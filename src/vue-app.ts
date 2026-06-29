@@ -51,8 +51,8 @@ function packageJson(projectName: string): Record<string, unknown> {
       "lint:fix": "oxlint . --fix --deny-warnings",
       preview: "vite preview",
       test: "vitest run",
-      "test:e2e": "playwright test",
-      typecheck: "vue-tsc -p tsconfig.json --noEmit"
+      "test:e2e": "pnpm run build && playwright test",
+      typecheck: "vue-tsc --build --noEmit"
     },
     dependencies: {
       "@vueuse/core": "catalog:",
@@ -122,9 +122,22 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
       kind: "writeJson",
       to: "tsconfig.json",
       value: {
+        files: [],
+        references: [
+          { path: "./tsconfig.app.json" },
+          { path: "./tsconfig.test.json" },
+          { path: "./tsconfig.node.json" }
+        ]
+      }
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.app.json",
+      value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: {
           baseUrl: ".",
+          composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",
           noEmitOnError: true,
@@ -134,17 +147,42 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
+          tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+          types: ["web-bluetooth"]
+        },
+        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"]
+      }
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.test.json",
+      value: {
+        extends: "./tsconfig.app.json",
+        compilerOptions: {
+          lib: ["ESNext", "DOM", "DOM.Iterable"],
+          tsBuildInfoFile: "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
           types: ["node", "vitest/globals", "web-bluetooth"]
         },
-        include: [
-          "env.d.ts",
-          "src/**/*.ts",
-          "src/**/*.vue",
-          "test/**/*.ts",
-          "playwright.config.ts",
-          "vite.config.ts",
-          "vitest.config.ts"
-        ]
+        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"]
+      }
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.node.json",
+      value: {
+        compilerOptions: {
+          composite: true,
+          module: "ESNext",
+          moduleResolution: "Bundler",
+          noEmitOnError: true,
+          lib: ["ESNext", "DOM", "DOM.Iterable"],
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+          tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+          types: ["node"]
+        },
+        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"]
       }
     },
     {

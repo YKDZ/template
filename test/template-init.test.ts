@@ -307,9 +307,21 @@ describe("template init", () => {
       "utf8"
     );
     const tsconfig = await readJson<{
+      files: string[];
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const appTsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
-    }>(path.join(projectDir, "tsconfig.json"));
+    }>(path.join(projectDir, "tsconfig.app.json"));
+    const testTsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.test.json"));
+    const nodeTsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.node.json"));
     const blueprint = await readJson<{ preset: string }>(
       path.join(projectDir, ".project-kit/blueprint.json")
     );
@@ -321,6 +333,10 @@ describe("template init", () => {
     expect(packageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix"
     );
+    expect(packageJson.scripts["test:e2e"]).toBe(
+      "pnpm run build && playwright test"
+    );
+    expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.dependencies.pinia).toBe("catalog:");
     expect(packageJson.dependencies["@vueuse/core"]).toBe("catalog:");
@@ -349,18 +365,38 @@ describe("template init", () => {
     expect(workspaceYaml).toContain('"@playwright/test":');
     expect(workspaceYaml).toContain('"@types/web-bluetooth":');
 
-    expect(tsconfig.compilerOptions.strict).toBe(true);
-    expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
-    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
-    expect(tsconfig.include).toEqual(
-      expect.arrayContaining([
-        "src/**/*.ts",
-        "src/**/*.vue",
-        "test/**/*.ts",
-        "playwright.config.ts",
-        "vite.config.ts"
-      ])
-    );
+    expect(tsconfig.files).toEqual([]);
+    expect(tsconfig.references).toEqual([
+      { path: "./tsconfig.app.json" },
+      { path: "./tsconfig.test.json" },
+      { path: "./tsconfig.node.json" }
+    ]);
+    expect(appTsconfig.compilerOptions.strict).toBe(true);
+    expect(appTsconfig.compilerOptions.skipLibCheck).toBe(false);
+    expect(appTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(appTsconfig.compilerOptions.types).toEqual(["web-bluetooth"]);
+    expect(appTsconfig.include).toEqual([
+      "env.d.ts",
+      "src/**/*.ts",
+      "src/**/*.vue"
+    ]);
+    expect(testTsconfig.compilerOptions.types).toEqual([
+      "node",
+      "vitest/globals",
+      "web-bluetooth"
+    ]);
+    expect(testTsconfig.include).toEqual([
+      "env.d.ts",
+      "src/**/*.ts",
+      "src/**/*.vue",
+      "test/**/*.ts"
+    ]);
+    expect(nodeTsconfig.compilerOptions.types).toEqual(["node"]);
+    expect(nodeTsconfig.include).toEqual([
+      "playwright.config.ts",
+      "vite.config.ts",
+      "vitest.config.ts"
+    ]);
 
     expect(blueprint.preset).toBe("vue-app");
 
@@ -391,9 +427,38 @@ describe("template init", () => {
     await execa("pnpm", installCommand!.split(" ").slice(1), {
       cwd: projectDir
     });
+    await writeFile(
+      path.join(projectDir, "src/type-boundary.ts"),
+      [
+        "export const nodeEnv = process.env.NODE_ENV;",
+        "",
+        'describe("browser app source", () => {',
+        '  it("does not see test globals", () => {',
+        "    expect(nodeEnv).toBeDefined();",
+        "  });",
+        "});",
+        ""
+      ].join("\n")
+    );
+    await expect(
+      execa("pnpm", ["run", "typecheck"], { cwd: projectDir })
+    ).rejects.toMatchObject({
+      failed: true
+    });
+    await writeFile(
+      path.join(projectDir, "src/type-boundary.ts"),
+      [
+        "export function currentBrowserLocation(): string {",
+        "  return window.location.href;",
+        "}",
+        ""
+      ].join("\n")
+    );
+    await execa("pnpm", ["run", "typecheck"], { cwd: projectDir });
     await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
       cwd: projectDir
     });
+    await execa("pnpm", ["run", "test:e2e"], { cwd: projectDir });
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 180_000);
 });
