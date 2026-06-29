@@ -6,6 +6,7 @@ import { execa } from "execa";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "src/cli.ts");
+const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
@@ -279,8 +280,8 @@ describe("template add package", () => {
 
     await expect(
       execa(
-        "pnpm",
-        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+        tsxBin,
+        [cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
         { cwd: projectDir }
       )
     ).rejects.toMatchObject({

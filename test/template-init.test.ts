@@ -53,7 +53,28 @@ async function generatePresetProject(preset: PresetName): Promise<string> {
   return projectDir;
 }
 
+const forbiddenWorkspaceLifecycleFeatures = [
+  "workspace-audit",
+  "workspace-diff",
+  "workspace-upgrade"
+] as const;
+
+function expectNoWorkspaceLifecycleFeatures(features: readonly string[]): void {
+  for (const feature of forbiddenWorkspaceLifecycleFeatures) {
+    expect(features).not.toContain(feature);
+  }
+}
+
 describe("template init", () => {
+  it.each(forbiddenWorkspaceLifecycleFeatures)(
+    "rejects the %s lifecycle feature on its own",
+    (feature) => {
+      expect(() => {
+        expectNoWorkspaceLifecycleFeatures(["root-check", feature]);
+      }).toThrow();
+    }
+  );
+
   it("generates capability-aware infrastructure for every supported built-in preset", async () => {
     const supportedPresets = builtInPresets.filter(
       (preset) => preset.generation === "supported"
@@ -97,9 +118,7 @@ describe("template init", () => {
         false
       );
       expect(blueprint.features).not.toContain("native-binary-release");
-      expect(blueprint.features).not.toEqual(
-        expect.arrayContaining(["workspace-audit", "workspace-diff", "workspace-upgrade"])
-      );
+      expectNoWorkspaceLifecycleFeatures(blueprint.features);
 
       expect(checkWorkflow).toContain("pull_request:");
       expect(checkWorkflow).toContain("push:");
@@ -134,8 +153,18 @@ describe("template init", () => {
       }
       if (preset.name === "vue-app" || preset.name === "vue-hono-app") {
         expect(extensions).toEqual(["Vue.volar", "oxc.oxc-vscode"]);
+      }
+      if (preset.name === "vue-app") {
         expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
         expect(devcontainer.postCreateCommand).toContain("pnpm exec playwright install chromium");
+      }
+      if (preset.name === "vue-hono-app") {
+        expect(checkWorkflow).toContain(
+          "pnpm --filter @demo-vue-hono-app/web exec playwright install --with-deps chromium"
+        );
+        expect(devcontainer.postCreateCommand).toContain(
+          "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium"
+        );
       }
       if (preset.name === "rust-bin") {
         expect(extensions).toEqual(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]);
@@ -148,6 +177,55 @@ describe("template init", () => {
       }
     }
   }, 300_000);
+
+  it("scopes Playwright install commands to the web package for workspace Vue Hono apps", async () => {
+    const projectDir = await generatePresetProject("vue-hono-app");
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const devcontainer = await readJson<{ postCreateCommand: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json")
+    );
+
+    expect(checkWorkflow).toContain(
+      "pnpm --filter @demo-vue-hono-app/web exec playwright install --with-deps chromium"
+    );
+    expect(devcontainer.postCreateCommand).toContain(
+      "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium"
+    );
+    expect(checkWorkflow).not.toMatch(/\bpnpm exec playwright install\b/);
+    expect(devcontainer.postCreateCommand).not.toMatch(
+      /\bpnpm exec playwright install\b/
+    );
+  }, 120_000);
+
+  it("generates Node presets with Dependabot-compatible pnpm coverage", async () => {
+    const nodePresetNames = builtInPresets
+      .filter((preset) => preset.generation === "supported")
+      .map((preset) => preset.name)
+      .filter((preset) => preset !== "rust-bin");
+
+    for (const preset of nodePresetNames) {
+      const projectDir = await generatePresetProject(preset);
+      const packageJson = await readJson<{ packageManager: string }>(
+        path.join(projectDir, "package.json")
+      );
+      const checkWorkflow = await readFile(
+        path.join(projectDir, ".github/workflows/check.yml"),
+        "utf8"
+      );
+      const dependabot = await readFile(
+        path.join(projectDir, ".github/dependabot.yml"),
+        "utf8"
+      );
+
+      expect(packageJson.packageManager).toBe("pnpm@10.0.0");
+      expect(checkWorkflow).toContain("          version: 10.0.0");
+      expect(dependabot).toContain("package-ecosystem: npm");
+      expect(dependabot).toContain("package-ecosystem: github-actions");
+    }
+  }, 240_000);
 
   it("generates a usable ts-lib project through the CLI", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
@@ -740,7 +818,9 @@ describe("template init", () => {
       code: "ENOENT"
     });
     expect(checkWorkflow).not.toContain("cache: pnpm");
-    expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+    expect(checkWorkflow).toContain(
+      "pnpm --filter @demo-fullstack/web exec playwright install --with-deps chromium"
+    );
 
     const installCommand = checkWorkflow.match(
       /^\s*-\s*run:\s*(pnpm install.*)$/m

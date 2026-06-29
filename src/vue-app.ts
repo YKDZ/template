@@ -77,7 +77,7 @@ function packageJson(projectName: string): Record<string, unknown> {
     engines: {
       node: ">=22.0.0"
     },
-    packageManager: "pnpm@11.8.0"
+    packageManager: "pnpm@10.0.0"
   };
 }
 
@@ -314,7 +314,7 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
         "      - uses: actions/checkout@v4",
         "      - uses: pnpm/action-setup@v4",
         "        with:",
-        "          version: 11.8.0",
+        "          version: 10.0.0",
         "      - uses: actions/setup-node@v4",
         "        with:",
         "          node-version: 22",

@@ -28,6 +28,10 @@ function packageName(projectName: string, leaf: "api" | "web"): string {
   return `@${projectName}/${leaf}`;
 }
 
+function workspacePackageFilter(projectName: string, leaf: "api" | "web"): string {
+  return `--filter ${packageName(projectName, leaf)}`;
+}
+
 async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
   await mkdir(targetDir, { recursive: true });
   const entries = await readdir(targetDir);
@@ -54,7 +58,7 @@ function rootPackageJson(projectName: string): Record<string, unknown> {
     engines: {
       node: ">=22.0.0"
     },
-    packageManager: "pnpm@11.8.0"
+    packageManager: "pnpm@10.0.0"
   };
 }
 
@@ -153,6 +157,7 @@ function webPackageJson(projectName: string): Record<string, unknown> {
 function operationsForVueHonoApp(projectName: string): RenderOperation[] {
   const apiName = packageName(projectName, "api");
   const webName = packageName(projectName, "web");
+  const webFilter = workspacePackageFilter(projectName, "web");
 
   return [
     { kind: "writeJson", to: "package.json", value: rootPackageJson(projectName) },
@@ -252,7 +257,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
       value: {
         name: `${projectName} full-stack development`,
         image: "mcr.microsoft.com/devcontainers/typescript-node:22",
-        postCreateCommand: "corepack enable && pnpm install && pnpm exec playwright install chromium",
+        postCreateCommand: `corepack enable && pnpm install && pnpm ${webFilter} exec playwright install chromium`,
         customizations: {
           vscode: {
             extensions: ["Vue.volar", "oxc.oxc-vscode"]
@@ -284,12 +289,12 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
         "      - uses: actions/checkout@v4",
         "      - uses: pnpm/action-setup@v4",
         "        with:",
-        "          version: 11.8.0",
+        "          version: 10.0.0",
         "      - uses: actions/setup-node@v4",
         "        with:",
         "          node-version: 22",
         "      - run: pnpm install",
-        "      - run: pnpm exec playwright install --with-deps chromium",
+        `      - run: pnpm ${webFilter} exec playwright install --with-deps chromium`,
         "      - run: pnpm run check",
         ""
       ].join("\n")
