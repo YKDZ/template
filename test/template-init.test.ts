@@ -276,4 +276,124 @@ describe("template init", () => {
       server.kill("SIGTERM");
     }
   });
+
+  it("generates a Vue app project through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
+    const projectDir = path.join(workspace, "demo-vue");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "vue-app",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const packageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8"
+    );
+    const tsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.json"));
+    const blueprint = await readJson<{ preset: string }>(
+      path.join(projectDir, ".project-kit/blueprint.json")
+    );
+
+    expect(packageJson.name).toBe("demo-vue");
+    expect(packageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e"
+    );
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix"
+    );
+    expect(packageJson.dependencies.vue).toBe("catalog:");
+    expect(packageJson.dependencies.pinia).toBe("catalog:");
+    expect(packageJson.dependencies["@vueuse/core"]).toBe("catalog:");
+    expect(packageJson.devDependencies.vite).toBe("catalog:");
+    expect(packageJson.devDependencies["@vitejs/plugin-vue"]).toBe("catalog:");
+    expect(packageJson.devDependencies["@vue/tsconfig"]).toBe("catalog:");
+    expect(packageJson.devDependencies["@types/web-bluetooth"]).toBe("catalog:");
+    expect(packageJson.devDependencies.vitest).toBe("catalog:");
+    expect(packageJson.devDependencies["@playwright/test"]).toBe("catalog:");
+    for (const excludedPackage of [
+      "vue-router",
+      "echarts",
+      "shadcn-vue",
+      "vee-validate",
+      "@tanstack/vue-form"
+    ]) {
+      expect(packageJson.dependencies).not.toHaveProperty(excludedPackage);
+      expect(packageJson.devDependencies).not.toHaveProperty(excludedPackage);
+    }
+
+    expect(workspaceYaml).toContain("catalog:");
+    expect(workspaceYaml).toContain("vue:");
+    expect(workspaceYaml).toContain("pinia:");
+    expect(workspaceYaml).toContain('"@vueuse/core":');
+    expect(workspaceYaml).toContain("vite:");
+    expect(workspaceYaml).toContain('"@playwright/test":');
+    expect(workspaceYaml).toContain('"@types/web-bluetooth":');
+
+    expect(tsconfig.compilerOptions.strict).toBe(true);
+    expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
+    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(tsconfig.include).toEqual(
+      expect.arrayContaining([
+        "src/**/*.ts",
+        "src/**/*.vue",
+        "test/**/*.ts",
+        "playwright.config.ts",
+        "vite.config.ts"
+      ])
+    );
+
+    expect(blueprint.preset).toBe("vue-app");
+
+    await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    await stat(path.join(projectDir, ".github/workflows/check.yml"));
+    await stat(path.join(projectDir, ".github/dependabot.yml"));
+    await stat(path.join(projectDir, "src/App.vue"));
+    await stat(path.join(projectDir, "src/main.ts"));
+    await stat(path.join(projectDir, "test/app.test.ts"));
+    await stat(path.join(projectDir, "test/e2e/app.spec.ts"));
+
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    expect(checkWorkflow).not.toContain("cache: pnpm");
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m
+    )?.[1];
+    expect(installCommand).toBeDefined();
+    expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+
+    await execa("pnpm", installCommand!.split(" ").slice(1), {
+      cwd: projectDir
+    });
+    await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
+      cwd: projectDir
+    });
+    await execa("pnpm", ["run", "check"], { cwd: projectDir });
+  }, 180_000);
 });

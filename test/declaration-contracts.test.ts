@@ -18,6 +18,9 @@ describe("declaration contracts", () => {
     expect(result.stdout).toContain("Built-in presets");
     expect(result.stdout).toContain("ts-lib");
     expect(result.stdout).toContain("TypeScript library");
+    expect(result.stdout).toContain("vue-app");
+    expect(result.stdout).toContain("Vue app");
+    expect(result.stdout).toContain("(supported)");
   });
 
   it("prints published JSON Schemas for declarations", async () => {

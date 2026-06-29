@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { initHonoApiProject } from "./hono-api.js";
 import { initTsLibProject } from "./ts-lib.js";
+import { initVueAppProject } from "./vue-app.js";
 import {
   blueprintJsonSchema,
   builtInPresets,
@@ -173,7 +174,13 @@ async function main(args: string[]): Promise<void> {
       return;
     }
 
-    throw new Error("Only the ts-lib and hono-api presets are supported in this version");
+    if (options.preset === "vue-app") {
+      await initVueAppProject(options.dir);
+      console.log(`Initialized vue-app project in ${options.dir}`);
+      return;
+    }
+
+    throw new Error("Only the ts-lib, hono-api, and vue-app presets are supported in this version");
   }
 
   if (command === "--help" || command === "-h") {
