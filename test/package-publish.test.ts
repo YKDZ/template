@@ -96,7 +96,7 @@ describe("package publishing", () => {
       type: "git",
       url: "git+https://github.com/YKDZ/template.git"
     });
-    expect(packageJson.bin.template).toBe("./dist/cli.js");
+    expect(packageJson.bin.template).toBe("dist/cli.js");
     expect(packageJson.publishConfig?.access).toBe("public");
   });
 
@@ -153,6 +153,6 @@ describe("package publishing", () => {
     const packageJson = JSON.parse(
       await readFile(packageJsonPath, "utf8")
     ) as { bin: Record<string, string> };
-    expect(packageJson.bin.template).toBe("./dist/cli.js");
+    expect(packageJson.bin.template).toBe("dist/cli.js");
   });
 });
