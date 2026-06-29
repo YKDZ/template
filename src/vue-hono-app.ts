@@ -24,12 +24,12 @@ function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
 }
 
-function packageName(projectName: string, leaf: "api" | "web"): string {
-  return `@${projectName}/${leaf}`;
+function packageName(packageScope: string, leaf: "api" | "web"): string {
+  return `@${packageScope}/${leaf}`;
 }
 
-function workspacePackageFilter(projectName: string, leaf: "api" | "web"): string {
-  return `--filter ${packageName(projectName, leaf)}`;
+function workspacePackageFilter(packageScope: string, leaf: "api" | "web"): string {
+  return `--filter ${packageName(packageScope, leaf)}`;
 }
 
 async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
@@ -62,9 +62,9 @@ function rootPackageJson(projectName: string): Record<string, unknown> {
   };
 }
 
-function apiPackageJson(projectName: string): Record<string, unknown> {
+function apiPackageJson(packageScope: string): Record<string, unknown> {
   return {
-    name: packageName(projectName, "api"),
+    name: packageName(packageScope, "api"),
     version: "0.0.0",
     private: true,
     type: "module",
@@ -105,9 +105,9 @@ function apiPackageJson(projectName: string): Record<string, unknown> {
   };
 }
 
-function webPackageJson(projectName: string): Record<string, unknown> {
+function webPackageJson(packageScope: string): Record<string, unknown> {
   return {
-    name: packageName(projectName, "web"),
+    name: packageName(packageScope, "web"),
     version: "0.0.0",
     private: true,
     type: "module",
@@ -127,7 +127,7 @@ function webPackageJson(projectName: string): Record<string, unknown> {
       typecheck: "vue-tsc --build"
     },
     dependencies: {
-      [packageName(projectName, "api")]: "workspace:*",
+      [packageName(packageScope, "api")]: "workspace:*",
       "@vueuse/core": "catalog:",
       hono: "catalog:",
       pinia: "catalog:",
@@ -154,10 +154,10 @@ function webPackageJson(projectName: string): Record<string, unknown> {
   };
 }
 
-function operationsForVueHonoApp(projectName: string): RenderOperation[] {
-  const apiName = packageName(projectName, "api");
-  const webName = packageName(projectName, "web");
-  const webFilter = workspacePackageFilter(projectName, "web");
+function operationsForVueHonoApp(projectName: string, packageScope: string): RenderOperation[] {
+  const apiName = packageName(packageScope, "api");
+  const webName = packageName(packageScope, "web");
+  const webFilter = workspacePackageFilter(packageScope, "web");
 
   return [
     { kind: "writeJson", to: "package.json", value: rootPackageJson(projectName) },
@@ -316,7 +316,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
         ""
       ].join("\n")
     },
-    { kind: "writeJson", to: "apps/api/package.json", value: apiPackageJson(projectName) },
+    { kind: "writeJson", to: "apps/api/package.json", value: apiPackageJson(packageScope) },
     {
       kind: "writeJson",
       to: "apps/api/tsconfig.json",
@@ -377,7 +377,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
     { kind: "copyFile", from: "api/src/server.ts", to: "apps/api/src/server.ts" },
     { kind: "copyFile", from: "api/test/app.test.ts", to: "apps/api/test/app.test.ts" },
     { kind: "copyFile", from: "api/vitest.config.ts", to: "apps/api/vitest.config.ts" },
-    { kind: "writeJson", to: "apps/web/package.json", value: webPackageJson(projectName) },
+    { kind: "writeJson", to: "apps/web/package.json", value: webPackageJson(packageScope) },
     {
       kind: "writeJson",
       to: "apps/web/tsconfig.json",
@@ -502,13 +502,17 @@ function templateSourceRoot(): string {
   );
 }
 
-export async function initVueHonoAppProject(targetDir: string): Promise<void> {
+export async function initVueHonoAppProject(
+  targetDir: string,
+  options: { scope?: string } = {}
+): Promise<void> {
   await assertNewOrEmptyDirectory(targetDir);
 
   const projectName = projectNameFromDir(targetDir);
+  const packageScope = options.scope ?? projectName;
   await renderProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
-    operations: operationsForVueHonoApp(projectName)
+    operations: operationsForVueHonoApp(projectName, packageScope)
   });
 }

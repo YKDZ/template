@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +51,10 @@ async function generatePresetProject(preset: PresetName): Promise<string> {
   );
 
   return projectDir;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 const forbiddenWorkspaceLifecycleFeatures = [
@@ -312,6 +316,216 @@ describe("template init", () => {
     expect(installCommand).toBeDefined();
 
     expect(installCommand).toBe("pnpm install");
+  });
+
+  it("prints the planned Project Blueprint during dry-run without writing files", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-dry-run-"));
+    const projectDir = path.join(workspace, "demo-lib");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--dry-run"
+      ],
+      { cwd: repoRoot }
+    );
+
+    expect(result.stdout).toContain("Project Blueprint");
+    expect(result.stdout).toContain("Preset: ts-lib");
+    expect(result.stdout).toContain("Target:");
+    expect(result.stdout).toContain(projectDir);
+
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("prints machine-readable init output with --json", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "vue-hono-app",
+        "--scope",
+        "custom-scope",
+        "--dry-run",
+        "--json"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const output = JSON.parse(result.stdout) as {
+      command: string;
+      dryRun: boolean;
+      targetDir: string;
+      blueprint: {
+        preset: string;
+        packageManager: string;
+        packages: Array<{ name: string; path: string }>;
+      };
+    };
+
+    expect(output).toEqual(
+      expect.objectContaining({
+        command: "init",
+        dryRun: true,
+        targetDir: projectDir
+      })
+    );
+    expect(output.blueprint).toEqual(
+      expect.objectContaining({
+        preset: "vue-hono-app",
+        packageManager: "pnpm",
+        packages: [
+          { name: "@custom-scope/web", path: "apps/web" },
+          { name: "@custom-scope/api", path: "apps/api" }
+        ]
+      })
+    );
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("fails clearly in non-interactive init without --yes", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-noninteractive-"));
+    const projectDir = path.join(workspace, "demo-lib");
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          path.join(repoRoot, "src/cli.ts"),
+          "init",
+          projectDir,
+          "--preset",
+          "ts-lib"
+        ],
+        { cwd: repoRoot, timeout: 5_000 }
+      )
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("Non-interactive init requires --yes")
+    });
+
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("allows empty target directories and rejects non-empty target directories", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-dir-safety-"));
+    const emptyDir = path.join(workspace, "empty");
+    const nonEmptyDir = path.join(workspace, "non-empty");
+    await mkdir(emptyDir);
+    await mkdir(nonEmptyDir);
+    await writeFile(path.join(nonEmptyDir, "README.md"), "# existing\n", "utf8");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        emptyDir,
+        "--preset",
+        "ts-lib",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    await stat(path.join(emptyDir, "package.json"));
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          path.join(repoRoot, "src/cli.ts"),
+          "init",
+          nonEmptyDir,
+          "--preset",
+          "ts-lib",
+          "--yes"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("Target directory is not empty")
+    });
+    expect(await readFile(path.join(nonEmptyDir, "README.md"), "utf8")).toBe(
+      "# existing\n"
+    );
+  });
+
+  it("reviews the Project Blueprint and asks for confirmation in interactive terminals", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-interactive-"));
+    const projectDir = path.join(workspace, "demo-lib");
+    const cliPath = path.join(repoRoot, "src/cli.ts");
+
+    const result = await execa(
+      "bash",
+      [
+        "-lc",
+        [
+          "printf 'y\\n' |",
+          "script -qfec",
+          shellQuote(
+            `pnpm exec tsx ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`
+          ),
+          "/dev/null"
+        ].join(" ")
+      ],
+      { cwd: repoRoot }
+    );
+
+    expect(result.stdout).toContain("Project Blueprint");
+    expect(result.stdout).toContain("Preset: ts-lib");
+    expect(result.stdout).toContain("Generate this project? [y/N]");
+    expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
+    await stat(path.join(projectDir, "package.json"));
+  });
+
+  it("prints next steps after generation without installing dependencies", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-next-steps-"));
+    const projectDir = path.join(workspace, "demo-lib");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
+    expect(result.stdout).toContain("Next steps:");
+    expect(result.stdout).toContain(`cd ${projectDir}`);
+    expect(result.stdout).toContain("pnpm install");
+    expect(result.stdout).toContain("pnpm run check");
+    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("generates a usable hono-api project through the CLI", async () => {
@@ -829,4 +1043,57 @@ describe("template init", () => {
 
     expect(installCommand).toBe("pnpm install");
   }, 240_000);
+
+  it("uses --scope for generated workspace package names", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-scope-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "vue-hono-app",
+        "--scope",
+        "custom-scope",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const blueprint = await readJson<{
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+    const apiPackageJson = await readJson<{ name: string }>(
+      path.join(projectDir, "apps/api/package.json")
+    );
+    const webPackageJson = await readJson<{
+      name: string;
+      dependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/web/package.json"));
+    const webApiClient = await readFile(
+      path.join(projectDir, "apps/web/src/api.ts"),
+      "utf8"
+    );
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+
+    expect(apiPackageJson.name).toBe("@custom-scope/api");
+    expect(webPackageJson.name).toBe("@custom-scope/web");
+    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
+    expect(webApiClient).toContain('import type { AppType } from "@custom-scope/api"');
+    expect(checkWorkflow).toContain(
+      "pnpm --filter @custom-scope/web exec playwright install --with-deps chromium"
+    );
+    expect(blueprint.packages).toEqual([
+      { name: "@custom-scope/web", path: "apps/web" },
+      { name: "@custom-scope/api", path: "apps/api" }
+    ]);
+  }, 120_000);
 });

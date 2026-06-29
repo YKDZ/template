@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createInterface } from "node:readline/promises";
 import { initHonoApiProject } from "./hono-api.js";
 import { initRustBinProject } from "./rust-bin.js";
 import { initTsLibProject } from "./ts-lib.js";
@@ -13,6 +14,9 @@ import {
   presetFileJsonSchema,
   validatePresetFile,
   validateProjectBlueprint,
+  type BuiltInPreset,
+  type ProjectBlueprint,
+  type PresetName,
   type ValidationIssue
 } from "./declarations.js";
 
@@ -20,6 +24,9 @@ type InitOptions = {
   dir: string;
   preset: string;
   yes: boolean;
+  dryRun: boolean;
+  json: boolean;
+  scope?: string;
 };
 
 type AddPackageOptions = {
@@ -41,7 +48,10 @@ function usage(): string {
     "Options:",
     "  --preset <name>  Project preset to generate",
     "  --name <name>    Package name to add",
-    "  --yes            Accept defaults for non-interactive generation"
+    "  --scope <name>   Package scope for workspace package names",
+    "  --yes            Accept defaults for non-interactive generation",
+    "  --dry-run        Print the planned generation without writing files",
+    "  --json           Print machine-readable output"
   ].join("\n");
 }
 
@@ -82,12 +92,35 @@ function parseInitOptions(args: string[]): InitOptions {
   const dir = args[1];
   let preset = "";
   let yes = false;
+  let dryRun = false;
+  let json = false;
+  let scope: string | undefined;
 
   for (let index = 2; index < args.length; index += 1) {
     const arg = args[index];
 
     if (arg === "--yes" || arg === "-y") {
       yes = true;
+      continue;
+    }
+
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+
+    if (arg === "--json") {
+      json = true;
+      continue;
+    }
+
+    if (arg === "--scope") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--scope requires a value");
+      }
+      scope = value;
+      index += 1;
       continue;
     }
 
@@ -108,7 +141,137 @@ function parseInitOptions(args: string[]): InitOptions {
     throw new Error("init requires a target directory");
   }
 
-  return { dir, preset, yes };
+  return { dir, preset, yes, dryRun, json, scope };
+}
+
+function supportedPreset(name: string): BuiltInPreset {
+  const preset = builtInPresets.find(
+    (candidate) => candidate.name === name && candidate.generation === "supported"
+  );
+
+  if (!preset) {
+    throw new Error(
+      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
+    );
+  }
+
+  return preset;
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function scopeFromOptions(projectName: string, scope?: string): string {
+  return scope ?? projectName;
+}
+
+function blueprintForInit(options: InitOptions): ProjectBlueprint {
+  const preset = supportedPreset(options.preset);
+  const projectName = projectNameFromDir(options.dir);
+  const packageScope = scopeFromOptions(projectName, options.scope);
+  const blueprint: ProjectBlueprint = {
+    schemaVersion: 1,
+    preset: preset.name,
+    projectKind: preset.supportedProjectKinds[0],
+    features: [...preset.features]
+  };
+
+  if (preset.supportedPackageManagers[0]) {
+    blueprint.packageManager = preset.supportedPackageManagers[0];
+  }
+
+  if (preset.name === "vue-hono-app") {
+    blueprint.packages = [
+      { name: `@${packageScope}/web`, path: "apps/web" },
+      { name: `@${packageScope}/api`, path: "apps/api" }
+    ];
+  }
+
+  return blueprint;
+}
+
+function formatBlueprintSummary(targetDir: string, blueprint: ProjectBlueprint): string {
+  const lines = [
+    "Project Blueprint",
+    `  Target: ${targetDir}`,
+    `  Preset: ${blueprint.preset}`,
+    `  Project kind: ${blueprint.projectKind}`
+  ];
+
+  if (blueprint.packageManager) {
+    lines.push(`  Package manager: ${blueprint.packageManager}`);
+  }
+
+  if (blueprint.packages) {
+    lines.push("  Packages:");
+    for (const pkg of blueprint.packages) {
+      lines.push(`    - ${pkg.name} (${pkg.path})`);
+    }
+  }
+
+  lines.push(`  Features: ${blueprint.features.join(", ")}`);
+  return lines.join("\n");
+}
+
+type InitJsonOutput = {
+  command: "init";
+  dryRun: boolean;
+  targetDir: string;
+  blueprint: ProjectBlueprint;
+  nextSteps?: string[];
+};
+
+function nextStepsForPreset(preset: PresetName): string[] {
+  if (preset === "rust-bin") {
+    return ["cd <target>", "./scripts/check"];
+  }
+
+  return ["cd <target>", "pnpm install", "pnpm run check"];
+}
+
+function formatNextSteps(targetDir: string, preset: PresetName): string {
+  return [
+    "Next steps:",
+    ...nextStepsForPreset(preset).map((step) => `  ${step.replace("<target>", targetDir)}`)
+  ].join("\n");
+}
+
+function printInitComplete(options: InitOptions, blueprint: ProjectBlueprint): void {
+  const preset = blueprint.preset as PresetName;
+
+  if (options.json) {
+    printJson({
+      command: "init",
+      dryRun: false,
+      targetDir: options.dir,
+      blueprint,
+      nextSteps: nextStepsForPreset(preset).map((step) => step.replace("<target>", options.dir))
+    } satisfies InitJsonOutput);
+    return;
+  }
+
+  console.log(`Initialized ${options.preset} project in ${options.dir}`);
+  console.log(formatNextSteps(options.dir, preset));
+}
+
+function isInteractiveTerminal(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+async function confirmInit(targetDir: string, blueprint: ProjectBlueprint): Promise<boolean> {
+  console.log(formatBlueprintSummary(targetDir, blueprint));
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  try {
+    const answer = await readline.question("Generate this project? [y/N] ");
+    return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+  } finally {
+    readline.close();
+  }
 }
 
 function parseAddPackageOptions(args: string[]): AddPackageOptions {
@@ -208,38 +371,58 @@ async function main(args: string[]): Promise<void> {
 
   if (command === "init") {
     const options = parseInitOptions(args);
+    const blueprint = blueprintForInit(options);
 
-    if (!options.yes) {
+    if (options.dryRun) {
+      if (options.json) {
+        printJson({
+          command: "init",
+          dryRun: true,
+          targetDir: options.dir,
+          blueprint
+        } satisfies InitJsonOutput);
+        return;
+      }
+
+      console.log(formatBlueprintSummary(options.dir, blueprint));
+      return;
+    }
+
+    if (!options.yes && (options.json || !isInteractiveTerminal())) {
       throw new Error("Non-interactive init requires --yes");
+    }
+
+    if (!options.yes && !(await confirmInit(options.dir, blueprint))) {
+      throw new Error("Init cancelled");
     }
 
     if (options.preset === "ts-lib") {
       await initTsLibProject(options.dir);
-      console.log(`Initialized ts-lib project in ${options.dir}`);
+      printInitComplete(options, blueprint);
       return;
     }
 
     if (options.preset === "hono-api") {
       await initHonoApiProject(options.dir);
-      console.log(`Initialized hono-api project in ${options.dir}`);
+      printInitComplete(options, blueprint);
       return;
     }
 
     if (options.preset === "vue-app") {
       await initVueAppProject(options.dir);
-      console.log(`Initialized vue-app project in ${options.dir}`);
+      printInitComplete(options, blueprint);
       return;
     }
 
     if (options.preset === "vue-hono-app") {
-      await initVueHonoAppProject(options.dir);
-      console.log(`Initialized vue-hono-app project in ${options.dir}`);
+      await initVueHonoAppProject(options.dir, { scope: options.scope });
+      printInitComplete(options, blueprint);
       return;
     }
 
     if (options.preset === "rust-bin") {
       await initRustBinProject(options.dir);
-      console.log(`Initialized rust-bin project in ${options.dir}`);
+      printInitComplete(options, blueprint);
       return;
     }
 
