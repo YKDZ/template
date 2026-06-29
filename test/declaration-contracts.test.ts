@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
+import { findBuiltInPreset } from "../src/declarations.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "src/cli.ts");
@@ -43,7 +44,11 @@ describe("declaration contracts", () => {
       type: "object"
     });
     expect(blueprintSchema.required).toContain("preset");
-    expect(blueprintSchema.required).toContain("packageManager");
+    expect(blueprintSchema.required).not.toContain("packageManager");
+  });
+
+  it("does not advertise pnpm support for Rust-only preset metadata", () => {
+    expect(findBuiltInPreset("rust-bin")?.supportedPackageManagers).toEqual([]);
   });
 
   it("validates a JSON preset file through the CLI", async () => {

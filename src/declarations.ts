@@ -53,7 +53,7 @@ export type ProjectPackage = {
 export type ProjectBlueprint = {
   schemaVersion: 1;
   preset: string;
-  packageManager: PackageManager;
+  packageManager?: PackageManager;
   projectKind: ProjectKind;
   features: FeatureName[];
   packages?: ProjectPackage[];
@@ -119,7 +119,7 @@ export const builtInPresets: readonly BuiltInPreset[] = [
     title: "Rust binary",
     description: "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
     generation: "supported",
-    supportedPackageManagers: ["pnpm"],
+    supportedPackageManagers: [],
     supportedProjectKinds: ["single-package"],
     features: [
       "root-check",
@@ -188,7 +188,6 @@ export const presetFileJsonSchema = {
     description: { type: "string", minLength: 1 },
     supportedPackageManagers: {
       type: "array",
-      minItems: 1,
       items: { enum: ["pnpm"] },
       uniqueItems: true
     },
@@ -212,7 +211,7 @@ export const blueprintJsonSchema = {
   title: "Project Kit Blueprint",
   type: "object",
   additionalProperties: false,
-  required: ["schemaVersion", "preset", "packageManager", "projectKind", "features"],
+  required: ["schemaVersion", "preset", "projectKind", "features"],
   properties: {
     schemaVersion: { const: 1 },
     preset: { type: "string", minLength: 1 },
@@ -248,7 +247,7 @@ export const presetFileSchema = v.strictObject({
   name: nonEmptyString,
   title: nonEmptyString,
   description: nonEmptyString,
-  supportedPackageManagers: v.pipe(v.array(packageManagerSchema), v.minLength(1)),
+  supportedPackageManagers: v.array(packageManagerSchema),
   supportedProjectKinds: v.pipe(v.array(projectKindSchema), v.minLength(1)),
   features: v.array(featureNameSchema)
 });
@@ -256,7 +255,7 @@ export const presetFileSchema = v.strictObject({
 export const projectBlueprintSchema = v.strictObject({
   schemaVersion: v.literal(1),
   preset: nonEmptyString,
-  packageManager: packageManagerSchema,
+  packageManager: v.optional(packageManagerSchema),
   projectKind: projectKindSchema,
   features: v.array(featureNameSchema),
   packages: v.optional(
@@ -384,10 +383,20 @@ export function validateProjectBlueprint(
       semanticIssues.push(unsupportedGeneration);
     }
 
-    if (!preset.supportedPackageManagers.includes(blueprint.packageManager)) {
+    if (
+      blueprint.packageManager &&
+      !preset.supportedPackageManagers.includes(blueprint.packageManager)
+    ) {
       semanticIssues.push({
         path: "$.packageManager",
         message: `${blueprint.packageManager} is not supported by preset ${preset.name}`
+      });
+    }
+
+    if (!blueprint.packageManager && preset.supportedPackageManagers.length > 0) {
+      semanticIssues.push({
+        path: "$.packageManager",
+        message: `packageManager is required by preset ${preset.name}`
       });
     }
 

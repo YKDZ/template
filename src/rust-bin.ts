@@ -20,8 +20,16 @@ const generatedBy = {
   command: "template init --preset rust-bin"
 };
 
-function projectNameFromDir(targetDir: string): string {
-  return path.basename(path.resolve(targetDir));
+function cargoPackageNameFromDir(targetDir: string): string {
+  const directoryName = path.basename(path.resolve(targetDir));
+  const slug = directoryName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "rust-bin";
 }
 
 async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
@@ -132,7 +140,6 @@ function operationsForRustBin(projectName: string): RenderOperation[] {
       value: {
         schemaVersion: 1,
         preset: "rust-bin",
-        packageManager: "pnpm",
         projectKind: "single-package",
         features
       }
@@ -216,6 +223,6 @@ export async function initRustBinProject(targetDir: string): Promise<void> {
   await renderProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
-    operations: operationsForRustBin(projectNameFromDir(targetDir))
+    operations: operationsForRustBin(cargoPackageNameFromDir(targetDir))
   });
 }

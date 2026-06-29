@@ -304,8 +304,9 @@ describe("template init", () => {
       mounts: string[];
       customizations: { vscode: { extensions: string[] } };
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-    const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".project-kit/blueprint.json")
+    const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
+    const blueprint = await readJson<{ preset: string; packageManager?: string }>(
+      blueprintPath
     );
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
@@ -342,6 +343,7 @@ describe("template init", () => {
     );
 
     expect(blueprint.preset).toBe("rust-bin");
+    expect(blueprint).not.toHaveProperty("packageManager");
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
     expect(checkWorkflow).toContain("components: rustfmt, clippy");
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
@@ -362,8 +364,48 @@ describe("template init", () => {
     expect(checkResult.stdout).toContain("cargo clippy");
     expect(checkResult.stdout).toContain("cargo test");
 
+    await execa(
+      "pnpm",
+      ["exec", "tsx", path.join(repoRoot, "src/cli.ts"), "blueprint", "validate", blueprintPath],
+      { cwd: repoRoot }
+    );
+
     const runResult = await execa("cargo", ["run", "--quiet"], { cwd: projectDir });
     expect(runResult.stdout).toBe("Hello from demo-rust");
+  }, 120_000);
+
+  it("normalizes rust-bin directory names into Cargo-safe package names", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-rust-name-"));
+    const projectDir = path.join(workspace, 'My demo.app "quoted"');
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "rust-bin",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const cargoToml = await readFile(path.join(projectDir, "Cargo.toml"), "utf8");
+    const cargoLock = await readFile(path.join(projectDir, "Cargo.lock"), "utf8");
+    const metadata = JSON.parse(
+      (
+        await execa("cargo", ["metadata", "--no-deps", "--format-version", "1"], {
+          cwd: projectDir
+        })
+      ).stdout
+    ) as { packages: Array<{ name: string }> };
+
+    expect(cargoToml).toContain('name = "my-demo-app-quoted"');
+    expect(cargoLock).toContain('name = "my-demo-app-quoted"');
+    expect(metadata.packages[0]?.name).toBe("my-demo-app-quoted");
   }, 120_000);
 
   it("generates a Vue app project through the CLI", async () => {
