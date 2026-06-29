@@ -75,6 +75,22 @@ async function copyCleanPackage(targetDir: string): Promise<void> {
 }
 
 describe("package publishing", () => {
+  it("declares public npm metadata for the template CLI", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8")
+    ) as {
+      bin: Record<string, string>;
+      name: string;
+      private: boolean;
+      publishConfig?: { access?: string };
+    };
+
+    expect(packageJson.name).toBe("@ykdz/template");
+    expect(packageJson.private).toBe(false);
+    expect(packageJson.bin.template).toBe("./dist/cli.js");
+    expect(packageJson.publishConfig?.access).toBe("public");
+  });
+
   it("packs a tarball with the advertised CLI from a clean unbuilt checkout", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-pack-"));
     const packageDir = path.join(workspace, "package");

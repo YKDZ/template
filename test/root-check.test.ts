@@ -13,4 +13,21 @@ describe("Project Kit Root Check", () => {
     expect(packageJson.scripts).toHaveProperty("check:fixtures");
     expect(packageJson.scripts.check).toContain("pnpm run check:fixtures");
   });
+
+  it("keeps ordinary checks separate from npm publishing", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8")
+    ) as { scripts: Record<string, string> };
+
+    const ordinaryCheckScripts = [
+      packageJson.scripts.check,
+      packageJson.scripts["check:fixtures"]
+    ];
+
+    for (const script of ordinaryCheckScripts) {
+      expect(script).not.toMatch(/\bnpm\s+publish\b/);
+      expect(script).not.toContain("NPM_TOKEN");
+      expect(script).not.toContain("NODE_AUTH_TOKEN");
+    }
+  });
 });
