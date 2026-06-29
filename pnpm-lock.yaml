@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      valibot:
+        specifier: ^1.4.2
+        version: 1.4.2(typescript@5.8.2)
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -595,6 +599,14 @@ packages:
     resolution: {integrity: sha512-+QBBXBCvifc56fsbuxZQ6Sic3wqqc3WWaqxs58gvJrcOuN83HGTCwz3oS5phzU9LthRNE9VrJCFCLUgHeeFnfA==}
     engines: {node: '>=18'}
 
+  valibot@1.4.2:
+    resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
+    peerDependencies:
+      typescript: '>=5'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   vite-node@3.2.4:
     resolution: {integrity: sha512-EbKSKh+bh1E1IFxeO0pg1n4dvoOTt0UDiXMd/qn++r98+jPO1xtJilvXldeuQ8giIB5IkpjCgMleHMNEsGH6pg==}
     engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
@@ -1122,6 +1134,10 @@ snapshots:
   undici-types@7.18.2: {}
 
   unicorn-magic@0.3.0: {}
+
+  valibot@1.4.2(typescript@5.8.2):
+    optionalDependencies:
+      typescript: 5.8.2
 
   vite-node@3.2.4(@types/node@24.13.2)(tsx@4.22.4):
     dependencies:

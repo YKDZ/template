@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -52,6 +52,7 @@ describe("template init", () => {
     const generatedBy = await readJson<{ packageName: string }>(
       path.join(projectDir, ".project-kit/generated-by.json")
     );
+    const projectKitFiles = await readdir(path.join(projectDir, ".project-kit"));
 
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts.check).toBe(
@@ -75,6 +76,7 @@ describe("template init", () => {
 
     expect(blueprint.preset).toBe("ts-lib");
     expect(generatedBy.packageName).toBe("@ykdz/template");
+    expect(projectKitFiles).toEqual(["blueprint.json", "generated-by.json"]);
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));

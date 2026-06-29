@@ -18,6 +18,7 @@ const packageFiles = [
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
   "src/cli.ts",
+  "src/declarations.ts",
   "src/ts-lib.ts",
   "tsconfig.build.json",
   "tsconfig.json"
