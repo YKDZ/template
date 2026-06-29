@@ -147,8 +147,7 @@ export const builtInPresets: readonly BuiltInPreset[] = [
       "github-actions",
       "dependabot",
       "rustfmt-clippy",
-      "cargo-test",
-      "native-binary-release"
+      "cargo-test"
     ]
   },
   {

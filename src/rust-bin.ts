@@ -10,8 +10,7 @@ const features = [
   "github-actions",
   "dependabot",
   "rustfmt-clippy",
-  "cargo-test",
-  "native-binary-release"
+  "cargo-test"
 ] as const;
 
 const generatedBy = {

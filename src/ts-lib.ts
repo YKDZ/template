@@ -170,7 +170,7 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
         postCreateCommand: "corepack enable && pnpm install",
         customizations: {
           vscode: {
-            extensions: ["oxc.oxc-vscode", "dbaeumer.vscode-eslint"]
+            extensions: ["oxc.oxc-vscode"]
           }
         }
       }

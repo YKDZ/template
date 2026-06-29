@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
+import { builtInPresets, type PresetName } from "../src/declarations.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -13,7 +14,141 @@ async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
 
+async function generatedFilePaths(root: string, current = "."): Promise<string[]> {
+  const entries = await readdir(path.join(root, current), { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const relativePath = path.posix.join(current, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await generatedFilePaths(root, relativePath)));
+      continue;
+    }
+
+    files.push(relativePath);
+  }
+
+  return files.sort();
+}
+
+async function generatePresetProject(preset: PresetName): Promise<string> {
+  const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
+  const projectDir = path.join(workspace, `demo-${preset}`);
+
+  await execa(
+    "pnpm",
+    [
+      "exec",
+      "tsx",
+      path.join(repoRoot, "src/cli.ts"),
+      "init",
+      projectDir,
+      "--preset",
+      preset,
+      "--yes"
+    ],
+    { cwd: repoRoot }
+  );
+
+  return projectDir;
+}
+
 describe("template init", () => {
+  it("generates capability-aware infrastructure for every supported built-in preset", async () => {
+    const supportedPresets = builtInPresets.filter(
+      (preset) => preset.generation === "supported"
+    );
+    const outOfScopePathPatterns = [
+      /(^|\/)Dockerfile$/,
+      /(^|\/)\.dockerignore$/,
+      /(^|\/)docker-compose\.ya?ml$/,
+      /(^|\/)compose\.ya?ml$/,
+      /(^|\/)k8s\//,
+      /(^|\/)deploy\//,
+      /(^|\/)\.github\/workflows\/.*(audit|diff|upgrade|ownership|manifest|release|deploy|image|docker).*\.ya?ml$/
+    ];
+
+    for (const preset of supportedPresets) {
+      const projectDir = await generatePresetProject(preset.name);
+      const blueprint = await readJson<{
+        features: string[];
+        packageManager?: string;
+      }>(path.join(projectDir, ".project-kit/blueprint.json"));
+      const devcontainer = await readJson<{
+        image: string;
+        postCreateCommand?: string;
+        mounts?: string[];
+        customizations: { vscode: { extensions: string[] } };
+      }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+      const checkWorkflow = await readFile(
+        path.join(projectDir, ".github/workflows/check.yml"),
+        "utf8"
+      );
+      const dependabot = await readFile(
+        path.join(projectDir, ".github/dependabot.yml"),
+        "utf8"
+      );
+      const files = await generatedFilePaths(projectDir);
+
+      expect(files.filter((file) => file.startsWith(".github/workflows/"))).toEqual([
+        ".github/workflows/check.yml"
+      ]);
+      expect(files.some((file) => outOfScopePathPatterns.some((pattern) => pattern.test(file)))).toBe(
+        false
+      );
+      expect(blueprint.features).not.toContain("native-binary-release");
+      expect(blueprint.features).not.toEqual(
+        expect.arrayContaining(["workspace-audit", "workspace-diff", "workspace-upgrade"])
+      );
+
+      expect(checkWorkflow).toContain("pull_request:");
+      expect(checkWorkflow).toContain("push:");
+      expect(checkWorkflow).not.toMatch(/\b(gh|hub)\s+(repo|api|auth|pr|release)\b/);
+      expect(checkWorkflow).not.toMatch(/\bdocker\s+(build|push|login)\b/);
+      expect(checkWorkflow).not.toContain("docker/build-push-action");
+      expect(checkWorkflow).not.toContain("docker/login-action");
+
+      expect(dependabot).toContain("package-ecosystem: github-actions");
+      if (blueprint.packageManager === "pnpm") {
+        expect(dependabot).toContain("package-ecosystem: npm");
+        expect(dependabot).not.toContain("package-ecosystem: cargo");
+        expect(devcontainer.image).toContain("typescript-node:22");
+        expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
+        expect(checkWorkflow).toContain("uses: pnpm/action-setup@v4");
+        expect(checkWorkflow).toContain("uses: actions/setup-node@v4");
+        expect(checkWorkflow).toContain("run: pnpm install");
+        expect(checkWorkflow).toContain("run: pnpm run check");
+      } else {
+        expect(dependabot).toContain("package-ecosystem: cargo");
+        expect(dependabot).not.toContain("package-ecosystem: npm");
+        expect(devcontainer.image).toContain("devcontainers/rust");
+        expect(devcontainer.postCreateCommand).toContain("rustup component add rustfmt clippy");
+        expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
+        expect(checkWorkflow).toContain("run: ./scripts/check");
+        expect(checkWorkflow).not.toContain("pnpm");
+      }
+
+      const extensions = devcontainer.customizations.vscode.extensions;
+      if (preset.name === "ts-lib" || preset.name === "hono-api") {
+        expect(extensions).toEqual(["oxc.oxc-vscode"]);
+      }
+      if (preset.name === "vue-app" || preset.name === "vue-hono-app") {
+        expect(extensions).toEqual(["Vue.volar", "oxc.oxc-vscode"]);
+        expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+        expect(devcontainer.postCreateCommand).toContain("pnpm exec playwright install chromium");
+      }
+      if (preset.name === "rust-bin") {
+        expect(extensions).toEqual(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]);
+        expect(devcontainer.mounts).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining("target=/usr/local/cargo/registry"),
+            expect.stringContaining("target=${containerWorkspaceFolder}/target")
+          ])
+        );
+      }
+    }
+  }, 300_000);
+
   it("generates a usable ts-lib project through the CLI", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
     const projectDir = path.join(workspace, "demo-lib");
