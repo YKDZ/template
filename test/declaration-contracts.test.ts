@@ -69,6 +69,35 @@ describe("declaration contracts", () => {
     expect(result.stdout).toContain("custom-lib");
   });
 
+  it("rejects future built-in preset references in preset files", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-future-preset-"));
+    const presetPath = path.join(workspace, "preset.json");
+    await writeFile(
+      presetPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "node-cli",
+          title: "Node CLI",
+          description: "A future built-in preset reference.",
+          supportedPackageManagers: ["pnpm"],
+          supportedProjectKinds: ["single-package"],
+          features: []
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await expect(
+      template(["preset", "validate", presetPath])
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Preset node-cli is not supported for generation in this version"
+      )
+    });
+  });
+
   it("validates a project blueprint against the built-in preset catalog", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-blueprint-"));
     const blueprintPath = path.join(workspace, "blueprint.json");
@@ -155,6 +184,65 @@ describe("declaration contracts", () => {
       template(["blueprint", "validate", blueprintPath])
     ).rejects.toMatchObject({
       stderr: expect.stringContaining("$.packages.name")
+    });
+  });
+
+  it("rejects multiple distinct packages in a single-package blueprint", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-single-package-"));
+    const blueprintPath = path.join(workspace, "blueprint.json");
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "ts-lib",
+          packageManager: "pnpm",
+          projectKind: "single-package",
+          features: ["strict-typescript", "root-check"],
+          packages: [
+            { name: "api", path: "packages/api" },
+            { name: "web", path: "packages/web" }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await expect(
+      template(["blueprint", "validate", blueprintPath])
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "single-package blueprints support exactly one package"
+      )
+    });
+  });
+
+  it("rejects future built-in presets in project blueprints", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-future-blueprint-"));
+    const blueprintPath = path.join(workspace, "blueprint.json");
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "ts-app",
+          packageManager: "pnpm",
+          projectKind: "single-package",
+          features: [],
+          packages: [{ name: "app", path: "." }]
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await expect(
+      template(["blueprint", "validate", blueprintPath])
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Preset ts-app is not supported for generation in this version"
+      )
     });
   });
 

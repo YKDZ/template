@@ -244,6 +244,20 @@ function duplicateIssues(values: string[], path: string): ValidationIssue[] {
   }));
 }
 
+function generationSupportIssue(
+  preset: BuiltInPreset,
+  path: string
+): ValidationIssue | undefined {
+  if (preset.generation === "supported") {
+    return undefined;
+  }
+
+  return {
+    path,
+    message: `Preset ${preset.name} is not supported for generation in this version`
+  };
+}
+
 export function validatePresetFile(input: unknown): ValidationResult<PresetFile> {
   const result = v.safeParse(presetFileSchema, input);
 
@@ -256,6 +270,15 @@ export function validatePresetFile(input: unknown): ValidationResult<PresetFile>
     ...duplicateIssues(result.output.supportedProjectKinds, "$.supportedProjectKinds"),
     ...duplicateIssues(result.output.features, "$.features")
   ];
+
+  const builtInPreset = findBuiltInPreset(result.output.name);
+  const unsupportedGeneration = builtInPreset
+    ? generationSupportIssue(builtInPreset, "$.name")
+    : undefined;
+
+  if (unsupportedGeneration) {
+    semanticIssues.push(unsupportedGeneration);
+  }
 
   if (semanticIssues.length > 0) {
     return { ok: false, issues: semanticIssues };
@@ -289,6 +312,12 @@ export function validateProjectBlueprint(
       message: `Unknown built-in preset: ${blueprint.preset}`
     });
   } else {
+    const unsupportedGeneration = generationSupportIssue(preset, "$.preset");
+
+    if (unsupportedGeneration) {
+      semanticIssues.push(unsupportedGeneration);
+    }
+
     if (!preset.supportedPackageManagers.includes(blueprint.packageManager)) {
       semanticIssues.push({
         path: "$.packageManager",
@@ -315,6 +344,13 @@ export function validateProjectBlueprint(
   }
 
   if (blueprint.packages) {
+    if (blueprint.projectKind === "single-package" && blueprint.packages.length > 1) {
+      semanticIssues.push({
+        path: "$.packages",
+        message: "single-package blueprints support exactly one package"
+      });
+    }
+
     semanticIssues.push(
       ...duplicateIssues(
         blueprint.packages.map((projectPackage) => projectPackage.name),
