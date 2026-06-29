@@ -1,4 +1,17 @@
-import { chmod, copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  chmod,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  rmdir,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import path from "node:path";
 
 type RenderVariables = Record<string, string>;
@@ -106,7 +119,7 @@ async function renderCopyFile(
   const sourceMode = (await stat(from)).mode;
 
   await mkdir(path.dirname(to), { recursive: true });
-  await copyFile(from, to);
+  await copyGeneratedFile(from, to);
   await chmod(to, sourceMode & 0o777);
 }
 
@@ -248,12 +261,17 @@ async function writeJsonFile(
   targetRoot: string,
   toPath: string,
   value: unknown,
-  multilineArrays?: string[]
+  multilineArrays?: string[],
+  overwrite = false
 ): Promise<void> {
   const to = resolveContainedPath(targetRoot, toPath);
 
   await mkdir(path.dirname(to), { recursive: true });
-  await writeFile(to, serializeJson(value, multilineArrays, rootKeyOrderForPath(toPath)), "utf8");
+  await writeGeneratedFile(
+    to,
+    serializeJson(value, multilineArrays, rootKeyOrderForPath(toPath)),
+    overwrite
+  );
 }
 
 async function renderWriteJson(
@@ -284,7 +302,13 @@ async function renderMergeJson(
     }
   }
 
-  await writeJsonFile(options.targetRoot, toPath, mergeJsonValue(existing, operation.value));
+  await writeJsonFile(
+    options.targetRoot,
+    toPath,
+    mergeJsonValue(existing, operation.value),
+    undefined,
+    true
+  );
 }
 
 const foundationTextFiles = new Set([
@@ -347,7 +371,7 @@ async function renderWriteText(
   const to = resolveContainedPath(options.targetRoot, toPath);
 
   await mkdir(path.dirname(to), { recursive: true });
-  await writeFile(to, operation.text, "utf8");
+  await writeGeneratedFile(to, operation.text);
 }
 
 async function renderSetExecutable(
@@ -484,6 +508,59 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+type TargetDirectoryStatus = "missing" | "empty";
+
+async function targetDirectoryStatus(targetRoot: string): Promise<TargetDirectoryStatus> {
+  try {
+    const targetStat = await stat(targetRoot);
+
+    if (!targetStat.isDirectory()) {
+      throw new Error(`Target path is not a directory: ${targetRoot}`);
+    }
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return "missing";
+    }
+
+    throw error;
+  }
+
+  const entries = await readdir(targetRoot);
+  if (entries.length > 0) {
+    throw new Error(`Target directory is not empty: ${targetRoot}`);
+  }
+
+  return "empty";
+}
+
+async function copyGeneratedFile(from: string, to: string): Promise<void> {
+  try {
+    await copyFile(from, to, constants.COPYFILE_EXCL);
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "EEXIST") {
+      throw new Error(`Refusing to overwrite existing file: ${to}`);
+    }
+
+    throw error;
+  }
+}
+
+async function writeGeneratedFile(
+  to: string,
+  text: string,
+  overwrite = false
+): Promise<void> {
+  try {
+    await writeFile(to, text, { encoding: "utf8", flag: overwrite ? "w" : "wx" });
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "EEXIST") {
+      throw new Error(`Refusing to overwrite existing file: ${to}`);
+    }
+
+    throw error;
+  }
+}
+
 export async function renderProject(options: RenderProjectOptions): Promise<void> {
   for (const operation of options.operations) {
     if (operation.kind === "copyFile") {
@@ -517,5 +594,57 @@ export async function renderProject(options: RenderProjectOptions): Promise<void
     }
 
     throw new Error(`Unsupported renderer operation: ${(operation as { kind: string }).kind}`);
+  }
+}
+
+async function commitStagedProject(stagingRoot: string, targetRoot: string): Promise<void> {
+  const targetStatus = await targetDirectoryStatus(targetRoot);
+
+  if (targetStatus === "empty") {
+    try {
+      await rmdir(targetRoot);
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        // The target disappeared between the emptiness check and commit.
+      } else if (isNodeError(error) && error.code === "ENOTEMPTY") {
+        throw new Error(`Target directory is not empty: ${targetRoot}`);
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  try {
+    await rename(stagingRoot, targetRoot);
+  } catch (error: unknown) {
+    if (
+      isNodeError(error) &&
+      ["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"].includes(error.code ?? "")
+    ) {
+      throw new Error(`Refusing to overwrite existing target: ${targetRoot}`);
+    }
+
+    throw error;
+  }
+}
+
+export async function renderNewProject(options: RenderProjectOptions): Promise<void> {
+  const targetRoot = path.resolve(options.targetRoot);
+  await targetDirectoryStatus(targetRoot);
+  await mkdir(path.dirname(targetRoot), { recursive: true });
+
+  const stagingRoot = await mkdtemp(
+    path.join(path.dirname(targetRoot), `.${path.basename(targetRoot)}.template-stage-`)
+  );
+  let committed = false;
+
+  try {
+    await renderProject({ ...options, targetRoot: stagingRoot });
+    await commitStagedProject(stagingRoot, targetRoot);
+    committed = true;
+  } finally {
+    if (!committed) {
+      await rm(stagingRoot, { recursive: true, force: true });
+    }
   }
 }

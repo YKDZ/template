@@ -1,7 +1,6 @@
-import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderProject, type RenderOperation } from "./renderer.js";
+import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -11,15 +10,6 @@ const generatedBy = {
 
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
-}
-
-async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
-  await mkdir(targetDir, { recursive: true });
-  const entries = await readdir(targetDir);
-
-  if (entries.length > 0) {
-    throw new Error(`Target directory is not empty: ${targetDir}`);
-  }
 }
 
 function packageJson(projectName: string): Record<string, unknown> {
@@ -228,9 +218,7 @@ function templateSourceRoot(): string {
 }
 
 export async function initTsLibProject(targetDir: string): Promise<void> {
-  await assertNewOrEmptyDirectory(targetDir);
-
-  await renderProject({
+  await renderNewProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
     operations: operationsForTsLib(projectNameFromDir(targetDir))

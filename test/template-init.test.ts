@@ -398,6 +398,52 @@ describe("template init", () => {
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("prints machine-readable init output after non-dry-run generation with --json --yes", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
+    const projectDir = path.join(workspace, "demo-lib");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--json",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const output = JSON.parse(result.stdout) as {
+      command: string;
+      dryRun: boolean;
+      targetDir: string;
+      blueprint: { preset: string; packageManager: string };
+      nextSteps: string[];
+    };
+
+    expect(output).toEqual(
+      expect.objectContaining({
+        command: "init",
+        dryRun: false,
+        targetDir: projectDir,
+        blueprint: expect.objectContaining({
+          preset: "ts-lib",
+          packageManager: "pnpm"
+        }),
+        nextSteps: [`cd ${projectDir}`, "pnpm install", "pnpm run check"]
+      })
+    );
+    await stat(path.join(projectDir, "package.json"));
+    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
   it("fails clearly in non-interactive init without --yes", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-noninteractive-"));
     const projectDir = path.join(workspace, "demo-lib");
@@ -497,6 +543,34 @@ describe("template init", () => {
     expect(result.stdout).toContain("Generate this project? [y/N]");
     expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
     await stat(path.join(projectDir, "package.json"));
+  });
+
+  it("cancels interactive init without writing files when confirmation is declined", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-interactive-"));
+    const projectDir = path.join(workspace, "demo-lib");
+    const cliPath = path.join(repoRoot, "src/cli.ts");
+
+    await expect(
+      execa(
+        "bash",
+        [
+          "-lc",
+          [
+            "printf 'n\\n' |",
+            "script -qfec",
+            shellQuote(
+              `pnpm exec tsx ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`
+            ),
+            "/dev/null"
+          ].join(" ")
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toMatchObject({
+      stdout: expect.stringMatching(/Generate this project\? \[y\/N\][\s\S]*Init cancelled/)
+    });
+
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("prints next steps after generation without installing dependencies", async () => {
@@ -1096,4 +1170,73 @@ describe("template init", () => {
       { name: "@custom-scope/api", path: "apps/api" }
     ]);
   }, 120_000);
+
+  it("normalizes npm scopes that include a leading at sign", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-scope-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "vue-hono-app",
+        "--scope",
+        "@custom-scope",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const apiPackageJson = await readJson<{ name: string }>(
+      path.join(projectDir, "apps/api/package.json")
+    );
+    const webPackageJson = await readJson<{
+      name: string;
+      dependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/web/package.json"));
+    const blueprint = await readJson<{
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+
+    expect(apiPackageJson.name).toBe("@custom-scope/api");
+    expect(webPackageJson.name).toBe("@custom-scope/web");
+    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
+    expect(blueprint.packages).toEqual([
+      { name: "@custom-scope/web", path: "apps/web" },
+      { name: "@custom-scope/api", path: "apps/api" }
+    ]);
+  }, 120_000);
+
+  it("rejects npm scopes with whitespace before writing files", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-scope-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          path.join(repoRoot, "src/cli.ts"),
+          "init",
+          projectDir,
+          "--preset",
+          "vue-hono-app",
+          "--scope",
+          "custom\nscope",
+          "--yes"
+        ],
+        { cwd: repoRoot }
+      )
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--scope must be a valid npm scope without whitespace")
+    });
+
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });

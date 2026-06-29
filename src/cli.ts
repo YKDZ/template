@@ -119,7 +119,7 @@ function parseInitOptions(args: string[]): InitOptions {
       if (!value) {
         throw new Error("--scope requires a value");
       }
-      scope = value;
+      scope = normalizeNpmScope(value);
       index += 1;
       continue;
     }
@@ -142,6 +142,19 @@ function parseInitOptions(args: string[]): InitOptions {
   }
 
   return { dir, preset, yes, dryRun, json, scope };
+}
+
+function normalizeNpmScope(value: string): string {
+  if (value !== value.trim() || /\s/.test(value)) {
+    throw new Error("--scope must be a valid npm scope without whitespace");
+  }
+
+  const scope = value.startsWith("@") ? value.slice(1) : value;
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(scope)) {
+    throw new Error("--scope must be a valid npm scope");
+  }
+
+  return scope;
 }
 
 function supportedPreset(name: string): BuiltInPreset {

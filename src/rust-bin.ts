@@ -1,7 +1,6 @@
-import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderProject, type RenderOperation } from "./renderer.js";
+import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
   "root-check",
@@ -29,15 +28,6 @@ function cargoPackageNameFromDir(targetDir: string): string {
     .replace(/^-+|-+$/g, "");
 
   return slug || "rust-bin";
-}
-
-async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
-  await mkdir(targetDir, { recursive: true });
-  const entries = await readdir(targetDir);
-
-  if (entries.length > 0) {
-    throw new Error(`Target directory is not empty: ${targetDir}`);
-  }
 }
 
 function cargoToml(projectName: string): string {
@@ -217,9 +207,7 @@ function templateSourceRoot(): string {
 }
 
 export async function initRustBinProject(targetDir: string): Promise<void> {
-  await assertNewOrEmptyDirectory(targetDir);
-
-  await renderProject({
+  await renderNewProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
     operations: operationsForRustBin(cargoPackageNameFromDir(targetDir))

@@ -1,7 +1,6 @@
-import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { renderProject, type RenderOperation } from "./renderer.js";
+import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
   "pnpm-catalog",
@@ -30,15 +29,6 @@ function packageName(packageScope: string, leaf: "api" | "web"): string {
 
 function workspacePackageFilter(packageScope: string, leaf: "api" | "web"): string {
   return `--filter ${packageName(packageScope, leaf)}`;
-}
-
-async function assertNewOrEmptyDirectory(targetDir: string): Promise<void> {
-  await mkdir(targetDir, { recursive: true });
-  const entries = await readdir(targetDir);
-
-  if (entries.length > 0) {
-    throw new Error(`Target directory is not empty: ${targetDir}`);
-  }
 }
 
 function rootPackageJson(projectName: string): Record<string, unknown> {
@@ -506,11 +496,9 @@ export async function initVueHonoAppProject(
   targetDir: string,
   options: { scope?: string } = {}
 ): Promise<void> {
-  await assertNewOrEmptyDirectory(targetDir);
-
   const projectName = projectNameFromDir(targetDir);
   const packageScope = options.scope ?? projectName;
-  await renderProject({
+  await renderNewProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
     operations: operationsForVueHonoApp(projectName, packageScope)

@@ -3,12 +3,13 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   stat,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { renderProject } from "../src/renderer.js";
+import { renderNewProject, renderProject } from "../src/renderer.js";
 
 async function tempWorkspace(): Promise<{ sourceRoot: string; targetRoot: string }> {
   const workspace = await mkdtemp(path.join(tmpdir(), "template-renderer-"));
@@ -224,6 +225,59 @@ describe("renderer", () => {
     await expect(readFile(path.join(targetRoot, ".gitignore"), "utf8")).resolves.toBe(
       "node_modules\ndist\n"
     );
+  });
+
+  it("rejects target files that appear before a renderer write lands", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+
+    await expect(
+      renderProject({
+        sourceRoot,
+        targetRoot,
+        operations: [
+          {
+            kind: "writeText",
+            to: "README.md",
+            text: "first writer\n"
+          },
+          {
+            kind: "writeText",
+            to: "README.md",
+            text: "second writer\n"
+          }
+        ]
+      })
+    ).rejects.toThrow("Refusing to overwrite existing file");
+
+    await expect(readFile(path.join(targetRoot, "README.md"), "utf8")).resolves.toBe(
+      "first writer\n"
+    );
+  });
+
+  it("leaves the target untouched when a new-project render fails", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    await mkdir(targetRoot, { recursive: true });
+
+    await expect(
+      renderNewProject({
+        sourceRoot,
+        targetRoot,
+        operations: [
+          {
+            kind: "writeText",
+            to: "README.md",
+            text: "# Demo\n"
+          },
+          {
+            kind: "writeText",
+            to: "src/index.ts",
+            text: "export const generated = true;\n"
+          }
+        ]
+      })
+    ).rejects.toThrow("Text output is limited to foundation files");
+
+    await expect(readdir(targetRoot)).resolves.toEqual([]);
   });
 
   it("updates executable bits without changing file contents", async () => {
