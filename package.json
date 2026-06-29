@@ -13,7 +13,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "check": "pnpm run typecheck && pnpm run test",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run check:fixtures",
+    "check:fixtures": "tsx scripts/check-fixtures.ts",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
