@@ -50,7 +50,7 @@ function filesForTsLib(targetDir: string): FileSpec[] {
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     "fix": "pnpm run format:write && pnpm run lint:fix",
     "format:check": "oxfmt --check .",
@@ -63,6 +63,7 @@ function filesForTsLib(targetDir: string): FileSpec[] {
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
+    "tsc-alias": "catalog:",
     "typescript": "catalog:"
   },
   "engines": {
@@ -82,6 +83,7 @@ function filesForTsLib(targetDir: string): FileSpec[] {
         '  "@types/node": ^24.0.0',
         "  oxfmt: ^0.56.0",
         "  oxlint: ^1.71.0",
+        "  tsc-alias: ^1.8.17",
         "  typescript: ^5.8.0",
         ""
       ].join("\n")
@@ -205,7 +207,7 @@ function filesForTsLib(targetDir: string): FileSpec[] {
         "        with:",
         "          node-version: 22",
         "          cache: pnpm",
-        "      - run: pnpm install --frozen-lockfile",
+        "      - run: pnpm install",
         "      - run: pnpm run check",
         ""
       ].join("\n")

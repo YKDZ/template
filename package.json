@@ -11,7 +11,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm run build && pnpm run typecheck && pnpm run test",
+    "prepack": "pnpm run build",
+    "check": "pnpm run typecheck && pnpm run test",
+    "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },

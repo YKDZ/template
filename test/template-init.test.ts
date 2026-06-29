@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { execa } from "execa";
 
 const repoRoot = path.resolve(
@@ -81,7 +81,72 @@ describe("template init", () => {
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "src/index.ts"));
 
-    await execa("pnpm", ["install"], { cwd: projectDir });
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m
+    )?.[1];
+    expect(installCommand).toBeDefined();
+
+    await execa("pnpm", installCommand!.split(" ").slice(1), {
+      cwd: projectDir
+    });
+
+    await writeFile(
+      path.join(projectDir, "src/internal.ts"),
+      [
+        "export function greetingMessage(name: string): string {",
+        "  return `Hello, ${name}`;",
+        "}",
+        ""
+      ].join("\n")
+    );
+    await writeFile(
+      path.join(projectDir, "src/index.ts"),
+      [
+        'import { greetingMessage } from "@/internal.js";',
+        "",
+        "export type Greeting = {",
+        "  message: string;",
+        "};",
+        "",
+        "export function greet(name: string): Greeting {",
+        "  return { message: greetingMessage(name) };",
+        "}",
+        ""
+      ].join("\n")
+    );
+
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
+    await execa("pnpm", ["run", "build"], { cwd: projectDir });
+
+    const emittedIndex = await readFile(
+      path.join(projectDir, "dist/index.js"),
+      "utf8"
+    );
+    expect(emittedIndex).not.toContain("@/");
+
+    const importResult = await execa(
+      "node",
+      [
+        "--input-type=module",
+        "--eval",
+        [
+          `import { greet } from ${JSON.stringify(
+            pathToFileURL(path.join(projectDir, "dist/index.js")).href
+          )};`,
+          'console.log(greet("Ada").message);'
+        ].join("\n")
+      ],
+      { cwd: projectDir }
+    );
+    expect(importResult.stdout).toBe("Hello, Ada");
   });
 });
