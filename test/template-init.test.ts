@@ -277,6 +277,95 @@ describe("template init", () => {
     }
   });
 
+  it("generates a usable rust-bin project through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
+    const projectDir = path.join(workspace, "demo-rust");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "rust-bin",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const cargoToml = await readFile(path.join(projectDir, "Cargo.toml"), "utf8");
+    const rustfmtToml = await readFile(path.join(projectDir, "rustfmt.toml"), "utf8");
+    const checkScript = await readFile(path.join(projectDir, "scripts/check"), "utf8");
+    const devcontainer = await readJson<{
+      image: string;
+      mounts: string[];
+      customizations: { vscode: { extensions: string[] } };
+    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    const blueprint = await readJson<{ preset: string }>(
+      path.join(projectDir, ".project-kit/blueprint.json")
+    );
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const dependabot = await readFile(
+      path.join(projectDir, ".github/dependabot.yml"),
+      "utf8"
+    );
+
+    expect(cargoToml).toContain('name = "demo-rust"');
+    expect(cargoToml).toContain('edition = "2024"');
+    expect(cargoToml).toContain("[workspace.lints.clippy]");
+    expect(cargoToml).toContain('all = "deny"');
+    expect(cargoToml).toContain("[profile.release]");
+    expect(cargoToml).toContain('strip = "symbols"');
+    expect(rustfmtToml).toContain("edition = \"2024\"");
+
+    expect(checkScript).toContain("cargo fmt --all -- --check");
+    expect(checkScript).toContain(
+      "cargo clippy --workspace --all-targets -- -D warnings"
+    );
+    expect(checkScript).toContain("cargo test --workspace");
+
+    expect(devcontainer.image).toContain("rust");
+    expect(devcontainer.mounts).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("target=/usr/local/cargo/registry"),
+        expect.stringContaining("target=${containerWorkspaceFolder}/target")
+      ])
+    );
+    expect(devcontainer.customizations.vscode.extensions).toEqual(
+      expect.arrayContaining(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"])
+    );
+
+    expect(blueprint.preset).toBe("rust-bin");
+    expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
+    expect(checkWorkflow).toContain("components: rustfmt, clippy");
+    expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
+    expect(checkWorkflow).toContain("run: ./scripts/check");
+    expect(dependabot).toContain("package-ecosystem: cargo");
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+
+    await stat(path.join(projectDir, "src/main.rs"));
+    await stat(path.join(projectDir, "Cargo.lock"));
+    await expect(
+      stat(path.join(projectDir, "package.json"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+
+    const checkResult = await execa("./scripts/check", [], { cwd: projectDir });
+    expect(checkResult.stdout).toContain("cargo fmt");
+    expect(checkResult.stdout).toContain("cargo clippy");
+    expect(checkResult.stdout).toContain("cargo test");
+
+    const runResult = await execa("cargo", ["run", "--quiet"], { cwd: projectDir });
+    expect(runResult.stdout).toBe("Hello from demo-rust");
+  }, 120_000);
+
   it("generates a Vue app project through the CLI", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
     const projectDir = path.join(workspace, "demo-vue");

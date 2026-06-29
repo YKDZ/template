@@ -1,6 +1,12 @@
 import * as v from "valibot";
 
-export type PresetName = "ts-lib" | "hono-api" | "vue-app" | "ts-app" | "node-cli";
+export type PresetName =
+  | "ts-lib"
+  | "hono-api"
+  | "vue-app"
+  | "rust-bin"
+  | "ts-app"
+  | "node-cli";
 
 export type BuiltInPreset = {
   name: PresetName;
@@ -24,7 +30,10 @@ export type FeatureName =
   | "fix-command"
   | "devcontainer"
   | "github-actions"
-  | "dependabot";
+  | "dependabot"
+  | "rustfmt-clippy"
+  | "cargo-test"
+  | "native-binary-release";
 
 export type PresetFile = {
   schemaVersion: 1;
@@ -106,6 +115,24 @@ export const builtInPresets: readonly BuiltInPreset[] = [
     ]
   },
   {
+    name: "rust-bin",
+    title: "Rust binary",
+    description: "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
+    generation: "supported",
+    supportedPackageManagers: ["pnpm"],
+    supportedProjectKinds: ["single-package"],
+    features: [
+      "root-check",
+      "fix-command",
+      "devcontainer",
+      "github-actions",
+      "dependabot",
+      "rustfmt-clippy",
+      "cargo-test",
+      "native-binary-release"
+    ]
+  },
+  {
     name: "ts-app",
     title: "TypeScript application",
     description: "Future application preset metadata.",
@@ -133,7 +160,10 @@ const featureNames: FeatureName[] = [
   "fix-command",
   "devcontainer",
   "github-actions",
-  "dependabot"
+  "dependabot",
+  "rustfmt-clippy",
+  "cargo-test",
+  "native-binary-release"
 ];
 
 export const presetFileJsonSchema = {
