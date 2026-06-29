@@ -120,8 +120,7 @@ function webPackageJson(projectName: string): Record<string, unknown> {
       preview: "vite preview",
       test: "vitest run",
       "test:e2e": "pnpm run build && playwright test",
-      typecheck:
-        "vue-tsc -p tsconfig.app.json --noEmit && vue-tsc -p tsconfig.test.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit"
+      typecheck: "vue-tsc --build"
     },
     dependencies: {
       [packageName(projectName, "api")]: "workspace:*",
@@ -398,7 +397,8 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
           moduleResolution: "Bundler",
           noEmitOnError: true,
           paths: {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
+            [apiName]: ["../api/src/index.ts"]
           },
           skipLibCheck: false,
           strict: true,
@@ -407,7 +407,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
           types: ["web-bluetooth"]
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"],
-        references: []
+        references: [{ path: "../api/tsconfig.build.json" }]
       }
     },
     {
@@ -421,7 +421,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
           types: ["node", "vitest/globals", "web-bluetooth"]
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"],
-        references: []
+        references: [{ path: "../api/tsconfig.build.json" }]
       }
     },
     {
@@ -434,6 +434,7 @@ function operationsForVueHonoApp(projectName: string): RenderOperation[] {
           moduleResolution: "Bundler",
           noEmitOnError: true,
           lib: ["ESNext", "DOM", "DOM.Iterable"],
+          outDir: "./node_modules/.tmp/tsconfig.node",
           skipLibCheck: false,
           strict: true,
           target: "ES2022",

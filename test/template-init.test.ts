@@ -633,6 +633,16 @@ describe("template init", () => {
       files: string[];
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const webTsconfig = await readJson<{
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "apps/web/tsconfig.json"));
+    const webAppTsconfig = await readJson<{
+      compilerOptions: { paths: Record<string, string[]> };
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "apps/web/tsconfig.app.json"));
+    const webTestTsconfig = await readJson<{
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "apps/web/tsconfig.test.json"));
     const turboConfig = await readJson<{
       tasks: { check: { dependsOn: string[] } };
     }>(path.join(projectDir, "turbo.json"));
@@ -673,13 +683,13 @@ describe("template init", () => {
     expect(apiPackageJson.exports).toEqual({ ".": "./dist/index.js" });
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
     expect(apiPackageJson.dependencies).not.toHaveProperty("vue");
+    expect(apiIndex).toContain('import type { app } from "./runtime.js"');
     expect(apiIndex).toContain("export type AppType = typeof app");
+    expect(apiIndex).not.toContain("new Hono");
     expect(apiIndex).not.toContain("@hono/node-server");
 
     expect(webPackageJson.name).toBe("@demo-fullstack/web");
-    expect(webPackageJson.scripts.typecheck).toBe(
-      "vue-tsc -p tsconfig.app.json --noEmit && vue-tsc -p tsconfig.test.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit"
-    );
+    expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build");
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe("workspace:*");
     expect(webPackageJson.dependencies.hono).toBe("catalog:");
     expect(webApiClient).toContain('import { hc } from "hono/client"');
@@ -694,6 +704,16 @@ describe("template init", () => {
       { path: "./apps/web/tsconfig.test.json" },
       { path: "./apps/web/tsconfig.node.json" }
     ]);
+    expect(webTsconfig.references).toEqual([
+      { path: "./tsconfig.app.json" },
+      { path: "./tsconfig.test.json" },
+      { path: "./tsconfig.node.json" }
+    ]);
+    expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual([
+      "../api/src/index.ts"
+    ]);
+    expect(webAppTsconfig.references).toEqual([{ path: "../api/tsconfig.build.json" }]);
+    expect(webTestTsconfig.references).toEqual([{ path: "../api/tsconfig.build.json" }]);
     expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
 
     expect(blueprint).toEqual(
@@ -730,6 +750,36 @@ describe("template init", () => {
     await execa("pnpm", installCommand!.split(" ").slice(1), {
       cwd: projectDir
     });
+
+    await writeFile(
+      path.join(projectDir, "apps/api/src/runtime.ts"),
+      [
+        'import { Hono } from "hono";',
+        "",
+        "export const app = new Hono()",
+        '  .basePath("/api")',
+        '  .get("/health", (context) => context.json({ status: "ok" as const }))',
+        '  .get("/runtime-only", (context) => context.json({ runtimeOnly: true as const }));',
+        ""
+      ].join("\n")
+    );
+    await writeFile(
+      path.join(projectDir, "apps/web/src/api-contract.ts"),
+      [
+        'import { api } from "@/api";',
+        "",
+        "export async function readRuntimeOnlyContract(): Promise<true> {",
+        '  const response = await api.api["runtime-only"].$get();',
+        "  const body = await response.json();",
+        "  return body.runtimeOnly;",
+        "}",
+        ""
+      ].join("\n")
+    );
+    await execa("pnpm", ["--filter", "@demo-fullstack/web", "run", "typecheck"], {
+      cwd: projectDir
+    });
+
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 240_000);
 });
