@@ -4,6 +4,7 @@ export type PresetName =
   | "ts-lib"
   | "hono-api"
   | "vue-app"
+  | "vue-hono-app"
   | "rust-bin"
   | "ts-app"
   | "node-cli";
@@ -20,7 +21,7 @@ export type BuiltInPreset = {
 
 export type PackageManager = "pnpm";
 
-export type ProjectKind = "single-package";
+export type ProjectKind = "single-package" | "multi-package";
 
 export type FeatureName =
   | "pnpm-catalog"
@@ -115,6 +116,24 @@ export const builtInPresets: readonly BuiltInPreset[] = [
     ]
   },
   {
+    name: "vue-hono-app",
+    title: "Vue Hono app",
+    description: "Full-stack Vue and Hono workspace with Hono RPC typing.",
+    generation: "supported",
+    supportedPackageManagers: ["pnpm"],
+    supportedProjectKinds: ["multi-package"],
+    features: [
+      "pnpm-catalog",
+      "oxc-format-lint",
+      "strict-typescript",
+      "root-check",
+      "fix-command",
+      "devcontainer",
+      "github-actions",
+      "dependabot"
+    ]
+  },
+  {
     name: "rust-bin",
     title: "Rust binary",
     description: "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
@@ -194,7 +213,7 @@ export const presetFileJsonSchema = {
     supportedProjectKinds: {
       type: "array",
       minItems: 1,
-      items: { enum: ["single-package"] },
+      items: { enum: ["single-package", "multi-package"] },
       uniqueItems: true
     },
     features: {
@@ -216,7 +235,7 @@ export const blueprintJsonSchema = {
     schemaVersion: { const: 1 },
     preset: { type: "string", minLength: 1 },
     packageManager: { enum: ["pnpm"] },
-    projectKind: { enum: ["single-package"] },
+    projectKind: { enum: ["single-package", "multi-package"] },
     features: {
       type: "array",
       items: { enum: featureNames },
@@ -239,7 +258,7 @@ export const blueprintJsonSchema = {
 
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
 const packageManagerSchema = v.picklist(["pnpm"] as const);
-const projectKindSchema = v.picklist(["single-package"] as const);
+const projectKindSchema = v.picklist(["single-package", "multi-package"] as const);
 const featureNameSchema = v.picklist(featureNames);
 
 export const presetFileSchema = v.strictObject({

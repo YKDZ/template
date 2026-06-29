@@ -185,6 +185,7 @@ const packageJsonRootKeyOrder = [
   "private",
   "files",
   "type",
+  "types",
   "exports",
   "scripts",
   "dependencies",

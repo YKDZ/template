@@ -592,4 +592,144 @@ describe("template init", () => {
     await execa("pnpm", ["run", "test:e2e"], { cwd: projectDir });
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 180_000);
+
+  it("generates a full-stack vue-hono-app project through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "vue-hono-app",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const rootPackageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const apiPackageJson = await readJson<{
+      name: string;
+      types: string;
+      exports: Record<string, string>;
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/api/package.json"));
+    const webPackageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/web/package.json"));
+    const rootTsconfig = await readJson<{
+      files: string[];
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const turboConfig = await readJson<{
+      tasks: { check: { dependsOn: string[] } };
+    }>(path.join(projectDir, "turbo.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8"
+    );
+    const blueprint = await readJson<{
+      preset: string;
+      projectKind: string;
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+    const apiIndex = await readFile(
+      path.join(projectDir, "apps/api/src/index.ts"),
+      "utf8"
+    );
+    const webApiClient = await readFile(
+      path.join(projectDir, "apps/web/src/api.ts"),
+      "utf8"
+    );
+    const viteConfig = await readFile(
+      path.join(projectDir, "apps/web/vite.config.ts"),
+      "utf8"
+    );
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+
+    expect(rootPackageJson.name).toBe("demo-fullstack");
+    expect(rootPackageJson.scripts.check).toBe("turbo run check");
+    expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
+    expect(workspaceYaml).toContain("  - apps/*");
+    expect(workspaceYaml).toContain("turbo:");
+
+    expect(apiPackageJson.name).toBe("@demo-fullstack/api");
+    expect(apiPackageJson.types).toBe("./dist/index.d.ts");
+    expect(apiPackageJson.exports).toEqual({ ".": "./dist/index.js" });
+    expect(apiPackageJson.dependencies.hono).toBe("catalog:");
+    expect(apiPackageJson.dependencies).not.toHaveProperty("vue");
+    expect(apiIndex).toContain("export type AppType = typeof app");
+    expect(apiIndex).not.toContain("@hono/node-server");
+
+    expect(webPackageJson.name).toBe("@demo-fullstack/web");
+    expect(webPackageJson.scripts.typecheck).toBe(
+      "vue-tsc -p tsconfig.app.json --noEmit && vue-tsc -p tsconfig.test.json --noEmit && vue-tsc -p tsconfig.node.json --noEmit"
+    );
+    expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe("workspace:*");
+    expect(webPackageJson.dependencies.hono).toBe("catalog:");
+    expect(webApiClient).toContain('import { hc } from "hono/client"');
+    expect(webApiClient).toContain('import type { AppType } from "@demo-fullstack/api"');
+    expect(viteConfig).toContain('"/api"');
+    expect(viteConfig).toContain("VITE_API_BASE_URL");
+
+    expect(rootTsconfig.files).toEqual([]);
+    expect(rootTsconfig.references).toEqual([
+      { path: "./apps/api/tsconfig.json" },
+      { path: "./apps/web/tsconfig.app.json" },
+      { path: "./apps/web/tsconfig.test.json" },
+      { path: "./apps/web/tsconfig.node.json" }
+    ]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
+
+    expect(blueprint).toEqual(
+      expect.objectContaining({
+        preset: "vue-hono-app",
+        projectKind: "multi-package",
+        packages: [
+          { name: "@demo-fullstack/web", path: "apps/web" },
+          { name: "@demo-fullstack/api", path: "apps/api" }
+        ]
+      })
+    );
+
+    await stat(path.join(projectDir, "apps/api/src/server.ts"));
+    await stat(path.join(projectDir, "apps/web/test/e2e/app.spec.ts"));
+    await expect(
+      stat(path.join(projectDir, "packages/api-client"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    expect(checkWorkflow).not.toContain("cache: pnpm");
+    expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m
+    )?.[1];
+    expect(installCommand).toBeDefined();
+
+    await execa("pnpm", installCommand!.split(" ").slice(1), {
+      cwd: projectDir
+    });
+    await execa("pnpm", ["run", "check"], { cwd: projectDir });
+  }, 240_000);
 });

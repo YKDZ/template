@@ -4,6 +4,7 @@ import path from "node:path";
 import { initHonoApiProject } from "./hono-api.js";
 import { initRustBinProject } from "./rust-bin.js";
 import { initTsLibProject } from "./ts-lib.js";
+import { initVueHonoAppProject } from "./vue-hono-app.js";
 import { initVueAppProject } from "./vue-app.js";
 import {
   blueprintJsonSchema,
@@ -181,6 +182,12 @@ async function main(args: string[]): Promise<void> {
       return;
     }
 
+    if (options.preset === "vue-hono-app") {
+      await initVueHonoAppProject(options.dir);
+      console.log(`Initialized vue-hono-app project in ${options.dir}`);
+      return;
+    }
+
     if (options.preset === "rust-bin") {
       await initRustBinProject(options.dir);
       console.log(`Initialized rust-bin project in ${options.dir}`);
@@ -188,7 +195,7 @@ async function main(args: string[]): Promise<void> {
     }
 
     throw new Error(
-      "Only the ts-lib, hono-api, vue-app, and rust-bin presets are supported in this version"
+      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
     );
   }
 

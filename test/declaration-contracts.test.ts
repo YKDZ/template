@@ -21,6 +21,8 @@ describe("declaration contracts", () => {
     expect(result.stdout).toContain("TypeScript library");
     expect(result.stdout).toContain("vue-app");
     expect(result.stdout).toContain("Vue app");
+    expect(result.stdout).toContain("vue-hono-app");
+    expect(result.stdout).toContain("Vue Hono app");
     expect(result.stdout).toContain("(supported)");
   });
 
@@ -129,6 +131,34 @@ describe("declaration contracts", () => {
 
     expect(result.stdout).toContain("Blueprint is valid");
     expect(result.stdout).toContain("ts-lib");
+  });
+
+  it("validates a multi-package vue-hono-app blueprint", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-fullstack-blueprint-"));
+    const blueprintPath = path.join(workspace, "blueprint.json");
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "vue-hono-app",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: ["strict-typescript", "root-check"],
+          packages: [
+            { name: "@demo/web", path: "apps/web" },
+            { name: "@demo/api", path: "apps/api" }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const result = await template(["blueprint", "validate", blueprintPath]);
+
+    expect(result.stdout).toContain("Blueprint is valid");
+    expect(result.stdout).toContain("vue-hono-app");
   });
 
   it("reports schema validation failures with useful paths", async () => {
