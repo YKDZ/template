@@ -20,9 +20,14 @@ function supportedFixturePresets(): SupportedFixturePreset[] {
     .map((preset) => preset.name as SupportedFixturePreset);
 }
 
-async function run(command: string, args: string[], cwd: string): Promise<void> {
+async function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  env?: Record<string, string>
+): Promise<void> {
   console.log(`$ ${[command, ...args].join(" ")}`);
-  await execa(command, args, { cwd, stdio: "inherit" });
+  await execa(command, args, { cwd, env, stdio: "inherit" });
 }
 
 async function generatePreset(
@@ -47,18 +52,30 @@ async function checkNodePreset(
   await run("pnpm", ["install"], projectDir);
 
   if (presetName === "vue-app") {
-    await run("pnpm", ["exec", "playwright", "install", "chromium"], projectDir);
+    await run(
+      "pnpm",
+      ["exec", "playwright", "install", "--with-deps", "chromium"],
+      projectDir
+    );
   }
 
   if (presetName === "vue-hono-app") {
     await run(
       "pnpm",
-      ["--filter", "@fixture-vue-hono-app/web", "exec", "playwright", "install", "chromium"],
+      [
+        "--filter",
+        "@fixture-vue-hono-app/web",
+        "exec",
+        "playwright",
+        "install",
+        "--with-deps",
+        "chromium"
+      ],
       projectDir
     );
   }
 
-  await run("pnpm", ["run", "check"], projectDir);
+  await run("pnpm", ["run", "check"], projectDir, { CI: "1" });
 }
 
 async function checkRustPreset(projectDir: string): Promise<void> {
