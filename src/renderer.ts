@@ -89,6 +89,10 @@ function resolveContainedPath(root: string, relativePath: string): string {
   return resolvedPath;
 }
 
+function expandOperationPath(relativePath: string, options: RenderProjectOptions): string {
+  return expandTemplatePath(relativePath, options.variables ?? {});
+}
+
 async function renderCopyFile(
   operation: CopyFileOperation,
   options: RenderProjectOptions
@@ -118,7 +122,8 @@ function serializeJsonValue(
   value: unknown,
   indentation: number,
   pathSegments: string[],
-  multilineArrays: Set<string>
+  multilineArrays: Set<string>,
+  rootKeyOrder?: Map<string, number>
 ): string {
   if (Array.isArray(value)) {
     const compact = `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
@@ -137,7 +142,8 @@ function serializeJsonValue(
           item,
           indentation + 2,
           [...pathSegments, String(index)],
-          multilineArrays
+          multilineArrays,
+          rootKeyOrder
         )}`
     );
     return `[\n${items.join(",\n")}\n${" ".repeat(indentation)}]`;
@@ -147,7 +153,9 @@ function serializeJsonValue(
     return JSON.stringify(value);
   }
 
-  const entries = Object.entries(value);
+  const entries = Object.entries(value).sort(([left], [right]) =>
+    compareJsonKeys(left, right, pathSegments, rootKeyOrder)
+  );
 
   if (entries.length === 0) {
     return "{}";
@@ -162,7 +170,8 @@ function serializeJsonValue(
             entryValue,
             indentation + 2,
             [...pathSegments, key],
-            multilineArrays
+            multilineArrays,
+            rootKeyOrder
           )}`
       )
       .join(",\n") +
@@ -170,8 +179,54 @@ function serializeJsonValue(
   );
 }
 
-function serializeJson(value: unknown, multilineArrays: string[] = []): string {
-  return `${serializeJsonValue(value, 0, [], new Set(multilineArrays))}\n`;
+const packageJsonRootKeyOrder = [
+  "name",
+  "version",
+  "private",
+  "files",
+  "type",
+  "exports",
+  "scripts",
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+  "engines",
+  "packageManager"
+];
+
+function compareJsonKeys(
+  left: string,
+  right: string,
+  pathSegments: string[],
+  rootKeyOrder?: Map<string, number>
+): number {
+  if (pathSegments.length === 0 && rootKeyOrder) {
+    const leftOrder = rootKeyOrder.get(left) ?? Number.POSITIVE_INFINITY;
+    const rightOrder = rootKeyOrder.get(right) ?? Number.POSITIVE_INFINITY;
+
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+  }
+
+  return left.localeCompare(right);
+}
+
+function rootKeyOrderForPath(toPath: string): Map<string, number> | undefined {
+  if (path.basename(toPath) !== "package.json") {
+    return undefined;
+  }
+
+  return new Map(packageJsonRootKeyOrder.map((key, index) => [key, index]));
+}
+
+function serializeJson(
+  value: unknown,
+  multilineArrays: string[] = [],
+  rootKeyOrder?: Map<string, number>
+): string {
+  return `${serializeJsonValue(value, 0, [], new Set(multilineArrays), rootKeyOrder)}\n`;
 }
 
 function mergeJsonValue(base: unknown, patch: unknown): unknown {
@@ -197,7 +252,7 @@ async function writeJsonFile(
   const to = resolveContainedPath(targetRoot, toPath);
 
   await mkdir(path.dirname(to), { recursive: true });
-  await writeFile(to, serializeJson(value, multilineArrays), "utf8");
+  await writeFile(to, serializeJson(value, multilineArrays, rootKeyOrderForPath(toPath)), "utf8");
 }
 
 async function renderWriteJson(
@@ -206,7 +261,7 @@ async function renderWriteJson(
 ): Promise<void> {
   await writeJsonFile(
     options.targetRoot,
-    operation.to,
+    expandOperationPath(operation.to, options),
     operation.value,
     operation.multilineArrays
   );
@@ -216,7 +271,8 @@ async function renderMergeJson(
   operation: MergeJsonOperation,
   options: RenderProjectOptions
 ): Promise<void> {
-  const to = resolveContainedPath(options.targetRoot, operation.to);
+  const toPath = expandOperationPath(operation.to, options);
+  const to = resolveContainedPath(options.targetRoot, toPath);
   let existing: unknown = {};
 
   try {
@@ -227,7 +283,7 @@ async function renderMergeJson(
     }
   }
 
-  await writeJsonFile(options.targetRoot, operation.to, mergeJsonValue(existing, operation.value));
+  await writeJsonFile(options.targetRoot, toPath, mergeJsonValue(existing, operation.value));
 }
 
 const foundationTextFiles = new Set([
@@ -244,20 +300,26 @@ const foundationTextFiles = new Set([
 ]);
 
 function assertFoundationTextPath(relativePath: string): void {
-  const basename = path.basename(relativePath);
+  const normalizedPath = relativePath.split(path.sep).join("/");
+  const isRootLevel = !normalizedPath.includes("/");
 
-  if (foundationTextFiles.has(basename)) {
+  if (isRootLevel && foundationTextFiles.has(normalizedPath)) {
     return;
   }
 
-  if (relativePath.endsWith(".md") && !relativePath.includes(`${path.sep}src${path.sep}`)) {
+  if (isRootLevel && relativePath.endsWith(".md")) {
     return;
   }
 
-  if (
-    (relativePath.endsWith(".yaml") || relativePath.endsWith(".yml")) &&
-    !relativePath.includes(`${path.sep}src${path.sep}`)
-  ) {
+  if (isRootLevel && (relativePath.endsWith(".yaml") || relativePath.endsWith(".yml"))) {
+    return;
+  }
+
+  if (/^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/.test(normalizedPath)) {
+    return;
+  }
+
+  if (/^\.github\/dependabot\.ya?ml$/.test(normalizedPath)) {
     return;
   }
 
@@ -268,8 +330,9 @@ async function renderWriteText(
   operation: WriteTextOperation,
   options: RenderProjectOptions
 ): Promise<void> {
-  assertFoundationTextPath(operation.to);
-  const to = resolveContainedPath(options.targetRoot, operation.to);
+  const toPath = expandOperationPath(operation.to, options);
+  assertFoundationTextPath(toPath);
+  const to = resolveContainedPath(options.targetRoot, toPath);
 
   await mkdir(path.dirname(to), { recursive: true });
   await writeFile(to, operation.text, "utf8");
@@ -279,7 +342,10 @@ async function renderSetExecutable(
   operation: SetExecutableOperation,
   options: RenderProjectOptions
 ): Promise<void> {
-  const filePath = resolveContainedPath(options.targetRoot, operation.path);
+  const filePath = resolveContainedPath(
+    options.targetRoot,
+    expandOperationPath(operation.path, options)
+  );
   const currentMode = (await stat(filePath)).mode;
   const executeBits = 0o111;
   const mode = operation.executable
@@ -295,38 +361,65 @@ type AnchorRange = {
   end: number;
 };
 
-async function findTypeScriptAnchorRanges(sourceText: string): Promise<AnchorRange[]> {
-  const ts = await import("typescript");
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
-    false,
-    ts.LanguageVariant.Standard,
-    sourceText
-  );
-  const anchors: AnchorRange[] = [];
+type ParsedSourceFile = import("typescript").SourceFile & {
+  parseDiagnostics?: readonly import("typescript").Diagnostic[];
+};
 
-  while (scanner.scan() !== ts.SyntaxKind.EndOfFileToken) {
-    const token = scanner.getToken();
-
-    if (
-      token !== ts.SyntaxKind.SingleLineCommentTrivia &&
-      token !== ts.SyntaxKind.MultiLineCommentTrivia
-    ) {
-      continue;
-    }
-
-    const text = scanner.getTokenText();
-    const match = text.match(/@template-anchor\s+([A-Za-z][A-Za-z0-9_-]*)/);
-
-    if (match) {
-      anchors.push({
-        name: match[1],
-        start: scanner.getTokenStart(),
-        end: scanner.getTextPos()
-      });
-    }
+function parseAnchorComment(commentText: string): string | undefined {
+  const singleLine = commentText.match(/^\/\/\s*@template-anchor\s+([A-Za-z][A-Za-z0-9_-]*)\s*$/);
+  if (singleLine) {
+    return singleLine[1];
   }
 
+  const multiline = commentText.match(
+    /^\/\*\s*@template-anchor\s+([A-Za-z][A-Za-z0-9_-]*)\s*\*\/$/
+  );
+  return multiline?.[1];
+}
+
+async function findTypeScriptAnchorRanges(sourceText: string): Promise<AnchorRange[]> {
+  const ts = await import("typescript");
+  const sourceFile = ts.createSourceFile(
+    "template-anchor.ts",
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  const anchors: AnchorRange[] = [];
+  const seenRanges = new Set<string>();
+
+  if (((sourceFile as ParsedSourceFile).parseDiagnostics ?? []).length > 0) {
+    throw new Error("Checked Transform Anchor requires valid TypeScript source");
+  }
+
+  function collectNodeAnchors(node: import("typescript").Node): void {
+    if (node.kind === ts.SyntaxKind.EndOfFileToken) {
+      return;
+    }
+
+    const comments = ts.getLeadingCommentRanges(sourceText, node.getFullStart()) ?? [];
+
+    for (const comment of comments) {
+      const name = parseAnchorComment(sourceText.slice(comment.pos, comment.end));
+      const rangeKey = `${comment.pos}:${comment.end}`;
+
+      if (name === undefined || seenRanges.has(rangeKey)) {
+        continue;
+      }
+
+      seenRanges.add(rangeKey);
+      anchors.push({
+        name,
+        start: comment.pos,
+        end: comment.end
+      });
+    }
+
+    ts.forEachChild(node, collectNodeAnchors);
+  }
+
+  ts.forEachChild(sourceFile, collectNodeAnchors);
   return anchors;
 }
 
@@ -335,6 +428,10 @@ function replaceRanges(sourceText: string, ranges: AnchorRange[], replacements: 
 
   for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
     const replacement = replacements[range.name];
+    if (replacement === undefined) {
+      continue;
+    }
+
     nextText = `${nextText.slice(0, range.start)}${replacement}${nextText.slice(range.end)}`;
   }
 
@@ -345,7 +442,14 @@ async function renderReplaceAnchors(
   operation: ReplaceAnchorsOperation,
   options: RenderProjectOptions
 ): Promise<void> {
-  const filePath = resolveContainedPath(options.targetRoot, operation.path);
+  if (operation.language !== "typescript") {
+    throw new Error("Checked Transform Anchor only supports TypeScript");
+  }
+
+  const filePath = resolveContainedPath(
+    options.targetRoot,
+    expandOperationPath(operation.path, options)
+  );
   const sourceText = await readFile(filePath, "utf8");
   const ranges = await findTypeScriptAnchorRanges(sourceText);
 

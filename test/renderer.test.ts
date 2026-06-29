@@ -75,16 +75,127 @@ describe("renderer", () => {
     await expect(readFile(path.join(targetRoot, "package.json"), "utf8")).resolves.toBe(
       [
         "{",
-        '  "scripts": {',
-        '    "test": "vitest",',
-        '    "build": "tsc -p tsconfig.json"',
-        "  },",
         '  "name": "demo",',
-        '  "private": true',
+        '  "private": true,',
+        '  "scripts": {',
+        '    "build": "tsc -p tsconfig.json",',
+        '    "test": "vitest"',
+        "  }",
         "}",
         ""
       ].join("\n")
     );
+  });
+
+  it("serializes equivalent JSON object key orders canonically", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+
+    await renderProject({
+      sourceRoot,
+      targetRoot,
+      operations: [
+        {
+          kind: "writeJson",
+          to: "a.json",
+          value: {
+            z: 1,
+            a: {
+              y: 2,
+              x: 1
+            },
+            list: [
+              {
+                b: 2,
+                a: 1
+              }
+            ]
+          }
+        },
+        {
+          kind: "writeJson",
+          to: "b.json",
+          value: {
+            list: [
+              {
+                a: 1,
+                b: 2
+              }
+            ],
+            a: {
+              x: 1,
+              y: 2
+            },
+            z: 1
+          }
+        },
+        {
+          kind: "writeJson",
+          to: "merged-a.json",
+          value: {
+            z: true,
+            nested: {
+              b: 2
+            }
+          }
+        },
+        {
+          kind: "mergeJson",
+          to: "merged-a.json",
+          value: {
+            a: true,
+            nested: {
+              a: 1
+            }
+          }
+        },
+        {
+          kind: "writeJson",
+          to: "merged-b.json",
+          value: {
+            nested: {
+              b: 2
+            },
+            z: true
+          }
+        },
+        {
+          kind: "mergeJson",
+          to: "merged-b.json",
+          value: {
+            nested: {
+              a: 1
+            },
+            a: true
+          }
+        }
+      ]
+    });
+
+    const canonical = [
+      "{",
+      '  "a": {',
+      '    "x": 1,',
+      '    "y": 2',
+      "  },",
+      '  "list": [',
+      "    {",
+      '      "a": 1,',
+      '      "b": 2',
+      "    }",
+      "  ],",
+      '  "z": 1',
+      "}",
+      ""
+    ].join("\n");
+    await expect(readFile(path.join(targetRoot, "a.json"), "utf8")).resolves.toBe(
+      canonical
+    );
+    await expect(readFile(path.join(targetRoot, "b.json"), "utf8")).resolves.toBe(
+      canonical
+    );
+    await expect(
+      readFile(path.join(targetRoot, "merged-a.json"), "utf8")
+    ).resolves.toBe(await readFile(path.join(targetRoot, "merged-b.json"), "utf8"));
   });
 
   it("writes limited foundation text files", async () => {
@@ -140,6 +251,94 @@ describe("renderer", () => {
     expect((await stat(renderedFile)).mode & 0o111).toBe(0o111);
   });
 
+  it("resolves constrained filename variables for all target path operations", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    const targetSourceFile = path.join(targetRoot, "src/index.ts");
+    await mkdir(path.dirname(targetSourceFile), { recursive: true });
+    await writeFile(
+      targetSourceFile,
+      [
+        "/* @template-anchor exports */",
+        "export const existing = true;",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    await renderProject({
+      sourceRoot,
+      targetRoot,
+      variables: {
+        configName: "demo",
+        entryName: "index",
+        npmrcName: ".npmrc",
+        readmeName: "README"
+      },
+      operations: [
+        {
+          kind: "writeJson",
+          to: ".project-kit/{{configName}}.json",
+          value: {
+            generated: true
+          }
+        },
+        {
+          kind: "mergeJson",
+          to: ".project-kit/{{configName}}.json",
+          value: {
+            preset: "ts-lib"
+          }
+        },
+        {
+          kind: "writeText",
+          to: "{{readmeName}}.md",
+          text: "# Demo\n"
+        },
+        {
+          kind: "writeText",
+          to: "{{npmrcName}}",
+          text: "shell-emulator=true\n"
+        },
+        {
+          kind: "setExecutable",
+          path: "{{npmrcName}}",
+          executable: true
+        },
+        {
+          kind: "replaceAnchors",
+          path: "src/{{entryName}}.ts",
+          language: "typescript",
+          replacements: {
+            exports: "export const generated = true;"
+          }
+        }
+      ]
+    });
+
+    await expect(
+      readFile(path.join(targetRoot, ".project-kit/demo.json"), "utf8")
+    ).resolves.toBe(
+      [
+        "{",
+        '  "generated": true,',
+        '  "preset": "ts-lib"',
+        "}",
+        ""
+      ].join("\n")
+    );
+    await expect(readFile(path.join(targetRoot, "README.md"), "utf8")).resolves.toBe(
+      "# Demo\n"
+    );
+    expect((await stat(path.join(targetRoot, ".npmrc"))).mode & 0o111).toBe(0o111);
+    await expect(readFile(targetSourceFile, "utf8")).resolves.toBe(
+      [
+        "export const generated = true;",
+        "export const existing = true;",
+        ""
+      ].join("\n")
+    );
+  });
+
   it("replaces checked transform anchors in TypeScript source", async () => {
     const { sourceRoot, targetRoot } = await tempWorkspace();
 
@@ -193,6 +392,108 @@ describe("renderer", () => {
     );
   });
 
+  it("preserves checked transform anchors that are not requested", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    const targetFile = path.join(targetRoot, "src/index.ts");
+    await mkdir(path.dirname(targetFile), { recursive: true });
+    await writeFile(
+      targetFile,
+      [
+        "/* @template-anchor imports */",
+        'import type { Demo } from "./demo.js";',
+        "/* @template-anchor exports */",
+        "export const existing = true;",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    await renderProject({
+      sourceRoot,
+      targetRoot,
+      operations: [
+        {
+          kind: "replaceAnchors",
+          path: "src/index.ts",
+          language: "typescript",
+          replacements: {
+            exports: "export const generated = true;"
+          }
+        }
+      ]
+    });
+
+    await expect(readFile(targetFile, "utf8")).resolves.toBe(
+      [
+        "/* @template-anchor imports */",
+        'import type { Demo } from "./demo.js";',
+        "export const generated = true;",
+        "export const existing = true;",
+        ""
+      ].join("\n")
+    );
+  });
+
+  it("rejects checked transform anchors for non-TypeScript languages", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    const targetFile = path.join(targetRoot, "src/index.ts");
+    await mkdir(path.dirname(targetFile), { recursive: true });
+    await writeFile(targetFile, "/* @template-anchor exports */\n", "utf8");
+
+    await expect(
+      renderProject({
+        sourceRoot,
+        targetRoot,
+        operations: [
+          {
+            kind: "replaceAnchors",
+            path: "src/index.ts",
+            language: "javascript",
+            replacements: {
+              exports: "export const generated = true;"
+            }
+          } as never
+        ]
+      })
+    ).rejects.toThrow("Checked Transform Anchor only supports TypeScript");
+
+    await expect(readFile(targetFile, "utf8")).resolves.toBe(
+      "/* @template-anchor exports */\n"
+    );
+  });
+
+  it("only replaces checked transform anchors attached to TypeScript syntax", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    const targetFile = path.join(targetRoot, "src/index.ts");
+    await mkdir(path.dirname(targetFile), { recursive: true });
+    await writeFile(
+      targetFile,
+      [
+        "export const before = true;",
+        "/* @template-anchor exports */",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+
+    await expect(
+      renderProject({
+        sourceRoot,
+        targetRoot,
+        operations: [
+          {
+            kind: "replaceAnchors",
+            path: "src/index.ts",
+            language: "typescript",
+            replacements: {
+              exports: "export const generated = true;"
+            }
+          }
+        ]
+      })
+    ).rejects.toThrow("Missing Checked Transform Anchor: exports");
+  });
+
   it("rejects unsupported rendering operations and arbitrary source text output", async () => {
     const { sourceRoot, targetRoot } = await tempWorkspace();
 
@@ -220,6 +521,20 @@ describe("renderer", () => {
             kind: "writeText",
             to: "src/index.ts",
             text: "export const arbitrary = true;\n"
+          }
+        ]
+      })
+    ).rejects.toThrow("Text output is limited to foundation files");
+
+    await expect(
+      renderProject({
+        sourceRoot,
+        targetRoot,
+        operations: [
+          {
+            kind: "writeText",
+            to: "src/README.md",
+            text: "# Not foundation text\n"
           }
         ]
       })
