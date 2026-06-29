@@ -19,8 +19,21 @@ async function initGeneratedWorkspace(projectDir: string): Promise<void> {
   );
 }
 
+function playwrightWebServerPorts(configText: string): number[] {
+  const matches = [
+    ...configText.matchAll(/port:\s*(\d+)/g),
+    ...configText.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g)
+  ];
+
+  if (matches.length === 0) {
+    throw new Error("Playwright config does not declare a web server port");
+  }
+
+  return matches.map((match) => Number(match[1]));
+}
+
 describe("template add package", () => {
-  it("adds a TypeScript library package to a generated workspace repository", async () => {
+  it("adds packages while keeping the stored blueprint valid for later additions", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
@@ -29,6 +42,16 @@ describe("template add package", () => {
     await execa(
       "pnpm",
       ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+      { cwd: projectDir }
+    );
+    await execa(
+      "pnpm",
+      ["exec", "tsx", cliPath, "blueprint", "validate", ".project-kit/blueprint.json"],
+      { cwd: projectDir }
+    );
+    await execa(
+      "pnpm",
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
       { cwd: projectDir }
     );
 
@@ -61,7 +84,8 @@ describe("template add package", () => {
         packages: [
           { name: "@demo-fullstack/web", path: "apps/web" },
           { name: "@demo-fullstack/api", path: "apps/api" },
-          { name: "@demo-fullstack/shared", path: "packages/shared", preset: "ts-lib" }
+          { name: "@demo-fullstack/shared", path: "packages/shared" },
+          { name: "@demo-fullstack/worker", path: "apps/worker" }
         ]
       })
     );
@@ -81,6 +105,7 @@ describe("template add package", () => {
     expect(tsconfig.include).toEqual(["src/**/*.ts"]);
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
+    await stat(path.join(projectDir, "apps/worker/src/app.ts"));
   });
 
   it("fails clearly in a generated Single-Package Project", async () => {
@@ -136,8 +161,7 @@ describe("template add package", () => {
 
     expect(blueprint.packages).toContainEqual({
       name: "@demo-fullstack/worker",
-      path: "apps/worker",
-      preset: "hono-api"
+      path: "apps/worker"
     });
     expect(rootTsconfig.references).toContainEqual({
       path: "./apps/worker/tsconfig.json"
@@ -176,8 +200,7 @@ describe("template add package", () => {
 
     expect(blueprint.packages).toContainEqual({
       name: "@demo-fullstack/admin",
-      path: "apps/admin",
-      preset: "vue-app"
+      path: "apps/admin"
     });
     expect(rootTsconfig.references).toEqual(
       expect.arrayContaining([
@@ -192,6 +215,37 @@ describe("template add package", () => {
 
     await stat(path.join(projectDir, "apps/admin/src/App.vue"));
     await stat(path.join(projectDir, "apps/admin/test/e2e/app.spec.ts"));
+  });
+
+  it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await execa(
+      "pnpm",
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "vue-app", "--name", "admin"],
+      { cwd: projectDir }
+    );
+
+    const webPlaywright = await readFile(
+      path.join(projectDir, "apps/web/playwright.config.ts"),
+      "utf8"
+    );
+    const adminPlaywright = await readFile(
+      path.join(projectDir, "apps/admin/playwright.config.ts"),
+      "utf8"
+    );
+    const adminPackageJson = await readJson<{ scripts: Record<string, string> }>(
+      path.join(projectDir, "apps/admin/package.json")
+    );
+
+    expect(playwrightWebServerPorts(webPlaywright)).toContain(4173);
+    const [adminPort] = playwrightWebServerPorts(adminPlaywright);
+    expect(playwrightWebServerPorts(webPlaywright)).not.toContain(adminPort);
+    expect(adminPackageJson.scripts.check).toContain("pnpm run test:e2e");
+    expect(adminPackageJson.scripts["test:e2e"]).toBe("pnpm run build && playwright test");
   });
 
   it("fails clearly when the target package path already exists", async () => {
@@ -214,5 +268,55 @@ describe("template add package", () => {
     });
 
     expect(await readFile(userFile, "utf8")).toBe("user-owned content\n");
+  });
+
+  it("fails before writing package files when the workspace manifest cannot be updated", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+    await writeFile(path.join(projectDir, "pnpm-workspace.yaml"), "catalog:\n  vite: ^7.0.0\n", "utf8");
+
+    await expect(
+      execa(
+        "pnpm",
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+        { cwd: projectDir }
+      )
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("Cannot update pnpm workspace membership")
+    });
+
+    await expect(stat(path.join(projectDir, "packages/shared"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("fails before writing package files when root TypeScript references cannot be updated", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+    await writeFile(
+      path.join(projectDir, "tsconfig.json"),
+      JSON.stringify({ files: [], references: "./apps/web" }, null, 2),
+      "utf8"
+    );
+
+    await expect(
+      execa(
+        "pnpm",
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+        { cwd: projectDir }
+      )
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Cannot update root TypeScript project references: references must be an array"
+      )
+    });
+
+    await expect(stat(path.join(projectDir, "packages/shared"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 });

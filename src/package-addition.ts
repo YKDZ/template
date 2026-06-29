@@ -15,6 +15,12 @@ type RootTsconfig = {
   [key: string]: unknown;
 };
 
+type RootUpdatePlan = {
+  blueprint: ProjectBlueprint;
+  rootTsconfig: RootTsconfig;
+  workspaceText: string;
+};
+
 function projectNameFromBlueprint(blueprint: ProjectBlueprint): string {
   const firstPackage = blueprint.packages?.[0];
   const match = firstPackage?.name.match(/^@([^/]+)\//);
@@ -55,6 +61,10 @@ async function assertMissing(targetPath: string): Promise<void> {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function tsLibPackageJson(packageName: string): Record<string, unknown> {
@@ -460,6 +470,74 @@ function templateSourceRoot(preset: string): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", preset);
 }
 
+function localPortsFromText(text: string): number[] {
+  return [
+    ...text.matchAll(/port:\s*(\d+)/g),
+    ...text.matchAll(/--port\s+(\d+)/g),
+    ...text.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g)
+  ].map((match) => Number(match[1]));
+}
+
+async function usedPlaywrightPorts(root: string, blueprint: ProjectBlueprint): Promise<Set<number>> {
+  const ports = new Set<number>();
+
+  for (const projectPackage of blueprint.packages ?? []) {
+    try {
+      const configText = await readFile(
+        path.join(root, projectPackage.path, "playwright.config.ts"),
+        "utf8"
+      );
+
+      for (const port of localPortsFromText(configText)) {
+        ports.add(port);
+      }
+    } catch (error: unknown) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return ports;
+}
+
+async function nextVuePreviewPort(root: string, blueprint: ProjectBlueprint): Promise<number> {
+  const usedPorts = await usedPlaywrightPorts(root, blueprint);
+  let port = 4173;
+
+  while (usedPorts.has(port)) {
+    port += 1;
+  }
+
+  return port;
+}
+
+function vueAppPlaywrightConfig(previewPort: number): string {
+  return `import { defineConfig, devices } from "@playwright/test";
+
+const previewUrl = "http://127.0.0.1:${previewPort}";
+
+export default defineConfig({
+  testDir: "./test/e2e",
+  use: {
+    baseURL: previewUrl,
+    trace: "on-first-retry"
+  },
+  webServer: {
+    command: "pnpm run preview --host 127.0.0.1 --port ${previewPort}",
+    reuseExistingServer: !process.env.CI,
+    url: previewUrl
+  },
+  projects: [
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"] }
+    }
+  ]
+});
+`;
+}
+
 async function readGeneratedWorkspaceBlueprint(root: string): Promise<ProjectBlueprint> {
   const blueprintPath = path.join(root, ".project-kit/blueprint.json");
   const result = validateProjectBlueprint(await readJson<unknown>(blueprintPath));
@@ -488,12 +566,9 @@ async function readGeneratedWorkspaceBlueprint(root: string): Promise<ProjectBlu
   return blueprint;
 }
 
-async function ensureWorkspacePackageGlob(root: string, glob: string): Promise<void> {
-  const workspacePath = path.join(root, "pnpm-workspace.yaml");
-  const text = await readFile(workspacePath, "utf8");
-
+function workspaceTextWithPackageGlob(text: string, glob: string): string {
   if (text.includes(`  - ${glob}`)) {
-    return;
+    return text;
   }
 
   const nextText = text.replace(/^packages:\n/m, `packages:\n  - ${glob}\n`);
@@ -501,12 +576,35 @@ async function ensureWorkspacePackageGlob(root: string, glob: string): Promise<v
     throw new Error("Cannot update pnpm workspace membership: missing packages section");
   }
 
-  await writeFile(workspacePath, nextText, "utf8");
+  return nextText;
 }
 
-async function addRootTsReferences(root: string, referencePaths: string[]): Promise<void> {
-  const tsconfigPath = path.join(root, "tsconfig.json");
-  const tsconfig = await readJson<RootTsconfig>(tsconfigPath);
+function assertRootTsconfig(input: unknown): asserts input is RootTsconfig {
+  if (!isRecord(input)) {
+    throw new Error("Cannot update root TypeScript project references: tsconfig.json must be an object");
+  }
+
+  const references = input.references;
+  if (references === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(references)) {
+    throw new Error("Cannot update root TypeScript project references: references must be an array");
+  }
+
+  for (const reference of references) {
+    if (!isRecord(reference) || typeof reference.path !== "string") {
+      throw new Error(
+        "Cannot update root TypeScript project references: each reference must have a string path"
+      );
+    }
+  }
+}
+
+function rootTsconfigWithReferences(input: unknown, referencePaths: string[]): RootTsconfig {
+  assertRootTsconfig(input);
+  const tsconfig = input;
   const references = tsconfig.references ?? [];
 
   for (const referencePath of referencePaths) {
@@ -515,7 +613,48 @@ async function addRootTsReferences(root: string, referencePaths: string[]): Prom
     }
   }
 
-  await writeJson(tsconfigPath, { ...tsconfig, references });
+  return { ...tsconfig, references };
+}
+
+function blueprintWithPackage(
+  blueprint: ProjectBlueprint,
+  packageName: string,
+  packagePath: string
+): ProjectBlueprint {
+  const nextBlueprint = {
+    ...blueprint,
+    packages: [...(blueprint.packages ?? []), { name: packageName, path: packagePath }]
+  };
+  const result = validateProjectBlueprint(nextBlueprint);
+
+  if (!result.ok) {
+    throw new Error("Package Addition would write an invalid .project-kit/blueprint.json");
+  }
+
+  return result.value;
+}
+
+async function planRootUpdates(
+  root: string,
+  blueprint: ProjectBlueprint,
+  packageName: string,
+  packagePath: string,
+  preset: string
+): Promise<RootUpdatePlan> {
+  const workspaceText = workspaceTextWithPackageGlob(
+    await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
+    packagePath.startsWith("apps/") ? "apps/*" : "packages/*"
+  );
+  const rootTsconfig = rootTsconfigWithReferences(
+    await readJson<unknown>(path.join(root, "tsconfig.json")),
+    rootTsReferencesForPreset(preset, packagePath)
+  );
+
+  return {
+    blueprint: blueprintWithPackage(blueprint, packageName, packagePath),
+    rootTsconfig,
+    workspaceText
+  };
 }
 
 export async function addPackage(options: AddPackageOptions): Promise<void> {
@@ -526,12 +665,22 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
   const projectName = projectNameFromBlueprint(blueprint);
   const packagePath = packagePathForPreset(options.preset, options.name);
   const packageName = `@${projectName}/${options.name}`;
+  const vuePreviewPort =
+    options.preset === "vue-app" ? await nextVuePreviewPort(root, blueprint) : undefined;
 
   if (blueprint.packages?.some((pkg) => pkg.name === packageName || pkg.path === packagePath)) {
     throw new Error(`Package Addition conflicts with an existing package definition: ${packageName}`);
   }
 
   await assertMissing(path.join(root, packagePath));
+  const rootUpdatePlan = await planRootUpdates(
+    root,
+    blueprint,
+    packageName,
+    packagePath,
+    options.preset
+  );
+
   await mkdir(path.join(root, packagePath), { recursive: true });
   await renderProject({
     sourceRoot: templateSourceRoot(options.preset),
@@ -539,13 +688,15 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     operations: packageOperationsForPreset(options.preset, packagePath, packageName)
   });
 
-  await ensureWorkspacePackageGlob(root, packagePath.startsWith("apps/") ? "apps/*" : "packages/*");
-  await addRootTsReferences(root, rootTsReferencesForPreset(options.preset, packagePath));
-  await writeJson(path.join(root, ".project-kit/blueprint.json"), {
-    ...blueprint,
-    packages: [
-      ...(blueprint.packages ?? []),
-      { name: packageName, path: packagePath, preset: options.preset }
-    ]
-  });
+  if (vuePreviewPort !== undefined) {
+    await writeFile(
+      path.join(root, packagePath, "playwright.config.ts"),
+      vueAppPlaywrightConfig(vuePreviewPort),
+      "utf8"
+    );
+  }
+
+  await writeFile(path.join(root, "pnpm-workspace.yaml"), rootUpdatePlan.workspaceText, "utf8");
+  await writeJson(path.join(root, "tsconfig.json"), rootUpdatePlan.rootTsconfig);
+  await writeJson(path.join(root, ".project-kit/blueprint.json"), rootUpdatePlan.blueprint);
 }
