@@ -198,7 +198,6 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
         "      - uses: actions/setup-node@v4",
         "        with:",
         "          node-version: 22",
-        "          cache: pnpm",
         "      - run: pnpm install",
         "      - run: pnpm run check",
         ""

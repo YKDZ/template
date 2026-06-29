@@ -92,6 +92,7 @@ describe("template init", () => {
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8"
     );
+    expect(checkWorkflow).not.toContain("cache: pnpm");
     const installCommand = checkWorkflow.match(
       /^\s*-\s*run:\s*(pnpm install.*)$/m
     )?.[1];
@@ -226,10 +227,16 @@ describe("template init", () => {
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "test/app.test.ts"));
 
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml"))
+    ).rejects.toMatchObject({
+      code: "ENOENT"
+    });
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8"
     );
+    expect(checkWorkflow).not.toContain("cache: pnpm");
     const installCommand = checkWorkflow.match(
       /^\s*-\s*run:\s*(pnpm install.*)$/m
     )?.[1];
