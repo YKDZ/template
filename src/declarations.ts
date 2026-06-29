@@ -1,6 +1,6 @@
 import * as v from "valibot";
 
-export type PresetName = "ts-lib" | "ts-app" | "node-cli";
+export type PresetName = "ts-lib" | "hono-api" | "ts-app" | "node-cli";
 
 export type BuiltInPreset = {
   name: PresetName;
@@ -55,6 +55,24 @@ export const builtInPresets: readonly BuiltInPreset[] = [
     name: "ts-lib",
     title: "TypeScript library",
     description: "Strict TypeScript package with pnpm catalog tooling.",
+    generation: "supported",
+    supportedPackageManagers: ["pnpm"],
+    supportedProjectKinds: ["single-package"],
+    features: [
+      "pnpm-catalog",
+      "oxc-format-lint",
+      "strict-typescript",
+      "root-check",
+      "fix-command",
+      "devcontainer",
+      "github-actions",
+      "dependabot"
+    ]
+  },
+  {
+    name: "hono-api",
+    title: "Hono API",
+    description: "Single-package Hono Node API with strict TypeScript tooling.",
     generation: "supported",
     supportedPackageManagers: ["pnpm"],
     supportedProjectKinds: ["single-package"],

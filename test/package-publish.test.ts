@@ -19,8 +19,13 @@ const packageFiles = [
   "pnpm-workspace.yaml",
   "src/cli.ts",
   "src/declarations.ts",
+  "src/hono-api.ts",
   "src/renderer.ts",
   "src/ts-lib.ts",
+  "templates/hono-api/src/app.ts",
+  "templates/hono-api/src/server.ts",
+  "templates/hono-api/test/app.test.ts",
+  "templates/hono-api/vitest.config.ts",
   "templates/ts-lib/src/index.ts",
   "tsconfig.build.json",
   "tsconfig.json"

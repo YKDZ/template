@@ -151,4 +151,122 @@ describe("template init", () => {
     );
     expect(importResult.stdout).toBe("Hello, Ada");
   });
+
+  it("generates a usable hono-api project through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
+    const projectDir = path.join(workspace, "demo-api");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "hono-api",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const packageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8"
+    );
+    const tsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const blueprint = await readJson<{ preset: string }>(
+      path.join(projectDir, ".project-kit/blueprint.json")
+    );
+    const appSource = await readFile(path.join(projectDir, "src/app.ts"), "utf8");
+    const serverSource = await readFile(
+      path.join(projectDir, "src/server.ts"),
+      "utf8"
+    );
+
+    expect(packageJson.name).toBe("demo-api");
+    expect(packageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test"
+    );
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix"
+    );
+    expect(packageJson.scripts.start).toBe("node dist/server.js");
+    expect(packageJson.dependencies.hono).toBe("catalog:");
+    expect(packageJson.dependencies["@hono/node-server"]).toBe("catalog:");
+    expect(packageJson.devDependencies.vitest).toBe("catalog:");
+    expect(packageJson.devDependencies.typescript).toBe("catalog:");
+    expect(packageJson.devDependencies.oxlint).toBe("catalog:");
+    expect(packageJson.devDependencies.oxfmt).toBe("catalog:");
+
+    expect(workspaceYaml).toContain("catalog:");
+    expect(workspaceYaml).toContain("hono:");
+    expect(workspaceYaml).toContain('"@hono/node-server":');
+    expect(workspaceYaml).toContain("vitest:");
+
+    expect(tsconfig.compilerOptions.strict).toBe(true);
+    expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
+    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+
+    expect(blueprint.preset).toBe("hono-api");
+    expect(appSource).toContain('"/health"');
+    expect(serverSource).toContain('from "@/app.js"');
+
+    await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    await stat(path.join(projectDir, ".github/workflows/check.yml"));
+    await stat(path.join(projectDir, ".github/dependabot.yml"));
+    await stat(path.join(projectDir, "test/app.test.ts"));
+
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m
+    )?.[1];
+    expect(installCommand).toBeDefined();
+
+    await execa("pnpm", installCommand!.split(" ").slice(1), {
+      cwd: projectDir
+    });
+    await execa("pnpm", ["run", "check"], { cwd: projectDir });
+    await execa("pnpm", ["run", "build"], { cwd: projectDir });
+
+    const server = execa("pnpm", ["run", "start"], { cwd: projectDir });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Timed out waiting for Hono API to start"));
+        }, 10_000);
+
+        server.stdout?.on("data", (chunk: Buffer) => {
+          if (chunk.toString().includes("http://localhost:3000")) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        });
+
+        server.on("error", (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+      });
+
+      const response = await fetch("http://localhost:3000/health");
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: "ok" });
+    } finally {
+      server.kill("SIGTERM");
+    }
+  });
 });

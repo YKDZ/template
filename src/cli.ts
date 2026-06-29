@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { initHonoApiProject } from "./hono-api.js";
 import { initTsLibProject } from "./ts-lib.js";
 import {
   blueprintJsonSchema,
@@ -20,7 +21,7 @@ type InitOptions = {
 function usage(): string {
   return [
     "Usage:",
-    "  template init <dir> --preset ts-lib --yes",
+    "  template init <dir> --preset <name> --yes",
     "  template presets",
     "  template schema preset",
     "  template schema blueprint",
@@ -160,13 +161,19 @@ async function main(args: string[]): Promise<void> {
       throw new Error("Non-interactive init requires --yes");
     }
 
-    if (options.preset !== "ts-lib") {
-      throw new Error("Only the ts-lib preset is supported in this version");
+    if (options.preset === "ts-lib") {
+      await initTsLibProject(options.dir);
+      console.log(`Initialized ts-lib project in ${options.dir}`);
+      return;
     }
 
-    await initTsLibProject(options.dir);
-    console.log(`Initialized ts-lib project in ${options.dir}`);
-    return;
+    if (options.preset === "hono-api") {
+      await initHonoApiProject(options.dir);
+      console.log(`Initialized hono-api project in ${options.dir}`);
+      return;
+    }
+
+    throw new Error("Only the ts-lib and hono-api presets are supported in this version");
   }
 
   if (command === "--help" || command === "-h") {
