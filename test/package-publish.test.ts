@@ -20,6 +20,7 @@ const packageFiles = [
   "src/cli.ts",
   "src/declarations.ts",
   "src/hono-api.ts",
+  "src/package-addition.ts",
   "src/renderer.ts",
   "src/rust-bin.ts",
   "src/ts-lib.ts",

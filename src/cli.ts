@@ -6,6 +6,7 @@ import { initRustBinProject } from "./rust-bin.js";
 import { initTsLibProject } from "./ts-lib.js";
 import { initVueHonoAppProject } from "./vue-hono-app.js";
 import { initVueAppProject } from "./vue-app.js";
+import { addPackage } from "./package-addition.js";
 import {
   blueprintJsonSchema,
   builtInPresets,
@@ -21,10 +22,16 @@ type InitOptions = {
   yes: boolean;
 };
 
+type AddPackageOptions = {
+  preset: string;
+  name: string;
+};
+
 function usage(): string {
   return [
     "Usage:",
     "  template init <dir> --preset <name> --yes",
+    "  template add package --preset <name> --name <name>",
     "  template presets",
     "  template schema preset",
     "  template schema blueprint",
@@ -33,6 +40,7 @@ function usage(): string {
     "",
     "Options:",
     "  --preset <name>  Project preset to generate",
+    "  --name <name>    Package name to add",
     "  --yes            Accept defaults for non-interactive generation"
   ].join("\n");
 }
@@ -101,6 +109,47 @@ function parseInitOptions(args: string[]): InitOptions {
   }
 
   return { dir, preset, yes };
+}
+
+function parseAddPackageOptions(args: string[]): AddPackageOptions {
+  let preset = "";
+  let name = "";
+
+  for (let index = 2; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === "--preset") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--preset requires a value");
+      }
+      preset = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--name") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--name requires a value");
+      }
+      name = value;
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`Unknown option: ${arg}`);
+  }
+
+  if (!preset) {
+    throw new Error("add package requires --preset");
+  }
+
+  if (!name) {
+    throw new Error("add package requires --name");
+  }
+
+  return { preset, name };
 }
 
 async function main(args: string[]): Promise<void> {
@@ -197,6 +246,13 @@ async function main(args: string[]): Promise<void> {
     throw new Error(
       "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
     );
+  }
+
+  if (command === "add" && args[1] === "package") {
+    const options = parseAddPackageOptions(args);
+    await addPackage({ cwd: process.cwd(), preset: options.preset, name: options.name });
+    console.log(`Added ${options.preset} package ${options.name}`);
+    return;
   }
 
   if (command === "--help" || command === "-h") {
