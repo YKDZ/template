@@ -28,7 +28,7 @@ These steps are human-owned and must be completed by a maintainer before the fir
 
 - [ ] npm account: confirm the publishing maintainer has npm access to the `@ykdz` scope and has 2FA configured according to the organization policy.
 - [ ] Package access: confirm `@ykdz/template` is intended to be public and that the first publish should use public scoped package access.
-- [ ] Trusted publisher: in npm, configure Trusted Publishing for package `@ykdz/template` with repository `YKDZ/template`, workflow `.github/workflows/release.yml`, and the release job environment `npm`.
+- [ ] Trusted publisher: in npm, configure Trusted Publishing for package `@ykdz/template` with repository `YKDZ/template`, workflow filename `release.yml`, release job environment `npm`, and Allowed actions including `npm publish`.
 - [ ] GitHub environment: create the `npm` GitHub environment used by the release job and add any required reviewers or deployment branch/tag restrictions.
 - [ ] release permission: confirm who is allowed to publish GitHub Releases or manually dispatch the release workflow.
 - [ ] Security settings: confirm branch protection, required status checks, tag/release controls, Actions permissions, and environment protections match the maintainer's release policy.

@@ -14,6 +14,8 @@ import { execa } from "execa";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const packageFiles = [
+  "LICENSE",
+  "README.md",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
@@ -80,13 +82,20 @@ describe("package publishing", () => {
       await readFile(path.join(repoRoot, "package.json"), "utf8")
     ) as {
       bin: Record<string, string>;
+      license?: string;
       name: string;
       private: boolean;
       publishConfig?: { access?: string };
+      repository?: { type?: string; url?: string };
     };
 
     expect(packageJson.name).toBe("@ykdz/template");
     expect(packageJson.private).toBe(false);
+    expect(packageJson.license).toBe("MIT");
+    expect(packageJson.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/YKDZ/template.git"
+    });
     expect(packageJson.bin.template).toBe("./dist/cli.js");
     expect(packageJson.publishConfig?.access).toBe("public");
   });
@@ -113,6 +122,8 @@ describe("package publishing", () => {
     const tarballPath = path.join(packDir, tarball!);
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
     expect(tarballContents.stdout.split("\n")).toContain("package/dist/cli.js");
+    expect(tarballContents.stdout.split("\n")).toContain("package/LICENSE");
+    expect(tarballContents.stdout.split("\n")).toContain("package/README.md");
 
     await writeFile(
       path.join(consumerDir, "package.json"),
