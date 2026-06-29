@@ -19,7 +19,9 @@ const packageFiles = [
   "pnpm-workspace.yaml",
   "src/cli.ts",
   "src/declarations.ts",
+  "src/renderer.ts",
   "src/ts-lib.ts",
+  "templates/ts-lib/src/index.ts",
   "tsconfig.build.json",
   "tsconfig.json"
 ];
@@ -68,6 +70,16 @@ describe("package publishing", () => {
       cwd: consumerDir
     });
     expect(result.stdout).toContain("Usage:");
+
+    const generatedDir = path.join(consumerDir, "generated-lib");
+    await execa(
+      "pnpm",
+      ["exec", "template", "init", generatedDir, "--preset", "ts-lib", "--yes"],
+      { cwd: consumerDir }
+    );
+    await expect(
+      readFile(path.join(generatedDir, "src/index.ts"), "utf8")
+    ).resolves.toContain("export function greet");
 
     const packageJsonPath = path.join(
       consumerDir,

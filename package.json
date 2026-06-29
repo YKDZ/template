@@ -7,7 +7,8 @@
     "template": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "templates"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -21,7 +22,6 @@
     "@types/node": "^24.0.0",
     "execa": "^9.6.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   },
   "engines": {
@@ -29,6 +29,7 @@
   },
   "packageManager": "pnpm@11.8.0",
   "dependencies": {
+    "typescript": "^5.8.0",
     "valibot": "^1.4.2"
   }
 }
