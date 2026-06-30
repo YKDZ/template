@@ -39,19 +39,6 @@ importers:
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
-
-  templates/shared/oxc:
-    devDependencies:
-      oxfmt:
-        specifier: ^0.56.0
-        version: 0.56.0
-      oxlint:
-        specifier: ^1.71.0
-        version: 1.71.0(oxlint-tsgolint@0.23.0)
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
 packages:
 
   '@esbuild/aix-ppc64@0.28.1':

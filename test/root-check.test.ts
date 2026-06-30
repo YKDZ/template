@@ -82,12 +82,6 @@ describe("Project Kit Root Check", () => {
     const rootPackageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
-    const sharedOxcPackageJson = JSON.parse(
-      await readFile(
-        path.join(repoRoot, "templates/shared/oxc/package.json"),
-        "utf8",
-      ),
-    ) as { scripts: Record<string, string> };
 
     expect(rootPackageJson.scripts).toHaveProperty(
       "check:templates:shared-oxc",
@@ -96,13 +90,28 @@ describe("Project Kit Root Check", () => {
       "pnpm run check:templates:shared-oxc",
     );
     expect(rootPackageJson.scripts["check:templates:shared-oxc"]).toBe(
-      "pnpm --dir templates/shared/oxc run check",
+      "pnpm run check:templates:shared-oxc:format && pnpm run check:templates:shared-oxc:lint && pnpm run check:templates:shared-oxc:typecheck",
     );
-    expect(sharedOxcPackageJson.scripts.check).toContain(
-      "pnpm run format:check",
+    expect(rootPackageJson.scripts["check:templates:shared-oxc"]).not.toContain(
+      "pnpm --dir templates/shared/oxc",
     );
-    expect(sharedOxcPackageJson.scripts.check).toContain("pnpm run lint");
-    expect(sharedOxcPackageJson.scripts.check).toContain("pnpm run typecheck");
+    expect(rootPackageJson.scripts).toMatchObject({
+      "check:templates:shared-oxc:format":
+        "oxfmt --check templates/shared/oxc",
+      "check:templates:shared-oxc:lint":
+        "oxlint templates/shared/oxc --deny-warnings",
+      "check:templates:shared-oxc:typecheck":
+        "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
+    });
+
+    const workspaceYaml = await readFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    expect(workspaceYaml).not.toContain("templates/shared/oxc");
+    await expect(
+      readFile(path.join(repoRoot, "templates/shared/oxc/package.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
 
     await execa("pnpm", ["run", "check:templates:shared-oxc"], {
       cwd: repoRoot,

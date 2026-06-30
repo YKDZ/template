@@ -1,6 +1,5 @@
 packages:
   - .
-  - templates/shared/oxc
 
 allowBuilds:
   esbuild: true

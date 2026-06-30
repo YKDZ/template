@@ -65,7 +65,6 @@ const packageFiles = [
   "templates/rust-bin/src/main.rs",
   "templates/shared/oxc/node/oxlint.config.ts",
   "templates/shared/oxc/oxfmt.config.ts",
-  "templates/shared/oxc/package.json",
   "templates/shared/oxc/tsconfig.json",
   "templates/shared/oxc/vue/oxlint.config.ts",
   "templates/projection-plans.ts",
@@ -125,6 +124,7 @@ async function copyCleanPackage(targetDir: string): Promise<void> {
 function checkedTemplatePackagePaths(): string[] {
   return packageFiles
     .filter((file) => file.startsWith("templates/"))
+    .filter((file) => file !== "templates/shared/oxc/tsconfig.json")
     .map((file) => `package/${file}`)
     .sort();
 }
@@ -221,6 +221,12 @@ describe("package publishing", () => {
     }
     expect(packedPaths).not.toContain(
       "package/templates/shared/oxc/oxc-config-modules.d.ts",
+    );
+    expect(packedPaths).not.toContain(
+      "package/templates/shared/oxc/package.json",
+    );
+    expect(packedPaths).not.toContain(
+      "package/templates/shared/oxc/tsconfig.json",
     );
 
     await writeFile(
