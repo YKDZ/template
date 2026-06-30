@@ -16,9 +16,10 @@ It runs when either:
 The workflow:
 
 1. checks out the repository,
-2. enables Corepack and installs with `pnpm install --frozen-lockfile`,
-3. runs `pnpm run check`,
-4. publishes with `npm publish --access public --provenance`.
+2. enables Corepack and sets up Node from `package.json`,
+3. installs with `pnpm install --frozen-lockfile`,
+4. runs `pnpm run check`,
+5. publishes with `pnpm publish --access public --provenance`.
 
 Ordinary checks and fixture checks do not publish. Publishing is isolated to the release workflow.
 
@@ -28,7 +29,7 @@ These steps are human-owned and must be completed by a maintainer before the fir
 
 - [ ] npm account: confirm the publishing maintainer has npm access to the `@ykdz` scope and has 2FA configured according to the organization policy.
 - [ ] Package access: confirm `@ykdz/template` is intended to be public and that the first publish should use public scoped package access.
-- [ ] Trusted publisher: in npm, configure Trusted Publishing for package `@ykdz/template` with repository `YKDZ/template`, workflow filename `release.yml`, release job environment `npm`, and Allowed actions including `npm publish`.
+- [ ] Trusted publisher: in npm, configure Trusted Publishing for package `@ykdz/template` with repository `YKDZ/template`, workflow filename `release.yml`, release job environment `npm`, and Allowed actions including `pnpm publish`.
 - [ ] GitHub environment: create the `npm` GitHub environment used by the release job and add any required reviewers or deployment branch/tag restrictions.
 - [ ] release permission: confirm who is allowed to publish GitHub Releases or manually dispatch the release workflow.
 - [ ] Security settings: confirm branch protection, required status checks, tag/release controls, Actions permissions, and environment protections match the maintainer's release policy.

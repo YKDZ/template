@@ -20,34 +20,17 @@ jobs:
     environment: npm
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Enable Corepack
         run: corepack enable
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version-file: package.json
           registry-url: https://registry.npmjs.org
           cache: pnpm
-
-      - name: Install Trusted Publishing-capable npm
-        run: npm install -g npm@^11.5.1
-
-      - name: Assert Trusted Publishing-capable npm
-        run: |
-          version="$(npm --version)"
-          node -e '
-            const version = process.env.npm_config_user_agent?.match(/npm\/([^\s]+)/)?.[1] ?? process.argv[1];
-            const [major, minor, patch] = version.split(".").map(Number);
-            const supported =
-              major > 11 ||
-              (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));
-            if (!supported) {
-              throw new Error(`npm ${version} does not satisfy >=11.5.1`);
-            }
-          ' "$version"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -56,4 +39,4 @@ jobs:
         run: pnpm run check
 
       - name: Publish package
-        run: npm publish --access public --provenance
+        run: pnpm publish --access public --provenance

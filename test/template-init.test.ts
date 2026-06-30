@@ -150,7 +150,7 @@ describe("template init", () => {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("typescript-node:22");
         expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
-        expect(checkWorkflow).toContain("uses: actions/setup-node@v4");
+        expect(checkWorkflow).toContain("uses: actions/setup-node@v6");
         expect(checkWorkflow).toContain("node-version-file: package.json");
         expect(checkWorkflow).toContain("run: corepack enable");
         expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");

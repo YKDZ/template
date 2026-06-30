@@ -13,29 +13,31 @@ describe("npm release workflow", () => {
 
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("contents: read");
-    expect(workflow).toContain("npm publish --access public --provenance");
+    expect(workflow).toContain("pnpm publish --access public --provenance");
     expect(workflow).not.toContain("NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
   });
 
-  it("guarantees a Trusted Publishing-capable npm CLI before publishing", async () => {
+  it("uses package metadata and pnpm for publishing", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),
       "utf8"
     );
 
-    expect(workflow).toContain('node-version: "24"');
-    expect(workflow).toContain("npm install -g npm@^11.5.1");
-    expect(workflow).toContain("npm --version");
-    expect(workflow).toContain(">=11.5.1");
-    expect(workflow.indexOf(">=11.5.1")).toBeLessThan(
-      workflow.indexOf("npm publish --access public --provenance")
-    );
+    expect(workflow).toContain("uses: actions/checkout@v6");
+    expect(workflow).toContain("uses: actions/setup-node@v6");
+    expect(workflow).toContain("node-version-file: package.json");
+    expect(workflow).toContain("run: corepack enable");
+    expect(workflow).toContain("run: pnpm install --frozen-lockfile");
+    expect(workflow).toContain("run: pnpm publish --access public --provenance");
+    expect(workflow).not.toContain("node-version:");
+    expect(workflow).not.toContain("npm install -g");
+    expect(workflow).not.toMatch(/run:\s+npm publish/);
   });
 
   it("documents the human-owned trusted publishing setup checklist", async () => {
     const docs = await readFile(
-      path.join(repoRoot, "docs/npm-trusted-publishing.md"),
+      path.join(repoRoot, "public/npm-trusted-publishing.md"),
       "utf8"
     );
 
@@ -51,7 +53,7 @@ describe("npm release workflow", () => {
 
   it("documents npm Trusted Publisher settings using npm's expected field values", async () => {
     const docs = await readFile(
-      path.join(repoRoot, "docs/npm-trusted-publishing.md"),
+      path.join(repoRoot, "public/npm-trusted-publishing.md"),
       "utf8"
     );
     const trustedPublisherLine = docs
@@ -61,6 +63,6 @@ describe("npm release workflow", () => {
     expect(trustedPublisherLine).toContain("workflow filename `release.yml`");
     expect(trustedPublisherLine).not.toContain(".github/workflows/release.yml");
     expect(trustedPublisherLine).toContain("Allowed actions");
-    expect(trustedPublisherLine).toContain("npm publish");
+    expect(trustedPublisherLine).toContain("pnpm publish");
   });
 });
