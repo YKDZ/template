@@ -145,8 +145,11 @@ describe("template init", () => {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("typescript-node:22");
         expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
-        expect(checkWorkflow).toContain("uses: pnpm/action-setup@v4");
         expect(checkWorkflow).toContain("uses: actions/setup-node@v4");
+        expect(checkWorkflow).toContain("node-version-file: package.json");
+        expect(checkWorkflow).toContain("run: corepack enable");
+        expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
+        expect(checkWorkflow).not.toContain("node-version: 22");
         expect(checkWorkflow).toContain("run: pnpm install");
         expect(checkWorkflow).toContain("run: pnpm run check");
       } else {
@@ -220,7 +223,10 @@ describe("template init", () => {
 
     for (const preset of nodePresetNames) {
       const projectDir = await generatePresetProject(preset);
-      const packageJson = await readJson<{ packageManager: string }>(
+      const packageJson = await readJson<{
+        engines: { node: string };
+        packageManager: string;
+      }>(
         path.join(projectDir, "package.json")
       );
       const checkWorkflow = await readFile(
@@ -232,12 +238,78 @@ describe("template init", () => {
         "utf8"
       );
 
+      expect(packageJson.engines.node).toBe("22");
       expect(packageJson.packageManager).toBe("pnpm@10.0.0");
-      expect(checkWorkflow).toContain("          version: 10.0.0");
+      expect(checkWorkflow).toContain("node-version-file: package.json");
+      expect(checkWorkflow).toContain("run: corepack enable");
+      expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
+      expect(checkWorkflow).not.toContain("          version: 10.0.0");
       expect(dependabot).toContain("package-ecosystem: npm");
       expect(dependabot).toContain("package-ecosystem: github-actions");
     }
   }, 240_000);
+
+  it("generates single-package Node metadata as the Node and pnpm version authority", async () => {
+    const projectDir = await generatePresetProject("ts-lib");
+    const packageJson = await readJson<{
+      engines: { node: string };
+      packageManager: string;
+    }>(path.join(projectDir, "package.json"));
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const devcontainer = await readJson<{ postCreateCommand: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json")
+    );
+
+    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(checkWorkflow).toContain("node-version-file: package.json");
+    expect(checkWorkflow).toContain("run: corepack enable");
+    expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
+    expect(checkWorkflow).not.toContain("version: 10.0.0");
+    expect(checkWorkflow).not.toContain("node-version: 22");
+    expect(devcontainer.postCreateCommand).toBe("corepack enable && pnpm install");
+  }, 120_000);
+
+  it("generates workspace Node metadata as the Node and pnpm version authority", async () => {
+    const projectDir = await generatePresetProject("vue-hono-app");
+    const rootPackageJson = await readJson<{
+      engines: { node: string };
+      packageManager: string;
+    }>(path.join(projectDir, "package.json"));
+    const apiPackageJson = await readJson<{
+      engines: { node: string };
+      packageManager?: string;
+    }>(path.join(projectDir, "apps/api/package.json"));
+    const webPackageJson = await readJson<{
+      engines: { node: string };
+      packageManager?: string;
+    }>(path.join(projectDir, "apps/web/package.json"));
+    const checkWorkflow = await readFile(
+      path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8"
+    );
+    const devcontainer = await readJson<{ postCreateCommand: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json")
+    );
+
+    expect(rootPackageJson.engines.node).toBe("22");
+    expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(apiPackageJson.engines.node).toBe("22");
+    expect(apiPackageJson).not.toHaveProperty("packageManager");
+    expect(webPackageJson.engines.node).toBe("22");
+    expect(webPackageJson).not.toHaveProperty("packageManager");
+    expect(checkWorkflow).toContain("node-version-file: package.json");
+    expect(checkWorkflow).toContain("run: corepack enable");
+    expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
+    expect(checkWorkflow).not.toContain("version: 10.0.0");
+    expect(checkWorkflow).not.toContain("node-version: 22");
+    expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
+    expect(devcontainer.postCreateCommand).not.toContain("corepack prepare");
+    expect(devcontainer.postCreateCommand).not.toContain("pnpm@10.0.0");
+  }, 120_000);
 
   it("generates Node presets with checked OXC config source", async () => {
     const nodePresetNames = builtInPresets
@@ -803,6 +875,8 @@ describe("template init", () => {
     expect(checkWorkflow).toContain("components: rustfmt, clippy");
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(checkWorkflow).toContain("run: ./scripts/check");
+    expect(checkWorkflow).not.toContain("node-version-file: package.json");
+    expect(checkWorkflow).not.toContain("corepack enable");
     expect(dependabot).toContain("package-ecosystem: cargo");
     expect(dependabot).toContain("package-ecosystem: github-actions");
     expect(files.some((file) => file.endsWith("oxlint.config.ts"))).toBe(false);

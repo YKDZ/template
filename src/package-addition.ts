@@ -98,7 +98,7 @@ function tsLibPackageJson(packageName: string): Record<string, unknown> {
       typescript: "catalog:"
     },
     engines: {
-      node: ">=22.0.0"
+      node: "22"
     }
   };
 }
@@ -187,7 +187,7 @@ function honoApiPackageJson(packageName: string): Record<string, unknown> {
       vitest: "catalog:"
     },
     engines: {
-      node: ">=22.0.0"
+      node: "22"
     }
   };
 }
@@ -293,7 +293,7 @@ function vueAppPackageJson(packageName: string): Record<string, unknown> {
       "vue-tsc": "catalog:"
     },
     engines: {
-      node: ">=22.0.0"
+      node: "22"
     }
   };
 }

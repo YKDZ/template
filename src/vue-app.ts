@@ -65,7 +65,7 @@ function packageJson(projectName: string): Record<string, unknown> {
       "vue-tsc": "catalog:"
     },
     engines: {
-      node: ">=22.0.0"
+      node: "22"
     },
     packageManager: "pnpm@10.0.0"
   };

@@ -72,6 +72,8 @@ describe("template add package", () => {
       name: string;
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
+      engines: { node: string };
+      packageManager?: string;
     }>(path.join(projectDir, "packages/shared/package.json"));
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
@@ -97,6 +99,8 @@ describe("template add package", () => {
       path: "./packages/shared/tsconfig.json"
     });
     expect(packageJson.name).toBe("@demo-fullstack/shared");
+    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check"
     );
@@ -174,6 +178,8 @@ describe("template add package", () => {
       name: string;
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
+      engines: { node: string };
+      packageManager?: string;
     }>(path.join(projectDir, "apps/worker/package.json"));
 
     expect(blueprint.packages).toContainEqual({
@@ -184,6 +190,8 @@ describe("template add package", () => {
       path: "./apps/worker/tsconfig.json"
     });
     expect(packageJson.name).toBe("@demo-fullstack/worker");
+    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.hono).toBe("catalog:");
     expect(packageJson.scripts.check).toContain("pnpm run test");
 
@@ -213,6 +221,8 @@ describe("template add package", () => {
       name: string;
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
+      engines: { node: string };
+      packageManager?: string;
     }>(path.join(projectDir, "apps/admin/package.json"));
 
     expect(blueprint.packages).toContainEqual({
@@ -227,6 +237,8 @@ describe("template add package", () => {
       ])
     );
     expect(packageJson.name).toBe("@demo-fullstack/admin");
+    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
 
