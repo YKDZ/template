@@ -1,26 +1,30 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { nodePnpmDevcontainer } from "./devcontainer.js";
+
+import type {
+  BuiltInPreset,
+  ProjectBlueprint,
+} from "../../src/declarations.js";
+import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import type { GenerationContext } from "../../src/generation-context.js";
 import {
   planNodeChecks,
   planNodeFixes,
   renderFixCommand,
   renderRootCheckCommand,
-} from "./module-graph.js";
-import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
-import { renderNewProject, type RenderOperation } from "./renderer.js";
-import { packageTemplateRoot } from "./runtime-paths.js";
-
-const features = [
-  "pnpm-catalog",
-  "oxc-format-lint",
-  "strict-typescript",
-  "root-check",
-  "fix-command",
-  "devcontainer",
-  "github-actions",
-  "dependabot",
-] as const;
+} from "../../src/module-graph.js";
+import type {
+  PresetBlueprintOptions,
+  PresetProjection,
+  PresetProjectionPlan,
+} from "../../src/preset-projection.js";
+import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+  type DependencyMaintenancePolicy,
+} from "../../src/project-github.js";
+import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -28,12 +32,58 @@ const generatedBy = {
   command: "template init --preset vue-hono-app",
 };
 
+export const vueHonoAppPresetMetadata: BuiltInPreset = {
+  name: "vue-hono-app",
+  title: "Vue Hono app",
+  description: "Full-stack Vue and Hono workspace with Hono RPC typing.",
+  generation: "supported",
+  supportedPackageManagers: ["pnpm"],
+  supportedProjectKinds: ["multi-package"],
+  features: [
+    "pnpm-catalog",
+    "oxc-format-lint",
+    "strict-typescript",
+    "root-check",
+    "fix-command",
+    "devcontainer",
+    "github-actions",
+    "dependabot",
+  ],
+};
+
+const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
+  ecosystems: ["npm", "github-actions"],
+  interval: "weekly",
+};
+
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
 }
 
+function packageScopeFromOptions(options: PresetBlueprintOptions): string {
+  return options.scope ?? projectNameFromDir(options.targetDir);
+}
+
 function packageName(packageScope: string, leaf: "api" | "web"): string {
   return `@${packageScope}/${leaf}`;
+}
+
+export function vueHonoAppBlueprint(
+  options: PresetBlueprintOptions,
+): ProjectBlueprint {
+  const packageScope = packageScopeFromOptions(options);
+
+  return {
+    schemaVersion: 1,
+    preset: "vue-hono-app",
+    packageManager: "pnpm",
+    projectKind: "multi-package",
+    features: [...vueHonoAppPresetMetadata.features],
+    packages: [
+      { name: packageName(packageScope, "web"), path: "apps/web" },
+      { name: packageName(packageScope, "api"), path: "apps/api" },
+    ],
+  };
 }
 
 export function projectVueHonoRootPackageScripts(): Record<string, string> {
@@ -77,24 +127,30 @@ export function projectVueHonoWebPackageScripts(): Record<string, string> {
   };
 }
 
-function rootPackageJson(projectName: string): Record<string, unknown> {
+function rootPackageJson(
+  context: GenerationContext,
+  packageScripts: Record<string, string>,
+): Record<string, unknown> {
   return {
-    name: projectName,
+    name: context.projectName.value,
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: projectVueHonoRootPackageScripts(),
+    scripts: packageScripts,
     devDependencies: {
       turbo: "catalog:",
     },
     engines: {
-      node: "22",
+      node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: "pnpm@10.0.0",
+    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
-function apiPackageJson(packageScope: string): Record<string, unknown> {
+function apiPackageJson(
+  context: GenerationContext,
+  packageScope: string,
+): Record<string, unknown> {
   return {
     name: packageName(packageScope, "api"),
     version: "0.0.0",
@@ -119,12 +175,15 @@ function apiPackageJson(packageScope: string): Record<string, unknown> {
       vitest: "catalog:",
     },
     engines: {
-      node: "22",
+      node: context.toolchain.nodeLtsMajor.value,
     },
   };
 }
 
-function webPackageJson(packageScope: string): Record<string, unknown> {
+function webPackageJson(
+  context: GenerationContext,
+  packageScope: string,
+): Record<string, unknown> {
   return {
     name: packageName(packageScope, "web"),
     version: "0.0.0",
@@ -154,17 +213,48 @@ function webPackageJson(packageScope: string): Record<string, unknown> {
       "vue-tsc": "catalog:",
     },
     engines: {
-      node: "22",
+      node: context.toolchain.nodeLtsMajor.value,
     },
   };
 }
 
-function operationsForVueHonoApp(projectName: string, packageScope: string): RenderOperation[] {
+function generationRecord(context: GenerationContext): Record<string, unknown> {
+  return {
+    ...generatedBy,
+    toolchain: {
+      nodeLtsMajor: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+      source: context.toolchain.source,
+    },
+  };
+}
+
+function packageScopeFromBlueprint(context: GenerationContext): string {
+  const apiPackage = context.blueprint.packages?.find(
+    (pkg) => pkg.path === "apps/api",
+  );
+
+  if (apiPackage?.name.startsWith("@") && apiPackage.name.endsWith("/api")) {
+    return apiPackage.name.slice(1, -"/api".length);
+  }
+
+  return context.projectName.value;
+}
+
+function operationsForVueHonoApp(
+  context: GenerationContext,
+  packageScripts: Record<string, string>,
+): RenderOperation[] {
+  const packageScope = packageScopeFromBlueprint(context);
   const apiName = packageName(packageScope, "api");
   const webName = packageName(packageScope, "web");
 
   return [
-    { kind: "writeJson", to: "package.json", value: rootPackageJson(projectName) },
+    {
+      kind: "writeJson",
+      to: "package.json",
+      value: rootPackageJson(context, packageScripts),
+    },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
@@ -238,49 +328,52 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
     {
       kind: "writeJson",
       to: ".project-kit/blueprint.json",
-      value: {
-        schemaVersion: 1,
-        preset: "vue-hono-app",
-        packageManager: "pnpm",
-        projectKind: "multi-package",
-        features,
-        packages: [
-          { name: webName, path: "apps/web" },
-          { name: apiName, path: "apps/api" },
-        ],
-      },
+      value: context.blueprint,
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy,
+      value: generationRecord(context),
     },
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
       value: nodePnpmDevcontainer({
-        name: `${projectName} full-stack development`,
-        nodeVersion: "22",
-        packageManagerPin: "pnpm@10.0.0",
+        name: `${context.projectName.value} full-stack development`,
+        nodeVersion: context.toolchain.nodeLtsMajor.value,
+        packageManagerPin: context.toolchain.packageManagerPin.value,
         extensions: ["Vue.volar", "oxc.oxc-vscode"],
       }),
     },
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n"),
+      text: [
+        "node_modules",
+        "dist",
+        "playwright-report",
+        "test-results",
+        ".env",
+        "",
+      ].join("\n"),
     },
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectPresetGithubCheckWorkflow("vue-hono-app"),
+      text: projectCheckWorkflow({
+        checkPlan: planNodeChecks("vue-hono-root"),
+      }),
     },
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectPresetDependabotConfig("vue-hono-app"),
+      text: projectDependabotConfig(dependencyMaintenancePolicy),
     },
-    { kind: "writeJson", to: "apps/api/package.json", value: apiPackageJson(packageScope) },
+    {
+      kind: "writeJson",
+      to: "apps/api/package.json",
+      value: apiPackageJson(context, packageScope),
+    },
     {
       kind: "writeJson",
       to: "apps/api/tsconfig.json",
@@ -329,11 +422,31 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       to: "apps/api/oxfmt.config.ts",
     },
     { kind: "copyFile", from: "api/src/index.ts", to: "apps/api/src/index.ts" },
-    { kind: "copyFile", from: "api/src/runtime.ts", to: "apps/api/src/runtime.ts" },
-    { kind: "copyFile", from: "api/src/server.ts", to: "apps/api/src/server.ts" },
-    { kind: "copyFile", from: "api/test/app.test.ts", to: "apps/api/test/app.test.ts" },
-    { kind: "copyFile", from: "api/vitest.config.ts", to: "apps/api/vitest.config.ts" },
-    { kind: "writeJson", to: "apps/web/package.json", value: webPackageJson(packageScope) },
+    {
+      kind: "copyFile",
+      from: "api/src/runtime.ts",
+      to: "apps/api/src/runtime.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "api/src/server.ts",
+      to: "apps/api/src/server.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "api/test/app.test.ts",
+      to: "apps/api/test/app.test.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "api/vitest.config.ts",
+      to: "apps/api/vitest.config.ts",
+    },
+    {
+      kind: "writeJson",
+      to: "apps/web/package.json",
+      value: webPackageJson(context, packageScope),
+    },
     {
       kind: "writeJson",
       to: "apps/web/tsconfig.json",
@@ -419,9 +532,21 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
     },
     { kind: "copyFile", from: "web/env.d.ts", to: "apps/web/env.d.ts" },
     { kind: "copyFile", from: "web/index.html", to: "apps/web/index.html" },
-    { kind: "copyFile", from: "web/playwright.config.ts", to: "apps/web/playwright.config.ts" },
-    { kind: "copyFile", from: "web/vite.config.ts", to: "apps/web/vite.config.ts" },
-    { kind: "copyFile", from: "web/vitest.config.ts", to: "apps/web/vitest.config.ts" },
+    {
+      kind: "copyFile",
+      from: "web/playwright.config.ts",
+      to: "apps/web/playwright.config.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "web/vite.config.ts",
+      to: "apps/web/vite.config.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "web/vitest.config.ts",
+      to: "apps/web/vitest.config.ts",
+    },
     { kind: "copyFile", from: "web/src/api.ts", to: "apps/web/src/api.ts" },
     {
       kind: "replaceAnchors",
@@ -434,31 +559,93 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
     },
     { kind: "copyFile", from: "web/src/App.vue", to: "apps/web/src/App.vue" },
     { kind: "copyFile", from: "web/src/main.ts", to: "apps/web/src/main.ts" },
-    { kind: "copyFile", from: "web/src/style.css", to: "apps/web/src/style.css" },
-    { kind: "copyFile", from: "web/src/stores/counter.ts", to: "apps/web/src/stores/counter.ts" },
-    { kind: "copyFile", from: "web/test/app.test.ts", to: "apps/web/test/app.test.ts" },
-    { kind: "copyFile", from: "web/test/e2e/app.spec.ts", to: "apps/web/test/e2e/app.spec.ts" },
+    {
+      kind: "copyFile",
+      from: "web/src/style.css",
+      to: "apps/web/src/style.css",
+    },
+    {
+      kind: "copyFile",
+      from: "web/src/stores/counter.ts",
+      to: "apps/web/src/stores/counter.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "web/test/app.test.ts",
+      to: "apps/web/test/app.test.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "web/test/e2e/app.spec.ts",
+      to: "apps/web/test/e2e/app.spec.ts",
+    },
   ];
 }
 
 function templateSourceRoot(): string {
-  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "vue-hono-app");
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedTemplateRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "vue-hono-app",
+  );
+
+  return existsSync(path.join(publishedTemplateRoot, "web", "src", "App.vue"))
+    ? publishedTemplateRoot
+    : projectionDir;
 }
 
 function sharedOxcSourceRoot(): string {
-  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "shared", "oxc");
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "oxc",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "oxfmt.config.ts"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "oxc");
 }
 
-export async function initVueHonoAppProject(
-  targetDir: string,
-  options: { scope?: string } = {},
-): Promise<void> {
-  const projectName = projectNameFromDir(targetDir);
-  const packageScope = options.scope ?? projectName;
-  await renderNewProject({
-    sourceRoot: templateSourceRoot(),
-    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-    targetRoot: targetDir,
-    operations: operationsForVueHonoApp(projectName, packageScope),
-  });
-}
+export const vueHonoAppPresetProjection: PresetProjection = {
+  metadata: vueHonoAppPresetMetadata,
+  blueprint: vueHonoAppBlueprint,
+  project(context: GenerationContext): PresetProjectionPlan {
+    const checkPlan = planNodeChecks("vue-hono-root");
+    const fixPlan = planNodeFixes("vue-hono-root");
+    const packageScripts = projectVueHonoRootPackageScripts();
+
+    return {
+      sourceRoot: templateSourceRoot(),
+      sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+      operations: operationsForVueHonoApp(context, packageScripts),
+      checkPlan,
+      fixPlan,
+      dependencyMaintenancePolicy,
+      packageScripts,
+      capabilities: {
+        rootCheck: true,
+        fixCommand: true,
+        githubActions: true,
+        dependabot: true,
+        devcontainer: true,
+      },
+    };
+  },
+  async render({ targetDir, plan }): Promise<void> {
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+  },
+};

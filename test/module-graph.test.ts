@@ -1,4 +1,3 @@
-import { projectHonoApiPackageScripts } from "../src/hono-api.js";
 import {
   planNodeChecks,
   planNodeFixes,
@@ -16,13 +15,14 @@ import {
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
 import { projectRustBinPackageScripts } from "../src/rust-bin.js";
-import { projectVueAppPackageScripts } from "../src/vue-app.js";
+import { projectHonoApiPackageScripts } from "../templates/hono-api/projection.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
+import { projectVueAppPackageScripts } from "../templates/vue-app/projection.js";
 import {
   projectVueHonoApiPackageScripts,
   projectVueHonoRootPackageScripts,
   projectVueHonoWebPackageScripts,
-} from "../src/vue-hono-app.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "../templates/vue-hono-app/projection.js";
 
 describe("module graph plans", () => {
   it("selects semantic Check and Fix Components for the ts-lib package boundary", () => {
@@ -318,9 +318,7 @@ describe("module graph plans", () => {
       },
     });
 
-    expect(
-      projectDependabotConfig(tsLibPlan.dependencyMaintenancePolicy),
-    ).toBe(
+    expect(projectDependabotConfig(tsLibPlan.dependencyMaintenancePolicy)).toBe(
       [
         "version: 2",
         "updates:",

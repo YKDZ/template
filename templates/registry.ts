@@ -4,7 +4,10 @@ import type {
   PresetProjection,
   PresetProjectionPlan,
 } from "../src/preset-projection.js";
+import { honoApiPresetProjection } from "./hono-api/projection.js";
 import { tsLibPresetProjection } from "./ts-lib/projection.js";
+import { vueAppPresetProjection } from "./vue-app/projection.js";
+import { vueHonoAppPresetProjection } from "./vue-hono-app/projection.js";
 
 const futurePresetMetadata = [
   {
@@ -29,61 +32,6 @@ const futurePresetMetadata = [
 
 const legacySupportedPresetMetadata = [
   {
-    name: "hono-api",
-    title: "Hono API",
-    description: "Single-package Hono Node API with strict TypeScript tooling.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot",
-    ],
-  },
-  {
-    name: "vue-app",
-    title: "Vue app",
-    description:
-      "Single-package Vue app with Vite, Tailwind, Pinia, and test tooling.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot",
-    ],
-  },
-  {
-    name: "vue-hono-app",
-    title: "Vue Hono app",
-    description: "Full-stack Vue and Hono workspace with Hono RPC typing.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["multi-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot",
-    ],
-  },
-  {
     name: "rust-bin",
     title: "Rust binary",
     description:
@@ -105,6 +53,9 @@ const legacySupportedPresetMetadata = [
 
 export const builtInPresetProjections: readonly PresetProjection[] = [
   tsLibPresetProjection,
+  honoApiPresetProjection,
+  vueAppPresetProjection,
+  vueHonoAppPresetProjection,
 ];
 
 export const builtInPresetMetadata: readonly BuiltInPreset[] = [

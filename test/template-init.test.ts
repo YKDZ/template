@@ -557,6 +557,9 @@ describe("template init", () => {
     expect(result.stdout).toContain("Preset: ts-lib");
     expect(result.stdout).toContain("Target:");
     expect(result.stdout).toContain(projectDir);
+    expect(result.stdout).toContain("Toolchain Resolution:");
+    expect(result.stdout).toContain("Node LTS major:");
+    expect(result.stdout).toContain("Package Manager Pin:");
     expect(result.stdout).toContain("Next Step Instructions:");
     expect(result.stdout).toContain("Install dependencies: pnpm install");
     expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
@@ -596,6 +599,11 @@ describe("template init", () => {
         packageManager: string;
         packages: Array<{ name: string; path: string }>;
       };
+      toolchain: {
+        nodeLtsMajor: string;
+        packageManagerPin: string;
+        source: string;
+      };
       nextSteps: Array<{
         id: string;
         display: string;
@@ -620,6 +628,12 @@ describe("template init", () => {
           { name: "@custom-scope/web", path: "apps/web" },
           { name: "@custom-scope/api", path: "apps/api" },
         ],
+      }),
+    );
+    expect(output.toolchain).toEqual(
+      expect.objectContaining({
+        nodeLtsMajor: expect.any(String),
+        packageManagerPin: expect.stringMatching(/^pnpm@/),
       }),
     );
     expect(output.nextSteps.map((step) => step.display)).toEqual([

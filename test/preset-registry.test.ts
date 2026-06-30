@@ -66,4 +66,62 @@ describe("Preset Registry", () => {
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.2.3" },
     });
   });
+
+  it.each(["hono-api", "vue-app", "vue-hono-app"] as const)(
+    "projects %s package metadata from the Generation Context toolchain",
+    async (preset) => {
+      const projection = findBuiltInPresetProjection(preset);
+      expect(projection?.metadata).toMatchObject({
+        name: preset,
+        generation: "supported",
+      });
+
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-preset-registry-"),
+      );
+      const targetDir = path.join(workspace, `demo-${preset}`);
+      const blueprint = projection!.blueprint({
+        targetDir,
+        scope: "acme",
+      });
+      const context = assembleGenerationContext({
+        targetDir,
+        blueprint,
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@11.2.3",
+          },
+          source: "online",
+          diagnostics: [],
+        },
+      });
+
+      const plan = projection!.project(context);
+      await projection!.render({ targetDir, plan });
+
+      const packageJson = await readJson<{
+        engines: { node: string };
+        packageManager: string;
+      }>(path.join(targetDir, "package.json"));
+      const generationRecord = await readJson<{
+        toolchain: { nodeLtsMajor: string; packageManagerPin: string };
+      }>(path.join(targetDir, ".project-kit/generated-by.json"));
+      const devcontainer = await readJson<{
+        features: Record<string, { version: string }>;
+      }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
+
+      expect(packageJson.engines.node).toBe("24");
+      expect(packageJson.packageManager).toBe("pnpm@11.2.3");
+      expect(generationRecord.toolchain).toEqual({
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.2.3",
+        source: "online",
+      });
+      expect(
+        devcontainer.features["ghcr.io/devcontainers/features/node:1"].version,
+      ).toBe("24");
+    },
+  );
 });

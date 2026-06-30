@@ -1,26 +1,29 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { nodePnpmDevcontainer } from "./devcontainer.js";
+
+import type {
+  BuiltInPreset,
+  ProjectBlueprint,
+} from "../../src/declarations.js";
+import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import type { GenerationContext } from "../../src/generation-context.js";
 import {
   planNodeChecks,
   planNodeFixes,
   renderFixCommand,
   renderRootCheckCommand,
-} from "./module-graph.js";
-import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
-import { renderNewProject, type RenderOperation } from "./renderer.js";
-import { packageTemplateRoot } from "./runtime-paths.js";
-
-const features = [
-  "pnpm-catalog",
-  "oxc-format-lint",
-  "strict-typescript",
-  "root-check",
-  "fix-command",
-  "devcontainer",
-  "github-actions",
-  "dependabot",
-] as const;
+} from "../../src/module-graph.js";
+import type {
+  PresetProjection,
+  PresetProjectionPlan,
+} from "../../src/preset-projection.js";
+import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+  type DependencyMaintenancePolicy,
+} from "../../src/project-github.js";
+import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -28,8 +31,39 @@ const generatedBy = {
   command: "template init --preset vue-app",
 };
 
-function projectNameFromDir(targetDir: string): string {
-  return path.basename(path.resolve(targetDir));
+export const vueAppPresetMetadata: BuiltInPreset = {
+  name: "vue-app",
+  title: "Vue app",
+  description:
+    "Single-package Vue app with Vite, Tailwind, Pinia, and test tooling.",
+  generation: "supported",
+  supportedPackageManagers: ["pnpm"],
+  supportedProjectKinds: ["single-package"],
+  features: [
+    "pnpm-catalog",
+    "oxc-format-lint",
+    "strict-typescript",
+    "root-check",
+    "fix-command",
+    "devcontainer",
+    "github-actions",
+    "dependabot",
+  ],
+};
+
+const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
+  ecosystems: ["npm", "github-actions"],
+  interval: "weekly",
+};
+
+export function vueAppBlueprint(): ProjectBlueprint {
+  return {
+    schemaVersion: 1,
+    preset: "vue-app",
+    packageManager: "pnpm",
+    projectKind: "single-package",
+    features: [...vueAppPresetMetadata.features],
+  };
 }
 
 export function projectVueAppPackageScripts(): Record<string, string> {
@@ -49,13 +83,16 @@ export function projectVueAppPackageScripts(): Record<string, string> {
   };
 }
 
-function packageJson(projectName: string): Record<string, unknown> {
+function packageJson(
+  context: GenerationContext,
+  packageScripts: Record<string, string>,
+): Record<string, unknown> {
   return {
-    name: projectName,
+    name: context.projectName.value,
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: projectVueAppPackageScripts(),
+    scripts: packageScripts,
     dependencies: {
       "@vueuse/core": "catalog:",
       pinia: "catalog:",
@@ -77,18 +114,32 @@ function packageJson(projectName: string): Record<string, unknown> {
       "vue-tsc": "catalog:",
     },
     engines: {
-      node: "22",
+      node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: "pnpm@10.0.0",
+    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
-function operationsForVueApp(projectName: string): RenderOperation[] {
+function generationRecord(context: GenerationContext): Record<string, unknown> {
+  return {
+    ...generatedBy,
+    toolchain: {
+      nodeLtsMajor: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+      source: context.toolchain.source,
+    },
+  };
+}
+
+function operationsForVueApp(
+  context: GenerationContext,
+  packageScripts: Record<string, string>,
+): RenderOperation[] {
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(projectName),
+      value: packageJson(context, packageScripts),
     },
     {
       kind: "writeText",
@@ -202,58 +253,33 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n"),
+      text: [
+        "node_modules",
+        "dist",
+        "playwright-report",
+        "test-results",
+        ".env",
+        "",
+      ].join("\n"),
     },
-    {
-      kind: "copyFile",
-      from: "env.d.ts",
-      to: "env.d.ts",
-    },
-    {
-      kind: "copyFile",
-      from: "index.html",
-      to: "index.html",
-    },
+    { kind: "copyFile", from: "env.d.ts", to: "env.d.ts" },
+    { kind: "copyFile", from: "index.html", to: "index.html" },
     {
       kind: "copyFile",
       from: "playwright.config.ts",
       to: "playwright.config.ts",
     },
-    {
-      kind: "copyFile",
-      from: "vite.config.ts",
-      to: "vite.config.ts",
-    },
-    {
-      kind: "copyFile",
-      from: "vitest.config.ts",
-      to: "vitest.config.ts",
-    },
-    {
-      kind: "copyFile",
-      from: "src/App.vue",
-      to: "src/App.vue",
-    },
-    {
-      kind: "copyFile",
-      from: "src/main.ts",
-      to: "src/main.ts",
-    },
-    {
-      kind: "copyFile",
-      from: "src/style.css",
-      to: "src/style.css",
-    },
+    { kind: "copyFile", from: "vite.config.ts", to: "vite.config.ts" },
+    { kind: "copyFile", from: "vitest.config.ts", to: "vitest.config.ts" },
+    { kind: "copyFile", from: "src/App.vue", to: "src/App.vue" },
+    { kind: "copyFile", from: "src/main.ts", to: "src/main.ts" },
+    { kind: "copyFile", from: "src/style.css", to: "src/style.css" },
     {
       kind: "copyFile",
       from: "src/stores/counter.ts",
       to: "src/stores/counter.ts",
     },
-    {
-      kind: "copyFile",
-      from: "test/app.test.ts",
-      to: "test/app.test.ts",
-    },
+    { kind: "copyFile", from: "test/app.test.ts", to: "test/app.test.ts" },
     {
       kind: "copyFile",
       from: "test/e2e/app.spec.ts",
@@ -262,55 +288,100 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
     {
       kind: "writeJson",
       to: ".project-kit/blueprint.json",
-      value: {
-        schemaVersion: 1,
-        preset: "vue-app",
-        packageManager: "pnpm",
-        projectKind: "single-package",
-        features,
-      },
+      value: vueAppBlueprint(),
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy,
+      value: generationRecord(context),
     },
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
       value: nodePnpmDevcontainer({
-        name: `${projectName} Vue development`,
-        nodeVersion: "22",
-        packageManagerPin: "pnpm@10.0.0",
+        name: `${context.projectName.value} Vue development`,
+        nodeVersion: context.toolchain.nodeLtsMajor.value,
+        packageManagerPin: context.toolchain.packageManagerPin.value,
         extensions: ["Vue.volar", "oxc.oxc-vscode"],
       }),
     },
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectPresetGithubCheckWorkflow("vue-app"),
+      text: projectCheckWorkflow({ checkPlan: planNodeChecks("vue-app") }),
     },
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectPresetDependabotConfig("vue-app"),
+      text: projectDependabotConfig(dependencyMaintenancePolicy),
     },
   ];
 }
 
 function templateSourceRoot(): string {
-  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "vue-app");
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedTemplateRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "vue-app",
+  );
+
+  return existsSync(path.join(publishedTemplateRoot, "src", "App.vue"))
+    ? publishedTemplateRoot
+    : projectionDir;
 }
 
 function sharedOxcSourceRoot(): string {
-  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "shared", "oxc");
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "oxc",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "oxfmt.config.ts"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "oxc");
 }
 
-export async function initVueAppProject(targetDir: string): Promise<void> {
-  await renderNewProject({
-    sourceRoot: templateSourceRoot(),
-    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-    targetRoot: targetDir,
-    operations: operationsForVueApp(projectNameFromDir(targetDir)),
-  });
-}
+export const vueAppPresetProjection: PresetProjection = {
+  metadata: vueAppPresetMetadata,
+  blueprint: vueAppBlueprint,
+  project(context: GenerationContext): PresetProjectionPlan {
+    const checkPlan = planNodeChecks("vue-app");
+    const fixPlan = planNodeFixes("vue-app");
+    const packageScripts = projectVueAppPackageScripts();
+
+    return {
+      sourceRoot: templateSourceRoot(),
+      sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+      operations: operationsForVueApp(context, packageScripts),
+      checkPlan,
+      fixPlan,
+      dependencyMaintenancePolicy,
+      packageScripts,
+      capabilities: {
+        rootCheck: true,
+        fixCommand: true,
+        githubActions: true,
+        dependabot: true,
+        devcontainer: true,
+      },
+    };
+  },
+  async render({ targetDir, plan }): Promise<void> {
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+  },
+};

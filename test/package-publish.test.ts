@@ -44,7 +44,6 @@ const packageFiles = [
   "src/declarations.ts",
   "src/devcontainer.ts",
   "src/generation-context.ts",
-  "src/hono-api.ts",
   "src/module-graph.ts",
   "src/next-step-instructions.ts",
   "src/package-addition.ts",
@@ -54,8 +53,7 @@ const packageFiles = [
   "src/rust-bin.ts",
   "src/runtime-paths.ts",
   "src/toolchain-resolution.ts",
-  "src/vue-app.ts",
-  "src/vue-hono-app.ts",
+  "templates/hono-api/projection.ts",
   "templates/hono-api/src/app.ts",
   "templates/hono-api/src/server.ts",
   "templates/hono-api/test/app.test.ts",
@@ -80,6 +78,7 @@ const packageFiles = [
   "templates/vue-app/env.d.ts",
   "templates/vue-app/index.html",
   "templates/vue-app/playwright.config.ts",
+  "templates/vue-app/projection.ts",
   "templates/vue-app/src/App.vue",
   "templates/vue-app/src/main.ts",
   "templates/vue-app/src/stores/counter.ts",
@@ -95,6 +94,7 @@ const packageFiles = [
   "templates/vue-hono-app/api/vitest.config.ts",
   "templates/vue-hono-app/.github/dependabot.yml",
   "templates/vue-hono-app/.github/workflows/check.yml",
+  "templates/vue-hono-app/projection.ts",
   "templates/vue-hono-app/web/env.d.ts",
   "templates/vue-hono-app/web/index.html",
   "templates/vue-hono-app/web/playwright.config.ts",
@@ -187,6 +187,15 @@ describe("package publishing", () => {
     expect(packedPaths).toContain(
       "package/dist/templates/ts-lib/projection.js",
     );
+    expect(packedPaths).toContain(
+      "package/dist/templates/hono-api/projection.js",
+    );
+    expect(packedPaths).toContain(
+      "package/dist/templates/vue-app/projection.js",
+    );
+    expect(packedPaths).toContain(
+      "package/dist/templates/vue-hono-app/projection.js",
+    );
     expect(packedPaths).toContain("package/dist/src/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");
     expect(packedPaths).toContain("package/README.md");
@@ -274,14 +283,7 @@ describe("package publishing", () => {
     );
     await execa(
       templateBin,
-      [
-        "add",
-        "package",
-        "--preset",
-        "ts-lib",
-        "--name",
-        "shared",
-      ],
+      ["add", "package", "--preset", "ts-lib", "--name", "shared"],
       { cwd: generatedWorkspaceDir },
     );
     await expect(

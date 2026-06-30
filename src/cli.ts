@@ -4,6 +4,10 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import {
+  findBuiltInPresetProjection,
+  projectPresetThroughRegistry,
+} from "../templates/registry.js";
+import {
   blueprintJsonSchema,
   builtInPresets,
   presetFileJsonSchema,
@@ -18,7 +22,6 @@ import {
   assembleGenerationContext,
   type GenerationContext,
 } from "./generation-context.js";
-import { initHonoApiProject } from "./hono-api.js";
 import {
   planNextStepInstructions,
   type NextStepInstruction,
@@ -34,12 +37,6 @@ import {
   type ResolvedToolchainVersions,
   type ToolchainResolutionSource,
 } from "./toolchain-resolution.js";
-import { initVueAppProject } from "./vue-app.js";
-import { initVueHonoAppProject } from "./vue-hono-app.js";
-import {
-  findBuiltInPresetProjection,
-  projectPresetThroughRegistry,
-} from "../templates/registry.js";
 
 type InitOptions = {
   dir: string;
@@ -195,14 +192,6 @@ function supportedPreset(name: string): BuiltInPreset {
   return preset;
 }
 
-function projectNameFromDir(targetDir: string): string {
-  return path.basename(path.resolve(targetDir));
-}
-
-function scopeFromOptions(projectName: string, scope?: string): string {
-  return scope ?? projectName;
-}
-
 function blueprintForInit(options: InitOptions): ProjectBlueprint {
   const preset = supportedPreset(options.preset);
   const projection = findBuiltInPresetProjection(preset.name);
@@ -213,8 +202,6 @@ function blueprintForInit(options: InitOptions): ProjectBlueprint {
     });
   }
 
-  const projectName = projectNameFromDir(options.dir);
-  const packageScope = scopeFromOptions(projectName, options.scope);
   const blueprint: ProjectBlueprint = {
     schemaVersion: 1,
     preset: preset.name,
@@ -224,13 +211,6 @@ function blueprintForInit(options: InitOptions): ProjectBlueprint {
 
   if (preset.supportedPackageManagers[0]) {
     blueprint.packageManager = preset.supportedPackageManagers[0];
-  }
-
-  if (preset.name === "vue-hono-app") {
-    blueprint.packages = [
-      { name: `@${packageScope}/web`, path: "apps/web" },
-      { name: `@${packageScope}/api`, path: "apps/api" },
-    ];
   }
 
   return blueprint;
@@ -374,21 +354,6 @@ async function generateInitProject(
     return;
   }
 
-  if (options.preset === "hono-api") {
-    await initHonoApiProject(options.dir);
-    return;
-  }
-
-  if (options.preset === "vue-app") {
-    await initVueAppProject(options.dir);
-    return;
-  }
-
-  if (options.preset === "vue-hono-app") {
-    await initVueHonoAppProject(options.dir, { scope: options.scope });
-    return;
-  }
-
   if (options.preset === "rust-bin") {
     await initRustBinProject(options.dir, { generationContext });
     return;
@@ -435,10 +400,7 @@ function printInitComplete(
   }
   console.log(
     projectionPlan
-      ? formatProjectionNextSteps(
-          options.dir,
-          projectionPlan,
-        )
+      ? formatProjectionNextSteps(options.dir, projectionPlan)
       : formatNextSteps(options.dir, preset),
   );
 }
@@ -606,12 +568,12 @@ async function main(args: string[]): Promise<void> {
       }
 
       console.log(formatBlueprintSummary(options.dir, blueprint));
+      if (generationContext) {
+        console.log(formatToolchainReport(generationContext.toolchain));
+      }
       console.log(
         projectionPlan
-          ? formatProjectionNextSteps(
-              options.dir,
-              projectionPlan,
-            )
+          ? formatProjectionNextSteps(options.dir, projectionPlan)
           : formatNextSteps(options.dir, blueprint.preset as PresetName),
       );
       return;
