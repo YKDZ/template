@@ -12,18 +12,18 @@ export default defineConfig(({ mode }) => {
     plugins: [vue(), tailwindcss()],
     resolve: {
       alias: {
-        "@": fileURLToPath(new URL("./src", import.meta.url))
-      }
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+      },
     },
     server: {
       proxy: {
-        "/api": apiBaseUrl
-      }
+        "/api": apiBaseUrl,
+      },
     },
     preview: {
       proxy: {
-        "/api": apiBaseUrl
-      }
-    }
+        "/api": apiBaseUrl,
+      },
+    },
   };
 });
