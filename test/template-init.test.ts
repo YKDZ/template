@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
-import { builtInPresets, type PresetName } from "../src/declarations.js";
+import { builtInPresets } from "../src/declarations.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
@@ -92,7 +92,7 @@ async function generatedFilePaths(
   return files.sort();
 }
 
-async function generatePresetProject(preset: PresetName): Promise<string> {
+async function generatePresetProject(preset: string): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), "template-init-"));
   const projectDir = path.join(workspace, `demo-${preset}`);
 
@@ -124,7 +124,7 @@ const forbiddenWorkspaceLifecycleFeatures = [
   "workspace-upgrade",
 ] as const;
 
-function oxcConfigDirectoriesForPreset(preset: PresetName): string[] {
+function oxcConfigDirectoriesForPreset(preset: string): string[] {
   if (preset === "vue-hono-app") {
     return ["apps/api", "apps/web"];
   }

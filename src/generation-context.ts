@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { PackageManager, PresetName, ProjectBlueprint } from "./declarations.js";
+import type { PackageManager, ProjectBlueprint } from "./declarations.js";
 import type { ResolvedToolchainVersions } from "./toolchain-resolution.js";
 
 export type ProjectName = {
@@ -14,7 +14,7 @@ export type GenerationPackageManager = {
 
 export type GenerationContext = {
   readonly projectName: ProjectName;
-  readonly preset: PresetName;
+  readonly preset: string;
   readonly packageManager?: GenerationPackageManager;
   readonly blueprint: ProjectBlueprint;
   readonly toolchain: ResolvedToolchainVersions;
@@ -31,7 +31,7 @@ export function assembleGenerationContext(
 ): GenerationContext {
   return {
     projectName: { kind: "ProjectName", value: path.basename(path.resolve(options.targetDir)) },
-    preset: options.blueprint.preset as PresetName,
+    preset: options.blueprint.preset,
     packageManager: options.blueprint.packageManager
       ? { kind: "PackageManager", value: options.blueprint.packageManager }
       : undefined,

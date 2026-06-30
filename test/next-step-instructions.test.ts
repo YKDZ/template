@@ -1,17 +1,11 @@
 import path from "node:path";
 
-import type { PresetName } from "../src/declarations.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { planNextStepInstructions } from "../src/next-step-instructions.js";
 import type { PresetProjectionPlan } from "../src/preset-projection.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
-type SupportedPresetName = Extract<
-  PresetName,
-  "ts-lib" | "hono-api" | "vue-app" | "vue-hono-app" | "rust-bin"
->;
-
-function projectPresetPlan(preset: SupportedPresetName): PresetProjectionPlan {
+function projectPresetPlan(preset: string): PresetProjectionPlan {
   const projection = findBuiltInPresetProjection(preset);
 
   if (!projection) {
@@ -55,7 +49,7 @@ describe("Next Step Instructions", () => {
         "pnpm run check",
       ],
     ],
-  ] satisfies Array<[SupportedPresetName, string[]]>)(
+  ] satisfies Array<[string, string[]]>)(
     "plans user-run instructions for a %s Preset without executable Post Commands",
     (preset, commandDisplays) => {
       const targetDir = path.join("/", "tmp", "generated-repository");

@@ -15,7 +15,6 @@ import {
   validateProjectBlueprint,
   type BuiltInPreset,
   type ProjectBlueprint,
-  type PresetName,
   type ValidationIssue,
 } from "./declarations.js";
 import {
@@ -180,12 +179,26 @@ function supportedPreset(name: string): BuiltInPreset {
   );
 
   if (!preset) {
-    throw new Error(
-      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version",
-    );
+    throw new Error(formatSupportedPresetError());
   }
 
   return preset;
+}
+
+function formatSupportedPresetError(): string {
+  const supportedPresetNames = builtInPresets
+    .filter((preset) => preset.generation === "supported")
+    .map((preset) => preset.name);
+
+  return `Only the ${formatList(supportedPresetNames)} presets are supported in this version`;
+}
+
+function formatList(values: readonly string[]): string {
+  if (values.length <= 1) {
+    return values[0] ?? "";
+  }
+
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
 }
 
 function blueprintForInit(options: InitOptions): ProjectBlueprint {
@@ -340,7 +353,7 @@ async function generateInitProject(
   }
 
   throw new Error(
-    "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version",
+    formatSupportedPresetError(),
   );
 }
 

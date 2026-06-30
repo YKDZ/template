@@ -1,17 +1,8 @@
 import * as v from "valibot";
 import { builtInPresetMetadata } from "../templates/registry.js";
 
-export type PresetName =
-  | "ts-lib"
-  | "hono-api"
-  | "vue-app"
-  | "vue-hono-app"
-  | "rust-bin"
-  | "ts-app"
-  | "node-cli";
-
 export type BuiltInPreset = {
-  name: PresetName;
+  name: string;
   title: string;
   description: string;
   generation: "supported" | "future";
