@@ -1,9 +1,11 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { execa } from "execa";
+
 import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
 import {
   projectCheckWorkflow,
@@ -13,11 +15,16 @@ import {
 } from "../src/project-github.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 describe("Project Kit Root Check", () => {
   it("invokes built-in preset fixture checks", async () => {
-    const packageJson = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8")) as {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as {
       scripts: Record<string, string>;
     };
 
@@ -26,11 +33,16 @@ describe("Project Kit Root Check", () => {
   });
 
   it("keeps ordinary checks separate from npm publishing", async () => {
-    const packageJson = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8")) as {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as {
       scripts: Record<string, string>;
     };
 
-    const ordinaryCheckScripts = [packageJson.scripts.check, packageJson.scripts["check:fixtures"]];
+    const ordinaryCheckScripts = [
+      packageJson.scripts.check,
+      packageJson.scripts["check:fixtures"],
+    ];
 
     for (const script of ordinaryCheckScripts) {
       expect(script).not.toMatch(/\bnpm\s+publish\b/);
@@ -40,7 +52,9 @@ describe("Project Kit Root Check", () => {
   });
 
   it("keeps the online toolchain contract check explicit and outside the default Root Check", async () => {
-    const packageJson = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8")) as {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as {
       scripts: Record<string, string>;
     };
 
@@ -53,7 +67,10 @@ describe("Project Kit Root Check", () => {
 
   it("exposes the online toolchain contract check as an explicit CI workflow", async () => {
     const workflow = await readFile(
-      path.join(repoRoot, ".github/workflows/toolchain-resolution-contract.yml"),
+      path.join(
+        repoRoot,
+        ".github/workflows/toolchain-resolution-contract.yml",
+      ),
       "utf8",
     );
 
@@ -68,17 +85,24 @@ describe("Project Kit Root Check", () => {
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
     const sharedOxcPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "templates/shared/oxc/package.json"), "utf8"),
+      await readFile(
+        path.join(repoRoot, "templates/shared/oxc/package.json"),
+        "utf8",
+      ),
     ) as { scripts: Record<string, string> };
 
-    expect(rootPackageJson.scripts).toHaveProperty("check:templates:shared-oxc");
+    expect(rootPackageJson.scripts).toHaveProperty(
+      "check:templates:shared-oxc",
+    );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:shared-oxc",
     );
     expect(rootPackageJson.scripts["check:templates:shared-oxc"]).toBe(
       "pnpm --dir templates/shared/oxc run check",
     );
-    expect(sharedOxcPackageJson.scripts.check).toContain("pnpm run format:check");
+    expect(sharedOxcPackageJson.scripts.check).toContain(
+      "pnpm run format:check",
+    );
     expect(sharedOxcPackageJson.scripts.check).toContain("pnpm run lint");
     expect(sharedOxcPackageJson.scripts.check).toContain("pnpm run typecheck");
 
@@ -94,7 +118,9 @@ describe("Project Kit Root Check", () => {
 
     expect(rootPackageJson.scripts).toHaveProperty("check:templates");
     expect(rootPackageJson.scripts.check).toContain("pnpm run check:templates");
-    expect(rootPackageJson.scripts.check.indexOf("pnpm run check:templates")).toBeLessThan(
+    expect(
+      rootPackageJson.scripts.check.indexOf("pnpm run check:templates"),
+    ).toBeLessThan(
       rootPackageJson.scripts.check.indexOf("pnpm run check:fixtures"),
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
@@ -113,7 +139,9 @@ describe("Project Kit Root Check", () => {
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
 
-    expect(rootPackageJson.scripts).toHaveProperty("check:templates:static-source");
+    expect(rootPackageJson.scripts).toHaveProperty(
+      "check:templates:static-source",
+    );
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
       "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
     );
@@ -128,7 +156,9 @@ describe("Project Kit Root Check", () => {
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
 
-    expect(rootPackageJson.scripts).toHaveProperty("check:templates:github-yaml");
+    expect(rootPackageJson.scripts).toHaveProperty(
+      "check:templates:github-yaml",
+    );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:github-yaml",
     );
@@ -176,7 +206,14 @@ describe("Project Kit Root Check", () => {
     await writeTemplateFile(
       workspace,
       "ts-lib/.github/workflows/check.yml",
-      ["name: Check", "on:", "  push:", "jobs:", "  check: ubuntu-latest", ""].join("\n"),
+      [
+        "name: Check",
+        "on:",
+        "  push:",
+        "jobs:",
+        "  check: ubuntu-latest",
+        "",
+      ].join("\n"),
     );
     await writeTemplateFile(
       workspace,
@@ -200,7 +237,15 @@ describe("Project Kit Root Check", () => {
     await writeTemplateFile(
       workspace,
       "ts-lib/.github/workflows/check.yml",
-      ["name: Check", "on:", "  push:", "jobs:", "  check:", "    steps: []", ""].join("\n"),
+      [
+        "name: Check",
+        "on:",
+        "  push:",
+        "jobs:",
+        "  check:",
+        "    steps: []",
+        "",
+      ].join("\n"),
     );
     await writeTemplateFile(
       workspace,
@@ -339,19 +384,33 @@ function validDependabotTemplate(ecosystem: "npm" | "cargo"): string {
     : validDependabotTemplateForPreset("ts-lib");
 }
 
-function validWorkflowTemplateForPreset(presetName: "ts-lib" | "rust-bin"): string {
+function validWorkflowTemplateForPreset(
+  presetName: "ts-lib" | "rust-bin",
+): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
+  const projectedWorkflow = projectionPlan?.operations.find(
+    (operation) =>
+      operation.kind === "writeText" &&
+      operation.to === ".github/workflows/check.yml",
+  );
 
-  return projectionPlan
-    ? projectCheckWorkflow({ checkPlan: projectionPlan.checkPlan })
+  return projectedWorkflow?.kind === "writeText"
+    ? projectedWorkflow.text
     : projectPresetGithubCheckWorkflow(presetName);
 }
 
-function validDependabotTemplateForPreset(presetName: "ts-lib" | "rust-bin"): string {
+function validDependabotTemplateForPreset(
+  presetName: "ts-lib" | "rust-bin",
+): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
+  const projectedDependabot = projectionPlan?.operations.find(
+    (operation) =>
+      operation.kind === "writeText" &&
+      operation.to === ".github/dependabot.yml",
+  );
 
-  return projectionPlan
-    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
+  return projectedDependabot?.kind === "writeText"
+    ? projectedDependabot.text
     : projectPresetDependabotConfig(presetName);
 }
 

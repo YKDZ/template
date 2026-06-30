@@ -671,6 +671,60 @@ describe("template init", () => {
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("prints rust-bin dry-run JSON from the Preset Projection plan", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
+    const projectDir = path.join(workspace, "demo-rust");
+
+    const result = await execa(
+      path.join(repoRoot, "node_modules/.bin/tsx"),
+      [
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "rust-bin",
+        "--dry-run",
+        "--json",
+      ],
+      { cwd: repoRoot },
+    );
+
+    const output = JSON.parse(result.stdout) as {
+      command: string;
+      dryRun: boolean;
+      targetDir: string;
+      blueprint: { preset: string; packageManager: string };
+      toolchain: {
+        nodeLtsMajor: string;
+        packageManagerPin: string;
+      };
+      nextSteps: Array<{ id: string; display: string }>;
+    };
+
+    expect(output).toEqual(
+      expect.objectContaining({
+        command: "init",
+        dryRun: true,
+        targetDir: projectDir,
+        blueprint: expect.objectContaining({
+          preset: "rust-bin",
+          packageManager: "pnpm",
+        }),
+        toolchain: expect.objectContaining({
+          nodeLtsMajor: expect.any(String),
+          packageManagerPin: expect.stringMatching(/^pnpm@/),
+        }),
+      }),
+    );
+    expect(output.nextSteps.map((step) => step.display)).toEqual([
+      `cd ${projectDir}`,
+      "pnpm install",
+      "pnpm run fix",
+      "pnpm run check",
+    ]);
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("prints machine-readable init output after non-dry-run generation with --json --yes", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
     const projectDir = path.join(workspace, "demo-lib");

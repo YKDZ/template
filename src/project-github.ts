@@ -3,7 +3,6 @@ import {
   type CheckEnvironmentNeed,
   type CheckPlan,
   planPresetChecks,
-  planRustBinChecks,
 } from "./module-graph.js";
 
 export type CiCapability = {
@@ -123,10 +122,9 @@ export function projectPresetDependencyMaintenancePolicy(
     case "vue-app":
     case "vue-hono-app":
       return { ecosystems: ["npm", "github-actions"], interval: "weekly" };
-    case "rust-bin":
-      return { ecosystems: ["npm", "cargo", "github-actions"], interval: "weekly" };
     case "ts-app":
     case "node-cli":
+    case "rust-bin":
       throw new Error(`Unsupported preset for Dependency Maintenance Policy projection: ${preset}`);
   }
 }
@@ -155,8 +153,4 @@ function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
   }
 
   return `pnpm exec playwright install --with-deps ${need.browser}`;
-}
-
-export function projectRustBinGithubCheckWorkflow(): string {
-  return projectCheckWorkflow({ checkPlan: planRustBinChecks(), rustToolchain: true });
 }

@@ -2,17 +2,20 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
+
 import { builtInPresets, type PresetName } from "../src/declarations.js";
 import {
-  projectCheckWorkflow,
-  projectDependabotConfig,
   projectPresetDependabotConfig,
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const defaultTemplatesRoot = path.join(repoRoot, "templates");
 
 type CheckTemplateGithubYamlOptions = {
@@ -20,7 +23,9 @@ type CheckTemplateGithubYamlOptions = {
   supportedPresetNames?: readonly string[];
 };
 
-async function listGithubYamlTemplates(templatesRoot: string): Promise<string[]> {
+async function listGithubYamlTemplates(
+  templatesRoot: string,
+): Promise<string[]> {
   const templateEntries = await readdir(templatesRoot, { withFileTypes: true });
   const templateFiles: string[] = [];
 
@@ -75,11 +80,17 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-function relativeTemplateFilePath(templatesRoot: string, filePath: string): string {
+function relativeTemplateFilePath(
+  templatesRoot: string,
+  filePath: string,
+): string {
   return `templates/${path.relative(templatesRoot, filePath).split(path.sep).join("/")}`;
 }
 
-async function checkYamlTemplate(templatesRoot: string, filePath: string): Promise<string[]> {
+async function checkYamlTemplate(
+  templatesRoot: string,
+  filePath: string,
+): Promise<string[]> {
   const contents = await readFile(filePath, "utf8");
   const document = parseDocument(contents);
   const relativePath = relativeTemplateFilePath(templatesRoot, filePath);
@@ -92,12 +103,20 @@ async function checkYamlTemplate(templatesRoot: string, filePath: string): Promi
     return problems;
   }
 
-  if (/^templates\/[^/]+\/\.github\/workflows\/[^/]+\.ya?ml$/.test(relativePath)) {
+  if (
+    /^templates\/[^/]+\/\.github\/workflows\/[^/]+\.ya?ml$/.test(relativePath)
+  ) {
     problems.push(...checkWorkflowTemplate(relativePath, document.contents));
-    problems.push(...checkProjectedTemplate(relativePath, contents, "workflow"));
-  } else if (/^templates\/[^/]+\/\.github\/dependabot\.ya?ml$/.test(relativePath)) {
+    problems.push(
+      ...checkProjectedTemplate(relativePath, contents, "workflow"),
+    );
+  } else if (
+    /^templates\/[^/]+\/\.github\/dependabot\.ya?ml$/.test(relativePath)
+  ) {
     problems.push(...checkDependabotTemplate(relativePath, document.contents));
-    problems.push(...checkProjectedTemplate(relativePath, contents, "dependabot"));
+    problems.push(
+      ...checkProjectedTemplate(relativePath, contents, "dependabot"),
+    );
   }
 
   return problems;
@@ -124,8 +143,12 @@ function checkProjectedTemplate(
   }
 
   const projectionName =
-    kind === "workflow" ? "GitHub check workflow projection" : "Dependabot projection";
-  return [`${relativePath}: expected checked template source to match ${projectionName}`];
+    kind === "workflow"
+      ? "GitHub check workflow projection"
+      : "Dependabot projection";
+  return [
+    `${relativePath}: expected checked template source to match ${projectionName}`,
+  ];
 }
 
 function presetNameFromRelativePath(relativePath: string): string | undefined {
@@ -140,17 +163,27 @@ function isSupportedPresetName(presetName: string): presetName is PresetName {
 
 function projectGithubCheckWorkflow(presetName: PresetName): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
+  const projectedWorkflow = projectionPlan?.operations.find(
+    (operation) =>
+      operation.kind === "writeText" &&
+      operation.to === ".github/workflows/check.yml",
+  );
 
-  return projectionPlan
-    ? projectCheckWorkflow({ checkPlan: projectionPlan.checkPlan })
+  return projectedWorkflow?.kind === "writeText"
+    ? projectedWorkflow.text
     : projectPresetGithubCheckWorkflow(presetName);
 }
 
 function projectDependabotTemplate(presetName: PresetName): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
+  const projectedDependabot = projectionPlan?.operations.find(
+    (operation) =>
+      operation.kind === "writeText" &&
+      operation.to === ".github/dependabot.yml",
+  );
 
-  return projectionPlan
-    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
+  return projectedDependabot?.kind === "writeText"
+    ? projectedDependabot.text
     : projectPresetDependabotConfig(presetName);
 }
 
@@ -175,7 +208,10 @@ function projectThroughPresetProjection(presetName: PresetName) {
   });
 }
 
-function checkWorkflowTemplate(relativePath: string, document: YAMLMap): string[] {
+function checkWorkflowTemplate(
+  relativePath: string,
+  document: YAMLMap,
+): string[] {
   const problems: string[] = [];
   const jobs = getMapValue(document, "jobs");
 
@@ -194,7 +230,9 @@ function checkWorkflowTemplate(relativePath: string, document: YAMLMap): string[
 
   for (const job of jobs.items) {
     if (!isMap(job.value)) {
-      problems.push(`${relativePath}: expected workflow job ${String(job.key)} to be a map`);
+      problems.push(
+        `${relativePath}: expected workflow job ${String(job.key)} to be a map`,
+      );
     }
   }
 
@@ -203,21 +241,30 @@ function checkWorkflowTemplate(relativePath: string, document: YAMLMap): string[
     problems.push(`${relativePath}: expected check workflow job`);
   } else if (isMap(checkJob)) {
     if (typeof getMapValue(checkJob, "runs-on") !== "string") {
-      problems.push(`${relativePath}: expected check workflow job to declare runs-on`);
+      problems.push(
+        `${relativePath}: expected check workflow job to declare runs-on`,
+      );
     }
 
     const steps = getMapValue(checkJob, "steps");
     if (!isSeq(steps) || steps.items.length === 0) {
-      problems.push(`${relativePath}: expected check workflow job to declare steps`);
+      problems.push(
+        `${relativePath}: expected check workflow job to declare steps`,
+      );
     } else if (!steps.items.every(isMap)) {
-      problems.push(`${relativePath}: expected every check workflow step to be a map`);
+      problems.push(
+        `${relativePath}: expected every check workflow step to be a map`,
+      );
     }
   }
 
   return problems;
 }
 
-function checkDependabotTemplate(relativePath: string, document: YAMLMap): string[] {
+function checkDependabotTemplate(
+  relativePath: string,
+  document: YAMLMap,
+): string[] {
   const problems: string[] = [];
   const version = getMapValue(document, "version");
   const updates = getMapValue(document, "updates");
@@ -237,11 +284,15 @@ function checkDependabotTemplate(relativePath: string, document: YAMLMap): strin
     .filter((ecosystem): ecosystem is string => typeof ecosystem === "string");
 
   if (updateMaps.length !== updates.items.length) {
-    problems.push(`${relativePath}: expected every Dependabot update to be a map`);
+    problems.push(
+      `${relativePath}: expected every Dependabot update to be a map`,
+    );
   }
 
   if (!ecosystems.includes("github-actions")) {
-    problems.push(`${relativePath}: expected github-actions Dependabot coverage`);
+    problems.push(
+      `${relativePath}: expected github-actions Dependabot coverage`,
+    );
   }
 
   if (!ecosystems.includes("npm") && !ecosystems.includes("cargo")) {
@@ -250,11 +301,16 @@ function checkDependabotTemplate(relativePath: string, document: YAMLMap): strin
 
   for (const update of updateMaps) {
     if (typeof getMapValue(update, "directory") !== "string") {
-      problems.push(`${relativePath}: expected every Dependabot update to declare directory`);
+      problems.push(
+        `${relativePath}: expected every Dependabot update to declare directory`,
+      );
     }
 
     const schedule = getMapValue(update, "schedule");
-    if (!isMap(schedule) || typeof getMapValue(schedule, "interval") !== "string") {
+    if (
+      !isMap(schedule) ||
+      typeof getMapValue(schedule, "interval") !== "string"
+    ) {
       problems.push(
         `${relativePath}: expected every Dependabot update to declare schedule.interval`,
       );
@@ -280,11 +336,15 @@ export async function checkTemplateGithubYaml(
   const templateFiles = await listGithubYamlTemplates(templatesRoot);
 
   if (templateFiles.length === 0) {
-    throw new Error("No checked GitHub YAML templates found in templates/*/.github");
+    throw new Error(
+      "No checked GitHub YAML templates found in templates/*/.github",
+    );
   }
 
   const seenFiles = new Set(
-    templateFiles.map((filePath) => relativeTemplateFilePath(templatesRoot, filePath)),
+    templateFiles.map((filePath) =>
+      relativeTemplateFilePath(templatesRoot, filePath),
+    ),
   );
   const requiredFiles = supportedPresetNames.flatMap((presetName) => [
     {
@@ -304,16 +364,27 @@ export async function checkTemplateGithubYaml(
   ]);
   const missingFiles = requiredFiles
     .filter((requiredFile) =>
-      requiredFile.acceptedPaths.every((acceptedPath) => !seenFiles.has(acceptedPath)),
+      requiredFile.acceptedPaths.every(
+        (acceptedPath) => !seenFiles.has(acceptedPath),
+      ),
     )
-    .map((requiredFile) => `${requiredFile.displayPath}: expected checked template source file`);
+    .map(
+      (requiredFile) =>
+        `${requiredFile.displayPath}: expected checked template source file`,
+    );
   const failures = (
-    await Promise.all(templateFiles.map((filePath) => checkYamlTemplate(templatesRoot, filePath)))
+    await Promise.all(
+      templateFiles.map((filePath) =>
+        checkYamlTemplate(templatesRoot, filePath),
+      ),
+    )
   ).flat();
   failures.unshift(...missingFiles);
 
   if (failures.length > 0) {
-    throw new Error(`Checked GitHub YAML templates are invalid:\n${failures.join("\n")}`);
+    throw new Error(
+      `Checked GitHub YAML templates are invalid:\n${failures.join("\n")}`,
+    );
   }
 
   return templateFiles.length;
@@ -322,7 +393,9 @@ export async function checkTemplateGithubYaml(
 async function main(): Promise<void> {
   const templateFileCount = await checkTemplateGithubYaml();
 
-  console.log(`Checked ${templateFileCount} GitHub workflow and Dependabot template files.`);
+  console.log(
+    `Checked ${templateFileCount} GitHub workflow and Dependabot template files.`,
+  );
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

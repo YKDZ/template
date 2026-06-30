@@ -1,8 +1,6 @@
 import {
   planNodeChecks,
   planNodeFixes,
-  planRustBinChecks,
-  planRustBinFixes,
   renderPlaywrightBrowserInstallCommand,
   renderRootCheckCommand,
   renderFixCommand,
@@ -14,9 +12,13 @@ import {
   projectPresetDependencyMaintenancePolicy,
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
-import { projectRustBinPackageScripts } from "../src/rust-bin.js";
 import { projectHonoApiPackageScripts } from "../templates/hono-api/projection.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
+import {
+  planRustBinChecks,
+  planRustBinFixes,
+  projectRustBinPackageScripts,
+} from "../templates/rust-bin/projection.js";
 import { projectVueAppPackageScripts } from "../templates/vue-app/projection.js";
 import {
   projectVueHonoApiPackageScripts,
@@ -295,12 +297,28 @@ describe("module graph plans", () => {
     expect(projectPresetGithubCheckWorkflow("vue-app")).toContain(
       "      - run: pnpm exec playwright install --with-deps chromium",
     );
-    expect(projectPresetGithubCheckWorkflow("rust-bin")).toContain(
+    const rustProjection = findBuiltInPresetProjection("rust-bin");
+    const rustPlan = rustProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-rust" },
+      preset: "rust-bin",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: rustProjection!.blueprint({ targetDir: "/tmp/demo-rust" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+    const rustWorkflow = projectCheckWorkflow({
+      checkPlan: rustPlan.checkPlan,
+      rustToolchain: true,
+    });
+
+    expect(rustWorkflow).toContain(
       "      - uses: dtolnay/rust-toolchain@stable\n        with:\n          components: rustfmt, clippy",
     );
-    expect(projectPresetGithubCheckWorkflow("rust-bin")).toContain(
-      "      - uses: Swatinem/rust-cache@v2",
-    );
+    expect(rustWorkflow).toContain("      - uses: Swatinem/rust-cache@v2");
   });
 
   it("projects Dependabot config from Dependency Maintenance Policy separately from Check Plans", () => {
@@ -334,10 +352,22 @@ describe("module graph plans", () => {
       ].join("\n"),
     );
 
+    const rustProjection = findBuiltInPresetProjection("rust-bin");
+    const rustPlan = rustProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-rust" },
+      preset: "rust-bin",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: rustProjection!.blueprint({ targetDir: "/tmp/demo-rust" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
     expect(
-      projectDependabotConfig(
-        projectPresetDependencyMaintenancePolicy("rust-bin"),
-      ),
+      projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
     ).toContain("package-ecosystem: cargo");
     expect(
       projectDependabotConfig(

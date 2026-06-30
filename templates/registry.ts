@@ -5,6 +5,7 @@ import type {
   PresetProjectionPlan,
 } from "../src/preset-projection.js";
 import { honoApiPresetProjection } from "./hono-api/projection.js";
+import { rustBinPresetProjection } from "./rust-bin/projection.js";
 import { tsLibPresetProjection } from "./ts-lib/projection.js";
 import { vueAppPresetProjection } from "./vue-app/projection.js";
 import { vueHonoAppPresetProjection } from "./vue-hono-app/projection.js";
@@ -30,37 +31,16 @@ const futurePresetMetadata = [
   },
 ] satisfies readonly BuiltInPreset[];
 
-const legacySupportedPresetMetadata = [
-  {
-    name: "rust-bin",
-    title: "Rust binary",
-    description:
-      "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot",
-      "rustfmt-clippy",
-      "cargo-test",
-    ],
-  },
-] satisfies readonly BuiltInPreset[];
-
 export const builtInPresetProjections: readonly PresetProjection[] = [
   tsLibPresetProjection,
   honoApiPresetProjection,
   vueAppPresetProjection,
   vueHonoAppPresetProjection,
+  rustBinPresetProjection,
 ];
 
 export const builtInPresetMetadata: readonly BuiltInPreset[] = [
   ...builtInPresetProjections.map((projection) => projection.metadata),
-  ...legacySupportedPresetMetadata,
   ...futurePresetMetadata,
 ];
 

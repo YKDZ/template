@@ -31,7 +31,6 @@ import {
   planNextStepInstructionsForProjection,
   type PresetProjectionPlan,
 } from "./preset-projection.js";
-import { initRustBinProject } from "./rust-bin.js";
 import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
@@ -319,10 +318,7 @@ async function generationContextForInit(
   options: InitOptions,
   blueprint: ProjectBlueprint,
 ): Promise<GenerationContext | undefined> {
-  if (
-    !findBuiltInPresetProjection(options.preset) &&
-    options.preset !== "rust-bin"
-  ) {
+  if (!findBuiltInPresetProjection(options.preset)) {
     return undefined;
   }
 
@@ -351,11 +347,6 @@ async function generateInitProject(
     }
     const plan = projection.project(generationContext);
     await projection.render({ targetDir: options.dir, plan });
-    return;
-  }
-
-  if (options.preset === "rust-bin") {
-    await initRustBinProject(options.dir, { generationContext });
     return;
   }
 
