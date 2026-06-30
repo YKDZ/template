@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { PresetName } from "./declarations.js";
+import { planPresetChecks, renderPlaywrightBrowserInstallCommand } from "./module-graph.js";
 
 export type NextStepInstruction = {
   readonly id: string;
@@ -62,6 +63,36 @@ function fixInstruction(): NextStepInstruction {
   };
 }
 
+function checkEnvironmentInstructions(preset: PresetName): NextStepInstruction[] {
+  const checkPlan = planPresetChecks(preset);
+
+  if (!checkPlan) {
+    return [];
+  }
+
+  return checkPlan.environmentNeeds.map((need) => {
+    const display = renderPlaywrightBrowserInstallCommand(need);
+    const [command, ...args] = display.split(" ");
+
+    return {
+      id:
+        need.owner.path === "apps/web"
+          ? "install-web-playwright-browsers"
+          : "install-playwright-browsers",
+      label:
+        need.owner.path === "apps/web"
+          ? "Install Playwright browser assets for web workspace"
+          : "Install Playwright browser assets",
+      kind: "command",
+      command,
+      args,
+      cwd: "",
+      display,
+      machineVerifiable: true,
+    };
+  });
+}
+
 function rustCheckInstruction(): NextStepInstruction {
   return {
     id: "run-check-script",
@@ -76,44 +107,18 @@ function rustCheckInstruction(): NextStepInstruction {
 }
 
 function presetSpecificInstructions(preset: PresetName): NextStepInstruction[] {
-  if (preset === "vue-app") {
+  if (
+    preset === "ts-lib" ||
+    preset === "hono-api" ||
+    preset === "vue-app" ||
+    preset === "vue-hono-app"
+  ) {
     return [
       installDependenciesInstruction(),
       fixInstruction(),
-      {
-        id: "install-playwright-browsers",
-        label: "Install Playwright browser assets",
-        kind: "command",
-        command: "pnpm",
-        args: ["exec", "playwright", "install", "chromium"],
-        cwd: "",
-        display: "pnpm exec playwright install chromium",
-        machineVerifiable: true,
-      },
+      ...checkEnvironmentInstructions(preset),
       rootCheckInstruction(),
     ];
-  }
-
-  if (preset === "vue-hono-app") {
-    return [
-      installDependenciesInstruction(),
-      fixInstruction(),
-      {
-        id: "install-web-playwright-browsers",
-        label: "Install Playwright browser assets for web workspace",
-        kind: "command",
-        command: "pnpm",
-        args: ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-        cwd: "",
-        display: "pnpm --filter ./apps/web exec playwright install chromium",
-        machineVerifiable: true,
-      },
-      rootCheckInstruction(),
-    ];
-  }
-
-  if (preset === "ts-lib" || preset === "hono-api") {
-    return [installDependenciesInstruction(), fixInstruction(), rootCheckInstruction()];
   }
 
   if (preset === "rust-bin") {

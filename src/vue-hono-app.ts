@@ -1,5 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  planNodeChecks,
+  planNodeFixes,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "./module-graph.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
@@ -10,13 +16,13 @@ const features = [
   "fix-command",
   "devcontainer",
   "github-actions",
-  "dependabot"
+  "dependabot",
 ] as const;
 
 const generatedBy = {
   packageName: "@ykdz/template",
   version: "0.0.0",
-  command: "template init --preset vue-hono-app"
+  command: "template init --preset vue-hono-app",
 };
 
 function projectNameFromDir(targetDir: string): string {
@@ -27,8 +33,45 @@ function packageName(packageScope: string, leaf: "api" | "web"): string {
   return `@${packageScope}/${leaf}`;
 }
 
-function workspacePackageFilter(packageScope: string, leaf: "api" | "web"): string {
-  return `--filter ${packageName(packageScope, leaf)}`;
+export function projectVueHonoRootPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planNodeChecks("vue-hono-root")),
+    dev: "turbo run dev --parallel",
+    fix: renderFixCommand(planNodeFixes("vue-hono-root")),
+  };
+}
+
+export function projectVueHonoApiPackageScripts(): Record<string, string> {
+  return {
+    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    check: renderRootCheckCommand(planNodeChecks("vue-hono-api")),
+    dev: "tsx watch src/server.ts",
+    fix: renderFixCommand(planNodeFixes("vue-hono-api")),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+    start: "node dist/server.js",
+    test: "vitest run",
+    typecheck: "tsc -p tsconfig.json --noEmit",
+  };
+}
+
+export function projectVueHonoWebPackageScripts(): Record<string, string> {
+  return {
+    build: "vite build",
+    check: renderRootCheckCommand(planNodeChecks("vue-hono-web")),
+    dev: "vite",
+    fix: renderFixCommand(planNodeFixes("vue-hono-web")),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+    preview: "vite preview",
+    test: "vitest run",
+    "test:e2e": "pnpm run build && playwright test",
+    typecheck: "vue-tsc --build",
+  };
 }
 
 function rootPackageJson(projectName: string): Record<string, unknown> {
@@ -37,18 +80,14 @@ function rootPackageJson(projectName: string): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: {
-      check: "turbo run check",
-      dev: "turbo run dev --parallel",
-      fix: "turbo run fix"
-    },
+    scripts: projectVueHonoRootPackageScripts(),
     devDependencies: {
-      turbo: "catalog:"
+      turbo: "catalog:",
     },
     engines: {
-      node: "22"
+      node: "22",
     },
-    packageManager: "pnpm@10.0.0"
+    packageManager: "pnpm@10.0.0",
   };
 }
 
@@ -60,25 +99,12 @@ function apiPackageJson(packageScope: string): Record<string, unknown> {
     type: "module",
     types: "./dist/index.d.ts",
     exports: {
-      ".": "./dist/index.js"
+      ".": "./dist/index.js",
     },
-    scripts: {
-      build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-      dev: "tsx watch src/server.ts",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
-      start: "node dist/server.js",
-      test: "vitest run",
-      typecheck: "tsc -p tsconfig.json --noEmit"
-    },
+    scripts: projectVueHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
-      hono: "catalog:"
+      hono: "catalog:",
     },
     devDependencies: {
       "@types/node": "catalog:",
@@ -87,11 +113,11 @@ function apiPackageJson(packageScope: string): Record<string, unknown> {
       "tsc-alias": "catalog:",
       tsx: "catalog:",
       typescript: "catalog:",
-      vitest: "catalog:"
+      vitest: "catalog:",
     },
     engines: {
-      node: "22"
-    }
+      node: "22",
+    },
   };
 }
 
@@ -101,27 +127,13 @@ function webPackageJson(packageScope: string): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: {
-      build: "vite build",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
-      dev: "vite",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
-      preview: "vite preview",
-      test: "vitest run",
-      "test:e2e": "pnpm run build && playwright test",
-      typecheck: "vue-tsc --build"
-    },
+    scripts: projectVueHonoWebPackageScripts(),
     dependencies: {
       [packageName(packageScope, "api")]: "workspace:*",
       "@vueuse/core": "catalog:",
       hono: "catalog:",
       pinia: "catalog:",
-      vue: "catalog:"
+      vue: "catalog:",
     },
     devDependencies: {
       "@playwright/test": "catalog:",
@@ -136,18 +148,17 @@ function webPackageJson(packageScope: string): Record<string, unknown> {
       typescript: "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
-      "vue-tsc": "catalog:"
+      "vue-tsc": "catalog:",
     },
     engines: {
-      node: "22"
-    }
+      node: "22",
+    },
   };
 }
 
 function operationsForVueHonoApp(projectName: string, packageScope: string): RenderOperation[] {
   const apiName = packageName(packageScope, "api");
   const webName = packageName(packageScope, "web");
-  const webFilter = workspacePackageFilter(packageScope, "web");
 
   return [
     { kind: "writeJson", to: "package.json", value: rootPackageJson(projectName) },
@@ -183,8 +194,8 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         "  vitest: ^4.1.9",
         "  vue: ^3.5.26",
         "  vue-tsc: ^3.1.8",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     },
     {
       kind: "writeJson",
@@ -193,20 +204,20 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         tasks: {
           build: {
             dependsOn: ["^build"],
-            outputs: ["dist/**"]
+            outputs: ["dist/**"],
           },
           check: {
-            dependsOn: ["^build"]
+            dependsOn: ["^build"],
           },
           dev: {
             cache: false,
-            persistent: true
+            persistent: true,
           },
           fix: {
-            cache: false
-          }
-        }
-      }
+            cache: false,
+          },
+        },
+      },
     },
     {
       kind: "writeJson",
@@ -217,9 +228,9 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
           { path: "./apps/api/tsconfig.json" },
           { path: "./apps/web/tsconfig.app.json" },
           { path: "./apps/web/tsconfig.test.json" },
-          { path: "./apps/web/tsconfig.node.json" }
-        ]
-      }
+          { path: "./apps/web/tsconfig.node.json" },
+        ],
+      },
     },
     {
       kind: "writeJson",
@@ -232,14 +243,14 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         features,
         packages: [
           { name: webName, path: "apps/web" },
-          { name: apiName, path: "apps/api" }
-        ]
-      }
+          { name: apiName, path: "apps/api" },
+        ],
+      },
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy
+      value: generatedBy,
     },
     {
       kind: "writeJson",
@@ -247,18 +258,18 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       value: {
         name: `${projectName} full-stack development`,
         image: "mcr.microsoft.com/devcontainers/typescript-node:22",
-        postCreateCommand: `corepack enable && pnpm install && pnpm ${webFilter} exec playwright install chromium`,
+        postCreateCommand: "corepack enable && pnpm install",
         customizations: {
           vscode: {
-            extensions: ["Vue.volar", "oxc.oxc-vscode"]
-          }
-        }
-      }
+            extensions: ["Vue.volar", "oxc.oxc-vscode"],
+          },
+        },
+      },
     },
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n")
+      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n"),
     },
     {
       kind: "copyFile",
@@ -283,15 +294,15 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
           moduleResolution: "NodeNext",
           noEmitOnError: true,
           paths: {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
           },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
-          types: ["node", "vitest/globals"]
+          types: ["node", "vitest/globals"],
         },
-        include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
-      }
+        include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+      },
     },
     {
       kind: "writeJson",
@@ -301,22 +312,22 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         compilerOptions: {
           outDir: "dist",
           rootDir: "src",
-          types: ["node"]
+          types: ["node"],
         },
-        include: ["src/**/*.ts"]
-      }
+        include: ["src/**/*.ts"],
+      },
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "node/oxlint.config.ts",
-      to: "apps/api/oxlint.config.ts"
+      to: "apps/api/oxlint.config.ts",
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "oxfmt.config.ts",
-      to: "apps/api/oxfmt.config.ts"
+      to: "apps/api/oxfmt.config.ts",
     },
     { kind: "copyFile", from: "api/src/index.ts", to: "apps/api/src/index.ts" },
     { kind: "copyFile", from: "api/src/runtime.ts", to: "apps/api/src/runtime.ts" },
@@ -332,9 +343,9 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         references: [
           { path: "./tsconfig.app.json" },
           { path: "./tsconfig.test.json" },
-          { path: "./tsconfig.node.json" }
-        ]
-      }
+          { path: "./tsconfig.node.json" },
+        ],
+      },
     },
     {
       kind: "writeJson",
@@ -349,17 +360,17 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
           noEmitOnError: true,
           paths: {
             "@/*": ["./src/*"],
-            [apiName]: ["../api/src/index.ts"]
+            [apiName]: ["../api/src/index.ts"],
           },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-          types: ["web-bluetooth"]
+          types: ["web-bluetooth"],
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"],
-        references: [{ path: "../api/tsconfig.build.json" }]
-      }
+        references: [{ path: "../api/tsconfig.build.json" }],
+      },
     },
     {
       kind: "writeJson",
@@ -369,11 +380,11 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
         compilerOptions: {
           lib: ["ESNext", "DOM", "DOM.Iterable"],
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
-          types: ["node", "vitest/globals", "web-bluetooth"]
+          types: ["node", "vitest/globals", "web-bluetooth"],
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"],
-        references: [{ path: "../api/tsconfig.build.json" }]
-      }
+        references: [{ path: "../api/tsconfig.build.json" }],
+      },
     },
     {
       kind: "writeJson",
@@ -390,22 +401,22 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
           strict: true,
           target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-          types: ["node"]
+          types: ["node"],
         },
-        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"]
-      }
+        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
+      },
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "vue/oxlint.config.ts",
-      to: "apps/web/oxlint.config.ts"
+      to: "apps/web/oxlint.config.ts",
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "oxfmt.config.ts",
-      to: "apps/web/oxfmt.config.ts"
+      to: "apps/web/oxfmt.config.ts",
     },
     { kind: "copyFile", from: "web/env.d.ts", to: "apps/web/env.d.ts" },
     { kind: "copyFile", from: "web/index.html", to: "apps/web/index.html" },
@@ -419,34 +430,35 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       language: "typescript",
       replacements: {
         "api-type-import-start": `import type { AppType } from "${apiName}";\nimport { hc } from "hono/client";\n/*`,
-        "api-type-import-end": "*/"
-      }
+        "api-type-import-end": "*/",
+      },
     },
     { kind: "copyFile", from: "web/src/App.vue", to: "apps/web/src/App.vue" },
     { kind: "copyFile", from: "web/src/main.ts", to: "apps/web/src/main.ts" },
     { kind: "copyFile", from: "web/src/style.css", to: "apps/web/src/style.css" },
     { kind: "copyFile", from: "web/src/stores/counter.ts", to: "apps/web/src/stores/counter.ts" },
     { kind: "copyFile", from: "web/test/app.test.ts", to: "apps/web/test/app.test.ts" },
-    { kind: "copyFile", from: "web/test/e2e/app.spec.ts", to: "apps/web/test/e2e/app.spec.ts" }
+    { kind: "copyFile", from: "web/test/e2e/app.spec.ts", to: "apps/web/test/e2e/app.spec.ts" },
   ];
 }
 
 function templateSourceRoot(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "vue-hono-app");
+}
+
+function sharedOxcSourceRoot(): string {
   return path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "..",
     "templates",
-    "vue-hono-app"
+    "shared",
+    "oxc",
   );
-}
-
-function sharedOxcSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
 }
 
 export async function initVueHonoAppProject(
   targetDir: string,
-  options: { scope?: string } = {}
+  options: { scope?: string } = {},
 ): Promise<void> {
   const projectName = projectNameFromDir(targetDir);
   const packageScope = options.scope ?? projectName;
@@ -454,6 +466,6 @@ export async function initVueHonoAppProject(
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
-    operations: operationsForVueHonoApp(projectName, packageScope)
+    operations: operationsForVueHonoApp(projectName, packageScope),
   });
 }

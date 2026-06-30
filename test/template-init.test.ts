@@ -205,15 +205,13 @@ describe("template init", () => {
       }
       if (preset.name === "vue-app") {
         expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
-        expect(devcontainer.postCreateCommand).toContain("pnpm exec playwright install chromium");
+        expect(devcontainer.postCreateCommand).not.toContain("playwright install");
       }
       if (preset.name === "vue-hono-app") {
         expect(checkWorkflow).toContain(
           "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
         );
-        expect(devcontainer.postCreateCommand).toContain(
-          "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium",
-        );
+        expect(devcontainer.postCreateCommand).not.toContain("playwright install");
       }
       if (preset.name === "rust-bin") {
         expect(extensions).toEqual(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]);
@@ -240,9 +238,7 @@ describe("template init", () => {
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
-    expect(devcontainer.postCreateCommand).toContain(
-      "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium",
-    );
+    expect(devcontainer.postCreateCommand).not.toContain("playwright install");
     expect(checkWorkflow).not.toMatch(/\bpnpm exec playwright install\b/);
     expect(devcontainer.postCreateCommand).not.toMatch(/\bpnpm exec playwright install\b/);
   }, 120_000);
@@ -510,7 +506,13 @@ describe("template init", () => {
         packageManager: string;
         packages: Array<{ name: string; path: string }>;
       };
-      nextSteps: Array<{ id: string; display: string; command: string; args: string[]; cwd: string }>;
+      nextSteps: Array<{
+        id: string;
+        display: string;
+        command: string;
+        args: string[];
+        cwd: string;
+      }>;
     };
 
     expect(output).toEqual(
@@ -589,7 +591,13 @@ describe("template init", () => {
         source: string;
         diagnostics: string[];
       };
-      nextSteps: Array<{ id: string; display: string; command: string; args: string[]; cwd: string }>;
+      nextSteps: Array<{
+        id: string;
+        display: string;
+        command: string;
+        args: string[];
+        cwd: string;
+      }>;
     };
 
     expect(output).toEqual(
@@ -813,14 +821,9 @@ describe("template init", () => {
 
     const result = await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        path.join(repoRoot, "src/cli.ts"),
-        "--help",
-      ],
+      ["exec", "tsx", path.join(repoRoot, "src/cli.ts"), "--help"],
       {
-        cwd: repoRoot
+        cwd: repoRoot,
       },
     );
 

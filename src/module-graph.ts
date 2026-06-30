@@ -1,13 +1,28 @@
+import type { PresetName } from "./declarations.js";
+
 export type PackageBoundaryOwner = {
   readonly kind: "package-boundary";
-  readonly path: ".";
+  readonly path: "." | "apps/api" | "apps/web";
 };
 
 export type ComponentOwner = PackageBoundaryOwner;
 
-export type CheckComponentKind = "typescript-typecheck" | "oxc-lint" | "oxc-format-check";
+export type CheckComponentKind =
+  | "typescript-typecheck"
+  | "oxc-lint"
+  | "oxc-format-check"
+  | "build"
+  | "unit-test"
+  | "e2e-test"
+  | "turbo-check";
 
-export type FixComponentKind = "oxc-format-write" | "oxc-lint-fix";
+export type FixComponentKind = "oxc-format-write" | "oxc-lint-fix" | "turbo-fix";
+
+export type CheckEnvironmentNeed = {
+  readonly kind: "playwright-browser-assets";
+  readonly browser: "chromium";
+  readonly owner: ComponentOwner;
+};
 
 export type CheckComponent = {
   readonly kind: CheckComponentKind;
@@ -21,6 +36,7 @@ export type FixComponent = {
 
 export type CheckPlan = {
   readonly components: CheckComponent[];
+  readonly environmentNeeds: CheckEnvironmentNeed[];
 };
 
 export type FixPlan = {
@@ -32,27 +48,152 @@ const tsLibPackageBoundary: ComponentOwner = {
   path: ".",
 };
 
-export function selectTsLibCheckComponents(): CheckComponent[] {
+const apiPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/api",
+};
+
+const webPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/web",
+};
+
+export type NodeCheckPlanTarget =
+  | "ts-lib"
+  | "hono-api"
+  | "vue-app"
+  | "vue-hono-root"
+  | "vue-hono-api"
+  | "vue-hono-web";
+
+export type NodeFixPlanTarget =
+  | "ts-lib"
+  | "hono-api"
+  | "vue-app"
+  | "vue-hono-root"
+  | "vue-hono-api"
+  | "vue-hono-web";
+
+function nodeLibraryCheckComponents(owner: ComponentOwner): CheckComponent[] {
   return [
-    { kind: "typescript-typecheck", owner: tsLibPackageBoundary },
-    { kind: "oxc-lint", owner: tsLibPackageBoundary },
-    { kind: "oxc-format-check", owner: tsLibPackageBoundary },
+    { kind: "typescript-typecheck", owner },
+    { kind: "oxc-lint", owner },
+    { kind: "oxc-format-check", owner },
   ];
+}
+
+function honoApiCheckComponents(owner: ComponentOwner): CheckComponent[] {
+  return [
+    { kind: "oxc-format-check", owner },
+    { kind: "oxc-lint", owner },
+    { kind: "typescript-typecheck", owner },
+    { kind: "build", owner },
+    { kind: "unit-test", owner },
+  ];
+}
+
+function vueAppCheckComponents(owner: ComponentOwner): CheckComponent[] {
+  return [
+    { kind: "oxc-format-check", owner },
+    { kind: "oxc-lint", owner },
+    { kind: "typescript-typecheck", owner },
+    { kind: "build", owner },
+    { kind: "unit-test", owner },
+    { kind: "e2e-test", owner },
+  ];
+}
+
+function nodeFixComponents(owner: ComponentOwner): FixComponent[] {
+  return [
+    { kind: "oxc-format-write", owner },
+    { kind: "oxc-lint-fix", owner },
+  ];
+}
+
+export function selectNodeCheckComponents(target: NodeCheckPlanTarget): CheckComponent[] {
+  switch (target) {
+    case "ts-lib":
+      return nodeLibraryCheckComponents(tsLibPackageBoundary);
+    case "hono-api":
+      return honoApiCheckComponents(tsLibPackageBoundary);
+    case "vue-app":
+      return vueAppCheckComponents(tsLibPackageBoundary);
+    case "vue-hono-root":
+      return [{ kind: "turbo-check", owner: tsLibPackageBoundary }];
+    case "vue-hono-api":
+      return honoApiCheckComponents(apiPackageBoundary);
+    case "vue-hono-web":
+      return vueAppCheckComponents(webPackageBoundary);
+  }
+}
+
+export function selectNodeFixComponents(target: NodeFixPlanTarget): FixComponent[] {
+  switch (target) {
+    case "ts-lib":
+    case "hono-api":
+    case "vue-app":
+      return nodeFixComponents(tsLibPackageBoundary);
+    case "vue-hono-root":
+      return [{ kind: "turbo-fix", owner: tsLibPackageBoundary }];
+    case "vue-hono-api":
+      return nodeFixComponents(apiPackageBoundary);
+    case "vue-hono-web":
+      return nodeFixComponents(webPackageBoundary);
+  }
+}
+
+function checkEnvironmentNeeds(target: NodeCheckPlanTarget): CheckEnvironmentNeed[] {
+  if (target === "vue-app") {
+    return [
+      { kind: "playwright-browser-assets", browser: "chromium", owner: tsLibPackageBoundary },
+    ];
+  }
+
+  if (target === "vue-hono-root" || target === "vue-hono-web") {
+    return [{ kind: "playwright-browser-assets", browser: "chromium", owner: webPackageBoundary }];
+  }
+
+  return [];
+}
+
+export function selectTsLibCheckComponents(): CheckComponent[] {
+  return selectNodeCheckComponents("ts-lib");
 }
 
 export function selectTsLibFixComponents(): FixComponent[] {
-  return [
-    { kind: "oxc-format-write", owner: tsLibPackageBoundary },
-    { kind: "oxc-lint-fix", owner: tsLibPackageBoundary },
-  ];
+  return selectNodeFixComponents("ts-lib");
+}
+
+export function planNodeChecks(target: NodeCheckPlanTarget): CheckPlan {
+  return {
+    components: selectNodeCheckComponents(target),
+    environmentNeeds: checkEnvironmentNeeds(target),
+  };
+}
+
+export function planNodeFixes(target: NodeFixPlanTarget): FixPlan {
+  return { components: selectNodeFixComponents(target) };
+}
+
+export function planPresetChecks(preset: PresetName): CheckPlan | undefined {
+  switch (preset) {
+    case "ts-lib":
+    case "hono-api":
+    case "vue-app":
+      return planNodeChecks(preset);
+    case "vue-hono-app":
+      return planNodeChecks("vue-hono-root");
+    default:
+      return undefined;
+  }
 }
 
 export function planTsLibChecks(): CheckPlan {
-  return { components: selectTsLibCheckComponents() };
+  return planNodeChecks("ts-lib");
 }
 
 export function planTsLibFixes(): FixPlan {
-  return { components: selectTsLibFixComponents() };
+  return planNodeFixes("ts-lib");
 }
 
 function renderCheckComponentCommand(component: CheckComponent): string {
@@ -63,6 +204,14 @@ function renderCheckComponentCommand(component: CheckComponent): string {
       return "pnpm run lint";
     case "oxc-format-check":
       return "pnpm run format:check";
+    case "build":
+      return "pnpm run build";
+    case "unit-test":
+      return "pnpm run test";
+    case "e2e-test":
+      return "pnpm run test:e2e";
+    case "turbo-check":
+      return "turbo run check";
   }
 }
 
@@ -72,6 +221,8 @@ function renderFixComponentCommand(component: FixComponent): string {
       return "pnpm run format:write";
     case "oxc-lint-fix":
       return "pnpm run lint:fix";
+    case "turbo-fix":
+      return "turbo run fix";
   }
 }
 
@@ -81,4 +232,12 @@ export function renderRootCheckCommand(plan: CheckPlan): string {
 
 export function renderFixCommand(plan: FixPlan): string {
   return plan.components.map(renderFixComponentCommand).join(" && ");
+}
+
+export function renderPlaywrightBrowserInstallCommand(need: CheckEnvironmentNeed): string {
+  if (need.owner.path === "apps/web") {
+    return `pnpm --filter ./apps/web exec playwright install ${need.browser}`;
+  }
+
+  return `pnpm exec playwright install ${need.browser}`;
 }

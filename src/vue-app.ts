@@ -1,5 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  planNodeChecks,
+  planNodeFixes,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "./module-graph.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
@@ -10,17 +16,34 @@ const features = [
   "fix-command",
   "devcontainer",
   "github-actions",
-  "dependabot"
+  "dependabot",
 ] as const;
 
 const generatedBy = {
   packageName: "@ykdz/template",
   version: "0.0.0",
-  command: "template init --preset vue-app"
+  command: "template init --preset vue-app",
 };
 
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
+}
+
+export function projectVueAppPackageScripts(): Record<string, string> {
+  return {
+    build: "vite build",
+    check: renderRootCheckCommand(planNodeChecks("vue-app")),
+    dev: "vite",
+    fix: renderFixCommand(planNodeFixes("vue-app")),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+    preview: "vite preview",
+    test: "vitest run",
+    "test:e2e": "pnpm run build && playwright test",
+    typecheck: "vue-tsc --build --noEmit",
+  };
 }
 
 function packageJson(projectName: string): Record<string, unknown> {
@@ -29,25 +52,11 @@ function packageJson(projectName: string): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: {
-      build: "vite build",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
-      dev: "vite",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
-      preview: "vite preview",
-      test: "vitest run",
-      "test:e2e": "pnpm run build && playwright test",
-      typecheck: "vue-tsc --build --noEmit"
-    },
+    scripts: projectVueAppPackageScripts(),
     dependencies: {
       "@vueuse/core": "catalog:",
       pinia: "catalog:",
-      vue: "catalog:"
+      vue: "catalog:",
     },
     devDependencies: {
       "@playwright/test": "catalog:",
@@ -62,12 +71,12 @@ function packageJson(projectName: string): Record<string, unknown> {
       typescript: "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
-      "vue-tsc": "catalog:"
+      "vue-tsc": "catalog:",
     },
     engines: {
-      node: "22"
+      node: "22",
     },
-    packageManager: "pnpm@10.0.0"
+    packageManager: "pnpm@10.0.0",
   };
 }
 
@@ -76,7 +85,7 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(projectName)
+      value: packageJson(projectName),
     },
     {
       kind: "writeText",
@@ -105,8 +114,8 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
         "  vitest: ^4.1.9",
         "  vue: ^3.5.26",
         "  vue-tsc: ^3.1.8",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     },
     {
       kind: "writeJson",
@@ -116,9 +125,9 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
         references: [
           { path: "./tsconfig.app.json" },
           { path: "./tsconfig.test.json" },
-          { path: "./tsconfig.node.json" }
-        ]
-      }
+          { path: "./tsconfig.node.json" },
+        ],
+      },
     },
     {
       kind: "writeJson",
@@ -132,16 +141,16 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
           moduleResolution: "Bundler",
           noEmitOnError: true,
           paths: {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
           },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
-          types: ["web-bluetooth"]
+          types: ["web-bluetooth"],
         },
-        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"]
-      }
+        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"],
+      },
     },
     {
       kind: "writeJson",
@@ -151,10 +160,10 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
         compilerOptions: {
           lib: ["ESNext", "DOM", "DOM.Iterable"],
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
-          types: ["node", "vitest/globals", "web-bluetooth"]
+          types: ["node", "vitest/globals", "web-bluetooth"],
         },
-        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"]
-      }
+        include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"],
+      },
     },
     {
       kind: "writeJson",
@@ -170,82 +179,82 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
           strict: true,
           target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
-          types: ["node"]
+          types: ["node"],
         },
-        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"]
-      }
+        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
+      },
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "vue/oxlint.config.ts",
-      to: "oxlint.config.ts"
+      to: "oxlint.config.ts",
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "oxfmt.config.ts",
-      to: "oxfmt.config.ts"
+      to: "oxfmt.config.ts",
     },
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n")
+      text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n"),
     },
     {
       kind: "copyFile",
       from: "env.d.ts",
-      to: "env.d.ts"
+      to: "env.d.ts",
     },
     {
       kind: "copyFile",
       from: "index.html",
-      to: "index.html"
+      to: "index.html",
     },
     {
       kind: "copyFile",
       from: "playwright.config.ts",
-      to: "playwright.config.ts"
+      to: "playwright.config.ts",
     },
     {
       kind: "copyFile",
       from: "vite.config.ts",
-      to: "vite.config.ts"
+      to: "vite.config.ts",
     },
     {
       kind: "copyFile",
       from: "vitest.config.ts",
-      to: "vitest.config.ts"
+      to: "vitest.config.ts",
     },
     {
       kind: "copyFile",
       from: "src/App.vue",
-      to: "src/App.vue"
+      to: "src/App.vue",
     },
     {
       kind: "copyFile",
       from: "src/main.ts",
-      to: "src/main.ts"
+      to: "src/main.ts",
     },
     {
       kind: "copyFile",
       from: "src/style.css",
-      to: "src/style.css"
+      to: "src/style.css",
     },
     {
       kind: "copyFile",
       from: "src/stores/counter.ts",
-      to: "src/stores/counter.ts"
+      to: "src/stores/counter.ts",
     },
     {
       kind: "copyFile",
       from: "test/app.test.ts",
-      to: "test/app.test.ts"
+      to: "test/app.test.ts",
     },
     {
       kind: "copyFile",
       from: "test/e2e/app.spec.ts",
-      to: "test/e2e/app.spec.ts"
+      to: "test/e2e/app.spec.ts",
     },
     {
       kind: "writeJson",
@@ -255,13 +264,13 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
         preset: "vue-app",
         packageManager: "pnpm",
         projectKind: "single-package",
-        features
-      }
+        features,
+      },
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy
+      value: generatedBy,
     },
     {
       kind: "writeJson",
@@ -269,13 +278,13 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
       value: {
         name: `${projectName} Vue development`,
         image: "mcr.microsoft.com/devcontainers/typescript-node:22",
-        postCreateCommand: "corepack enable && pnpm install && pnpm exec playwright install chromium",
+        postCreateCommand: "corepack enable && pnpm install",
         customizations: {
           vscode: {
-            extensions: ["Vue.volar", "oxc.oxc-vscode"]
-          }
-        }
-      }
+            extensions: ["Vue.volar", "oxc.oxc-vscode"],
+          },
+        },
+      },
     },
     {
       kind: "copyFile",
@@ -286,7 +295,7 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
       kind: "copyFile",
       from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-    }
+    },
   ];
 }
 
@@ -295,7 +304,13 @@ function templateSourceRoot(): string {
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "templates",
+    "shared",
+    "oxc",
+  );
 }
 
 export async function initVueAppProject(targetDir: string): Promise<void> {
@@ -303,6 +318,6 @@ export async function initVueAppProject(targetDir: string): Promise<void> {
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
-    operations: operationsForVueApp(projectNameFromDir(targetDir))
+    operations: operationsForVueApp(projectNameFromDir(targetDir)),
   });
 }

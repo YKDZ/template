@@ -1,5 +1,11 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  planNodeChecks,
+  planNodeFixes,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "./module-graph.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
@@ -10,17 +16,32 @@ const features = [
   "fix-command",
   "devcontainer",
   "github-actions",
-  "dependabot"
+  "dependabot",
 ] as const;
 
 const generatedBy = {
   packageName: "@ykdz/template",
   version: "0.0.0",
-  command: "template init --preset hono-api"
+  command: "template init --preset hono-api",
 };
 
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
+}
+
+export function projectHonoApiPackageScripts(): Record<string, string> {
+  return {
+    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    check: renderRootCheckCommand(planNodeChecks("hono-api")),
+    fix: renderFixCommand(planNodeFixes("hono-api")),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+    start: "node dist/server.js",
+    test: "vitest run",
+    typecheck: "tsc -p tsconfig.json --noEmit",
+  };
 }
 
 function packageJson(projectName: string): Record<string, unknown> {
@@ -29,22 +50,10 @@ function packageJson(projectName: string): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
-    scripts: {
-      build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
-      start: "node dist/server.js",
-      test: "vitest run",
-      typecheck: "tsc -p tsconfig.json --noEmit"
-    },
+    scripts: projectHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
-      hono: "catalog:"
+      hono: "catalog:",
     },
     devDependencies: {
       "@types/node": "catalog:",
@@ -52,12 +61,12 @@ function packageJson(projectName: string): Record<string, unknown> {
       oxlint: "catalog:",
       "tsc-alias": "catalog:",
       typescript: "catalog:",
-      vitest: "catalog:"
+      vitest: "catalog:",
     },
     engines: {
-      node: "22"
+      node: "22",
     },
-    packageManager: "pnpm@10.0.0"
+    packageManager: "pnpm@10.0.0",
   };
 }
 
@@ -66,7 +75,7 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(projectName)
+      value: packageJson(projectName),
     },
     {
       kind: "writeText",
@@ -84,8 +93,8 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
         "  tsc-alias: ^1.8.17",
         "  typescript: ^5.8.0",
         "  vitest: ^4.1.9",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     },
     {
       kind: "writeJson",
@@ -96,15 +105,15 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
           moduleResolution: "NodeNext",
           noEmitOnError: true,
           paths: {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
           },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
-          types: ["node", "vitest/globals"]
+          types: ["node", "vitest/globals"],
         },
-        include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
-      }
+        include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+      },
     },
     {
       kind: "writeJson",
@@ -114,47 +123,47 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
         compilerOptions: {
           outDir: "dist",
           rootDir: "src",
-          types: ["node"]
+          types: ["node"],
         },
-        include: ["src/**/*.ts"]
-      }
+        include: ["src/**/*.ts"],
+      },
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "node/oxlint.config.ts",
-      to: "oxlint.config.ts"
+      to: "oxlint.config.ts",
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "oxfmt.config.ts",
-      to: "oxfmt.config.ts"
+      to: "oxfmt.config.ts",
     },
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", ".env", ""].join("\n")
+      text: ["node_modules", "dist", ".env", ""].join("\n"),
     },
     {
       kind: "copyFile",
       from: "src/app.ts",
-      to: "src/app.ts"
+      to: "src/app.ts",
     },
     {
       kind: "copyFile",
       from: "src/server.ts",
-      to: "src/server.ts"
+      to: "src/server.ts",
     },
     {
       kind: "copyFile",
       from: "test/app.test.ts",
-      to: "test/app.test.ts"
+      to: "test/app.test.ts",
     },
     {
       kind: "copyFile",
       from: "vitest.config.ts",
-      to: "vitest.config.ts"
+      to: "vitest.config.ts",
     },
     {
       kind: "writeJson",
@@ -164,13 +173,13 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
         preset: "hono-api",
         packageManager: "pnpm",
         projectKind: "single-package",
-        features
-      }
+        features,
+      },
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy
+      value: generatedBy,
     },
     {
       kind: "writeJson",
@@ -181,10 +190,10 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
         postCreateCommand: "corepack enable && pnpm install",
         customizations: {
           vscode: {
-            extensions: ["oxc.oxc-vscode"]
-          }
-        }
-      }
+            extensions: ["oxc.oxc-vscode"],
+          },
+        },
+      },
     },
     {
       kind: "copyFile",
@@ -195,7 +204,7 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
       kind: "copyFile",
       from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-    }
+    },
   ];
 }
 
@@ -204,7 +213,13 @@ function templateSourceRoot(): string {
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "templates",
+    "shared",
+    "oxc",
+  );
 }
 
 export async function initHonoApiProject(targetDir: string): Promise<void> {
@@ -212,6 +227,6 @@ export async function initHonoApiProject(targetDir: string): Promise<void> {
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
-    operations: operationsForHonoApi(projectNameFromDir(targetDir))
+    operations: operationsForHonoApi(projectNameFromDir(targetDir)),
   });
 }
