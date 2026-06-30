@@ -40,6 +40,7 @@ const packageFiles = [
   "src/declarations.ts",
   "src/generation-context.ts",
   "src/hono-api.ts",
+  "src/module-graph.ts",
   "src/package-addition.ts",
   "src/post-commands.ts",
   "src/renderer.ts",
@@ -168,6 +169,7 @@ describe("package publishing", () => {
     const packedPaths = tarballContents.stdout.split("\n");
     expect(packedPaths).toContain("package/dist/cli.js");
     expect(packedPaths).toContain("package/dist/generation-context.js");
+    expect(packedPaths).toContain("package/dist/module-graph.js");
     expect(packedPaths).toContain("package/dist/post-commands.js");
     expect(packedPaths).toContain("package/dist/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");

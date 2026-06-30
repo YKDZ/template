@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import { builtInPresets, type PresetName } from "../src/declarations.js";
+import { projectTsLibPackageScripts } from "../src/ts-lib.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -404,6 +405,7 @@ describe("template init", () => {
     const projectKitFiles = await readdir(path.join(projectDir, ".project-kit"));
 
     expect(packageJson.name).toBe("demo-lib");
+    expect(packageJson.scripts).toEqual(projectTsLibPackageScripts());
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );

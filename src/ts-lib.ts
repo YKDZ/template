@@ -2,6 +2,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProjectBlueprint } from "./declarations.js";
 import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
+import {
+  planTsLibChecks,
+  planTsLibFixes,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "./module-graph.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 import { resolveToolchainVersions } from "./toolchain-resolution.js";
 
@@ -32,6 +38,19 @@ const tsLibBlueprint: ProjectBlueprint = {
   ],
 };
 
+export function projectTsLibPackageScripts(): Record<string, string> {
+  return {
+    build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    check: renderRootCheckCommand(planTsLibChecks()),
+    fix: renderFixCommand(planTsLibFixes()),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+    typecheck: "tsc -p tsconfig.json --noEmit",
+  };
+}
+
 function packageJson(context: GenerationContext): Record<string, unknown> {
   return {
     name: context.projectName.value,
@@ -45,16 +64,7 @@ function packageJson(context: GenerationContext): Record<string, unknown> {
         types: "./dist/index.d.ts",
       },
     },
-    scripts: {
-      build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
-      check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
-      typecheck: "tsc -p tsconfig.json --noEmit",
-    },
+    scripts: projectTsLibPackageScripts(),
     devDependencies: {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
