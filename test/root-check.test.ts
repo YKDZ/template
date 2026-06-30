@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -244,7 +245,7 @@ describe("Project Kit Root Check", () => {
 });
 
 async function mkdirTempTemplateWorkspace(): Promise<string> {
-  return await mkdtemp(path.join(repoRoot, ".scratch/root-check-test-"));
+  return await mkdtemp(path.join(tmpdir(), "template-root-check-"));
 }
 
 async function writeTemplateFile(
