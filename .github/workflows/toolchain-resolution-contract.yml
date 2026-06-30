@@ -1,0 +1,32 @@
+name: Toolchain Resolution Contract
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 8 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check online toolchain resolution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check online toolchain resolution contract
+        run: pnpm run check:toolchain:online

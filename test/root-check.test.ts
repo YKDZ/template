@@ -32,6 +32,30 @@ describe("Project Kit Root Check", () => {
     }
   });
 
+  it("keeps the online toolchain contract check explicit and outside the default Root Check", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts).toHaveProperty("check:toolchain:online");
+    expect(packageJson.scripts["check:toolchain:online"]).toBe(
+      "tsx scripts/check-online-toolchain-resolution-contract.ts",
+    );
+    expect(packageJson.scripts.check).not.toContain("check:toolchain:online");
+  });
+
+  it("exposes the online toolchain contract check as an explicit CI workflow", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github/workflows/toolchain-resolution-contract.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("name: Toolchain Resolution Contract");
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("run: pnpm run check:toolchain:online");
+    expect(workflow).not.toContain("pnpm run check\n");
+  });
+
   it("runs direct shared OXC template source checks from Root Check", async () => {
     const rootPackageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),

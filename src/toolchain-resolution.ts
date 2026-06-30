@@ -24,8 +24,18 @@ export type ResolveToolchainVersionsOptions = {
   readonly pnpmRegistryUrl?: string;
 };
 
-const defaultNodeReleaseIndexUrl = "https://nodejs.org/dist/index.json";
-const defaultPnpmRegistryUrl = "https://registry.npmjs.org/pnpm";
+export const nodeReleaseIndexUrl = "https://nodejs.org/dist/index.json";
+export const pnpmRegistryUrl = "https://registry.npmjs.org/pnpm";
+
+type OnlineToolchainResolutionContractOptions = {
+  readonly fetchJson?: (url: string) => Promise<unknown>;
+};
+
+export type OnlineToolchainResolutionContractResult = {
+  readonly nodeLtsMajor: NodeLtsMajor;
+  readonly packageManagerPin: PackageManagerPin;
+  readonly diagnostics: string[];
+};
 
 const bundledFallbackToolchain = {
   nodeLtsMajor: nodeLtsMajor("22"),
@@ -38,7 +48,10 @@ type NodeRelease = {
 };
 
 type PnpmRegistryMetadata = {
-  readonly versions: Record<string, { readonly engines?: { readonly node?: string } }>;
+  readonly versions: Record<
+    string,
+    { readonly engines?: { readonly node?: string } }
+  >;
 };
 
 export async function resolveToolchainVersions(
@@ -53,13 +66,16 @@ export async function resolveToolchainVersions(
   try {
     const fetchJson = options.fetchJson ?? fetchOfficialJson;
     const nodeReleases = parseNodeReleaseIndex(
-      await fetchJson(options.nodeReleaseIndexUrl ?? defaultNodeReleaseIndexUrl),
+      await fetchJson(options.nodeReleaseIndexUrl ?? nodeReleaseIndexUrl),
     );
     const nodeMajor = latestLtsMajor(nodeReleases);
     const pnpmMetadata = parsePnpmRegistryMetadata(
-      await fetchJson(options.pnpmRegistryUrl ?? defaultPnpmRegistryUrl),
+      await fetchJson(options.pnpmRegistryUrl ?? pnpmRegistryUrl),
     );
-    const pnpmVersion = latestCompatiblePnpmVersion(pnpmMetadata, Number(nodeMajor.value));
+    const pnpmVersion = latestCompatiblePnpmVersion(
+      pnpmMetadata,
+      Number(nodeMajor.value),
+    );
 
     return {
       nodeLtsMajor: nodeMajor,
@@ -72,6 +88,49 @@ export async function resolveToolchainVersions(
     return fallbackResult([
       `Using bundled fallback toolchain metadata because online resolution failed: ${message}`,
     ]);
+  }
+}
+
+export async function checkOnlineToolchainResolutionContract(
+  options: OnlineToolchainResolutionContractOptions = {},
+): Promise<OnlineToolchainResolutionContractResult> {
+  const fetchJson = options.fetchJson ?? fetchOfficialJson;
+  const nodeMajor = await contractPhase("Node source parsing", async () => {
+    const nodeReleases = parseNodeReleaseIndex(
+      await fetchJson(nodeReleaseIndexUrl),
+    );
+    return latestLtsMajor(nodeReleases);
+  });
+  const pnpmMetadata = await contractPhase("pnpm source parsing", async () =>
+    parsePnpmRegistryMetadata(await fetchJson(pnpmRegistryUrl)),
+  );
+  const pnpmVersion = await contractPhase("compatibility selection", async () =>
+    latestCompatiblePnpmVersion(pnpmMetadata, Number(nodeMajor.value)),
+  );
+
+  return {
+    nodeLtsMajor: nodeMajor,
+    packageManagerPin: packageManagerPin(pnpmVersion),
+    diagnostics: [
+      `Node source parsing succeeded; latest LTS major is ${nodeMajor.value}.`,
+      `pnpm source parsing succeeded; latest compatible pnpm release is ${pnpmVersion}.`,
+      `Compatibility selection succeeded for pnpm@${pnpmVersion} on Node ${nodeMajor.value}.`,
+    ],
+  };
+}
+
+async function contractPhase<T>(
+  phase: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Online toolchain resolution contract failed during ${phase}: ${message}`,
+      error instanceof Error ? { cause: error } : undefined,
+    );
   }
 }
 
@@ -124,7 +183,10 @@ function parseNodeReleaseIndex(value: unknown): NodeRelease[] {
 
     const version = entry.version;
     const lts = entry.lts;
-    if (typeof version !== "string" || (typeof lts !== "string" && typeof lts !== "boolean")) {
+    if (
+      typeof version !== "string" ||
+      (typeof lts !== "string" && typeof lts !== "boolean")
+    ) {
       throw new Error("Node release entry is missing version or lts");
     }
 
@@ -159,7 +221,12 @@ function parsePnpmRegistryMetadata(value: unknown): PnpmRegistryMetadata {
 
     versions[version] = {
       engines: isRecord(metadata.engines)
-        ? { node: typeof metadata.engines.node === "string" ? metadata.engines.node : undefined }
+        ? {
+            node:
+              typeof metadata.engines.node === "string"
+                ? metadata.engines.node
+                : undefined,
+          }
         : undefined,
     };
   }
@@ -167,10 +234,17 @@ function parsePnpmRegistryMetadata(value: unknown): PnpmRegistryMetadata {
   return { versions };
 }
 
-function latestCompatiblePnpmVersion(metadata: PnpmRegistryMetadata, nodeMajor: number): string {
+function latestCompatiblePnpmVersion(
+  metadata: PnpmRegistryMetadata,
+  nodeMajor: number,
+): string {
   const candidates = Object.entries(metadata.versions)
-    .filter(([version]) => /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version))
-    .filter(([, packageMetadata]) => nodeSatisfiesRange(nodeMajor, packageMetadata.engines?.node))
+    .filter(([version]) =>
+      /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version),
+    )
+    .filter(([, packageMetadata]) =>
+      nodeSatisfiesRange(nodeMajor, packageMetadata.engines?.node),
+    )
     .map(([version]) => version)
     .sort(compareSemver);
 
@@ -184,7 +258,10 @@ function latestCompatiblePnpmVersion(metadata: PnpmRegistryMetadata, nodeMajor: 
   return latest;
 }
 
-function nodeSatisfiesRange(nodeMajor: number, range: string | undefined): boolean {
+function nodeSatisfiesRange(
+  nodeMajor: number,
+  range: string | undefined,
+): boolean {
   if (!range) {
     return true;
   }
@@ -195,10 +272,13 @@ function nodeSatisfiesRange(nodeMajor: number, range: string | undefined): boole
     .every((comparator) => nodeSatisfiesComparator(nodeMajor, comparator));
 }
 
-function nodeSatisfiesComparator(nodeMajor: number, comparator: string): boolean {
+function nodeSatisfiesComparator(
+  nodeMajor: number,
+  comparator: string,
+): boolean {
   const match = comparator.match(/^(>=|>|<=|<|=)?(\d+)(?:\.\d+){0,2}$/);
   if (!match) {
-    return true;
+    return false;
   }
 
   const operator = match[1] ?? "=";

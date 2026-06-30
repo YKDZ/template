@@ -2,9 +2,13 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
 import { execa } from "execa";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 type CommandRecord = {
   command: string;
@@ -13,19 +17,54 @@ type CommandRecord = {
   ci: string | null;
 };
 
-async function writeExecutable(filePath: string, content: string): Promise<void> {
+async function writeExecutable(
+  filePath: string,
+  content: string,
+): Promise<void> {
   await writeFile(filePath, content, "utf8");
   await chmod(filePath, 0o755);
 }
 
 describe("fixture checks", () => {
   it("runs generated root checks with CI-equivalent Playwright setup", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-fixture-test-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-fixture-test-"),
+    );
     const binDir = path.join(workspace, "bin");
     const logPath = path.join(workspace, "commands.jsonl");
+    const officialFetchLogPath = path.join(workspace, "official-fetches.txt");
+    const fetchGuardPath = path.join(
+      workspace,
+      "guard-official-toolchain-fetches.mjs",
+    );
     const realPnpm = (await execa("which", ["pnpm"])).stdout;
 
     await mkdir(binDir, { recursive: true });
+    await writeFile(
+      fetchGuardPath,
+      [
+        'import { appendFileSync } from "node:fs";',
+        "",
+        "const officialToolchainUrls = new Set([",
+        '  "https://nodejs.org/dist/index.json",',
+        '  "https://registry.npmjs.org/pnpm"',
+        "]);",
+        "const originalFetch = globalThis.fetch;",
+        "globalThis.fetch = async (input, init) => {",
+        "  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url;",
+        "  if (officialToolchainUrls.has(url)) {",
+        "    appendFileSync(process.env.OFFICIAL_TOOLCHAIN_FETCH_LOG, `${url}\\n`);",
+        "    return new Response('{}', {",
+        "      status: 200,",
+        "      headers: { 'content-type': 'application/json' }",
+        "    });",
+        "  }",
+        "  return originalFetch(input, init);",
+        "};",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
     await writeExecutable(
       path.join(binDir, "pnpm"),
       [
@@ -58,8 +97,8 @@ describe("fixture checks", () => {
         "}",
         "",
         "process.exit(0);",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
     await writeExecutable(
       path.join(binDir, "corepack"),
@@ -75,8 +114,8 @@ describe("fixture checks", () => {
         "    ci: process.env.CI ?? null",
         "  }) + '\\n'",
         ");",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
     await writeExecutable(
       path.join(binDir, "cargo"),
@@ -92,17 +131,21 @@ describe("fixture checks", () => {
         "    ci: process.env.CI ?? null",
         "  }) + '\\n'",
         ");",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
 
     await execa(realPnpm, ["exec", "tsx", "scripts/check-fixtures.ts"], {
       cwd: repoRoot,
       env: {
         FIXTURE_COMMAND_LOG: logPath,
+        OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
+          .filter(Boolean)
+          .join(" "),
         PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-        REAL_PNPM: realPnpm
-      }
+        REAL_PNPM: realPnpm,
+      },
     });
 
     const records = (await readFile(logPath, "utf8"))
@@ -110,17 +153,33 @@ describe("fixture checks", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as CommandRecord);
     const pnpmRecords = records.filter((record) => record.command === "pnpm");
+    const officialFetches = await readFile(officialFetchLogPath, "utf8").catch(
+      (error: unknown) => {
+        if (
+          error &&
+          typeof error === "object" &&
+          "code" in error &&
+          error.code === "ENOENT"
+        ) {
+          return "";
+        }
+
+        throw error;
+      },
+    );
+
+    expect(officialFetches).toBe("");
 
     expect(records).toContainEqual(
       expect.objectContaining({
         command: "corepack",
-        args: ["enable"]
-      })
+        args: ["enable"],
+      }),
     );
     expect(pnpmRecords).toContainEqual(
       expect.objectContaining({
-        args: ["exec", "playwright", "install", "--with-deps", "chromium"]
-      })
+        args: ["exec", "playwright", "install", "--with-deps", "chromium"],
+      }),
     );
     expect(pnpmRecords).toContainEqual(
       expect.objectContaining({
@@ -131,45 +190,47 @@ describe("fixture checks", () => {
           "playwright",
           "install",
           "--with-deps",
-          "chromium"
-        ]
-      })
+          "chromium",
+        ],
+      }),
     );
 
     const generatedRootChecks = pnpmRecords.filter(
-      (record) => record.args[0] === "run" && record.args[1] === "check"
+      (record) => record.args[0] === "run" && record.args[1] === "check",
     );
     expect(generatedRootChecks).toHaveLength(4);
     expect(generatedRootChecks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           ci: "1",
-          cwd: expect.stringContaining("fixture-ts-lib")
+          cwd: expect.stringContaining("fixture-ts-lib"),
         }),
         expect.objectContaining({
           ci: "1",
-          cwd: expect.stringContaining("fixture-hono-api")
+          cwd: expect.stringContaining("fixture-hono-api"),
         }),
         expect.objectContaining({
           ci: "1",
-          cwd: expect.stringContaining("fixture-vue-app")
+          cwd: expect.stringContaining("fixture-vue-app"),
         }),
         expect.objectContaining({
           ci: "1",
-          cwd: expect.stringContaining("fixture-vue-hono-app")
-        })
-      ])
+          cwd: expect.stringContaining("fixture-vue-hono-app"),
+        }),
+      ]),
     );
 
     for (const generatedRootCheck of generatedRootChecks) {
       const projectRecords = records.filter(
-        (record) => record.cwd === generatedRootCheck.cwd
+        (record) => record.cwd === generatedRootCheck.cwd,
       );
       const corepackIndex = projectRecords.findIndex(
-        (record) => record.command === "corepack" && record.args.join(" ") === "enable"
+        (record) =>
+          record.command === "corepack" && record.args.join(" ") === "enable",
       );
       const installIndex = projectRecords.findIndex(
-        (record) => record.command === "pnpm" && record.args.join(" ") === "install"
+        (record) =>
+          record.command === "pnpm" && record.args.join(" ") === "install",
       );
       const playwrightIndex = projectRecords.findIndex((record) => {
         if (record.command !== "pnpm") {
@@ -193,7 +254,8 @@ describe("fixture checks", () => {
         return false;
       });
       const checkIndex = projectRecords.findIndex(
-        (record) => record.command === "pnpm" && record.args.join(" ") === "run check"
+        (record) =>
+          record.command === "pnpm" && record.args.join(" ") === "run check",
       );
 
       expect(corepackIndex).toBeGreaterThanOrEqual(0);

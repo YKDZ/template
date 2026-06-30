@@ -35,6 +35,7 @@
     "check": "pnpm run typecheck && pnpm run test && pnpm run check:templates && pnpm run check:fixtures",
     "check:fixtures": "tsx scripts/check-fixtures.ts",
     "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:templates:static-source",
+    "check:toolchain:online": "tsx scripts/check-online-toolchain-resolution-contract.ts",
     "check:templates:github-yaml": "tsx scripts/check-template-github-yaml.ts",
     "check:templates:shared-oxc": "pnpm --dir templates/shared/oxc run check",
     "check:templates:static-source": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
