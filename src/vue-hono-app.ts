@@ -6,6 +6,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "./module-graph.js";
+import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
@@ -272,14 +273,14 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n"),
     },
     {
-      kind: "copyFile",
-      from: ".github/workflows/check.yml",
+      kind: "writeText",
       to: ".github/workflows/check.yml",
+      text: projectPresetGithubCheckWorkflow("vue-hono-app"),
     },
     {
-      kind: "copyFile",
-      from: ".github/dependabot.yml",
+      kind: "writeText",
       to: ".github/dependabot.yml",
+      text: projectPresetDependabotConfig("vue-hono-app"),
     },
     { kind: "writeJson", to: "apps/api/package.json", value: apiPackageJson(packageScope) },
     {

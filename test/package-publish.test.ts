@@ -43,6 +43,7 @@ const packageFiles = [
   "src/module-graph.ts",
   "src/next-step-instructions.ts",
   "src/package-addition.ts",
+  "src/project-github.ts",
   "src/renderer.ts",
   "src/rust-bin.ts",
   "src/toolchain-resolution.ts",

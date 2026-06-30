@@ -6,6 +6,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "./module-graph.js";
+import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 
 const features = [
@@ -196,14 +197,14 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
       },
     },
     {
-      kind: "copyFile",
-      from: ".github/workflows/check.yml",
+      kind: "writeText",
       to: ".github/workflows/check.yml",
+      text: projectPresetGithubCheckWorkflow("hono-api"),
     },
     {
-      kind: "copyFile",
-      from: ".github/dependabot.yml",
+      kind: "writeText",
       to: ".github/dependabot.yml",
+      text: projectPresetDependabotConfig("hono-api"),
     },
   ];
 }

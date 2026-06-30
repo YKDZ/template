@@ -8,6 +8,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "./module-graph.js";
+import { projectPresetDependabotConfig, projectTsLibGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
 import { resolveToolchainVersions } from "./toolchain-resolution.js";
 
@@ -199,14 +200,14 @@ function operationsForTsLib(context: GenerationContext): RenderOperation[] {
       },
     },
     {
-      kind: "copyFile",
-      from: ".github/workflows/check.yml",
+      kind: "writeText",
       to: ".github/workflows/check.yml",
+      text: projectTsLibGithubCheckWorkflow(),
     },
     {
-      kind: "copyFile",
-      from: ".github/dependabot.yml",
+      kind: "writeText",
       to: ".github/dependabot.yml",
+      text: projectPresetDependabotConfig("ts-lib"),
     },
   ];
 }

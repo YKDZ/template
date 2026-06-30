@@ -3,7 +3,11 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
-import { builtInPresets } from "../src/declarations.js";
+import { builtInPresets, type PresetName } from "../src/declarations.js";
+import {
+  projectPresetDependabotConfig,
+  projectPresetGithubCheckWorkflow,
+} from "../src/project-github.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultTemplatesRoot = path.join(repoRoot, "templates");
@@ -87,11 +91,48 @@ async function checkYamlTemplate(templatesRoot: string, filePath: string): Promi
 
   if (/^templates\/[^/]+\/\.github\/workflows\/[^/]+\.ya?ml$/.test(relativePath)) {
     problems.push(...checkWorkflowTemplate(relativePath, document.contents));
+    problems.push(...checkProjectedTemplate(relativePath, contents, "workflow"));
   } else if (/^templates\/[^/]+\/\.github\/dependabot\.ya?ml$/.test(relativePath)) {
     problems.push(...checkDependabotTemplate(relativePath, document.contents));
+    problems.push(...checkProjectedTemplate(relativePath, contents, "dependabot"));
   }
 
   return problems;
+}
+
+function checkProjectedTemplate(
+  relativePath: string,
+  contents: string,
+  kind: "workflow" | "dependabot",
+): string[] {
+  const presetName = presetNameFromRelativePath(relativePath);
+
+  if (!presetName || !isSupportedPresetName(presetName)) {
+    return [];
+  }
+
+  const expected =
+    kind === "workflow"
+      ? projectPresetGithubCheckWorkflow(presetName)
+      : projectPresetDependabotConfig(presetName);
+
+  if (contents.replace(/\r\n/g, "\n") === expected) {
+    return [];
+  }
+
+  const projectionName =
+    kind === "workflow" ? "GitHub check workflow projection" : "Dependabot projection";
+  return [`${relativePath}: expected checked template source to match ${projectionName}`];
+}
+
+function presetNameFromRelativePath(relativePath: string): string | undefined {
+  return relativePath.match(/^templates\/([^/]+)\//)?.[1];
+}
+
+function isSupportedPresetName(presetName: string): presetName is PresetName {
+  return builtInPresets.some(
+    (preset) => preset.name === presetName && preset.generation === "supported",
+  );
 }
 
 function checkWorkflowTemplate(relativePath: string, document: YAMLMap): string[] {

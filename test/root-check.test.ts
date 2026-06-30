@@ -5,6 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
+import {
+  projectPresetDependabotConfig,
+  projectPresetGithubCheckWorkflow,
+} from "../src/project-github.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -266,6 +270,29 @@ describe("Project Kit Root Check", () => {
       }),
     ).resolves.toBe(2);
   });
+
+  it("fails when checked GitHub YAML template source diverges from plan projections", async () => {
+    const workspace = await mkdirTempTemplateWorkspace();
+
+    await writeValidGithubTemplatePair(workspace, "ts-lib", "npm");
+    await writeTemplateFile(
+      workspace,
+      "ts-lib/.github/workflows/check.yml",
+      projectPresetGithubCheckWorkflow("ts-lib").replace(
+        "      - run: pnpm run check",
+        "      - run: pnpm test",
+      ),
+    );
+
+    await expect(
+      checkTemplateGithubYaml({
+        templatesRoot: workspace,
+        supportedPresetNames: ["ts-lib"],
+      }),
+    ).rejects.toThrow(
+      "templates/ts-lib/.github/workflows/check.yml: expected checked template source to match GitHub check workflow projection",
+    );
+  });
 });
 
 async function mkdirTempTemplateWorkspace(): Promise<string> {
@@ -284,47 +311,27 @@ async function writeTemplateFile(
 
 async function writeValidGithubTemplatePair(
   workspace: string,
-  presetName: string,
+  presetName: "ts-lib" | "rust-bin",
   ecosystem: "npm" | "cargo",
 ): Promise<void> {
   await writeTemplateFile(
     workspace,
     `${presetName}/.github/workflows/check.yml`,
-    validWorkflowTemplate(),
+    projectPresetGithubCheckWorkflow(presetName),
   );
   await writeTemplateFile(
     workspace,
     `${presetName}/.github/dependabot.yml`,
-    validDependabotTemplate(ecosystem),
+    projectPresetDependabotConfig(presetName),
   );
 }
 
 function validWorkflowTemplate(): string {
-  return [
-    "name: Check",
-    "on:",
-    "  push:",
-    "jobs:",
-    "  check:",
-    "    runs-on: ubuntu-latest",
-    "    steps:",
-    "      - uses: actions/checkout@v6",
-    "",
-  ].join("\n");
+  return projectPresetGithubCheckWorkflow("ts-lib");
 }
 
 function validDependabotTemplate(ecosystem: "npm" | "cargo"): string {
-  return [
-    "version: 2",
-    "updates:",
-    "  - package-ecosystem: github-actions",
-    "    directory: /",
-    "    schedule:",
-    "      interval: weekly",
-    `  - package-ecosystem: ${ecosystem}`,
-    "    directory: /",
-    "    schedule:",
-    "      interval: weekly",
-    "",
-  ].join("\n");
+  return ecosystem === "cargo"
+    ? projectPresetDependabotConfig("rust-bin")
+    : projectPresetDependabotConfig("ts-lib");
 }

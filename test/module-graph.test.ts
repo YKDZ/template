@@ -12,6 +12,12 @@ import {
   selectTsLibCheckComponents,
   selectTsLibFixComponents,
 } from "../src/module-graph.js";
+import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+  projectPresetDependencyMaintenancePolicy,
+  projectPresetGithubCheckWorkflow,
+} from "../src/project-github.js";
 import { projectHonoApiPackageScripts } from "../src/hono-api.js";
 import { projectRustBinPackageScripts } from "../src/rust-bin.js";
 import { projectTsLibPackageScripts } from "../src/ts-lib.js";
@@ -194,5 +200,67 @@ describe("module graph plans", () => {
         "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
       fix: "cargo fmt --all",
     });
+  });
+
+  it("projects GitHub check workflows from CI Capability, environment preparation, Check Plans, and pnpm Task Layer", () => {
+    expect(projectCheckWorkflow({ checkPlan: planNodeChecks("ts-lib"), rustToolchain: false })).toBe(
+      [
+        "name: Check",
+        "",
+        "on:",
+        "  pull_request:",
+        "  push:",
+        "    branches:",
+        "      - main",
+        "",
+        "jobs:",
+        "  check:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - uses: actions/checkout@v6",
+        "      - uses: actions/setup-node@v6",
+        "        with:",
+        "          node-version-file: package.json",
+        "      - run: corepack enable",
+        "      - run: pnpm install",
+        "      - run: pnpm run check",
+        "",
+      ].join("\n"),
+    );
+
+    expect(projectPresetGithubCheckWorkflow("vue-app")).toContain(
+      "      - run: pnpm exec playwright install --with-deps chromium",
+    );
+    expect(projectPresetGithubCheckWorkflow("rust-bin")).toContain(
+      "      - uses: dtolnay/rust-toolchain@stable\n        with:\n          components: rustfmt, clippy",
+    );
+    expect(projectPresetGithubCheckWorkflow("rust-bin")).toContain(
+      "      - uses: Swatinem/rust-cache@v2",
+    );
+  });
+
+  it("projects Dependabot config from Dependency Maintenance Policy separately from Check Plans", () => {
+    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("ts-lib"))).toBe(
+      [
+        "version: 2",
+        "updates:",
+        "  - package-ecosystem: npm",
+        "    directory: /",
+        "    schedule:",
+        "      interval: weekly",
+        "  - package-ecosystem: github-actions",
+        "    directory: /",
+        "    schedule:",
+        "      interval: weekly",
+        "",
+      ].join("\n"),
+    );
+
+    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("rust-bin"))).toContain(
+      "package-ecosystem: cargo",
+    );
+    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("vue-hono-app"))).toContain(
+      "package-ecosystem: npm",
+    );
   });
 });
