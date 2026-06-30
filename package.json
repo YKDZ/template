@@ -1,6 +1,6 @@
 {
   "name": "@ykdz/template",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Project template generator for YKDZ starter projects.",
   "license": "MIT",
   "private": false,
