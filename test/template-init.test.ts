@@ -146,10 +146,15 @@ describe("template init", () => {
       }>(path.join(projectDir, ".project-kit/blueprint.json"));
       const devcontainer = await readJson<{
         image: string;
+        features?: Record<string, { version?: string; pnpmVersion?: string }>;
         postCreateCommand?: string;
         mounts?: string[];
         customizations: { vscode: { extensions: string[] } };
       }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+      const packageJson = await readJson<{
+        engines: { node: string };
+        packageManager: string;
+      }>(path.join(projectDir, "package.json"));
       const checkWorkflow = await readFile(
         path.join(projectDir, ".github/workflows/check.yml"),
         "utf8",
@@ -189,13 +194,19 @@ describe("template init", () => {
       if (preset.name === "rust-bin") {
         expect(dependabot).toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("devcontainers/rust");
-        expect(devcontainer.postCreateCommand).toContain("rustup component add rustfmt clippy");
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
       } else {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("typescript-node:22");
-        expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
       }
+      const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
+        id.includes("features/node"),
+      )?.[1];
+      expect(nodeFeature).toEqual({
+        version: packageJson.engines.node,
+        pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+      });
+      expect(devcontainer).not.toHaveProperty("postCreateCommand");
 
       const extensions = devcontainer.customizations.vscode.extensions;
       if (preset.name === "ts-lib" || preset.name === "hono-api") {
@@ -206,13 +217,11 @@ describe("template init", () => {
       }
       if (preset.name === "vue-app") {
         expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
-        expect(devcontainer.postCreateCommand).not.toContain("playwright install");
       }
       if (preset.name === "vue-hono-app") {
         expect(checkWorkflow).toContain(
           "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
         );
-        expect(devcontainer.postCreateCommand).not.toContain("playwright install");
       }
       if (preset.name === "rust-bin") {
         expect(extensions).toEqual(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]);
@@ -232,16 +241,15 @@ describe("template init", () => {
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    const devcontainer = await readJson<{ postCreateCommand: string }>(
+    const devcontainer = await readJson<{ postCreateCommand?: string }>(
       path.join(projectDir, ".devcontainer/devcontainer.json"),
     );
 
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
-    expect(devcontainer.postCreateCommand).not.toContain("playwright install");
+    expect(devcontainer).not.toHaveProperty("postCreateCommand");
     expect(checkWorkflow).not.toMatch(/\bpnpm exec playwright install\b/);
-    expect(devcontainer.postCreateCommand).not.toMatch(/\bpnpm exec playwright install\b/);
   }, 120_000);
 
   it("generates Node presets with Dependabot-compatible pnpm coverage", async () => {
@@ -283,7 +291,10 @@ describe("template init", () => {
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    const devcontainer = await readJson<{ postCreateCommand: string }>(
+    const devcontainer = await readJson<{
+      features?: Record<string, { version?: string; pnpmVersion?: string }>;
+      postCreateCommand?: string;
+    }>(
       path.join(projectDir, ".devcontainer/devcontainer.json"),
     );
 
@@ -294,7 +305,14 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version: 22");
-    expect(devcontainer.postCreateCommand).toBe("corepack enable && pnpm install");
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
+      id.includes("features/node"),
+    )?.[1];
+    expect(nodeFeature).toEqual({
+      version: packageJson.engines.node,
+      pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+    });
+    expect(devcontainer).not.toHaveProperty("postCreateCommand");
   }, 120_000);
 
   it("generates workspace Node metadata as the Node and pnpm version authority", async () => {
@@ -315,7 +333,10 @@ describe("template init", () => {
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    const devcontainer = await readJson<{ postCreateCommand: string }>(
+    const devcontainer = await readJson<{
+      features?: Record<string, { version?: string; pnpmVersion?: string }>;
+      postCreateCommand?: string;
+    }>(
       path.join(projectDir, ".devcontainer/devcontainer.json"),
     );
 
@@ -330,9 +351,14 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version: 22");
-    expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
-    expect(devcontainer.postCreateCommand).not.toContain("corepack prepare");
-    expect(devcontainer.postCreateCommand).not.toContain("pnpm@10.0.0");
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
+      id.includes("features/node"),
+    )?.[1];
+    expect(nodeFeature).toEqual({
+      version: rootPackageJson.engines.node,
+      pnpmVersion: rootPackageJson.packageManager.replace(/^pnpm@/, ""),
+    });
+    expect(devcontainer).not.toHaveProperty("postCreateCommand");
   }, 120_000);
 
   it("generates Node presets with checked OXC config source", async () => {
@@ -1153,7 +1179,7 @@ describe("template init", () => {
       image: string;
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
       mounts: string[];
-      postCreateCommand: string;
+      postCreateCommand?: string;
       customizations: { vscode: { extensions: string[] } };
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
     const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
@@ -1192,8 +1218,7 @@ describe("template init", () => {
       version: packageJson.engines.node,
       pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
     });
-    expect(devcontainer.postCreateCommand).toContain("corepack enable");
-    expect(devcontainer.postCreateCommand).toContain("pnpm install");
+    expect(devcontainer).not.toHaveProperty("postCreateCommand");
     expect(devcontainer.mounts).toEqual(
       expect.arrayContaining([
         expect.stringContaining("target=/usr/local/cargo/registry"),

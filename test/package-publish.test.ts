@@ -38,6 +38,7 @@ const packageFiles = [
   "pnpm-workspace.yaml",
   "src/cli.ts",
   "src/declarations.ts",
+  "src/devcontainer.ts",
   "src/generation-context.ts",
   "src/hono-api.ts",
   "src/module-graph.ts",
@@ -169,6 +170,7 @@ describe("package publishing", () => {
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
     const packedPaths = tarballContents.stdout.split("\n");
     expect(packedPaths).toContain("package/dist/cli.js");
+    expect(packedPaths).toContain("package/dist/devcontainer.js");
     expect(packedPaths).toContain("package/dist/generation-context.js");
     expect(packedPaths).toContain("package/dist/module-graph.js");
     expect(packedPaths).toContain("package/dist/next-step-instructions.js");

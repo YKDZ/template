@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodePnpmDevcontainer } from "./devcontainer.js";
 import {
   planNodeChecks,
   planNodeFixes,
@@ -185,16 +186,12 @@ function operationsForHonoApi(projectName: string): RenderOperation[] {
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
-      value: {
+      value: nodePnpmDevcontainer({
         name: `${projectName} API development`,
-        image: "mcr.microsoft.com/devcontainers/typescript-node:22",
-        postCreateCommand: "corepack enable && pnpm install",
-        customizations: {
-          vscode: {
-            extensions: ["oxc.oxc-vscode"],
-          },
-        },
-      },
+        nodeVersion: "22",
+        packageManagerPin: "pnpm@10.0.0",
+        extensions: ["oxc.oxc-vscode"],
+      }),
     },
     {
       kind: "writeText",

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodePnpmDevcontainer } from "./devcontainer.js";
 import {
   planNodeChecks,
   planNodeFixes,
@@ -276,16 +277,12 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
-      value: {
+      value: nodePnpmDevcontainer({
         name: `${projectName} Vue development`,
-        image: "mcr.microsoft.com/devcontainers/typescript-node:22",
-        postCreateCommand: "corepack enable && pnpm install",
-        customizations: {
-          vscode: {
-            extensions: ["Vue.volar", "oxc.oxc-vscode"],
-          },
-        },
-      },
+        nodeVersion: "22",
+        packageManagerPin: "pnpm@10.0.0",
+        extensions: ["Vue.volar", "oxc.oxc-vscode"],
+      }),
     },
     {
       kind: "writeText",

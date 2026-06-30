@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { nodePnpmDevcontainer } from "./devcontainer.js";
 import type { ProjectBlueprint } from "./declarations.js";
 import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
 import {
@@ -188,16 +189,12 @@ function operationsForTsLib(context: GenerationContext): RenderOperation[] {
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
-      value: {
+      value: nodePnpmDevcontainer({
         name: `${context.projectName.value} development`,
-        image: `mcr.microsoft.com/devcontainers/typescript-node:${context.toolchain.nodeLtsMajor.value}`,
-        postCreateCommand: "corepack enable && pnpm install",
-        customizations: {
-          vscode: {
-            extensions: ["oxc.oxc-vscode"],
-          },
-        },
-      },
+        nodeVersion: context.toolchain.nodeLtsMajor.value,
+        packageManagerPin: context.toolchain.packageManagerPin.value,
+        extensions: ["oxc.oxc-vscode"],
+      }),
     },
     {
       kind: "writeText",

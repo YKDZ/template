@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { devcontainerNodeFeature } from "./devcontainer.js";
 import type { ProjectBlueprint } from "./declarations.js";
 import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
 import {
@@ -128,10 +129,6 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
   };
 }
 
-function pnpmVersion(context: GenerationContext): string {
-  return context.toolchain.packageManagerPin.value.replace(/^pnpm@/, "");
-}
-
 function operationsForRustBin(context: GenerationContext, projectName: string): RenderOperation[] {
   return [
     {
@@ -185,18 +182,15 @@ function operationsForRustBin(context: GenerationContext, projectName: string): 
       value: {
         name: `${projectName} Rust development`,
         image: "mcr.microsoft.com/devcontainers/rust:1",
-        features: {
-          "ghcr.io/devcontainers/features/node:1": {
-            version: context.toolchain.nodeLtsMajor.value,
-            pnpmVersion: pnpmVersion(context)
-          }
-        },
+        features: devcontainerNodeFeature({
+          nodeVersion: context.toolchain.nodeLtsMajor.value,
+          packageManagerPin: context.toolchain.packageManagerPin.value,
+        }),
         mounts: [
           "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
           "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
           "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume"
         ],
-        postCreateCommand: "rustup component add rustfmt clippy && corepack enable && pnpm install && cargo fetch",
         customizations: {
           vscode: {
             extensions: ["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]
