@@ -10,12 +10,9 @@ import { initVueAppProject } from "./vue-app.js";
 import { addPackage } from "./package-addition.js";
 import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
 import {
-  planPostCommands,
-  runPostCommands,
-  type PostCommand,
-  type PostCommandExecution,
-  type PostCommandPlan,
-} from "./post-commands.js";
+  planNextStepInstructions,
+  type NextStepInstruction,
+} from "./next-step-instructions.js";
 import {
   blueprintJsonSchema,
   builtInPresets,
@@ -39,7 +36,6 @@ type InitOptions = {
   yes: boolean;
   dryRun: boolean;
   json: boolean;
-  ready: boolean;
   scope?: string;
 };
 
@@ -64,7 +60,6 @@ function usage(): string {
     "  --name <name>    Package name to add",
     "  --scope <name>   Package scope for workspace package names",
     "  --yes            Accept defaults for non-interactive generation",
-    "  --ready          Run template-maintained Post Commands after writing files",
     "  --dry-run        Print the planned generation without writing files",
     "  --json           Print machine-readable output",
   ].join("\n");
@@ -109,7 +104,6 @@ function parseInitOptions(args: string[]): InitOptions {
   let yes = false;
   let dryRun = false;
   let json = false;
-  let ready = false;
   let scope: string | undefined;
 
   for (let index = 2; index < args.length; index += 1) {
@@ -122,11 +116,6 @@ function parseInitOptions(args: string[]): InitOptions {
 
     if (arg === "--dry-run") {
       dryRun = true;
-      continue;
-    }
-
-    if (arg === "--ready") {
-      ready = true;
       continue;
     }
 
@@ -162,7 +151,7 @@ function parseInitOptions(args: string[]): InitOptions {
     throw new Error("init requires a target directory");
   }
 
-  return { dir, preset, yes, dryRun, json, ready, scope };
+  return { dir, preset, yes, dryRun, json, scope };
 }
 
 function normalizeNpmScope(value: string): string {
@@ -248,30 +237,13 @@ function formatBlueprintSummary(targetDir: string, blueprint: ProjectBlueprint):
   return lines.join("\n");
 }
 
-function formatPostCommand(command: PostCommand): string {
-  return [command.command, ...command.args].join(" ");
-}
-
-function formatPostCommandPlan(commands: readonly PostCommand[]): string {
-  if (commands.length === 0) {
-    return ["Post Commands:", "  (none)"].join("\n");
-  }
-
-  return [
-    "Post Commands:",
-    ...commands.map((command) => `  ${command.label}: ${formatPostCommand(command)}`),
-  ].join("\n");
-}
-
 type InitJsonOutput = {
   command: "init";
   dryRun: boolean;
-  ready: boolean;
   targetDir: string;
   blueprint: ProjectBlueprint;
   toolchain?: ToolchainReport;
-  postCommands: PostCommandReport;
-  nextSteps?: string[];
+  nextSteps: readonly NextStepInstruction[];
 };
 
 type ToolchainReport = {
@@ -281,31 +253,11 @@ type ToolchainReport = {
   diagnostics: string[];
 };
 
-type PostCommandReport = {
-  planned: Array<{
-    id: string;
-    label: string;
-    command: string;
-    args: string[];
-    cwd: string;
-  }>;
-  run: Array<{ id: string; exitCode: number }>;
-  failed: Array<{ id: string; exitCode: number | null; error: string }>;
-  skipped: Array<{ id: string; reason: string }>;
-};
-
-function nextStepsForPreset(preset: PresetName): string[] {
-  if (preset === "rust-bin") {
-    return ["cd <target>", "./scripts/check"];
-  }
-
-  return ["cd <target>", "pnpm install", "pnpm run check"];
-}
-
 function formatNextSteps(targetDir: string, preset: PresetName): string {
+  const plan = planNextStepInstructions({ preset, targetDir });
   return [
-    "Next steps:",
-    ...nextStepsForPreset(preset).map((step) => `  ${step.replace("<target>", targetDir)}`),
+    "Next Step Instructions:",
+    ...plan.steps.map((step) => `  ${step.label}: ${step.display}`),
   ].join("\n");
 }
 
@@ -326,52 +278,6 @@ function formatToolchainReport(toolchain: ResolvedToolchainVersions): string {
     `  Package Manager Pin: ${toolchain.packageManagerPin.value}`,
     ...toolchain.diagnostics.map((diagnostic) => `  ${diagnostic}`),
   ].join("\n");
-}
-
-function postCommandReport(
-  planned: readonly PostCommand[],
-  executions: PostCommandExecution[],
-  skipped: Array<{ id: string; reason: string }>,
-): PostCommandReport {
-  return {
-    planned: planned.map((command) => ({
-      id: command.id,
-      label: command.label,
-      command: command.command,
-      args: [...command.args],
-      cwd: command.cwd,
-    })),
-    run: executions
-      .filter((execution) => execution.status === "run")
-      .map((execution) => ({
-        id: execution.command.id,
-        exitCode: execution.exitCode,
-      })),
-    failed: executions
-      .filter((execution) => execution.status === "failed")
-      .map((execution) => ({
-        id: execution.command.id,
-        exitCode: execution.exitCode,
-        error: execution.error,
-      })),
-    skipped,
-  };
-}
-
-function failedPostCommand(
-  executions: PostCommandExecution[],
-): Extract<PostCommandExecution, { status: "failed" }> | undefined {
-  return executions.find(
-    (execution): execution is Extract<PostCommandExecution, { status: "failed" }> =>
-      execution.status === "failed",
-  );
-}
-
-function skippedPostCommands(
-  commands: readonly PostCommand[],
-  reason: string,
-): Array<{ id: string; reason: string }> {
-  return commands.map((command) => ({ id: command.id, reason }));
 }
 
 function toolchainResolutionSourceFromEnv(): ToolchainResolutionSource | undefined {
@@ -441,21 +347,19 @@ async function generateInitProject(
 function printInitComplete(
   options: InitOptions,
   blueprint: ProjectBlueprint,
-  report: PostCommandReport,
   generationContext?: GenerationContext,
 ): void {
   const preset = blueprint.preset as PresetName;
+  const nextSteps = planNextStepInstructions({ preset, targetDir: options.dir }).steps;
 
   if (options.json) {
     printJson({
       command: "init",
       dryRun: false,
-      ready: options.ready,
       targetDir: options.dir,
       blueprint,
       toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
-      postCommands: report,
-      nextSteps: nextStepsForPreset(preset).map((step) => step.replace("<target>", options.dir)),
+      nextSteps,
     } satisfies InitJsonOutput);
     return;
   }
@@ -463,9 +367,6 @@ function printInitComplete(
   console.log(`Initialized ${options.preset} project in ${options.dir}`);
   if (generationContext) {
     console.log(formatToolchainReport(generationContext.toolchain));
-  }
-  if (options.ready) {
-    console.log(formatPostCommandPlan(report.planned));
   }
   console.log(formatNextSteps(options.dir, preset));
 }
@@ -590,31 +491,25 @@ async function main(args: string[]): Promise<void> {
 
     if (options.dryRun) {
       const generationContext = await generationContextForInit(options, blueprint);
-      const postCommandPlan = planPostCommands({
+      const nextSteps = planNextStepInstructions({
         preset: blueprint.preset as PresetName,
         targetDir: options.dir,
-        packageManagerPin: generationContext?.toolchain.packageManagerPin.value,
-      });
+      }).steps;
 
       if (options.json) {
         printJson({
           command: "init",
           dryRun: true,
-          ready: options.ready,
           targetDir: options.dir,
           blueprint,
           toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
-          postCommands: postCommandReport(
-            postCommandPlan.commands,
-            [],
-            skippedPostCommands(postCommandPlan.commands, "dry-run"),
-          ),
+          nextSteps,
         } satisfies InitJsonOutput);
         return;
       }
 
       console.log(formatBlueprintSummary(options.dir, blueprint));
-      console.log(formatPostCommandPlan(postCommandPlan.commands));
+      console.log(formatNextSteps(options.dir, blueprint.preset as PresetName));
       return;
     }
 
@@ -627,29 +522,8 @@ async function main(args: string[]): Promise<void> {
     }
 
     const generationContext = await generationContextForInit(options, blueprint);
-    const postCommandPlan: PostCommandPlan = planPostCommands({
-      preset: blueprint.preset as PresetName,
-      targetDir: options.dir,
-      packageManagerPin: generationContext?.toolchain.packageManagerPin.value,
-    });
     await generateInitProject(options, generationContext);
-    const executions = options.ready ? await runPostCommands({ plan: postCommandPlan }) : [];
-    const failedExecution = failedPostCommand(executions);
-    printInitComplete(
-      options,
-      blueprint,
-      postCommandReport(
-        postCommandPlan.commands,
-        executions,
-        options.ready
-          ? []
-          : skippedPostCommands(postCommandPlan.commands, "ready-mode-not-requested"),
-      ),
-      generationContext,
-    );
-    if (failedExecution) {
-      throw new Error(failedExecution.error);
-    }
+    printInitComplete(options, blueprint, generationContext);
     return;
   }
 

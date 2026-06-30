@@ -469,13 +469,12 @@ describe("template init", () => {
     expect(result.stdout).toContain("Preset: ts-lib");
     expect(result.stdout).toContain("Target:");
     expect(result.stdout).toContain(projectDir);
-    expect(result.stdout).toContain("Post Commands:");
-    expect(result.stdout).toContain("Enable Corepack");
-    expect(result.stdout).toContain("corepack enable");
-    expect(result.stdout).toContain("Refresh Package Manager Pin and Install Dependencies");
-    expect(result.stdout).toContain("corepack use pnpm@10.0.0");
-    expect(result.stdout).not.toContain("Install dependencies: pnpm install");
-    expect(result.stdout).toContain("pnpm run fix");
+    expect(result.stdout).toContain("Next Step Instructions:");
+    expect(result.stdout).toContain("Install dependencies: pnpm install");
+    expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
+    expect(result.stdout).toContain("Run Root Check: pnpm run check");
+    expect(result.stdout).not.toContain("Post Commands:");
+    expect(result.stdout).not.toContain("corepack");
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -505,26 +504,19 @@ describe("template init", () => {
     const output = JSON.parse(result.stdout) as {
       command: string;
       dryRun: boolean;
-      ready: boolean;
       targetDir: string;
       blueprint: {
         preset: string;
         packageManager: string;
         packages: Array<{ name: string; path: string }>;
       };
-      postCommands: {
-        planned: Array<{ id: string }>;
-        run: Array<{ id: string }>;
-        failed: Array<{ id: string }>;
-        skipped: Array<{ id: string; reason: string }>;
-      };
+      nextSteps: Array<{ id: string; display: string; command: string; args: string[]; cwd: string }>;
     };
 
     expect(output).toEqual(
       expect.objectContaining({
         command: "init",
         dryRun: true,
-        ready: false,
         targetDir: projectDir,
       }),
     );
@@ -538,20 +530,31 @@ describe("template init", () => {
         ],
       }),
     );
-    expect(output.postCommands.planned.map((command) => command.id)).toEqual([
-      "node-enable-corepack",
-      "node-refresh-package-manager-pin",
-      "node-run-fix",
-      "vue-hono-install-playwright-browsers",
+    expect(output.nextSteps.map((step) => step.display)).toEqual([
+      `cd ${projectDir}`,
+      "pnpm install",
+      "pnpm run fix",
+      "pnpm --filter ./apps/web exec playwright install chromium",
+      "pnpm run check",
     ]);
-    expect(output.postCommands.run).toEqual([]);
-    expect(output.postCommands.failed).toEqual([]);
-    expect(output.postCommands.skipped).toEqual([
-      { id: "node-enable-corepack", reason: "dry-run" },
-      { id: "node-refresh-package-manager-pin", reason: "dry-run" },
-      { id: "node-run-fix", reason: "dry-run" },
-      { id: "vue-hono-install-playwright-browsers", reason: "dry-run" },
-    ]);
+    expect(output.nextSteps[2]).toEqual(
+      expect.objectContaining({
+        id: "run-fix",
+        command: "pnpm",
+        args: ["run", "fix"],
+        cwd: projectDir,
+      }),
+    );
+    expect(output.nextSteps[3]).toEqual(
+      expect.objectContaining({
+        id: "install-web-playwright-browsers",
+        command: "pnpm",
+        args: ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+        cwd: projectDir,
+      }),
+    );
+    expect(output).not.toHaveProperty("postCommands");
+    expect(output).not.toHaveProperty("ready");
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -578,7 +581,6 @@ describe("template init", () => {
     const output = JSON.parse(result.stdout) as {
       command: string;
       dryRun: boolean;
-      ready: boolean;
       targetDir: string;
       blueprint: { preset: string; packageManager: string };
       toolchain: {
@@ -587,47 +589,64 @@ describe("template init", () => {
         source: string;
         diagnostics: string[];
       };
-      postCommands: {
-        planned: Array<{ id: string }>;
-        run: Array<{ id: string }>;
-        failed: Array<{ id: string }>;
-        skipped: Array<{ id: string; reason: string }>;
-      };
-      nextSteps: string[];
+      nextSteps: Array<{ id: string; display: string; command: string; args: string[]; cwd: string }>;
     };
 
     expect(output).toEqual(
       expect.objectContaining({
         command: "init",
         dryRun: false,
-        ready: false,
         targetDir: projectDir,
         blueprint: expect.objectContaining({
           preset: "ts-lib",
           packageManager: "pnpm",
         }),
-        nextSteps: [`cd ${projectDir}`, "pnpm install", "pnpm run check"],
       }),
     );
+    expect(output.nextSteps).toEqual([
+      expect.objectContaining({
+        id: "enter-project",
+        display: `cd ${projectDir}`,
+        command: "cd",
+        args: [projectDir],
+        cwd: ".",
+      }),
+      expect.objectContaining({
+        id: "install-dependencies",
+        display: "pnpm install",
+        command: "pnpm",
+        args: ["install"],
+        cwd: projectDir,
+      }),
+      expect.objectContaining({
+        id: "run-fix",
+        display: "pnpm run fix",
+        command: "pnpm",
+        args: ["run", "fix"],
+        cwd: projectDir,
+      }),
+      expect.objectContaining({
+        id: "run-root-check",
+        display: "pnpm run check",
+        command: "pnpm",
+        args: ["run", "check"],
+        cwd: projectDir,
+      }),
+    ]);
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "22",
       packageManagerPin: "pnpm@10.0.0",
       source: "online",
       diagnostics: [],
     });
-    expect(output.postCommands.planned.map((command) => command.id)).toEqual([
-      "node-enable-corepack",
-      "node-refresh-package-manager-pin",
-      "node-run-fix",
-    ]);
-    expect(output.postCommands.run).toEqual([]);
-    expect(output.postCommands.failed).toEqual([]);
-    expect(output.postCommands.skipped).toEqual([
-      { id: "node-enable-corepack", reason: "ready-mode-not-requested" },
-      { id: "node-refresh-package-manager-pin", reason: "ready-mode-not-requested" },
-      { id: "node-run-fix", reason: "ready-mode-not-requested" },
-    ]);
+    expect(output).not.toHaveProperty("postCommands");
+    expect(output).not.toHaveProperty("ready");
     await stat(path.join(projectDir, "package.json"));
+    expect(
+      await readJson<Record<string, unknown>>(
+        path.join(projectDir, ".project-kit", "generated-by.json"),
+      ),
+    ).not.toHaveProperty("nextSteps");
     await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -720,7 +739,7 @@ describe("template init", () => {
     expect(result.stdout).toContain("Using bundled fallback toolchain metadata");
   });
 
-  it("runs planned Post Commands only when ready mode is requested", async () => {
+  it("rejects ready mode without executing generated project commands", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-"));
     const projectDir = path.join(workspace, "demo-lib");
     const fakeBin = path.join(workspace, "bin");
@@ -779,130 +798,36 @@ describe("template init", () => {
           PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
           ...toolchainEnvWithPnpm("10.2.0"),
         },
-      },
-    );
-
-    const output = JSON.parse(result.stdout) as {
-      postCommands: {
-        planned: Array<{
-          id: string;
-          label: string;
-          command: string;
-          args: string[];
-          cwd: string;
-        }>;
-        run: Array<{ id: string; exitCode: number }>;
-        failed: Array<{ id: string }>;
-        skipped: Array<{ id: string; reason: string }>;
-      };
-    };
-
-    expect(output.postCommands.planned).toEqual([
-      {
-        id: "node-enable-corepack",
-        label: "Enable Corepack",
-        command: "corepack",
-        args: ["enable"],
-        cwd: projectDir,
-      },
-      {
-        id: "node-refresh-package-manager-pin",
-        label: "Refresh Package Manager Pin and Install Dependencies",
-        command: "corepack",
-        args: ["use", "pnpm@10.2.0"],
-        cwd: projectDir,
-      },
-      {
-        id: "node-run-fix",
-        label: "Run Fix Command",
-        command: "pnpm",
-        args: ["run", "fix"],
-        cwd: projectDir,
-      },
-    ]);
-    expect(output.postCommands.run).toEqual([
-      { id: "node-enable-corepack", exitCode: 0 },
-      { id: "node-refresh-package-manager-pin", exitCode: 0 },
-      { id: "node-run-fix", exitCode: 0 },
-    ]);
-    expect(output.postCommands.failed).toEqual([]);
-    expect(output.postCommands.skipped).toEqual([]);
-    await stat(path.join(projectDir, "pnpm-lock.yaml"));
-    await stat(path.join(projectDir, "READY_FIX_RAN"));
-    expect(
-      (await readFile(path.join(projectDir, "ready-command-log.jsonl"), "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as string[]),
-    ).toEqual([["run", "fix"]]);
-    expect(
-      (await readJson<{ packageManager: string }>(path.join(projectDir, "package.json")))
-        .packageManager,
-    ).toBe("pnpm@10.2.0+sha224.fake-corepack-hash");
-    expect(
-      await readJson<{ packageManager: string }>(
-        path.join(projectDir, ".project-kit", "blueprint.json"),
-      ),
-    ).toEqual(expect.objectContaining({ packageManager: "pnpm" }));
-    expect(
-      await readJson<{
-        packageManager?: string;
-        toolchain: { packageManagerPin: string };
-      }>(path.join(projectDir, ".project-kit", "generated-by.json")),
-    ).toEqual(
-      expect.objectContaining({
-        toolchain: expect.objectContaining({ packageManagerPin: "pnpm@10.2.0" }),
-      }),
-    );
-  });
-
-  it("fails ready mode clearly when a planned Post Command fails", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-failure-"));
-    const projectDir = path.join(workspace, "demo-lib");
-    const fakeBin = path.join(workspace, "bin");
-    const fakeCorepack = path.join(fakeBin, "corepack");
-    await mkdir(fakeBin);
-    await writeExecutable(fakeCorepack, "#!/bin/sh\necho planned corepack failed >&2\nexit 7\n");
-
-    const result = await execa(
-      process.execPath,
-      [
-        "--import",
-        "tsx",
-        path.join(repoRoot, "src/cli.ts"),
-        "init",
-        projectDir,
-        "--preset",
-        "ts-lib",
-        "--ready",
-        "--json",
-        "--yes",
-      ],
-      {
-        cwd: repoRoot,
-        env: { PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` },
         reject: false,
       },
     );
 
     expect(result.exitCode).toBe(1);
-    const output = JSON.parse(result.stdout) as {
-      postCommands: {
-        run: Array<{ id: string }>;
-        failed: Array<{ id: string; exitCode: number | null; error: string }>;
-        skipped: Array<{ id: string; reason: string }>;
-      };
-    };
-    expect(output.postCommands.run).toEqual([]);
-    expect(output.postCommands.failed).toEqual([
+    expect(result.stderr).toContain("Unknown option: --ready");
+    expect(result.stderr).not.toContain("Run template-maintained Post Commands");
+    await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not advertise ready mode in help", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-failure-"));
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "--help",
+      ],
       {
-        id: "node-enable-corepack",
-        exitCode: 7,
-        error: expect.stringContaining("node-enable-corepack"),
+        cwd: repoRoot
       },
-    ]);
-    expect(output.postCommands.skipped).toEqual([]);
-    expect(result.stderr).toContain("Post Command failed");
+    );
+
+    expect(result.stdout).toContain("Usage:");
+    expect(result.stdout).not.toContain("--ready");
+    expect(result.stdout).not.toContain("Post Commands");
+    await expect(stat(workspace)).resolves.toBeDefined();
   });
 
   it("fails clearly in non-interactive init without --yes", async () => {
@@ -1052,10 +977,60 @@ describe("template init", () => {
     );
 
     expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
-    expect(result.stdout).toContain("Next steps:");
+    expect(result.stdout).toContain("Next Step Instructions:");
     expect(result.stdout).toContain(`cd ${projectDir}`);
     expect(result.stdout).toContain("pnpm install");
+    expect(result.stdout).toContain("pnpm run fix");
     expect(result.stdout).toContain("pnpm run check");
+    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("prints fix next steps after generation without executing the fix command", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-next-step-fix-"));
+    const projectDir = path.join(workspace, "demo-lib");
+    const fakeBin = path.join(workspace, "bin");
+    const commandLog = path.join(workspace, "commands.jsonl");
+
+    await mkdir(fakeBin);
+    await writeExecutable(
+      path.join(fakeBin, "pnpm"),
+      [
+        "#!/usr/bin/env node",
+        'import { appendFileSync } from "node:fs";',
+        "",
+        "appendFileSync(",
+        `  ${JSON.stringify(commandLog)},`,
+        "  JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }) + '\\n'",
+        ");",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await execa(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--yes",
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+          ...toolchainEnvWithPnpm("10.2.0"),
+        },
+      },
+    );
+
+    expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
+    await expect(readFile(commandLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
       code: "ENOENT",
     });

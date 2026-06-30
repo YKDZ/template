@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 
 import { builtInPresets, type BuiltInPreset } from "../src/declarations.js";
+import { planNextStepInstructions } from "../src/next-step-instructions.js";
 
 type SupportedFixturePreset = Extract<
   BuiltInPreset["name"],
@@ -67,40 +68,27 @@ async function checkNodePreset(
   presetName: Exclude<SupportedFixturePreset, "rust-bin">,
   projectDir: string,
 ): Promise<void> {
-  // Fixture Checks follow generated CI setup so browser dependencies stay covered
-  // without making local checks run full ready-mode browser installs differently.
-  await run("corepack", ["enable"], projectDir);
-  await run("pnpm", ["install"], projectDir);
-
-  if (presetName === "vue-app") {
-    await run(
-      "pnpm",
-      ["exec", "playwright", "install", "--with-deps", "chromium"],
-      projectDir,
-    );
-  }
-
-  if (presetName === "vue-hono-app") {
-    await run(
-      "pnpm",
-      [
-        "--filter",
-        "./apps/web",
-        "exec",
-        "playwright",
-        "install",
-        "--with-deps",
-        "chromium",
-      ],
-      projectDir,
-    );
-  }
-
-  await run("pnpm", ["run", "check"], projectDir, { CI: "1" });
+  await runMachineVerifiableNextSteps(presetName, projectDir);
 }
 
 async function checkRustPreset(projectDir: string): Promise<void> {
-  await run("./scripts/check", [], projectDir);
+  await runMachineVerifiableNextSteps("rust-bin", projectDir);
+}
+
+async function runMachineVerifiableNextSteps(
+  presetName: SupportedFixturePreset,
+  projectDir: string,
+): Promise<void> {
+  const plan = planNextStepInstructions({ preset: presetName, targetDir: projectDir });
+
+  for (const step of plan.steps) {
+    if (!step.machineVerifiable || step.kind !== "command") {
+      continue;
+    }
+
+    const env = step.id === "run-root-check" ? { CI: "1" } : undefined;
+    await run(step.command, [...step.args], step.cwd, env);
+  }
 }
 
 async function checkPreset(

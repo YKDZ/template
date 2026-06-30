@@ -26,7 +26,7 @@ async function writeExecutable(
 }
 
 describe("fixture checks", () => {
-  it("runs generated root checks with CI-equivalent Playwright setup", async () => {
+  it("runs machine-verifiable Next Step Instructions for generated repositories", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-fixture-test-"),
     );
@@ -134,6 +134,32 @@ describe("fixture checks", () => {
         "",
       ].join("\n"),
     );
+    await writeExecutable(
+      path.join(binDir, "sh"),
+      [
+        "#!/usr/bin/env node",
+        'import { appendFileSync } from "node:fs";',
+        'import { spawnSync } from "node:child_process";',
+        "",
+        "appendFileSync(",
+        "  process.env.FIXTURE_COMMAND_LOG,",
+        "  JSON.stringify({",
+        "    command: 'sh',",
+        "    args: process.argv.slice(2),",
+        "    cwd: process.cwd(),",
+        "    ci: process.env.CI ?? null",
+        "  }) + '\\n'",
+        ");",
+        "",
+        "const result = spawnSync('/bin/sh', process.argv.slice(2), {",
+        "  cwd: process.cwd(),",
+        "  env: process.env,",
+        "  stdio: 'inherit'",
+        "});",
+        "process.exit(result.status ?? 1);",
+        "",
+      ].join("\n"),
+    );
 
     await execa(realPnpm, ["exec", "tsx", "scripts/check-fixtures.ts"], {
       cwd: repoRoot,
@@ -170,15 +196,12 @@ describe("fixture checks", () => {
 
     expect(officialFetches).toBe("");
 
-    expect(records).toContainEqual(
-      expect.objectContaining({
-        command: "corepack",
-        args: ["enable"],
-      }),
+    expect(records).not.toContainEqual(
+      expect.objectContaining({ command: "corepack" }),
     );
     expect(pnpmRecords).toContainEqual(
       expect.objectContaining({
-        args: ["exec", "playwright", "install", "--with-deps", "chromium"],
+        args: ["exec", "playwright", "install", "chromium"],
       }),
     );
     expect(pnpmRecords).toContainEqual(
@@ -189,10 +212,30 @@ describe("fixture checks", () => {
           "exec",
           "playwright",
           "install",
-          "--with-deps",
           "chromium",
         ],
       }),
+    );
+
+    const generatedFixes = pnpmRecords.filter(
+      (record) => record.args[0] === "run" && record.args[1] === "fix",
+    );
+    expect(generatedFixes).toHaveLength(4);
+    expect(generatedFixes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cwd: expect.stringContaining("fixture-ts-lib"),
+        }),
+        expect.objectContaining({
+          cwd: expect.stringContaining("fixture-hono-api"),
+        }),
+        expect.objectContaining({
+          cwd: expect.stringContaining("fixture-vue-app"),
+        }),
+        expect.objectContaining({
+          cwd: expect.stringContaining("fixture-vue-hono-app"),
+        }),
+      ]),
     );
 
     const generatedRootChecks = pnpmRecords.filter(
@@ -220,13 +263,22 @@ describe("fixture checks", () => {
       ]),
     );
 
+    expect(pnpmRecords).not.toContainEqual(
+      expect.objectContaining({
+        cwd: expect.stringContaining("fixture-rust-bin"),
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        command: "sh",
+        args: expect.arrayContaining(["./scripts/check"]),
+        cwd: expect.stringContaining("fixture-rust-bin"),
+      }),
+    );
+
     for (const generatedRootCheck of generatedRootChecks) {
       const projectRecords = records.filter(
         (record) => record.cwd === generatedRootCheck.cwd,
-      );
-      const corepackIndex = projectRecords.findIndex(
-        (record) =>
-          record.command === "corepack" && record.args.join(" ") === "enable",
       );
       const installIndex = projectRecords.findIndex(
         (record) =>
@@ -240,14 +292,14 @@ describe("fixture checks", () => {
         if (generatedRootCheck.cwd.includes("fixture-vue-app")) {
           return (
             record.args.join(" ") ===
-            "exec playwright install --with-deps chromium"
+            "exec playwright install chromium"
           );
         }
 
         if (generatedRootCheck.cwd.includes("fixture-vue-hono-app")) {
           return (
             record.args.join(" ") ===
-            "--filter ./apps/web exec playwright install --with-deps chromium"
+            "--filter ./apps/web exec playwright install chromium"
           );
         }
 
@@ -257,16 +309,20 @@ describe("fixture checks", () => {
         (record) =>
           record.command === "pnpm" && record.args.join(" ") === "run check",
       );
+      const fixIndex = projectRecords.findIndex(
+        (record) =>
+          record.command === "pnpm" && record.args.join(" ") === "run fix",
+      );
 
-      expect(corepackIndex).toBeGreaterThanOrEqual(0);
-      expect(installIndex).toBeGreaterThan(corepackIndex);
+      expect(installIndex).toBeGreaterThanOrEqual(0);
+      expect(fixIndex).toBeGreaterThan(installIndex);
       if (generatedRootCheck.cwd.includes("fixture-vue")) {
-        expect(playwrightIndex).toBeGreaterThan(installIndex);
+        expect(playwrightIndex).toBeGreaterThan(fixIndex);
         expect(checkIndex).toBeGreaterThan(playwrightIndex);
         continue;
       }
 
-      expect(checkIndex).toBeGreaterThan(installIndex);
+      expect(checkIndex).toBeGreaterThan(fixIndex);
     }
   }, 120_000);
 });
