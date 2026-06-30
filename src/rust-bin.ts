@@ -158,46 +158,14 @@ function operationsForRustBin(projectName: string): RenderOperation[] {
       }
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
       to: ".github/workflows/check.yml",
-      text: [
-        "name: Check",
-        "",
-        "on:",
-        "  pull_request:",
-        "  push:",
-        "    branches:",
-        "      - main",
-        "",
-        "jobs:",
-        "  check:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - uses: actions/checkout@v4",
-        "      - uses: dtolnay/rust-toolchain@stable",
-        "        with:",
-        "          components: rustfmt, clippy",
-        "      - uses: Swatinem/rust-cache@v2",
-        "      - run: ./scripts/check",
-        ""
-      ].join("\n")
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-      text: [
-        "version: 2",
-        "updates:",
-        "  - package-ecosystem: cargo",
-        "    directory: /",
-        "    schedule:",
-        "      interval: weekly",
-        "  - package-ecosystem: github-actions",
-        "    directory: /",
-        "    schedule:",
-        "      interval: weekly",
-        ""
-      ].join("\n")
     }
   ];
 }

@@ -31,8 +31,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run check:templates:shared-oxc && pnpm run check:fixtures",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:fixtures",
     "check:fixtures": "tsx scripts/check-fixtures.ts",
+    "check:templates:github-yaml": "tsx scripts/check-template-github-yaml.ts",
     "check:templates:shared-oxc": "pnpm --dir templates/shared/oxc run check",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -49,7 +50,8 @@
     "oxlint": "^1.71.0",
     "oxlint-tsgolint": "^0.23.0",
     "tsx": "^4.20.0",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": ">=22.0.0"

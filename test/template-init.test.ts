@@ -172,7 +172,7 @@ describe("template init", () => {
       }
       if (preset.name === "vue-hono-app") {
         expect(checkWorkflow).toContain(
-          "pnpm --filter @demo-vue-hono-app/web exec playwright install --with-deps chromium"
+          "pnpm --filter ./apps/web exec playwright install --with-deps chromium"
         );
         expect(devcontainer.postCreateCommand).toContain(
           "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium"
@@ -201,7 +201,7 @@ describe("template init", () => {
     );
 
     expect(checkWorkflow).toContain(
-      "pnpm --filter @demo-vue-hono-app/web exec playwright install --with-deps chromium"
+      "pnpm --filter ./apps/web exec playwright install --with-deps chromium"
     );
     expect(devcontainer.postCreateCommand).toContain(
       "pnpm --filter @demo-vue-hono-app/web exec playwright install chromium"
@@ -1149,7 +1149,7 @@ describe("template init", () => {
     });
     expect(checkWorkflow).not.toContain("cache: pnpm");
     expect(checkWorkflow).toContain(
-      "pnpm --filter @demo-fullstack/web exec playwright install --with-deps chromium"
+      "pnpm --filter ./apps/web exec playwright install --with-deps chromium"
     );
 
     const installCommand = checkWorkflow.match(
@@ -1205,7 +1205,7 @@ describe("template init", () => {
     expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
     expect(webApiClient).toContain('import type { AppType } from "@custom-scope/api"');
     expect(checkWorkflow).toContain(
-      "pnpm --filter @custom-scope/web exec playwright install --with-deps chromium"
+      "pnpm --filter ./apps/web exec playwright install --with-deps chromium"
     );
     expect(blueprint.packages).toEqual([
       { name: "@custom-scope/web", path: "apps/web" },

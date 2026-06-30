@@ -32,13 +32,21 @@ const packageFiles = [
   "templates/hono-api/src/server.ts",
   "templates/hono-api/test/app.test.ts",
   "templates/hono-api/vitest.config.ts",
+  "templates/hono-api/.github/dependabot.yml",
+  "templates/hono-api/.github/workflows/check.yml",
+  "templates/rust-bin/.github/dependabot.yml",
+  "templates/rust-bin/.github/workflows/check.yml",
   "templates/rust-bin/src/main.rs",
   "templates/shared/oxc/node/oxlint.config.ts",
   "templates/shared/oxc/oxfmt.config.ts",
   "templates/shared/oxc/package.json",
   "templates/shared/oxc/tsconfig.json",
   "templates/shared/oxc/vue/oxlint.config.ts",
+  "templates/ts-lib/.github/dependabot.yml",
+  "templates/ts-lib/.github/workflows/check.yml",
   "templates/ts-lib/src/index.ts",
+  "templates/vue-app/.github/dependabot.yml",
+  "templates/vue-app/.github/workflows/check.yml",
   "templates/vue-app/env.d.ts",
   "templates/vue-app/index.html",
   "templates/vue-app/playwright.config.ts",
@@ -55,6 +63,8 @@ const packageFiles = [
   "templates/vue-hono-app/api/src/server.ts",
   "templates/vue-hono-app/api/test/app.test.ts",
   "templates/vue-hono-app/api/vitest.config.ts",
+  "templates/vue-hono-app/.github/dependabot.yml",
+  "templates/vue-hono-app/.github/workflows/check.yml",
   "templates/vue-hono-app/web/env.d.ts",
   "templates/vue-hono-app/web/index.html",
   "templates/vue-hono-app/web/playwright.config.ts",
@@ -131,11 +141,21 @@ describe("package publishing", () => {
     expect(tarballContents.stdout.split("\n")).toContain("package/README.md");
     expect(tarballContents.stdout.split("\n")).toEqual(
       expect.arrayContaining([
+        "package/templates/hono-api/.github/dependabot.yml",
+        "package/templates/hono-api/.github/workflows/check.yml",
+        "package/templates/rust-bin/.github/dependabot.yml",
+        "package/templates/rust-bin/.github/workflows/check.yml",
         "package/templates/shared/oxc/node/oxlint.config.ts",
         "package/templates/shared/oxc/vue/oxlint.config.ts",
         "package/templates/shared/oxc/oxfmt.config.ts",
         "package/templates/shared/oxc/package.json",
-        "package/templates/shared/oxc/tsconfig.json"
+        "package/templates/shared/oxc/tsconfig.json",
+        "package/templates/ts-lib/.github/dependabot.yml",
+        "package/templates/ts-lib/.github/workflows/check.yml",
+        "package/templates/vue-app/.github/dependabot.yml",
+        "package/templates/vue-app/.github/workflows/check.yml",
+        "package/templates/vue-hono-app/.github/dependabot.yml",
+        "package/templates/vue-hono-app/.github/workflows/check.yml"
       ])
     );
     expect(tarballContents.stdout.split("\n")).not.toContain(

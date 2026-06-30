@@ -261,50 +261,14 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       text: ["node_modules", "dist", "playwright-report", "test-results", ".env", ""].join("\n")
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
       to: ".github/workflows/check.yml",
-      text: [
-        "name: Check",
-        "",
-        "on:",
-        "  pull_request:",
-        "  push:",
-        "    branches:",
-        "      - main",
-        "",
-        "jobs:",
-        "  check:",
-        "    runs-on: ubuntu-latest",
-        "    steps:",
-        "      - uses: actions/checkout@v4",
-        "      - uses: pnpm/action-setup@v4",
-        "        with:",
-        "          version: 10.0.0",
-        "      - uses: actions/setup-node@v4",
-        "        with:",
-        "          node-version: 22",
-        "      - run: pnpm install",
-        `      - run: pnpm ${webFilter} exec playwright install --with-deps chromium`,
-        "      - run: pnpm run check",
-        ""
-      ].join("\n")
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-      text: [
-        "version: 2",
-        "updates:",
-        "  - package-ecosystem: npm",
-        "    directory: /",
-        "    schedule:",
-        "      interval: weekly",
-        "  - package-ecosystem: github-actions",
-        "    directory: /",
-        "    schedule:",
-        "      interval: weekly",
-        ""
-      ].join("\n")
     },
     { kind: "writeJson", to: "apps/api/package.json", value: apiPackageJson(packageScope) },
     {

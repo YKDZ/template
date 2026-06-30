@@ -62,4 +62,24 @@ describe("Project Kit Root Check", () => {
       cwd: repoRoot
     });
   });
+
+  it("runs direct GitHub YAML template source checks from Root Check", async () => {
+    const rootPackageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8")
+    ) as { scripts: Record<string, string> };
+
+    expect(rootPackageJson.scripts).toHaveProperty(
+      "check:templates:github-yaml"
+    );
+    expect(rootPackageJson.scripts.check).toContain(
+      "pnpm run check:templates:github-yaml"
+    );
+    expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
+      "tsx scripts/check-template-github-yaml.ts"
+    );
+
+    await execa("pnpm", ["run", "check:templates:github-yaml"], {
+      cwd: repoRoot
+    });
+  });
 });
