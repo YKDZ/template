@@ -6,15 +6,15 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
-import { builtInPresets, type BuiltInPreset } from "../src/declarations.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { planNextStepInstructions } from "../src/next-step-instructions.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import {
+  builtInPresetProjections,
+  findBuiltInPresetProjection,
+} from "../templates/registry.js";
 
-type SupportedFixturePreset = Extract<
-  BuiltInPreset["name"],
-  "ts-lib" | "hono-api" | "vue-app" | "vue-hono-app" | "rust-bin"
->;
+type SupportedFixturePreset =
+  (typeof builtInPresetProjections)[number]["metadata"]["name"];
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,9 +26,9 @@ const deterministicToolchainEnv = {
 };
 
 function supportedFixturePresets(): SupportedFixturePreset[] {
-  return builtInPresets
-    .filter((preset) => preset.generation === "supported")
-    .map((preset) => preset.name as SupportedFixturePreset);
+  return builtInPresetProjections
+    .filter((projection) => projection.metadata.generation === "supported")
+    .map((projection) => projection.metadata.name);
 }
 
 async function run(
@@ -64,17 +64,6 @@ async function generatePreset(
   );
 
   return projectDir;
-}
-
-async function checkNodePreset(
-  presetName: Exclude<SupportedFixturePreset, "rust-bin">,
-  projectDir: string,
-): Promise<void> {
-  await runMachineVerifiableNextSteps(presetName, projectDir);
-}
-
-async function checkRustPreset(projectDir: string): Promise<void> {
-  await runMachineVerifiableNextSteps("rust-bin", projectDir);
 }
 
 async function runMachineVerifiableNextSteps(
@@ -123,13 +112,7 @@ async function checkPreset(
 ): Promise<void> {
   console.log(`\n== ${presetName} ==`);
   const projectDir = await generatePreset(presetName, workspace);
-
-  if (presetName === "rust-bin") {
-    await checkRustPreset(projectDir);
-    return;
-  }
-
-  await checkNodePreset(presetName, projectDir);
+  await runMachineVerifiableNextSteps(presetName, projectDir);
 }
 
 async function main(): Promise<void> {

@@ -5,8 +5,13 @@ import { fileURLToPath } from "node:url";
 
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 
-import { builtInPresets, type PresetName } from "../src/declarations.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import {
+  builtInPresetProjections,
+  findBuiltInPresetProjection,
+} from "../templates/registry.js";
+
+type SupportedPresetName =
+  (typeof builtInPresetProjections)[number]["metadata"]["name"];
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -151,13 +156,17 @@ function presetNameFromRelativePath(relativePath: string): string | undefined {
   return relativePath.match(/^templates\/([^/]+)\//)?.[1];
 }
 
-function isSupportedPresetName(presetName: string): presetName is PresetName {
-  return builtInPresets.some(
-    (preset) => preset.name === presetName && preset.generation === "supported",
+function isSupportedPresetName(
+  presetName: string,
+): presetName is SupportedPresetName {
+  return builtInPresetProjections.some(
+    (projection) =>
+      projection.metadata.name === presetName &&
+      projection.metadata.generation === "supported",
   );
 }
 
-function projectGithubCheckWorkflow(presetName: PresetName): string {
+function projectGithubCheckWorkflow(presetName: SupportedPresetName): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
   const projectedWorkflow = projectionPlan?.operations.find(
     (operation) =>
@@ -170,7 +179,7 @@ function projectGithubCheckWorkflow(presetName: PresetName): string {
     : missingProjectedGithubTemplate(presetName, "workflow");
 }
 
-function projectDependabotTemplate(presetName: PresetName): string {
+function projectDependabotTemplate(presetName: SupportedPresetName): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
   const projectedDependabot = projectionPlan?.operations.find(
     (operation) =>
@@ -184,7 +193,7 @@ function projectDependabotTemplate(presetName: PresetName): string {
 }
 
 function missingProjectedGithubTemplate(
-  presetName: PresetName,
+  presetName: SupportedPresetName,
   kind: "workflow" | "dependabot",
 ): never {
   throw new Error(
@@ -192,7 +201,7 @@ function missingProjectedGithubTemplate(
   );
 }
 
-function projectThroughPresetProjection(presetName: PresetName) {
+function projectThroughPresetProjection(presetName: SupportedPresetName) {
   const projection = findBuiltInPresetProjection(presetName);
 
   if (!projection) {
@@ -335,9 +344,9 @@ export async function checkTemplateGithubYaml(
   const templatesRoot = options.templatesRoot ?? defaultTemplatesRoot;
   const supportedPresetNames =
     options.supportedPresetNames ??
-    builtInPresets
-      .filter((preset) => preset.generation === "supported")
-      .map((preset) => preset.name);
+    builtInPresetProjections
+      .filter((projection) => projection.metadata.generation === "supported")
+      .map((projection) => projection.metadata.name);
   const templateFiles = await listGithubYamlTemplates(templatesRoot);
 
   if (templateFiles.length === 0) {

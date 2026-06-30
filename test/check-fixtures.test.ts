@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
+import { builtInPresetProjections } from "../templates/registry.js";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -16,6 +18,10 @@ type CommandRecord = {
   cwd: string;
   ci: string | null;
 };
+
+const supportedPresetNames = builtInPresetProjections
+  .filter((projection) => projection.metadata.generation === "supported")
+  .map((projection) => projection.metadata.name);
 
 async function writeExecutable(
   filePath: string,
@@ -220,54 +226,30 @@ describe("fixture checks", () => {
     const generatedFixes = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "fix",
     );
-    expect(generatedFixes).toHaveLength(5);
+    expect(generatedFixes).toHaveLength(supportedPresetNames.length);
     expect(generatedFixes).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          cwd: expect.stringContaining("fixture-ts-lib"),
-        }),
-        expect.objectContaining({
-          cwd: expect.stringContaining("fixture-hono-api"),
-        }),
-        expect.objectContaining({
-          cwd: expect.stringContaining("fixture-vue-app"),
-        }),
-        expect.objectContaining({
-          cwd: expect.stringContaining("fixture-vue-hono-app"),
-        }),
-        expect.objectContaining({
-          cwd: expect.stringContaining("fixture-rust-bin"),
-        }),
-      ]),
+      expect.arrayContaining(
+        supportedPresetNames.map((presetName) =>
+          expect.objectContaining({
+            cwd: expect.stringContaining(`fixture-${presetName}`),
+          }),
+        ),
+      ),
     );
 
     const generatedRootChecks = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "check",
     );
-    expect(generatedRootChecks).toHaveLength(5);
+    expect(generatedRootChecks).toHaveLength(supportedPresetNames.length);
     expect(generatedRootChecks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          ci: "1",
-          cwd: expect.stringContaining("fixture-ts-lib"),
-        }),
-        expect.objectContaining({
-          ci: "1",
-          cwd: expect.stringContaining("fixture-hono-api"),
-        }),
-        expect.objectContaining({
-          ci: "1",
-          cwd: expect.stringContaining("fixture-vue-app"),
-        }),
-        expect.objectContaining({
-          ci: "1",
-          cwd: expect.stringContaining("fixture-vue-hono-app"),
-        }),
-        expect.objectContaining({
-          ci: "1",
-          cwd: expect.stringContaining("fixture-rust-bin"),
-        }),
-      ]),
+      expect.arrayContaining(
+        supportedPresetNames.map((presetName) =>
+          expect.objectContaining({
+            ci: "1",
+            cwd: expect.stringContaining(`fixture-${presetName}`),
+          }),
+        ),
+      ),
     );
 
     expect(records).not.toContainEqual(

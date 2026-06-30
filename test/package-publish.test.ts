@@ -13,6 +13,11 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
+import { assembleGenerationContext } from "../src/generation-context.js";
+import type { PresetProjection } from "../src/preset-projection.js";
+import type { CopyFileOperation } from "../src/renderer.js";
+import { builtInPresetProjections } from "../templates/registry.js";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -33,86 +38,132 @@ function jsonDataUrl(value: unknown): string {
   return `data:application/json,${encodeURIComponent(JSON.stringify(value))}`;
 }
 
-const packageFiles = [
+const packageRootFiles = [
   ".npmignore",
   "LICENSE",
   "README.md",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
-  "src/cli.ts",
-  "src/declarations.ts",
-  "src/devcontainer.ts",
-  "src/generation-context.ts",
-  "src/module-graph.ts",
-  "src/next-step-instructions.ts",
-  "src/package-addition.ts",
-  "src/preset-projection.ts",
-  "src/project-github.ts",
-  "src/renderer.ts",
-  "src/runtime-paths.ts",
-  "src/toolchain-resolution.ts",
-  "templates/hono-api/projection.ts",
-  "templates/hono-api/src/app.ts",
-  "templates/hono-api/src/server.ts",
-  "templates/hono-api/test/app.test.ts",
-  "templates/hono-api/vitest.config.ts",
-  "templates/hono-api/.github/dependabot.yml",
-  "templates/hono-api/.github/workflows/check.yml",
-  "templates/rust-bin/.github/dependabot.yml",
-  "templates/rust-bin/.github/workflows/check.yml",
-  "templates/rust-bin/projection.ts",
-  "templates/rust-bin/src/main.rs",
-  "templates/shared/oxc/node/oxlint.config.ts",
-  "templates/shared/oxc/oxfmt.config.ts",
-  "templates/shared/oxc/tsconfig.json",
-  "templates/shared/oxc/vue/oxlint.config.ts",
-  "templates/projection-plans.ts",
-  "templates/registry.ts",
-  "templates/ts-lib/.github/dependabot.yml",
-  "templates/ts-lib/.github/workflows/check.yml",
-  "templates/ts-lib/projection.ts",
-  "templates/ts-lib/src/index.ts",
-  "templates/vue-app/.github/dependabot.yml",
-  "templates/vue-app/.github/workflows/check.yml",
-  "templates/vue-app/env.d.ts",
-  "templates/vue-app/index.html",
-  "templates/vue-app/playwright.config.ts",
-  "templates/vue-app/projection.ts",
-  "templates/vue-app/src/App.vue",
-  "templates/vue-app/src/main.ts",
-  "templates/vue-app/src/stores/counter.ts",
-  "templates/vue-app/src/style.css",
-  "templates/vue-app/test/app.test.ts",
-  "templates/vue-app/test/e2e/app.spec.ts",
-  "templates/vue-app/vite.config.ts",
-  "templates/vue-app/vitest.config.ts",
-  "templates/vue-hono-app/api/src/index.ts",
-  "templates/vue-hono-app/api/src/runtime.ts",
-  "templates/vue-hono-app/api/src/server.ts",
-  "templates/vue-hono-app/api/test/app.test.ts",
-  "templates/vue-hono-app/api/vitest.config.ts",
-  "templates/vue-hono-app/.github/dependabot.yml",
-  "templates/vue-hono-app/.github/workflows/check.yml",
-  "templates/vue-hono-app/projection.ts",
-  "templates/vue-hono-app/web/env.d.ts",
-  "templates/vue-hono-app/web/index.html",
-  "templates/vue-hono-app/web/playwright.config.ts",
-  "templates/vue-hono-app/web/src/App.vue",
-  "templates/vue-hono-app/web/src/api.ts",
-  "templates/vue-hono-app/web/src/main.ts",
-  "templates/vue-hono-app/web/src/stores/counter.ts",
-  "templates/vue-hono-app/web/src/style.css",
-  "templates/vue-hono-app/web/test/app.test.ts",
-  "templates/vue-hono-app/web/test/e2e/app.spec.ts",
-  "templates/vue-hono-app/web/vite.config.ts",
-  "templates/vue-hono-app/web/vitest.config.ts",
   "tsconfig.build.json",
   "tsconfig.json",
 ];
 
+const supportedPresetProjections = builtInPresetProjections.filter(
+  (projection) => projection.metadata.generation === "supported",
+);
+
+async function listFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(entryPath)));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
+}
+
+async function runtimeSourceFiles(): Promise<string[]> {
+  const srcFiles = (await listFiles(path.join(repoRoot, "src")))
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => relativeRepoPath(file));
+  const projectionRuntimeFiles = supportedPresetProjections.map(
+    (projection) => `templates/${projection.metadata.name}/projection.ts`,
+  );
+
+  return [
+    ...srcFiles,
+    "templates/projection-plans.ts",
+    "templates/registry.ts",
+    ...projectionRuntimeFiles,
+  ];
+}
+
+function projectionPlanFor(projection: PresetProjection) {
+  const targetDir = path.join("/tmp", `generated-${projection.metadata.name}`);
+  const blueprint = projection.blueprint({ targetDir, scope: "acme" });
+
+  return projection.project(
+    assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+        source: "bundled-fallback",
+        diagnostics: [],
+      },
+    }),
+  );
+}
+
+function projectionTemplateSourceFiles(): string[] {
+  const files = new Set<string>();
+
+  for (const projection of supportedPresetProjections) {
+    const plan = projectionPlanFor(projection);
+    const sourceRoots: Record<string, string> = {
+      ...(plan.sourceRoots ?? {}),
+      default: plan.sourceRoot,
+    };
+
+    for (const operation of plan.operations) {
+      if (operation.kind !== "copyFile") {
+        continue;
+      }
+
+      const root = operation.sourceRoot
+        ? sourceRoots[operation.sourceRoot]
+        : sourceRoots.default;
+
+      if (!root) {
+        throw new Error(
+          `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
+        );
+      }
+
+      files.add(relativeRepoPath(path.join(root, operation.from)));
+    }
+  }
+
+  return [...files];
+}
+
+function checkedGithubTemplateFiles(): string[] {
+  return supportedPresetProjections.flatMap((projection) => [
+    `templates/${projection.metadata.name}/.github/dependabot.yml`,
+    `templates/${projection.metadata.name}/.github/workflows/check.yml`,
+  ]);
+}
+
+async function packageFiles(): Promise<string[]> {
+  return [
+    ...new Set([
+      ...packageRootFiles,
+      ...(await runtimeSourceFiles()),
+      ...projectionTemplateSourceFiles(),
+      ...checkedGithubTemplateFiles(),
+      "templates/shared/oxc/tsconfig.json",
+    ]),
+  ].sort();
+}
+
+function relativeRepoPath(filePath: string): string {
+  return path.relative(repoRoot, filePath).split(path.sep).join("/");
+}
+
 async function copyCleanPackage(targetDir: string): Promise<void> {
-  for (const file of packageFiles) {
+  for (const file of await packageFiles()) {
     const from = path.join(repoRoot, file);
     const to = path.join(targetDir, file);
 
@@ -121,12 +172,33 @@ async function copyCleanPackage(targetDir: string): Promise<void> {
   }
 }
 
-function checkedTemplatePackagePaths(): string[] {
-  return packageFiles
+async function checkedTemplatePackagePaths(): Promise<string[]> {
+  return (await packageFiles())
     .filter((file) => file.startsWith("templates/"))
     .filter((file) => file !== "templates/shared/oxc/tsconfig.json")
     .map((file) => `package/${file}`)
     .sort();
+}
+
+function compiledProjectionRuntimePackagePaths(): string[] {
+  return supportedPresetProjections.map(
+    (projection) =>
+      `package/dist/templates/${projection.metadata.name}/projection.js`,
+  );
+}
+
+function firstCopyOperation(projection: PresetProjection): CopyFileOperation {
+  const operation = projectionPlanFor(projection).operations.find(
+    (candidate) => candidate.kind === "copyFile",
+  );
+
+  if (!operation) {
+    throw new Error(
+      `Preset Projection ${projection.metadata.name} does not copy template source`,
+    );
+  }
+
+  return operation;
 }
 
 describe("package publishing", () => {
@@ -186,17 +258,8 @@ describe("package publishing", () => {
     expect(packedPaths).toContain("package/dist/templates/registry.js");
     expect(packedPaths).toContain("package/dist/templates/projection-plans.js");
     expect(packedPaths).not.toContain("package/dist/src/preset-registry.js");
-    expect(packedPaths).toContain(
-      "package/dist/templates/ts-lib/projection.js",
-    );
-    expect(packedPaths).toContain(
-      "package/dist/templates/hono-api/projection.js",
-    );
-    expect(packedPaths).toContain(
-      "package/dist/templates/vue-app/projection.js",
-    );
-    expect(packedPaths).toContain(
-      "package/dist/templates/vue-hono-app/projection.js",
+    expect(packedPaths).toEqual(
+      expect.arrayContaining(compiledProjectionRuntimePackagePaths()),
     );
     expect(packedPaths).toContain("package/dist/src/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");
@@ -208,7 +271,7 @@ describe("package publishing", () => {
     await writeFile(localTemplateArtifact, "not checked template source\n");
     try {
       expect(packedPaths).toEqual(
-        expect.arrayContaining(checkedTemplatePackagePaths()),
+        expect.arrayContaining(await checkedTemplatePackagePaths()),
       );
       expect(packedPaths).not.toContain(
         `package/templates/${path.basename(localTemplateArtifact)}`,
@@ -240,39 +303,30 @@ describe("package publishing", () => {
     });
     expect(result.stdout).toContain("Usage:");
 
-    const generatedDir = path.join(consumerDir, "generated-lib");
-    await execa(
-      "pnpm",
-      ["exec", "template", "init", generatedDir, "--preset", "ts-lib", "--yes"],
-      { cwd: consumerDir },
-    );
-    await expect(
-      readFile(path.join(generatedDir, "src/index.ts"), "utf8"),
-    ).resolves.toContain("export function greet");
-    await expect(
-      readFile(path.join(generatedDir, "oxlint.config.ts"), "utf8"),
-    ).resolves.toContain("defineConfig");
+    for (const projection of supportedPresetProjections) {
+      const presetName = projection.metadata.name;
+      const generatedDir = path.join(consumerDir, `generated-${presetName}`);
+      const copyOperation = firstCopyOperation(projection);
 
-    const generatedVueDir = path.join(consumerDir, "generated-vue");
-    await execa(
-      "pnpm",
-      [
-        "exec",
-        "template",
-        "init",
-        generatedVueDir,
-        "--preset",
-        "vue-app",
-        "--yes",
-      ],
-      { cwd: consumerDir },
-    );
-    await expect(
-      readFile(path.join(generatedVueDir, "src/App.vue"), "utf8"),
-    ).resolves.toContain("<script setup");
-    await expect(
-      readFile(path.join(generatedVueDir, "oxlint.config.ts"), "utf8"),
-    ).resolves.toContain("vue");
+      await execa(
+        "pnpm",
+        [
+          "exec",
+          "template",
+          "init",
+          generatedDir,
+          "--preset",
+          presetName,
+          "--yes",
+        ],
+        { cwd: consumerDir },
+      );
+      const copiedTemplateSource = await readFile(
+        path.join(generatedDir, copyOperation.to),
+        "utf8",
+      );
+      expect(copiedTemplateSource.length).toBeGreaterThan(0);
+    }
 
     const templateBin = path.join(consumerDir, "node_modules/.bin/template");
     const generatedWorkspaceDir = path.join(consumerDir, "generated-workspace");
