@@ -11,5 +11,12 @@
     "target": "ES2022",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts", "templates/shared/oxc/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "scripts/**/*.ts",
+    "src/**/*.ts",
+    "templates/shared/oxc/**/*.ts",
+    "templates/registry.ts",
+    "templates/ts-lib/projection.ts",
+    "test/**/*.ts"
+  ]
 }

@@ -9,6 +9,7 @@ import {
 } from "./module-graph.js";
 import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
+import { packageTemplateRoot } from "./runtime-paths.js";
 
 const features = [
   "pnpm-catalog",
@@ -298,17 +299,11 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
 }
 
 function templateSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "vue-app");
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "vue-app");
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "templates",
-    "shared",
-    "oxc",
-  );
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "shared", "oxc");
 }
 
 export async function initVueAppProject(targetDir: string): Promise<void> {

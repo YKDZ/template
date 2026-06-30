@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderProject, type RenderOperation } from "./renderer.js";
 import { validateProjectBlueprint, type ProjectBlueprint } from "./declarations.js";
+import { packageTemplateRoot } from "./runtime-paths.js";
 
 export type AddPackageOptions = {
   cwd: string;
@@ -443,11 +444,11 @@ function rootTsReferencesForPreset(preset: string, packagePath: string): string[
 }
 
 function templateSourceRoot(preset: string): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", preset);
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), preset);
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "shared", "oxc");
 }
 
 function localPortsFromText(text: string): number[] {

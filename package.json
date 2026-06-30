@@ -6,7 +6,7 @@
   "private": false,
   "type": "module",
   "bin": {
-    "template": "dist/cli.js"
+    "template": "dist/src/cli.js"
   },
   "publishConfig": {
     "access": "public"

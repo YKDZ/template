@@ -9,6 +9,7 @@ import {
 } from "./module-graph.js";
 import { projectPresetDependabotConfig, projectPresetGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
+import { packageTemplateRoot } from "./runtime-paths.js";
 
 const features = [
   "pnpm-catalog",
@@ -441,17 +442,11 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
 }
 
 function templateSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "vue-hono-app");
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "vue-hono-app");
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "templates",
-    "shared",
-    "oxc",
-  );
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "shared", "oxc");
 }
 
 export async function initVueHonoAppProject(

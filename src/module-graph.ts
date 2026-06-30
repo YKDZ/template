@@ -50,7 +50,7 @@ export type FixPlan = {
   readonly components: FixComponent[];
 };
 
-const tsLibPackageBoundary: ComponentOwner = {
+const rootPackageBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: ".",
 };
@@ -71,7 +71,6 @@ const rustPackageBoundary: ComponentOwner = {
 };
 
 export type NodeCheckPlanTarget =
-  | "ts-lib"
   | "hono-api"
   | "vue-app"
   | "vue-hono-root"
@@ -79,20 +78,11 @@ export type NodeCheckPlanTarget =
   | "vue-hono-web";
 
 export type NodeFixPlanTarget =
-  | "ts-lib"
   | "hono-api"
   | "vue-app"
   | "vue-hono-root"
   | "vue-hono-api"
   | "vue-hono-web";
-
-function nodeLibraryCheckComponents(owner: ComponentOwner): CheckComponent[] {
-  return [
-    { kind: "typescript-typecheck", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "oxc-format-check", owner },
-  ];
-}
 
 function honoApiCheckComponents(owner: ComponentOwner): CheckComponent[] {
   return [
@@ -124,14 +114,12 @@ function nodeFixComponents(owner: ComponentOwner): FixComponent[] {
 
 export function selectNodeCheckComponents(target: NodeCheckPlanTarget): CheckComponent[] {
   switch (target) {
-    case "ts-lib":
-      return nodeLibraryCheckComponents(tsLibPackageBoundary);
     case "hono-api":
-      return honoApiCheckComponents(tsLibPackageBoundary);
+      return honoApiCheckComponents(rootPackageBoundary);
     case "vue-app":
-      return vueAppCheckComponents(tsLibPackageBoundary);
+      return vueAppCheckComponents(rootPackageBoundary);
     case "vue-hono-root":
-      return [{ kind: "turbo-check", owner: tsLibPackageBoundary }];
+      return [{ kind: "turbo-check", owner: rootPackageBoundary }];
     case "vue-hono-api":
       return honoApiCheckComponents(apiPackageBoundary);
     case "vue-hono-web":
@@ -141,12 +129,11 @@ export function selectNodeCheckComponents(target: NodeCheckPlanTarget): CheckCom
 
 export function selectNodeFixComponents(target: NodeFixPlanTarget): FixComponent[] {
   switch (target) {
-    case "ts-lib":
     case "hono-api":
     case "vue-app":
-      return nodeFixComponents(tsLibPackageBoundary);
+      return nodeFixComponents(rootPackageBoundary);
     case "vue-hono-root":
-      return [{ kind: "turbo-fix", owner: tsLibPackageBoundary }];
+      return [{ kind: "turbo-fix", owner: rootPackageBoundary }];
     case "vue-hono-api":
       return nodeFixComponents(apiPackageBoundary);
     case "vue-hono-web":
@@ -157,7 +144,7 @@ export function selectNodeFixComponents(target: NodeFixPlanTarget): FixComponent
 function checkEnvironmentNeeds(target: NodeCheckPlanTarget): CheckEnvironmentNeed[] {
   if (target === "vue-app") {
     return [
-      { kind: "playwright-browser-assets", browser: "chromium", owner: tsLibPackageBoundary },
+      { kind: "playwright-browser-assets", browser: "chromium", owner: rootPackageBoundary },
     ];
   }
 
@@ -166,14 +153,6 @@ function checkEnvironmentNeeds(target: NodeCheckPlanTarget): CheckEnvironmentNee
   }
 
   return [];
-}
-
-export function selectTsLibCheckComponents(): CheckComponent[] {
-  return selectNodeCheckComponents("ts-lib");
-}
-
-export function selectTsLibFixComponents(): FixComponent[] {
-  return selectNodeFixComponents("ts-lib");
 }
 
 export function planNodeChecks(target: NodeCheckPlanTarget): CheckPlan {
@@ -206,7 +185,6 @@ export function planRustBinFixes(): FixPlan {
 
 export function planPresetChecks(preset: PresetName): CheckPlan | undefined {
   switch (preset) {
-    case "ts-lib":
     case "hono-api":
     case "vue-app":
       return planNodeChecks(preset);
@@ -217,14 +195,6 @@ export function planPresetChecks(preset: PresetName): CheckPlan | undefined {
     default:
       return undefined;
   }
-}
-
-export function planTsLibChecks(): CheckPlan {
-  return planNodeChecks("ts-lib");
-}
-
-export function planTsLibFixes(): FixPlan {
-  return planNodeFixes("ts-lib");
 }
 
 function renderCheckComponentCommand(component: CheckComponent): string {

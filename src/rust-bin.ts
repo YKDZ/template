@@ -11,6 +11,7 @@ import {
 } from "./module-graph.js";
 import { projectPresetDependabotConfig, projectRustBinGithubCheckWorkflow } from "./project-github.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
+import { packageTemplateRoot } from "./runtime-paths.js";
 import { resolveToolchainVersions } from "./toolchain-resolution.js";
 
 const features = [
@@ -212,7 +213,7 @@ function operationsForRustBin(context: GenerationContext, projectName: string): 
 }
 
 function templateSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "rust-bin");
+  return packageTemplateRoot(path.dirname(fileURLToPath(import.meta.url)), "rust-bin");
 }
 
 export async function initRustBinProject(

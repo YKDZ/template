@@ -2,7 +2,6 @@ import type { PresetName } from "./declarations.js";
 import {
   type CheckEnvironmentNeed,
   type CheckPlan,
-  planNodeChecks,
   planPresetChecks,
   planRustBinChecks,
 } from "./module-graph.js";
@@ -156,10 +155,6 @@ function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
   }
 
   return `pnpm exec playwright install --with-deps ${need.browser}`;
-}
-
-export function projectTsLibGithubCheckWorkflow(): string {
-  return projectCheckWorkflow({ checkPlan: planNodeChecks("ts-lib") });
 }
 
 export function projectRustBinGithubCheckWorkflow(): string {

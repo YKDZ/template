@@ -1,6 +1,6 @@
 import { assembleGenerationContext } from "../src/generation-context.js";
-import { initTsLibProject } from "../src/ts-lib.js";
 import type { ProjectBlueprint } from "../src/declarations.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -62,7 +62,11 @@ describe("generation context", () => {
       },
     });
 
-    await initTsLibProject(targetDir, { generationContext: context });
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const plan = projection?.project(context);
+    expect(projection).toBeDefined();
+    expect(plan).toBeDefined();
+    await projection!.render({ targetDir, plan: plan! });
 
     const packageJson = await readJson<{
       engines: { node: string };

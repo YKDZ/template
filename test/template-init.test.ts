@@ -1,12 +1,26 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execa } from "execa";
-import { builtInPresets, type PresetName } from "../src/declarations.js";
-import { projectTsLibPackageScripts } from "../src/ts-lib.js";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { execa } from "execa";
+
+import { builtInPresets, type PresetName } from "../src/declarations.js";
+import { assembleGenerationContext } from "../src/generation-context.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 const defaultToolchainEnv = {
   TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
@@ -48,13 +62,21 @@ async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
 
-async function writeExecutable(filePath: string, content: string): Promise<void> {
+async function writeExecutable(
+  filePath: string,
+  content: string,
+): Promise<void> {
   await writeFile(filePath, content, "utf8");
   await chmod(filePath, 0o755);
 }
 
-async function generatedFilePaths(root: string, current = "."): Promise<string[]> {
-  const entries = await readdir(path.join(root, current), { withFileTypes: true });
+async function generatedFilePaths(
+  root: string,
+  current = ".",
+): Promise<string[]> {
+  const entries = await readdir(path.join(root, current), {
+    withFileTypes: true,
+  });
   const files: string[] = [];
 
   for (const entry of entries) {
@@ -127,7 +149,9 @@ describe("template init", () => {
   );
 
   it("generates capability-aware infrastructure for every supported built-in preset", async () => {
-    const supportedPresets = builtInPresets.filter((preset) => preset.generation === "supported");
+    const supportedPresets = builtInPresets.filter(
+      (preset) => preset.generation === "supported",
+    );
     const outOfScopePathPatterns = [
       /(^|\/)Dockerfile$/,
       /(^|\/)\.dockerignore$/,
@@ -159,21 +183,28 @@ describe("template init", () => {
         path.join(projectDir, ".github/workflows/check.yml"),
         "utf8",
       );
-      const dependabot = await readFile(path.join(projectDir, ".github/dependabot.yml"), "utf8");
+      const dependabot = await readFile(
+        path.join(projectDir, ".github/dependabot.yml"),
+        "utf8",
+      );
       const files = await generatedFilePaths(projectDir);
 
-      expect(files.filter((file) => file.startsWith(".github/workflows/"))).toEqual([
-        ".github/workflows/check.yml",
-      ]);
       expect(
-        files.some((file) => outOfScopePathPatterns.some((pattern) => pattern.test(file))),
+        files.filter((file) => file.startsWith(".github/workflows/")),
+      ).toEqual([".github/workflows/check.yml"]);
+      expect(
+        files.some((file) =>
+          outOfScopePathPatterns.some((pattern) => pattern.test(file)),
+        ),
       ).toBe(false);
       expect(blueprint.features).not.toContain("native-binary-release");
       expectNoWorkspaceLifecycleFeatures(blueprint.features);
 
       expect(checkWorkflow).toContain("pull_request:");
       expect(checkWorkflow).toContain("push:");
-      expect(checkWorkflow).not.toMatch(/\b(gh|hub)\s+(repo|api|auth|pr|release)\b/);
+      expect(checkWorkflow).not.toMatch(
+        /\b(gh|hub)\s+(repo|api|auth|pr|release)\b/,
+      );
       expect(checkWorkflow).not.toMatch(/\bdocker\s+(build|push|login)\b/);
       expect(checkWorkflow).not.toContain("docker/build-push-action");
       expect(checkWorkflow).not.toContain("docker/login-action");
@@ -199,8 +230,8 @@ describe("template init", () => {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("typescript-node:22");
       }
-      const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
-        id.includes("features/node"),
+      const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
+        ([id]) => id.includes("features/node"),
       )?.[1];
       expect(nodeFeature).toEqual({
         version: packageJson.engines.node,
@@ -216,7 +247,9 @@ describe("template init", () => {
         expect(extensions).toEqual(["Vue.volar", "oxc.oxc-vscode"]);
       }
       if (preset.name === "vue-app") {
-        expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+        expect(checkWorkflow).toContain(
+          "pnpm exec playwright install --with-deps chromium",
+        );
       }
       if (preset.name === "vue-hono-app") {
         expect(checkWorkflow).toContain(
@@ -224,11 +257,16 @@ describe("template init", () => {
         );
       }
       if (preset.name === "rust-bin") {
-        expect(extensions).toEqual(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]);
+        expect(extensions).toEqual([
+          "rust-lang.rust-analyzer",
+          "tamasfe.even-better-toml",
+        ]);
         expect(devcontainer.mounts).toEqual(
           expect.arrayContaining([
             expect.stringContaining("target=/usr/local/cargo/registry"),
-            expect.stringContaining("target=${containerWorkspaceFolder}/target"),
+            expect.stringContaining(
+              "target=${containerWorkspaceFolder}/target",
+            ),
           ]),
         );
       }
@@ -268,7 +306,10 @@ describe("template init", () => {
         path.join(projectDir, ".github/workflows/check.yml"),
         "utf8",
       );
-      const dependabot = await readFile(path.join(projectDir, ".github/dependabot.yml"), "utf8");
+      const dependabot = await readFile(
+        path.join(projectDir, ".github/dependabot.yml"),
+        "utf8",
+      );
 
       expect(packageJson.engines.node).toBe("22");
       expect(packageJson.packageManager).toBe("pnpm@10.0.0");
@@ -294,9 +335,7 @@ describe("template init", () => {
     const devcontainer = await readJson<{
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
       postCreateCommand?: string;
-    }>(
-      path.join(projectDir, ".devcontainer/devcontainer.json"),
-    );
+    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
 
     expect(packageJson.engines.node).toBe("22");
     expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
@@ -305,8 +344,8 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version: 22");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
-      id.includes("features/node"),
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
+      ([id]) => id.includes("features/node"),
     )?.[1];
     expect(nodeFeature).toEqual({
       version: packageJson.engines.node,
@@ -336,9 +375,7 @@ describe("template init", () => {
     const devcontainer = await readJson<{
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
       postCreateCommand?: string;
-    }>(
-      path.join(projectDir, ".devcontainer/devcontainer.json"),
-    );
+    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
 
     expect(rootPackageJson.engines.node).toBe("22");
     expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
@@ -351,8 +388,8 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version: 22");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
-      id.includes("features/node"),
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
+      ([id]) => id.includes("features/node"),
     )?.[1];
     expect(nodeFeature).toEqual({
       version: rootPackageJson.engines.node,
@@ -382,7 +419,9 @@ describe("template init", () => {
         expect(packageJson.scripts["format:check"]).toBe("oxfmt --check .");
         expect(packageJson.scripts["format:write"]).toBe("oxfmt --write .");
         expect(packageJson.scripts.lint).toBe("oxlint . --deny-warnings");
-        expect(packageJson.scripts["lint:fix"]).toBe("oxlint . --fix --deny-warnings");
+        expect(packageJson.scripts["lint:fix"]).toBe(
+          "oxlint . --fix --deny-warnings",
+        );
       }
 
       expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
@@ -415,7 +454,10 @@ describe("template init", () => {
       dependencies?: Record<string, string>;
       devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
-    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "tsconfig.json"));
@@ -425,14 +467,35 @@ describe("template init", () => {
     const generatedBy = await readJson<{ packageName: string }>(
       path.join(projectDir, ".project-kit/generated-by.json"),
     );
-    const projectKitFiles = await readdir(path.join(projectDir, ".project-kit"));
+    const projectKitFiles = await readdir(
+      path.join(projectDir, ".project-kit"),
+    );
+
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const expectedPlan = projection!.project(
+      assembleGenerationContext({
+        targetDir: projectDir,
+        blueprint: projection!.blueprint({ targetDir: projectDir }),
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@10.0.0",
+          },
+          source: "online",
+          diagnostics: [],
+        },
+      }),
+    );
 
     expect(packageJson.name).toBe("demo-lib");
-    expect(packageJson.scripts).toEqual(projectTsLibPackageScripts());
+    expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
-    expect(packageJson.scripts.fix).toBe("pnpm run format:write && pnpm run lint:fix");
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix",
+    );
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(packageJson.devDependencies.oxlint).toBe("catalog:");
     expect(packageJson.devDependencies.oxfmt).toBe("catalog:");
@@ -455,7 +518,9 @@ describe("template init", () => {
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "src/index.ts"));
 
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
     const checkWorkflow = await readFile(
@@ -463,7 +528,9 @@ describe("template init", () => {
       "utf8",
     );
     expect(checkWorkflow).not.toContain("cache: pnpm");
-    const installCommand = checkWorkflow.match(/^\s*-\s*run:\s*(pnpm install.*)$/m)?.[1];
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m,
+    )?.[1];
     expect(installCommand).toBeDefined();
 
     expect(installCommand).toBe("pnpm install");
@@ -474,10 +541,8 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        "exec",
-        "tsx",
         path.join(repoRoot, "src/cli.ts"),
         "init",
         projectDir,
@@ -507,10 +572,8 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-fullstack");
 
     const result = await execa(
-      "pnpm",
+      path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        "exec",
-        "tsx",
         path.join(repoRoot, "src/cli.ts"),
         "init",
         projectDir,
@@ -578,7 +641,14 @@ describe("template init", () => {
       expect.objectContaining({
         id: "install-web-playwright-browsers",
         command: "pnpm",
-        args: ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+        args: [
+          "--filter",
+          "./apps/web",
+          "exec",
+          "playwright",
+          "install",
+          "chromium",
+        ],
         cwd: projectDir,
       }),
     );
@@ -682,13 +752,60 @@ describe("template init", () => {
         path.join(projectDir, ".project-kit", "generated-by.json"),
       ),
     ).not.toHaveProperty("nextSteps");
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
+  it("keeps projection next step paths consistent with a relative target dir", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
+
+    const result = await execa(
+      path.join(repoRoot, "node_modules/.bin/tsx"),
+      [
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        "demo-lib",
+        "--preset",
+        "ts-lib",
+        "--dry-run",
+        "--json",
+      ],
+      { cwd: workspace },
+    );
+
+    const output = JSON.parse(result.stdout) as {
+      targetDir: string;
+      nextSteps: Array<{
+        id: string;
+        display: string;
+        args: string[];
+        cwd: string;
+      }>;
+    };
+
+    expect(output.targetDir).toBe("demo-lib");
+    expect(output.nextSteps[0]).toEqual(
+      expect.objectContaining({
+        id: "enter-project",
+        display: "cd demo-lib",
+        args: ["demo-lib"],
+        cwd: ".",
+      }),
+    );
+    expect(output.nextSteps.slice(1).map((step) => step.cwd)).toEqual([
+      "demo-lib",
+      "demo-lib",
+      "demo-lib",
+    ]);
+  });
+
   it("reports bundled toolchain fallback in JSON output and the generation record", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-toolchain-fallback-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-toolchain-fallback-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
@@ -708,7 +825,8 @@ describe("template init", () => {
         cwd: repoRoot,
         env: {
           TEMPLATE_TOOLCHAIN_RESOLUTION: "online",
-          TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: "http://127.0.0.1:9/index.json",
+          TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL:
+            "http://127.0.0.1:9/index.json",
         },
       },
     );
@@ -733,7 +851,9 @@ describe("template init", () => {
       nodeLtsMajor: "22",
       packageManagerPin: "pnpm@10.0.0",
       source: "bundled-fallback",
-      diagnostics: [expect.stringContaining("Using bundled fallback toolchain metadata")],
+      diagnostics: [
+        expect.stringContaining("Using bundled fallback toolchain metadata"),
+      ],
     });
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "22",
@@ -743,7 +863,9 @@ describe("template init", () => {
   });
 
   it("reports bundled toolchain fallback visibly in human init output", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-toolchain-fallback-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-toolchain-fallback-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
@@ -762,7 +884,8 @@ describe("template init", () => {
         cwd: repoRoot,
         env: {
           TEMPLATE_TOOLCHAIN_RESOLUTION: "online",
-          TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: "http://127.0.0.1:9/index.json",
+          TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL:
+            "http://127.0.0.1:9/index.json",
         },
       },
     );
@@ -771,7 +894,9 @@ describe("template init", () => {
     expect(result.stdout).toContain("Source: bundled-fallback");
     expect(result.stdout).toContain("Node LTS major: 22");
     expect(result.stdout).toContain("Package Manager Pin: pnpm@10.0.0");
-    expect(result.stdout).toContain("Using bundled fallback toolchain metadata");
+    expect(result.stdout).toContain(
+      "Using bundled fallback toolchain metadata",
+    );
   });
 
   it("rejects ready mode without executing generated project commands", async () => {
@@ -839,12 +964,16 @@ describe("template init", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Unknown option: --ready");
-    expect(result.stderr).not.toContain("Run template-maintained Post Commands");
+    expect(result.stderr).not.toContain(
+      "Run template-maintained Post Commands",
+    );
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not advertise ready mode in help", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-failure-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-ready-failure-"),
+    );
 
     const result = await execa(
       "pnpm",
@@ -861,7 +990,9 @@ describe("template init", () => {
   });
 
   it("fails clearly in non-interactive init without --yes", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-noninteractive-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-noninteractive-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
 
     await expect(
@@ -886,12 +1017,18 @@ describe("template init", () => {
   });
 
   it("allows empty target directories and rejects non-empty target directories", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-dir-safety-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-dir-safety-"),
+    );
     const emptyDir = path.join(workspace, "empty");
     const nonEmptyDir = path.join(workspace, "non-empty");
     await mkdir(emptyDir);
     await mkdir(nonEmptyDir);
-    await writeFile(path.join(nonEmptyDir, "README.md"), "# existing\n", "utf8");
+    await writeFile(
+      path.join(nonEmptyDir, "README.md"),
+      "# existing\n",
+      "utf8",
+    );
 
     await execa(
       "pnpm",
@@ -928,11 +1065,15 @@ describe("template init", () => {
     ).rejects.toMatchObject({
       stderr: expect.stringContaining("Target directory is not empty"),
     });
-    expect(await readFile(path.join(nonEmptyDir, "README.md"), "utf8")).toBe("# existing\n");
+    expect(await readFile(path.join(nonEmptyDir, "README.md"), "utf8")).toBe(
+      "# existing\n",
+    );
   });
 
   it("reviews the Project Blueprint and asks for confirmation in interactive terminals", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-interactive-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-interactive-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
     const cliPath = path.join(repoRoot, "src/cli.ts");
 
@@ -955,12 +1096,16 @@ describe("template init", () => {
     expect(result.stdout).toContain("Project Blueprint");
     expect(result.stdout).toContain("Preset: ts-lib");
     expect(result.stdout).toContain("Generate this project? [y/N]");
-    expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
+    expect(result.stdout).toContain(
+      `Initialized ts-lib project in ${projectDir}`,
+    );
     await stat(path.join(projectDir, "package.json"));
   });
 
   it("cancels interactive init without writing files when confirmation is declined", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-interactive-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-interactive-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
     const cliPath = path.join(repoRoot, "src/cli.ts");
 
@@ -981,14 +1126,18 @@ describe("template init", () => {
         { cwd: repoRoot },
       ),
     ).rejects.toMatchObject({
-      stdout: expect.stringMatching(/Generate this project\? \[y\/N\][\s\S]*Init cancelled/),
+      stdout: expect.stringMatching(
+        /Generate this project\? \[y\/N\][\s\S]*Init cancelled/,
+      ),
     });
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("prints next steps after generation without installing dependencies", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-next-steps-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-next-steps-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
@@ -1006,19 +1155,25 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    expect(result.stdout).toContain(`Initialized ts-lib project in ${projectDir}`);
+    expect(result.stdout).toContain(
+      `Initialized ts-lib project in ${projectDir}`,
+    );
     expect(result.stdout).toContain("Next Step Instructions:");
     expect(result.stdout).toContain(`cd ${projectDir}`);
     expect(result.stdout).toContain("pnpm install");
     expect(result.stdout).toContain("pnpm run fix");
     expect(result.stdout).toContain("pnpm run check");
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("prints fix next steps after generation without executing the fix command", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-next-step-fix-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-next-step-fix-"),
+    );
     const projectDir = path.join(workspace, "demo-lib");
     const fakeBin = path.join(workspace, "bin");
     const commandLog = path.join(workspace, "commands.jsonl");
@@ -1060,8 +1215,12 @@ describe("template init", () => {
     );
 
     expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
-    await expect(readFile(commandLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(readFile(commandLog, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -1091,21 +1250,32 @@ describe("template init", () => {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
-    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "tsconfig.json"));
     const blueprint = await readJson<{ preset: string }>(
       path.join(projectDir, ".project-kit/blueprint.json"),
     );
-    const appSource = await readFile(path.join(projectDir, "src/app.ts"), "utf8");
-    const serverSource = await readFile(path.join(projectDir, "src/server.ts"), "utf8");
+    const appSource = await readFile(
+      path.join(projectDir, "src/app.ts"),
+      "utf8",
+    );
+    const serverSource = await readFile(
+      path.join(projectDir, "src/server.ts"),
+      "utf8",
+    );
 
     expect(packageJson.name).toBe("demo-api");
     expect(packageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
     );
-    expect(packageJson.scripts.fix).toBe("pnpm run format:write && pnpm run lint:fix");
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix",
+    );
     expect(packageJson.scripts.start).toBe("node dist/server.js");
     expect(packageJson.dependencies.hono).toBe("catalog:");
     expect(packageJson.dependencies["@hono/node-server"]).toBe("catalog:");
@@ -1132,7 +1302,9 @@ describe("template init", () => {
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "test/app.test.ts"));
 
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
     const checkWorkflow = await readFile(
@@ -1140,7 +1312,9 @@ describe("template init", () => {
       "utf8",
     );
     expect(checkWorkflow).not.toContain("cache: pnpm");
-    const installCommand = checkWorkflow.match(/^\s*-\s*run:\s*(pnpm install.*)$/m)?.[1];
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m,
+    )?.[1];
     expect(installCommand).toBeDefined();
 
     expect(installCommand).toBe("pnpm install");
@@ -1165,8 +1339,14 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const cargoToml = await readFile(path.join(projectDir, "Cargo.toml"), "utf8");
-    const rustfmtToml = await readFile(path.join(projectDir, "rustfmt.toml"), "utf8");
+    const cargoToml = await readFile(
+      path.join(projectDir, "Cargo.toml"),
+      "utf8",
+    );
+    const rustfmtToml = await readFile(
+      path.join(projectDir, "rustfmt.toml"),
+      "utf8",
+    );
     const packageJson = await readJson<{
       name: string;
       private: boolean;
@@ -1174,7 +1354,10 @@ describe("template init", () => {
       scripts: Record<string, string>;
       packageManager: string;
     }>(path.join(projectDir, "package.json"));
-    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const devcontainer = await readJson<{
       image: string;
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
@@ -1183,12 +1366,18 @@ describe("template init", () => {
       customizations: { vscode: { extensions: string[] } };
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
     const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
-    const blueprint = await readJson<{ preset: string; packageManager?: string }>(blueprintPath);
+    const blueprint = await readJson<{
+      preset: string;
+      packageManager?: string;
+    }>(blueprintPath);
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    const dependabot = await readFile(path.join(projectDir, ".github/dependabot.yml"), "utf8");
+    const dependabot = await readFile(
+      path.join(projectDir, ".github/dependabot.yml"),
+      "utf8",
+    );
     const files = await generatedFilePaths(projectDir);
 
     expect(packageJson.name).toBe("demo-rust");
@@ -1211,8 +1400,8 @@ describe("template init", () => {
     expect(rustfmtToml).toContain('edition = "2024"');
 
     expect(devcontainer.image).toContain("rust");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
-      id.includes("features/node"),
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
+      ([id]) => id.includes("features/node"),
     )?.[1];
     expect(nodeFeature).toEqual({
       version: packageJson.engines.node,
@@ -1226,7 +1415,10 @@ describe("template init", () => {
       ]),
     );
     expect(devcontainer.customizations.vscode.extensions).toEqual(
-      expect.arrayContaining(["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]),
+      expect.arrayContaining([
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+      ]),
     );
 
     expect(blueprint.preset).toBe("rust-bin");
@@ -1249,13 +1441,22 @@ describe("template init", () => {
 
     await stat(path.join(projectDir, "src/main.rs"));
     await stat(path.join(projectDir, "Cargo.lock"));
-    await expect(stat(path.join(projectDir, "scripts/check"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "scripts/check")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
 
     await execa(
       "pnpm",
-      ["exec", "tsx", path.join(repoRoot, "src/cli.ts"), "blueprint", "validate", blueprintPath],
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "blueprint",
+        "validate",
+        blueprintPath,
+      ],
       { cwd: repoRoot },
     );
   }, 120_000);
@@ -1279,8 +1480,14 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const cargoToml = await readFile(path.join(projectDir, "Cargo.toml"), "utf8");
-    const cargoLock = await readFile(path.join(projectDir, "Cargo.lock"), "utf8");
+    const cargoToml = await readFile(
+      path.join(projectDir, "Cargo.toml"),
+      "utf8",
+    );
+    const cargoLock = await readFile(
+      path.join(projectDir, "Cargo.lock"),
+      "utf8",
+    );
 
     expect(cargoToml).toContain('name = "my-demo-app-quoted"');
     expect(cargoLock).toContain('name = "my-demo-app-quoted"');
@@ -1311,7 +1518,10 @@ describe("template init", () => {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
-    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const tsconfig = await readJson<{
       files: string[];
       references: Array<{ path: string }>;
@@ -1336,8 +1546,12 @@ describe("template init", () => {
     expect(packageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
     );
-    expect(packageJson.scripts.fix).toBe("pnpm run format:write && pnpm run lint:fix");
-    expect(packageJson.scripts["test:e2e"]).toBe("pnpm run build && playwright test");
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix",
+    );
+    expect(packageJson.scripts["test:e2e"]).toBe(
+      "pnpm run build && playwright test",
+    );
     expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.dependencies.pinia).toBe("catalog:");
@@ -1345,7 +1559,9 @@ describe("template init", () => {
     expect(packageJson.devDependencies.vite).toBe("catalog:");
     expect(packageJson.devDependencies["@vitejs/plugin-vue"]).toBe("catalog:");
     expect(packageJson.devDependencies["@vue/tsconfig"]).toBe("catalog:");
-    expect(packageJson.devDependencies["@types/web-bluetooth"]).toBe("catalog:");
+    expect(packageJson.devDependencies["@types/web-bluetooth"]).toBe(
+      "catalog:",
+    );
     expect(packageJson.devDependencies.vitest).toBe("catalog:");
     expect(packageJson.devDependencies["@playwright/test"]).toBe("catalog:");
     for (const excludedPackage of [
@@ -1377,8 +1593,16 @@ describe("template init", () => {
     expect(appTsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(appTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
     expect(appTsconfig.compilerOptions.types).toEqual(["web-bluetooth"]);
-    expect(appTsconfig.include).toEqual(["env.d.ts", "src/**/*.ts", "src/**/*.vue"]);
-    expect(testTsconfig.compilerOptions.types).toEqual(["node", "vitest/globals", "web-bluetooth"]);
+    expect(appTsconfig.include).toEqual([
+      "env.d.ts",
+      "src/**/*.ts",
+      "src/**/*.vue",
+    ]);
+    expect(testTsconfig.compilerOptions.types).toEqual([
+      "node",
+      "vitest/globals",
+      "web-bluetooth",
+    ]);
     expect(testTsconfig.include).toEqual([
       "env.d.ts",
       "src/**/*.ts",
@@ -1402,7 +1626,9 @@ describe("template init", () => {
     await stat(path.join(projectDir, "test/app.test.ts"));
     await stat(path.join(projectDir, "test/e2e/app.spec.ts"));
 
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
     const checkWorkflow = await readFile(
@@ -1410,9 +1636,13 @@ describe("template init", () => {
       "utf8",
     );
     expect(checkWorkflow).not.toContain("cache: pnpm");
-    const installCommand = checkWorkflow.match(/^\s*-\s*run:\s*(pnpm install.*)$/m)?.[1];
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m,
+    )?.[1];
     expect(installCommand).toBeDefined();
-    expect(checkWorkflow).toContain("pnpm exec playwright install --with-deps chromium");
+    expect(checkWorkflow).toContain(
+      "pnpm exec playwright install --with-deps chromium",
+    );
 
     expect(installCommand).toBe("pnpm install");
   }, 180_000);
@@ -1470,15 +1700,27 @@ describe("template init", () => {
     const turboConfig = await readJson<{
       tasks: { check: { dependsOn: string[] } };
     }>(path.join(projectDir, "turbo.json"));
-    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
       packages: Array<{ name: string; path: string }>;
     }>(path.join(projectDir, ".project-kit/blueprint.json"));
-    const apiIndex = await readFile(path.join(projectDir, "apps/api/src/index.ts"), "utf8");
-    const webApiClient = await readFile(path.join(projectDir, "apps/web/src/api.ts"), "utf8");
-    const viteConfig = await readFile(path.join(projectDir, "apps/web/vite.config.ts"), "utf8");
+    const apiIndex = await readFile(
+      path.join(projectDir, "apps/api/src/index.ts"),
+      "utf8",
+    );
+    const webApiClient = await readFile(
+      path.join(projectDir, "apps/web/src/api.ts"),
+      "utf8",
+    );
+    const viteConfig = await readFile(
+      path.join(projectDir, "apps/web/vite.config.ts"),
+      "utf8",
+    );
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
@@ -1502,9 +1744,13 @@ describe("template init", () => {
 
     expect(webPackageJson.name).toBe("@demo-fullstack/web");
     expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build");
-    expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe("workspace:*");
+    expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe(
+      "workspace:*",
+    );
     expect(webPackageJson.dependencies.hono).toBe("catalog:");
-    expect(webApiClient).toMatch(/^import type \{ AppType \} from "@demo-fullstack\/api";$/m);
+    expect(webApiClient).toMatch(
+      /^import type \{ AppType \} from "@demo-fullstack\/api";$/m,
+    );
     expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
     expect(viteConfig).toContain('"/api"');
     expect(viteConfig).toContain("VITE_API_BASE_URL");
@@ -1521,11 +1767,15 @@ describe("template init", () => {
       { path: "./tsconfig.test.json" },
       { path: "./tsconfig.node.json" },
     ]);
-    expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual([
-      "../api/src/index.ts",
+    expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual(
+      ["../api/src/index.ts"],
+    );
+    expect(webAppTsconfig.references).toEqual([
+      { path: "../api/tsconfig.build.json" },
     ]);
-    expect(webAppTsconfig.references).toEqual([{ path: "../api/tsconfig.build.json" }]);
-    expect(webTestTsconfig.references).toEqual([{ path: "../api/tsconfig.build.json" }]);
+    expect(webTestTsconfig.references).toEqual([
+      { path: "../api/tsconfig.build.json" },
+    ]);
     expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
 
     expect(blueprint).toEqual(
@@ -1541,10 +1791,14 @@ describe("template init", () => {
 
     await stat(path.join(projectDir, "apps/api/src/server.ts"));
     await stat(path.join(projectDir, "apps/web/test/e2e/app.spec.ts"));
-    await expect(stat(path.join(projectDir, "packages/api-client"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "packages/api-client")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+    await expect(
+      stat(path.join(projectDir, "pnpm-lock.yaml")),
+    ).rejects.toMatchObject({
       code: "ENOENT",
     });
     expect(checkWorkflow).not.toContain("cache: pnpm");
@@ -1552,7 +1806,9 @@ describe("template init", () => {
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
 
-    const installCommand = checkWorkflow.match(/^\s*-\s*run:\s*(pnpm install.*)$/m)?.[1];
+    const installCommand = checkWorkflow.match(
+      /^\s*-\s*run:\s*(pnpm install.*)$/m,
+    )?.[1];
     expect(installCommand).toBeDefined();
 
     expect(installCommand).toBe("pnpm install");
@@ -1589,7 +1845,10 @@ describe("template init", () => {
       name: string;
       dependencies: Record<string, string>;
     }>(path.join(projectDir, "apps/web/package.json"));
-    const webApiClient = await readFile(path.join(projectDir, "apps/web/src/api.ts"), "utf8");
+    const webApiClient = await readFile(
+      path.join(projectDir, "apps/web/src/api.ts"),
+      "utf8",
+    );
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
@@ -1597,8 +1856,12 @@ describe("template init", () => {
 
     expect(apiPackageJson.name).toBe("@custom-scope/api");
     expect(webPackageJson.name).toBe("@custom-scope/web");
-    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
-    expect(webApiClient).toMatch(/^import type \{ AppType \} from "@custom-scope\/api";$/m);
+    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe(
+      "workspace:*",
+    );
+    expect(webApiClient).toMatch(
+      /^import type \{ AppType \} from "@custom-scope\/api";$/m,
+    );
     expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
@@ -1643,7 +1906,9 @@ describe("template init", () => {
 
     expect(apiPackageJson.name).toBe("@custom-scope/api");
     expect(webPackageJson.name).toBe("@custom-scope/web");
-    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
+    expect(webPackageJson.dependencies["@custom-scope/api"]).toBe(
+      "workspace:*",
+    );
     expect(blueprint.packages).toEqual([
       { name: "@custom-scope/web", path: "apps/web" },
       { name: "@custom-scope/api", path: "apps/api" },
@@ -1672,7 +1937,9 @@ describe("template init", () => {
         { cwd: repoRoot },
       ),
     ).rejects.toMatchObject({
-      stderr: expect.stringContaining("--scope must be a valid npm scope without whitespace"),
+      stderr: expect.stringContaining(
+        "--scope must be a valid npm scope without whitespace",
+      ),
     });
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });

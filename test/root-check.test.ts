@@ -6,9 +6,12 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
 import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
   projectPresetDependabotConfig,
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -278,7 +281,7 @@ describe("Project Kit Root Check", () => {
     await writeTemplateFile(
       workspace,
       "ts-lib/.github/workflows/check.yml",
-      projectPresetGithubCheckWorkflow("ts-lib").replace(
+      validWorkflowTemplateForPreset("ts-lib").replace(
         "      - run: pnpm run check",
         "      - run: pnpm test",
       ),
@@ -317,21 +320,58 @@ async function writeValidGithubTemplatePair(
   await writeTemplateFile(
     workspace,
     `${presetName}/.github/workflows/check.yml`,
-    projectPresetGithubCheckWorkflow(presetName),
+    validWorkflowTemplateForPreset(presetName),
   );
   await writeTemplateFile(
     workspace,
     `${presetName}/.github/dependabot.yml`,
-    projectPresetDependabotConfig(presetName),
+    validDependabotTemplateForPreset(presetName),
   );
 }
 
 function validWorkflowTemplate(): string {
-  return projectPresetGithubCheckWorkflow("ts-lib");
+  return validWorkflowTemplateForPreset("ts-lib");
 }
 
 function validDependabotTemplate(ecosystem: "npm" | "cargo"): string {
   return ecosystem === "cargo"
-    ? projectPresetDependabotConfig("rust-bin")
-    : projectPresetDependabotConfig("ts-lib");
+    ? validDependabotTemplateForPreset("rust-bin")
+    : validDependabotTemplateForPreset("ts-lib");
+}
+
+function validWorkflowTemplateForPreset(presetName: "ts-lib" | "rust-bin"): string {
+  const projectionPlan = projectThroughPresetProjection(presetName);
+
+  return projectionPlan
+    ? projectCheckWorkflow({ checkPlan: projectionPlan.checkPlan })
+    : projectPresetGithubCheckWorkflow(presetName);
+}
+
+function validDependabotTemplateForPreset(presetName: "ts-lib" | "rust-bin"): string {
+  const projectionPlan = projectThroughPresetProjection(presetName);
+
+  return projectionPlan
+    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
+    : projectPresetDependabotConfig(presetName);
+}
+
+function projectThroughPresetProjection(presetName: "ts-lib" | "rust-bin") {
+  const projection = findBuiltInPresetProjection(presetName);
+
+  if (!projection) {
+    return undefined;
+  }
+
+  return projection.project({
+    projectName: { kind: "ProjectName", value: "generated-repository" },
+    preset: presetName,
+    packageManager: { kind: "PackageManager", value: "pnpm" },
+    blueprint: projection.blueprint({ targetDir: "generated-repository" }),
+    toolchain: {
+      nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      source: "bundled-fallback",
+      diagnostics: [],
+    },
+  });
 }

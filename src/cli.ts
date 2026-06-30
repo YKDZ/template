@@ -2,17 +2,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
-import { initHonoApiProject } from "./hono-api.js";
-import { initRustBinProject } from "./rust-bin.js";
-import { initTsLibProject } from "./ts-lib.js";
-import { initVueHonoAppProject } from "./vue-hono-app.js";
-import { initVueAppProject } from "./vue-app.js";
-import { addPackage } from "./package-addition.js";
-import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
-import {
-  planNextStepInstructions,
-  type NextStepInstruction,
-} from "./next-step-instructions.js";
+
 import {
   blueprintJsonSchema,
   builtInPresets,
@@ -25,10 +15,31 @@ import {
   type ValidationIssue,
 } from "./declarations.js";
 import {
+  assembleGenerationContext,
+  type GenerationContext,
+} from "./generation-context.js";
+import { initHonoApiProject } from "./hono-api.js";
+import {
+  planNextStepInstructions,
+  type NextStepInstruction,
+} from "./next-step-instructions.js";
+import { addPackage } from "./package-addition.js";
+import {
+  planNextStepInstructionsForProjection,
+  type PresetProjectionPlan,
+} from "./preset-projection.js";
+import { initRustBinProject } from "./rust-bin.js";
+import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
   type ToolchainResolutionSource,
 } from "./toolchain-resolution.js";
+import { initVueAppProject } from "./vue-app.js";
+import { initVueHonoAppProject } from "./vue-hono-app.js";
+import {
+  findBuiltInPresetProjection,
+  projectPresetThroughRegistry,
+} from "../templates/registry.js";
 
 type InitOptions = {
   dir: string;
@@ -85,7 +96,9 @@ async function readJsonDeclaration(filePath: string): Promise<unknown> {
 }
 
 function formatValidationIssues(issues: ValidationIssue[]): string {
-  return issues.map((issue) => `  - ${issue.path}: ${issue.message}`).join("\n");
+  return issues
+    .map((issue) => `  - ${issue.path}: ${issue.message}`)
+    .join("\n");
 }
 
 function formatPresetCatalog(): string {
@@ -169,7 +182,8 @@ function normalizeNpmScope(value: string): string {
 
 function supportedPreset(name: string): BuiltInPreset {
   const preset = builtInPresets.find(
-    (candidate) => candidate.name === name && candidate.generation === "supported",
+    (candidate) =>
+      candidate.name === name && candidate.generation === "supported",
   );
 
   if (!preset) {
@@ -191,6 +205,14 @@ function scopeFromOptions(projectName: string, scope?: string): string {
 
 function blueprintForInit(options: InitOptions): ProjectBlueprint {
   const preset = supportedPreset(options.preset);
+  const projection = findBuiltInPresetProjection(preset.name);
+  if (projection) {
+    return projection.blueprint({
+      targetDir: options.dir,
+      scope: options.scope,
+    });
+  }
+
   const projectName = projectNameFromDir(options.dir);
   const packageScope = scopeFromOptions(projectName, options.scope);
   const blueprint: ProjectBlueprint = {
@@ -214,7 +236,10 @@ function blueprintForInit(options: InitOptions): ProjectBlueprint {
   return blueprint;
 }
 
-function formatBlueprintSummary(targetDir: string, blueprint: ProjectBlueprint): string {
+function formatBlueprintSummary(
+  targetDir: string,
+  blueprint: ProjectBlueprint,
+): string {
   const lines = [
     "Project Blueprint",
     `  Target: ${targetDir}`,
@@ -261,7 +286,24 @@ function formatNextSteps(targetDir: string, preset: PresetName): string {
   ].join("\n");
 }
 
-function toolchainReport(toolchain: ResolvedToolchainVersions): ToolchainReport {
+function formatProjectionNextSteps(
+  targetDir: string,
+  projectionPlan: PresetProjectionPlan,
+): string {
+  const steps = planNextStepInstructionsForProjection({
+    targetDir,
+    plan: projectionPlan,
+  });
+
+  return [
+    "Next Step Instructions:",
+    ...steps.map((step) => `  ${step.label}: ${step.display}`),
+  ].join("\n");
+}
+
+function toolchainReport(
+  toolchain: ResolvedToolchainVersions,
+): ToolchainReport {
   return {
     nodeLtsMajor: toolchain.nodeLtsMajor.value,
     packageManagerPin: toolchain.packageManagerPin.value,
@@ -280,7 +322,9 @@ function formatToolchainReport(toolchain: ResolvedToolchainVersions): string {
   ].join("\n");
 }
 
-function toolchainResolutionSourceFromEnv(): ToolchainResolutionSource | undefined {
+function toolchainResolutionSourceFromEnv():
+  | ToolchainResolutionSource
+  | undefined {
   if (
     process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "online" ||
     process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "bundled-fallback"
@@ -295,7 +339,10 @@ async function generationContextForInit(
   options: InitOptions,
   blueprint: ProjectBlueprint,
 ): Promise<GenerationContext | undefined> {
-  if (options.preset !== "ts-lib" && options.preset !== "rust-bin") {
+  if (
+    !findBuiltInPresetProjection(options.preset) &&
+    options.preset !== "rust-bin"
+  ) {
     return undefined;
   }
 
@@ -304,7 +351,8 @@ async function generationContextForInit(
     blueprint,
     toolchain: await resolveToolchainVersions({
       source: toolchainResolutionSourceFromEnv(),
-      nodeReleaseIndexUrl: process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
+      nodeReleaseIndexUrl:
+        process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
       pnpmRegistryUrl: process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
     }),
   });
@@ -314,8 +362,15 @@ async function generateInitProject(
   options: InitOptions,
   generationContext?: GenerationContext,
 ): Promise<void> {
-  if (options.preset === "ts-lib") {
-    await initTsLibProject(options.dir, { generationContext });
+  const projection = findBuiltInPresetProjection(options.preset);
+  if (projection) {
+    if (!generationContext) {
+      throw new Error(
+        `Missing Generation Context for Preset Projection: ${options.preset}`,
+      );
+    }
+    const plan = projection.project(generationContext);
+    await projection.render({ targetDir: options.dir, plan });
     return;
   }
 
@@ -350,7 +405,15 @@ function printInitComplete(
   generationContext?: GenerationContext,
 ): void {
   const preset = blueprint.preset as PresetName;
-  const nextSteps = planNextStepInstructions({ preset, targetDir: options.dir }).steps;
+  const projectionPlan = generationContext
+    ? projectPresetThroughRegistry(generationContext)
+    : undefined;
+  const nextSteps = projectionPlan
+    ? planNextStepInstructionsForProjection({
+        targetDir: options.dir,
+        plan: projectionPlan,
+      })
+    : planNextStepInstructions({ preset, targetDir: options.dir }).steps;
 
   if (options.json) {
     printJson({
@@ -358,7 +421,9 @@ function printInitComplete(
       dryRun: false,
       targetDir: options.dir,
       blueprint,
-      toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
+      toolchain: generationContext
+        ? toolchainReport(generationContext.toolchain)
+        : undefined,
       nextSteps,
     } satisfies InitJsonOutput);
     return;
@@ -368,14 +433,24 @@ function printInitComplete(
   if (generationContext) {
     console.log(formatToolchainReport(generationContext.toolchain));
   }
-  console.log(formatNextSteps(options.dir, preset));
+  console.log(
+    projectionPlan
+      ? formatProjectionNextSteps(
+          options.dir,
+          projectionPlan,
+        )
+      : formatNextSteps(options.dir, preset),
+  );
 }
 
 function isInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-async function confirmInit(targetDir: string, blueprint: ProjectBlueprint): Promise<boolean> {
+async function confirmInit(
+  targetDir: string,
+  blueprint: ProjectBlueprint,
+): Promise<boolean> {
   console.log(formatBlueprintSummary(targetDir, blueprint));
   const readline = createInterface({
     input: process.stdin,
@@ -384,7 +459,10 @@ async function confirmInit(targetDir: string, blueprint: ProjectBlueprint): Prom
 
   try {
     const answer = await readline.question("Generate this project? [y/N] ");
-    return answer.trim().toLowerCase() === "y" || answer.trim().toLowerCase() === "yes";
+    return (
+      answer.trim().toLowerCase() === "y" ||
+      answer.trim().toLowerCase() === "yes"
+    );
   } finally {
     readline.close();
   }
@@ -463,7 +541,9 @@ async function main(args: string[]): Promise<void> {
 
     const result = validatePresetFile(await readJsonDeclaration(filePath));
     if (!result.ok) {
-      throw new Error(`Preset file is invalid:\n${formatValidationIssues(result.issues)}`);
+      throw new Error(
+        `Preset file is invalid:\n${formatValidationIssues(result.issues)}`,
+      );
     }
 
     console.log(`Preset file is valid: ${result.value.name}`);
@@ -476,9 +556,13 @@ async function main(args: string[]): Promise<void> {
       throw new Error("blueprint validate requires a path");
     }
 
-    const result = validateProjectBlueprint(await readJsonDeclaration(filePath));
+    const result = validateProjectBlueprint(
+      await readJsonDeclaration(filePath),
+    );
     if (!result.ok) {
-      throw new Error(`Blueprint is invalid:\n${formatValidationIssues(result.issues)}`);
+      throw new Error(
+        `Blueprint is invalid:\n${formatValidationIssues(result.issues)}`,
+      );
     }
 
     console.log(`Blueprint is valid: ${result.value.preset}`);
@@ -490,11 +574,22 @@ async function main(args: string[]): Promise<void> {
     const blueprint = blueprintForInit(options);
 
     if (options.dryRun) {
-      const generationContext = await generationContextForInit(options, blueprint);
-      const nextSteps = planNextStepInstructions({
-        preset: blueprint.preset as PresetName,
-        targetDir: options.dir,
-      }).steps;
+      const generationContext = await generationContextForInit(
+        options,
+        blueprint,
+      );
+      const projectionPlan = generationContext
+        ? projectPresetThroughRegistry(generationContext)
+        : undefined;
+      const nextSteps = projectionPlan
+        ? planNextStepInstructionsForProjection({
+            targetDir: options.dir,
+            plan: projectionPlan,
+          })
+        : planNextStepInstructions({
+            preset: blueprint.preset as PresetName,
+            targetDir: options.dir,
+          }).steps;
 
       if (options.json) {
         printJson({
@@ -502,14 +597,23 @@ async function main(args: string[]): Promise<void> {
           dryRun: true,
           targetDir: options.dir,
           blueprint,
-          toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
+          toolchain: generationContext
+            ? toolchainReport(generationContext.toolchain)
+            : undefined,
           nextSteps,
         } satisfies InitJsonOutput);
         return;
       }
 
       console.log(formatBlueprintSummary(options.dir, blueprint));
-      console.log(formatNextSteps(options.dir, blueprint.preset as PresetName));
+      console.log(
+        projectionPlan
+          ? formatProjectionNextSteps(
+              options.dir,
+              projectionPlan,
+            )
+          : formatNextSteps(options.dir, blueprint.preset as PresetName),
+      );
       return;
     }
 
@@ -521,7 +625,10 @@ async function main(args: string[]): Promise<void> {
       throw new Error("Init cancelled");
     }
 
-    const generationContext = await generationContextForInit(options, blueprint);
+    const generationContext = await generationContextForInit(
+      options,
+      blueprint,
+    );
     await generateInitProject(options, generationContext);
     printInitComplete(options, blueprint, generationContext);
     return;
@@ -529,7 +636,11 @@ async function main(args: string[]): Promise<void> {
 
   if (command === "add" && args[1] === "package") {
     const options = parseAddPackageOptions(args);
-    await addPackage({ cwd: process.cwd(), preset: options.preset, name: options.name });
+    await addPackage({
+      cwd: process.cwd(),
+      preset: options.preset,
+      name: options.name,
+    });
     console.log(`Added ${options.preset} package ${options.name}`);
     return;
   }

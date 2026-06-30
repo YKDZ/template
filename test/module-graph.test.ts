@@ -1,16 +1,13 @@
+import { projectHonoApiPackageScripts } from "../src/hono-api.js";
 import {
   planNodeChecks,
   planNodeFixes,
   planRustBinChecks,
   planRustBinFixes,
-  planTsLibChecks,
-  planTsLibFixes,
   renderPlaywrightBrowserInstallCommand,
   renderRootCheckCommand,
   renderFixCommand,
   selectNodeCheckComponents,
-  selectTsLibCheckComponents,
-  selectTsLibFixComponents,
 } from "../src/module-graph.js";
 import {
   projectCheckWorkflow,
@@ -18,19 +15,32 @@ import {
   projectPresetDependencyMaintenancePolicy,
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
-import { projectHonoApiPackageScripts } from "../src/hono-api.js";
 import { projectRustBinPackageScripts } from "../src/rust-bin.js";
-import { projectTsLibPackageScripts } from "../src/ts-lib.js";
 import { projectVueAppPackageScripts } from "../src/vue-app.js";
 import {
   projectVueHonoApiPackageScripts,
   projectVueHonoRootPackageScripts,
   projectVueHonoWebPackageScripts,
 } from "../src/vue-hono-app.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 describe("module graph plans", () => {
   it("selects semantic Check and Fix Components for the ts-lib package boundary", () => {
-    expect(selectTsLibCheckComponents()).toEqual([
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const plan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-lib" },
+      preset: "ts-lib",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-lib" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    expect(plan.checkPlan.components).toEqual([
       {
         kind: "typescript-typecheck",
         owner: { kind: "package-boundary", path: "." },
@@ -45,7 +55,7 @@ describe("module graph plans", () => {
       },
     ]);
 
-    expect(selectTsLibFixComponents()).toEqual([
+    expect(plan.fixPlan.components).toEqual([
       {
         kind: "oxc-format-write",
         owner: { kind: "package-boundary", path: "." },
@@ -58,8 +68,21 @@ describe("module graph plans", () => {
   });
 
   it("orders ts-lib Check and Fix Plans before rendering Root Check and Fix Command strings", () => {
-    const checkPlan = planTsLibChecks();
-    const fixPlan = planTsLibFixes();
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const plan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-lib" },
+      preset: "ts-lib",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-lib" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+    const checkPlan = plan.checkPlan;
+    const fixPlan = plan.fixPlan;
 
     expect(checkPlan.components.map((component) => component.kind)).toEqual([
       "typescript-typecheck",
@@ -74,11 +97,27 @@ describe("module graph plans", () => {
     expect(renderRootCheckCommand(checkPlan)).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
-    expect(renderFixCommand(fixPlan)).toBe("pnpm run format:write && pnpm run lint:fix");
+    expect(renderFixCommand(fixPlan)).toBe(
+      "pnpm run format:write && pnpm run lint:fix",
+    );
   });
 
   it("projects ts-lib package scripts from Check and Fix Plans", () => {
-    expect(projectTsLibPackageScripts()).toEqual({
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const plan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-lib" },
+      preset: "ts-lib",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-lib" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    expect(plan.packageScripts).toEqual({
       build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
       check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
       fix: "pnpm run format:write && pnpm run lint:fix",
@@ -131,9 +170,9 @@ describe("module graph plans", () => {
         owner: { kind: "package-boundary", path: "." },
       },
     ]);
-    expect(renderPlaywrightBrowserInstallCommand(checkPlan.environmentNeeds[0])).toBe(
-      "pnpm exec playwright install chromium",
-    );
+    expect(
+      renderPlaywrightBrowserInstallCommand(checkPlan.environmentNeeds[0]),
+    ).toBe("pnpm exec playwright install chromium");
   });
 
   it("projects vue-hono workspace scripts and preserves web Playwright package filtering", () => {
@@ -160,12 +199,16 @@ describe("module graph plans", () => {
     );
     expect(selectNodeCheckComponents("vue-hono-api")).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ owner: { kind: "package-boundary", path: "apps/api" } }),
+        expect.objectContaining({
+          owner: { kind: "package-boundary", path: "apps/api" },
+        }),
       ]),
     );
     expect(selectNodeCheckComponents("vue-hono-web")).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ owner: { kind: "package-boundary", path: "apps/web" } }),
+        expect.objectContaining({
+          owner: { kind: "package-boundary", path: "apps/web" },
+        }),
       ]),
     );
     expect(rootCheckPlan.environmentNeeds).toEqual([
@@ -175,9 +218,9 @@ describe("module graph plans", () => {
         owner: { kind: "package-boundary", path: "apps/web" },
       },
     ]);
-    expect(renderPlaywrightBrowserInstallCommand(rootCheckPlan.environmentNeeds[0])).toBe(
-      "pnpm --filter ./apps/web exec playwright install chromium",
-    );
+    expect(
+      renderPlaywrightBrowserInstallCommand(rootCheckPlan.environmentNeeds[0]),
+    ).toBe("pnpm --filter ./apps/web exec playwright install chromium");
   });
 
   it("projects rust-bin package scripts from Rust Check and Fix Plans", () => {
@@ -189,7 +232,9 @@ describe("module graph plans", () => {
       "cargo-clippy",
       "cargo-test",
     ]);
-    expect(fixPlan.components.map((component) => component.kind)).toEqual(["rustfmt-write"]);
+    expect(fixPlan.components.map((component) => component.kind)).toEqual([
+      "rustfmt-write",
+    ]);
     expect(renderRootCheckCommand(checkPlan)).toBe(
       "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
     );
@@ -203,7 +248,26 @@ describe("module graph plans", () => {
   });
 
   it("projects GitHub check workflows from CI Capability, environment preparation, Check Plans, and pnpm Task Layer", () => {
-    expect(projectCheckWorkflow({ checkPlan: planNodeChecks("ts-lib"), rustToolchain: false })).toBe(
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const tsLibPlan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-lib" },
+      preset: "ts-lib",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-lib" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    expect(
+      projectCheckWorkflow({
+        checkPlan: tsLibPlan.checkPlan,
+        rustToolchain: false,
+      }),
+    ).toBe(
       [
         "name: Check",
         "",
@@ -240,7 +304,23 @@ describe("module graph plans", () => {
   });
 
   it("projects Dependabot config from Dependency Maintenance Policy separately from Check Plans", () => {
-    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("ts-lib"))).toBe(
+    const projection = findBuiltInPresetProjection("ts-lib");
+    const tsLibPlan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-lib" },
+      preset: "ts-lib",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-lib" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    expect(
+      projectDependabotConfig(tsLibPlan.dependencyMaintenancePolicy),
+    ).toBe(
       [
         "version: 2",
         "updates:",
@@ -256,11 +336,15 @@ describe("module graph plans", () => {
       ].join("\n"),
     );
 
-    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("rust-bin"))).toContain(
-      "package-ecosystem: cargo",
-    );
-    expect(projectDependabotConfig(projectPresetDependencyMaintenancePolicy("vue-hono-app"))).toContain(
-      "package-ecosystem: npm",
-    );
+    expect(
+      projectDependabotConfig(
+        projectPresetDependencyMaintenancePolicy("rust-bin"),
+      ),
+    ).toContain("package-ecosystem: cargo");
+    expect(
+      projectDependabotConfig(
+        projectPresetDependencyMaintenancePolicy("vue-hono-app"),
+      ),
+    ).toContain("package-ecosystem: npm");
   });
 });

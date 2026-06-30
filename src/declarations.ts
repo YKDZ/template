@@ -1,4 +1,5 @@
 import * as v from "valibot";
+import { builtInPresetMetadata } from "../templates/registry.js";
 
 export type PresetName =
   | "ts-lib"
@@ -60,115 +61,7 @@ export type ProjectBlueprint = {
   packages?: ProjectPackage[];
 };
 
-export const builtInPresets: readonly BuiltInPreset[] = [
-  {
-    name: "ts-lib",
-    title: "TypeScript library",
-    description: "Strict TypeScript package with pnpm catalog tooling.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot"
-    ]
-  },
-  {
-    name: "hono-api",
-    title: "Hono API",
-    description: "Single-package Hono Node API with strict TypeScript tooling.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot"
-    ]
-  },
-  {
-    name: "vue-app",
-    title: "Vue app",
-    description: "Single-package Vue app with Vite, Tailwind, Pinia, and test tooling.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot"
-    ]
-  },
-  {
-    name: "vue-hono-app",
-    title: "Vue Hono app",
-    description: "Full-stack Vue and Hono workspace with Hono RPC typing.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["multi-package"],
-    features: [
-      "pnpm-catalog",
-      "oxc-format-lint",
-      "strict-typescript",
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot"
-    ]
-  },
-  {
-    name: "rust-bin",
-    title: "Rust binary",
-    description: "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
-    generation: "supported",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: [
-      "root-check",
-      "fix-command",
-      "devcontainer",
-      "github-actions",
-      "dependabot",
-      "rustfmt-clippy",
-      "cargo-test"
-    ]
-  },
-  {
-    name: "ts-app",
-    title: "TypeScript application",
-    description: "Future application preset metadata.",
-    generation: "future",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: []
-  },
-  {
-    name: "node-cli",
-    title: "Node.js CLI",
-    description: "Future command-line preset metadata.",
-    generation: "future",
-    supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
-    features: []
-  }
-];
+export const builtInPresets: readonly BuiltInPreset[] = builtInPresetMetadata;
 
 const featureNames: FeatureName[] = [
   "pnpm-catalog",

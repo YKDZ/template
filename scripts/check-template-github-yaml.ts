@@ -5,9 +5,12 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { builtInPresets, type PresetName } from "../src/declarations.js";
 import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
   projectPresetDependabotConfig,
   projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultTemplatesRoot = path.join(repoRoot, "templates");
@@ -113,8 +116,8 @@ function checkProjectedTemplate(
 
   const expected =
     kind === "workflow"
-      ? projectPresetGithubCheckWorkflow(presetName)
-      : projectPresetDependabotConfig(presetName);
+      ? projectGithubCheckWorkflow(presetName)
+      : projectDependabotTemplate(presetName);
 
   if (contents.replace(/\r\n/g, "\n") === expected) {
     return [];
@@ -133,6 +136,43 @@ function isSupportedPresetName(presetName: string): presetName is PresetName {
   return builtInPresets.some(
     (preset) => preset.name === presetName && preset.generation === "supported",
   );
+}
+
+function projectGithubCheckWorkflow(presetName: PresetName): string {
+  const projectionPlan = projectThroughPresetProjection(presetName);
+
+  return projectionPlan
+    ? projectCheckWorkflow({ checkPlan: projectionPlan.checkPlan })
+    : projectPresetGithubCheckWorkflow(presetName);
+}
+
+function projectDependabotTemplate(presetName: PresetName): string {
+  const projectionPlan = projectThroughPresetProjection(presetName);
+
+  return projectionPlan
+    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
+    : projectPresetDependabotConfig(presetName);
+}
+
+function projectThroughPresetProjection(presetName: PresetName) {
+  const projection = findBuiltInPresetProjection(presetName);
+
+  if (!projection) {
+    return undefined;
+  }
+
+  return projection.project({
+    projectName: { kind: "ProjectName", value: "generated-repository" },
+    preset: presetName,
+    packageManager: { kind: "PackageManager", value: "pnpm" },
+    blueprint: projection.blueprint({ targetDir: "generated-repository" }),
+    toolchain: {
+      nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      source: "bundled-fallback",
+      diagnostics: [],
+    },
+  });
 }
 
 function checkWorkflowTemplate(relativePath: string, document: YAMLMap): string[] {
