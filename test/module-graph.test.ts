@@ -1,16 +1,11 @@
 import {
-  planNodeChecks,
-  planNodeFixes,
   renderPlaywrightBrowserInstallCommand,
   renderRootCheckCommand,
   renderFixCommand,
-  selectNodeCheckComponents,
 } from "../src/module-graph.js";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
-  projectPresetDependencyMaintenancePolicy,
-  projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
 import { projectHonoApiPackageScripts } from "../templates/hono-api/projection.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
@@ -148,7 +143,19 @@ describe("module graph plans", () => {
   });
 
   it("projects vue-app package scripts and browser environment needs from Check and Fix Plans", () => {
-    const checkPlan = planNodeChecks("vue-app");
+    const projection = findBuiltInPresetProjection("vue-app");
+    const plan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-vue" },
+      preset: "vue-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-vue" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
 
     expect(projectVueAppPackageScripts()).toEqual({
       build: "vite build",
@@ -165,7 +172,7 @@ describe("module graph plans", () => {
       "test:e2e": "pnpm run build && playwright test",
       typecheck: "vue-tsc --build --noEmit",
     });
-    expect(checkPlan.environmentNeeds).toEqual([
+    expect(plan.checkPlan.environmentNeeds).toEqual([
       {
         kind: "playwright-browser-assets",
         browser: "chromium",
@@ -173,13 +180,26 @@ describe("module graph plans", () => {
       },
     ]);
     expect(
-      renderPlaywrightBrowserInstallCommand(checkPlan.environmentNeeds[0]),
+      renderPlaywrightBrowserInstallCommand(plan.checkPlan.environmentNeeds[0]),
     ).toBe("pnpm exec playwright install chromium");
   });
 
   it("projects vue-hono workspace scripts and preserves web Playwright package filtering", () => {
-    const rootCheckPlan = planNodeChecks("vue-hono-root");
-    const rootFixPlan = planNodeFixes("vue-hono-root");
+    const projection = findBuiltInPresetProjection("vue-hono-app");
+    const plan = projection!.project({
+      projectName: { kind: "ProjectName", value: "demo-stack" },
+      preset: "vue-hono-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: projection!.blueprint({ targetDir: "/tmp/demo-stack" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+    const rootCheckPlan = plan.checkPlan;
+    const rootFixPlan = plan.fixPlan;
 
     expect(rootFixPlan.components).toEqual([
       {
@@ -198,20 +218,6 @@ describe("module graph plans", () => {
     );
     expect(projectVueHonoWebPackageScripts().check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
-    );
-    expect(selectNodeCheckComponents("vue-hono-api")).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          owner: { kind: "package-boundary", path: "apps/api" },
-        }),
-      ]),
-    );
-    expect(selectNodeCheckComponents("vue-hono-web")).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          owner: { kind: "package-boundary", path: "apps/web" },
-        }),
-      ]),
     );
     expect(rootCheckPlan.environmentNeeds).toEqual([
       {
@@ -267,7 +273,7 @@ describe("module graph plans", () => {
     expect(
       projectCheckWorkflow({
         checkPlan: tsLibPlan.checkPlan,
-        rustToolchain: false,
+        environmentPreparation: { rustToolchain: false },
       }),
     ).toBe(
       [
@@ -294,7 +300,21 @@ describe("module graph plans", () => {
       ].join("\n"),
     );
 
-    expect(projectPresetGithubCheckWorkflow("vue-app")).toContain(
+    const vueProjection = findBuiltInPresetProjection("vue-app");
+    const vuePlan = vueProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-vue" },
+      preset: "vue-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: vueProjection!.blueprint({ targetDir: "/tmp/demo-vue" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    expect(projectCheckWorkflow({ checkPlan: vuePlan.checkPlan })).toContain(
       "      - run: pnpm exec playwright install --with-deps chromium",
     );
     const rustProjection = findBuiltInPresetProjection("rust-bin");
@@ -312,7 +332,7 @@ describe("module graph plans", () => {
     });
     const rustWorkflow = projectCheckWorkflow({
       checkPlan: rustPlan.checkPlan,
-      rustToolchain: true,
+      environmentPreparation: { rustToolchain: true },
     });
 
     expect(rustWorkflow).toContain(
@@ -369,10 +389,21 @@ describe("module graph plans", () => {
     expect(
       projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
     ).toContain("package-ecosystem: cargo");
+    const vueHonoProjection = findBuiltInPresetProjection("vue-hono-app");
+    const vueHonoPlan = vueHonoProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-stack" },
+      preset: "vue-hono-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: vueHonoProjection!.blueprint({ targetDir: "/tmp/demo-stack" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
     expect(
-      projectDependabotConfig(
-        projectPresetDependencyMaintenancePolicy("vue-hono-app"),
-      ),
+      projectDependabotConfig(vueHonoPlan.dependencyMaintenancePolicy),
     ).toContain("package-ecosystem: npm");
   });
 });

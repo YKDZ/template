@@ -152,6 +152,7 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
 function operationsForTsLib(
   context: GenerationContext,
   packageScripts: Record<string, string>,
+  checkPlan: CheckPlan,
 ): RenderOperation[] {
   return [
     {
@@ -244,7 +245,7 @@ function operationsForTsLib(
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan: planTsLibChecks() }),
+      text: projectCheckWorkflow({ checkPlan }),
     },
     {
       kind: "writeText",
@@ -298,7 +299,7 @@ export const tsLibPresetProjection: PresetProjection = {
     return {
       sourceRoot: templateSourceRoot(),
       sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-      operations: operationsForTsLib(context, packageScripts),
+      operations: operationsForTsLib(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,
       dependencyMaintenancePolicy,

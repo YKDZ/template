@@ -22,10 +22,7 @@ import {
   assembleGenerationContext,
   type GenerationContext,
 } from "./generation-context.js";
-import {
-  planNextStepInstructions,
-  type NextStepInstruction,
-} from "./next-step-instructions.js";
+import type { NextStepInstruction } from "./next-step-instructions.js";
 import { addPackage } from "./package-addition.js";
 import {
   planNextStepInstructionsForProjection,
@@ -257,14 +254,6 @@ type ToolchainReport = {
   diagnostics: string[];
 };
 
-function formatNextSteps(targetDir: string, preset: PresetName): string {
-  const plan = planNextStepInstructions({ preset, targetDir });
-  return [
-    "Next Step Instructions:",
-    ...plan.steps.map((step) => `  ${step.label}: ${step.display}`),
-  ].join("\n");
-}
-
 function formatProjectionNextSteps(
   targetDir: string,
   projectionPlan: PresetProjectionPlan,
@@ -360,16 +349,16 @@ function printInitComplete(
   blueprint: ProjectBlueprint,
   generationContext?: GenerationContext,
 ): void {
-  const preset = blueprint.preset as PresetName;
   const projectionPlan = generationContext
     ? projectPresetThroughRegistry(generationContext)
     : undefined;
-  const nextSteps = projectionPlan
-    ? planNextStepInstructionsForProjection({
-        targetDir: options.dir,
-        plan: projectionPlan,
-      })
-    : planNextStepInstructions({ preset, targetDir: options.dir }).steps;
+  if (!projectionPlan) {
+    throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
+  }
+  const nextSteps = planNextStepInstructionsForProjection({
+    targetDir: options.dir,
+    plan: projectionPlan,
+  });
 
   if (options.json) {
     printJson({
@@ -389,11 +378,7 @@ function printInitComplete(
   if (generationContext) {
     console.log(formatToolchainReport(generationContext.toolchain));
   }
-  console.log(
-    projectionPlan
-      ? formatProjectionNextSteps(options.dir, projectionPlan)
-      : formatNextSteps(options.dir, preset),
-  );
+  console.log(formatProjectionNextSteps(options.dir, projectionPlan));
 }
 
 function isInteractiveTerminal(): boolean {
@@ -534,15 +519,13 @@ async function main(args: string[]): Promise<void> {
       const projectionPlan = generationContext
         ? projectPresetThroughRegistry(generationContext)
         : undefined;
-      const nextSteps = projectionPlan
-        ? planNextStepInstructionsForProjection({
-            targetDir: options.dir,
-            plan: projectionPlan,
-          })
-        : planNextStepInstructions({
-            preset: blueprint.preset as PresetName,
-            targetDir: options.dir,
-          }).steps;
+      if (!projectionPlan) {
+        throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
+      }
+      const nextSteps = planNextStepInstructionsForProjection({
+        targetDir: options.dir,
+        plan: projectionPlan,
+      });
 
       if (options.json) {
         printJson({
@@ -562,11 +545,7 @@ async function main(args: string[]): Promise<void> {
       if (generationContext) {
         console.log(formatToolchainReport(generationContext.toolchain));
       }
-      console.log(
-        projectionPlan
-          ? formatProjectionNextSteps(options.dir, projectionPlan)
-          : formatNextSteps(options.dir, blueprint.preset as PresetName),
-      );
+      console.log(formatProjectionNextSteps(options.dir, projectionPlan));
       return;
     }
 

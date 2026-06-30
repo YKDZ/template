@@ -16,6 +16,7 @@
     "src/**/*.ts",
     "templates/shared/oxc/**/*.ts",
     "templates/registry.ts",
+    "templates/projection-plans.ts",
     "templates/*/projection.ts",
     "test/**/*.ts"
   ]

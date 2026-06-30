@@ -6,10 +6,6 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 
 import { builtInPresets, type PresetName } from "../src/declarations.js";
-import {
-  projectPresetDependabotConfig,
-  projectPresetGithubCheckWorkflow,
-} from "../src/project-github.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
@@ -171,7 +167,7 @@ function projectGithubCheckWorkflow(presetName: PresetName): string {
 
   return projectedWorkflow?.kind === "writeText"
     ? projectedWorkflow.text
-    : projectPresetGithubCheckWorkflow(presetName);
+    : missingProjectedGithubTemplate(presetName, "workflow");
 }
 
 function projectDependabotTemplate(presetName: PresetName): string {
@@ -184,7 +180,16 @@ function projectDependabotTemplate(presetName: PresetName): string {
 
   return projectedDependabot?.kind === "writeText"
     ? projectedDependabot.text
-    : projectPresetDependabotConfig(presetName);
+    : missingProjectedGithubTemplate(presetName, "dependabot");
+}
+
+function missingProjectedGithubTemplate(
+  presetName: PresetName,
+  kind: "workflow" | "dependabot",
+): never {
+  throw new Error(
+    `Preset Projection ${presetName} did not project ${kind} template source`,
+  );
 }
 
 function projectThroughPresetProjection(presetName: PresetName) {

@@ -1,6 +1,5 @@
-import path from "node:path";
-import type { PresetName } from "./declarations.js";
-import { planPresetChecks, renderPlaywrightBrowserInstallCommand } from "./module-graph.js";
+import { renderPlaywrightBrowserInstallCommand } from "./module-graph.js";
+import type { PresetProjectionPlan } from "./preset-projection.js";
 
 export type NextStepInstruction = {
   readonly id: string;
@@ -14,14 +13,13 @@ export type NextStepInstruction = {
 };
 
 export type NextStepInstructionPlan = {
-  readonly preset: PresetName;
   readonly targetDir: string;
   readonly steps: readonly NextStepInstruction[];
 };
 
 export type PlanNextStepInstructionsOptions = {
-  readonly preset: PresetName;
   readonly targetDir: string;
+  readonly projectionPlan: PresetProjectionPlan;
 };
 
 function rootCheckInstruction(): NextStepInstruction {
@@ -63,14 +61,10 @@ function fixInstruction(): NextStepInstruction {
   };
 }
 
-function checkEnvironmentInstructions(preset: PresetName): NextStepInstruction[] {
-  const checkPlan = planPresetChecks(preset);
-
-  if (!checkPlan) {
-    return [];
-  }
-
-  return checkPlan.environmentNeeds.map((need) => {
+function checkEnvironmentInstructions(
+  plan: PresetProjectionPlan,
+): NextStepInstruction[] {
+  return plan.checkPlan.environmentNeeds.map((need) => {
     const display = renderPlaywrightBrowserInstallCommand(need);
     const [command, ...args] = display.split(" ");
 
@@ -93,33 +87,34 @@ function checkEnvironmentInstructions(preset: PresetName): NextStepInstruction[]
   });
 }
 
-function presetSpecificInstructions(preset: PresetName): NextStepInstruction[] {
-  if (
-    preset === "ts-lib" ||
-    preset === "hono-api" ||
-    preset === "vue-app" ||
-    preset === "vue-hono-app" ||
-    preset === "rust-bin"
-  ) {
-    return [
-      installDependenciesInstruction(),
-      fixInstruction(),
-      ...checkEnvironmentInstructions(preset),
-      rootCheckInstruction(),
-    ];
+function projectionInstructions(
+  plan: PresetProjectionPlan,
+): NextStepInstruction[] {
+  const steps = [installDependenciesInstruction()];
+
+  if (plan.capabilities.fixCommand) {
+    steps.push(fixInstruction());
   }
 
-  return [installDependenciesInstruction(), rootCheckInstruction()];
+  steps.push(...checkEnvironmentInstructions(plan));
+
+  if (plan.capabilities.rootCheck) {
+    steps.push(rootCheckInstruction());
+  }
+
+  return steps;
 }
 
 export function planNextStepInstructions(
   options: PlanNextStepInstructionsOptions,
 ): NextStepInstructionPlan {
-  const targetDir = path.resolve(options.targetDir);
-  const commandSteps = presetSpecificInstructions(options.preset).map((step) => ({
-    ...step,
-    cwd: targetDir,
-  }));
+  const targetDir = options.targetDir;
+  const commandSteps = projectionInstructions(options.projectionPlan).map(
+    (step) => ({
+      ...step,
+      cwd: targetDir,
+    }),
+  );
   const navigationStep: NextStepInstruction = {
     id: "enter-project",
     label: "Enter Generated Repository",
@@ -132,8 +127,9 @@ export function planNextStepInstructions(
   };
 
   return Object.freeze({
-    preset: options.preset,
     targetDir,
-    steps: Object.freeze([navigationStep, ...commandSteps].map((step) => Object.freeze(step))),
+    steps: Object.freeze(
+      [navigationStep, ...commandSteps].map((step) => Object.freeze(step)),
+    ),
   });
 }

@@ -7,7 +7,9 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 
 import { builtInPresets, type BuiltInPreset } from "../src/declarations.js";
+import { assembleGenerationContext } from "../src/generation-context.js";
 import { planNextStepInstructions } from "../src/next-step-instructions.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 type SupportedFixturePreset = Extract<
   BuiltInPreset["name"],
@@ -79,7 +81,31 @@ async function runMachineVerifiableNextSteps(
   presetName: SupportedFixturePreset,
   projectDir: string,
 ): Promise<void> {
-  const plan = planNextStepInstructions({ preset: presetName, targetDir: projectDir });
+  const projection = findBuiltInPresetProjection(presetName);
+
+  if (!projection) {
+    throw new Error(
+      `Missing Preset Projection for fixture preset ${presetName}`,
+    );
+  }
+
+  const blueprint = projection.blueprint({ targetDir: projectDir });
+  const projectionPlan = projection.project(
+    assembleGenerationContext({
+      targetDir: projectDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+        source: "bundled-fallback",
+        diagnostics: [],
+      },
+    }),
+  );
+  const plan = planNextStepInstructions({
+    targetDir: projectDir,
+    projectionPlan,
+  });
 
   for (const step of plan.steps) {
     if (!step.machineVerifiable || step.kind !== "command") {

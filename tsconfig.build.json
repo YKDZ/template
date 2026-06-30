@@ -4,5 +4,10 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "templates/registry.ts", "templates/*/projection.ts"]
+  "include": [
+    "src/**/*.ts",
+    "templates/registry.ts",
+    "templates/projection-plans.ts",
+    "templates/*/projection.ts"
+  ]
 }

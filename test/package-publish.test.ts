@@ -68,6 +68,7 @@ const packageFiles = [
   "templates/shared/oxc/package.json",
   "templates/shared/oxc/tsconfig.json",
   "templates/shared/oxc/vue/oxlint.config.ts",
+  "templates/projection-plans.ts",
   "templates/registry.ts",
   "templates/ts-lib/.github/dependabot.yml",
   "templates/ts-lib/.github/workflows/check.yml",
@@ -183,6 +184,7 @@ describe("package publishing", () => {
     expect(packedPaths).toContain("package/dist/src/next-step-instructions.js");
     expect(packedPaths).not.toContain("package/dist/post-commands.js");
     expect(packedPaths).toContain("package/dist/templates/registry.js");
+    expect(packedPaths).toContain("package/dist/templates/projection-plans.js");
     expect(packedPaths).not.toContain("package/dist/src/preset-registry.js");
     expect(packedPaths).toContain(
       "package/dist/templates/ts-lib/projection.js",

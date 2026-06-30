@@ -1,12 +1,52 @@
 import path from "node:path";
-import { planNextStepInstructions } from "../src/next-step-instructions.js";
+
 import type { PresetName } from "../src/declarations.js";
+import { assembleGenerationContext } from "../src/generation-context.js";
+import { planNextStepInstructions } from "../src/next-step-instructions.js";
+import type { PresetProjectionPlan } from "../src/preset-projection.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
+
+type SupportedPresetName = Extract<
+  PresetName,
+  "ts-lib" | "hono-api" | "vue-app" | "vue-hono-app" | "rust-bin"
+>;
+
+function projectPresetPlan(preset: SupportedPresetName): PresetProjectionPlan {
+  const projection = findBuiltInPresetProjection(preset);
+
+  if (!projection) {
+    throw new Error(`Missing test Preset Projection: ${preset}`);
+  }
+
+  const targetDir = path.join("/", "tmp", `generated-${preset}`);
+  const blueprint = projection.blueprint({ targetDir });
+
+  return projection.project(
+    assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    }),
+  );
+}
 
 describe("Next Step Instructions", () => {
   it.each([
     ["ts-lib", ["pnpm run fix", "pnpm run check"]],
     ["hono-api", ["pnpm run fix", "pnpm run check"]],
-    ["vue-app", ["pnpm run fix", "pnpm exec playwright install chromium", "pnpm run check"]],
+    [
+      "vue-app",
+      [
+        "pnpm run fix",
+        "pnpm exec playwright install chromium",
+        "pnpm run check",
+      ],
+    ],
     [
       "vue-hono-app",
       [
@@ -15,12 +55,15 @@ describe("Next Step Instructions", () => {
         "pnpm run check",
       ],
     ],
-  ] satisfies Array<[PresetName, string[]]>)(
+  ] satisfies Array<[SupportedPresetName, string[]]>)(
     "plans user-run instructions for a %s Preset without executable Post Commands",
     (preset, commandDisplays) => {
       const targetDir = path.join("/", "tmp", "generated-repository");
 
-      const plan = planNextStepInstructions({ preset, targetDir });
+      const plan = planNextStepInstructions({
+        targetDir,
+        projectionPlan: projectPresetPlan(preset),
+      });
 
       expect(plan.steps).toEqual([
         {
@@ -59,7 +102,10 @@ describe("Next Step Instructions", () => {
   it("plans pnpm task-layer instructions for the Rust Preset", () => {
     const targetDir = path.join("/", "tmp", "rust-repository");
 
-    const plan = planNextStepInstructions({ preset: "rust-bin", targetDir });
+    const plan = planNextStepInstructions({
+      targetDir,
+      projectionPlan: projectPresetPlan("rust-bin"),
+    });
 
     expect(plan.steps.map((step) => step.display)).toEqual([
       `cd ${targetDir}`,
@@ -101,18 +147,42 @@ describe("Next Step Instructions", () => {
     ]);
   });
 
-  it.each(["ts-app", "node-cli"] satisfies PresetName[])(
-    "plans only generic instructions for unsupported future Preset %s",
-    (preset) => {
-      const targetDir = path.join("/", "tmp", "future-repository");
+  it("derives Playwright setup guidance from Check Plan environment needs", () => {
+    const targetDir = path.join("/", "tmp", "custom-repository");
 
-      const plan = planNextStepInstructions({ preset, targetDir });
+    const plan = planNextStepInstructions({
+      targetDir,
+      projectionPlan: {
+        sourceRoot: targetDir,
+        operations: [],
+        checkPlan: {
+          components: [],
+          environmentNeeds: [
+            {
+              kind: "playwright-browser-assets",
+              browser: "chromium",
+              owner: { kind: "package-boundary", path: "apps/web" },
+            },
+          ],
+        },
+        fixPlan: { components: [] },
+        dependencyMaintenancePolicy: {
+          ecosystems: ["npm", "github-actions"],
+          interval: "weekly",
+        },
+        packageScripts: {},
+        capabilities: {
+          rootCheck: true,
+          fixCommand: true,
+          githubActions: true,
+          dependabot: true,
+          devcontainer: true,
+        },
+      },
+    });
 
-      expect(plan.steps.map((step) => step.display)).toEqual([
-        `cd ${targetDir}`,
-        "pnpm install",
-        "pnpm run check",
-      ]);
-    },
-  );
+    expect(plan.steps.map((step) => step.display)).toContain(
+      "pnpm --filter ./apps/web exec playwright install chromium",
+    );
+  });
 });

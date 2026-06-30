@@ -1,9 +1,4 @@
-import type { PresetName } from "./declarations.js";
-import {
-  type CheckEnvironmentNeed,
-  type CheckPlan,
-  planPresetChecks,
-} from "./module-graph.js";
+import { type CheckEnvironmentNeed, type CheckPlan } from "./module-graph.js";
 
 export type CiCapability = {
   readonly workflowName: "Check";
@@ -33,7 +28,6 @@ type ProjectCheckWorkflowOptions = {
   readonly capability?: CiCapability;
   readonly environmentPreparation?: Partial<CiEnvironmentPreparation>;
   readonly taskLayer?: PnpmTaskLayer;
-  readonly rustToolchain?: boolean;
 };
 
 const defaultCiCapability: CiCapability = {
@@ -47,24 +41,13 @@ const pnpmTaskLayer: PnpmTaskLayer = {
   checkCommand: "pnpm run check",
 };
 
-export function projectPresetGithubCheckWorkflow(preset: PresetName): string {
-  const checkPlan = planPresetChecks(preset);
-
-  if (!checkPlan) {
-    throw new Error(`Unsupported preset for GitHub check workflow projection: ${preset}`);
-  }
-
-  return projectCheckWorkflow({
-    checkPlan,
-    rustToolchain: preset === "rust-bin",
-  });
-}
-
-export function projectCheckWorkflow(options: ProjectCheckWorkflowOptions): string {
+export function projectCheckWorkflow(
+  options: ProjectCheckWorkflowOptions,
+): string {
   const capability = options.capability ?? defaultCiCapability;
   const environmentPreparation: CiEnvironmentPreparation = {
     nodeFromPackageMetadata: true,
-    rustToolchain: options.rustToolchain ?? false,
+    rustToolchain: false,
     ...options.environmentPreparation,
   };
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
@@ -113,27 +96,9 @@ export function projectCheckWorkflow(options: ProjectCheckWorkflowOptions): stri
   return lines.join("\n");
 }
 
-export function projectPresetDependencyMaintenancePolicy(
-  preset: PresetName,
-): DependencyMaintenancePolicy {
-  switch (preset) {
-    case "ts-lib":
-    case "hono-api":
-    case "vue-app":
-    case "vue-hono-app":
-      return { ecosystems: ["npm", "github-actions"], interval: "weekly" };
-    case "ts-app":
-    case "node-cli":
-    case "rust-bin":
-      throw new Error(`Unsupported preset for Dependency Maintenance Policy projection: ${preset}`);
-  }
-}
-
-export function projectPresetDependabotConfig(preset: PresetName): string {
-  return projectDependabotConfig(projectPresetDependencyMaintenancePolicy(preset));
-}
-
-export function projectDependabotConfig(policy: DependencyMaintenancePolicy): string {
+export function projectDependabotConfig(
+  policy: DependencyMaintenancePolicy,
+): string {
   return [
     "version: 2",
     "updates:",
@@ -148,7 +113,10 @@ export function projectDependabotConfig(policy: DependencyMaintenancePolicy): st
 }
 
 function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
-  if (need.kind === "playwright-browser-assets" && need.owner.path === "apps/web") {
+  if (
+    need.kind === "playwright-browser-assets" &&
+    need.owner.path === "apps/web"
+  ) {
     return `pnpm --filter ./apps/web exec playwright install --with-deps ${need.browser}`;
   }
 

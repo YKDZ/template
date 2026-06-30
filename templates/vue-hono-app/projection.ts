@@ -9,8 +9,7 @@ import type {
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
-  planNodeChecks,
-  planNodeFixes,
+  type CheckPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
@@ -25,6 +24,7 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
+import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -244,6 +244,7 @@ function packageScopeFromBlueprint(context: GenerationContext): string {
 function operationsForVueHonoApp(
   context: GenerationContext,
   packageScripts: Record<string, string>,
+  checkPlan: CheckPlan,
 ): RenderOperation[] {
   const packageScope = packageScopeFromBlueprint(context);
   const apiName = packageName(packageScope, "api");
@@ -360,9 +361,7 @@ function operationsForVueHonoApp(
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({
-        checkPlan: planNodeChecks("vue-hono-root"),
-      }),
+      text: projectCheckWorkflow({ checkPlan }),
     },
     {
       kind: "writeText",
@@ -626,7 +625,7 @@ export const vueHonoAppPresetProjection: PresetProjection = {
     return {
       sourceRoot: templateSourceRoot(),
       sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-      operations: operationsForVueHonoApp(context, packageScripts),
+      operations: operationsForVueHonoApp(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,
       dependencyMaintenancePolicy,

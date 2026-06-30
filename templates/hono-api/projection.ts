@@ -9,8 +9,7 @@ import type {
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
-  planNodeChecks,
-  planNodeFixes,
+  type CheckPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
@@ -24,6 +23,7 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
+import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -123,6 +123,7 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
 function operationsForHonoApi(
   context: GenerationContext,
   packageScripts: Record<string, string>,
+  checkPlan: CheckPlan,
 ): RenderOperation[] {
   return [
     {
@@ -225,7 +226,7 @@ function operationsForHonoApi(
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan: planNodeChecks("hono-api") }),
+      text: projectCheckWorkflow({ checkPlan }),
     },
     {
       kind: "writeText",
@@ -279,7 +280,7 @@ export const honoApiPresetProjection: PresetProjection = {
     return {
       sourceRoot: templateSourceRoot(),
       sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-      operations: operationsForHonoApi(context, packageScripts),
+      operations: operationsForHonoApi(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,
       dependencyMaintenancePolicy,

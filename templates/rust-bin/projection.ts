@@ -183,9 +183,8 @@ function operationsForRustBin(
   context: GenerationContext,
   projectName: string,
   packageScripts: Record<string, string>,
+  checkPlan: CheckPlan,
 ): RenderOperation[] {
-  const checkPlan = planRustBinChecks();
-
   return [
     {
       kind: "writeJson",
@@ -257,7 +256,10 @@ function operationsForRustBin(
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan, rustToolchain: true }),
+      text: projectCheckWorkflow({
+        checkPlan,
+        environmentPreparation: { rustToolchain: true },
+      }),
     },
     {
       kind: "writeText",
@@ -296,7 +298,12 @@ export const rustBinPresetProjection: PresetProjection = {
 
     return {
       sourceRoot: templateSourceRoot(),
-      operations: operationsForRustBin(context, projectName, packageScripts),
+      operations: operationsForRustBin(
+        context,
+        projectName,
+        packageScripts,
+        checkPlan,
+      ),
       checkPlan,
       fixPlan,
       dependencyMaintenancePolicy,

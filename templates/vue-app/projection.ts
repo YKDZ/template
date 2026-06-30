@@ -9,8 +9,7 @@ import type {
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
-  planNodeChecks,
-  planNodeFixes,
+  type CheckPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
@@ -24,6 +23,7 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
+import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -134,6 +134,7 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
 function operationsForVueApp(
   context: GenerationContext,
   packageScripts: Record<string, string>,
+  checkPlan: CheckPlan,
 ): RenderOperation[] {
   return [
     {
@@ -308,7 +309,7 @@ function operationsForVueApp(
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan: planNodeChecks("vue-app") }),
+      text: projectCheckWorkflow({ checkPlan }),
     },
     {
       kind: "writeText",
@@ -362,7 +363,7 @@ export const vueAppPresetProjection: PresetProjection = {
     return {
       sourceRoot: templateSourceRoot(),
       sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-      operations: operationsForVueApp(context, packageScripts),
+      operations: operationsForVueApp(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,
       dependencyMaintenancePolicy,

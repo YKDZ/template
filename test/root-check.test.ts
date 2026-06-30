@@ -10,8 +10,6 @@ import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.j
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
-  projectPresetDependabotConfig,
-  projectPresetGithubCheckWorkflow,
 } from "../src/project-github.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
@@ -396,7 +394,7 @@ function validWorkflowTemplateForPreset(
 
   return projectedWorkflow?.kind === "writeText"
     ? projectedWorkflow.text
-    : projectPresetGithubCheckWorkflow(presetName);
+    : missingProjectedGithubTemplate(presetName, "workflow");
 }
 
 function validDependabotTemplateForPreset(
@@ -411,7 +409,16 @@ function validDependabotTemplateForPreset(
 
   return projectedDependabot?.kind === "writeText"
     ? projectedDependabot.text
-    : projectPresetDependabotConfig(presetName);
+    : missingProjectedGithubTemplate(presetName, "dependabot");
+}
+
+function missingProjectedGithubTemplate(
+  presetName: "ts-lib" | "rust-bin",
+  kind: "workflow" | "dependabot",
+): never {
+  throw new Error(
+    `Preset Projection ${presetName} did not project ${kind} template source`,
+  );
 }
 
 function projectThroughPresetProjection(presetName: "ts-lib" | "rust-bin") {
