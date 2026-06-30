@@ -14,6 +14,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
+  PresetPackageAdditionPlan,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -236,6 +237,117 @@ function operationsForHonoApi(
   ];
 }
 
+function packageAdditionOperations(
+  packagePath: string,
+  packageName: string,
+): RenderOperation[] {
+  return [
+    {
+      kind: "writeJson",
+      to: `${packagePath}/package.json`,
+      value: {
+        name: packageName,
+        version: "0.0.0",
+        private: true,
+        type: "module",
+        scripts: projectHonoApiPackageScripts(),
+        dependencies: {
+          "@hono/node-server": "catalog:",
+          hono: "catalog:",
+        },
+        devDependencies: {
+          "@types/node": "catalog:",
+          oxfmt: "catalog:",
+          oxlint: "catalog:",
+          "tsc-alias": "catalog:",
+          typescript: "catalog:",
+          vitest: "catalog:",
+        },
+        engines: {
+          node: "22",
+        },
+      },
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/tsconfig.json`,
+      value: {
+        compilerOptions: {
+          composite: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          paths: {
+            "@/*": ["./src/*"],
+          },
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+          types: ["node", "vitest/globals"],
+        },
+        include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/tsconfig.build.json`,
+      value: {
+        extends: "./tsconfig.json",
+        compilerOptions: {
+          outDir: "dist",
+          rootDir: "src",
+          types: ["node"],
+        },
+        include: ["src/**/*.ts"],
+      },
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "node/oxlint.config.ts",
+      to: `${packagePath}/oxlint.config.ts`,
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: `${packagePath}/oxfmt.config.ts`,
+    },
+    { kind: "copyFile", from: "src/app.ts", to: `${packagePath}/src/app.ts` },
+    {
+      kind: "copyFile",
+      from: "src/server.ts",
+      to: `${packagePath}/src/server.ts`,
+    },
+    {
+      kind: "copyFile",
+      from: "test/app.test.ts",
+      to: `${packagePath}/test/app.test.ts`,
+    },
+    {
+      kind: "copyFile",
+      from: "vitest.config.ts",
+      to: `${packagePath}/vitest.config.ts`,
+    },
+  ];
+}
+
+function packageAdditionPlan(
+  packageLeafName: string,
+  packageName: string,
+): PresetPackageAdditionPlan {
+  const packagePath = `apps/${packageLeafName}`;
+
+  return {
+    packagePath,
+    workspacePackageGlob: "apps/*",
+    rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
+    sourceRoot: templateSourceRoot(),
+    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+    operations: packageAdditionOperations(packagePath, packageName),
+  };
+}
+
 function templateSourceRoot(): string {
   const projectionDir = path.dirname(fileURLToPath(import.meta.url));
   const publishedTemplateRoot = path.join(
@@ -271,6 +383,13 @@ function sharedOxcSourceRoot(): string {
 
 export const honoApiPresetProjection: PresetProjection = {
   metadata: honoApiPresetMetadata,
+  capabilities: {
+    packageAddition: {
+      planPackageAddition({ packageLeafName, packageName }) {
+        return packageAdditionPlan(packageLeafName, packageName);
+      },
+    },
+  },
   blueprint: honoApiBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
     const checkPlan = planNodeChecks("hono-api");

@@ -16,6 +16,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
+  PresetPackageAdditionPlan,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -255,6 +256,100 @@ function operationsForTsLib(
   ];
 }
 
+function packageAdditionOperations(
+  packagePath: string,
+  packageName: string,
+): RenderOperation[] {
+  return [
+    {
+      kind: "writeJson",
+      to: `${packagePath}/package.json`,
+      value: {
+        name: packageName,
+        version: "0.0.0",
+        private: true,
+        files: ["dist"],
+        type: "module",
+        exports: {
+          ".": {
+            default: "./dist/index.js",
+            types: "./dist/index.d.ts",
+          },
+        },
+        scripts: projectTsLibPackageScripts(),
+        devDependencies: {
+          "@types/node": "catalog:",
+          oxfmt: "catalog:",
+          oxlint: "catalog:",
+          "tsc-alias": "catalog:",
+          typescript: "catalog:",
+        },
+        engines: {
+          node: "22",
+        },
+      },
+      multilineArrays: ["files"],
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/tsconfig.json`,
+      value: {
+        compilerOptions: {
+          composite: true,
+          declaration: true,
+          declarationMap: true,
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          outDir: "dist",
+          paths: {
+            "@/*": ["./src/*"],
+          },
+          rootDir: "src",
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+          types: ["node"],
+        },
+        include: ["src/**/*.ts"],
+      },
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "node/oxlint.config.ts",
+      to: `${packagePath}/oxlint.config.ts`,
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: `${packagePath}/oxfmt.config.ts`,
+    },
+    {
+      kind: "copyFile",
+      from: "src/index.ts",
+      to: `${packagePath}/src/index.ts`,
+    },
+  ];
+}
+
+function packageAdditionPlan(
+  packageLeafName: string,
+  packageName: string,
+): PresetPackageAdditionPlan {
+  const packagePath = `packages/${packageLeafName}`;
+
+  return {
+    packagePath,
+    workspacePackageGlob: "packages/*",
+    rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
+    sourceRoot: templateSourceRoot(),
+    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+    operations: packageAdditionOperations(packagePath, packageName),
+  };
+}
+
 function templateSourceRoot(): string {
   const projectionDir = path.dirname(fileURLToPath(import.meta.url));
   const publishedTemplateRoot = path.join(
@@ -290,6 +385,13 @@ function sharedOxcSourceRoot(): string {
 
 export const tsLibPresetProjection: PresetProjection = {
   metadata: tsLibPresetMetadata,
+  capabilities: {
+    packageAddition: {
+      planPackageAddition({ packageLeafName, packageName }) {
+        return packageAdditionPlan(packageLeafName, packageName);
+      },
+    },
+  },
   blueprint: tsLibBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
     const checkPlan = planTsLibChecks();

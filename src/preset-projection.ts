@@ -8,6 +8,32 @@ import {
 import type { DependencyMaintenancePolicy } from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
 
+export type PresetPackageAdditionOptions = {
+  readonly root: string;
+  readonly blueprint: ProjectBlueprint;
+  readonly packageLeafName: string;
+  readonly packageName: string;
+};
+
+export type PresetPackageAdditionPlan = {
+  readonly packagePath: string;
+  readonly workspacePackageGlob: string;
+  readonly rootTsconfigReferences: readonly string[];
+  readonly sourceRoot: string;
+  readonly sourceRoots?: Record<string, string>;
+  readonly operations: readonly RenderOperation[];
+  readonly textFiles?: readonly {
+    readonly path: string;
+    readonly text: string;
+  }[];
+};
+
+export type PresetPackageAdditionCapability = {
+  planPackageAddition(
+    options: PresetPackageAdditionOptions,
+  ): PresetPackageAdditionPlan | Promise<PresetPackageAdditionPlan>;
+};
+
 export type PresetProjectionPlan = {
   readonly sourceRoot: string;
   readonly sourceRoots?: Record<string, string>;
@@ -37,6 +63,9 @@ export type RenderPresetProjectionOptions = {
 
 export type PresetProjection = {
   readonly metadata: BuiltInPreset;
+  readonly capabilities?: {
+    readonly packageAddition?: PresetPackageAdditionCapability;
+  };
   blueprint(options: PresetBlueprintOptions): ProjectBlueprint;
   project(context: GenerationContext): PresetProjectionPlan;
   render(options: RenderPresetProjectionOptions): Promise<void>;
