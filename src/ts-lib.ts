@@ -1,20 +1,40 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProjectBlueprint } from "./declarations.js";
+import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
+import { resolveToolchainVersions } from "./toolchain-resolution.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
   version: "0.0.0",
-  command: "template init --preset ts-lib"
+  command: "template init --preset ts-lib",
 };
 
-function projectNameFromDir(targetDir: string): string {
-  return path.basename(path.resolve(targetDir));
-}
+type InitTsLibProjectOptions = {
+  readonly generationContext?: GenerationContext;
+};
 
-function packageJson(projectName: string): Record<string, unknown> {
+const tsLibBlueprint: ProjectBlueprint = {
+  schemaVersion: 1,
+  preset: "ts-lib",
+  packageManager: "pnpm",
+  projectKind: "single-package",
+  features: [
+    "pnpm-catalog",
+    "oxc-format-lint",
+    "strict-typescript",
+    "root-check",
+    "fix-command",
+    "devcontainer",
+    "github-actions",
+    "dependabot",
+  ],
+};
+
+function packageJson(context: GenerationContext): Record<string, unknown> {
   return {
-    name: projectName,
+    name: context.projectName.value,
     version: "0.0.0",
     private: true,
     files: ["dist"],
@@ -22,8 +42,8 @@ function packageJson(projectName: string): Record<string, unknown> {
     exports: {
       ".": {
         default: "./dist/index.js",
-        types: "./dist/index.d.ts"
-      }
+        types: "./dist/index.d.ts",
+      },
     },
     scripts: {
       build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
@@ -33,29 +53,40 @@ function packageJson(projectName: string): Record<string, unknown> {
       "format:write": "oxfmt --write .",
       lint: "oxlint . --deny-warnings",
       "lint:fix": "oxlint . --fix --deny-warnings",
-      typecheck: "tsc -p tsconfig.json --noEmit"
+      typecheck: "tsc -p tsconfig.json --noEmit",
     },
     devDependencies: {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "tsc-alias": "catalog:",
-      typescript: "catalog:"
+      typescript: "catalog:",
     },
     engines: {
-      node: "22"
+      node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: "pnpm@10.0.0"
+    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
-function operationsForTsLib(projectName: string): RenderOperation[] {
+function generationRecord(context: GenerationContext): Record<string, unknown> {
+  return {
+    ...generatedBy,
+    toolchain: {
+      nodeLtsMajor: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+      source: context.toolchain.source,
+    },
+  };
+}
+
+function operationsForTsLib(context: GenerationContext): RenderOperation[] {
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(projectName),
-      multilineArrays: ["files"]
+      value: packageJson(context),
+      multilineArrays: ["files"],
     },
     {
       kind: "writeText",
@@ -70,8 +101,8 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
         "  oxlint: ^1.71.0",
         "  tsc-alias: ^1.8.17",
         "  typescript: ^5.8.0",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     },
     {
       kind: "writeJson",
@@ -85,38 +116,38 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
           noEmitOnError: true,
           outDir: "dist",
           paths: {
-            "@/*": ["./src/*"]
+            "@/*": ["./src/*"],
           },
           rootDir: "src",
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
-          types: ["node"]
+          types: ["node"],
         },
-        include: ["src/**/*.ts"]
-      }
+        include: ["src/**/*.ts"],
+      },
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "node/oxlint.config.ts",
-      to: "oxlint.config.ts"
+      to: "oxlint.config.ts",
     },
     {
       kind: "copyFile",
       sourceRoot: "sharedOxc",
       from: "oxfmt.config.ts",
-      to: "oxfmt.config.ts"
+      to: "oxfmt.config.ts",
     },
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", ".env", ""].join("\n")
+      text: ["node_modules", "dist", ".env", ""].join("\n"),
     },
     {
       kind: "copyFile",
       from: "src/index.ts",
-      to: "src/index.ts"
+      to: "src/index.ts",
     },
     {
       kind: "writeJson",
@@ -134,28 +165,28 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
           "fix-command",
           "devcontainer",
           "github-actions",
-          "dependabot"
-        ]
-      }
+          "dependabot",
+        ],
+      },
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy
+      value: generationRecord(context),
     },
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
       value: {
-        name: `${projectName} development`,
-        image: "mcr.microsoft.com/devcontainers/typescript-node:22",
+        name: `${context.projectName.value} development`,
+        image: `mcr.microsoft.com/devcontainers/typescript-node:${context.toolchain.nodeLtsMajor.value}`,
         postCreateCommand: "corepack enable && pnpm install",
         customizations: {
           vscode: {
-            extensions: ["oxc.oxc-vscode"]
-          }
-        }
-      }
+            extensions: ["oxc.oxc-vscode"],
+          },
+        },
+      },
     },
     {
       kind: "copyFile",
@@ -166,7 +197,7 @@ function operationsForTsLib(projectName: string): RenderOperation[] {
       kind: "copyFile",
       from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-    }
+    },
   ];
 }
 
@@ -175,14 +206,31 @@ function templateSourceRoot(): string {
 }
 
 function sharedOxcSourceRoot(): string {
-  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+  return path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "templates",
+    "shared",
+    "oxc",
+  );
 }
 
-export async function initTsLibProject(targetDir: string): Promise<void> {
+export async function initTsLibProject(
+  targetDir: string,
+  options?: InitTsLibProjectOptions,
+): Promise<void> {
+  const generationContext =
+    options?.generationContext ??
+    assembleGenerationContext({
+      targetDir,
+      blueprint: tsLibBlueprint,
+      toolchain: await resolveToolchainVersions(),
+    });
+
   await renderNewProject({
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
-    operations: operationsForTsLib(projectNameFromDir(targetDir))
+    operations: operationsForTsLib(generationContext),
   });
 }

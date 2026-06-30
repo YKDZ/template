@@ -13,6 +13,7 @@ export type PostCommand = {
 export type PlanPostCommandsOptions = {
   preset: PresetName;
   targetDir: string;
+  packageManagerPin?: `pnpm@${string}`;
 };
 
 const postCommandPlanBrand: unique symbol = Symbol("PostCommandPlan");
@@ -20,6 +21,7 @@ const postCommandPlanBrand: unique symbol = Symbol("PostCommandPlan");
 export type PostCommandPlan = {
   readonly preset: PresetName;
   readonly targetDir: string;
+  readonly packageManagerPin?: `pnpm@${string}`;
   readonly commands: readonly PostCommand[];
   readonly [postCommandPlanBrand]: true;
 };
@@ -50,26 +52,28 @@ type PlannedPostCommand = Omit<PostCommand, "cwd">;
 
 const packageManagerPin = "pnpm@10.0.0";
 
-const nodeReadyCommands = [
-  {
-    id: "node-enable-corepack",
-    label: "Enable Corepack",
-    command: "corepack",
-    args: ["enable"]
-  },
-  {
-    id: "node-refresh-package-manager-pin",
-    label: "Refresh Package Manager Pin and Install Dependencies",
-    command: "corepack",
-    args: ["use", packageManagerPin]
-  },
-  {
-    id: "node-run-fix",
-    label: "Run Fix Command",
-    command: "pnpm",
-    args: ["run", "fix"]
-  }
-] as const satisfies readonly PlannedPostCommand[];
+function nodeReadyCommands(pin: `pnpm@${string}`): readonly PlannedPostCommand[] {
+  return [
+    {
+      id: "node-enable-corepack",
+      label: "Enable Corepack",
+      command: "corepack",
+      args: ["enable"]
+    },
+    {
+      id: "node-refresh-package-manager-pin",
+      label: "Refresh Package Manager Pin and Install Dependencies",
+      command: "corepack",
+      args: ["use", pin]
+    },
+    {
+      id: "node-run-fix",
+      label: "Run Fix Command",
+      command: "pnpm",
+      args: ["run", "fix"]
+    }
+  ] as const satisfies readonly PlannedPostCommand[];
+}
 
 const vueReadyCommand = {
   id: "vue-install-playwright-browsers",
@@ -95,7 +99,9 @@ function postCommandsForPreset(options: PlanPostCommandsOptions): PostCommand[] 
     return [];
   }
 
-  const commands: PlannedPostCommand[] = [...nodeReadyCommands];
+  const commands: PlannedPostCommand[] = [
+    ...nodeReadyCommands(options.packageManagerPin ?? packageManagerPin)
+  ];
 
   if (options.preset === "vue-app") {
     commands.push(vueReadyCommand);
@@ -115,12 +121,14 @@ export function planPostCommands(options: PlanPostCommandsOptions): PostCommandP
   const targetDir = path.resolve(options.targetDir);
   const commands = postCommandsForPreset({
     preset: options.preset,
-    targetDir
+    targetDir,
+    packageManagerPin: options.packageManagerPin
   }).map((command) => Object.freeze(command));
 
   return Object.freeze({
     preset: options.preset,
     targetDir,
+    packageManagerPin: options.packageManagerPin,
     commands: Object.freeze(commands),
     [postCommandPlanBrand]: true as const
   });
@@ -162,7 +170,8 @@ function sameCommand(left: PostCommand, right: PostCommand): boolean {
 function validatePostCommandPlan(plan: PostCommandPlan): void {
   const expectedCommands = postCommandsForPreset({
     preset: plan.preset,
-    targetDir: path.resolve(plan.targetDir)
+    targetDir: path.resolve(plan.targetDir),
+    packageManagerPin: plan.packageManagerPin
   });
   const expectedCommandIds = new Set(expectedCommands.map((command) => command.id));
 

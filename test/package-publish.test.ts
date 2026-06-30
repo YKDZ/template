@@ -15,6 +15,20 @@ import { execa } from "execa";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const templatesRoot = path.join(repoRoot, "templates");
 
+process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
+  { version: "v22.11.0", lts: "Jod" },
+  { version: "v24.1.0", lts: false },
+]);
+process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL ??= jsonDataUrl({
+  versions: {
+    "10.0.0": { engines: { node: ">=18.12" } },
+  },
+});
+
+function jsonDataUrl(value: unknown): string {
+  return `data:application/json,${encodeURIComponent(JSON.stringify(value))}`;
+}
+
 const packageFiles = [
   ".npmignore",
   "LICENSE",
@@ -24,11 +38,13 @@ const packageFiles = [
   "pnpm-workspace.yaml",
   "src/cli.ts",
   "src/declarations.ts",
+  "src/generation-context.ts",
   "src/hono-api.ts",
   "src/package-addition.ts",
   "src/post-commands.ts",
   "src/renderer.ts",
   "src/rust-bin.ts",
+  "src/toolchain-resolution.ts",
   "src/ts-lib.ts",
   "src/vue-app.ts",
   "src/vue-hono-app.ts",
@@ -151,7 +167,9 @@ describe("package publishing", () => {
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
     const packedPaths = tarballContents.stdout.split("\n");
     expect(packedPaths).toContain("package/dist/cli.js");
+    expect(packedPaths).toContain("package/dist/generation-context.js");
     expect(packedPaths).toContain("package/dist/post-commands.js");
+    expect(packedPaths).toContain("package/dist/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");
     expect(packedPaths).toContain("package/README.md");
     const localTemplateArtifact = path.join(

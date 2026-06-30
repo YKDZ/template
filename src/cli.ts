@@ -8,12 +8,13 @@ import { initTsLibProject } from "./ts-lib.js";
 import { initVueHonoAppProject } from "./vue-hono-app.js";
 import { initVueAppProject } from "./vue-app.js";
 import { addPackage } from "./package-addition.js";
+import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
 import {
   planPostCommands,
   runPostCommands,
   type PostCommand,
   type PostCommandExecution,
-  type PostCommandPlan
+  type PostCommandPlan,
 } from "./post-commands.js";
 import {
   blueprintJsonSchema,
@@ -24,8 +25,13 @@ import {
   type BuiltInPreset,
   type ProjectBlueprint,
   type PresetName,
-  type ValidationIssue
+  type ValidationIssue,
 } from "./declarations.js";
+import {
+  resolveToolchainVersions,
+  type ResolvedToolchainVersions,
+  type ToolchainResolutionSource,
+} from "./toolchain-resolution.js";
 
 type InitOptions = {
   dir: string;
@@ -60,7 +66,7 @@ function usage(): string {
     "  --yes            Accept defaults for non-interactive generation",
     "  --ready          Run template-maintained Post Commands after writing files",
     "  --dry-run        Print the planned generation without writing files",
-    "  --json           Print machine-readable output"
+    "  --json           Print machine-readable output",
   ].join("\n");
 }
 
@@ -92,8 +98,8 @@ function formatPresetCatalog(): string {
     "Built-in presets",
     ...builtInPresets.map(
       (preset) =>
-        `  ${preset.name.padEnd(8)} ${preset.title} (${preset.generation}) - ${preset.description}`
-    )
+        `  ${preset.name.padEnd(8)} ${preset.title} (${preset.generation}) - ${preset.description}`,
+    ),
   ].join("\n");
 }
 
@@ -174,12 +180,12 @@ function normalizeNpmScope(value: string): string {
 
 function supportedPreset(name: string): BuiltInPreset {
   const preset = builtInPresets.find(
-    (candidate) => candidate.name === name && candidate.generation === "supported"
+    (candidate) => candidate.name === name && candidate.generation === "supported",
   );
 
   if (!preset) {
     throw new Error(
-      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
+      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version",
     );
   }
 
@@ -202,7 +208,7 @@ function blueprintForInit(options: InitOptions): ProjectBlueprint {
     schemaVersion: 1,
     preset: preset.name,
     projectKind: preset.supportedProjectKinds[0],
-    features: [...preset.features]
+    features: [...preset.features],
   };
 
   if (preset.supportedPackageManagers[0]) {
@@ -212,7 +218,7 @@ function blueprintForInit(options: InitOptions): ProjectBlueprint {
   if (preset.name === "vue-hono-app") {
     blueprint.packages = [
       { name: `@${packageScope}/web`, path: "apps/web" },
-      { name: `@${packageScope}/api`, path: "apps/api" }
+      { name: `@${packageScope}/api`, path: "apps/api" },
     ];
   }
 
@@ -224,7 +230,7 @@ function formatBlueprintSummary(targetDir: string, blueprint: ProjectBlueprint):
     "Project Blueprint",
     `  Target: ${targetDir}`,
     `  Preset: ${blueprint.preset}`,
-    `  Project kind: ${blueprint.projectKind}`
+    `  Project kind: ${blueprint.projectKind}`,
   ];
 
   if (blueprint.packageManager) {
@@ -253,7 +259,7 @@ function formatPostCommandPlan(commands: readonly PostCommand[]): string {
 
   return [
     "Post Commands:",
-    ...commands.map((command) => `  ${command.label}: ${formatPostCommand(command)}`)
+    ...commands.map((command) => `  ${command.label}: ${formatPostCommand(command)}`),
   ].join("\n");
 }
 
@@ -263,8 +269,16 @@ type InitJsonOutput = {
   ready: boolean;
   targetDir: string;
   blueprint: ProjectBlueprint;
+  toolchain?: ToolchainReport;
   postCommands: PostCommandReport;
   nextSteps?: string[];
+};
+
+type ToolchainReport = {
+  nodeLtsMajor: string;
+  packageManagerPin: string;
+  source: ToolchainResolutionSource;
+  diagnostics: string[];
 };
 
 type PostCommandReport = {
@@ -291,14 +305,33 @@ function nextStepsForPreset(preset: PresetName): string[] {
 function formatNextSteps(targetDir: string, preset: PresetName): string {
   return [
     "Next steps:",
-    ...nextStepsForPreset(preset).map((step) => `  ${step.replace("<target>", targetDir)}`)
+    ...nextStepsForPreset(preset).map((step) => `  ${step.replace("<target>", targetDir)}`),
+  ].join("\n");
+}
+
+function toolchainReport(toolchain: ResolvedToolchainVersions): ToolchainReport {
+  return {
+    nodeLtsMajor: toolchain.nodeLtsMajor.value,
+    packageManagerPin: toolchain.packageManagerPin.value,
+    source: toolchain.source,
+    diagnostics: [...toolchain.diagnostics],
+  };
+}
+
+function formatToolchainReport(toolchain: ResolvedToolchainVersions): string {
+  return [
+    "Toolchain Resolution:",
+    `  Source: ${toolchain.source}`,
+    `  Node LTS major: ${toolchain.nodeLtsMajor.value}`,
+    `  Package Manager Pin: ${toolchain.packageManagerPin.value}`,
+    ...toolchain.diagnostics.map((diagnostic) => `  ${diagnostic}`),
   ].join("\n");
 }
 
 function postCommandReport(
   planned: readonly PostCommand[],
   executions: PostCommandExecution[],
-  skipped: Array<{ id: string; reason: string }>
+  skipped: Array<{ id: string; reason: string }>,
 ): PostCommandReport {
   return {
     planned: planned.map((command) => ({
@@ -306,44 +339,77 @@ function postCommandReport(
       label: command.label,
       command: command.command,
       args: [...command.args],
-      cwd: command.cwd
+      cwd: command.cwd,
     })),
     run: executions
       .filter((execution) => execution.status === "run")
       .map((execution) => ({
         id: execution.command.id,
-        exitCode: execution.exitCode
+        exitCode: execution.exitCode,
       })),
     failed: executions
       .filter((execution) => execution.status === "failed")
       .map((execution) => ({
         id: execution.command.id,
         exitCode: execution.exitCode,
-        error: execution.error
+        error: execution.error,
       })),
-    skipped
+    skipped,
   };
 }
 
 function failedPostCommand(
-  executions: PostCommandExecution[]
+  executions: PostCommandExecution[],
 ): Extract<PostCommandExecution, { status: "failed" }> | undefined {
   return executions.find(
     (execution): execution is Extract<PostCommandExecution, { status: "failed" }> =>
-      execution.status === "failed"
+      execution.status === "failed",
   );
 }
 
 function skippedPostCommands(
   commands: readonly PostCommand[],
-  reason: string
+  reason: string,
 ): Array<{ id: string; reason: string }> {
   return commands.map((command) => ({ id: command.id, reason }));
 }
 
-async function generateInitProject(options: InitOptions): Promise<void> {
+function toolchainResolutionSourceFromEnv(): ToolchainResolutionSource | undefined {
+  if (
+    process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "online" ||
+    process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "bundled-fallback"
+  ) {
+    return process.env.TEMPLATE_TOOLCHAIN_RESOLUTION;
+  }
+
+  return undefined;
+}
+
+async function generationContextForInit(
+  options: InitOptions,
+  blueprint: ProjectBlueprint,
+): Promise<GenerationContext | undefined> {
+  if (options.preset !== "ts-lib") {
+    return undefined;
+  }
+
+  return assembleGenerationContext({
+    targetDir: options.dir,
+    blueprint,
+    toolchain: await resolveToolchainVersions({
+      source: toolchainResolutionSourceFromEnv(),
+      nodeReleaseIndexUrl: process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
+      pnpmRegistryUrl: process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
+    }),
+  });
+}
+
+async function generateInitProject(
+  options: InitOptions,
+  generationContext?: GenerationContext,
+): Promise<void> {
   if (options.preset === "ts-lib") {
-    await initTsLibProject(options.dir);
+    await initTsLibProject(options.dir, { generationContext });
     return;
   }
 
@@ -368,14 +434,15 @@ async function generateInitProject(options: InitOptions): Promise<void> {
   }
 
   throw new Error(
-    "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
+    "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version",
   );
 }
 
 function printInitComplete(
   options: InitOptions,
   blueprint: ProjectBlueprint,
-  report: PostCommandReport
+  report: PostCommandReport,
+  generationContext?: GenerationContext,
 ): void {
   const preset = blueprint.preset as PresetName;
 
@@ -386,13 +453,17 @@ function printInitComplete(
       ready: options.ready,
       targetDir: options.dir,
       blueprint,
+      toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
       postCommands: report,
-      nextSteps: nextStepsForPreset(preset).map((step) => step.replace("<target>", options.dir))
+      nextSteps: nextStepsForPreset(preset).map((step) => step.replace("<target>", options.dir)),
     } satisfies InitJsonOutput);
     return;
   }
 
   console.log(`Initialized ${options.preset} project in ${options.dir}`);
+  if (generationContext) {
+    console.log(formatToolchainReport(generationContext.toolchain));
+  }
   if (options.ready) {
     console.log(formatPostCommandPlan(report.planned));
   }
@@ -407,7 +478,7 @@ async function confirmInit(targetDir: string, blueprint: ProjectBlueprint): Prom
   console.log(formatBlueprintSummary(targetDir, blueprint));
   const readline = createInterface({
     input: process.stdin,
-    output: process.stdout
+    output: process.stdout,
   });
 
   try {
@@ -518,9 +589,11 @@ async function main(args: string[]): Promise<void> {
     const blueprint = blueprintForInit(options);
 
     if (options.dryRun) {
+      const generationContext = await generationContextForInit(options, blueprint);
       const postCommandPlan = planPostCommands({
         preset: blueprint.preset as PresetName,
-        targetDir: options.dir
+        targetDir: options.dir,
+        packageManagerPin: generationContext?.toolchain.packageManagerPin.value,
       });
 
       if (options.json) {
@@ -530,11 +603,12 @@ async function main(args: string[]): Promise<void> {
           ready: options.ready,
           targetDir: options.dir,
           blueprint,
+          toolchain: generationContext ? toolchainReport(generationContext.toolchain) : undefined,
           postCommands: postCommandReport(
             postCommandPlan.commands,
             [],
-            skippedPostCommands(postCommandPlan.commands, "dry-run")
-          )
+            skippedPostCommands(postCommandPlan.commands, "dry-run"),
+          ),
         } satisfies InitJsonOutput);
         return;
       }
@@ -552,11 +626,13 @@ async function main(args: string[]): Promise<void> {
       throw new Error("Init cancelled");
     }
 
+    const generationContext = await generationContextForInit(options, blueprint);
     const postCommandPlan: PostCommandPlan = planPostCommands({
       preset: blueprint.preset as PresetName,
-      targetDir: options.dir
+      targetDir: options.dir,
+      packageManagerPin: generationContext?.toolchain.packageManagerPin.value,
     });
-    await generateInitProject(options);
+    await generateInitProject(options, generationContext);
     const executions = options.ready ? await runPostCommands({ plan: postCommandPlan }) : [];
     const failedExecution = failedPostCommand(executions);
     printInitComplete(
@@ -567,8 +643,9 @@ async function main(args: string[]): Promise<void> {
         executions,
         options.ready
           ? []
-          : skippedPostCommands(postCommandPlan.commands, "ready-mode-not-requested")
-      )
+          : skippedPostCommands(postCommandPlan.commands, "ready-mode-not-requested"),
+      ),
+      generationContext,
     );
     if (failedExecution) {
       throw new Error(failedExecution.error);
