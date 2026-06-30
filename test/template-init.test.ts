@@ -1406,8 +1406,8 @@ describe("template init", () => {
     expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build");
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe("workspace:*");
     expect(webPackageJson.dependencies.hono).toBe("catalog:");
-    expect(webApiClient).toContain('import { hc } from "hono/client"');
-    expect(webApiClient).toContain('import type { AppType } from "@demo-fullstack/api"');
+    expect(webApiClient).toMatch(/^import type \{ AppType \} from "@demo-fullstack\/api";$/m);
+    expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
     expect(viteConfig).toContain('"/api"');
     expect(viteConfig).toContain("VITE_API_BASE_URL");
 
@@ -1509,7 +1509,8 @@ describe("template init", () => {
     expect(apiPackageJson.name).toBe("@custom-scope/api");
     expect(webPackageJson.name).toBe("@custom-scope/web");
     expect(webPackageJson.dependencies["@custom-scope/api"]).toBe("workspace:*");
-    expect(webApiClient).toContain('import type { AppType } from "@custom-scope/api"');
+    expect(webApiClient).toMatch(/^import type \{ AppType \} from "@custom-scope\/api";$/m);
+    expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium"
     );

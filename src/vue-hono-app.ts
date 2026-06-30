@@ -418,7 +418,7 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       path: "apps/web/src/api.ts",
       language: "typescript",
       replacements: {
-        "api-type-import-start": `import type { AppType } from "${apiName}";\n/*`,
+        "api-type-import-start": `import type { AppType } from "${apiName}";\nimport { hc } from "hono/client";\n/*`,
         "api-type-import-end": "*/"
       }
     },
