@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -450,6 +450,9 @@ describe("template init", () => {
     expect(result.stdout).toContain("Preset: ts-lib");
     expect(result.stdout).toContain("Target:");
     expect(result.stdout).toContain(projectDir);
+    expect(result.stdout).toContain("Post Commands:");
+    expect(result.stdout).toContain("Check Node runtime");
+    expect(result.stdout).toContain("node --version");
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -479,11 +482,18 @@ describe("template init", () => {
     const output = JSON.parse(result.stdout) as {
       command: string;
       dryRun: boolean;
+      ready: boolean;
       targetDir: string;
       blueprint: {
         preset: string;
         packageManager: string;
         packages: Array<{ name: string; path: string }>;
+      };
+      postCommands: {
+        planned: Array<{ id: string }>;
+        run: Array<{ id: string }>;
+        failed: Array<{ id: string }>;
+        skipped: Array<{ id: string; reason: string }>;
       };
     };
 
@@ -491,6 +501,7 @@ describe("template init", () => {
       expect.objectContaining({
         command: "init",
         dryRun: true,
+        ready: false,
         targetDir: projectDir
       })
     );
@@ -504,6 +515,21 @@ describe("template init", () => {
         ]
       })
     );
+    expect(output.postCommands).toEqual({
+      planned: [
+        expect.objectContaining({
+          id: "node-ready-smoke"
+        })
+      ],
+      run: [],
+      failed: [],
+      skipped: [
+        {
+          id: "node-ready-smoke",
+          reason: "dry-run"
+        }
+      ]
+    });
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -530,8 +556,15 @@ describe("template init", () => {
     const output = JSON.parse(result.stdout) as {
       command: string;
       dryRun: boolean;
+      ready: boolean;
       targetDir: string;
       blueprint: { preset: string; packageManager: string };
+      postCommands: {
+        planned: Array<{ id: string }>;
+        run: Array<{ id: string }>;
+        failed: Array<{ id: string }>;
+        skipped: Array<{ id: string; reason: string }>;
+      };
       nextSteps: string[];
     };
 
@@ -539,6 +572,7 @@ describe("template init", () => {
       expect.objectContaining({
         command: "init",
         dryRun: false,
+        ready: false,
         targetDir: projectDir,
         blueprint: expect.objectContaining({
           preset: "ts-lib",
@@ -547,10 +581,129 @@ describe("template init", () => {
         nextSteps: [`cd ${projectDir}`, "pnpm install", "pnpm run check"]
       })
     );
+    expect(output.postCommands).toEqual({
+      planned: [
+        expect.objectContaining({
+          id: "node-ready-smoke"
+        })
+      ],
+      run: [],
+      failed: [],
+      skipped: [
+        {
+          id: "node-ready-smoke",
+          reason: "ready-mode-not-requested"
+        }
+      ]
+    });
     await stat(path.join(projectDir, "package.json"));
     await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
       code: "ENOENT"
     });
+  });
+
+  it("runs planned Post Commands only when ready mode is requested", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-"));
+    const projectDir = path.join(workspace, "demo-lib");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--ready",
+        "--json",
+        "--yes"
+      ],
+      { cwd: repoRoot }
+    );
+
+    const output = JSON.parse(result.stdout) as {
+      postCommands: {
+        planned: Array<{
+          id: string;
+          label: string;
+          command: string;
+          args: string[];
+          cwd: string;
+        }>;
+        run: Array<{ id: string; exitCode: number }>;
+        failed: Array<{ id: string }>;
+        skipped: Array<{ id: string; reason: string }>;
+      };
+    };
+
+    expect(output.postCommands.planned).toEqual([
+      {
+        id: "node-ready-smoke",
+        label: "Check Node runtime",
+        command: "node",
+        args: ["--version"],
+        cwd: projectDir
+      }
+    ]);
+    expect(output.postCommands.run).toEqual([{ id: "node-ready-smoke", exitCode: 0 }]);
+    expect(output.postCommands.failed).toEqual([]);
+    expect(output.postCommands.skipped).toEqual([]);
+    await stat(path.join(projectDir, "package.json"));
+    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+  });
+
+  it("fails ready mode clearly when a planned Post Command fails", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-failure-"));
+    const projectDir = path.join(workspace, "demo-lib");
+    const fakeBin = path.join(workspace, "bin");
+    const fakeNode = path.join(fakeBin, "node");
+    await mkdir(fakeBin);
+    await writeFile(fakeNode, "#!/bin/sh\necho planned node failed >&2\nexit 7\n");
+    await chmod(fakeNode, 0o755);
+
+    const result = await execa(
+      process.execPath,
+      [
+        "--import",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        projectDir,
+        "--preset",
+        "ts-lib",
+        "--ready",
+        "--json",
+        "--yes"
+      ],
+      {
+        cwd: repoRoot,
+        env: { PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` },
+        reject: false
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    const output = JSON.parse(result.stdout) as {
+      postCommands: {
+        run: Array<{ id: string }>;
+        failed: Array<{ id: string; exitCode: number | null; error: string }>;
+        skipped: Array<{ id: string; reason: string }>;
+      };
+    };
+    expect(output.postCommands.run).toEqual([]);
+    expect(output.postCommands.failed).toEqual([
+      {
+        id: "node-ready-smoke",
+        exitCode: 7,
+        error: expect.stringContaining("node-ready-smoke")
+      }
+    ]);
+    expect(output.postCommands.skipped).toEqual([]);
+    expect(result.stderr).toContain("Post Command failed");
   });
 
   it("fails clearly in non-interactive init without --yes", async () => {

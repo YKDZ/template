@@ -108,6 +108,40 @@ describe("declaration contracts", () => {
     });
   });
 
+  it("rejects Post Commands in user Preset Files", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-preset-post-commands-"));
+    const presetPath = path.join(workspace, "preset.json");
+    await writeFile(
+      presetPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "custom-lib",
+          title: "Custom library",
+          description: "A custom strict TypeScript library preset.",
+          supportedPackageManagers: ["pnpm"],
+          supportedProjectKinds: ["single-package"],
+          features: ["strict-typescript", "root-check"],
+          postCommands: [
+            {
+              command: "pnpm",
+              args: ["install"]
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    await expect(template(["preset", "validate", presetPath])).rejects.toMatchObject({
+      stderr: expect.stringContaining("Preset file is invalid")
+    });
+    await expect(template(["preset", "validate", presetPath])).rejects.toMatchObject({
+      stderr: expect.stringContaining("$.postCommands")
+    });
+  });
+
   it("validates a project blueprint against the built-in preset catalog", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-blueprint-"));
     const blueprintPath = path.join(workspace, "blueprint.json");

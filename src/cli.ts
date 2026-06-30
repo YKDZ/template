@@ -9,6 +9,13 @@ import { initVueHonoAppProject } from "./vue-hono-app.js";
 import { initVueAppProject } from "./vue-app.js";
 import { addPackage } from "./package-addition.js";
 import {
+  planPostCommands,
+  runPostCommands,
+  type PostCommand,
+  type PostCommandExecution,
+  type PostCommandPlan
+} from "./post-commands.js";
+import {
   blueprintJsonSchema,
   builtInPresets,
   presetFileJsonSchema,
@@ -26,6 +33,7 @@ type InitOptions = {
   yes: boolean;
   dryRun: boolean;
   json: boolean;
+  ready: boolean;
   scope?: string;
 };
 
@@ -50,6 +58,7 @@ function usage(): string {
     "  --name <name>    Package name to add",
     "  --scope <name>   Package scope for workspace package names",
     "  --yes            Accept defaults for non-interactive generation",
+    "  --ready          Run template-maintained Post Commands after writing files",
     "  --dry-run        Print the planned generation without writing files",
     "  --json           Print machine-readable output"
   ].join("\n");
@@ -94,6 +103,7 @@ function parseInitOptions(args: string[]): InitOptions {
   let yes = false;
   let dryRun = false;
   let json = false;
+  let ready = false;
   let scope: string | undefined;
 
   for (let index = 2; index < args.length; index += 1) {
@@ -106,6 +116,11 @@ function parseInitOptions(args: string[]): InitOptions {
 
     if (arg === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+
+    if (arg === "--ready") {
+      ready = true;
       continue;
     }
 
@@ -141,7 +156,7 @@ function parseInitOptions(args: string[]): InitOptions {
     throw new Error("init requires a target directory");
   }
 
-  return { dir, preset, yes, dryRun, json, scope };
+  return { dir, preset, yes, dryRun, json, ready, scope };
 }
 
 function normalizeNpmScope(value: string): string {
@@ -227,12 +242,42 @@ function formatBlueprintSummary(targetDir: string, blueprint: ProjectBlueprint):
   return lines.join("\n");
 }
 
+function formatPostCommand(command: PostCommand): string {
+  return [command.command, ...command.args].join(" ");
+}
+
+function formatPostCommandPlan(commands: readonly PostCommand[]): string {
+  if (commands.length === 0) {
+    return ["Post Commands:", "  (none)"].join("\n");
+  }
+
+  return [
+    "Post Commands:",
+    ...commands.map((command) => `  ${command.label}: ${formatPostCommand(command)}`)
+  ].join("\n");
+}
+
 type InitJsonOutput = {
   command: "init";
   dryRun: boolean;
+  ready: boolean;
   targetDir: string;
   blueprint: ProjectBlueprint;
+  postCommands: PostCommandReport;
   nextSteps?: string[];
+};
+
+type PostCommandReport = {
+  planned: Array<{
+    id: string;
+    label: string;
+    command: string;
+    args: string[];
+    cwd: string;
+  }>;
+  run: Array<{ id: string; exitCode: number }>;
+  failed: Array<{ id: string; exitCode: number | null; error: string }>;
+  skipped: Array<{ id: string; reason: string }>;
 };
 
 function nextStepsForPreset(preset: PresetName): string[] {
@@ -250,21 +295,107 @@ function formatNextSteps(targetDir: string, preset: PresetName): string {
   ].join("\n");
 }
 
-function printInitComplete(options: InitOptions, blueprint: ProjectBlueprint): void {
+function postCommandReport(
+  planned: readonly PostCommand[],
+  executions: PostCommandExecution[],
+  skipped: Array<{ id: string; reason: string }>
+): PostCommandReport {
+  return {
+    planned: planned.map((command) => ({
+      id: command.id,
+      label: command.label,
+      command: command.command,
+      args: [...command.args],
+      cwd: command.cwd
+    })),
+    run: executions
+      .filter((execution) => execution.status === "run")
+      .map((execution) => ({
+        id: execution.command.id,
+        exitCode: execution.exitCode
+      })),
+    failed: executions
+      .filter((execution) => execution.status === "failed")
+      .map((execution) => ({
+        id: execution.command.id,
+        exitCode: execution.exitCode,
+        error: execution.error
+      })),
+    skipped
+  };
+}
+
+function failedPostCommand(
+  executions: PostCommandExecution[]
+): Extract<PostCommandExecution, { status: "failed" }> | undefined {
+  return executions.find(
+    (execution): execution is Extract<PostCommandExecution, { status: "failed" }> =>
+      execution.status === "failed"
+  );
+}
+
+function skippedPostCommands(
+  commands: readonly PostCommand[],
+  reason: string
+): Array<{ id: string; reason: string }> {
+  return commands.map((command) => ({ id: command.id, reason }));
+}
+
+async function generateInitProject(options: InitOptions): Promise<void> {
+  if (options.preset === "ts-lib") {
+    await initTsLibProject(options.dir);
+    return;
+  }
+
+  if (options.preset === "hono-api") {
+    await initHonoApiProject(options.dir);
+    return;
+  }
+
+  if (options.preset === "vue-app") {
+    await initVueAppProject(options.dir);
+    return;
+  }
+
+  if (options.preset === "vue-hono-app") {
+    await initVueHonoAppProject(options.dir, { scope: options.scope });
+    return;
+  }
+
+  if (options.preset === "rust-bin") {
+    await initRustBinProject(options.dir);
+    return;
+  }
+
+  throw new Error(
+    "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
+  );
+}
+
+function printInitComplete(
+  options: InitOptions,
+  blueprint: ProjectBlueprint,
+  report: PostCommandReport
+): void {
   const preset = blueprint.preset as PresetName;
 
   if (options.json) {
     printJson({
       command: "init",
       dryRun: false,
+      ready: options.ready,
       targetDir: options.dir,
       blueprint,
+      postCommands: report,
       nextSteps: nextStepsForPreset(preset).map((step) => step.replace("<target>", options.dir))
     } satisfies InitJsonOutput);
     return;
   }
 
   console.log(`Initialized ${options.preset} project in ${options.dir}`);
+  if (options.ready) {
+    console.log(formatPostCommandPlan(report.planned));
+  }
   console.log(formatNextSteps(options.dir, preset));
 }
 
@@ -387,17 +518,29 @@ async function main(args: string[]): Promise<void> {
     const blueprint = blueprintForInit(options);
 
     if (options.dryRun) {
+      const postCommandPlan = planPostCommands({
+        preset: blueprint.preset as PresetName,
+        targetDir: options.dir
+      });
+
       if (options.json) {
         printJson({
           command: "init",
           dryRun: true,
+          ready: options.ready,
           targetDir: options.dir,
-          blueprint
+          blueprint,
+          postCommands: postCommandReport(
+            postCommandPlan.commands,
+            [],
+            skippedPostCommands(postCommandPlan.commands, "dry-run")
+          )
         } satisfies InitJsonOutput);
         return;
       }
 
       console.log(formatBlueprintSummary(options.dir, blueprint));
+      console.log(formatPostCommandPlan(postCommandPlan.commands));
       return;
     }
 
@@ -409,39 +552,28 @@ async function main(args: string[]): Promise<void> {
       throw new Error("Init cancelled");
     }
 
-    if (options.preset === "ts-lib") {
-      await initTsLibProject(options.dir);
-      printInitComplete(options, blueprint);
-      return;
-    }
-
-    if (options.preset === "hono-api") {
-      await initHonoApiProject(options.dir);
-      printInitComplete(options, blueprint);
-      return;
-    }
-
-    if (options.preset === "vue-app") {
-      await initVueAppProject(options.dir);
-      printInitComplete(options, blueprint);
-      return;
-    }
-
-    if (options.preset === "vue-hono-app") {
-      await initVueHonoAppProject(options.dir, { scope: options.scope });
-      printInitComplete(options, blueprint);
-      return;
-    }
-
-    if (options.preset === "rust-bin") {
-      await initRustBinProject(options.dir);
-      printInitComplete(options, blueprint);
-      return;
-    }
-
-    throw new Error(
-      "Only the ts-lib, hono-api, vue-app, vue-hono-app, and rust-bin presets are supported in this version"
+    const postCommandPlan: PostCommandPlan = planPostCommands({
+      preset: blueprint.preset as PresetName,
+      targetDir: options.dir
+    });
+    await generateInitProject(options);
+    const executions = options.ready ? await runPostCommands({ plan: postCommandPlan }) : [];
+    const failedExecution = failedPostCommand(executions);
+    printInitComplete(
+      options,
+      blueprint,
+      postCommandReport(
+        postCommandPlan.commands,
+        executions,
+        options.ready
+          ? []
+          : skippedPostCommands(postCommandPlan.commands, "ready-mode-not-requested")
+      )
     );
+    if (failedExecution) {
+      throw new Error(failedExecution.error);
+    }
+    return;
   }
 
   if (command === "add" && args[1] === "package") {
