@@ -2,3 +2,10 @@ node_modules
 dist
 .env
 docs/
+AGENTS.md
+CONTEXT.md
+.agents/
+.scratch/
+.pnpm-store/
+.devcontainer/
+.vscode/
