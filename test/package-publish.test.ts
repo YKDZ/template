@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  rm,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,8 +13,10 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const templatesRoot = path.join(repoRoot, "templates");
 
 const packageFiles = [
+  ".npmignore",
   "LICENSE",
   "README.md",
   "package.json",
@@ -92,6 +95,13 @@ async function copyCleanPackage(targetDir: string): Promise<void> {
   }
 }
 
+function checkedTemplatePackagePaths(): string[] {
+  return packageFiles
+    .filter((file) => file.startsWith("templates/"))
+    .map((file) => `package/${file}`)
+    .sort();
+}
+
 describe("package publishing", () => {
   it("declares public npm metadata for the template CLI", async () => {
     const packageJson = JSON.parse(
@@ -139,30 +149,30 @@ describe("package publishing", () => {
 
     const tarballPath = path.join(packDir, tarball!);
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
-    expect(tarballContents.stdout.split("\n")).toContain("package/dist/cli.js");
-    expect(tarballContents.stdout.split("\n")).toContain("package/dist/post-commands.js");
-    expect(tarballContents.stdout.split("\n")).toContain("package/LICENSE");
-    expect(tarballContents.stdout.split("\n")).toContain("package/README.md");
-    expect(tarballContents.stdout.split("\n")).toEqual(
-      expect.arrayContaining([
-        "package/templates/hono-api/.github/dependabot.yml",
-        "package/templates/hono-api/.github/workflows/check.yml",
-        "package/templates/rust-bin/.github/dependabot.yml",
-        "package/templates/rust-bin/.github/workflows/check.yml",
-        "package/templates/shared/oxc/node/oxlint.config.ts",
-        "package/templates/shared/oxc/vue/oxlint.config.ts",
-        "package/templates/shared/oxc/oxfmt.config.ts",
-        "package/templates/shared/oxc/package.json",
-        "package/templates/shared/oxc/tsconfig.json",
-        "package/templates/ts-lib/.github/dependabot.yml",
-        "package/templates/ts-lib/.github/workflows/check.yml",
-        "package/templates/vue-app/.github/dependabot.yml",
-        "package/templates/vue-app/.github/workflows/check.yml",
-        "package/templates/vue-hono-app/.github/dependabot.yml",
-        "package/templates/vue-hono-app/.github/workflows/check.yml"
-      ])
+    const packedPaths = tarballContents.stdout.split("\n");
+    expect(packedPaths).toContain("package/dist/cli.js");
+    expect(packedPaths).toContain("package/dist/post-commands.js");
+    expect(packedPaths).toContain("package/LICENSE");
+    expect(packedPaths).toContain("package/README.md");
+    const localTemplateArtifact = path.join(
+      templatesRoot,
+      `.package-publish-artifact-${process.pid}.tmp`
     );
-    expect(tarballContents.stdout.split("\n")).not.toContain(
+    await writeFile(localTemplateArtifact, "not checked template source\n");
+    try {
+      expect(packedPaths).toEqual(
+        expect.arrayContaining(checkedTemplatePackagePaths())
+      );
+      expect(packedPaths).not.toContain(
+        `package/templates/${path.basename(localTemplateArtifact)}`
+      );
+      expect(packedPaths).not.toEqual(
+        expect.arrayContaining([expect.stringContaining("/node_modules/")])
+      );
+    } finally {
+      await rm(localTemplateArtifact, { force: true });
+    }
+    expect(packedPaths).not.toContain(
       "package/templates/shared/oxc/oxc-config-modules.d.ts"
     );
 
@@ -186,6 +196,22 @@ describe("package publishing", () => {
     await expect(
       readFile(path.join(generatedDir, "src/index.ts"), "utf8")
     ).resolves.toContain("export function greet");
+    await expect(
+      readFile(path.join(generatedDir, "oxlint.config.ts"), "utf8")
+    ).resolves.toContain("defineConfig");
+
+    const generatedVueDir = path.join(consumerDir, "generated-vue");
+    await execa(
+      "pnpm",
+      ["exec", "template", "init", generatedVueDir, "--preset", "vue-app", "--yes"],
+      { cwd: consumerDir }
+    );
+    await expect(
+      readFile(path.join(generatedVueDir, "src/App.vue"), "utf8")
+    ).resolves.toContain("<script setup");
+    await expect(
+      readFile(path.join(generatedVueDir, "oxlint.config.ts"), "utf8")
+    ).resolves.toContain("vue");
 
     const packageJsonPath = path.join(
       consumerDir,

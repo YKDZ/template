@@ -62,6 +62,23 @@ describe("fixture checks", () => {
       ].join("\n")
     );
     await writeExecutable(
+      path.join(binDir, "corepack"),
+      [
+        "#!/usr/bin/env node",
+        'import { appendFileSync } from "node:fs";',
+        "appendFileSync(",
+        "  process.env.FIXTURE_COMMAND_LOG,",
+        "  JSON.stringify({",
+        "    command: 'corepack',",
+        "    args: process.argv.slice(2),",
+        "    cwd: process.cwd(),",
+        "    ci: process.env.CI ?? null",
+        "  }) + '\\n'",
+        ");",
+        ""
+      ].join("\n")
+    );
+    await writeExecutable(
       path.join(binDir, "cargo"),
       [
         "#!/usr/bin/env node",
@@ -94,6 +111,12 @@ describe("fixture checks", () => {
       .map((line) => JSON.parse(line) as CommandRecord);
     const pnpmRecords = records.filter((record) => record.command === "pnpm");
 
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        command: "corepack",
+        args: ["enable"]
+      })
+    );
     expect(pnpmRecords).toContainEqual(
       expect.objectContaining({
         args: ["exec", "playwright", "install", "--with-deps", "chromium"]
@@ -103,7 +126,7 @@ describe("fixture checks", () => {
       expect.objectContaining({
         args: [
           "--filter",
-          "@fixture-vue-hono-app/web",
+          "./apps/web",
           "exec",
           "playwright",
           "install",
@@ -137,5 +160,51 @@ describe("fixture checks", () => {
         })
       ])
     );
+
+    for (const generatedRootCheck of generatedRootChecks) {
+      const projectRecords = records.filter(
+        (record) => record.cwd === generatedRootCheck.cwd
+      );
+      const corepackIndex = projectRecords.findIndex(
+        (record) => record.command === "corepack" && record.args.join(" ") === "enable"
+      );
+      const installIndex = projectRecords.findIndex(
+        (record) => record.command === "pnpm" && record.args.join(" ") === "install"
+      );
+      const playwrightIndex = projectRecords.findIndex((record) => {
+        if (record.command !== "pnpm") {
+          return false;
+        }
+
+        if (generatedRootCheck.cwd.includes("fixture-vue-app")) {
+          return (
+            record.args.join(" ") ===
+            "exec playwright install --with-deps chromium"
+          );
+        }
+
+        if (generatedRootCheck.cwd.includes("fixture-vue-hono-app")) {
+          return (
+            record.args.join(" ") ===
+            "--filter ./apps/web exec playwright install --with-deps chromium"
+          );
+        }
+
+        return false;
+      });
+      const checkIndex = projectRecords.findIndex(
+        (record) => record.command === "pnpm" && record.args.join(" ") === "run check"
+      );
+
+      expect(corepackIndex).toBeGreaterThanOrEqual(0);
+      expect(installIndex).toBeGreaterThan(corepackIndex);
+      if (generatedRootCheck.cwd.includes("fixture-vue")) {
+        expect(playwrightIndex).toBeGreaterThan(installIndex);
+        expect(checkIndex).toBeGreaterThan(playwrightIndex);
+        continue;
+      }
+
+      expect(checkIndex).toBeGreaterThan(installIndex);
+    }
   }, 120_000);
 });

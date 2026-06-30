@@ -26,7 +26,8 @@
   ],
   "files": [
     "dist",
-    "templates"
+    "templates",
+    "!templates/**/node_modules"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

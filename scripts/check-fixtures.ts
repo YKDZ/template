@@ -49,6 +49,9 @@ async function checkNodePreset(
   presetName: Exclude<SupportedFixturePreset, "rust-bin">,
   projectDir: string
 ): Promise<void> {
+  // Fixture Checks follow generated CI setup so browser dependencies stay covered
+  // without making local checks run full ready-mode browser installs differently.
+  await run("corepack", ["enable"], projectDir);
   await run("pnpm", ["install"], projectDir);
 
   if (presetName === "vue-app") {
@@ -64,7 +67,7 @@ async function checkNodePreset(
       "pnpm",
       [
         "--filter",
-        "@fixture-vue-hono-app/web",
+        "./apps/web",
         "exec",
         "playwright",
         "install",
