@@ -1,4 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
+
 import { useCounterStore } from "@/stores/counter";
 
 describe("counter store", () => {

@@ -8,12 +8,14 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --dir ../api run build && PORT=8787 pnpm --dir ../api run start",
+      command:
+        "pnpm --dir ../api run build && PORT=8787 pnpm --dir ../api run start",
       port: 8787,
       reuseExistingServer: false,
     },
     {
-      command: "VITE_API_BASE_URL=http://localhost:8787 pnpm run preview -- --host 127.0.0.1",
+      command:
+        "VITE_API_BASE_URL=http://localhost:8787 pnpm run preview -- --host 127.0.0.1",
       port: 4173,
       reuseExistingServer: false,
     },

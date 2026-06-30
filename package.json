@@ -37,7 +37,7 @@
     "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:templates:static-source",
     "check:templates:github-yaml": "tsx scripts/check-template-github-yaml.ts",
     "check:templates:shared-oxc": "pnpm --dir templates/shared/oxc run check",
-    "check:templates:static-source": "oxfmt --check templates && rustfmt --check templates/rust-bin/src/main.rs",
+    "check:templates:static-source": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

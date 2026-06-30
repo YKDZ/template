@@ -83,7 +83,7 @@ describe("Project Kit Root Check", () => {
 
     expect(rootPackageJson.scripts).toHaveProperty("check:templates:static-source");
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
-      "oxfmt --check templates && rustfmt --check templates/rust-bin/src/main.rs",
+      "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
     );
 
     await execa("pnpm", ["run", "check:templates:static-source"], {
