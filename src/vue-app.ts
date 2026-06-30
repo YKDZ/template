@@ -176,24 +176,16 @@ function operationsForVueApp(projectName: string): RenderOperation[] {
       }
     },
     {
-      kind: "writeJson",
-      to: ".oxlintrc.json",
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc", "vue"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "vue/oxlint.config.ts",
+      to: "oxlint.config.ts"
     },
     {
-      kind: "writeJson",
-      to: ".oxfmtrc.json",
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: "oxfmt.config.ts"
     },
     {
       kind: "writeText",
@@ -338,9 +330,14 @@ function templateSourceRoot(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "vue-app");
 }
 
+function sharedOxcSourceRoot(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+}
+
 export async function initVueAppProject(targetDir: string): Promise<void> {
   await renderNewProject({
     sourceRoot: templateSourceRoot(),
+    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
     operations: operationsForVueApp(projectNameFromDir(targetDir))
   });

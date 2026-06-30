@@ -63,6 +63,14 @@ const forbiddenWorkspaceLifecycleFeatures = [
   "workspace-upgrade"
 ] as const;
 
+function oxcConfigDirectoriesForPreset(preset: PresetName): string[] {
+  if (preset === "vue-hono-app") {
+    return ["apps/api", "apps/web"];
+  }
+
+  return ["."];
+}
+
 function expectNoWorkspaceLifecycleFeatures(features: readonly string[]): void {
   for (const feature of forbiddenWorkspaceLifecycleFeatures) {
     expect(features).not.toContain(feature);
@@ -228,6 +236,35 @@ describe("template init", () => {
       expect(checkWorkflow).toContain("          version: 10.0.0");
       expect(dependabot).toContain("package-ecosystem: npm");
       expect(dependabot).toContain("package-ecosystem: github-actions");
+    }
+  }, 240_000);
+
+  it("generates Node presets with checked OXC config source", async () => {
+    const nodePresetNames = builtInPresets
+      .filter((preset) => preset.generation === "supported")
+      .map((preset) => preset.name)
+      .filter((preset) => preset !== "rust-bin");
+
+    for (const preset of nodePresetNames) {
+      const projectDir = await generatePresetProject(preset);
+      const files = await generatedFilePaths(projectDir);
+
+      for (const configDir of oxcConfigDirectoriesForPreset(preset)) {
+        const prefix = configDir === "." ? "" : `${configDir}/`;
+        expect(files).toContain(`${prefix}oxlint.config.ts`);
+        expect(files).toContain(`${prefix}oxfmt.config.ts`);
+
+        const packageJson = await readJson<{ scripts: Record<string, string> }>(
+          path.join(projectDir, configDir, "package.json")
+        );
+        expect(packageJson.scripts["format:check"]).toBe("oxfmt --check .");
+        expect(packageJson.scripts["format:write"]).toBe("oxfmt --write .");
+        expect(packageJson.scripts.lint).toBe("oxlint . --deny-warnings");
+        expect(packageJson.scripts["lint:fix"]).toBe("oxlint . --fix --deny-warnings");
+      }
+
+      expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
+      expect(files.some((file) => file.endsWith(".oxfmtrc.json"))).toBe(false);
     }
   }, 240_000);
 
@@ -733,6 +770,7 @@ describe("template init", () => {
       path.join(projectDir, ".github/dependabot.yml"),
       "utf8"
     );
+    const files = await generatedFilePaths(projectDir);
 
     expect(cargoToml).toContain('name = "demo-rust"');
     expect(cargoToml).toContain('edition = "2024"');
@@ -767,6 +805,10 @@ describe("template init", () => {
     expect(checkWorkflow).toContain("run: ./scripts/check");
     expect(dependabot).toContain("package-ecosystem: cargo");
     expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(files.some((file) => file.endsWith("oxlint.config.ts"))).toBe(false);
+    expect(files.some((file) => file.endsWith("oxfmt.config.ts"))).toBe(false);
+    expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
+    expect(files.some((file) => file.endsWith(".oxfmtrc.json"))).toBe(false);
 
     await stat(path.join(projectDir, "src/main.rs"));
     await stat(path.join(projectDir, "Cargo.lock"));

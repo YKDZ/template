@@ -20,6 +20,7 @@ export type CopyFileOperation = {
   kind: "copyFile";
   from: string;
   to: string;
+  sourceRoot?: string;
 };
 
 export type WriteJsonOperation = {
@@ -64,6 +65,7 @@ export type RenderOperation =
 
 export type RenderProjectOptions = {
   sourceRoot: string;
+  sourceRoots?: Record<string, string>;
   targetRoot: string;
   variables?: RenderVariables;
   operations: RenderOperation[];
@@ -111,8 +113,17 @@ async function renderCopyFile(
   options: RenderProjectOptions
 ): Promise<void> {
   const variables = options.variables ?? {};
+  const sourceRoot =
+    operation.sourceRoot === undefined
+      ? options.sourceRoot
+      : options.sourceRoots?.[operation.sourceRoot];
+
+  if (sourceRoot === undefined) {
+    throw new Error(`Unknown renderer source root: ${operation.sourceRoot}`);
+  }
+
   const from = resolveContainedPath(
-    options.sourceRoot,
+    sourceRoot,
     expandTemplatePath(operation.from, variables)
   );
   const to = resolveContainedPath(options.targetRoot, expandTemplatePath(operation.to, variables));

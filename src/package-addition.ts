@@ -136,24 +136,16 @@ function tsLibPackageOperations(packagePath: string, packageName: string): Rende
       }
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxlintrc.json`,
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "node/oxlint.config.ts",
+      to: `${packagePath}/oxlint.config.ts`
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxfmtrc.json`,
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: `${packagePath}/oxfmt.config.ts`
     },
     {
       kind: "copyFile",
@@ -241,24 +233,16 @@ function honoApiPackageOperations(packagePath: string, packageName: string): Ren
       }
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxlintrc.json`,
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "node/oxlint.config.ts",
+      to: `${packagePath}/oxlint.config.ts`
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxfmtrc.json`,
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: `${packagePath}/oxfmt.config.ts`
     },
     { kind: "copyFile", from: "src/app.ts", to: `${packagePath}/src/app.ts` },
     { kind: "copyFile", from: "src/server.ts", to: `${packagePath}/src/server.ts` },
@@ -385,24 +369,16 @@ function vueAppPackageOperations(packagePath: string, packageName: string): Rend
       }
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxlintrc.json`,
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc", "vue"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "vue/oxlint.config.ts",
+      to: `${packagePath}/oxlint.config.ts`
     },
     {
-      kind: "writeJson",
-      to: `${packagePath}/.oxfmtrc.json`,
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: `${packagePath}/oxfmt.config.ts`
     },
     { kind: "copyFile", from: "env.d.ts", to: `${packagePath}/env.d.ts` },
     { kind: "copyFile", from: "index.html", to: `${packagePath}/index.html` },
@@ -468,6 +444,10 @@ function rootTsReferencesForPreset(preset: string, packagePath: string): string[
 
 function templateSourceRoot(preset: string): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", preset);
+}
+
+function sharedOxcSourceRoot(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
 }
 
 function localPortsFromText(text: string): number[] {
@@ -684,6 +664,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
   await mkdir(path.join(root, packagePath), { recursive: true });
   await renderProject({
     sourceRoot: templateSourceRoot(options.preset),
+    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: root,
     operations: packageOperationsForPreset(options.preset, packagePath, packageName)
   });

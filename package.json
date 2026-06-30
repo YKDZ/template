@@ -31,24 +31,28 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run check:fixtures",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run check:templates:shared-oxc && pnpm run check:fixtures",
     "check:fixtures": "tsx scripts/check-fixtures.ts",
+    "check:templates:shared-oxc": "pnpm --dir templates/shared/oxc run check",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
+  "dependencies": {
+    "typescript": "^6.0.3",
+    "valibot": "^1.4.2"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "execa": "^9.6.0",
+    "oxfmt": "^0.56.0",
+    "oxlint": "^1.71.0",
+    "oxlint-tsgolint": "^0.23.0",
     "tsx": "^4.20.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=22.0.0"
   },
-  "packageManager": "pnpm@11.8.0",
-  "dependencies": {
-    "typescript": "^5.8.0",
-    "valibot": "^1.4.2"
-  }
+  "packageManager": "pnpm@11.8.0"
 }

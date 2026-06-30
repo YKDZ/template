@@ -107,6 +107,22 @@ describe("template add package", () => {
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
     await stat(path.join(projectDir, "apps/worker/src/app.ts"));
+    await stat(path.join(projectDir, "packages/shared/oxlint.config.ts"));
+    await stat(path.join(projectDir, "packages/shared/oxfmt.config.ts"));
+    await stat(path.join(projectDir, "apps/worker/oxlint.config.ts"));
+    await stat(path.join(projectDir, "apps/worker/oxfmt.config.ts"));
+    await expect(stat(path.join(projectDir, "packages/shared/.oxlintrc.json"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(stat(path.join(projectDir, "packages/shared/.oxfmtrc.json"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(stat(path.join(projectDir, "apps/worker/.oxlintrc.json"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
+    await expect(stat(path.join(projectDir, "apps/worker/.oxfmtrc.json"))).rejects.toMatchObject({
+      code: "ENOENT"
+    });
   });
 
   it("fails clearly in a generated Single-Package Project", async () => {

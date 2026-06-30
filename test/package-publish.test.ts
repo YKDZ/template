@@ -33,6 +33,11 @@ const packageFiles = [
   "templates/hono-api/test/app.test.ts",
   "templates/hono-api/vitest.config.ts",
   "templates/rust-bin/src/main.rs",
+  "templates/shared/oxc/node/oxlint.config.ts",
+  "templates/shared/oxc/oxfmt.config.ts",
+  "templates/shared/oxc/package.json",
+  "templates/shared/oxc/tsconfig.json",
+  "templates/shared/oxc/vue/oxlint.config.ts",
   "templates/ts-lib/src/index.ts",
   "templates/vue-app/env.d.ts",
   "templates/vue-app/index.html",
@@ -124,6 +129,18 @@ describe("package publishing", () => {
     expect(tarballContents.stdout.split("\n")).toContain("package/dist/cli.js");
     expect(tarballContents.stdout.split("\n")).toContain("package/LICENSE");
     expect(tarballContents.stdout.split("\n")).toContain("package/README.md");
+    expect(tarballContents.stdout.split("\n")).toEqual(
+      expect.arrayContaining([
+        "package/templates/shared/oxc/node/oxlint.config.ts",
+        "package/templates/shared/oxc/vue/oxlint.config.ts",
+        "package/templates/shared/oxc/oxfmt.config.ts",
+        "package/templates/shared/oxc/package.json",
+        "package/templates/shared/oxc/tsconfig.json"
+      ])
+    );
+    expect(tarballContents.stdout.split("\n")).not.toContain(
+      "package/templates/shared/oxc/oxc-config-modules.d.ts"
+    );
 
     await writeFile(
       path.join(consumerDir, "package.json"),

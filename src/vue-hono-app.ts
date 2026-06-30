@@ -343,24 +343,16 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       }
     },
     {
-      kind: "writeJson",
-      to: "apps/api/.oxlintrc.json",
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "node/oxlint.config.ts",
+      to: "apps/api/oxlint.config.ts"
     },
     {
-      kind: "writeJson",
-      to: "apps/api/.oxfmtrc.json",
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: "apps/api/oxfmt.config.ts"
     },
     { kind: "copyFile", from: "api/src/index.ts", to: "apps/api/src/index.ts" },
     { kind: "copyFile", from: "api/src/runtime.ts", to: "apps/api/src/runtime.ts" },
@@ -440,24 +432,16 @@ function operationsForVueHonoApp(projectName: string, packageScope: string): Ren
       }
     },
     {
-      kind: "writeJson",
-      to: "apps/web/.oxlintrc.json",
-      value: {
-        categories: {
-          correctness: "error",
-          suspicious: "error"
-        },
-        plugins: ["typescript", "oxc", "vue"]
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "vue/oxlint.config.ts",
+      to: "apps/web/oxlint.config.ts"
     },
     {
-      kind: "writeJson",
-      to: "apps/web/.oxfmtrc.json",
-      value: {
-        printWidth: 100,
-        singleQuote: false,
-        trailingComma: "none"
-      }
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: "apps/web/oxfmt.config.ts"
     },
     { kind: "copyFile", from: "web/env.d.ts", to: "apps/web/env.d.ts" },
     { kind: "copyFile", from: "web/index.html", to: "apps/web/index.html" },
@@ -492,6 +476,10 @@ function templateSourceRoot(): string {
   );
 }
 
+function sharedOxcSourceRoot(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "shared", "oxc");
+}
+
 export async function initVueHonoAppProject(
   targetDir: string,
   options: { scope?: string } = {}
@@ -500,6 +488,7 @@ export async function initVueHonoAppProject(
   const packageScope = options.scope ?? projectName;
   await renderNewProject({
     sourceRoot: templateSourceRoot(),
+    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     targetRoot: targetDir,
     operations: operationsForVueHonoApp(projectName, packageScope)
   });
