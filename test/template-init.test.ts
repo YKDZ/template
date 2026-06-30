@@ -14,6 +14,11 @@ async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
 
+async function writeExecutable(filePath: string, content: string): Promise<void> {
+  await writeFile(filePath, content, "utf8");
+  await chmod(filePath, 0o755);
+}
+
 async function generatedFilePaths(root: string, current = "."): Promise<string[]> {
   const entries = await readdir(path.join(root, current), { withFileTypes: true });
   const files: string[] = [];
@@ -451,8 +456,12 @@ describe("template init", () => {
     expect(result.stdout).toContain("Target:");
     expect(result.stdout).toContain(projectDir);
     expect(result.stdout).toContain("Post Commands:");
-    expect(result.stdout).toContain("Check Node runtime");
-    expect(result.stdout).toContain("node --version");
+    expect(result.stdout).toContain("Enable Corepack");
+    expect(result.stdout).toContain("corepack enable");
+    expect(result.stdout).toContain("Refresh Package Manager Pin and Install Dependencies");
+    expect(result.stdout).toContain("corepack use pnpm@10.0.0");
+    expect(result.stdout).not.toContain("Install dependencies: pnpm install");
+    expect(result.stdout).toContain("pnpm run fix");
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -515,21 +524,20 @@ describe("template init", () => {
         ]
       })
     );
-    expect(output.postCommands).toEqual({
-      planned: [
-        expect.objectContaining({
-          id: "node-ready-smoke"
-        })
-      ],
-      run: [],
-      failed: [],
-      skipped: [
-        {
-          id: "node-ready-smoke",
-          reason: "dry-run"
-        }
-      ]
-    });
+    expect(output.postCommands.planned.map((command) => command.id)).toEqual([
+      "node-enable-corepack",
+      "node-refresh-package-manager-pin",
+      "node-run-fix",
+      "vue-hono-install-playwright-browsers"
+    ]);
+    expect(output.postCommands.run).toEqual([]);
+    expect(output.postCommands.failed).toEqual([]);
+    expect(output.postCommands.skipped).toEqual([
+      { id: "node-enable-corepack", reason: "dry-run" },
+      { id: "node-refresh-package-manager-pin", reason: "dry-run" },
+      { id: "node-run-fix", reason: "dry-run" },
+      { id: "vue-hono-install-playwright-browsers", reason: "dry-run" }
+    ]);
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -581,21 +589,18 @@ describe("template init", () => {
         nextSteps: [`cd ${projectDir}`, "pnpm install", "pnpm run check"]
       })
     );
-    expect(output.postCommands).toEqual({
-      planned: [
-        expect.objectContaining({
-          id: "node-ready-smoke"
-        })
-      ],
-      run: [],
-      failed: [],
-      skipped: [
-        {
-          id: "node-ready-smoke",
-          reason: "ready-mode-not-requested"
-        }
-      ]
-    });
+    expect(output.postCommands.planned.map((command) => command.id)).toEqual([
+      "node-enable-corepack",
+      "node-refresh-package-manager-pin",
+      "node-run-fix"
+    ]);
+    expect(output.postCommands.run).toEqual([]);
+    expect(output.postCommands.failed).toEqual([]);
+    expect(output.postCommands.skipped).toEqual([
+      { id: "node-enable-corepack", reason: "ready-mode-not-requested" },
+      { id: "node-refresh-package-manager-pin", reason: "ready-mode-not-requested" },
+      { id: "node-run-fix", reason: "ready-mode-not-requested" }
+    ]);
     await stat(path.join(projectDir, "package.json"));
     await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
       code: "ENOENT"
@@ -605,11 +610,46 @@ describe("template init", () => {
   it("runs planned Post Commands only when ready mode is requested", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-"));
     const projectDir = path.join(workspace, "demo-lib");
+    const fakeBin = path.join(workspace, "bin");
+    await mkdir(fakeBin);
+    await writeExecutable(
+      path.join(fakeBin, "corepack"),
+      [
+        "#!/usr/bin/env node",
+        'import { readFileSync, writeFileSync } from "node:fs";',
+        "",
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'use') {",
+        "  const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));",
+        "  packageJson.packageManager = `${args[1]}+sha224.fake-corepack-hash`;",
+        "  writeFileSync('package.json', `${JSON.stringify(packageJson, null, 2)}\\n`);",
+        "  writeFileSync('pnpm-lock.yaml', 'lockfileVersion: 9.0\\n');",
+        "}",
+        ""
+      ].join("\n")
+    );
+    await writeExecutable(
+      path.join(fakeBin, "pnpm"),
+      [
+        "#!/usr/bin/env node",
+        'import { appendFileSync, writeFileSync } from "node:fs";',
+        "",
+        "const args = process.argv.slice(2);",
+        "appendFileSync('ready-command-log.jsonl', `${JSON.stringify(args)}\\n`);",
+        "if (args[0] === 'install') {",
+        "  writeFileSync('pnpm-lock.yaml', 'lockfileVersion: 9.0\\n');",
+        "}",
+        "if (args[0] === 'run' && args[1] === 'fix') {",
+        "  writeFileSync('READY_FIX_RAN', 'yes\\n');",
+        "}",
+        ""
+      ].join("\n")
+    );
 
     const result = await execa(
-      "pnpm",
+      process.execPath,
       [
-        "exec",
+        "--import",
         "tsx",
         path.join(repoRoot, "src/cli.ts"),
         "init",
@@ -620,7 +660,10 @@ describe("template init", () => {
         "--json",
         "--yes"
       ],
-      { cwd: repoRoot }
+      {
+        cwd: repoRoot,
+        env: { PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}` }
+      }
     );
 
     const output = JSON.parse(result.stdout) as {
@@ -640,30 +683,66 @@ describe("template init", () => {
 
     expect(output.postCommands.planned).toEqual([
       {
-        id: "node-ready-smoke",
-        label: "Check Node runtime",
-        command: "node",
-        args: ["--version"],
+        id: "node-enable-corepack",
+        label: "Enable Corepack",
+        command: "corepack",
+        args: ["enable"],
+        cwd: projectDir
+      },
+      {
+        id: "node-refresh-package-manager-pin",
+        label: "Refresh Package Manager Pin and Install Dependencies",
+        command: "corepack",
+        args: ["use", "pnpm@10.0.0"],
+        cwd: projectDir
+      },
+      {
+        id: "node-run-fix",
+        label: "Run Fix Command",
+        command: "pnpm",
+        args: ["run", "fix"],
         cwd: projectDir
       }
     ]);
-    expect(output.postCommands.run).toEqual([{ id: "node-ready-smoke", exitCode: 0 }]);
+    expect(output.postCommands.run).toEqual([
+      { id: "node-enable-corepack", exitCode: 0 },
+      { id: "node-refresh-package-manager-pin", exitCode: 0 },
+      { id: "node-run-fix", exitCode: 0 }
+    ]);
     expect(output.postCommands.failed).toEqual([]);
     expect(output.postCommands.skipped).toEqual([]);
-    await stat(path.join(projectDir, "package.json"));
-    await expect(stat(path.join(projectDir, "pnpm-lock.yaml"))).rejects.toMatchObject({
-      code: "ENOENT"
-    });
+    await stat(path.join(projectDir, "pnpm-lock.yaml"));
+    await stat(path.join(projectDir, "READY_FIX_RAN"));
+    expect(
+      (await readFile(path.join(projectDir, "ready-command-log.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[])
+    ).toEqual([["run", "fix"]]);
+    expect(
+      (
+        await readJson<{ packageManager: string }>(path.join(projectDir, "package.json"))
+      ).packageManager
+    ).toBe("pnpm@10.0.0+sha224.fake-corepack-hash");
+    expect(
+      await readJson<{ packageManager: string }>(
+        path.join(projectDir, ".project-kit", "blueprint.json")
+      )
+    ).toEqual(expect.objectContaining({ packageManager: "pnpm" }));
+    expect(
+      await readJson<Record<string, unknown>>(
+        path.join(projectDir, ".project-kit", "generated-by.json")
+      )
+    ).not.toHaveProperty("packageManager");
   });
 
   it("fails ready mode clearly when a planned Post Command fails", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-ready-failure-"));
     const projectDir = path.join(workspace, "demo-lib");
     const fakeBin = path.join(workspace, "bin");
-    const fakeNode = path.join(fakeBin, "node");
+    const fakeCorepack = path.join(fakeBin, "corepack");
     await mkdir(fakeBin);
-    await writeFile(fakeNode, "#!/bin/sh\necho planned node failed >&2\nexit 7\n");
-    await chmod(fakeNode, 0o755);
+    await writeExecutable(fakeCorepack, "#!/bin/sh\necho planned corepack failed >&2\nexit 7\n");
 
     const result = await execa(
       process.execPath,
@@ -697,9 +776,9 @@ describe("template init", () => {
     expect(output.postCommands.run).toEqual([]);
     expect(output.postCommands.failed).toEqual([
       {
-        id: "node-ready-smoke",
+        id: "node-enable-corepack",
         exitCode: 7,
-        error: expect.stringContaining("node-ready-smoke")
+        error: expect.stringContaining("node-enable-corepack")
       }
     ]);
     expect(output.postCommands.skipped).toEqual([]);

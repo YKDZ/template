@@ -1,4 +1,4 @@
-import { execa, type Options as ExecaOptions } from "execa";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import type { PresetName } from "./declarations.js";
 
@@ -46,24 +46,69 @@ export type RunPostCommandsOptions = {
   executor?: PostCommandExecutor;
 };
 
-const nodeReadySmokeCommand = {
-  id: "node-ready-smoke",
-  label: "Check Node runtime",
-  command: "node",
-  args: ["--version"]
-} as const;
+type PlannedPostCommand = Omit<PostCommand, "cwd">;
+
+const packageManagerPin = "pnpm@10.0.0";
+
+const nodeReadyCommands = [
+  {
+    id: "node-enable-corepack",
+    label: "Enable Corepack",
+    command: "corepack",
+    args: ["enable"]
+  },
+  {
+    id: "node-refresh-package-manager-pin",
+    label: "Refresh Package Manager Pin and Install Dependencies",
+    command: "corepack",
+    args: ["use", packageManagerPin]
+  },
+  {
+    id: "node-run-fix",
+    label: "Run Fix Command",
+    command: "pnpm",
+    args: ["run", "fix"]
+  }
+] as const satisfies readonly PlannedPostCommand[];
+
+const vueReadyCommand = {
+  id: "vue-install-playwright-browsers",
+  label: "Install Playwright browser assets",
+  command: "pnpm",
+  args: ["exec", "playwright", "install", "chromium"]
+} as const satisfies PlannedPostCommand;
+
+const vueHonoReadyCommand = {
+  id: "vue-hono-install-playwright-browsers",
+  label: "Install Playwright browser assets for web workspace",
+  command: "pnpm",
+  args: ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"]
+} as const satisfies PlannedPostCommand;
 
 function postCommandsForPreset(options: PlanPostCommandsOptions): PostCommand[] {
-  if (options.preset === "rust-bin") {
+  if (
+    options.preset !== "ts-lib" &&
+    options.preset !== "hono-api" &&
+    options.preset !== "vue-app" &&
+    options.preset !== "vue-hono-app"
+  ) {
     return [];
   }
 
-  return [
-    {
-      ...nodeReadySmokeCommand,
-      cwd: options.targetDir
-    }
-  ];
+  const commands: PlannedPostCommand[] = [...nodeReadyCommands];
+
+  if (options.preset === "vue-app") {
+    commands.push(vueReadyCommand);
+  }
+
+  if (options.preset === "vue-hono-app") {
+    commands.push(vueHonoReadyCommand);
+  }
+
+  return commands.map((command) => ({
+    ...command,
+    cwd: options.targetDir
+  }));
 }
 
 export function planPostCommands(options: PlanPostCommandsOptions): PostCommandPlan {
@@ -82,12 +127,17 @@ export function planPostCommands(options: PlanPostCommandsOptions): PostCommandP
 }
 
 async function defaultExecutor(command: PostCommand): Promise<{ exitCode: number }> {
-  await execa(command.command, [...command.args], {
-    cwd: command.cwd,
-    stdio: "ignore"
-  } satisfies ExecaOptions);
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command.command, [...command.args], {
+      cwd: command.cwd,
+      stdio: "ignore"
+    });
 
-  return { exitCode: 0 };
+    child.once("error", reject);
+    child.once("close", (exitCode) => {
+      resolve({ exitCode: exitCode ?? 1 });
+    });
+  });
 }
 
 function isWithinDirectory(parentDir: string, childPath: string): boolean {
@@ -114,15 +164,26 @@ function validatePostCommandPlan(plan: PostCommandPlan): void {
     preset: plan.preset,
     targetDir: path.resolve(plan.targetDir)
   });
+  const expectedCommandIds = new Set(expectedCommands.map((command) => command.id));
 
   for (const command of plan.commands) {
     if (!isWithinDirectory(plan.targetDir, command.cwd)) {
       throw new Error(`Post Command cwd must stay within the target directory: ${command.id}`);
     }
 
-    const expectedCommand = expectedCommands.find((candidate) => candidate.id === command.id);
-    if (!expectedCommand) {
+    if (!expectedCommandIds.has(command.id)) {
       throw new Error(`Unplanned Post Command: ${command.id}`);
+    }
+  }
+
+  if (plan.commands.length !== expectedCommands.length) {
+    throw new Error("Post Command plan must match the complete planned sequence");
+  }
+
+  for (const [index, command] of plan.commands.entries()) {
+    const expectedCommand = expectedCommands[index];
+    if (!expectedCommand || command.id !== expectedCommand.id) {
+      throw new Error("Post Command plan must match the complete planned sequence");
     }
 
     if (!sameCommand(command, expectedCommand)) {

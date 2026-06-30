@@ -23,6 +23,7 @@ const packageFiles = [
   "src/declarations.ts",
   "src/hono-api.ts",
   "src/package-addition.ts",
+  "src/post-commands.ts",
   "src/renderer.ts",
   "src/rust-bin.ts",
   "src/ts-lib.ts",
@@ -97,6 +98,7 @@ describe("package publishing", () => {
       await readFile(path.join(repoRoot, "package.json"), "utf8")
     ) as {
       bin: Record<string, string>;
+      dependencies?: Record<string, string>;
       license?: string;
       name: string;
       private: boolean;
@@ -112,6 +114,7 @@ describe("package publishing", () => {
       url: "git+https://github.com/YKDZ/template.git"
     });
     expect(packageJson.bin.template).toBe("dist/cli.js");
+    expect(packageJson.dependencies ?? {}).not.toHaveProperty("execa");
     expect(packageJson.publishConfig?.access).toBe("public");
   });
 
@@ -137,6 +140,7 @@ describe("package publishing", () => {
     const tarballPath = path.join(packDir, tarball!);
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
     expect(tarballContents.stdout.split("\n")).toContain("package/dist/cli.js");
+    expect(tarballContents.stdout.split("\n")).toContain("package/dist/post-commands.js");
     expect(tarballContents.stdout.split("\n")).toContain("package/LICENSE");
     expect(tarballContents.stdout.split("\n")).toContain("package/README.md");
     expect(tarballContents.stdout.split("\n")).toEqual(
