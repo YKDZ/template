@@ -93,25 +93,13 @@ function checkEnvironmentInstructions(preset: PresetName): NextStepInstruction[]
   });
 }
 
-function rustCheckInstruction(): NextStepInstruction {
-  return {
-    id: "run-check-script",
-    label: "Run Check Script",
-    kind: "command",
-    command: "./scripts/check",
-    args: [],
-    cwd: "",
-    display: "./scripts/check",
-    machineVerifiable: true,
-  };
-}
-
 function presetSpecificInstructions(preset: PresetName): NextStepInstruction[] {
   if (
     preset === "ts-lib" ||
     preset === "hono-api" ||
     preset === "vue-app" ||
-    preset === "vue-hono-app"
+    preset === "vue-hono-app" ||
+    preset === "rust-bin"
   ) {
     return [
       installDependenciesInstruction(),
@@ -119,10 +107,6 @@ function presetSpecificInstructions(preset: PresetName): NextStepInstruction[] {
       ...checkEnvironmentInstructions(preset),
       rootCheckInstruction(),
     ];
-  }
-
-  if (preset === "rust-bin") {
-    return [rustCheckInstruction()];
   }
 
   return [installDependenciesInstruction(), rootCheckInstruction()];

@@ -14,9 +14,16 @@ export type CheckComponentKind =
   | "build"
   | "unit-test"
   | "e2e-test"
-  | "turbo-check";
+  | "turbo-check"
+  | "rustfmt-check"
+  | "cargo-clippy"
+  | "cargo-test";
 
-export type FixComponentKind = "oxc-format-write" | "oxc-lint-fix" | "turbo-fix";
+export type FixComponentKind =
+  | "oxc-format-write"
+  | "oxc-lint-fix"
+  | "turbo-fix"
+  | "rustfmt-write";
 
 export type CheckEnvironmentNeed = {
   readonly kind: "playwright-browser-assets";
@@ -56,6 +63,11 @@ const apiPackageBoundary: ComponentOwner = {
 const webPackageBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: "apps/web",
+};
+
+const rustPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
 };
 
 export type NodeCheckPlanTarget =
@@ -175,6 +187,23 @@ export function planNodeFixes(target: NodeFixPlanTarget): FixPlan {
   return { components: selectNodeFixComponents(target) };
 }
 
+export function planRustBinChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "rustfmt-check", owner: rustPackageBoundary },
+      { kind: "cargo-clippy", owner: rustPackageBoundary },
+      { kind: "cargo-test", owner: rustPackageBoundary },
+    ],
+    environmentNeeds: [],
+  };
+}
+
+export function planRustBinFixes(): FixPlan {
+  return {
+    components: [{ kind: "rustfmt-write", owner: rustPackageBoundary }],
+  };
+}
+
 export function planPresetChecks(preset: PresetName): CheckPlan | undefined {
   switch (preset) {
     case "ts-lib":
@@ -183,6 +212,8 @@ export function planPresetChecks(preset: PresetName): CheckPlan | undefined {
       return planNodeChecks(preset);
     case "vue-hono-app":
       return planNodeChecks("vue-hono-root");
+    case "rust-bin":
+      return planRustBinChecks();
     default:
       return undefined;
   }
@@ -212,6 +243,12 @@ function renderCheckComponentCommand(component: CheckComponent): string {
       return "pnpm run test:e2e";
     case "turbo-check":
       return "turbo run check";
+    case "rustfmt-check":
+      return "cargo fmt --all -- --check";
+    case "cargo-clippy":
+      return "cargo clippy --workspace --all-targets -- -D warnings";
+    case "cargo-test":
+      return "cargo test --workspace";
   }
 }
 
@@ -223,6 +260,8 @@ function renderFixComponentCommand(component: FixComponent): string {
       return "pnpm run lint:fix";
     case "turbo-fix":
       return "turbo run fix";
+    case "rustfmt-write":
+      return "cargo fmt --all";
   }
 }
 

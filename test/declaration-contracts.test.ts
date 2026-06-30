@@ -49,8 +49,8 @@ describe("declaration contracts", () => {
     expect(blueprintSchema.required).not.toContain("packageManager");
   });
 
-  it("does not advertise pnpm support for Rust-only preset metadata", () => {
-    expect(findBuiltInPreset("rust-bin")?.supportedPackageManagers).toEqual([]);
+  it("advertises pnpm support for the Rust preset task layer", () => {
+    expect(findBuiltInPreset("rust-bin")?.supportedPackageManagers).toEqual(["pnpm"]);
   });
 
   it("validates a JSON preset file through the CLI", async () => {

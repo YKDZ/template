@@ -56,25 +56,49 @@ describe("Next Step Instructions", () => {
     },
   );
 
-  it("plans the supported check script instruction for the Rust Preset until pnpm tasks exist", () => {
+  it("plans pnpm task-layer instructions for the Rust Preset", () => {
     const targetDir = path.join("/", "tmp", "rust-repository");
 
     const plan = planNextStepInstructions({ preset: "rust-bin", targetDir });
 
     expect(plan.steps.map((step) => step.display)).toEqual([
       `cd ${targetDir}`,
-      "./scripts/check",
+      "pnpm install",
+      "pnpm run fix",
+      "pnpm run check",
     ]);
-    expect(plan.steps[1]).toEqual({
-      id: "run-check-script",
-      label: "Run Check Script",
-      kind: "command",
-      command: "./scripts/check",
-      args: [],
-      cwd: targetDir,
-      display: "./scripts/check",
-      machineVerifiable: true,
-    });
+    expect(plan.steps.slice(1)).toEqual([
+      {
+        id: "install-dependencies",
+        label: "Install dependencies",
+        kind: "command",
+        command: "pnpm",
+        args: ["install"],
+        cwd: targetDir,
+        display: "pnpm install",
+        machineVerifiable: true,
+      },
+      {
+        id: "run-fix",
+        label: "Run Fix Command",
+        kind: "command",
+        command: "pnpm",
+        args: ["run", "fix"],
+        cwd: targetDir,
+        display: "pnpm run fix",
+        machineVerifiable: true,
+      },
+      {
+        id: "run-root-check",
+        label: "Run Root Check",
+        kind: "command",
+        command: "pnpm",
+        args: ["run", "check"],
+        cwd: targetDir,
+        display: "pnpm run check",
+        machineVerifiable: true,
+      },
+    ]);
   });
 
   it.each(["ts-app", "node-cli"] satisfies PresetName[])(

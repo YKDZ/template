@@ -358,10 +358,6 @@ function assertFoundationTextPath(relativePath: string): void {
     return;
   }
 
-  if (normalizedPath === "scripts/check") {
-    return;
-  }
-
   if (/^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/.test(normalizedPath)) {
     return;
   }

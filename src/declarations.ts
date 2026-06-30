@@ -138,7 +138,7 @@ export const builtInPresets: readonly BuiltInPreset[] = [
     title: "Rust binary",
     description: "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
     generation: "supported",
-    supportedPackageManagers: [],
+    supportedPackageManagers: ["pnpm"],
     supportedProjectKinds: ["single-package"],
     features: [
       "root-check",

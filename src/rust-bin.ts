@@ -1,6 +1,15 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ProjectBlueprint } from "./declarations.js";
+import { assembleGenerationContext, type GenerationContext } from "./generation-context.js";
+import {
+  planRustBinChecks,
+  planRustBinFixes,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "./module-graph.js";
 import { renderNewProject, type RenderOperation } from "./renderer.js";
+import { resolveToolchainVersions } from "./toolchain-resolution.js";
 
 const features = [
   "root-check",
@@ -16,6 +25,18 @@ const generatedBy = {
   packageName: "@ykdz/template",
   version: "0.0.0",
   command: "template init --preset rust-bin"
+};
+
+type InitRustBinProjectOptions = {
+  readonly generationContext?: GenerationContext;
+};
+
+const rustBinBlueprint: ProjectBlueprint = {
+  schemaVersion: 1,
+  preset: "rust-bin",
+  packageManager: "pnpm",
+  projectKind: "single-package",
+  features: [...features],
 };
 
 function cargoPackageNameFromDir(targetDir: string): string {
@@ -75,8 +96,53 @@ function cargoLock(projectName: string): string {
   ].join("\n");
 }
 
-function operationsForRustBin(projectName: string): RenderOperation[] {
+export function projectRustBinPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planRustBinChecks()),
+    fix: renderFixCommand(planRustBinFixes()),
+  };
+}
+
+function packageJson(context: GenerationContext, projectName: string): Record<string, unknown> {
+  return {
+    name: projectName,
+    version: "0.0.0",
+    private: true,
+    scripts: projectRustBinPackageScripts(),
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function generationRecord(context: GenerationContext): Record<string, unknown> {
+  return {
+    ...generatedBy,
+    toolchain: {
+      nodeLtsMajor: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+      source: context.toolchain.source,
+    },
+  };
+}
+
+function pnpmVersion(context: GenerationContext): string {
+  return context.toolchain.packageManagerPin.value.replace(/^pnpm@/, "");
+}
+
+function operationsForRustBin(context: GenerationContext, projectName: string): RenderOperation[] {
   return [
+    {
+      kind: "writeJson",
+      to: "package.json",
+      value: packageJson(context, projectName),
+    },
+    {
+      kind: "writeText",
+      to: "pnpm-workspace.yaml",
+      text: ["packages:", "  - .", ""].join("\n"),
+    },
     {
       kind: "writeText",
       to: "Cargo.toml",
@@ -103,40 +169,14 @@ function operationsForRustBin(projectName: string): RenderOperation[] {
       to: "src/main.rs"
     },
     {
-      kind: "writeText",
-      to: "scripts/check",
-      text: [
-        "#!/usr/bin/env sh",
-        "set -eu",
-        "",
-        "echo cargo fmt --all -- --check",
-        "cargo fmt --all -- --check",
-        "echo cargo clippy --workspace --all-targets -- -D warnings",
-        "cargo clippy --workspace --all-targets -- -D warnings",
-        "echo cargo test --workspace",
-        "cargo test --workspace",
-        ""
-      ].join("\n")
-    },
-    {
-      kind: "setExecutable",
-      path: "scripts/check",
-      executable: true
-    },
-    {
       kind: "writeJson",
       to: ".project-kit/blueprint.json",
-      value: {
-        schemaVersion: 1,
-        preset: "rust-bin",
-        projectKind: "single-package",
-        features
-      }
+      value: rustBinBlueprint
     },
     {
       kind: "writeJson",
       to: ".project-kit/generated-by.json",
-      value: generatedBy
+      value: generationRecord(context)
     },
     {
       kind: "writeJson",
@@ -144,12 +184,18 @@ function operationsForRustBin(projectName: string): RenderOperation[] {
       value: {
         name: `${projectName} Rust development`,
         image: "mcr.microsoft.com/devcontainers/rust:1",
+        features: {
+          "ghcr.io/devcontainers/features/node:1": {
+            version: context.toolchain.nodeLtsMajor.value,
+            pnpmVersion: pnpmVersion(context)
+          }
+        },
         mounts: [
           "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
           "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
           "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume"
         ],
-        postCreateCommand: "rustup component add rustfmt clippy && cargo fetch",
+        postCreateCommand: "rustup component add rustfmt clippy && corepack enable && pnpm install && cargo fetch",
         customizations: {
           vscode: {
             extensions: ["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]
@@ -174,10 +220,22 @@ function templateSourceRoot(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "templates", "rust-bin");
 }
 
-export async function initRustBinProject(targetDir: string): Promise<void> {
+export async function initRustBinProject(
+  targetDir: string,
+  options?: InitRustBinProjectOptions,
+): Promise<void> {
+  const generationContext =
+    options?.generationContext ??
+    assembleGenerationContext({
+      targetDir,
+      blueprint: rustBinBlueprint,
+      toolchain: await resolveToolchainVersions(),
+    });
+  const projectName = cargoPackageNameFromDir(targetDir);
+
   await renderNewProject({
     sourceRoot: templateSourceRoot(),
     targetRoot: targetDir,
-    operations: operationsForRustBin(cargoPackageNameFromDir(targetDir))
+    operations: operationsForRustBin(generationContext, projectName)
   });
 }

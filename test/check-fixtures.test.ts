@@ -220,7 +220,7 @@ describe("fixture checks", () => {
     const generatedFixes = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "fix",
     );
-    expect(generatedFixes).toHaveLength(4);
+    expect(generatedFixes).toHaveLength(5);
     expect(generatedFixes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -235,13 +235,16 @@ describe("fixture checks", () => {
         expect.objectContaining({
           cwd: expect.stringContaining("fixture-vue-hono-app"),
         }),
+        expect.objectContaining({
+          cwd: expect.stringContaining("fixture-rust-bin"),
+        }),
       ]),
     );
 
     const generatedRootChecks = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "check",
     );
-    expect(generatedRootChecks).toHaveLength(4);
+    expect(generatedRootChecks).toHaveLength(5);
     expect(generatedRootChecks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -260,20 +263,15 @@ describe("fixture checks", () => {
           ci: "1",
           cwd: expect.stringContaining("fixture-vue-hono-app"),
         }),
+        expect.objectContaining({
+          ci: "1",
+          cwd: expect.stringContaining("fixture-rust-bin"),
+        }),
       ]),
     );
 
-    expect(pnpmRecords).not.toContainEqual(
-      expect.objectContaining({
-        cwd: expect.stringContaining("fixture-rust-bin"),
-      }),
-    );
-    expect(records).toContainEqual(
-      expect.objectContaining({
-        command: "sh",
-        args: expect.arrayContaining(["./scripts/check"]),
-        cwd: expect.stringContaining("fixture-rust-bin"),
-      }),
+    expect(records).not.toContainEqual(
+      expect.objectContaining({ command: "sh" }),
     );
 
     for (const generatedRootCheck of generatedRootChecks) {

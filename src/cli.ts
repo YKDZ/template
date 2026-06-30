@@ -295,7 +295,7 @@ async function generationContextForInit(
   options: InitOptions,
   blueprint: ProjectBlueprint,
 ): Promise<GenerationContext | undefined> {
-  if (options.preset !== "ts-lib") {
+  if (options.preset !== "ts-lib" && options.preset !== "rust-bin") {
     return undefined;
   }
 
@@ -335,7 +335,7 @@ async function generateInitProject(
   }
 
   if (options.preset === "rust-bin") {
-    await initRustBinProject(options.dir);
+    await initRustBinProject(options.dir, { generationContext });
     return;
   }
 

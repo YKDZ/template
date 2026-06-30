@@ -176,9 +176,6 @@ describe("template init", () => {
       expect(dependabot).toContain("package-ecosystem: github-actions");
       if (blueprint.packageManager === "pnpm") {
         expect(dependabot).toContain("package-ecosystem: npm");
-        expect(dependabot).not.toContain("package-ecosystem: cargo");
-        expect(devcontainer.image).toContain("typescript-node:22");
-        expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
         expect(checkWorkflow).toContain("uses: actions/setup-node@v6");
         expect(checkWorkflow).toContain("node-version-file: package.json");
         expect(checkWorkflow).toContain("run: corepack enable");
@@ -186,14 +183,18 @@ describe("template init", () => {
         expect(checkWorkflow).not.toContain("node-version: 22");
         expect(checkWorkflow).toContain("run: pnpm install");
         expect(checkWorkflow).toContain("run: pnpm run check");
-      } else {
+        expect(checkWorkflow).not.toContain("run: ./scripts/check");
+      }
+
+      if (preset.name === "rust-bin") {
         expect(dependabot).toContain("package-ecosystem: cargo");
-        expect(dependabot).not.toContain("package-ecosystem: npm");
         expect(devcontainer.image).toContain("devcontainers/rust");
         expect(devcontainer.postCreateCommand).toContain("rustup component add rustfmt clippy");
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
-        expect(checkWorkflow).toContain("run: ./scripts/check");
-        expect(checkWorkflow).not.toContain("pnpm");
+      } else {
+        expect(dependabot).not.toContain("package-ecosystem: cargo");
+        expect(devcontainer.image).toContain("typescript-node:22");
+        expect(devcontainer.postCreateCommand).toContain("corepack enable && pnpm install");
       }
 
       const extensions = devcontainer.customizations.vscode.extensions;
@@ -1140,10 +1141,19 @@ describe("template init", () => {
 
     const cargoToml = await readFile(path.join(projectDir, "Cargo.toml"), "utf8");
     const rustfmtToml = await readFile(path.join(projectDir, "rustfmt.toml"), "utf8");
-    const checkScript = await readFile(path.join(projectDir, "scripts/check"), "utf8");
+    const packageJson = await readJson<{
+      name: string;
+      private: boolean;
+      engines: { node: string };
+      scripts: Record<string, string>;
+      packageManager: string;
+    }>(path.join(projectDir, "package.json"));
+    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
     const devcontainer = await readJson<{
       image: string;
+      features?: Record<string, { version?: string; pnpmVersion?: string }>;
       mounts: string[];
+      postCreateCommand: string;
       customizations: { vscode: { extensions: string[] } };
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
     const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
@@ -1155,6 +1165,17 @@ describe("template init", () => {
     const dependabot = await readFile(path.join(projectDir, ".github/dependabot.yml"), "utf8");
     const files = await generatedFilePaths(projectDir);
 
+    expect(packageJson.name).toBe("demo-rust");
+    expect(packageJson.private).toBe(true);
+    expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(packageJson.scripts).toEqual({
+      check:
+        "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+      fix: "cargo fmt --all",
+    });
+    expect(packageJson.scripts.fix).not.toContain("clippy");
+    expect(workspaceYaml).toBe(["packages:", "  - .", ""].join("\n"));
+
     expect(cargoToml).toContain('name = "demo-rust"');
     expect(cargoToml).toContain('edition = "2024"');
     expect(cargoToml).toContain("[workspace.lints.clippy]");
@@ -1163,11 +1184,16 @@ describe("template init", () => {
     expect(cargoToml).toContain('strip = "symbols"');
     expect(rustfmtToml).toContain('edition = "2024"');
 
-    expect(checkScript).toContain("cargo fmt --all -- --check");
-    expect(checkScript).toContain("cargo clippy --workspace --all-targets -- -D warnings");
-    expect(checkScript).toContain("cargo test --workspace");
-
     expect(devcontainer.image).toContain("rust");
+    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(([id]) =>
+      id.includes("features/node"),
+    )?.[1];
+    expect(nodeFeature).toEqual({
+      version: packageJson.engines.node,
+      pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+    });
+    expect(devcontainer.postCreateCommand).toContain("corepack enable");
+    expect(devcontainer.postCreateCommand).toContain("pnpm install");
     expect(devcontainer.mounts).toEqual(
       expect.arrayContaining([
         expect.stringContaining("target=/usr/local/cargo/registry"),
@@ -1179,14 +1205,17 @@ describe("template init", () => {
     );
 
     expect(blueprint.preset).toBe("rust-bin");
-    expect(blueprint).not.toHaveProperty("packageManager");
+    expect(blueprint.packageManager).toBe("pnpm");
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
     expect(checkWorkflow).toContain("components: rustfmt, clippy");
+    expect(checkWorkflow).toContain("node-version-file: package.json");
+    expect(checkWorkflow).toContain("run: corepack enable");
+    expect(checkWorkflow).toContain("run: pnpm install");
+    expect(checkWorkflow).toContain("run: pnpm run check");
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
-    expect(checkWorkflow).toContain("run: ./scripts/check");
-    expect(checkWorkflow).not.toContain("node-version-file: package.json");
-    expect(checkWorkflow).not.toContain("corepack enable");
+    expect(checkWorkflow).not.toContain("./scripts/check");
     expect(dependabot).toContain("package-ecosystem: cargo");
+    expect(dependabot).toContain("package-ecosystem: npm");
     expect(dependabot).toContain("package-ecosystem: github-actions");
     expect(files.some((file) => file.endsWith("oxlint.config.ts"))).toBe(false);
     expect(files.some((file) => file.endsWith("oxfmt.config.ts"))).toBe(false);
@@ -1195,7 +1224,7 @@ describe("template init", () => {
 
     await stat(path.join(projectDir, "src/main.rs"));
     await stat(path.join(projectDir, "Cargo.lock"));
-    await expect(stat(path.join(projectDir, "package.json"))).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "scripts/check"))).rejects.toMatchObject({
       code: "ENOENT",
     });
 

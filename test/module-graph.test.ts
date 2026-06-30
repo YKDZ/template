@@ -1,6 +1,8 @@
 import {
   planNodeChecks,
   planNodeFixes,
+  planRustBinChecks,
+  planRustBinFixes,
   planTsLibChecks,
   planTsLibFixes,
   renderPlaywrightBrowserInstallCommand,
@@ -11,6 +13,7 @@ import {
   selectTsLibFixComponents,
 } from "../src/module-graph.js";
 import { projectHonoApiPackageScripts } from "../src/hono-api.js";
+import { projectRustBinPackageScripts } from "../src/rust-bin.js";
 import { projectTsLibPackageScripts } from "../src/ts-lib.js";
 import { projectVueAppPackageScripts } from "../src/vue-app.js";
 import {
@@ -169,5 +172,27 @@ describe("module graph plans", () => {
     expect(renderPlaywrightBrowserInstallCommand(rootCheckPlan.environmentNeeds[0])).toBe(
       "pnpm --filter ./apps/web exec playwright install chromium",
     );
+  });
+
+  it("projects rust-bin package scripts from Rust Check and Fix Plans", () => {
+    const checkPlan = planRustBinChecks();
+    const fixPlan = planRustBinFixes();
+
+    expect(checkPlan.components.map((component) => component.kind)).toEqual([
+      "rustfmt-check",
+      "cargo-clippy",
+      "cargo-test",
+    ]);
+    expect(fixPlan.components.map((component) => component.kind)).toEqual(["rustfmt-write"]);
+    expect(renderRootCheckCommand(checkPlan)).toBe(
+      "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+    );
+    expect(renderFixCommand(fixPlan)).toBe("cargo fmt --all");
+    expect(renderFixCommand(fixPlan)).not.toContain("clippy");
+    expect(projectRustBinPackageScripts()).toEqual({
+      check:
+        "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+      fix: "cargo fmt --all",
+    });
   });
 });
