@@ -154,10 +154,11 @@ describe("module graph plans", () => {
       check:
         "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
       fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
-      "format:check": "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      "format:write": "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint:
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "format:check":
+        "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "format:write":
+        "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
       "lint:fix":
         "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
@@ -182,10 +183,11 @@ describe("module graph plans", () => {
       check:
         "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
       fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
+      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "lint:fix":
+        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
       start: "node dist/server.js",
       test: "vitest run",
       typecheck: "tsc -p tsconfig.json --noEmit",
@@ -213,10 +215,11 @@ describe("module graph plans", () => {
         "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
       dev: "vite",
       fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
+      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "lint:fix":
+        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
       preview: "vite preview",
       test: "vitest run",
       "test:e2e": "pnpm run build && playwright test",
@@ -226,12 +229,12 @@ describe("module graph plans", () => {
       {
         kind: "playwright-browser-assets",
         browser: "chromium",
-        owner: { kind: "package-boundary", path: "." },
+        owner: { kind: "package-boundary", path: "apps/web" },
       },
     ]);
     expect(
       renderPlaywrightBrowserInstallCommand(plan.checkPlan.environmentNeeds[0]),
-    ).toBe("pnpm exec playwright install chromium");
+    ).toBe("pnpm --filter ./apps/web exec playwright install chromium");
   });
 
   it("projects vue-hono workspace scripts and preserves web Playwright package filtering", () => {
@@ -253,15 +256,34 @@ describe("module graph plans", () => {
 
     expect(rootFixPlan.components).toEqual([
       {
-        kind: "turbo-fix",
-        owner: { kind: "package-boundary", path: "." },
+        kind: "oxc-format-write",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "oxc-lint-fix",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "turbo-package-fix",
+        owner: { kind: "package-boundary", path: "apps/*" },
       },
     ]);
-    expect(renderFixCommand(rootFixPlan)).toBe("turbo run fix");
+    expect(renderFixCommand(rootFixPlan)).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
+    );
     expect(projectVueHonoRootPackageScripts()).toEqual({
-      check: "turbo run check",
+      check:
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),
+      "format:check":
+        "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "format:write":
+        "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "lint:fix":
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+      typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(projectVueHonoApiPackageScripts().check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
@@ -365,7 +387,7 @@ describe("module graph plans", () => {
     });
 
     expect(projectCheckWorkflow({ checkPlan: vuePlan.checkPlan })).toContain(
-      "      - run: pnpm exec playwright install --with-deps chromium",
+      "      - run: pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
     const rustProjection = findBuiltInPresetProjection("rust-bin");
     const rustPlan = rustProjection!.project({

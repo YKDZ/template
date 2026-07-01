@@ -229,8 +229,9 @@ describe("Preset Registry", () => {
       "oxc.enable",
       true,
     );
-    expect(devcontainer.customizations.vscode.settings).not.toHaveProperty(
+    expect(devcontainer.customizations.vscode.settings).toHaveProperty(
       "oxc.configPath",
+      "./oxlint.config.ts",
     );
     expect(devcontainerText).toMatch(
       /^\{\n  "name": "demo-vue-hono",\n  "build": \{/,
@@ -243,7 +244,9 @@ describe("Preset Registry", () => {
     expect(dockerfile).toContain("xvfb");
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
-    expect(rootPackageJson.scripts.check).toBe("turbo run check");
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
   });
 

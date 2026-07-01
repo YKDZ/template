@@ -6,7 +6,10 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
-import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
+import {
+  collectGeneratedManifestCatalogDependencies,
+  renderGeneratedPnpmWorkspaceYaml,
+} from "../../src/dependency-catalog.js";
 import {
   dockerfileFirstNodePnpmDevcontainer,
   nodePnpmToolLayer,
@@ -15,12 +18,15 @@ import { editorCustomizationForCapabilities } from "../../src/editor-customizati
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
+  type ComponentOwner,
+  type FixPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
+  PresetBlueprintOptions,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -30,7 +36,6 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
-import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -41,10 +46,10 @@ const generatedBy = {
 export const honoApiPresetMetadata: BuiltInPreset = {
   name: "hono-api",
   title: "Hono API",
-  description: "Single-package Hono Node API with strict TypeScript tooling.",
+  description: "Hono Node API workspace with strict TypeScript tooling.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
-  supportedProjectKinds: ["single-package"],
+  supportedProjectKinds: ["multi-package"],
   features: [
     "pnpm-catalog",
     "oxc-format-lint",
@@ -62,32 +67,124 @@ const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
   interval: "weekly",
 };
 
-export function honoApiBlueprint(): ProjectBlueprint {
+const apiPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
+};
+
+const rootBoundary: ComponentOwner = {
+  kind: "workspace-orchestration",
+  path: ".",
+};
+
+const workspacePackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/*",
+};
+
+function planHonoApiPackageChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "oxc-format-check", owner: apiPackageBoundary },
+      { kind: "oxc-lint", owner: apiPackageBoundary },
+      { kind: "typescript-typecheck", owner: apiPackageBoundary },
+      { kind: "build", owner: apiPackageBoundary },
+      { kind: "unit-test", owner: apiPackageBoundary },
+    ],
+    environmentNeeds: [],
+  };
+}
+
+function planHonoApiRootChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "oxc-format-check", owner: rootBoundary },
+      { kind: "oxc-lint", owner: rootBoundary },
+      { kind: "typescript-typecheck", owner: rootBoundary },
+      { kind: "turbo-package-check", owner: workspacePackageBoundary },
+    ],
+    environmentNeeds: [],
+  };
+}
+
+function planHonoApiPackageFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "oxc-format-write", owner: apiPackageBoundary },
+      { kind: "oxc-lint-fix", owner: apiPackageBoundary },
+    ],
+  };
+}
+
+function planHonoApiRootFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "oxc-format-write", owner: rootBoundary },
+      { kind: "oxc-lint-fix", owner: rootBoundary },
+      { kind: "turbo-package-fix", owner: workspacePackageBoundary },
+    ],
+  };
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function packageScopeFromOptions(options: PresetBlueprintOptions): string {
+  return options.scope ?? projectNameFromDir(options.targetDir);
+}
+
+function packageName(packageScope: string): string {
+  return `@${packageScope}/api`;
+}
+
+export function honoApiBlueprint(
+  options: PresetBlueprintOptions = { targetDir: process.cwd() },
+): ProjectBlueprint {
+  const packageScope = packageScopeFromOptions(options);
+
   return {
     schemaVersion: 1,
     preset: "hono-api",
     packageManager: "pnpm",
-    projectKind: "single-package",
+    projectKind: "multi-package",
     features: [...honoApiPresetMetadata.features],
+    packages: [{ name: packageName(packageScope), path: "apps/api" }],
+  };
+}
+
+function projectHonoApiRootPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planHonoApiRootChecks()),
+    fix: renderFixCommand(planHonoApiRootFixes()),
+    "format:check":
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    "format:write":
+      "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    "lint:fix":
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+    typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }
 
 export function projectHonoApiPackageScripts(): Record<string, string> {
   return {
     build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    check: renderRootCheckCommand(planNodeChecks("hono-api")),
-    fix: renderFixCommand(planNodeFixes("hono-api")),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    check: renderRootCheckCommand(planHonoApiPackageChecks()),
+    fix: renderFixCommand(planHonoApiPackageFixes()),
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    "lint:fix":
+      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
     start: "node dist/server.js",
     test: "vitest run",
     typecheck: "tsc -p tsconfig.json --noEmit",
   };
 }
 
-function packageJson(
+function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
 ): Record<string, unknown> {
@@ -97,6 +194,34 @@ function packageJson(
     private: true,
     type: "module",
     scripts: packageScripts,
+    devDependencies: {
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function apiPackageName(context: GenerationContext): string {
+  const apiPackage = context.blueprint.packages?.find(
+    (pkg) => pkg.path === "apps/api",
+  );
+
+  return apiPackage?.name ?? packageName(context.projectName.value);
+}
+
+function apiPackageJson(context: GenerationContext): Record<string, unknown> {
+  return {
+    name: apiPackageName(context),
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    scripts: projectHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
       hono: "catalog:",
@@ -112,7 +237,6 @@ function packageJson(
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
@@ -145,34 +269,78 @@ function operationsForHonoApi(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const rootManifest = rootPackageJson(context, packageScripts);
+  const apiManifest = apiPackageJson(context);
 
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(context, packageScripts),
+      value: rootManifest,
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
-        dependencies: [
-          "@hono/node-server",
-          "@types/node",
-          "hono",
-          "oxfmt",
-          "oxlint",
-          "tsc-alias",
-          "typescript",
-          "vitest",
-        ],
+        packages: ["apps/*"],
+        dependencies: collectGeneratedManifestCatalogDependencies([
+          rootManifest,
+          apiManifest,
+        ]),
       }),
+    },
+    {
+      kind: "writeJson",
+      to: "turbo.json",
+      value: {
+        tasks: {
+          build: {
+            dependsOn: ["^build"],
+            outputs: ["dist/**"],
+          },
+          check: {
+            dependsOn: ["^build"],
+          },
+          fix: {
+            cache: false,
+          },
+        },
+      },
     },
     {
       kind: "writeJson",
       to: "tsconfig.json",
       value: {
+        files: [],
+        references: [{ path: "./apps/api/tsconfig.json" }],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.config.json",
+      value: {
         compilerOptions: {
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["oxlint.config.ts", "oxfmt.config.ts"],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: "apps/api/package.json",
+      value: apiManifest,
+    },
+    {
+      kind: "writeJson",
+      to: "apps/api/tsconfig.json",
+      value: {
+        compilerOptions: {
+          composite: true,
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
@@ -189,7 +357,7 @@ function operationsForHonoApi(
     },
     {
       kind: "writeJson",
-      to: "tsconfig.build.json",
+      to: "apps/api/tsconfig.build.json",
       value: {
         extends: "./tsconfig.json",
         compilerOptions: {
@@ -224,14 +392,26 @@ function operationsForHonoApi(
         "",
       ].join("\n"),
     },
-    { kind: "copyFile", from: "src/app.ts", to: "src/app.ts" },
-    { kind: "copyFile", from: "src/server.ts", to: "src/server.ts" },
-    { kind: "copyFile", from: "test/app.test.ts", to: "test/app.test.ts" },
-    { kind: "copyFile", from: "vitest.config.ts", to: "vitest.config.ts" },
+    { kind: "copyFile", from: "src/app.ts", to: "apps/api/src/app.ts" },
+    {
+      kind: "copyFile",
+      from: "src/server.ts",
+      to: "apps/api/src/server.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "test/app.test.ts",
+      to: "apps/api/test/app.test.ts",
+    },
+    {
+      kind: "copyFile",
+      from: "vitest.config.ts",
+      to: "apps/api/vitest.config.ts",
+    },
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
-      value: honoApiBlueprint(),
+      value: context.blueprint,
     },
     {
       kind: "writeJson",
@@ -439,9 +619,9 @@ export const honoApiPresetProjection: PresetProjection = {
   },
   blueprint: honoApiBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planNodeChecks("hono-api");
-    const fixPlan = planNodeFixes("hono-api");
-    const packageScripts = projectHonoApiPackageScripts();
+    const checkPlan = planHonoApiRootChecks();
+    const fixPlan = planHonoApiRootFixes();
+    const packageScripts = projectHonoApiRootPackageScripts();
 
     return {
       sourceRoot: templateSourceRoot(),

@@ -6,7 +6,10 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
-import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
+import {
+  collectGeneratedManifestCatalogReferences,
+  renderGeneratedPnpmWorkspaceYaml,
+} from "../../src/dependency-catalog.js";
 import {
   browserTestToolLayer,
   dockerfileFirstNodePnpmDevcontainer,
@@ -16,6 +19,8 @@ import { editorCustomizationForCapabilities } from "../../src/editor-customizati
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
+  type ComponentOwner,
+  type FixPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
@@ -30,7 +35,6 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
-import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -61,6 +65,107 @@ const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
   ecosystems: ["npm", "github-actions", "docker"],
   interval: "weekly",
 };
+
+const rootBoundary: ComponentOwner = {
+  kind: "workspace-orchestration",
+  path: ".",
+};
+
+const apiPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
+};
+
+const webPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
+};
+
+const workspacePackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/*",
+};
+
+const webWorkspaceBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/web",
+};
+
+function honoApiCheckComponents(owner: ComponentOwner) {
+  return [
+    { kind: "oxc-format-check", owner },
+    { kind: "oxc-lint", owner },
+    { kind: "typescript-typecheck", owner },
+    { kind: "build", owner },
+    { kind: "unit-test", owner },
+  ] as const;
+}
+
+function vueWebCheckComponents(owner: ComponentOwner) {
+  return [
+    { kind: "oxc-format-check", owner },
+    { kind: "oxc-lint", owner },
+    { kind: "typescript-typecheck", owner },
+    { kind: "build", owner },
+    { kind: "unit-test", owner },
+    { kind: "e2e-test", owner },
+  ] as const;
+}
+
+function nodeFixComponents(owner: ComponentOwner) {
+  return [
+    { kind: "oxc-format-write", owner },
+    { kind: "oxc-lint-fix", owner },
+  ] as const;
+}
+
+function planVueHonoRootChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "oxc-format-check", owner: rootBoundary },
+      { kind: "oxc-lint", owner: rootBoundary },
+      { kind: "typescript-typecheck", owner: rootBoundary },
+      { kind: "turbo-package-check", owner: workspacePackageBoundary },
+    ],
+    environmentNeeds: [
+      {
+        kind: "playwright-browser-assets",
+        browser: "chromium",
+        owner: webWorkspaceBoundary,
+      },
+    ],
+  };
+}
+
+function planVueHonoRootFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "oxc-format-write", owner: rootBoundary },
+      { kind: "oxc-lint-fix", owner: rootBoundary },
+      { kind: "turbo-package-fix", owner: workspacePackageBoundary },
+    ],
+  };
+}
+
+function planVueHonoApiChecks(): CheckPlan {
+  return {
+    components: [...honoApiCheckComponents(apiPackageBoundary)],
+    environmentNeeds: [],
+  };
+}
+
+function planVueHonoWebChecks(): CheckPlan {
+  return {
+    components: [...vueWebCheckComponents(webPackageBoundary)],
+    environmentNeeds: [],
+  };
+}
+
+function planVueHonoPackageFixes(owner: ComponentOwner): FixPlan {
+  return {
+    components: [...nodeFixComponents(owner)],
+  };
+}
 
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
@@ -94,22 +199,31 @@ export function vueHonoAppBlueprint(
 
 export function projectVueHonoRootPackageScripts(): Record<string, string> {
   return {
-    check: renderRootCheckCommand(planNodeChecks("vue-hono-root")),
+    check: renderRootCheckCommand(planVueHonoRootChecks()),
     dev: "turbo run dev --parallel",
-    fix: renderFixCommand(planNodeFixes("vue-hono-root")),
+    fix: renderFixCommand(planVueHonoRootFixes()),
+    "format:check":
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    "format:write":
+      "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    "lint:fix":
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+    typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }
 
 export function projectVueHonoApiPackageScripts(): Record<string, string> {
   return {
     build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    check: renderRootCheckCommand(planNodeChecks("vue-hono-api")),
+    check: renderRootCheckCommand(planVueHonoApiChecks()),
     dev: "tsx watch src/server.ts",
-    fix: renderFixCommand(planNodeFixes("vue-hono-api")),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    fix: renderFixCommand(planVueHonoPackageFixes(apiPackageBoundary)),
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    "lint:fix":
+      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
     start: "node dist/server.js",
     test: "vitest run",
     typecheck: "tsc -p tsconfig.json --noEmit",
@@ -119,13 +233,14 @@ export function projectVueHonoApiPackageScripts(): Record<string, string> {
 export function projectVueHonoWebPackageScripts(): Record<string, string> {
   return {
     build: "vite build",
-    check: renderRootCheckCommand(planNodeChecks("vue-hono-web")),
+    check: renderRootCheckCommand(planVueHonoWebChecks()),
     dev: "vite",
-    fix: renderFixCommand(planNodeFixes("vue-hono-web")),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    fix: renderFixCommand(planVueHonoPackageFixes(webPackageBoundary)),
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    "lint:fix":
+      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
     preview: "vite preview",
     test: "vitest run",
     "test:e2e": "pnpm run build && playwright test",
@@ -144,7 +259,10 @@ function rootPackageJson(
     type: "module",
     scripts: packageScripts,
     devDependencies: {
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
       turbo: "catalog:",
+      typescript: "catalog:",
     },
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
@@ -255,12 +373,12 @@ function operationsForVueHonoApp(
   const packageScope = packageScopeFromBlueprint(context);
   const apiName = packageName(packageScope, "api");
   const webName = packageName(packageScope, "web");
-  const editorCustomization = editorCustomizationForCapabilities(
-    ["oxc-format-lint", "vue", "tailwind", "vitest"],
-    {
-      oxcConfigPaths: "nested",
-    },
-  );
+  const editorCustomization = editorCustomizationForCapabilities([
+    "oxc-format-lint",
+    "vue",
+    "tailwind",
+    "vitest",
+  ]);
   const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
     name: context.projectName.value,
     layer: nodePnpmToolLayer({
@@ -271,41 +389,26 @@ function operationsForVueHonoApp(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const rootManifest = rootPackageJson(context, packageScripts);
+  const apiManifest = apiPackageJson(context, packageScope);
+  const webManifest = webPackageJson(context, packageScope);
 
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: rootPackageJson(context, packageScripts),
+      value: rootManifest,
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
         packages: ["apps/*"],
-        dependencies: [
-          "@hono/node-server",
-          "@playwright/test",
-          "@tailwindcss/vite",
-          "@types/node",
-          "@types/web-bluetooth",
-          "@vitejs/plugin-vue",
-          "@vue/tsconfig",
-          "@vueuse/core",
-          "hono",
-          "oxfmt",
-          "oxlint",
-          "pinia",
-          "tailwindcss",
-          "tsc-alias",
-          "tsx",
-          "turbo",
-          "typescript",
-          "vite",
-          "vitest",
-          "vue",
-          "vue-tsc",
-        ],
+        dependencies: collectGeneratedManifestCatalogReferences([
+          rootManifest,
+          apiManifest,
+          webManifest,
+        ]),
         allowBuilds: {
           esbuild: true,
         },
@@ -345,6 +448,33 @@ function operationsForVueHonoApp(
           { path: "./apps/web/tsconfig.node.json" },
         ],
       },
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.config.json",
+      value: {
+        compilerOptions: {
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["oxlint.config.ts", "oxfmt.config.ts"],
+      },
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "vue/oxlint.config.ts",
+      to: "oxlint.config.ts",
+    },
+    {
+      kind: "copyFile",
+      sourceRoot: "sharedOxc",
+      from: "oxfmt.config.ts",
+      to: "oxfmt.config.ts",
     },
     {
       kind: "writeJson",
@@ -406,7 +536,7 @@ function operationsForVueHonoApp(
     {
       kind: "writeJson",
       to: "apps/api/package.json",
-      value: apiPackageJson(context, packageScope),
+      value: apiManifest,
     },
     {
       kind: "writeJson",
@@ -443,18 +573,6 @@ function operationsForVueHonoApp(
         include: ["src/**/*.ts"],
       },
     },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "node/oxlint.config.ts",
-      to: "apps/api/oxlint.config.ts",
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "oxfmt.config.ts",
-      to: "apps/api/oxfmt.config.ts",
-    },
     { kind: "copyFile", from: "api/src/index.ts", to: "apps/api/src/index.ts" },
     {
       kind: "copyFile",
@@ -479,7 +597,7 @@ function operationsForVueHonoApp(
     {
       kind: "writeJson",
       to: "apps/web/package.json",
-      value: webPackageJson(context, packageScope),
+      value: webManifest,
     },
     {
       kind: "writeJson",
@@ -550,18 +668,6 @@ function operationsForVueHonoApp(
         },
         include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
       },
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "vue/oxlint.config.ts",
-      to: "apps/web/oxlint.config.ts",
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "oxfmt.config.ts",
-      to: "apps/web/oxfmt.config.ts",
     },
     { kind: "copyFile", from: "web/env.d.ts", to: "apps/web/env.d.ts" },
     { kind: "copyFile", from: "web/index.html", to: "apps/web/index.html" },
@@ -652,8 +758,8 @@ export const vueHonoAppPresetProjection: PresetProjection = {
   metadata: vueHonoAppPresetMetadata,
   blueprint: vueHonoAppBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planNodeChecks("vue-hono-root");
-    const fixPlan = planNodeFixes("vue-hono-root");
+    const checkPlan = planVueHonoRootChecks();
+    const fixPlan = planVueHonoRootFixes();
     const packageScripts = projectVueHonoRootPackageScripts();
 
     return {

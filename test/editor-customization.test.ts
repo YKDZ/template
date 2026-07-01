@@ -64,7 +64,7 @@ function oxcConfigPathSettings(
 function editorCustomizationOptionsForPreset(
   preset: string,
 ): EditorCustomizationOptions | undefined {
-  return preset === "vue-hono-app" ? { oxcConfigPaths: "nested" } : undefined;
+  return undefined;
 }
 
 function editorCustomizationCapabilitiesForPreset(
@@ -210,7 +210,9 @@ describe("editor customization", () => {
     expectForbiddenOptionalExtensionsAbsent(
       devcontainer.customizations.vscode.extensions,
     );
-    expectForbiddenOptionalExtensionsAbsent(workspaceExtensions.recommendations);
+    expectForbiddenOptionalExtensionsAbsent(
+      workspaceExtensions.recommendations,
+    );
   });
 
   it("does not recommend Vitest for generated projects without Vitest capability", async () => {
@@ -273,7 +275,9 @@ describe("editor customization", () => {
     expectForbiddenOptionalExtensionsAbsent(
       devcontainer.customizations.vscode.extensions,
     );
-    expectForbiddenOptionalExtensionsAbsent(workspaceExtensions.recommendations);
+    expectForbiddenOptionalExtensionsAbsent(
+      workspaceExtensions.recommendations,
+    );
   });
 
   it("projects Vue and Tailwind recommendations to generated Vue app repositories", async () => {
@@ -310,7 +314,9 @@ describe("editor customization", () => {
     expectForbiddenOptionalExtensionsAbsent(
       devcontainer.customizations.vscode.extensions,
     );
-    expectForbiddenOptionalExtensionsAbsent(workspaceExtensions.recommendations);
+    expectForbiddenOptionalExtensionsAbsent(
+      workspaceExtensions.recommendations,
+    );
   });
 
   it.each(["hono-api", "vue-app", "vue-hono-app"])(

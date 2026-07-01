@@ -136,6 +136,22 @@ const forbiddenWorkspaceLifecycleFeatures = [
 ] as const;
 
 function oxcConfigDirectoriesForPreset(preset: string): string[] {
+  return ["."];
+}
+
+function oxcPackageDirectoriesForPreset(preset: string): string[] {
+  if (preset === "ts-lib") {
+    return ["packages/demo-ts-lib"];
+  }
+
+  if (preset === "hono-api") {
+    return ["apps/api"];
+  }
+
+  if (preset === "vue-app") {
+    return ["apps/web"];
+  }
+
   if (preset === "vue-hono-app") {
     return ["apps/api", "apps/web"];
   }
@@ -168,7 +184,7 @@ function expectCatalogDependencySpecifiers(packageJson: {
 function editorCustomizationOptionsForPreset(
   preset: string,
 ): EditorCustomizationOptions | undefined {
-  return preset === "vue-hono-app" ? { oxcConfigPaths: "nested" } : undefined;
+  return undefined;
 }
 
 function editorCustomizationCapabilitiesForPreset(
@@ -229,6 +245,7 @@ describe("template init", () => {
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
       "tsc-alias": "^1.8.17",
+      turbo: "^2.10.2",
       typescript: "^6.0.3",
       vitest: "^4.1.9",
     });
@@ -484,6 +501,7 @@ describe("template init", () => {
       oxlint: "^1.72.0",
       pinia: "^3.0.4",
       tailwindcss: "^4.3.2",
+      turbo: "^2.10.2",
       typescript: "^6.0.3",
       vite: "^8.1.2",
       vitest: "^4.1.9",
@@ -729,7 +747,7 @@ describe("template init", () => {
       expect(workspaceSettings).toEqual(expectedEditorCustomization.settings);
       if (preset.name === "vue-app") {
         expect(checkWorkflow).toContain(
-          "pnpm exec playwright install --with-deps chromium",
+          "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
         );
       }
       if (preset.name === "vue-hono-app") {
@@ -970,53 +988,45 @@ describe("template init", () => {
         expect(files).toContain(`${prefix}oxlint.config.ts`);
         expect(files).toContain(`${prefix}oxfmt.config.ts`);
 
-        if (preset === "ts-lib") {
-          const packageJson = await readJson<{
-            scripts: Record<string, string>;
-          }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
-          expect(packageJson.scripts["format:check"]).toBe(
-            "oxfmt --check --config ../../oxfmt.config.ts .",
-          );
-          expect(packageJson.scripts["format:write"]).toBe(
-            "oxfmt --write --config ../../oxfmt.config.ts .",
-          );
-          expect(packageJson.scripts.lint).toBe(
-            "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-          );
-          expect(packageJson.scripts["lint:fix"]).toBe(
-            "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
-          );
-          const rootPackageJson = await readJson<{
-            scripts: Record<string, string>;
-          }>(path.join(projectDir, "package.json"));
-          const rootConfigTsconfig = await readJson<{ include: string[] }>(
-            path.join(projectDir, "tsconfig.config.json"),
-          );
-          expect(rootPackageJson.scripts.typecheck).toBe(
-            "tsc -p tsconfig.config.json --noEmit",
-          );
-          expect(rootConfigTsconfig.include).toEqual([
-            "oxlint.config.ts",
-            "oxfmt.config.ts",
-          ]);
-          expect(rootPackageJson.scripts["format:check"]).toBe(
-            "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-          );
-          expect(rootPackageJson.scripts.lint).toBe(
-            "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
-          );
-          continue;
-        }
+        const rootPackageJson = await readJson<{
+          scripts: Record<string, string>;
+        }>(path.join(projectDir, "package.json"));
+        const rootConfigTsconfig = await readJson<{ include: string[] }>(
+          path.join(projectDir, "tsconfig.config.json"),
+        );
+        expect(rootPackageJson.scripts.typecheck).toBe(
+          "tsc -p tsconfig.config.json --noEmit",
+        );
+        expect(rootConfigTsconfig.include).toEqual([
+          "oxlint.config.ts",
+          "oxfmt.config.ts",
+        ]);
+        expect(rootPackageJson.scripts["format:check"]).toBe(
+          "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+        );
+        expect(rootPackageJson.scripts.lint).toBe(
+          "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+        );
+      }
 
-        const packageJson = await readJson<{ scripts: Record<string, string> }>(
-          path.join(projectDir, configDir, "package.json"),
+      for (const packageDir of oxcPackageDirectoriesForPreset(preset)) {
+        const packageJson = await readJson<{
+          scripts: Record<string, string>;
+        }>(path.join(projectDir, packageDir, "package.json"));
+        expect(packageJson.scripts["format:check"]).toBe(
+          "oxfmt --check --config ../../oxfmt.config.ts .",
         );
-        expect(packageJson.scripts["format:check"]).toBe("oxfmt --check .");
-        expect(packageJson.scripts["format:write"]).toBe("oxfmt --write .");
-        expect(packageJson.scripts.lint).toBe("oxlint . --deny-warnings");
+        expect(packageJson.scripts["format:write"]).toBe(
+          "oxfmt --write --config ../../oxfmt.config.ts .",
+        );
+        expect(packageJson.scripts.lint).toBe(
+          "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+        );
         expect(packageJson.scripts["lint:fix"]).toBe(
-          "oxlint . --fix --deny-warnings",
+          "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
         );
+        expect(files).not.toContain(`${packageDir}/oxlint.config.ts`);
+        expect(files).not.toContain(`${packageDir}/oxfmt.config.ts`);
       }
 
       expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
@@ -1987,63 +1997,159 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const packageJson = await readJson<{
+    const rootPackageJson = await readJson<{
       name: string;
+      private: boolean;
+      exports?: unknown;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const apiPackageJson = await readJson<{
+      name: string;
+      packageManager?: string;
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
-    }>(path.join(projectDir, "package.json"));
+    }>(path.join(projectDir, "apps/api/package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
     );
-    const tsconfig = await readJson<{
-      compilerOptions: Record<string, unknown>;
+    const rootTsconfig = await readJson<{
+      files: string[];
+      references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
-    const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".template/blueprint.json"),
+    const rootConfigTsconfig = await readJson<{
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.config.json"));
+    const apiTsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+    }>(path.join(projectDir, "apps/api/tsconfig.json"));
+    const turboConfig = await readJson<{
+      tasks: { check: { dependsOn: string[] } };
+    }>(path.join(projectDir, "turbo.json"));
+    const blueprint = await readJson<{
+      preset: string;
+      projectKind: string;
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const devcontainer = await readJson<{ name: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceSettings = await readJson<Record<string, unknown>>(
+      path.join(projectDir, ".vscode/settings.json"),
     );
     const appSource = await readFile(
-      path.join(projectDir, "src/app.ts"),
+      path.join(projectDir, "apps/api/src/app.ts"),
       "utf8",
     );
     const serverSource = await readFile(
-      path.join(projectDir, "src/server.ts"),
+      path.join(projectDir, "apps/api/src/server.ts"),
       "utf8",
     );
 
-    expect(packageJson.name).toBe("demo-api");
-    expect(packageJson.scripts.check).toBe(
+    expect(rootPackageJson.name).toBe("demo-api");
+    expect(rootPackageJson.private).toBe(true);
+    expect(rootPackageJson).not.toHaveProperty("exports");
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    );
+    expect(rootPackageJson.scripts.lint).toBe(
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "tsc -p tsconfig.config.json --noEmit",
+    );
+    expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
+    expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
+    expect(rootPackageJson.devDependencies).toEqual({
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    });
+
+    expect(apiPackageJson.name).toBe("@demo-api/api");
+    expect(apiPackageJson).not.toHaveProperty("packageManager");
+    expect(apiPackageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
     );
-    expect(packageJson.scripts.fix).toBe(
+    expect(apiPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix",
     );
-    expect(packageJson.scripts.start).toBe("node dist/server.js");
-    expect(packageJson.dependencies.hono).toBe("catalog:");
-    expect(packageJson.dependencies["@hono/node-server"]).toBe("catalog:");
-    expect(packageJson.devDependencies.vitest).toBe("catalog:");
-    expect(packageJson.devDependencies.typescript).toBe("catalog:");
-    expect(packageJson.devDependencies.oxlint).toBe("catalog:");
-    expect(packageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(apiPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config ../../oxfmt.config.ts .",
+    );
+    expect(apiPackageJson.scripts.lint).toBe(
+      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    );
+    expect(apiPackageJson.scripts.start).toBe("node dist/server.js");
+    expect(apiPackageJson.dependencies.hono).toBe("catalog:");
+    expect(apiPackageJson.dependencies["@hono/node-server"]).toBe("catalog:");
+    expect(apiPackageJson.devDependencies.vitest).toBe("catalog:");
+    expect(apiPackageJson.devDependencies.typescript).toBe("catalog:");
+    expect(apiPackageJson.devDependencies.oxlint).toBe("catalog:");
+    expect(apiPackageJson.devDependencies.oxfmt).toBe("catalog:");
 
-    expect(workspaceYaml).toContain("catalog:");
+    const parsedWorkspace = parseYaml(workspaceYaml) as {
+      packages: string[];
+      catalog: Record<string, string>;
+    };
+    expect(parsedWorkspace.packages).toEqual(["apps/*"]);
+    expect(parsedWorkspace.catalog).toHaveProperty("turbo");
     expect(workspaceYaml).toContain("hono:");
     expect(workspaceYaml).toContain('"@hono/node-server":');
     expect(workspaceYaml).toContain("vitest:");
 
-    expect(tsconfig.compilerOptions.strict).toBe(true);
-    expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
-    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(rootTsconfig).toEqual({
+      files: [],
+      references: [{ path: "./apps/api/tsconfig.json" }],
+    });
+    expect(rootConfigTsconfig.include).toEqual([
+      "oxlint.config.ts",
+      "oxfmt.config.ts",
+    ]);
+    expect(apiTsconfig.compilerOptions.strict).toBe(true);
+    expect(apiTsconfig.compilerOptions.skipLibCheck).toBe(false);
+    expect(apiTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
 
-    expect(blueprint.preset).toBe("hono-api");
+    expect(blueprint).toMatchObject({
+      preset: "hono-api",
+      projectKind: "multi-package",
+      packages: [{ name: "@demo-api/api", path: "apps/api" }],
+    });
+    expect(devcontainer.name).toBe("demo-api");
+    expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
+    expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");
     expect(appSource).toContain('"/health"');
     expect(serverSource).toContain('from "@/app.js"');
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
-    await stat(path.join(projectDir, "test/app.test.ts"));
+    await stat(path.join(projectDir, "apps/api/test/app.test.ts"));
+    await expect(
+      stat(path.join(projectDir, "src/app.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "apps/api/oxlint.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "apps/api/oxfmt.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
 
     await expect(
       stat(path.join(projectDir, "pnpm-lock.yaml")),
@@ -2297,58 +2403,118 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const packageJson = await readJson<{
+    const rootPackageJson = await readJson<{
       name: string;
+      private: boolean;
+      exports?: unknown;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const webPackageJson = await readJson<{
+      name: string;
+      packageManager?: string;
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
-    }>(path.join(projectDir, "package.json"));
+    }>(path.join(projectDir, "apps/web/package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
     );
-    const tsconfig = await readJson<{
+    const rootTsconfig = await readJson<{
       files: string[];
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const rootConfigTsconfig = await readJson<{
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.config.json"));
+    const webTsconfig = await readJson<{
+      files: string[];
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "apps/web/tsconfig.json"));
     const appTsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
-    }>(path.join(projectDir, "tsconfig.app.json"));
+    }>(path.join(projectDir, "apps/web/tsconfig.app.json"));
     const testTsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
-    }>(path.join(projectDir, "tsconfig.test.json"));
+    }>(path.join(projectDir, "apps/web/tsconfig.test.json"));
     const nodeTsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
-    }>(path.join(projectDir, "tsconfig.node.json"));
-    const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".template/blueprint.json"),
+    }>(path.join(projectDir, "apps/web/tsconfig.node.json"));
+    const turboConfig = await readJson<{
+      tasks: { check: { dependsOn: string[] } };
+    }>(path.join(projectDir, "turbo.json"));
+    const blueprint = await readJson<{
+      preset: string;
+      projectKind: string;
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const devcontainer = await readJson<{ name: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceSettings = await readJson<Record<string, unknown>>(
+      path.join(projectDir, ".vscode/settings.json"),
     );
 
-    expect(packageJson.name).toBe("demo-vue");
-    expect(packageJson.scripts.check).toBe(
+    expect(rootPackageJson.name).toBe("demo-vue");
+    expect(rootPackageJson.private).toBe(true);
+    expect(rootPackageJson).not.toHaveProperty("exports");
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    );
+    expect(rootPackageJson.scripts.lint).toBe(
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "tsc -p tsconfig.config.json --noEmit",
+    );
+    expect(rootPackageJson.devDependencies).toEqual({
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    });
+
+    expect(webPackageJson.name).toBe("@demo-vue/web");
+    expect(webPackageJson).not.toHaveProperty("packageManager");
+    expect(webPackageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
     );
-    expect(packageJson.scripts.fix).toBe(
+    expect(webPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix",
     );
-    expect(packageJson.scripts["test:e2e"]).toBe(
+    expect(webPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config ../../oxfmt.config.ts .",
+    );
+    expect(webPackageJson.scripts.lint).toBe(
+      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    );
+    expect(webPackageJson.scripts["test:e2e"]).toBe(
       "pnpm run build && playwright test",
     );
-    expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
-    expect(packageJson.dependencies.vue).toBe("catalog:");
-    expect(packageJson.dependencies.pinia).toBe("catalog:");
-    expect(packageJson.dependencies["@vueuse/core"]).toBe("catalog:");
-    expect(packageJson.devDependencies.vite).toBe("catalog:");
-    expect(packageJson.devDependencies["@vitejs/plugin-vue"]).toBe("catalog:");
-    expect(packageJson.devDependencies["@vue/tsconfig"]).toBe("catalog:");
-    expect(packageJson.devDependencies["@types/web-bluetooth"]).toBe(
+    expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
+    expect(webPackageJson.dependencies.vue).toBe("catalog:");
+    expect(webPackageJson.dependencies.pinia).toBe("catalog:");
+    expect(webPackageJson.dependencies["@vueuse/core"]).toBe("catalog:");
+    expect(webPackageJson.devDependencies.vite).toBe("catalog:");
+    expect(webPackageJson.devDependencies["@vitejs/plugin-vue"]).toBe(
       "catalog:",
     );
-    expect(packageJson.devDependencies.vitest).toBe("catalog:");
-    expect(packageJson.devDependencies["@playwright/test"]).toBe("catalog:");
+    expect(webPackageJson.devDependencies["@vue/tsconfig"]).toBe("catalog:");
+    expect(webPackageJson.devDependencies["@types/web-bluetooth"]).toBe(
+      "catalog:",
+    );
+    expect(webPackageJson.devDependencies.vitest).toBe("catalog:");
+    expect(webPackageJson.devDependencies["@playwright/test"]).toBe("catalog:");
     for (const excludedPackage of [
       "vue-router",
       "echarts",
@@ -2356,11 +2522,18 @@ describe("template init", () => {
       "vee-validate",
       "@tanstack/vue-form",
     ]) {
-      expect(packageJson.dependencies).not.toHaveProperty(excludedPackage);
-      expect(packageJson.devDependencies).not.toHaveProperty(excludedPackage);
+      expect(webPackageJson.dependencies).not.toHaveProperty(excludedPackage);
+      expect(webPackageJson.devDependencies).not.toHaveProperty(
+        excludedPackage,
+      );
     }
 
-    expect(workspaceYaml).toContain("catalog:");
+    const parsedWorkspace = parseYaml(workspaceYaml) as {
+      packages: string[];
+      catalog: Record<string, string>;
+    };
+    expect(parsedWorkspace.packages).toEqual(["apps/*"]);
+    expect(parsedWorkspace.catalog).toHaveProperty("turbo");
     expect(workspaceYaml).toContain("vue:");
     expect(workspaceYaml).toContain("pinia:");
     expect(workspaceYaml).toContain('"@vueuse/core":');
@@ -2368,12 +2541,24 @@ describe("template init", () => {
     expect(workspaceYaml).toContain('"@playwright/test":');
     expect(workspaceYaml).toContain('"@types/web-bluetooth":');
 
-    expect(tsconfig.files).toEqual([]);
-    expect(tsconfig.references).toEqual([
-      { path: "./tsconfig.app.json" },
-      { path: "./tsconfig.test.json" },
-      { path: "./tsconfig.node.json" },
+    expect(rootTsconfig.files).toEqual([]);
+    expect(rootTsconfig.references).toEqual([
+      { path: "./apps/web/tsconfig.app.json" },
+      { path: "./apps/web/tsconfig.test.json" },
+      { path: "./apps/web/tsconfig.node.json" },
     ]);
+    expect(rootConfigTsconfig.include).toEqual([
+      "oxlint.config.ts",
+      "oxfmt.config.ts",
+    ]);
+    expect(webTsconfig).toEqual({
+      files: [],
+      references: [
+        { path: "./tsconfig.app.json" },
+        { path: "./tsconfig.test.json" },
+        { path: "./tsconfig.node.json" },
+      ],
+    });
     expect(appTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
     expect(appTsconfig.compilerOptions.strict).toBe(true);
     expect(appTsconfig.compilerOptions.skipLibCheck).toBe(false);
@@ -2401,16 +2586,39 @@ describe("template init", () => {
       "vite.config.ts",
       "vitest.config.ts",
     ]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
 
-    expect(blueprint.preset).toBe("vue-app");
+    expect(blueprint).toMatchObject({
+      preset: "vue-app",
+      projectKind: "multi-package",
+      packages: [{ name: "@demo-vue/web", path: "apps/web" }],
+    });
+    expect(devcontainer.name).toBe("demo-vue");
+    expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
+    expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
-    await stat(path.join(projectDir, "src/App.vue"));
-    await stat(path.join(projectDir, "src/main.ts"));
-    await stat(path.join(projectDir, "test/app.test.ts"));
-    await stat(path.join(projectDir, "test/e2e/app.spec.ts"));
+    await stat(path.join(projectDir, "apps/web/src/App.vue"));
+    await stat(path.join(projectDir, "apps/web/src/main.ts"));
+    await stat(path.join(projectDir, "apps/web/test/app.test.ts"));
+    await stat(path.join(projectDir, "apps/web/test/e2e/app.spec.ts"));
+    await expect(
+      stat(path.join(projectDir, "src/App.vue")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "apps/web/oxlint.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "apps/web/oxfmt.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
 
     await expect(
       stat(path.join(projectDir, "pnpm-lock.yaml")),
@@ -2427,7 +2635,7 @@ describe("template init", () => {
     )?.[1];
     expect(installCommand).toBeDefined();
     expect(checkWorkflow).toContain(
-      "pnpm exec playwright install --with-deps chromium",
+      "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
 
     expect(installCommand).toBe("pnpm install");
@@ -2456,6 +2664,7 @@ describe("template init", () => {
       name: string;
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
+      exports?: unknown;
     }>(path.join(projectDir, "package.json"));
     const apiPackageJson = await readJson<{
       name: string;
@@ -2463,16 +2672,21 @@ describe("template init", () => {
       exports: Record<string, string>;
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
     }>(path.join(projectDir, "apps/api/package.json"));
     const webPackageJson = await readJson<{
       name: string;
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
     }>(path.join(projectDir, "apps/web/package.json"));
     const rootTsconfig = await readJson<{
       files: string[];
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const rootConfigTsconfig = await readJson<{
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.config.json"));
     const webTsconfig = await readJson<{
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "apps/web/tsconfig.json"));
@@ -2511,18 +2725,55 @@ describe("template init", () => {
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
+    const devcontainer = await readJson<{ name: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceSettings = await readJson<Record<string, unknown>>(
+      path.join(projectDir, ".vscode/settings.json"),
+    );
 
     expect(rootPackageJson.name).toBe("demo-fullstack");
-    expect(rootPackageJson.scripts.check).toBe("turbo run check");
-    expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
+    expect(rootPackageJson).not.toHaveProperty("exports");
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
+    expect(rootPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    );
+    expect(rootPackageJson.scripts.lint).toBe(
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "tsc -p tsconfig.config.json --noEmit",
+    );
+    expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
+    expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
+    expect(rootPackageJson.devDependencies).toEqual({
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    });
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("turbo:");
 
     expect(apiPackageJson.name).toBe("@demo-fullstack/api");
     expect(apiPackageJson.types).toBe("./dist/index.d.ts");
     expect(apiPackageJson.exports).toEqual({ ".": "./dist/index.js" });
+    expect(apiPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config ../../oxfmt.config.ts .",
+    );
+    expect(apiPackageJson.scripts.lint).toBe(
+      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    );
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
     expect(apiPackageJson.dependencies).not.toHaveProperty("vue");
+    expect(apiPackageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(apiPackageJson.devDependencies.oxlint).toBe("catalog:");
     expect(apiIndex).toContain('import type { app } from "./runtime.js"');
     expect(apiIndex).toContain("export type AppType = typeof app");
     expect(apiIndex).not.toContain("new Hono");
@@ -2530,10 +2781,18 @@ describe("template init", () => {
 
     expect(webPackageJson.name).toBe("@demo-fullstack/web");
     expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build");
+    expect(webPackageJson.scripts["format:check"]).toBe(
+      "oxfmt --check --config ../../oxfmt.config.ts .",
+    );
+    expect(webPackageJson.scripts.lint).toBe(
+      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    );
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe(
       "workspace:*",
     );
     expect(webPackageJson.dependencies.hono).toBe("catalog:");
+    expect(webPackageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(webPackageJson.devDependencies.oxlint).toBe("catalog:");
     expect(webApiClient).toMatch(
       /^import type \{ AppType \} from "@demo-fullstack\/api";$/m,
     );
@@ -2547,6 +2806,10 @@ describe("template init", () => {
       { path: "./apps/web/tsconfig.app.json" },
       { path: "./apps/web/tsconfig.test.json" },
       { path: "./apps/web/tsconfig.node.json" },
+    ]);
+    expect(rootConfigTsconfig.include).toEqual([
+      "oxlint.config.ts",
+      "oxfmt.config.ts",
     ]);
     expect(webTsconfig.references).toEqual([
       { path: "./tsconfig.app.json" },
@@ -2565,6 +2828,9 @@ describe("template init", () => {
       { path: "../api/tsconfig.build.json" },
     ]);
     expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
+    expect(devcontainer.name).toBe("demo-fullstack");
+    expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
+    expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");
 
     expect(blueprint).toEqual(
       expect.objectContaining({
@@ -2579,6 +2845,16 @@ describe("template init", () => {
 
     await stat(path.join(projectDir, "apps/api/src/server.ts"));
     await stat(path.join(projectDir, "apps/web/test/e2e/app.spec.ts"));
+    await expect(
+      stat(path.join(projectDir, "apps/api/oxlint.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "apps/web/oxlint.config.ts")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(
       stat(path.join(projectDir, "packages/api-client")),
     ).rejects.toMatchObject({

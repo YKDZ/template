@@ -207,11 +207,6 @@ describe("fixture checks", () => {
     );
     expect(pnpmRecords).toContainEqual(
       expect.objectContaining({
-        args: ["exec", "playwright", "install", "chromium"],
-      }),
-    );
-    expect(pnpmRecords).toContainEqual(
-      expect.objectContaining({
         args: [
           "--filter",
           "./apps/web",
@@ -269,14 +264,7 @@ describe("fixture checks", () => {
           return false;
         }
 
-        if (generatedRootCheck.cwd.includes("fixture-vue-app")) {
-          return (
-            record.args.join(" ") ===
-            "exec playwright install chromium"
-          );
-        }
-
-        if (generatedRootCheck.cwd.includes("fixture-vue-hono-app")) {
+        if (generatedRootCheck.cwd.includes("fixture-vue")) {
           return (
             record.args.join(" ") ===
             "--filter ./apps/web exec playwright install chromium"

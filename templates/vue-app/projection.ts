@@ -7,7 +7,10 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
-import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
+import {
+  collectGeneratedManifestCatalogDependencies,
+  renderGeneratedPnpmWorkspaceYaml,
+} from "../../src/dependency-catalog.js";
 import {
   browserTestToolLayer,
   dockerfileFirstNodePnpmDevcontainer,
@@ -17,12 +20,15 @@ import { editorCustomizationForCapabilities } from "../../src/editor-customizati
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
+  type ComponentOwner,
+  type FixPlan,
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
+  PresetBlueprintOptions,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -32,7 +38,6 @@ import {
   type DependencyMaintenancePolicy,
 } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
-import { planNodeChecks, planNodeFixes } from "../projection-plans.js";
 
 const generatedBy = {
   packageName: "@ykdz/template",
@@ -44,10 +49,10 @@ export const vueAppPresetMetadata: BuiltInPreset = {
   name: "vue-app",
   title: "Vue app",
   description:
-    "Single-package Vue app with Vite, Tailwind, Pinia, and test tooling.",
+    "Vue app workspace with Vite, Tailwind, Pinia, and test tooling.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
-  supportedProjectKinds: ["single-package"],
+  supportedProjectKinds: ["multi-package"],
   features: [
     "pnpm-catalog",
     "oxc-format-lint",
@@ -65,26 +70,130 @@ const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
   interval: "weekly",
 };
 
-export function vueAppBlueprint(): ProjectBlueprint {
+const webPackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
+};
+
+const rootBoundary: ComponentOwner = {
+  kind: "workspace-orchestration",
+  path: ".",
+};
+
+const workspacePackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/*",
+};
+
+const webWorkspaceBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "apps/web",
+};
+
+function planVueAppPackageChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "oxc-format-check", owner: webPackageBoundary },
+      { kind: "oxc-lint", owner: webPackageBoundary },
+      { kind: "typescript-typecheck", owner: webPackageBoundary },
+      { kind: "build", owner: webPackageBoundary },
+      { kind: "unit-test", owner: webPackageBoundary },
+      { kind: "e2e-test", owner: webPackageBoundary },
+    ],
+    environmentNeeds: [],
+  };
+}
+
+function planVueAppRootChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "oxc-format-check", owner: rootBoundary },
+      { kind: "oxc-lint", owner: rootBoundary },
+      { kind: "typescript-typecheck", owner: rootBoundary },
+      { kind: "turbo-package-check", owner: workspacePackageBoundary },
+    ],
+    environmentNeeds: [
+      {
+        kind: "playwright-browser-assets",
+        browser: "chromium",
+        owner: webWorkspaceBoundary,
+      },
+    ],
+  };
+}
+
+function planVueAppPackageFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "oxc-format-write", owner: webPackageBoundary },
+      { kind: "oxc-lint-fix", owner: webPackageBoundary },
+    ],
+  };
+}
+
+function planVueAppRootFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "oxc-format-write", owner: rootBoundary },
+      { kind: "oxc-lint-fix", owner: rootBoundary },
+      { kind: "turbo-package-fix", owner: workspacePackageBoundary },
+    ],
+  };
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function packageScopeFromOptions(options: PresetBlueprintOptions): string {
+  return options.scope ?? projectNameFromDir(options.targetDir);
+}
+
+function packageName(packageScope: string): string {
+  return `@${packageScope}/web`;
+}
+
+export function vueAppBlueprint(
+  options: PresetBlueprintOptions = { targetDir: process.cwd() },
+): ProjectBlueprint {
+  const packageScope = packageScopeFromOptions(options);
+
   return {
     schemaVersion: 1,
     preset: "vue-app",
     packageManager: "pnpm",
-    projectKind: "single-package",
+    projectKind: "multi-package",
     features: [...vueAppPresetMetadata.features],
+    packages: [{ name: packageName(packageScope), path: "apps/web" }],
+  };
+}
+
+function projectVueAppRootPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planVueAppRootChecks()),
+    fix: renderFixCommand(planVueAppRootFixes()),
+    "format:check":
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    "format:write":
+      "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    "lint:fix":
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+    typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }
 
 export function projectVueAppPackageScripts(): Record<string, string> {
   return {
     build: "vite build",
-    check: renderRootCheckCommand(planNodeChecks("vue-app")),
+    check: renderRootCheckCommand(planVueAppPackageChecks()),
     dev: "vite",
-    fix: renderFixCommand(planNodeFixes("vue-app")),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    fix: renderFixCommand(planVueAppPackageFixes()),
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    "lint:fix":
+      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
     preview: "vite preview",
     test: "vitest run",
     "test:e2e": "pnpm run build && playwright test",
@@ -92,7 +201,7 @@ export function projectVueAppPackageScripts(): Record<string, string> {
   };
 }
 
-function packageJson(
+function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
 ): Record<string, unknown> {
@@ -102,6 +211,34 @@ function packageJson(
     private: true,
     type: "module",
     scripts: packageScripts,
+    devDependencies: {
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function webPackageName(context: GenerationContext): string {
+  const webPackage = context.blueprint.packages?.find(
+    (pkg) => pkg.path === "apps/web",
+  );
+
+  return webPackage?.name ?? packageName(context.projectName.value);
+}
+
+function webPackageJson(context: GenerationContext): Record<string, unknown> {
+  return {
+    name: webPackageName(context),
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    scripts: projectVueAppPackageScripts(),
     dependencies: {
       "@vueuse/core": "catalog:",
       pinia: "catalog:",
@@ -125,7 +262,6 @@ function packageJson(
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
@@ -161,35 +297,24 @@ function operationsForVueApp(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const rootManifest = rootPackageJson(context, packageScripts);
+  const webManifest = webPackageJson(context);
 
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(context, packageScripts),
+      value: rootManifest,
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
-        dependencies: [
-          "@playwright/test",
-          "@tailwindcss/vite",
-          "@types/node",
-          "@types/web-bluetooth",
-          "@vitejs/plugin-vue",
-          "@vue/tsconfig",
-          "@vueuse/core",
-          "oxfmt",
-          "oxlint",
-          "pinia",
-          "tailwindcss",
-          "typescript",
-          "vite",
-          "vitest",
-          "vue",
-          "vue-tsc",
-        ],
+        packages: ["apps/*"],
+        dependencies: collectGeneratedManifestCatalogDependencies([
+          rootManifest,
+          webManifest,
+        ]),
         allowBuilds: {
           esbuild: true,
         },
@@ -197,7 +322,61 @@ function operationsForVueApp(
     },
     {
       kind: "writeJson",
+      to: "turbo.json",
+      value: {
+        tasks: {
+          build: {
+            dependsOn: ["^build"],
+            outputs: ["dist/**"],
+          },
+          check: {
+            dependsOn: ["^build"],
+          },
+          dev: {
+            cache: false,
+            persistent: true,
+          },
+          fix: {
+            cache: false,
+          },
+        },
+      },
+    },
+    {
+      kind: "writeJson",
       to: "tsconfig.json",
+      value: {
+        files: [],
+        references: [
+          { path: "./apps/web/tsconfig.app.json" },
+          { path: "./apps/web/tsconfig.test.json" },
+          { path: "./apps/web/tsconfig.node.json" },
+        ],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.config.json",
+      value: {
+        compilerOptions: {
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["oxlint.config.ts", "oxfmt.config.ts"],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: "apps/web/package.json",
+      value: webManifest,
+    },
+    {
+      kind: "writeJson",
+      to: "apps/web/tsconfig.json",
       value: {
         files: [],
         references: [
@@ -209,7 +388,7 @@ function operationsForVueApp(
     },
     {
       kind: "writeJson",
-      to: "tsconfig.app.json",
+      to: "apps/web/tsconfig.app.json",
       value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: {
@@ -231,7 +410,7 @@ function operationsForVueApp(
     },
     {
       kind: "writeJson",
-      to: "tsconfig.test.json",
+      to: "apps/web/tsconfig.test.json",
       value: {
         extends: "./tsconfig.app.json",
         compilerOptions: {
@@ -244,7 +423,7 @@ function operationsForVueApp(
     },
     {
       kind: "writeJson",
-      to: "tsconfig.node.json",
+      to: "apps/web/tsconfig.node.json",
       value: {
         compilerOptions: {
           composite: true,
@@ -287,33 +466,41 @@ function operationsForVueApp(
         "",
       ].join("\n"),
     },
-    { kind: "copyFile", from: "env.d.ts", to: "env.d.ts" },
-    { kind: "copyFile", from: "index.html", to: "index.html" },
+    { kind: "copyFile", from: "env.d.ts", to: "apps/web/env.d.ts" },
+    { kind: "copyFile", from: "index.html", to: "apps/web/index.html" },
     {
       kind: "copyFile",
       from: "playwright.config.ts",
-      to: "playwright.config.ts",
+      to: "apps/web/playwright.config.ts",
     },
-    { kind: "copyFile", from: "vite.config.ts", to: "vite.config.ts" },
-    { kind: "copyFile", from: "vitest.config.ts", to: "vitest.config.ts" },
-    { kind: "copyFile", from: "src/App.vue", to: "src/App.vue" },
-    { kind: "copyFile", from: "src/main.ts", to: "src/main.ts" },
-    { kind: "copyFile", from: "src/style.css", to: "src/style.css" },
+    { kind: "copyFile", from: "vite.config.ts", to: "apps/web/vite.config.ts" },
+    {
+      kind: "copyFile",
+      from: "vitest.config.ts",
+      to: "apps/web/vitest.config.ts",
+    },
+    { kind: "copyFile", from: "src/App.vue", to: "apps/web/src/App.vue" },
+    { kind: "copyFile", from: "src/main.ts", to: "apps/web/src/main.ts" },
+    { kind: "copyFile", from: "src/style.css", to: "apps/web/src/style.css" },
     {
       kind: "copyFile",
       from: "src/stores/counter.ts",
-      to: "src/stores/counter.ts",
+      to: "apps/web/src/stores/counter.ts",
     },
-    { kind: "copyFile", from: "test/app.test.ts", to: "test/app.test.ts" },
+    {
+      kind: "copyFile",
+      from: "test/app.test.ts",
+      to: "apps/web/test/app.test.ts",
+    },
     {
       kind: "copyFile",
       from: "test/e2e/app.spec.ts",
-      to: "test/e2e/app.spec.ts",
+      to: "apps/web/test/e2e/app.spec.ts",
     },
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
-      value: vueAppBlueprint(),
+      value: context.blueprint,
     },
     {
       kind: "writeJson",
@@ -670,9 +857,9 @@ export const vueAppPresetProjection: PresetProjection = {
   },
   blueprint: vueAppBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planNodeChecks("vue-app");
-    const fixPlan = planNodeFixes("vue-app");
-    const packageScripts = projectVueAppPackageScripts();
+    const checkPlan = planVueAppRootChecks();
+    const fixPlan = planVueAppRootFixes();
+    const packageScripts = projectVueAppRootPackageScripts();
 
     return {
       sourceRoot: templateSourceRoot(),

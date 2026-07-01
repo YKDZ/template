@@ -247,7 +247,9 @@ describe("template add package", () => {
     );
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
-    expect(rootPackageJson.scripts.check).toBe("turbo run check");
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
     expect(rootTsconfig.references).toContainEqual({
       path: "./packages/shared/tsconfig.json",
     });
@@ -288,7 +290,9 @@ describe("template add package", () => {
     await expectPathMissing(
       path.join(projectDir, "packages/shared/.oxfmtrc.json"),
     );
-    await expectPathMissing(path.join(projectDir, "apps/worker/.oxlintrc.json"));
+    await expectPathMissing(
+      path.join(projectDir, "apps/worker/.oxlintrc.json"),
+    );
     await expectPathMissing(path.join(projectDir, "apps/worker/.oxfmtrc.json"));
   }, 120_000);
 

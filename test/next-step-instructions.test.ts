@@ -43,7 +43,7 @@ describe("Next Step Instructions", () => {
       "vue-app",
       [
         "pnpm run fix",
-        "pnpm exec playwright install chromium",
+        "pnpm --filter ./apps/web exec playwright install chromium",
         "pnpm run check",
       ],
     ],
