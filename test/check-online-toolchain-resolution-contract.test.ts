@@ -11,11 +11,11 @@ describe("check-online-toolchain-resolution-contract script", () => {
       stderr: (line) => stderr.push(line),
       fetchJson: async (url) => {
         if (url === nodeReleaseIndexUrl) {
-          return [{ version: "v22.11.0", lts: "Jod" }];
+          return [{ version: "v24.11.0", lts: "Krypton" }];
         }
 
         if (url === pnpmRegistryUrl) {
-          return { versions: { "10.2.0": { engines: { node: ">=22.0.0" } } } };
+          return { versions: { "11.0.0": { engines: { node: ">=24.0.0" } } } };
         }
 
         throw new Error(`unexpected URL ${url}`);
@@ -25,8 +25,8 @@ describe("check-online-toolchain-resolution-contract script", () => {
     expect(exitCode).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout.join("\n")).toContain("Online toolchain resolution contract check passed.");
-    expect(stdout.join("\n")).toContain("Node LTS major: 22");
-    expect(stdout.join("\n")).toContain("Package Manager Pin: pnpm@10.2.0");
+    expect(stdout.join("\n")).toContain("Node LTS major: 24");
+    expect(stdout.join("\n")).toContain("Package Manager Pin: pnpm@11.0.0");
   });
 
   it("prints clear diagnostics when the contract fails", async () => {

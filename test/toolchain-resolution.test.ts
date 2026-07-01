@@ -1,17 +1,17 @@
 import { resolveToolchainVersions } from "../src/toolchain-resolution.js";
 
 const nodeReleaseIndex = [
-  { version: "v22.11.0", lts: "Jod" },
-  { version: "v24.1.0", lts: false },
+  { version: "v24.11.0", lts: "Krypton" },
+  { version: "v26.1.0", lts: false },
   { version: "v20.18.0", lts: "Iron" },
-  { version: "v22.9.0", lts: false },
+  { version: "v24.9.0", lts: false },
 ];
 
 const pnpmRegistryMetadata = {
   versions: {
     "10.1.0": { engines: { node: ">=18.12" } },
     "11.0.0": { engines: { node: ">=24.0.0" } },
-    "10.2.0": { engines: { node: ">=22.0.0" } },
+    "12.0.0": { engines: { node: ">=26.0.0" } },
   },
 };
 
@@ -28,8 +28,8 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("online");
-    expect(result.nodeLtsMajor.value).toBe("22");
-    expect(result.packageManagerPin.value).toBe("pnpm@10.2.0");
+    expect(result.nodeLtsMajor.value).toBe("24");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
     expect(result.diagnostics).toEqual([]);
   });
 
@@ -46,8 +46,8 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("online");
-    expect(result.nodeLtsMajor.value).toBe("22");
-    expect(result.packageManagerPin.value).toBe("pnpm@10.2.0");
+    expect(result.nodeLtsMajor.value).toBe("24");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
     expect(result.diagnostics).toEqual([]);
   });
 
@@ -60,7 +60,7 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("bundled-fallback");
-    expect(result.nodeLtsMajor.value).toBe("22");
+    expect(result.nodeLtsMajor.value).toBe("24");
     expect(result.packageManagerPin.value).toBe("pnpm@10.0.0");
     expect(result.diagnostics).toEqual([
       expect.stringContaining("Using bundled fallback toolchain metadata"),
@@ -77,7 +77,7 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("bundled-fallback");
-    expect(result.nodeLtsMajor.value).toBe("22");
+    expect(result.nodeLtsMajor.value).toBe("24");
     expect(result.packageManagerPin.value).toBe("pnpm@10.0.0");
     expect(result.diagnostics).toEqual([]);
   });

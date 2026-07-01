@@ -1,6 +1,29 @@
 packages:
   - .
 
+catalog:
+  "@hono/node-server": ^2.0.6
+  "@playwright/test": ^1.61.1
+  "@tailwindcss/vite": ^4.3.2
+  "@types/node": ^24.0.0
+  "@types/web-bluetooth": ^0.0.21
+  "@vitejs/plugin-vue": ^6.0.7
+  "@vue/tsconfig": ^0.9.1
+  "@vueuse/core": ^14.3.0
+  hono: ^4.12.27
+  oxfmt: ^0.57.0
+  oxlint: ^1.72.0
+  pinia: ^3.0.4
+  tailwindcss: ^4.3.2
+  tsc-alias: ^1.8.17
+  tsx: ^4.22.4
+  turbo: ^2.10.2
+  typescript: ^6.0.3
+  vite: ^8.1.2
+  vitest: ^4.1.9
+  vue: ^3.5.39
+  vue-tsc: ^3.3.6
+
 allowBuilds:
   esbuild: true
 

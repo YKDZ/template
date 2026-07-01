@@ -14,8 +14,8 @@ describe("online toolchain resolution contract check", () => {
 
         if (url === nodeReleaseIndexUrl) {
           return [
-            { version: "v22.11.0", lts: "Jod" },
-            { version: "v24.1.0", lts: false },
+            { version: "v24.11.0", lts: "Krypton" },
+            { version: "v26.1.0", lts: false },
             { version: "v20.18.0", lts: "Iron" },
           ];
         }
@@ -25,7 +25,7 @@ describe("online toolchain resolution contract check", () => {
             versions: {
               "10.1.0": { engines: { node: ">=18.12" } },
               "11.0.0": { engines: { node: ">=24.0.0" } },
-              "10.2.0": { engines: { node: ">=22.0.0" } },
+              "12.0.0": { engines: { node: ">=26.0.0" } },
             },
           };
         }
@@ -35,12 +35,12 @@ describe("online toolchain resolution contract check", () => {
     });
 
     expect(requestedUrls).toEqual([nodeReleaseIndexUrl, pnpmRegistryUrl]);
-    expect(result.nodeLtsMajor.value).toBe("22");
-    expect(result.packageManagerPin.value).toBe("pnpm@10.2.0");
+    expect(result.nodeLtsMajor.value).toBe("24");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
     expect(result.diagnostics).toEqual([
-      "Node source parsing succeeded; latest LTS major is 22.",
-      "pnpm source parsing succeeded; latest compatible pnpm release is 10.2.0.",
-      "Compatibility selection succeeded for pnpm@10.2.0 on Node 22.",
+      "Node source parsing succeeded; latest LTS major is 24.",
+      "pnpm source parsing succeeded; latest compatible pnpm release is 11.0.0.",
+      "Compatibility selection succeeded for pnpm@11.0.0 on Node 24.",
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("online toolchain resolution contract check", () => {
       checkOnlineToolchainResolutionContract({
         fetchJson: async (url) => {
           if (url === nodeReleaseIndexUrl) {
-            return [{ version: "v22.11.0", lts: "Jod" }];
+            return [{ version: "v24.11.0", lts: "Krypton" }];
           }
 
           return [];
@@ -75,18 +75,18 @@ describe("online toolchain resolution contract check", () => {
       checkOnlineToolchainResolutionContract({
         fetchJson: async (url) => {
           if (url === nodeReleaseIndexUrl) {
-            return [{ version: "v22.11.0", lts: "Jod" }];
+            return [{ version: "v24.11.0", lts: "Krypton" }];
           }
 
           return {
             versions: {
-              "11.0.0": { engines: { node: ">=24.0.0" } },
+              "12.0.0": { engines: { node: ">=26.0.0" } },
             },
           };
         },
       }),
     ).rejects.toThrow(
-      "Online toolchain resolution contract failed during compatibility selection: pnpm registry metadata did not contain a release compatible with Node 22",
+      "Online toolchain resolution contract failed during compatibility selection: pnpm registry metadata did not contain a release compatible with Node 24",
     );
   });
 
@@ -94,13 +94,13 @@ describe("online toolchain resolution contract check", () => {
     const result = await checkOnlineToolchainResolutionContract({
       fetchJson: async (url) => {
         if (url === nodeReleaseIndexUrl) {
-          return [{ version: "v22.11.0", lts: "Jod" }];
+          return [{ version: "v24.11.0", lts: "Krypton" }];
         }
 
         return {
           versions: {
             "10.3.0": { engines: { node: ">=20.0.0" } },
-            "11.0.0": { engines: { node: ">=24.0.0" } },
+            "11.0.0": { engines: { node: ">=26.0.0" } },
           },
         };
       },
@@ -113,33 +113,33 @@ describe("online toolchain resolution contract check", () => {
     const result = await checkOnlineToolchainResolutionContract({
       fetchJson: async (url) => {
         if (url === nodeReleaseIndexUrl) {
-          return [{ version: "v22.11.0", lts: "Jod" }];
+          return [{ version: "v24.11.0", lts: "Krypton" }];
         }
 
         return {
           versions: {
-            "10.2.0": { engines: { node: ">=22.0.0" } },
-            "11.0.0": { engines: { node: "^22.0.0" } },
-            "11.1.0": { engines: { node: ">=20.0.0 || >=22.0.0" } },
-            "11.2.0": { engines: { node: "~22.0.0" } },
+            "11.0.0": { engines: { node: ">=24.0.0" } },
+            "12.0.0": { engines: { node: "^24.0.0" } },
+            "12.1.0": { engines: { node: ">=20.0.0 || >=24.0.0" } },
+            "12.2.0": { engines: { node: "~24.0.0" } },
           },
         };
       },
     });
 
-    expect(result.packageManagerPin.value).toBe("pnpm@10.2.0");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
   });
 
   it.each([
-    ["caret", "^22.0.0"],
-    ["OR", ">=20.0.0 || >=22.0.0"],
-    ["unsupported", "~22.0.0"],
+    ["caret", "^24.0.0"],
+    ["OR", ">=20.0.0 || >=24.0.0"],
+    ["unsupported", "~24.0.0"],
   ])("treats %s pnpm engine ranges as incompatible", async (_label, range) => {
     await expect(
       checkOnlineToolchainResolutionContract({
         fetchJson: async (url) => {
           if (url === nodeReleaseIndexUrl) {
-            return [{ version: "v22.11.0", lts: "Jod" }];
+            return [{ version: "v24.11.0", lts: "Krypton" }];
           }
 
           return {
@@ -150,7 +150,7 @@ describe("online toolchain resolution contract check", () => {
         },
       }),
     ).rejects.toThrow(
-      "Online toolchain resolution contract failed during compatibility selection: pnpm registry metadata did not contain a release compatible with Node 22",
+      "Online toolchain resolution contract failed during compatibility selection: pnpm registry metadata did not contain a release compatible with Node 24",
     );
   });
 });

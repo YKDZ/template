@@ -13,6 +13,7 @@ export type PresetPackageAdditionOptions = {
   readonly blueprint: ProjectBlueprint;
   readonly packageLeafName: string;
   readonly packageName: string;
+  readonly nodeVersion: string;
 };
 
 export type PresetPackageAdditionPlan = {

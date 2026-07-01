@@ -7,6 +7,7 @@ import type {
   ProjectBlueprint,
 } from "../../src/declarations.js";
 import { devcontainerNodeFeature } from "../../src/devcontainer.js";
+import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
@@ -185,6 +186,10 @@ function operationsForRustBin(
   packageScripts: Record<string, string>,
   checkPlan: CheckPlan,
 ): RenderOperation[] {
+  const editorCustomization = editorCustomizationForCapabilities([
+    "rust-tooling",
+  ]);
+
   return [
     {
       kind: "writeJson",
@@ -248,10 +253,23 @@ function operationsForRustBin(
         ],
         customizations: {
           vscode: {
-            extensions: ["rust-lang.rust-analyzer", "tamasfe.even-better-toml"],
+            extensions: editorCustomization.extensions,
+            settings: editorCustomization.settings,
           },
         },
       },
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
     },
     {
       kind: "writeText",

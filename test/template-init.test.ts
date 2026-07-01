@@ -12,8 +12,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import { parse as parseYaml } from "yaml";
 
 import { builtInPresets } from "../src/declarations.js";
+import {
+  editorCustomizationForCapabilities,
+  type EditorCustomizationCapability,
+  type EditorCustomizationOptions,
+} from "../src/editor-customization.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
@@ -24,8 +30,8 @@ const repoRoot = path.resolve(
 
 const defaultToolchainEnv = {
   TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
-    { version: "v22.11.0", lts: "Jod" },
-    { version: "v24.1.0", lts: false },
+    { version: "v24.11.0", lts: "Krypton" },
+    { version: "v26.1.0", lts: false },
   ]),
   TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
     versions: {
@@ -46,13 +52,13 @@ function jsonDataUrl(value: unknown): string {
 function toolchainEnvWithPnpm(version: string): Record<string, string> {
   return {
     TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
-      { version: "v22.11.0", lts: "Jod" },
-      { version: "v24.1.0", lts: false },
+      { version: "v24.11.0", lts: "Krypton" },
+      { version: "v26.1.0", lts: false },
     ]),
     TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
       versions: {
-        [version]: { engines: { node: ">=22.0.0" } },
-        "11.0.0": { engines: { node: ">=24.0.0" } },
+        [version]: { engines: { node: ">=24.0.0" } },
+        "12.0.0": { engines: { node: ">=26.0.0" } },
       },
     }),
   };
@@ -132,6 +138,40 @@ function oxcConfigDirectoriesForPreset(preset: string): string[] {
   return ["."];
 }
 
+function editorCustomizationOptionsForPreset(
+  preset: string,
+): EditorCustomizationOptions | undefined {
+  return preset === "vue-hono-app" ? { oxcConfigPaths: "nested" } : undefined;
+}
+
+function editorCustomizationCapabilitiesForPreset(
+  preset: string,
+): EditorCustomizationCapability[] {
+  if (preset === "ts-lib") {
+    return ["oxc-format-lint"];
+  }
+
+  if (preset === "rust-bin") {
+    return ["rust-tooling"];
+  }
+
+  if (preset === "vue-app" || preset === "vue-hono-app") {
+    return ["oxc-format-lint", "vue", "tailwind", "vitest"];
+  }
+
+  return ["oxc-format-lint", "vitest"];
+}
+
+function catalogFromWorkspaceYaml(
+  workspaceYaml: string,
+): Record<string, string> {
+  const parsed = parseYaml(workspaceYaml) as {
+    catalog?: Record<string, string>;
+  };
+
+  return parsed.catalog ?? {};
+}
+
 function expectNoWorkspaceLifecycleFeatures(features: readonly string[]): void {
   for (const feature of forbiddenWorkspaceLifecycleFeatures) {
     expect(features).not.toContain(feature);
@@ -147,6 +187,103 @@ describe("template init", () => {
       }).toThrow();
     },
   );
+
+  it("generates a minimal Template Dependency Catalog projection for the Hono API preset", async () => {
+    const projectDir = await generatePresetProject("hono-api");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
+      "@hono/node-server": "^2.0.6",
+      "@types/node": "^24.0.0",
+      hono: "^4.12.27",
+      oxfmt: "^0.57.0",
+      oxlint: "^1.72.0",
+      "tsc-alias": "^1.8.17",
+      typescript: "^6.0.3",
+      vitest: "^4.1.9",
+    });
+  });
+
+  it("generates a minimal Template Dependency Catalog projection for the TypeScript library preset", async () => {
+    const projectDir = await generatePresetProject("ts-lib");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
+      "@types/node": "^24.0.0",
+      oxfmt: "^0.57.0",
+      oxlint: "^1.72.0",
+      "tsc-alias": "^1.8.17",
+      typescript: "^6.0.3",
+    });
+  });
+
+  it("generates a minimal Template Dependency Catalog projection for the Vue app preset", async () => {
+    const projectDir = await generatePresetProject("vue-app");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
+      "@playwright/test": "^1.61.1",
+      "@tailwindcss/vite": "^4.3.2",
+      "@types/node": "^24.0.0",
+      "@types/web-bluetooth": "^0.0.21",
+      "@vitejs/plugin-vue": "^6.0.7",
+      "@vue/tsconfig": "^0.9.1",
+      "@vueuse/core": "^14.3.0",
+      oxfmt: "^0.57.0",
+      oxlint: "^1.72.0",
+      pinia: "^3.0.4",
+      tailwindcss: "^4.3.2",
+      typescript: "^6.0.3",
+      vite: "^8.1.2",
+      vitest: "^4.1.9",
+      vue: "^3.5.39",
+      "vue-tsc": "^3.3.6",
+    });
+    expect(workspaceYaml).toContain("allowBuilds:\n  esbuild: true\n");
+  });
+
+  it("generates a minimal Template Dependency Catalog projection for the Vue Hono app preset", async () => {
+    const projectDir = await generatePresetProject("vue-hono-app");
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
+      "@hono/node-server": "^2.0.6",
+      "@playwright/test": "^1.61.1",
+      "@tailwindcss/vite": "^4.3.2",
+      "@types/node": "^24.0.0",
+      "@types/web-bluetooth": "^0.0.21",
+      "@vitejs/plugin-vue": "^6.0.7",
+      "@vue/tsconfig": "^0.9.1",
+      "@vueuse/core": "^14.3.0",
+      hono: "^4.12.27",
+      oxfmt: "^0.57.0",
+      oxlint: "^1.72.0",
+      pinia: "^3.0.4",
+      tailwindcss: "^4.3.2",
+      "tsc-alias": "^1.8.17",
+      tsx: "^4.22.4",
+      turbo: "^2.10.2",
+      typescript: "^6.0.3",
+      vite: "^8.1.2",
+      vitest: "^4.1.9",
+      vue: "^3.5.39",
+      "vue-tsc": "^3.3.6",
+    });
+    expect(workspaceYaml).toContain("packages:\n  - apps/*\n");
+    expect(workspaceYaml).toContain("allowBuilds:\n  esbuild: true\n");
+  });
 
   it("generates capability-aware infrastructure for every supported built-in preset", async () => {
     const supportedPresets = builtInPresets.filter(
@@ -173,7 +310,12 @@ describe("template init", () => {
         features?: Record<string, { version?: string; pnpmVersion?: string }>;
         postCreateCommand?: string;
         mounts?: string[];
-        customizations: { vscode: { extensions: string[] } };
+        customizations: {
+          vscode: {
+            extensions: string[];
+            settings?: Record<string, unknown>;
+          };
+        };
       }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
       const packageJson = await readJson<{
         engines: { node: string };
@@ -216,7 +358,7 @@ describe("template init", () => {
         expect(checkWorkflow).toContain("node-version-file: package.json");
         expect(checkWorkflow).toContain("run: corepack enable");
         expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
-        expect(checkWorkflow).not.toContain("node-version: 22");
+        expect(checkWorkflow).not.toContain("node-version:");
         expect(checkWorkflow).toContain("run: pnpm install");
         expect(checkWorkflow).toContain("run: pnpm run check");
         expect(checkWorkflow).not.toContain("run: ./scripts/check");
@@ -228,7 +370,7 @@ describe("template init", () => {
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
       } else {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
-        expect(devcontainer.image).toContain("typescript-node:22");
+        expect(devcontainer.image).toContain("typescript-node:24");
       }
       const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
         ([id]) => id.includes("features/node"),
@@ -240,12 +382,25 @@ describe("template init", () => {
       expect(devcontainer).not.toHaveProperty("postCreateCommand");
 
       const extensions = devcontainer.customizations.vscode.extensions;
-      if (preset.name === "ts-lib" || preset.name === "hono-api") {
-        expect(extensions).toEqual(["oxc.oxc-vscode"]);
-      }
-      if (preset.name === "vue-app" || preset.name === "vue-hono-app") {
-        expect(extensions).toEqual(["Vue.volar", "oxc.oxc-vscode"]);
-      }
+      const expectedEditorCustomization = editorCustomizationForCapabilities(
+        editorCustomizationCapabilitiesForPreset(preset.name),
+        editorCustomizationOptionsForPreset(preset.name),
+      );
+      const workspaceExtensions = await readJson<{
+        recommendations: string[];
+      }>(path.join(projectDir, ".vscode/extensions.json"));
+      const workspaceSettings = await readJson<Record<string, unknown>>(
+        path.join(projectDir, ".vscode/settings.json"),
+      );
+
+      expect(extensions).toEqual(expectedEditorCustomization.extensions);
+      expect(devcontainer.customizations.vscode.settings).toEqual(
+        expectedEditorCustomization.settings,
+      );
+      expect(workspaceExtensions.recommendations).toEqual(
+        expectedEditorCustomization.extensions,
+      );
+      expect(workspaceSettings).toEqual(expectedEditorCustomization.settings);
       if (preset.name === "vue-app") {
         expect(checkWorkflow).toContain(
           "pnpm exec playwright install --with-deps chromium",
@@ -257,10 +412,6 @@ describe("template init", () => {
         );
       }
       if (preset.name === "rust-bin") {
-        expect(extensions).toEqual([
-          "rust-lang.rust-analyzer",
-          "tamasfe.even-better-toml",
-        ]);
         expect(devcontainer.mounts).toEqual(
           expect.arrayContaining([
             expect.stringContaining("target=/usr/local/cargo/registry"),
@@ -311,7 +462,7 @@ describe("template init", () => {
         "utf8",
       );
 
-      expect(packageJson.engines.node).toBe("22");
+      expect(packageJson.engines.node).toBe("24");
       expect(packageJson.packageManager).toBe("pnpm@10.0.0");
       expect(checkWorkflow).toContain("node-version-file: package.json");
       expect(checkWorkflow).toContain("run: corepack enable");
@@ -337,13 +488,13 @@ describe("template init", () => {
       postCreateCommand?: string;
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
 
-    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
     expect(checkWorkflow).toContain("node-version-file: package.json");
     expect(checkWorkflow).toContain("run: corepack enable");
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
-    expect(checkWorkflow).not.toContain("node-version: 22");
+    expect(checkWorkflow).not.toContain("node-version:");
     const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
       ([id]) => id.includes("features/node"),
     )?.[1];
@@ -377,17 +528,17 @@ describe("template init", () => {
       postCreateCommand?: string;
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
 
-    expect(rootPackageJson.engines.node).toBe("22");
+    expect(rootPackageJson.engines.node).toBe("24");
     expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
-    expect(apiPackageJson.engines.node).toBe("22");
+    expect(apiPackageJson.engines.node).toBe("24");
     expect(apiPackageJson).not.toHaveProperty("packageManager");
-    expect(webPackageJson.engines.node).toBe("22");
+    expect(webPackageJson.engines.node).toBe("24");
     expect(webPackageJson).not.toHaveProperty("packageManager");
     expect(checkWorkflow).toContain("node-version-file: package.json");
     expect(checkWorkflow).toContain("run: corepack enable");
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
-    expect(checkWorkflow).not.toContain("node-version: 22");
+    expect(checkWorkflow).not.toContain("node-version:");
     const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
       ([id]) => id.includes("features/node"),
     )?.[1];
@@ -458,6 +609,10 @@ describe("template init", () => {
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
     );
+    const rootWorkspaceYaml = await readFile(
+      path.join(repoRoot, "pnpm-workspace.yaml"),
+      "utf8",
+    );
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "tsconfig.json"));
@@ -470,6 +625,12 @@ describe("template init", () => {
     const projectKitFiles = await readdir(
       path.join(projectDir, ".project-kit"),
     );
+    const generatedWorkspace = parseYaml(workspaceYaml) as {
+      catalog: Record<string, string>;
+    };
+    const templateWorkspace = parseYaml(rootWorkspaceYaml) as {
+      catalog: Record<string, string>;
+    };
 
     const projection = findBuiltInPresetProjection("ts-lib");
     const expectedPlan = projection!.project(
@@ -477,7 +638,7 @@ describe("template init", () => {
         targetDir: projectDir,
         blueprint: projection!.blueprint({ targetDir: projectDir }),
         toolchain: {
-          nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
           packageManagerPin: {
             kind: "PackageManagerPin",
             value: "pnpm@10.0.0",
@@ -504,6 +665,14 @@ describe("template init", () => {
     expect(workspaceYaml).toContain("typescript:");
     expect(workspaceYaml).toContain("oxlint:");
     expect(workspaceYaml).toContain("oxfmt:");
+    expect(generatedWorkspace.catalog).toEqual({
+      "@types/node": templateWorkspace.catalog["@types/node"],
+      oxfmt: templateWorkspace.catalog.oxfmt,
+      oxlint: templateWorkspace.catalog.oxlint,
+      "tsc-alias": templateWorkspace.catalog["tsc-alias"],
+      typescript: templateWorkspace.catalog.typescript,
+    });
+    expect(generatedWorkspace.catalog).not.toHaveProperty("hono");
 
     expect(tsconfig.compilerOptions.strict).toBe(true);
     expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
@@ -807,7 +976,7 @@ describe("template init", () => {
       }),
     ]);
     expect(output.toolchain).toEqual({
-      nodeLtsMajor: "22",
+      nodeLtsMajor: "24",
       packageManagerPin: "pnpm@10.0.0",
       source: "online",
       diagnostics: [],
@@ -916,7 +1085,7 @@ describe("template init", () => {
     }>(path.join(projectDir, ".project-kit/generated-by.json"));
 
     expect(output.toolchain).toEqual({
-      nodeLtsMajor: "22",
+      nodeLtsMajor: "24",
       packageManagerPin: "pnpm@10.0.0",
       source: "bundled-fallback",
       diagnostics: [
@@ -924,7 +1093,7 @@ describe("template init", () => {
       ],
     });
     expect(generationRecord.toolchain).toEqual({
-      nodeLtsMajor: "22",
+      nodeLtsMajor: "24",
       packageManagerPin: "pnpm@10.0.0",
       source: "bundled-fallback",
     });
@@ -960,7 +1129,7 @@ describe("template init", () => {
 
     expect(result.stdout).toContain("Toolchain Resolution:");
     expect(result.stdout).toContain("Source: bundled-fallback");
-    expect(result.stdout).toContain("Node LTS major: 22");
+    expect(result.stdout).toContain("Node LTS major: 24");
     expect(result.stdout).toContain("Package Manager Pin: pnpm@10.0.0");
     expect(result.stdout).toContain(
       "Using bundled fallback toolchain metadata",
@@ -1431,8 +1600,19 @@ describe("template init", () => {
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
       mounts: string[];
       postCreateCommand?: string;
-      customizations: { vscode: { extensions: string[] } };
+      customizations: {
+        vscode: {
+          extensions: string[];
+          settings: Record<string, unknown>;
+        };
+      };
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    const workspaceExtensions = await readJson<{
+      recommendations: string[];
+    }>(path.join(projectDir, ".vscode/extensions.json"));
+    const workspaceSettings = await readJson<Record<string, unknown>>(
+      path.join(projectDir, ".vscode/settings.json"),
+    );
     const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
     const blueprint = await readJson<{
       preset: string;
@@ -1482,12 +1662,19 @@ describe("template init", () => {
         expect.stringContaining("target=${containerWorkspaceFolder}/target"),
       ]),
     );
+    const expectedEditorCustomization = editorCustomizationForCapabilities([
+      "rust-tooling",
+    ]);
     expect(devcontainer.customizations.vscode.extensions).toEqual(
-      expect.arrayContaining([
-        "rust-lang.rust-analyzer",
-        "tamasfe.even-better-toml",
-      ]),
+      expectedEditorCustomization.extensions,
     );
+    expect(devcontainer.customizations.vscode.settings).toEqual(
+      expectedEditorCustomization.settings,
+    );
+    expect(workspaceExtensions.recommendations).toEqual(
+      expectedEditorCustomization.extensions,
+    );
+    expect(workspaceSettings).toEqual(expectedEditorCustomization.settings);
 
     expect(blueprint.preset).toBe("rust-bin");
     expect(blueprint.packageManager).toBe("pnpm");
@@ -1657,6 +1844,7 @@ describe("template init", () => {
       { path: "./tsconfig.test.json" },
       { path: "./tsconfig.node.json" },
     ]);
+    expect(appTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
     expect(appTsconfig.compilerOptions.strict).toBe(true);
     expect(appTsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(appTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
@@ -1835,6 +2023,8 @@ describe("template init", () => {
       { path: "./tsconfig.test.json" },
       { path: "./tsconfig.node.json" },
     ]);
+    expect(webAppTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
+    expect(webAppTsconfig.compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
     expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual(
       ["../api/src/index.ts"],
     );

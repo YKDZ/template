@@ -84,7 +84,7 @@ async function runMachineVerifiableNextSteps(
       targetDir: projectDir,
       blueprint,
       toolchain: {
-        nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
         packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
         source: "bundled-fallback",
         diagnostics: [],

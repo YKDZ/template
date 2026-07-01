@@ -25,8 +25,8 @@ const repoRoot = path.resolve(
 const templatesRoot = path.join(repoRoot, "templates");
 
 process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
-  { version: "v22.11.0", lts: "Jod" },
-  { version: "v24.1.0", lts: false },
+  { version: "v24.11.0", lts: "Krypton" },
+  { version: "v26.1.0", lts: false },
 ]);
 process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL ??= jsonDataUrl({
   versions: {
@@ -98,7 +98,7 @@ function projectionPlanFor(projection: PresetProjection) {
       targetDir,
       blueprint,
       toolchain: {
-        nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
         packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
         source: "bundled-fallback",
         diagnostics: [],
@@ -263,6 +263,7 @@ describe("package publishing", () => {
     );
     expect(packedPaths).toContain("package/dist/src/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");
+    expect(packedPaths).toContain("package/pnpm-workspace.yaml");
     expect(packedPaths).toContain("package/README.md");
     const localTemplateArtifact = path.join(
       templatesRoot,

@@ -137,6 +137,25 @@ async function readGeneratedWorkspaceBlueprint(
   return blueprint;
 }
 
+async function readGeneratedRepositoryNodeVersion(root: string): Promise<string> {
+  const packageJson = await readJson<unknown>(path.join(root, "package.json"));
+
+  if (!isRecord(packageJson) || !isRecord(packageJson.engines)) {
+    throw new Error(
+      "Package Addition requires root package.json to declare engines.node",
+    );
+  }
+
+  const nodeVersion = packageJson.engines.node;
+  if (typeof nodeVersion !== "string" || nodeVersion.length === 0) {
+    throw new Error(
+      "Package Addition requires root package.json to declare engines.node",
+    );
+  }
+
+  return nodeVersion;
+}
+
 function workspaceTextWithPackageGlob(text: string, glob: string): string {
   if (text.includes(`  - ${glob}`)) {
     return text;
@@ -248,6 +267,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
 
   const root = path.resolve(options.cwd);
   const blueprint = await readGeneratedWorkspaceBlueprint(root);
+  const nodeVersion = await readGeneratedRepositoryNodeVersion(root);
   const projectName = projectNameFromBlueprint(blueprint);
   const packageName = `@${projectName}/${options.name}`;
   const projection = findBuiltInPresetProjection(options.preset);
@@ -268,6 +288,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     blueprint,
     packageLeafName: options.name,
     packageName,
+    nodeVersion,
   });
 
   if (

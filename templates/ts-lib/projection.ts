@@ -6,7 +6,9 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
+import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
@@ -16,6 +18,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
+  PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
   PresetProjection,
   PresetProjectionPlan,
@@ -155,6 +158,10 @@ function operationsForTsLib(
   packageScripts: Record<string, string>,
   checkPlan: CheckPlan,
 ): RenderOperation[] {
+  const editorCustomization = editorCustomizationForCapabilities([
+    "oxc-format-lint",
+  ]);
+
   return [
     {
       kind: "writeJson",
@@ -165,18 +172,15 @@ function operationsForTsLib(
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
-      text: [
-        "packages:",
-        "  - .",
-        "",
-        "catalog:",
-        '  "@types/node": ^24.0.0',
-        "  oxfmt: ^0.56.0",
-        "  oxlint: ^1.71.0",
-        "  tsc-alias: ^1.8.17",
-        "  typescript: ^5.8.0",
-        "",
-      ].join("\n"),
+      text: renderGeneratedPnpmWorkspaceYaml({
+        dependencies: [
+          "@types/node",
+          "oxfmt",
+          "oxlint",
+          "tsc-alias",
+          "typescript",
+        ],
+      }),
     },
     {
       kind: "writeJson",
@@ -240,8 +244,22 @@ function operationsForTsLib(
         name: `${context.projectName.value} development`,
         nodeVersion: context.toolchain.nodeLtsMajor.value,
         packageManagerPin: context.toolchain.packageManagerPin.value,
-        extensions: ["oxc.oxc-vscode"],
+        extensions: editorCustomization.extensions,
+        settings: editorCustomization.settings,
       }),
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+      multilineArrays: ["recommendations"],
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
     },
     {
       kind: "writeText",
@@ -259,6 +277,7 @@ function operationsForTsLib(
 function packageAdditionOperations(
   packagePath: string,
   packageName: string,
+  nodeVersion: string,
 ): RenderOperation[] {
   return [
     {
@@ -285,7 +304,7 @@ function packageAdditionOperations(
           typescript: "catalog:",
         },
         engines: {
-          node: "22",
+          node: nodeVersion,
         },
       },
       multilineArrays: ["files"],
@@ -337,6 +356,7 @@ function packageAdditionOperations(
 function packageAdditionPlan(
   packageLeafName: string,
   packageName: string,
+  nodeVersion: string,
 ): PresetPackageAdditionPlan {
   const packagePath = `packages/${packageLeafName}`;
 
@@ -346,7 +366,11 @@ function packageAdditionPlan(
     rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-    operations: packageAdditionOperations(packagePath, packageName),
+    operations: packageAdditionOperations(
+      packagePath,
+      packageName,
+      nodeVersion,
+    ),
   };
 }
 
@@ -387,8 +411,12 @@ export const tsLibPresetProjection: PresetProjection = {
   metadata: tsLibPresetMetadata,
   capabilities: {
     packageAddition: {
-      planPackageAddition({ packageLeafName, packageName }) {
-        return packageAdditionPlan(packageLeafName, packageName);
+      planPackageAddition({
+        packageLeafName,
+        packageName,
+        nodeVersion,
+      }: PresetPackageAdditionOptions) {
+        return packageAdditionPlan(packageLeafName, packageName, nodeVersion);
       },
     },
   },

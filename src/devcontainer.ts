@@ -8,7 +8,9 @@ export type DevcontainerNodeFeature = {
   readonly pnpmVersion: string;
 };
 
-export function pnpmVersionFromPackageManagerPin(packageManagerPin: string): string {
+export function pnpmVersionFromPackageManagerPin(
+  packageManagerPin: string,
+): string {
   return packageManagerPin.replace(/^pnpm@/, "");
 }
 
@@ -28,6 +30,7 @@ export function nodePnpmDevcontainer(options: {
   readonly nodeVersion: string;
   readonly packageManagerPin: string;
   readonly extensions: readonly string[];
+  readonly settings?: Record<string, unknown>;
 }): Record<string, unknown> {
   return {
     name: options.name,
@@ -36,6 +39,7 @@ export function nodePnpmDevcontainer(options: {
     customizations: {
       vscode: {
         extensions: options.extensions,
+        ...(options.settings ? { settings: options.settings } : {}),
       },
     },
   };

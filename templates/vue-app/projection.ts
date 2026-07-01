@@ -7,7 +7,9 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
+import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
@@ -139,6 +141,13 @@ function operationsForVueApp(
   packageScripts: Record<string, string>,
   checkPlan: CheckPlan,
 ): RenderOperation[] {
+  const editorCustomization = editorCustomizationForCapabilities([
+    "oxc-format-lint",
+    "vue",
+    "tailwind",
+    "vitest",
+  ]);
+
   return [
     {
       kind: "writeJson",
@@ -148,32 +157,29 @@ function operationsForVueApp(
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
-      text: [
-        "packages:",
-        "  - .",
-        "",
-        "allowBuilds:",
-        "  esbuild: true",
-        "",
-        "catalog:",
-        '  "@playwright/test": ^1.57.0',
-        '  "@tailwindcss/vite": ^4.1.18',
-        '  "@types/node": ^24.0.0',
-        '  "@types/web-bluetooth": ^0.0.21',
-        '  "@vitejs/plugin-vue": ^6.0.2',
-        '  "@vue/tsconfig": ^0.8.1',
-        '  "@vueuse/core": ^14.1.0',
-        "  oxfmt: ^0.56.0",
-        "  oxlint: ^1.71.0",
-        "  pinia: ^3.0.4",
-        "  tailwindcss: ^4.1.18",
-        "  typescript: ^5.8.0",
-        "  vite: ^7.3.0",
-        "  vitest: ^4.1.9",
-        "  vue: ^3.5.26",
-        "  vue-tsc: ^3.1.8",
-        "",
-      ].join("\n"),
+      text: renderGeneratedPnpmWorkspaceYaml({
+        dependencies: [
+          "@playwright/test",
+          "@tailwindcss/vite",
+          "@types/node",
+          "@types/web-bluetooth",
+          "@vitejs/plugin-vue",
+          "@vue/tsconfig",
+          "@vueuse/core",
+          "oxfmt",
+          "oxlint",
+          "pinia",
+          "tailwindcss",
+          "typescript",
+          "vite",
+          "vitest",
+          "vue",
+          "vue-tsc",
+        ],
+        allowBuilds: {
+          esbuild: true,
+        },
+      }),
     },
     {
       kind: "writeJson",
@@ -193,7 +199,6 @@ function operationsForVueApp(
       value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: {
-          baseUrl: ".",
           composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",
@@ -306,8 +311,22 @@ function operationsForVueApp(
         name: `${context.projectName.value} Vue development`,
         nodeVersion: context.toolchain.nodeLtsMajor.value,
         packageManagerPin: context.toolchain.packageManagerPin.value,
-        extensions: ["Vue.volar", "oxc.oxc-vscode"],
+        extensions: editorCustomization.extensions,
+        settings: editorCustomization.settings,
       }),
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+      multilineArrays: ["recommendations"],
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
     },
     {
       kind: "writeText",
@@ -403,6 +422,7 @@ export default defineConfig({
 function packageAdditionOperations(
   packagePath: string,
   packageName: string,
+  nodeVersion: string,
 ): RenderOperation[] {
   return [
     {
@@ -435,7 +455,7 @@ function packageAdditionOperations(
           "vue-tsc": "catalog:",
         },
         engines: {
-          node: "22",
+          node: nodeVersion,
         },
       },
     },
@@ -457,7 +477,6 @@ function packageAdditionOperations(
       value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: {
-          baseUrl: ".",
           composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",
@@ -565,6 +584,7 @@ async function packageAdditionPlan({
   blueprint,
   packageLeafName,
   packageName,
+  nodeVersion,
 }: PresetPackageAdditionOptions): Promise<PresetPackageAdditionPlan> {
   const packagePath = `apps/${packageLeafName}`;
   const previewPort = await nextVuePreviewPort(root, blueprint);
@@ -579,7 +599,11 @@ async function packageAdditionPlan({
     ],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-    operations: packageAdditionOperations(packagePath, packageName),
+    operations: packageAdditionOperations(
+      packagePath,
+      packageName,
+      nodeVersion,
+    ),
     textFiles: [
       {
         path: `${packagePath}/playwright.config.ts`,

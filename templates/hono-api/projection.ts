@@ -6,7 +6,9 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
+import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
@@ -14,6 +16,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
+  PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
   PresetProjection,
   PresetProjectionPlan,
@@ -126,6 +129,11 @@ function operationsForHonoApi(
   packageScripts: Record<string, string>,
   checkPlan: CheckPlan,
 ): RenderOperation[] {
+  const editorCustomization = editorCustomizationForCapabilities([
+    "oxc-format-lint",
+    "vitest",
+  ]);
+
   return [
     {
       kind: "writeJson",
@@ -135,21 +143,18 @@ function operationsForHonoApi(
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
-      text: [
-        "packages:",
-        "  - .",
-        "",
-        "catalog:",
-        '  "@hono/node-server": ^2.0.6',
-        '  "@types/node": ^24.0.0',
-        "  hono: ^4.12.27",
-        "  oxfmt: ^0.56.0",
-        "  oxlint: ^1.71.0",
-        "  tsc-alias: ^1.8.17",
-        "  typescript: ^5.8.0",
-        "  vitest: ^4.1.9",
-        "",
-      ].join("\n"),
+      text: renderGeneratedPnpmWorkspaceYaml({
+        dependencies: [
+          "@hono/node-server",
+          "@types/node",
+          "hono",
+          "oxfmt",
+          "oxlint",
+          "tsc-alias",
+          "typescript",
+          "vitest",
+        ],
+      }),
     },
     {
       kind: "writeJson",
@@ -221,8 +226,22 @@ function operationsForHonoApi(
         name: `${context.projectName.value} API development`,
         nodeVersion: context.toolchain.nodeLtsMajor.value,
         packageManagerPin: context.toolchain.packageManagerPin.value,
-        extensions: ["oxc.oxc-vscode"],
+        extensions: editorCustomization.extensions,
+        settings: editorCustomization.settings,
       }),
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+      multilineArrays: ["recommendations"],
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
     },
     {
       kind: "writeText",
@@ -240,6 +259,7 @@ function operationsForHonoApi(
 function packageAdditionOperations(
   packagePath: string,
   packageName: string,
+  nodeVersion: string,
 ): RenderOperation[] {
   return [
     {
@@ -264,7 +284,7 @@ function packageAdditionOperations(
           vitest: "catalog:",
         },
         engines: {
-          node: "22",
+          node: nodeVersion,
         },
       },
     },
@@ -335,6 +355,7 @@ function packageAdditionOperations(
 function packageAdditionPlan(
   packageLeafName: string,
   packageName: string,
+  nodeVersion: string,
 ): PresetPackageAdditionPlan {
   const packagePath = `apps/${packageLeafName}`;
 
@@ -344,7 +365,11 @@ function packageAdditionPlan(
     rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
-    operations: packageAdditionOperations(packagePath, packageName),
+    operations: packageAdditionOperations(
+      packagePath,
+      packageName,
+      nodeVersion,
+    ),
   };
 }
 
@@ -385,8 +410,12 @@ export const honoApiPresetProjection: PresetProjection = {
   metadata: honoApiPresetMetadata,
   capabilities: {
     packageAddition: {
-      planPackageAddition({ packageLeafName, packageName }) {
-        return packageAdditionPlan(packageLeafName, packageName);
+      planPackageAddition({
+        packageLeafName,
+        packageName,
+        nodeVersion,
+      }: PresetPackageAdditionOptions) {
+        return packageAdditionPlan(packageLeafName, packageName, nodeVersion);
       },
     },
   },

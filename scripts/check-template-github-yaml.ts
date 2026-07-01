@@ -209,7 +209,7 @@ function projectThroughPresetProjection(presetName: string) {
     packageManager: { kind: "PackageManager", value: "pnpm" },
     blueprint: projection.blueprint({ targetDir: "generated-repository" }),
     toolchain: {
-      nodeLtsMajor: { kind: "NodeLtsMajor", value: "22" },
+      nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
       packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
       source: "bundled-fallback",
       diagnostics: [],

@@ -6,7 +6,9 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
+import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
 import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
   type CheckPlan,
@@ -249,6 +251,12 @@ function operationsForVueHonoApp(
   const packageScope = packageScopeFromBlueprint(context);
   const apiName = packageName(packageScope, "api");
   const webName = packageName(packageScope, "web");
+  const editorCustomization = editorCustomizationForCapabilities(
+    ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    {
+      oxcConfigPaths: "nested",
+    },
+  );
 
   return [
     {
@@ -259,37 +267,35 @@ function operationsForVueHonoApp(
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
-      text: [
-        "packages:",
-        "  - apps/*",
-        "",
-        "allowBuilds:",
-        "  esbuild: true",
-        "",
-        "catalog:",
-        '  "@hono/node-server": ^2.0.6',
-        '  "@playwright/test": ^1.57.0',
-        '  "@tailwindcss/vite": ^4.1.18',
-        '  "@types/node": ^24.0.0',
-        '  "@types/web-bluetooth": ^0.0.21',
-        '  "@vitejs/plugin-vue": ^6.0.2',
-        '  "@vue/tsconfig": ^0.8.1',
-        '  "@vueuse/core": ^14.1.0',
-        "  hono: ^4.12.27",
-        "  oxfmt: ^0.56.0",
-        "  oxlint: ^1.71.0",
-        "  pinia: ^3.0.4",
-        "  tailwindcss: ^4.1.18",
-        "  tsc-alias: ^1.8.17",
-        "  tsx: ^4.20.0",
-        "  turbo: ^2.7.0",
-        "  typescript: ^5.8.0",
-        "  vite: ^7.3.0",
-        "  vitest: ^4.1.9",
-        "  vue: ^3.5.26",
-        "  vue-tsc: ^3.1.8",
-        "",
-      ].join("\n"),
+      text: renderGeneratedPnpmWorkspaceYaml({
+        packages: ["apps/*"],
+        dependencies: [
+          "@hono/node-server",
+          "@playwright/test",
+          "@tailwindcss/vite",
+          "@types/node",
+          "@types/web-bluetooth",
+          "@vitejs/plugin-vue",
+          "@vue/tsconfig",
+          "@vueuse/core",
+          "hono",
+          "oxfmt",
+          "oxlint",
+          "pinia",
+          "tailwindcss",
+          "tsc-alias",
+          "tsx",
+          "turbo",
+          "typescript",
+          "vite",
+          "vitest",
+          "vue",
+          "vue-tsc",
+        ],
+        allowBuilds: {
+          esbuild: true,
+        },
+      }),
     },
     {
       kind: "writeJson",
@@ -343,8 +349,22 @@ function operationsForVueHonoApp(
         name: `${context.projectName.value} full-stack development`,
         nodeVersion: context.toolchain.nodeLtsMajor.value,
         packageManagerPin: context.toolchain.packageManagerPin.value,
-        extensions: ["Vue.volar", "oxc.oxc-vscode"],
+        extensions: editorCustomization.extensions,
+        settings: editorCustomization.settings,
       }),
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+      multilineArrays: ["recommendations"],
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
     },
     {
       kind: "writeText",
@@ -464,7 +484,6 @@ function operationsForVueHonoApp(
       value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: {
-          baseUrl: ".",
           composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",

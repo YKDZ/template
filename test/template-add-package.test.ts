@@ -5,10 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cliPath = path.join(repoRoot, "src/cli.ts");
 const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
 
@@ -19,16 +16,7 @@ async function readJson<T>(filePath: string): Promise<T> {
 async function initGeneratedWorkspace(projectDir: string): Promise<void> {
   await execa(
     "pnpm",
-    [
-      "exec",
-      "tsx",
-      cliPath,
-      "init",
-      projectDir,
-      "--preset",
-      "vue-hono-app",
-      "--yes",
-    ],
+    ["exec", "tsx", cliPath, "init", projectDir, "--preset", "vue-hono-app", "--yes"],
     { cwd: repoRoot },
   );
 }
@@ -48,53 +36,24 @@ function playwrightWebServerPorts(configText: string): number[] {
 
 describe("template add package", () => {
   it("adds packages while keeping the stored blueprint valid for later additions", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
 
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "ts-lib",
-        "--name",
-        "shared",
-      ],
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
       { cwd: projectDir },
     );
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "blueprint",
-        "validate",
-        ".project-kit/blueprint.json",
-      ],
+      ["exec", "tsx", cliPath, "blueprint", "validate", ".project-kit/blueprint.json"],
       { cwd: projectDir },
     );
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "hono-api",
-        "--name",
-        "worker",
-      ],
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
       { cwd: projectDir },
     );
 
@@ -103,13 +62,11 @@ describe("template add package", () => {
       projectKind: string;
       packages: Array<{ name: string; path: string; preset?: string }>;
     }>(path.join(projectDir, ".project-kit/blueprint.json"));
-    const workspaceYaml = await readFile(
-      path.join(projectDir, "pnpm-workspace.yaml"),
-      "utf8",
-    );
-    const rootPackageJson = await readJson<{ scripts: Record<string, string> }>(
-      path.join(projectDir, "package.json"),
-    );
+    const workspaceYaml = await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8");
+    const rootPackageJson = await readJson<{
+      scripts: Record<string, string>;
+      engines: { node: string };
+    }>(path.join(projectDir, "package.json"));
     const rootTsconfig = await readJson<{
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
@@ -120,6 +77,10 @@ describe("template add package", () => {
       engines: { node: string };
       packageManager?: string;
     }>(path.join(projectDir, "packages/shared/package.json"));
+    const workerPackageJson = await readJson<{
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/worker/package.json"));
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
@@ -144,12 +105,19 @@ describe("template add package", () => {
       path: "./packages/shared/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/shared");
-    expect(packageJson.engines.node).toBe("22");
+    expect(rootPackageJson.engines.node).toBe("24");
+    expect(packageJson.engines.node).toBe(rootPackageJson.engines.node);
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
+    const addedPackageDependencySpecifiers = [
+      ...Object.values(packageJson.devDependencies),
+      ...Object.values(workerPackageJson.dependencies),
+      ...Object.values(workerPackageJson.devDependencies),
+    ];
+    expect(addedPackageDependencySpecifiers.every((value) => value === "catalog:")).toBe(true);
     expect(tsconfig.compilerOptions.composite).toBe(true);
     expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
     expect(tsconfig.include).toEqual(["src/**/*.ts"]);
@@ -170,53 +138,28 @@ describe("template add package", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await expect(
-      stat(path.join(projectDir, "apps/worker/.oxlintrc.json")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "apps/worker/.oxlintrc.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await expect(
-      stat(path.join(projectDir, "apps/worker/.oxfmtrc.json")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "apps/worker/.oxfmtrc.json"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-  });
+  }, 120_000);
 
   it("fails clearly in a generated Single-Package Project", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-lib");
 
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "init",
-        projectDir,
-        "--preset",
-        "ts-lib",
-        "--yes",
-      ],
+      ["exec", "tsx", cliPath, "init", projectDir, "--preset", "ts-lib", "--yes"],
       { cwd: repoRoot },
     );
 
     await expect(
       execa(
         "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "ts-lib",
-          "--name",
-          "shared",
-        ],
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
         { cwd: projectDir },
       ),
     ).rejects.toMatchObject({
@@ -225,17 +168,13 @@ describe("template add package", () => {
       ),
     });
 
-    await expect(
-      stat(path.join(projectDir, "packages/shared")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "packages/shared"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("fails clearly when the requested preset does not support Package Addition", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
@@ -243,58 +182,30 @@ describe("template add package", () => {
     await expect(
       execa(
         "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "rust-bin",
-          "--name",
-          "native",
-        ],
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "rust-bin", "--name", "native"],
         { cwd: projectDir },
       ),
     ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition is not supported by preset: rust-bin",
-      ),
+      stderr: expect.stringContaining("Package Addition is not supported by preset: rust-bin"),
     });
 
-    await expect(
-      stat(path.join(projectDir, "packages/native")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "packages/native"))).rejects.toMatchObject({
       code: "ENOENT",
     });
-    await expect(
-      stat(path.join(projectDir, "apps/native")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "apps/native"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("adds a Hono API package to a generated workspace repository", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
 
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "hono-api",
-        "--name",
-        "worker",
-      ],
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
       { cwd: projectDir },
     );
 
@@ -320,7 +231,7 @@ describe("template add package", () => {
       path: "./apps/worker/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/worker");
-    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.hono).toBe("catalog:");
     expect(packageJson.scripts.check).toContain("pnpm run test");
@@ -329,27 +240,53 @@ describe("template add package", () => {
     await stat(path.join(projectDir, "apps/worker/test/app.test.ts"));
   });
 
-  it("adds a Vue app package with root TypeScript project references", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
+  it("adds packages with the existing generated repository Node engine", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    const rootPackageJsonPath = path.join(projectDir, "package.json");
+    const rootPackageJson = await readJson<{
+      engines: { node: string };
+      [key: string]: unknown;
+    }>(rootPackageJsonPath);
+    const inheritedNodeVersion = "25";
+    await writeFile(
+      rootPackageJsonPath,
+      `${JSON.stringify(
+        {
+          ...rootPackageJson,
+          engines: { ...rootPackageJson.engines, node: inheritedNodeVersion },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
     );
+
+    await execa(
+      "pnpm",
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+      { cwd: projectDir },
+    );
+
+    const packageJson = await readJson<{
+      engines: { node: string };
+    }>(path.join(projectDir, "packages/shared/package.json"));
+
+    expect(packageJson.engines.node).toBe(inheritedNodeVersion);
+  });
+
+  it("adds a Vue app package with root TypeScript project references", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
 
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "vue-app",
-        "--name",
-        "admin",
-      ],
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "vue-app", "--name", "admin"],
       { cwd: projectDir },
     );
 
@@ -379,7 +316,7 @@ describe("template add package", () => {
       ]),
     );
     expect(packageJson.name).toBe("@demo-fullstack/admin");
-    expect(packageJson.engines.node).toBe("22");
+    expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
@@ -389,26 +326,14 @@ describe("template add package", () => {
   });
 
   it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
 
     await execa(
       "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "vue-app",
-        "--name",
-        "admin",
-      ],
+      ["exec", "tsx", cliPath, "add", "package", "--preset", "vue-app", "--name", "admin"],
       { cwd: projectDir },
     );
 
@@ -428,15 +353,11 @@ describe("template add package", () => {
     const [adminPort] = playwrightWebServerPorts(adminPlaywright);
     expect(playwrightWebServerPorts(webPlaywright)).not.toContain(adminPort);
     expect(adminPackageJson.scripts.check).toContain("pnpm run test:e2e");
-    expect(adminPackageJson.scripts["test:e2e"]).toBe(
-      "pnpm run build && playwright test",
-    );
+    expect(adminPackageJson.scripts["test:e2e"]).toBe("pnpm run build && playwright test");
   });
 
   it("fails clearly when the target package path already exists", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
     const userFile = path.join(projectDir, "packages/shared/README.md");
 
@@ -447,32 +368,18 @@ describe("template add package", () => {
     await expect(
       execa(
         "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "ts-lib",
-          "--name",
-          "shared",
-        ],
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
         { cwd: projectDir },
       ),
     ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition would overwrite an existing path",
-      ),
+      stderr: expect.stringContaining("Package Addition would overwrite an existing path"),
     });
 
     expect(await readFile(userFile, "utf8")).toBe("user-owned content\n");
   });
 
   it("fails before writing package files when the workspace manifest cannot be updated", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
@@ -483,28 +390,20 @@ describe("template add package", () => {
     );
 
     await expect(
-      execa(
-        tsxBin,
-        [cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
-        { cwd: projectDir },
-      ),
+      execa(tsxBin, [cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"], {
+        cwd: projectDir,
+      }),
     ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Cannot update pnpm workspace membership",
-      ),
+      stderr: expect.stringContaining("Cannot update pnpm workspace membership"),
     });
 
-    await expect(
-      stat(path.join(projectDir, "packages/shared")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "packages/shared"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
   it("fails before writing package files when root TypeScript references cannot be updated", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-add-package-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
@@ -517,17 +416,7 @@ describe("template add package", () => {
     await expect(
       execa(
         "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "ts-lib",
-          "--name",
-          "shared",
-        ],
+        ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
         { cwd: projectDir },
       ),
     ).rejects.toMatchObject({
@@ -536,9 +425,7 @@ describe("template add package", () => {
       ),
     });
 
-    await expect(
-      stat(path.join(projectDir, "packages/shared")),
-    ).rejects.toMatchObject({
+    await expect(stat(path.join(projectDir, "packages/shared"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
