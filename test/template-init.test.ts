@@ -27,6 +27,11 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const optionalGitDisplays = [
+  "git init",
+  "git add .",
+  'git commit -m "Initial commit"',
+];
 
 const defaultToolchainEnv = {
   TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
@@ -304,7 +309,7 @@ describe("template init", () => {
       const blueprint = await readJson<{
         features: string[];
         packageManager?: string;
-      }>(path.join(projectDir, ".project-kit/blueprint.json"));
+      }>(path.join(projectDir, ".template/blueprint.json"));
       const devcontainer = await readJson<{
         image: string;
         features?: Record<string, { version?: string; pnpmVersion?: string }>;
@@ -325,6 +330,10 @@ describe("template init", () => {
         path.join(projectDir, ".github/workflows/check.yml"),
         "utf8",
       );
+      const gitignore = await readFile(
+        path.join(projectDir, ".gitignore"),
+        "utf8",
+      );
       const dependabot = await readFile(
         path.join(projectDir, ".github/dependabot.yml"),
         "utf8",
@@ -339,6 +348,21 @@ describe("template init", () => {
           outOfScopePathPatterns.some((pattern) => pattern.test(file)),
         ),
       ).toBe(false);
+      expect(files).toContain(".template/blueprint.json");
+      expect(files).toContain(".template/generated-by.json");
+      expect(files.some((file) => file.startsWith(".project-kit/"))).toBe(
+        false,
+      );
+      expect(gitignore).toContain(".template/\n");
+      expect(gitignore).toContain(".pnpm-store/\n");
+      await expect(
+        stat(path.join(projectDir, ".project-kit")),
+      ).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      await expect(stat(path.join(projectDir, ".git"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
       expect(blueprint.features).not.toContain("native-binary-release");
       expectNoWorkspaceLifecycleFeatures(blueprint.features);
 
@@ -616,15 +640,17 @@ describe("template init", () => {
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const gitignore = await readFile(
+      path.join(projectDir, ".gitignore"),
+      "utf8",
+    );
     const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".project-kit/blueprint.json"),
+      path.join(projectDir, ".template/blueprint.json"),
     );
     const generatedBy = await readJson<{ packageName: string }>(
-      path.join(projectDir, ".project-kit/generated-by.json"),
+      path.join(projectDir, ".template/generated-by.json"),
     );
-    const projectKitFiles = await readdir(
-      path.join(projectDir, ".project-kit"),
-    );
+    const templateFiles = await readdir(path.join(projectDir, ".template"));
     const generatedWorkspace = parseYaml(workspaceYaml) as {
       catalog: Record<string, string>;
     };
@@ -680,12 +706,22 @@ describe("template init", () => {
 
     expect(blueprint.preset).toBe("ts-lib");
     expect(generatedBy.packageName).toBe("@ykdz/template");
-    expect(projectKitFiles).toEqual(["blueprint.json", "generated-by.json"]);
+    expect(templateFiles).toEqual(["blueprint.json", "generated-by.json"]);
+    expect(gitignore).toContain(".template/\n");
+    expect(gitignore).toContain(".pnpm-store/\n");
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "src/index.ts"));
+    await expect(
+      stat(path.join(projectDir, ".project-kit")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(stat(path.join(projectDir, ".git"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
 
     await expect(
       stat(path.join(projectDir, "pnpm-lock.yaml")),
@@ -811,6 +847,7 @@ describe("template init", () => {
       "pnpm run fix",
       "pnpm --filter ./apps/web exec playwright install chromium",
       "pnpm run check",
+      ...optionalGitDisplays,
     ]);
     expect(output.nextSteps[2]).toEqual(
       expect.objectContaining({
@@ -890,6 +927,7 @@ describe("template init", () => {
       "pnpm install",
       "pnpm run fix",
       "pnpm run check",
+      ...optionalGitDisplays,
     ]);
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -974,6 +1012,30 @@ describe("template init", () => {
         args: ["run", "check"],
         cwd: projectDir,
       }),
+      expect.objectContaining({
+        id: "optional-git-init",
+        display: "git init",
+        command: "git",
+        args: ["init"],
+        cwd: projectDir,
+        machineVerifiable: false,
+      }),
+      expect.objectContaining({
+        id: "optional-git-add",
+        display: "git add .",
+        command: "git",
+        args: ["add", "."],
+        cwd: projectDir,
+        machineVerifiable: false,
+      }),
+      expect.objectContaining({
+        id: "optional-git-commit",
+        display: 'git commit -m "Initial commit"',
+        command: "git",
+        args: ["commit", "-m", "Initial commit"],
+        cwd: projectDir,
+        machineVerifiable: false,
+      }),
     ]);
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
@@ -986,7 +1048,7 @@ describe("template init", () => {
     await stat(path.join(projectDir, "package.json"));
     expect(
       await readJson<Record<string, unknown>>(
-        path.join(projectDir, ".project-kit", "generated-by.json"),
+        path.join(projectDir, ".template", "generated-by.json"),
       ),
     ).not.toHaveProperty("nextSteps");
     await expect(
@@ -1036,6 +1098,9 @@ describe("template init", () => {
       "demo-lib",
       "demo-lib",
       "demo-lib",
+      "demo-lib",
+      "demo-lib",
+      "demo-lib",
     ]);
   });
 
@@ -1082,7 +1147,7 @@ describe("template init", () => {
         packageManagerPin: string;
         source: string;
       };
-    }>(path.join(projectDir, ".project-kit/generated-by.json"));
+    }>(path.join(projectDir, ".template/generated-by.json"));
 
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
@@ -1400,6 +1465,9 @@ describe("template init", () => {
     expect(result.stdout).toContain("pnpm install");
     expect(result.stdout).toContain("pnpm run fix");
     expect(result.stdout).toContain("pnpm run check");
+    expect(result.stdout).toContain("git init");
+    expect(result.stdout).toContain("git add .");
+    expect(result.stdout).toContain('git commit -m "Initial commit"');
     await expect(
       stat(path.join(projectDir, "pnpm-lock.yaml")),
     ).rejects.toMatchObject({
@@ -1495,7 +1563,7 @@ describe("template init", () => {
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "tsconfig.json"));
     const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".project-kit/blueprint.json"),
+      path.join(projectDir, ".template/blueprint.json"),
     );
     const appSource = await readFile(
       path.join(projectDir, "src/app.ts"),
@@ -1613,7 +1681,7 @@ describe("template init", () => {
     const workspaceSettings = await readJson<Record<string, unknown>>(
       path.join(projectDir, ".vscode/settings.json"),
     );
-    const blueprintPath = path.join(projectDir, ".project-kit/blueprint.json");
+    const blueprintPath = path.join(projectDir, ".template/blueprint.json");
     const blueprint = await readJson<{
       preset: string;
       packageManager?: string;
@@ -1794,7 +1862,7 @@ describe("template init", () => {
       include: string[];
     }>(path.join(projectDir, "tsconfig.node.json"));
     const blueprint = await readJson<{ preset: string }>(
-      path.join(projectDir, ".project-kit/blueprint.json"),
+      path.join(projectDir, ".template/blueprint.json"),
     );
 
     expect(packageJson.name).toBe("demo-vue");
@@ -1964,7 +2032,7 @@ describe("template init", () => {
       preset: string;
       projectKind: string;
       packages: Array<{ name: string; path: string }>;
-    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+    }>(path.join(projectDir, ".template/blueprint.json"));
     const apiIndex = await readFile(
       path.join(projectDir, "apps/api/src/index.ts"),
       "utf8",
@@ -2095,7 +2163,7 @@ describe("template init", () => {
 
     const blueprint = await readJson<{
       packages: Array<{ name: string; path: string }>;
-    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+    }>(path.join(projectDir, ".template/blueprint.json"));
     const apiPackageJson = await readJson<{ name: string }>(
       path.join(projectDir, "apps/api/package.json"),
     );
@@ -2160,7 +2228,7 @@ describe("template init", () => {
     }>(path.join(projectDir, "apps/web/package.json"));
     const blueprint = await readJson<{
       packages: Array<{ name: string; path: string }>;
-    }>(path.join(projectDir, ".project-kit/blueprint.json"));
+    }>(path.join(projectDir, ".template/blueprint.json"));
 
     expect(apiPackageJson.name).toBe("@custom-scope/api");
     expect(webPackageJson.name).toBe("@custom-scope/web");

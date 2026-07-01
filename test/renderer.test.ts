@@ -331,14 +331,14 @@ describe("renderer", () => {
       operations: [
         {
           kind: "writeJson",
-          to: ".project-kit/{{configName}}.json",
+          to: ".template/{{configName}}.json",
           value: {
             generated: true
           }
         },
         {
           kind: "mergeJson",
-          to: ".project-kit/{{configName}}.json",
+          to: ".template/{{configName}}.json",
           value: {
             preset: "ts-lib"
           }
@@ -370,7 +370,7 @@ describe("renderer", () => {
     });
 
     await expect(
-      readFile(path.join(targetRoot, ".project-kit/demo.json"), "utf8")
+      readFile(path.join(targetRoot, ".template/demo.json"), "utf8")
     ).resolves.toBe(
       [
         "{",

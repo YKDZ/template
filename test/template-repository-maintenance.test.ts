@@ -72,7 +72,10 @@ function inlineDependencyVersionRanges(source: string): string[] {
         }
 
         const versionRange = stringLiteralText(property.initializer);
-        if (versionRange === undefined || !isDependencySemverRange(versionRange)) {
+        if (
+          versionRange === undefined ||
+          !isDependencySemverRange(versionRange)
+        ) {
           continue;
         }
 
@@ -82,9 +85,7 @@ function inlineDependencyVersionRanges(source: string): string[] {
         );
 
         dependencyVersions.push(
-          `${packageName}: ${versionRange} at ${position.line + 1}:${
-            position.character + 1
-          }`,
+          `${packageName}: ${versionRange} at ${position.line + 1}:${position.character + 1}`,
         );
       }
     }
@@ -167,6 +168,14 @@ describe("template Repository maintenance", () => {
       ...Object.values(packageJson.dependencies ?? {}),
       ...Object.values(packageJson.devDependencies ?? {}),
     ]).not.toContain("catalog:");
+  });
+
+  it("keeps Local Template Metadata and local pnpm store paths ignored", async () => {
+    const gitignore = await readFile(path.join(repoRoot, ".gitignore"), "utf8");
+
+    expect(gitignore).toContain(".template/\n");
+    expect(gitignore).toContain(".project-kit/\n");
+    expect(gitignore).toContain(".pnpm-store/\n");
   });
 
   it("uses official root Dependabot config for npm and GitHub Actions", async () => {

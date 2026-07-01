@@ -5,6 +5,12 @@ import { planNextStepInstructions } from "../src/next-step-instructions.js";
 import type { PresetProjectionPlan } from "../src/preset-projection.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
+const optionalGitDisplays = [
+  "git init",
+  "git add .",
+  'git commit -m "Initial commit"',
+];
+
 function projectPresetPlan(preset: string): PresetProjectionPlan {
   const projection = findBuiltInPresetProjection(preset);
 
@@ -88,6 +94,14 @@ describe("Next Step Instructions", () => {
             machineVerifiable: true,
           }),
         ),
+        ...optionalGitDisplays.map((display) =>
+          expect.objectContaining({
+            kind: "command",
+            cwd: targetDir,
+            display,
+            machineVerifiable: false,
+          }),
+        ),
       ]);
       expect(plan.steps.map((step) => step.command)).not.toContain("corepack");
     },
@@ -106,6 +120,7 @@ describe("Next Step Instructions", () => {
       "pnpm install",
       "pnpm run fix",
       "pnpm run check",
+      ...optionalGitDisplays,
     ]);
     expect(plan.steps.slice(1)).toEqual([
       {
@@ -137,6 +152,36 @@ describe("Next Step Instructions", () => {
         cwd: targetDir,
         display: "pnpm run check",
         machineVerifiable: true,
+      },
+      {
+        id: "optional-git-init",
+        label: "Optional: initialize git",
+        kind: "command",
+        command: "git",
+        args: ["init"],
+        cwd: targetDir,
+        display: "git init",
+        machineVerifiable: false,
+      },
+      {
+        id: "optional-git-add",
+        label: "Optional: stage files",
+        kind: "command",
+        command: "git",
+        args: ["add", "."],
+        cwd: targetDir,
+        display: "git add .",
+        machineVerifiable: false,
+      },
+      {
+        id: "optional-git-commit",
+        label: "Optional: create your first commit",
+        kind: "command",
+        command: "git",
+        args: ["commit", "-m", "Initial commit"],
+        cwd: targetDir,
+        display: 'git commit -m "Initial commit"',
+        machineVerifiable: false,
       },
     ]);
   });

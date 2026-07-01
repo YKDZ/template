@@ -219,7 +219,7 @@ function operationsForRustBin(
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["target", ".env", ""].join("\n"),
+      text: ["target", ".env", ".template/", ".pnpm-store/", ""].join("\n"),
     },
     {
       kind: "copyFile",
@@ -228,12 +228,12 @@ function operationsForRustBin(
     },
     {
       kind: "writeJson",
-      to: ".project-kit/blueprint.json",
+      to: ".template/blueprint.json",
       value: rustBinBlueprint(),
     },
     {
       kind: "writeJson",
-      to: ".project-kit/generated-by.json",
+      to: ".template/generated-by.json",
       value: generationRecord(context),
     },
     {

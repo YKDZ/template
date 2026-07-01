@@ -56,7 +56,7 @@ describe("Preset Registry", () => {
     const generationRecord = await readJson<{
       command: string;
       toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-    }>(path.join(targetDir, ".project-kit/generated-by.json"));
+    }>(path.join(targetDir, ".template/generated-by.json"));
 
     expect(packageJson.scripts).toEqual(plan.packageScripts);
     expect(packageJson.engines.node).toBe("24");
@@ -107,7 +107,7 @@ describe("Preset Registry", () => {
       }>(path.join(targetDir, "package.json"));
       const generationRecord = await readJson<{
         toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-      }>(path.join(targetDir, ".project-kit/generated-by.json"));
+      }>(path.join(targetDir, ".template/generated-by.json"));
       const devcontainer = await readJson<{
         features: Record<string, { version: string }>;
       }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
@@ -178,7 +178,7 @@ describe("Preset Registry", () => {
     const generationRecord = await readJson<{
       command: string;
       toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-    }>(path.join(targetDir, ".project-kit/generated-by.json"));
+    }>(path.join(targetDir, ".template/generated-by.json"));
     const devcontainer = await readJson<{
       image: string;
       features: Record<string, { version: string }>;

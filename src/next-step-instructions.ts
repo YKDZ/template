@@ -35,6 +35,41 @@ function rootCheckInstruction(): NextStepInstruction {
   };
 }
 
+function optionalGitInstructions(): NextStepInstruction[] {
+  return [
+    {
+      id: "optional-git-init",
+      label: "Optional: initialize git",
+      kind: "command",
+      command: "git",
+      args: ["init"],
+      cwd: "",
+      display: "git init",
+      machineVerifiable: false,
+    },
+    {
+      id: "optional-git-add",
+      label: "Optional: stage files",
+      kind: "command",
+      command: "git",
+      args: ["add", "."],
+      cwd: "",
+      display: "git add .",
+      machineVerifiable: false,
+    },
+    {
+      id: "optional-git-commit",
+      label: "Optional: create your first commit",
+      kind: "command",
+      command: "git",
+      args: ["commit", "-m", "Initial commit"],
+      cwd: "",
+      display: 'git commit -m "Initial commit"',
+      machineVerifiable: false,
+    },
+  ];
+}
+
 function installDependenciesInstruction(): NextStepInstruction {
   return {
     id: "install-dependencies",
@@ -101,6 +136,8 @@ function projectionInstructions(
   if (plan.capabilities.rootCheck) {
     steps.push(rootCheckInstruction());
   }
+
+  steps.push(...optionalGitInstructions());
 
   return steps;
 }

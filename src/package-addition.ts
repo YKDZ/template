@@ -100,14 +100,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function readGeneratedWorkspaceBlueprint(
   root: string,
 ): Promise<ProjectBlueprint> {
-  const blueprintPath = path.join(root, ".project-kit/blueprint.json");
-  const result = validateProjectBlueprint(
-    await readJson<unknown>(blueprintPath),
-  );
+  const blueprintPath = path.join(root, ".template/blueprint.json");
+  let blueprintJson: unknown;
+
+  try {
+    blueprintJson = await readJson<unknown>(blueprintPath);
+  } catch (error: unknown) {
+    if (
+      error instanceof SyntaxError ||
+      (isNodeError(error) && error.code === "ENOENT")
+    ) {
+      throw new Error(
+        "Package Addition requires a valid .template/blueprint.json",
+      );
+    }
+
+    throw error;
+  }
+
+  const result = validateProjectBlueprint(blueprintJson);
 
   if (!result.ok) {
     throw new Error(
-      "Package Addition requires a valid .project-kit/blueprint.json",
+      "Package Addition requires a valid .template/blueprint.json",
     );
   }
 
@@ -137,7 +152,9 @@ async function readGeneratedWorkspaceBlueprint(
   return blueprint;
 }
 
-async function readGeneratedRepositoryNodeVersion(root: string): Promise<string> {
+async function readGeneratedRepositoryNodeVersion(
+  root: string,
+): Promise<string> {
   const packageJson = await readJson<unknown>(path.join(root, "package.json"));
 
   if (!isRecord(packageJson) || !isRecord(packageJson.engines)) {
@@ -231,7 +248,7 @@ function blueprintWithPackage(
 
   if (!result.ok) {
     throw new Error(
-      "Package Addition would write an invalid .project-kit/blueprint.json",
+      "Package Addition would write an invalid .template/blueprint.json",
     );
   }
 
@@ -338,7 +355,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     rootUpdatePlan.rootTsconfig,
   );
   await writeJson(
-    path.join(root, ".project-kit/blueprint.json"),
+    path.join(root, ".template/blueprint.json"),
     rootUpdatePlan.blueprint,
   );
 }

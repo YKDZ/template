@@ -268,6 +268,8 @@ function operationsForVueApp(
         "playwright-report",
         "test-results",
         ".env",
+        ".template/",
+        ".pnpm-store/",
         "",
       ].join("\n"),
     },
@@ -296,12 +298,12 @@ function operationsForVueApp(
     },
     {
       kind: "writeJson",
-      to: ".project-kit/blueprint.json",
+      to: ".template/blueprint.json",
       value: vueAppBlueprint(),
     },
     {
       kind: "writeJson",
-      to: ".project-kit/generated-by.json",
+      to: ".template/generated-by.json",
       value: generationRecord(context),
     },
     {

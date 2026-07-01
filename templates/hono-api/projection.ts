@@ -203,7 +203,14 @@ function operationsForHonoApi(
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", ".env", ""].join("\n"),
+      text: [
+        "node_modules",
+        "dist",
+        ".env",
+        ".template/",
+        ".pnpm-store/",
+        "",
+      ].join("\n"),
     },
     { kind: "copyFile", from: "src/app.ts", to: "src/app.ts" },
     { kind: "copyFile", from: "src/server.ts", to: "src/server.ts" },
@@ -211,12 +218,12 @@ function operationsForHonoApi(
     { kind: "copyFile", from: "vitest.config.ts", to: "vitest.config.ts" },
     {
       kind: "writeJson",
-      to: ".project-kit/blueprint.json",
+      to: ".template/blueprint.json",
       value: honoApiBlueprint(),
     },
     {
       kind: "writeJson",
-      to: ".project-kit/generated-by.json",
+      to: ".template/generated-by.json",
       value: generationRecord(context),
     },
     {

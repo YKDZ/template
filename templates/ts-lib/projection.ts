@@ -220,7 +220,14 @@ function operationsForTsLib(
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["node_modules", "dist", ".env", ""].join("\n"),
+      text: [
+        "node_modules",
+        "dist",
+        ".env",
+        ".template/",
+        ".pnpm-store/",
+        "",
+      ].join("\n"),
     },
     {
       kind: "copyFile",
@@ -229,12 +236,12 @@ function operationsForTsLib(
     },
     {
       kind: "writeJson",
-      to: ".project-kit/blueprint.json",
+      to: ".template/blueprint.json",
       value: tsLibBlueprint(),
     },
     {
       kind: "writeJson",
-      to: ".project-kit/generated-by.json",
+      to: ".template/generated-by.json",
       value: generationRecord(context),
     },
     {

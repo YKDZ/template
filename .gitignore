@@ -6,5 +6,7 @@ AGENTS.md
 CONTEXT.md
 .agents/
 .scratch/
+.template/
+.project-kit/
 .pnpm-store/
 .devcontainer/

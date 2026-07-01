@@ -1,9 +1,10 @@
-import { assembleGenerationContext } from "../src/generation-context.js";
-import type { ProjectBlueprint } from "../src/declarations.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import type { ProjectBlueprint } from "../src/declarations.js";
+import { assembleGenerationContext } from "../src/generation-context.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
@@ -30,10 +31,19 @@ describe("generation context", () => {
       },
     });
 
-    expect(context.projectName).toEqual({ kind: "ProjectName", value: "demo-lib" });
+    expect(context.projectName).toEqual({
+      kind: "ProjectName",
+      value: "demo-lib",
+    });
     expect(context.preset).toBe("ts-lib");
-    expect(context.packageManager).toEqual({ kind: "PackageManager", value: "pnpm" });
-    expect(context.toolchain.nodeLtsMajor).toEqual({ kind: "NodeLtsMajor", value: "24" });
+    expect(context.packageManager).toEqual({
+      kind: "PackageManager",
+      value: "pnpm",
+    });
+    expect(context.toolchain.nodeLtsMajor).toEqual({
+      kind: "NodeLtsMajor",
+      value: "24",
+    });
     expect(context.toolchain.packageManagerPin).toEqual({
       kind: "PackageManagerPin",
       value: "pnpm@11.2.3",
@@ -42,7 +52,9 @@ describe("generation context", () => {
   });
 
   it("projects the generation context toolchain into ts-lib package metadata and generation record", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-generation-context-"));
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-generation-context-"),
+    );
     const targetDir = path.join(workspace, "demo-lib");
     const blueprint: ProjectBlueprint = {
       schemaVersion: 1,
@@ -81,11 +93,13 @@ describe("generation context", () => {
         packageManagerPin: string;
         source: string;
       };
-    }>(path.join(targetDir, ".project-kit/generated-by.json"));
+    }>(path.join(targetDir, ".template/generated-by.json"));
 
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
-    expect(devcontainer.image).toBe("mcr.microsoft.com/devcontainers/typescript-node:24");
+    expect(devcontainer.image).toBe(
+      "mcr.microsoft.com/devcontainers/typescript-node:24",
+    );
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",
       packageManagerPin: "pnpm@11.2.3",
