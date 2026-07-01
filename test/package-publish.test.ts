@@ -274,6 +274,14 @@ describe("package publishing", () => {
       expect(packedPaths).toEqual(
         expect.arrayContaining(await checkedTemplatePackagePaths()),
       );
+      expect(packedPaths).toEqual(
+        expect.arrayContaining([
+          "package/templates/rust-bin/src/main.rs",
+          "package/templates/shared/oxc/node/oxlint.config.ts",
+          "package/templates/shared/oxc/vue/oxlint.config.ts",
+          "package/templates/shared/oxc/oxfmt.config.ts",
+        ]),
+      );
       expect(packedPaths).not.toContain(
         `package/templates/${path.basename(localTemplateArtifact)}`,
       );

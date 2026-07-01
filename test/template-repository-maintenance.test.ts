@@ -179,6 +179,18 @@ describe("template Repository maintenance", () => {
     expect(gitignore).not.toContain(".devcontainer/\n");
   });
 
+  it("marks workspace-shape ADRs superseded when ADR-0058 replaces their direction", async () => {
+    const workspaceOnlyAdr = await readFile(
+      path.join(repoRoot, "docs/adr/0002-workspace-only-for-multi-package-v1.md"),
+      "utf8",
+    );
+
+    expect(workspaceOnlyAdr).toContain("Superseded by ADR-0058");
+    expect(workspaceOnlyAdr).not.toContain(
+      "Single-package presets should stay single-package",
+    );
+  });
+
   it("keeps the root Development Container Dockerfile-first with intentional editor customizations", async () => {
     const devcontainer = JSON.parse(
       await readFile(
