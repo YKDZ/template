@@ -5,7 +5,7 @@ catalog:
   "@hono/node-server": ^2.0.6
   "@playwright/test": ^1.61.1
   "@tailwindcss/vite": ^4.3.2
-  "@types/node": ^24.0.0
+  "@types/node": ^26.0.1
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.7
   "@vue/tsconfig": ^0.9.1
