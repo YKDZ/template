@@ -137,7 +137,7 @@ function operationsForHonoApi(
     "vitest",
   ]);
   const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
-    name: `${context.projectName.value} API development`,
+    name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,

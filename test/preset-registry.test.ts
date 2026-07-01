@@ -145,7 +145,7 @@ describe("Preset Registry", () => {
       true,
     );
     expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-vue-app Vue development",\n  "build": \{/,
+      /^\{\n  "name": "demo-vue-app",\n  "build": \{/,
     );
     expect(dockerfile).toContain(
       "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
@@ -233,7 +233,7 @@ describe("Preset Registry", () => {
       "oxc.configPath",
     );
     expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-vue-hono full-stack development",\n  "build": \{/,
+      /^\{\n  "name": "demo-vue-hono",\n  "build": \{/,
     );
     expect(dockerfile).toContain(
       "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
@@ -332,7 +332,7 @@ describe("Preset Registry", () => {
       );
       if (preset === "hono-api") {
         expect(devcontainerText).toMatch(
-          /^\{\n  "name": "demo-hono-api API development",\n  "build": \{/,
+          /^\{\n  "name": "demo-hono-api",\n  "build": \{/,
         );
         expect(dockerfile).not.toContain("libnss3");
         expect(dockerfile).not.toContain("xvfb");
@@ -454,7 +454,7 @@ describe("Preset Registry", () => {
     });
     expect(devcontainer).not.toHaveProperty("features");
     expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-rust Rust development",\n  "build": \{/,
+      /^\{\n  "name": "demo-rust",\n  "build": \{/,
     );
     expect(devcontainer.mounts).toEqual([
       "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",

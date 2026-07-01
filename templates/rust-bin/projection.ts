@@ -204,7 +204,7 @@ function operationsForRustBin(
   ]);
   const rustLayer = rustToolLayer();
   const developmentContainer = dockerfileFirstRustPnpmDevcontainer({
-    name: `${projectName} Rust development`,
+    name: projectName,
     nodeLayer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,

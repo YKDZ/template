@@ -302,8 +302,7 @@ describe("template init", () => {
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
       "format:write":
         "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint:
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
       "lint:fix":
         "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
@@ -775,7 +774,7 @@ describe("template init", () => {
       true,
     );
     expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-ts-lib development",\n  "build": \{/,
+      /^\{\n  "name": "demo-ts-lib",\n  "build": \{/,
     );
     expect(dockerfile).toContain(
       `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,

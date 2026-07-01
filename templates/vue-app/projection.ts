@@ -152,7 +152,7 @@ function operationsForVueApp(
     "vitest",
   ]);
   const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
-    name: `${context.projectName.value} Vue development`,
+    name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,

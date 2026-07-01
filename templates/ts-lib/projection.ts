@@ -178,8 +178,7 @@ function projectTsLibRootPackageScripts(): Record<string, string> {
       "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
     "format:write":
       "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-    lint:
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
     "lint:fix":
       "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
     typecheck: "tsc -p tsconfig.config.json --noEmit",
@@ -275,7 +274,7 @@ function operationsForTsLib(
     "oxc-format-lint",
   ]);
   const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
-    name: `${context.projectName.value} development`,
+    name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,

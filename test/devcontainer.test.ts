@@ -8,7 +8,7 @@ import {
 describe("Development Container planning", () => {
   it("plans a Dockerfile-first Node pnpm tool layer from the toolchain baseline", () => {
     const plan = dockerfileFirstNodePnpmDevcontainer({
-      name: "demo development",
+      name: "demo",
       layer: nodePnpmToolLayer({
         nodeVersion: "24",
         packageManagerPin: "pnpm@10.0.0",
@@ -18,7 +18,7 @@ describe("Development Container planning", () => {
     });
 
     expect(plan.devcontainer).toEqual({
-      name: "demo development",
+      name: "demo",
       build: {
         dockerfile: "Dockerfile",
         args: {
@@ -46,7 +46,7 @@ describe("Development Container planning", () => {
 
   it("plans a Dockerfile-first Rust tool layer with Node pnpm task tooling", () => {
     const plan = dockerfileFirstRustPnpmDevcontainer({
-      name: "demo Rust development",
+      name: "demo",
       nodeLayer: nodePnpmToolLayer({
         nodeVersion: "24",
         packageManagerPin: "pnpm@10.0.0",
@@ -57,7 +57,7 @@ describe("Development Container planning", () => {
     });
 
     expect(plan.devcontainer).toEqual({
-      name: "demo Rust development",
+      name: "demo",
       build: {
         dockerfile: "Dockerfile",
         args: {

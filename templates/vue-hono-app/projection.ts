@@ -262,7 +262,7 @@ function operationsForVueHonoApp(
     },
   );
   const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
-    name: `${context.projectName.value} full-stack development`,
+    name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,
