@@ -38,5 +38,7 @@ describe("Development Container planning", () => {
     expect(plan.dockerfile).toContain(
       "RUN corepack enable && corepack prepare pnpm@10.0.0 --activate",
     );
+    expect(plan.dockerfile).not.toContain("libnss3");
+    expect(plan.dockerfile).not.toContain("xvfb");
   });
 });

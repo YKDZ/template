@@ -8,7 +8,11 @@ import type {
   ProjectBlueprint,
 } from "../../src/declarations.js";
 import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
-import { nodePnpmDevcontainer } from "../../src/devcontainer.js";
+import {
+  browserTestToolLayer,
+  dockerfileFirstNodePnpmDevcontainer,
+  nodePnpmToolLayer,
+} from "../../src/devcontainer.js";
 import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
@@ -147,6 +151,16 @@ function operationsForVueApp(
     "tailwind",
     "vitest",
   ]);
+  const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
+    name: `${context.projectName.value} Vue development`,
+    layer: nodePnpmToolLayer({
+      nodeVersion: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+    }),
+    additionalLayers: [browserTestToolLayer()],
+    extensions: editorCustomization.extensions,
+    settings: editorCustomization.settings,
+  });
 
   return [
     {
@@ -309,13 +323,12 @@ function operationsForVueApp(
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
-      value: nodePnpmDevcontainer({
-        name: `${context.projectName.value} Vue development`,
-        nodeVersion: context.toolchain.nodeLtsMajor.value,
-        packageManagerPin: context.toolchain.packageManagerPin.value,
-        extensions: editorCustomization.extensions,
-        settings: editorCustomization.settings,
-      }),
+      value: developmentContainer.devcontainer,
+    },
+    {
+      kind: "writeText",
+      to: ".devcontainer/Dockerfile",
+      text: developmentContainer.dockerfile,
     },
     {
       kind: "writeJson",

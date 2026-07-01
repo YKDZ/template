@@ -343,6 +343,12 @@ describe("template init", () => {
         "utf8",
       );
       const files = await generatedFilePaths(projectDir);
+      const dockerfile = files.includes(".devcontainer/Dockerfile")
+        ? await readFile(
+            path.join(projectDir, ".devcontainer/Dockerfile"),
+            "utf8",
+          )
+        : undefined;
 
       expect(
         files.filter((file) => file.startsWith(".github/workflows/")),
@@ -392,7 +398,11 @@ describe("template init", () => {
         expect(checkWorkflow).not.toContain("run: ./scripts/check");
       }
 
-      if (preset.name === "ts-lib") {
+      if (
+        preset.name === "ts-lib" ||
+        preset.name === "vue-app" ||
+        preset.name === "vue-hono-app"
+      ) {
         expect(files).toContain(".devcontainer/Dockerfile");
         expect(devcontainer.build).toEqual({
           dockerfile: "Dockerfile",
@@ -402,6 +412,20 @@ describe("template init", () => {
           },
         });
         expect(devcontainer).not.toHaveProperty("features");
+        expect(dockerfile).toContain(
+          `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+        );
+        if (preset.name === "ts-lib") {
+          expect(dockerfile).not.toContain("libnss3");
+          expect(dockerfile).not.toContain("xvfb");
+        } else {
+          expect(dockerfile).toContain("libnss3");
+          expect(dockerfile).toContain("libgbm1");
+          expect(dockerfile).toContain("xvfb");
+          expect(dockerfile).not.toMatch(
+            /\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/,
+          );
+        }
       } else if (preset.name === "rust-bin") {
         expect(dependabot).toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("devcontainers/rust");
@@ -619,9 +643,17 @@ describe("template init", () => {
       "utf8",
     );
     const devcontainer = await readJson<{
+      build?: {
+        dockerfile: string;
+        args?: Record<string, string>;
+      };
       features?: Record<string, { version?: string; pnpmVersion?: string }>;
       postCreateCommand?: string;
     }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    const dockerfile = await readFile(
+      path.join(projectDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
 
     expect(rootPackageJson.engines.node).toBe("24");
     expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
@@ -634,13 +666,20 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version:");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
-      ([id]) => id.includes("features/node"),
-    )?.[1];
-    expect(nodeFeature).toEqual({
-      version: rootPackageJson.engines.node,
-      pnpmVersion: rootPackageJson.packageManager.replace(/^pnpm@/, ""),
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: rootPackageJson.engines.node,
+        PACKAGE_MANAGER_PIN: rootPackageJson.packageManager,
+      },
     });
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(dockerfile).toContain(
+      `FROM mcr.microsoft.com/devcontainers/typescript-node:${rootPackageJson.engines.node}`,
+    );
+    expect(dockerfile).toContain(
+      `RUN corepack enable && corepack prepare ${rootPackageJson.packageManager} --activate`,
+    );
     expect(devcontainer).not.toHaveProperty("postCreateCommand");
   }, 120_000);
 

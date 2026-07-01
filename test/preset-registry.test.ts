@@ -67,6 +67,172 @@ describe("Preset Registry", () => {
     });
   });
 
+  it("projects vue-app with a Dockerfile-first Development Container for browser checks", async () => {
+    const projection = findBuiltInPresetProjection("vue-app");
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-preset-registry-"),
+    );
+    const targetDir = path.join(workspace, "demo-vue-app");
+    const blueprint = projection!.blueprint({ targetDir });
+    const context = assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    const plan = projection!.project(context);
+    await projection!.render({ targetDir, plan });
+
+    const devcontainerText = await readFile(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+      "utf8",
+    );
+    const devcontainer = JSON.parse(devcontainerText) as {
+      build?: {
+        dockerfile: string;
+        args?: Record<string, string>;
+      };
+      features?: unknown;
+      customizations: {
+        vscode: {
+          extensions: string[];
+          settings: Record<string, unknown>;
+        };
+      };
+    };
+    const dockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+
+    expect(Object.keys(devcontainer)).toEqual([
+      "name",
+      "build",
+      "customizations",
+    ]);
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: "24",
+        PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+      },
+    });
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(devcontainer.customizations.vscode.extensions).toContain(
+      "Vue.volar",
+    );
+    expect(devcontainer.customizations.vscode.settings).toHaveProperty(
+      "oxc.enable",
+      true,
+    );
+    expect(devcontainerText).toMatch(
+      /^\{\n  "name": "demo-vue-app Vue development",\n  "build": \{/,
+    );
+    expect(dockerfile).toContain(
+      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+    );
+    expect(dockerfile).toContain(
+      "RUN apt-get update && apt-get install -y --no-install-recommends \\",
+    );
+    expect(dockerfile).toContain("libnss3");
+    expect(dockerfile).toContain("libgbm1");
+    expect(dockerfile).toContain("xvfb");
+    expect(dockerfile).not.toContain("npm install -g");
+  });
+
+  it("projects vue-hono-app with browser checks but no globally installed Turbo", async () => {
+    const projection = findBuiltInPresetProjection("vue-hono-app");
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-preset-registry-"),
+    );
+    const targetDir = path.join(workspace, "demo-vue-hono");
+    const blueprint = projection!.blueprint({
+      targetDir,
+      scope: "acme",
+    });
+    const context = assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+
+    const plan = projection!.project(context);
+    await projection!.render({ targetDir, plan });
+
+    const rootPackageJson = await readJson<{
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(targetDir, "package.json"));
+    const devcontainerText = await readFile(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+      "utf8",
+    );
+    const devcontainer = JSON.parse(devcontainerText) as {
+      build?: {
+        dockerfile: string;
+        args?: Record<string, string>;
+      };
+      features?: unknown;
+      customizations: {
+        vscode: {
+          extensions: string[];
+          settings: Record<string, unknown>;
+        };
+      };
+    };
+    const dockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+
+    expect(Object.keys(devcontainer)).toEqual([
+      "name",
+      "build",
+      "customizations",
+    ]);
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: "24",
+        PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+      },
+    });
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(devcontainer.customizations.vscode.extensions).toContain(
+      "Vue.volar",
+    );
+    expect(devcontainer.customizations.vscode.settings).toHaveProperty(
+      "oxc.enable",
+      true,
+    );
+    expect(devcontainer.customizations.vscode.settings).not.toHaveProperty(
+      "oxc.configPath",
+    );
+    expect(devcontainerText).toMatch(
+      /^\{\n  "name": "demo-vue-hono full-stack development",\n  "build": \{/,
+    );
+    expect(dockerfile).toContain(
+      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+    );
+    expect(dockerfile).toContain("libnss3");
+    expect(dockerfile).toContain("libgbm1");
+    expect(dockerfile).toContain("xvfb");
+    expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
+    expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
+    expect(rootPackageJson.scripts.check).toBe("turbo run check");
+    expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
+  });
+
   it.each(["hono-api", "vue-app", "vue-hono-app"] as const)(
     "projects %s package metadata from the Generation Context toolchain",
     async (preset) => {
@@ -109,7 +275,10 @@ describe("Preset Registry", () => {
         toolchain: { nodeLtsMajor: string; packageManagerPin: string };
       }>(path.join(targetDir, ".template/generated-by.json"));
       const devcontainer = await readJson<{
-        features: Record<string, { version: string }>;
+        build?: {
+          args?: Record<string, string>;
+        };
+        features?: Record<string, { version: string }>;
       }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
 
       expect(packageJson.engines.node).toBe("24");
@@ -119,9 +288,15 @@ describe("Preset Registry", () => {
         packageManagerPin: "pnpm@11.2.3",
         source: "online",
       });
-      expect(
-        devcontainer.features["ghcr.io/devcontainers/features/node:1"].version,
-      ).toBe("24");
+      if (preset === "hono-api") {
+        expect(
+          devcontainer.features?.["ghcr.io/devcontainers/features/node:1"]
+            ?.version,
+        ).toBe("24");
+      } else {
+        expect(devcontainer.build?.args?.NODE_VERSION).toBe("24");
+        expect(devcontainer).not.toHaveProperty("features");
+      }
     },
   );
 
