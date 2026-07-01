@@ -55,6 +55,14 @@ export type FixPlan = {
   readonly components: FixComponent[];
 };
 
+function renderTurboPackageFilter(owner: ComponentOwner): string {
+  if (owner.kind !== "package-boundary") {
+    throw new Error("Turbo package tasks require a Package Boundary owner.");
+  }
+
+  return `--filter './${owner.path}'`;
+}
+
 function renderCheckComponentCommand(component: CheckComponent): string {
   switch (component.kind) {
     case "typescript-typecheck":
@@ -72,7 +80,7 @@ function renderCheckComponentCommand(component: CheckComponent): string {
     case "turbo-check":
       return "turbo run check";
     case "turbo-package-check":
-      return "turbo run check --filter './packages/*'";
+      return `turbo run check ${renderTurboPackageFilter(component.owner)}`;
     case "rustfmt-check":
       return "cargo fmt --all -- --check";
     case "cargo-clippy":
@@ -91,7 +99,7 @@ function renderFixComponentCommand(component: FixComponent): string {
     case "turbo-fix":
       return "turbo run fix";
     case "turbo-package-fix":
-      return "turbo run fix --filter './packages/*'";
+      return `turbo run fix ${renderTurboPackageFilter(component.owner)}`;
     case "rustfmt-write":
       return "cargo fmt --all";
   }

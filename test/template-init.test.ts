@@ -263,6 +263,14 @@ describe("template init", () => {
       files: string[];
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const turboConfig = await readJson<{
+      tasks: {
+        check: {
+          dependsOn: string[];
+          command?: string;
+        };
+      };
+    }>(path.join(projectDir, "turbo.json"));
     const rootConfigTsconfig = await readJson<{
       include: string[];
     }>(path.join(projectDir, "tsconfig.config.json"));
@@ -303,7 +311,9 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
     expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
     expect(rootPackageJson.scripts.check).not.toBe("turbo run check");
+    expect(rootPackageJson.scripts.check).toContain("--filter './packages/*'");
     expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix");
+    expect(turboConfig.tasks.check).toEqual({ dependsOn: ["^build"] });
 
     expect(libraryPackageJson).toMatchObject({
       name: "@demo-ts-lib/demo-ts-lib",
@@ -319,7 +329,7 @@ describe("template init", () => {
       },
     });
     expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
     );
     expect(libraryPackageJson.devDependencies).toMatchObject({
       "@types/node": "catalog:",
@@ -1001,7 +1011,7 @@ describe("template init", () => {
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
     expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
     );
     expect(libraryPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix",

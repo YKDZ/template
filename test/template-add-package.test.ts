@@ -168,7 +168,7 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe(rootPackageJson.engines.node);
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
     );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
@@ -272,7 +272,7 @@ describe("template add package", () => {
     expect(packageJson.name).toBe("@demo-lib/shared");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
     );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");

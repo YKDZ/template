@@ -76,7 +76,7 @@ const tsLibRootBoundary: ComponentOwner = {
 
 const tsLibWorkspacePackageBoundary: ComponentOwner = {
   kind: "package-boundary",
-  path: ".",
+  path: "packages/*",
 };
 
 function planTsLibPackageChecks(): CheckPlan {
@@ -85,6 +85,7 @@ function planTsLibPackageChecks(): CheckPlan {
       { kind: "typescript-typecheck", owner: tsLibPackageBoundary },
       { kind: "oxc-lint", owner: tsLibPackageBoundary },
       { kind: "oxc-format-check", owner: tsLibPackageBoundary },
+      { kind: "build", owner: tsLibPackageBoundary },
     ],
     environmentNeeds: [],
   };

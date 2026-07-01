@@ -53,7 +53,7 @@ describe("module graph plans", () => {
       },
       {
         kind: "turbo-package-check",
-        owner: { kind: "package-boundary", path: "." },
+        owner: { kind: "package-boundary", path: "packages/*" },
       },
     ]);
 
@@ -68,7 +68,7 @@ describe("module graph plans", () => {
       },
       {
         kind: "turbo-package-fix",
-        owner: { kind: "package-boundary", path: "." },
+        owner: { kind: "package-boundary", path: "packages/*" },
       },
     ]);
   });
@@ -110,6 +110,31 @@ describe("module graph plans", () => {
     );
   });
 
+  it("renders Turbo package filters from package boundary ownership", () => {
+    expect(
+      renderRootCheckCommand({
+        components: [
+          {
+            kind: "turbo-package-check",
+            owner: { kind: "package-boundary", path: "apps/*" },
+          },
+        ],
+        environmentNeeds: [],
+      }),
+    ).toBe("turbo run check --filter './apps/*'");
+
+    expect(
+      renderFixCommand({
+        components: [
+          {
+            kind: "turbo-package-fix",
+            owner: { kind: "package-boundary", path: "apps/*" },
+          },
+        ],
+      }),
+    ).toBe("turbo run fix --filter './apps/*'");
+  });
+
   it("projects ts-lib root and member package scripts from Check and Fix Plans", () => {
     const projection = findBuiltInPresetProjection("ts-lib");
     const plan = projection!.project({
@@ -139,7 +164,8 @@ describe("module graph plans", () => {
     });
     expect(projectTsLibPackageScripts()).toEqual({
       build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
-      check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+      check:
+        "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
       fix: "pnpm run format:write && pnpm run lint:fix",
       "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
       "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
