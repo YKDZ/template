@@ -176,9 +176,49 @@ describe("template Repository maintenance", () => {
     expect(gitignore).toContain(".template/\n");
     expect(gitignore).toContain(".project-kit/\n");
     expect(gitignore).toContain(".pnpm-store/\n");
+    expect(gitignore).not.toContain(".devcontainer/\n");
   });
 
-  it("uses official root Dependabot config for npm and GitHub Actions", async () => {
+  it("keeps the root Development Container Dockerfile-first with intentional editor customizations", async () => {
+    const devcontainer = JSON.parse(
+      await readFile(
+        path.join(repoRoot, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    ) as {
+      name?: string;
+      build?: { dockerfile?: string };
+      customizations?: {
+        vscode?: {
+          extensions?: string[];
+          settings?: Record<string, unknown>;
+        };
+      };
+      features?: unknown;
+    };
+
+    expect(Object.keys(devcontainer).slice(0, 3)).toEqual([
+      "name",
+      "build",
+      "customizations",
+    ]);
+    expect(devcontainer.build?.dockerfile).toBe("Dockerfile");
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(devcontainer.customizations?.vscode?.extensions).toEqual([
+      "rust-lang.rust-analyzer",
+      "tamasfe.even-better-toml",
+      "vadimcn.vscode-lldb",
+      "serayuzgur.crates",
+      "redhat.vscode-yaml",
+      "fill-labs.dependi",
+    ]);
+    expect(devcontainer.customizations?.vscode?.settings).toMatchObject({
+      "editor.formatOnSave": true,
+      "rust-analyzer.check.command": "clippy",
+    });
+  });
+
+  it("uses official root Dependabot config for npm, GitHub Actions, and the Development Container Dockerfile", async () => {
     const dependabot = parseYaml(
       await readFile(path.join(repoRoot, ".github/dependabot.yml"), "utf8"),
     ) as {
@@ -201,6 +241,11 @@ describe("template Repository maintenance", () => {
         {
           "package-ecosystem": "github-actions",
           directory: "/",
+          schedule: { interval: "weekly" },
+        },
+        {
+          "package-ecosystem": "docker",
+          directory: "/.devcontainer",
           schedule: { interval: "weekly" },
         },
       ],
