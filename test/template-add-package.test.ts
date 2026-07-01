@@ -79,19 +79,13 @@ async function expectPathMissing(filePath: string): Promise<void> {
   });
 }
 
-async function initGeneratedWorkspace(projectDir: string): Promise<void> {
+async function initGeneratedWorkspace(
+  projectDir: string,
+  preset = "vue-hono-app",
+): Promise<void> {
   await execa(
     "pnpm",
-    [
-      "exec",
-      "tsx",
-      cliPath,
-      "init",
-      projectDir,
-      "--preset",
-      "vue-hono-app",
-      "--yes",
-    ],
+    ["exec", "tsx", cliPath, "init", projectDir, "--preset", preset, "--yes"],
     { cwd: repoRoot },
   );
 }
@@ -291,8 +285,12 @@ describe("template add package", () => {
     await expectPathMissing(
       path.join(projectDir, "packages/shared/oxfmt.config.ts"),
     );
-    await stat(path.join(projectDir, "apps/worker/oxlint.config.ts"));
-    await stat(path.join(projectDir, "apps/worker/oxfmt.config.ts"));
+    await expectPathMissing(
+      path.join(projectDir, "apps/worker/oxlint.config.ts"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "apps/worker/oxfmt.config.ts"),
+    );
     await expectPathMissing(
       path.join(projectDir, "packages/shared/.oxlintrc.json"),
     );
@@ -386,6 +384,86 @@ describe("template add package", () => {
       path.join(projectDir, "packages/shared/oxfmt.config.ts"),
     );
   });
+
+  it.each([
+    { projectName: "demo-api", preset: "hono-api" },
+    { projectName: "demo-vue", preset: "vue-app" },
+  ])(
+    "adds a TypeScript library package to the generated $preset workspace",
+    async ({ projectName, preset }) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-add-package-"),
+      );
+      const projectDir = path.join(workspace, projectName);
+
+      await initGeneratedWorkspace(projectDir, preset);
+
+      await execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "shared",
+        ],
+        { cwd: projectDir },
+      );
+      await execa(
+        tsxBin,
+        [cliPath, "blueprint", "validate", ".template/blueprint.json"],
+        {
+          cwd: projectDir,
+        },
+      );
+
+      const blueprint = await readJson<{
+        projectKind: string;
+        packages: Array<{ name: string; path: string }>;
+      }>(path.join(projectDir, ".template/blueprint.json"));
+      const workspaceYaml = await readFile(
+        path.join(projectDir, "pnpm-workspace.yaml"),
+        "utf8",
+      );
+      const rootTsconfig = await readJson<{
+        references: Array<{ path: string }>;
+      }>(path.join(projectDir, "tsconfig.json"));
+      const packageJson = await readJson<{
+        name: string;
+        scripts: Record<string, string>;
+        dependencies: Record<string, string>;
+        devDependencies: Record<string, string>;
+        engines: { node: string };
+      }>(path.join(projectDir, "packages/shared/package.json"));
+
+      expect(blueprint.projectKind).toBe("multi-package");
+      expect(blueprint.packages).toContainEqual({
+        name: `@${projectName}/shared`,
+        path: "packages/shared",
+      });
+      expect(workspaceYaml).toContain("  - packages/*");
+      expect(rootTsconfig.references).toContainEqual({
+        path: "./packages/shared/tsconfig.json",
+      });
+      expect(packageJson.name).toBe(`@${projectName}/shared`);
+      expect(packageJson.engines.node).toBe("24");
+      expect(packageJson.dependencies.valibot).toBe("catalog:");
+      expect(packageJson.devDependencies.typescript).toBe("catalog:");
+      expectSharedRootOxcScripts(packageJson.scripts);
+
+      await stat(path.join(projectDir, "packages/shared/src/index.ts"));
+      await expectPathMissing(
+        path.join(projectDir, "packages/shared/oxlint.config.ts"),
+      );
+      await expectPathMissing(
+        path.join(projectDir, "packages/shared/oxfmt.config.ts"),
+      );
+    },
+  );
 
   it("fails clearly when the requested preset does not support Package Addition", async () => {
     const workspace = await mkdtemp(
@@ -559,9 +637,16 @@ describe("template add package", () => {
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.hono).toBe("catalog:");
     expect(packageJson.scripts.check).toContain("pnpm run test");
+    expectSharedRootOxcScripts(packageJson.scripts);
 
     await stat(path.join(projectDir, "apps/worker/src/app.ts"));
     await stat(path.join(projectDir, "apps/worker/test/app.test.ts"));
+    await expectPathMissing(
+      path.join(projectDir, "apps/worker/oxlint.config.ts"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "apps/worker/oxfmt.config.ts"),
+    );
   });
 
   it("adds packages with the existing generated repository Node engine", async () => {
@@ -668,9 +753,16 @@ describe("template add package", () => {
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
+    expectSharedRootOxcScripts(packageJson.scripts);
 
     await stat(path.join(projectDir, "apps/admin/src/App.vue"));
     await stat(path.join(projectDir, "apps/admin/test/e2e/app.spec.ts"));
+    await expectPathMissing(
+      path.join(projectDir, "apps/admin/oxlint.config.ts"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "apps/admin/oxfmt.config.ts"),
+    );
   });
 
   it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {

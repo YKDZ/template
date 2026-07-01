@@ -519,18 +519,6 @@ function packageAdditionOperations(
         include: ["src/**/*.ts"],
       },
     },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "node/oxlint.config.ts",
-      to: `${packagePath}/oxlint.config.ts`,
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "oxfmt.config.ts",
-      to: `${packagePath}/oxfmt.config.ts`,
-    },
     { kind: "copyFile", from: "src/app.ts", to: `${packagePath}/src/app.ts` },
     {
       kind: "copyFile",

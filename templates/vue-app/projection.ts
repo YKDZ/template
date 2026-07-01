@@ -727,18 +727,6 @@ function packageAdditionOperations(
         include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
       },
     },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "vue/oxlint.config.ts",
-      to: `${packagePath}/oxlint.config.ts`,
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "oxfmt.config.ts",
-      to: `${packagePath}/oxfmt.config.ts`,
-    },
     { kind: "copyFile", from: "env.d.ts", to: `${packagePath}/env.d.ts` },
     { kind: "copyFile", from: "index.html", to: `${packagePath}/index.html` },
     {
