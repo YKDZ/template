@@ -179,16 +179,6 @@ export function projectTsLibPackageScripts(): Record<string, string> {
   };
 }
 
-function projectTsLibLocalOxcPackageScripts(): Record<string, string> {
-  return {
-    ...projectTsLibPackageScripts(),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
-  };
-}
-
 function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
@@ -444,7 +434,7 @@ function packageAdditionOperations(
             types: "./dist/index.d.ts",
           },
         },
-        scripts: projectTsLibLocalOxcPackageScripts(),
+        scripts: projectTsLibPackageScripts(),
         devDependencies: {
           "@types/node": "catalog:",
           oxfmt: "catalog:",
@@ -481,18 +471,6 @@ function packageAdditionOperations(
         },
         include: ["src/**/*.ts"],
       },
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "node/oxlint.config.ts",
-      to: `${packagePath}/oxlint.config.ts`,
-    },
-    {
-      kind: "copyFile",
-      sourceRoot: "sharedOxc",
-      from: "oxfmt.config.ts",
-      to: `${packagePath}/oxfmt.config.ts`,
     },
     {
       kind: "copyFile",

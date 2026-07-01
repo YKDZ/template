@@ -23,6 +23,27 @@ async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
 
+function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
+  expect(scripts["format:check"]).toBe(
+    "oxfmt --check --config ../../oxfmt.config.ts .",
+  );
+  expect(scripts["format:write"]).toBe(
+    "oxfmt --write --config ../../oxfmt.config.ts .",
+  );
+  expect(scripts.lint).toBe(
+    "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+  );
+  expect(scripts["lint:fix"]).toBe(
+    "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+  );
+}
+
+async function expectPathMissing(filePath: string): Promise<void> {
+  await expect(stat(filePath)).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+}
+
 async function initGeneratedWorkspace(projectDir: string): Promise<void> {
   await execa(
     "pnpm",
@@ -149,6 +170,7 @@ describe("template add package", () => {
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
+    expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     const addedPackageDependencySpecifiers = [
       ...Object.values(packageJson.devDependencies),
@@ -164,30 +186,22 @@ describe("template add package", () => {
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
     await stat(path.join(projectDir, "apps/worker/src/app.ts"));
-    await stat(path.join(projectDir, "packages/shared/oxlint.config.ts"));
-    await stat(path.join(projectDir, "packages/shared/oxfmt.config.ts"));
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/oxlint.config.ts"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/oxfmt.config.ts"),
+    );
     await stat(path.join(projectDir, "apps/worker/oxlint.config.ts"));
     await stat(path.join(projectDir, "apps/worker/oxfmt.config.ts"));
-    await expect(
-      stat(path.join(projectDir, "packages/shared/.oxlintrc.json")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      stat(path.join(projectDir, "packages/shared/.oxfmtrc.json")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      stat(path.join(projectDir, "apps/worker/.oxlintrc.json")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      stat(path.join(projectDir, "apps/worker/.oxfmtrc.json")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/.oxlintrc.json"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/.oxfmtrc.json"),
+    );
+    await expectPathMissing(path.join(projectDir, "apps/worker/.oxlintrc.json"));
+    await expectPathMissing(path.join(projectDir, "apps/worker/.oxfmtrc.json"));
   }, 120_000);
 
   it("adds a package to the generated TypeScript library workspace tracer", async () => {
@@ -260,9 +274,16 @@ describe("template add package", () => {
     expect(packageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
+    expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/oxlint.config.ts"),
+    );
+    await expectPathMissing(
+      path.join(projectDir, "packages/shared/oxfmt.config.ts"),
+    );
   });
 
   it("fails clearly when the requested preset does not support Package Addition", async () => {
