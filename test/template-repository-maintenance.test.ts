@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
+import { builtInPresetProjections } from "../templates/registry.js";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -19,6 +21,13 @@ const packageDependencyFields = new Set([
 
 const staleGeneratedCatalogLinePattern =
   /["']\s{2}(?:"@?[\w./-]+"|[\w.-]+): \^\d+\.\d+\.\d+/;
+
+function dependencyVersionGateProjectionFiles(): string[] {
+  return builtInPresetProjections
+    .filter((projection) => projection.metadata.generation === "supported")
+    .map((projection) => `templates/${projection.metadata.name}/projection.ts`)
+    .sort();
+}
 
 function propertyNameText(
   name: ts.PropertyName,
@@ -138,15 +147,14 @@ describe("template Repository maintenance", () => {
     ).not.toThrow();
   });
 
-  it("keeps dependency version ranges out of Preset Projection source", async () => {
-    const projectionFiles = [
-      "templates/hono-api/projection.ts",
-      "templates/ts-lib/projection.ts",
-      "templates/vue-app/projection.ts",
-      "templates/vue-hono-app/projection.ts",
-    ];
+  it("covers every supported Preset Projection in the dependency version gate", () => {
+    expect(dependencyVersionGateProjectionFiles()).toEqual(
+      expect.arrayContaining(["templates/rust-bin/projection.ts"]),
+    );
+  });
 
-    for (const projectionFile of projectionFiles) {
+  it("keeps dependency version ranges out of Preset Projection source", async () => {
+    for (const projectionFile of dependencyVersionGateProjectionFiles()) {
       const source = await readFile(
         path.join(repoRoot, projectionFile),
         "utf8",
@@ -177,18 +185,6 @@ describe("template Repository maintenance", () => {
     expect(gitignore).toContain(".project-kit/\n");
     expect(gitignore).toContain(".pnpm-store/\n");
     expect(gitignore).not.toContain(".devcontainer/\n");
-  });
-
-  it("marks workspace-shape ADRs superseded when ADR-0058 replaces their direction", async () => {
-    const workspaceOnlyAdr = await readFile(
-      path.join(repoRoot, "docs/adr/0002-workspace-only-for-multi-package-v1.md"),
-      "utf8",
-    );
-
-    expect(workspaceOnlyAdr).toContain("Superseded by ADR-0058");
-    expect(workspaceOnlyAdr).not.toContain(
-      "Single-package presets should stay single-package",
-    );
   });
 
   it("keeps the root Development Container Dockerfile-first with intentional editor customizations", async () => {

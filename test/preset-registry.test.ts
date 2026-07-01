@@ -408,6 +408,7 @@ describe("Preset Registry", () => {
       "utf8",
     );
     const devcontainer = JSON.parse(devcontainerText) as {
+      name: string;
       build?: {
         dockerfile: string;
         args?: Record<string, string>;
@@ -465,6 +466,7 @@ describe("Preset Registry", () => {
       "customizations",
       "mounts",
     ]);
+    expect(devcontainer.name).toBe("Demo Rust!");
     expect(devcontainer.build).toEqual({
       dockerfile: "Dockerfile",
       args: {
@@ -475,7 +477,7 @@ describe("Preset Registry", () => {
     });
     expect(devcontainer).not.toHaveProperty("features");
     expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-rust",\n  "build": \{/,
+      /^\{\n  "name": "Demo Rust!",\n  "build": \{/,
     );
     expect(devcontainer.mounts).toEqual([
       "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",

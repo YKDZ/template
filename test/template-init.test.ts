@@ -2423,9 +2423,13 @@ describe("template init", () => {
       path.join(rustPackageDir, "Cargo.lock"),
       "utf8",
     );
+    const devcontainer = await readJson<{ name: string }>(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
 
     expect(cargoToml).toContain('name = "my-demo-app-quoted"');
     expect(cargoLock).toContain('name = "my-demo-app-quoted"');
+    expect(devcontainer.name).toBe('My demo.app "quoted"');
   }, 120_000);
 
   it("generates a Vue app project through the CLI", async () => {

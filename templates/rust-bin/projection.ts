@@ -276,6 +276,7 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
 
 function operationsForRustBin(
   context: GenerationContext,
+  devcontainerName: string,
   projectName: string,
   packageScripts: Record<string, string>,
   checkPlan: CheckPlan,
@@ -285,7 +286,7 @@ function operationsForRustBin(
   ]);
   const rustLayer = rustToolLayer();
   const developmentContainer = dockerfileFirstRustPnpmDevcontainer({
-    name: projectName,
+    name: devcontainerName,
     nodeLayer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,
@@ -438,6 +439,7 @@ export const rustBinPresetProjection: PresetProjection = {
     const projectName = cargoPackageNameFromProjectName(
       context.projectName.value,
     );
+    const devcontainerName = context.projectName.value;
     const dependencyMaintenancePolicy =
       rustDependencyMaintenancePolicy(projectName);
 
@@ -445,6 +447,7 @@ export const rustBinPresetProjection: PresetProjection = {
       sourceRoot: templateSourceRoot(),
       operations: operationsForRustBin(
         context,
+        devcontainerName,
         projectName,
         packageScripts,
         checkPlan,
