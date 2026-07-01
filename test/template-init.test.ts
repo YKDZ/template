@@ -399,6 +399,7 @@ describe("template init", () => {
       }
 
       if (
+        preset.name === "hono-api" ||
         preset.name === "ts-lib" ||
         preset.name === "vue-app" ||
         preset.name === "vue-hono-app"
@@ -415,7 +416,7 @@ describe("template init", () => {
         expect(dockerfile).toContain(
           `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
         );
-        if (preset.name === "ts-lib") {
+        if (preset.name === "hono-api" || preset.name === "ts-lib") {
           expect(dockerfile).not.toContain("libnss3");
           expect(dockerfile).not.toContain("xvfb");
         } else {

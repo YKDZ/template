@@ -274,12 +274,21 @@ describe("Preset Registry", () => {
       const generationRecord = await readJson<{
         toolchain: { nodeLtsMajor: string; packageManagerPin: string };
       }>(path.join(targetDir, ".template/generated-by.json"));
-      const devcontainer = await readJson<{
+      const devcontainerText = await readFile(
+        path.join(targetDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      );
+      const devcontainer = JSON.parse(devcontainerText) as {
         build?: {
+          dockerfile?: string;
           args?: Record<string, string>;
         };
-        features?: Record<string, { version: string }>;
-      }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
+        features?: unknown;
+      };
+      const dockerfile = await readFile(
+        path.join(targetDir, ".devcontainer/Dockerfile"),
+        "utf8",
+      );
 
       expect(packageJson.engines.node).toBe("24");
       expect(packageJson.packageManager).toBe("pnpm@11.2.3");
@@ -288,14 +297,31 @@ describe("Preset Registry", () => {
         packageManagerPin: "pnpm@11.2.3",
         source: "online",
       });
+      expect(Object.keys(devcontainer)).toEqual([
+        "name",
+        "build",
+        "customizations",
+      ]);
+      expect(devcontainer.build).toEqual({
+        dockerfile: "Dockerfile",
+        args: {
+          NODE_VERSION: "24",
+          PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+        },
+      });
+      expect(devcontainer).not.toHaveProperty("features");
+      expect(dockerfile).toContain(
+        "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+      );
+      expect(dockerfile).toContain(
+        "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
+      );
       if (preset === "hono-api") {
-        expect(
-          devcontainer.features?.["ghcr.io/devcontainers/features/node:1"]
-            ?.version,
-        ).toBe("24");
-      } else {
-        expect(devcontainer.build?.args?.NODE_VERSION).toBe("24");
-        expect(devcontainer).not.toHaveProperty("features");
+        expect(devcontainerText).toMatch(
+          /^\{\n  "name": "demo-hono-api API development",\n  "build": \{/,
+        );
+        expect(dockerfile).not.toContain("libnss3");
+        expect(dockerfile).not.toContain("xvfb");
       }
     },
   );
