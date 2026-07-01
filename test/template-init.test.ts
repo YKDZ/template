@@ -428,7 +428,31 @@ describe("template init", () => {
         }
       } else if (preset.name === "rust-bin") {
         expect(dependabot).toContain("package-ecosystem: cargo");
-        expect(devcontainer.image).toContain("devcontainers/rust");
+        expect(files).toContain(".devcontainer/Dockerfile");
+        expect(files).toContain("rust-toolchain.toml");
+        expect(devcontainer.build).toEqual({
+          dockerfile: "Dockerfile",
+          args: {
+            NODE_VERSION: packageJson.engines.node,
+            PACKAGE_MANAGER_PIN: packageJson.packageManager,
+            RUST_TOOLCHAIN: "stable",
+          },
+        });
+        expect(devcontainer).not.toHaveProperty("features");
+        expect(devcontainer.mounts).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining("target=/usr/local/cargo/registry"),
+            expect.stringContaining("target=/usr/local/cargo/git"),
+            expect.stringContaining("target=${containerWorkspaceFolder}/target"),
+          ]),
+        );
+        expect(dockerfile).toContain(
+          `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+        );
+        expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+        expect(dockerfile).toContain(
+          "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
+        );
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
       } else {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
@@ -1763,6 +1787,10 @@ describe("template init", () => {
       path.join(projectDir, "rustfmt.toml"),
       "utf8",
     );
+    const rustToolchainToml = await readFile(
+      path.join(projectDir, "rust-toolchain.toml"),
+      "utf8",
+    );
     const packageJson = await readJson<{
       name: string;
       private: boolean;
@@ -1775,8 +1803,11 @@ describe("template init", () => {
       "utf8",
     );
     const devcontainer = await readJson<{
-      image: string;
-      features?: Record<string, { version?: string; pnpmVersion?: string }>;
+      build: {
+        dockerfile: string;
+        args: Record<string, string>;
+      };
+      features?: unknown;
       mounts: string[];
       postCreateCommand?: string;
       customizations: {
@@ -1799,6 +1830,10 @@ describe("template init", () => {
     }>(blueprintPath);
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    const dockerfile = await readFile(
+      path.join(projectDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
     const dependabot = await readFile(
@@ -1825,15 +1860,30 @@ describe("template init", () => {
     expect(cargoToml).toContain("[profile.release]");
     expect(cargoToml).toContain('strip = "symbols"');
     expect(rustfmtToml).toContain('edition = "2024"');
+    expect(rustToolchainToml).toContain('[toolchain]\nchannel = "stable"\n');
+    expect(rustToolchainToml).toContain(
+      'components = ["rustfmt", "clippy"]',
+    );
 
-    expect(devcontainer.image).toContain("rust");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
-      ([id]) => id.includes("features/node"),
-    )?.[1];
-    expect(nodeFeature).toEqual({
-      version: packageJson.engines.node,
-      pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: packageJson.engines.node,
+        PACKAGE_MANAGER_PIN: packageJson.packageManager,
+        RUST_TOOLCHAIN: "stable",
+      },
     });
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(dockerfile).toContain(
+      `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+    );
+    expect(dockerfile).toContain(
+      `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
+    );
+    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+    expect(dockerfile).toContain(
+      "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
+    );
     expect(devcontainer).not.toHaveProperty("postCreateCommand");
     expect(devcontainer.mounts).toEqual(
       expect.arrayContaining([

@@ -6,7 +6,11 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
-import { devcontainerNodeFeature } from "../../src/devcontainer.js";
+import {
+  dockerfileFirstRustPnpmDevcontainer,
+  nodePnpmToolLayer,
+  rustToolLayer,
+} from "../../src/devcontainer.js";
 import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
 import type { GenerationContext } from "../../src/generation-context.js";
 import {
@@ -152,6 +156,15 @@ function cargoLock(projectName: string): string {
   ].join("\n");
 }
 
+function rustToolchainToml(toolchain: string): string {
+  return [
+    "[toolchain]",
+    `channel = "${toolchain}"`,
+    'components = ["rustfmt", "clippy"]',
+    "",
+  ].join("\n");
+}
+
 function packageJson(
   context: GenerationContext,
   projectName: string,
@@ -189,6 +202,17 @@ function operationsForRustBin(
   const editorCustomization = editorCustomizationForCapabilities([
     "rust-tooling",
   ]);
+  const rustLayer = rustToolLayer();
+  const developmentContainer = dockerfileFirstRustPnpmDevcontainer({
+    name: `${projectName} Rust development`,
+    nodeLayer: nodePnpmToolLayer({
+      nodeVersion: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+    }),
+    rustLayer,
+    extensions: editorCustomization.extensions,
+    settings: editorCustomization.settings,
+  });
 
   return [
     {
@@ -218,6 +242,11 @@ function operationsForRustBin(
     },
     {
       kind: "writeText",
+      to: "rust-toolchain.toml",
+      text: rustToolchainToml(rustLayer.toolchain),
+    },
+    {
+      kind: "writeText",
       to: ".gitignore",
       text: ["target", ".env", ".template/", ".pnpm-store/", ""].join("\n"),
     },
@@ -239,25 +268,12 @@ function operationsForRustBin(
     {
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
-      value: {
-        name: `${projectName} Rust development`,
-        image: "mcr.microsoft.com/devcontainers/rust:1",
-        features: devcontainerNodeFeature({
-          nodeVersion: context.toolchain.nodeLtsMajor.value,
-          packageManagerPin: context.toolchain.packageManagerPin.value,
-        }),
-        mounts: [
-          "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
-          "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
-          "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
-        ],
-        customizations: {
-          vscode: {
-            extensions: editorCustomization.extensions,
-            settings: editorCustomization.settings,
-          },
-        },
-      },
+      value: developmentContainer.devcontainer,
+    },
+    {
+      kind: "writeText",
+      to: ".devcontainer/Dockerfile",
+      text: developmentContainer.dockerfile,
     },
     {
       kind: "writeJson",

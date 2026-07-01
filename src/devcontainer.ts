@@ -55,6 +55,11 @@ export type DevelopmentContainerBrowserTestLayer = {
   readonly kind: "browser-test";
 };
 
+export type DevelopmentContainerRustLayer = {
+  readonly kind: "rust";
+  readonly toolchain: string;
+};
+
 export type DevelopmentContainerPlan = {
   readonly devcontainer: Record<string, unknown>;
   readonly dockerfile: string;
@@ -73,6 +78,12 @@ export function nodePnpmToolLayer(options: {
 
 export function browserTestToolLayer(): DevelopmentContainerBrowserTestLayer {
   return { kind: "browser-test" };
+}
+
+export function rustToolLayer(options: {
+  readonly toolchain?: string;
+} = {}): DevelopmentContainerRustLayer {
+  return { kind: "rust", toolchain: options.toolchain ?? "stable" };
 }
 
 function renderBrowserTestLayer(): readonly string[] {
@@ -101,6 +112,28 @@ function renderBrowserTestLayer(): readonly string[] {
     "    libxrandr2 \\",
     "    xvfb \\",
     "    && rm -rf /var/lib/apt/lists/*",
+    "",
+  ];
+}
+
+function renderRustLayer(layer: DevelopmentContainerRustLayer): readonly string[] {
+  return [
+    `ARG RUST_TOOLCHAIN=${layer.toolchain}`,
+    "ENV RUSTUP_HOME=/usr/local/rustup",
+    "ENV CARGO_HOME=/usr/local/cargo",
+    'ENV PATH="/usr/local/cargo/bin:${PATH}"',
+    "RUN apt-get update && apt-get install -y --no-install-recommends \\",
+    "    build-essential \\",
+    "    ca-certificates \\",
+    "    curl \\",
+    "    pkg-config \\",
+    "    libssl-dev \\",
+    "    && rm -rf /var/lib/apt/lists/*",
+    "RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \\",
+    "    sh -s -- -y --profile minimal --default-toolchain none \\",
+    "    && rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy \\",
+    "    && rustup default ${RUST_TOOLCHAIN} \\",
+    "    && chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}",
     "",
   ];
 }
@@ -145,6 +178,47 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
       `RUN corepack enable && corepack prepare ${options.layer.packageManagerPin} --activate`,
       "",
       ...additionalDockerfileLines,
+    ].join("\n"),
+  };
+}
+
+export function dockerfileFirstRustPnpmDevcontainer(options: {
+  readonly name: string;
+  readonly nodeLayer: DevelopmentContainerNodePnpmLayer;
+  readonly rustLayer: DevelopmentContainerRustLayer;
+  readonly extensions: readonly string[];
+  readonly settings?: Record<string, unknown>;
+}): DevelopmentContainerPlan {
+  return {
+    devcontainer: {
+      name: options.name,
+      build: {
+        dockerfile: "Dockerfile",
+        args: {
+          NODE_VERSION: options.nodeLayer.nodeVersion,
+          PACKAGE_MANAGER_PIN: options.nodeLayer.packageManagerPin,
+          RUST_TOOLCHAIN: options.rustLayer.toolchain,
+        },
+      },
+      customizations: {
+        vscode: {
+          extensions: options.extensions,
+          ...(options.settings ? { settings: options.settings } : {}),
+        },
+      },
+      mounts: [
+        "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+        "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
+        "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
+      ],
+    },
+    dockerfile: [
+      `FROM mcr.microsoft.com/devcontainers/typescript-node:${options.nodeLayer.nodeVersion}`,
+      "",
+      'SHELL ["/bin/bash", "-o", "pipefail", "-c"]',
+      `RUN corepack enable && corepack prepare ${options.nodeLayer.packageManagerPin} --activate`,
+      "",
+      ...renderRustLayer(options.rustLayer),
     ].join("\n"),
   };
 }

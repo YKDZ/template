@@ -354,10 +354,26 @@ describe("Preset Registry", () => {
       command: string;
       toolchain: { nodeLtsMajor: string; packageManagerPin: string };
     }>(path.join(targetDir, ".template/generated-by.json"));
-    const devcontainer = await readJson<{
-      image: string;
-      features: Record<string, { version: string }>;
-    }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
+    const devcontainerText = await readFile(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+      "utf8",
+    );
+    const devcontainer = JSON.parse(devcontainerText) as {
+      build?: {
+        dockerfile: string;
+        args?: Record<string, string>;
+      };
+      features?: unknown;
+      mounts?: string[];
+    };
+    const dockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+    const rustToolchain = await readFile(
+      path.join(targetDir, "rust-toolchain.toml"),
+      "utf8",
+    );
     const cargoToml = await readFile(
       path.join(targetDir, "Cargo.toml"),
       "utf8",
@@ -380,10 +396,41 @@ describe("Preset Registry", () => {
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.2.3" },
     });
     expect(cargoToml).toContain('name = "demo-rust"');
-    expect(devcontainer.image).toContain("devcontainers/rust");
-    expect(
-      devcontainer.features["ghcr.io/devcontainers/features/node:1"].version,
-    ).toBe("24");
+    expect(Object.keys(devcontainer)).toEqual([
+      "name",
+      "build",
+      "customizations",
+      "mounts",
+    ]);
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: "24",
+        PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+        RUST_TOOLCHAIN: "stable",
+      },
+    });
+    expect(devcontainer).not.toHaveProperty("features");
+    expect(devcontainerText).toMatch(
+      /^\{\n  "name": "demo-rust Rust development",\n  "build": \{/,
+    );
+    expect(devcontainer.mounts).toEqual([
+      "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+      "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
+      "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
+    ]);
+    expect(dockerfile).toContain(
+      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+    );
+    expect(dockerfile).toContain(
+      "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
+    );
+    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+    expect(dockerfile).toContain("rustup toolchain install");
+    expect(dockerfile).toContain("rustfmt");
+    expect(dockerfile).toContain("clippy");
+    expect(rustToolchain).toContain('[toolchain]\nchannel = "stable"\n');
+    expect(rustToolchain).toContain('components = ["rustfmt", "clippy"]');
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(dependabot).toContain("package-ecosystem: npm");

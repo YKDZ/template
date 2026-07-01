@@ -366,7 +366,9 @@ function assertFoundationTextPath(relativePath: string): void {
 
   if (
     isRootLevel &&
-    ["Cargo.toml", "Cargo.lock", "rustfmt.toml"].includes(normalizedPath)
+    ["Cargo.toml", "Cargo.lock", "rustfmt.toml", "rust-toolchain.toml"].includes(
+      normalizedPath,
+    )
   ) {
     return;
   }
