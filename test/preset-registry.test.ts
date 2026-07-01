@@ -372,14 +372,13 @@ describe("Preset Registry", () => {
 
     expect(
       plan.checkPlan.components.map((component) => component.kind),
-    ).toEqual(["rustfmt-check", "cargo-clippy", "cargo-test"]);
+    ).toEqual(["turbo-package-check"]);
     expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
-      "rustfmt-write",
+      "turbo-package-fix",
     ]);
     expect(plan.packageScripts).toEqual({
-      check:
-        "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-      fix: "cargo fmt --all",
+      check: "turbo run check --filter './packages/*'",
+      fix: "turbo run fix --filter './packages/*'",
     });
     expect(plan.dependencyMaintenancePolicy.ecosystems).toEqual([
       "npm",
@@ -393,8 +392,13 @@ describe("Preset Registry", () => {
       name: string;
       engines: { node: string };
       packageManager: string;
+      devDependencies?: Record<string, string>;
       scripts: Record<string, string>;
     }>(path.join(targetDir, "package.json"));
+    const rustPackageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+    }>(path.join(targetDir, "packages/demo-rust/package.json"));
     const generationRecord = await readJson<{
       command: string;
       toolchain: { nodeLtsMajor: string; packageManagerPin: string };
@@ -420,7 +424,7 @@ describe("Preset Registry", () => {
       "utf8",
     );
     const cargoToml = await readFile(
-      path.join(targetDir, "Cargo.toml"),
+      path.join(targetDir, "packages/demo-rust/Cargo.toml"),
       "utf8",
     );
     const checkWorkflow = await readFile(
@@ -434,8 +438,22 @@ describe("Preset Registry", () => {
 
     expect(packageJson.name).toBe("demo-rust");
     expect(packageJson.scripts).toEqual(plan.packageScripts);
+    expect(packageJson.devDependencies).toEqual({ turbo: "catalog:" });
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
+    expect(rustPackageJson).toEqual({
+      name: "demo-rust-native",
+      version: "0.0.0",
+      private: true,
+      scripts: {
+        check:
+          "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+        fix: "cargo fmt --all",
+      },
+      engines: {
+        node: "24",
+      },
+    });
     expect(generationRecord).toMatchObject({
       command: "template init --preset rust-bin",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.2.3" },

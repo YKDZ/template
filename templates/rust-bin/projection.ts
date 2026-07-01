@@ -7,6 +7,10 @@ import type {
   ProjectBlueprint,
 } from "../../src/declarations.js";
 import {
+  collectGeneratedManifestCatalogDependencies,
+  renderGeneratedPnpmWorkspaceYaml,
+} from "../../src/dependency-catalog.js";
+import {
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
@@ -21,6 +25,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import type {
+  PresetBlueprintOptions,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -41,10 +46,10 @@ export const rustBinPresetMetadata: BuiltInPreset = {
   name: "rust-bin",
   title: "Rust binary",
   description:
-    "Single-package Rust native binary with rustfmt, clippy, and cargo tests.",
+    "Rust native binary workspace with rustfmt, clippy, and cargo tests.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
-  supportedProjectKinds: ["single-package"],
+  supportedProjectKinds: ["multi-package"],
   features: [
     "root-check",
     "fix-command",
@@ -66,6 +71,11 @@ const rustPackageBoundary: ComponentOwner = {
   path: ".",
 };
 
+const rustWorkspacePackageBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: "packages/*",
+};
+
 function cargoPackageNameFromProjectName(projectName: string): string {
   const slug = projectName
     .normalize("NFKD")
@@ -75,6 +85,18 @@ function cargoPackageNameFromProjectName(projectName: string): string {
     .replace(/^-+|-+$/g, "");
 
   return slug || "rust-bin";
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function rustWorkspacePackageName(projectName: string): string {
+  return `${cargoPackageNameFromProjectName(projectName)}-native`;
+}
+
+function rustWorkspacePackagePath(projectName: string): string {
+  return `packages/${cargoPackageNameFromProjectName(projectName)}`;
 }
 
 export function planRustBinChecks(): CheckPlan {
@@ -88,19 +110,46 @@ export function planRustBinChecks(): CheckPlan {
   };
 }
 
+function planRustBinRootChecks(): CheckPlan {
+  return {
+    components: [
+      { kind: "turbo-package-check", owner: rustWorkspacePackageBoundary },
+    ],
+    environmentNeeds: [],
+  };
+}
+
 export function planRustBinFixes(): FixPlan {
   return {
     components: [{ kind: "rustfmt-write", owner: rustPackageBoundary }],
   };
 }
 
-export function rustBinBlueprint(): ProjectBlueprint {
+function planRustBinRootFixes(): FixPlan {
+  return {
+    components: [
+      { kind: "turbo-package-fix", owner: rustWorkspacePackageBoundary },
+    ],
+  };
+}
+
+export function rustBinBlueprint(
+  options: PresetBlueprintOptions = { targetDir: process.cwd() },
+): ProjectBlueprint {
+  const projectName = projectNameFromDir(options.targetDir);
+
   return {
     schemaVersion: 1,
     preset: "rust-bin",
     packageManager: "pnpm",
-    projectKind: "single-package",
+    projectKind: "multi-package",
     features: [...rustBinPresetMetadata.features],
+    packages: [
+      {
+        name: rustWorkspacePackageName(projectName),
+        path: rustWorkspacePackagePath(projectName),
+      },
+    ],
   };
 }
 
@@ -108,6 +157,13 @@ export function projectRustBinPackageScripts(): Record<string, string> {
   return {
     check: renderRootCheckCommand(planRustBinChecks()),
     fix: renderFixCommand(planRustBinFixes()),
+  };
+}
+
+function projectRustBinRootPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planRustBinRootChecks()),
+    fix: renderFixCommand(planRustBinRootFixes()),
   };
 }
 
@@ -175,10 +231,28 @@ function packageJson(
     version: "0.0.0",
     private: true,
     scripts: packageScripts,
+    devDependencies: {
+      turbo: "catalog:",
+    },
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
     packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function rustWorkspacePackageJson(
+  context: GenerationContext,
+  projectName: string,
+): Record<string, unknown> {
+  return {
+    name: rustWorkspacePackageName(projectName),
+    version: "0.0.0",
+    private: true,
+    scripts: projectRustBinPackageScripts(),
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
   };
 }
 
@@ -213,31 +287,57 @@ function operationsForRustBin(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const workspacePackagePath = rustWorkspacePackagePath(projectName);
+  const rootManifest = packageJson(context, projectName, packageScripts);
+  const packageManifest = rustWorkspacePackageJson(context, projectName);
 
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(context, projectName, packageScripts),
+      value: rootManifest,
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
-      text: ["packages:", "  - .", ""].join("\n"),
+      text: renderGeneratedPnpmWorkspaceYaml({
+        packages: ["packages/*"],
+        dependencies: collectGeneratedManifestCatalogDependencies([
+          rootManifest,
+          packageManifest,
+        ]),
+      }),
+    },
+    {
+      kind: "writeJson",
+      to: "turbo.json",
+      value: {
+        tasks: {
+          check: {},
+          fix: {
+            cache: false,
+          },
+        },
+      },
+    },
+    {
+      kind: "writeJson",
+      to: `${workspacePackagePath}/package.json`,
+      value: packageManifest,
     },
     {
       kind: "writeText",
-      to: "Cargo.toml",
+      to: `${workspacePackagePath}/Cargo.toml`,
       text: cargoToml(projectName),
     },
     {
       kind: "writeText",
-      to: "Cargo.lock",
+      to: `${workspacePackagePath}/Cargo.lock`,
       text: cargoLock(projectName),
     },
     {
       kind: "writeText",
-      to: "rustfmt.toml",
+      to: `${workspacePackagePath}/rustfmt.toml`,
       text: ['edition = "2024"', "max_width = 100", ""].join("\n"),
     },
     {
@@ -253,12 +353,12 @@ function operationsForRustBin(
     {
       kind: "copyFile",
       from: "src/main.rs",
-      to: "src/main.rs",
+      to: `${workspacePackagePath}/src/main.rs`,
     },
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
-      value: rustBinBlueprint(),
+      value: context.blueprint,
     },
     {
       kind: "writeJson",
@@ -323,9 +423,9 @@ export const rustBinPresetProjection: PresetProjection = {
   metadata: rustBinPresetMetadata,
   blueprint: rustBinBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planRustBinChecks();
-    const fixPlan = planRustBinFixes();
-    const packageScripts = projectRustBinPackageScripts();
+    const checkPlan = planRustBinRootChecks();
+    const fixPlan = planRustBinRootFixes();
+    const packageScripts = projectRustBinRootPackageScripts();
     const projectName = cargoPackageNameFromProjectName(
       context.projectName.value,
     );

@@ -2188,12 +2188,13 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
+    const rustPackageDir = path.join(projectDir, "packages/demo-rust");
     const cargoToml = await readFile(
-      path.join(projectDir, "Cargo.toml"),
+      path.join(rustPackageDir, "Cargo.toml"),
       "utf8",
     );
     const rustfmtToml = await readFile(
-      path.join(projectDir, "rustfmt.toml"),
+      path.join(rustPackageDir, "rustfmt.toml"),
       "utf8",
     );
     const rustToolchainToml = await readFile(
@@ -2203,10 +2204,16 @@ describe("template init", () => {
     const packageJson = await readJson<{
       name: string;
       private: boolean;
+      devDependencies?: Record<string, string>;
       engines: { node: string };
       scripts: Record<string, string>;
       packageManager: string;
     }>(path.join(projectDir, "package.json"));
+    const rustPackageJson = await readJson<{
+      name: string;
+      private: boolean;
+      scripts: Record<string, string>;
+    }>(path.join(rustPackageDir, "package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
@@ -2235,7 +2242,9 @@ describe("template init", () => {
     const blueprintPath = path.join(projectDir, ".template/blueprint.json");
     const blueprint = await readJson<{
       preset: string;
+      projectKind?: string;
       packageManager?: string;
+      packages?: Array<{ name: string; path: string }>;
     }>(blueprintPath);
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
@@ -2254,13 +2263,27 @@ describe("template init", () => {
     expect(packageJson.name).toBe("demo-rust");
     expect(packageJson.private).toBe(true);
     expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(packageJson.devDependencies).toEqual({
+      turbo: "catalog:",
+    });
     expect(packageJson.scripts).toEqual({
+      check: "turbo run check --filter './packages/*'",
+      fix: "turbo run fix --filter './packages/*'",
+    });
+    expect(rustPackageJson).toMatchObject({
+      name: "demo-rust-native",
+      private: true,
+    });
+    expect(rustPackageJson.scripts).toEqual({
       check:
         "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
       fix: "cargo fmt --all",
     });
-    expect(packageJson.scripts.fix).not.toContain("clippy");
-    expect(workspaceYaml).toBe(["packages:", "  - .", ""].join("\n"));
+    expect(rustPackageJson.scripts.fix).not.toContain("clippy");
+    expect(workspaceYaml).toContain("packages:\n  - packages/*\n");
+    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
+      turbo: expect.stringMatching(/^\^/),
+    });
 
     expect(cargoToml).toContain('name = "demo-rust"');
     expect(cargoToml).toContain('edition = "2024"');
@@ -2313,7 +2336,11 @@ describe("template init", () => {
     expect(workspaceSettings).toEqual(expectedEditorCustomization.settings);
 
     expect(blueprint.preset).toBe("rust-bin");
+    expect(blueprint.projectKind).toBe("multi-package");
     expect(blueprint.packageManager).toBe("pnpm");
+    expect(blueprint.packages).toEqual([
+      { name: "demo-rust-native", path: "packages/demo-rust" },
+    ]);
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
     expect(checkWorkflow).toContain("components: rustfmt, clippy");
     expect(checkWorkflow).toContain("node-version-file: package.json");
@@ -2330,8 +2357,18 @@ describe("template init", () => {
     expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
     expect(files.some((file) => file.endsWith(".oxfmtrc.json"))).toBe(false);
 
-    await stat(path.join(projectDir, "src/main.rs"));
-    await stat(path.join(projectDir, "Cargo.lock"));
+    await stat(path.join(rustPackageDir, "src/main.rs"));
+    await stat(path.join(rustPackageDir, "Cargo.lock"));
+    await expect(stat(path.join(projectDir, "Cargo.toml"))).rejects.toMatchObject(
+      {
+        code: "ENOENT",
+      },
+    );
+    await expect(stat(path.join(projectDir, "src/main.rs"))).rejects.toMatchObject(
+      {
+        code: "ENOENT",
+      },
+    );
     await expect(
       stat(path.join(projectDir, "scripts/check")),
     ).rejects.toMatchObject({
@@ -2371,12 +2408,16 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
+    const rustPackageDir = path.join(
+      projectDir,
+      "packages/my-demo-app-quoted",
+    );
     const cargoToml = await readFile(
-      path.join(projectDir, "Cargo.toml"),
+      path.join(rustPackageDir, "Cargo.toml"),
       "utf8",
     );
     const cargoLock = await readFile(
-      path.join(projectDir, "Cargo.lock"),
+      path.join(rustPackageDir, "Cargo.lock"),
       "utf8",
     );
 

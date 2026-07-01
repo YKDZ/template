@@ -373,6 +373,14 @@ function assertFoundationTextPath(relativePath: string): void {
     return;
   }
 
+  if (
+    /^packages\/[A-Za-z0-9._-]+\/(?:Cargo\.toml|Cargo\.lock|rustfmt\.toml)$/.test(
+      normalizedPath,
+    )
+  ) {
+    return;
+  }
+
   if (/^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/.test(normalizedPath)) {
     return;
   }
