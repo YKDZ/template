@@ -84,8 +84,18 @@ describe("generation context", () => {
       engines: { node: string };
       packageManager: string;
     }>(path.join(targetDir, "package.json"));
-    const devcontainer = await readJson<{ image: string }>(
-      path.join(targetDir, ".devcontainer/devcontainer.json"),
+    const devcontainer = await readJson<{
+      build: {
+        dockerfile: string;
+        args: {
+          NODE_VERSION: string;
+          PACKAGE_MANAGER_PIN: string;
+        };
+      };
+    }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
+    const dockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
     );
     const generationRecord = await readJson<{
       toolchain: {
@@ -97,8 +107,18 @@ describe("generation context", () => {
 
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
-    expect(devcontainer.image).toBe(
-      "mcr.microsoft.com/devcontainers/typescript-node:24",
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: "24",
+        PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+      },
+    });
+    expect(dockerfile).toContain(
+      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+    );
+    expect(dockerfile).toContain(
+      "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
     );
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",

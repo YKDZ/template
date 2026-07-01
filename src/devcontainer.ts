@@ -44,3 +44,58 @@ export function nodePnpmDevcontainer(options: {
     },
   };
 }
+
+export type DevelopmentContainerNodePnpmLayer = {
+  readonly kind: "node-pnpm";
+  readonly nodeVersion: string;
+  readonly packageManagerPin: string;
+};
+
+export type DevelopmentContainerPlan = {
+  readonly devcontainer: Record<string, unknown>;
+  readonly dockerfile: string;
+};
+
+export function nodePnpmToolLayer(options: {
+  readonly nodeVersion: string;
+  readonly packageManagerPin: string;
+}): DevelopmentContainerNodePnpmLayer {
+  return {
+    kind: "node-pnpm",
+    nodeVersion: options.nodeVersion,
+    packageManagerPin: options.packageManagerPin,
+  };
+}
+
+export function dockerfileFirstNodePnpmDevcontainer(options: {
+  readonly name: string;
+  readonly layer: DevelopmentContainerNodePnpmLayer;
+  readonly extensions: readonly string[];
+  readonly settings?: Record<string, unknown>;
+}): DevelopmentContainerPlan {
+  return {
+    devcontainer: {
+      name: options.name,
+      build: {
+        dockerfile: "Dockerfile",
+        args: {
+          NODE_VERSION: options.layer.nodeVersion,
+          PACKAGE_MANAGER_PIN: options.layer.packageManagerPin,
+        },
+      },
+      customizations: {
+        vscode: {
+          extensions: options.extensions,
+          ...(options.settings ? { settings: options.settings } : {}),
+        },
+      },
+    },
+    dockerfile: [
+      `FROM mcr.microsoft.com/devcontainers/typescript-node:${options.layer.nodeVersion}`,
+      "",
+      "SHELL [\"/bin/bash\", \"-o\", \"pipefail\", \"-c\"]",
+      `RUN corepack enable && corepack prepare ${options.layer.packageManagerPin} --activate`,
+      "",
+    ].join("\n"),
+  };
+}

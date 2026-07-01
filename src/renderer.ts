@@ -220,6 +220,13 @@ const packageJsonRootKeyOrder = [
   "packageManager"
 ];
 
+const devcontainerJsonRootKeyOrder = [
+  "name",
+  "build",
+  "image",
+  "customizations"
+];
+
 function compareJsonKeys(
   left: string,
   right: string,
@@ -239,11 +246,17 @@ function compareJsonKeys(
 }
 
 function rootKeyOrderForPath(toPath: string): Map<string, number> | undefined {
-  if (path.basename(toPath) !== "package.json") {
-    return undefined;
+  if (path.basename(toPath) === "package.json") {
+    return new Map(packageJsonRootKeyOrder.map((key, index) => [key, index]));
   }
 
-  return new Map(packageJsonRootKeyOrder.map((key, index) => [key, index]));
+  if (toPath.split(path.sep).join("/") === ".devcontainer/devcontainer.json") {
+    return new Map(
+      devcontainerJsonRootKeyOrder.map((key, index) => [key, index])
+    );
+  }
+
+  return undefined;
 }
 
 function serializeJson(
@@ -363,6 +376,10 @@ function assertFoundationTextPath(relativePath: string): void {
   }
 
   if (/^\.github\/dependabot\.ya?ml$/.test(normalizedPath)) {
+    return;
+  }
+
+  if (normalizedPath === ".devcontainer/Dockerfile") {
     return;
   }
 

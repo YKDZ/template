@@ -295,7 +295,7 @@ describe("template init", () => {
       (preset) => preset.generation === "supported",
     );
     const outOfScopePathPatterns = [
-      /(^|\/)Dockerfile$/,
+      /^(?!\.devcontainer\/Dockerfile$)(?:.*\/)?Dockerfile$/,
       /(^|\/)\.dockerignore$/,
       /(^|\/)docker-compose\.ya?ml$/,
       /(^|\/)compose\.ya?ml$/,
@@ -311,7 +311,11 @@ describe("template init", () => {
         packageManager?: string;
       }>(path.join(projectDir, ".template/blueprint.json"));
       const devcontainer = await readJson<{
-        image: string;
+        image?: string;
+        build?: {
+          dockerfile: string;
+          args?: Record<string, string>;
+        };
         features?: Record<string, { version?: string; pnpmVersion?: string }>;
         postCreateCommand?: string;
         mounts?: string[];
@@ -388,21 +392,31 @@ describe("template init", () => {
         expect(checkWorkflow).not.toContain("run: ./scripts/check");
       }
 
-      if (preset.name === "rust-bin") {
+      if (preset.name === "ts-lib") {
+        expect(files).toContain(".devcontainer/Dockerfile");
+        expect(devcontainer.build).toEqual({
+          dockerfile: "Dockerfile",
+          args: {
+            NODE_VERSION: packageJson.engines.node,
+            PACKAGE_MANAGER_PIN: packageJson.packageManager,
+          },
+        });
+        expect(devcontainer).not.toHaveProperty("features");
+      } else if (preset.name === "rust-bin") {
         expect(dependabot).toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("devcontainers/rust");
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
       } else {
         expect(dependabot).not.toContain("package-ecosystem: cargo");
         expect(devcontainer.image).toContain("typescript-node:24");
+        const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
+          ([id]) => id.includes("features/node"),
+        )?.[1];
+        expect(nodeFeature).toEqual({
+          version: packageJson.engines.node,
+          pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+        });
       }
-      const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
-        ([id]) => id.includes("features/node"),
-      )?.[1];
-      expect(nodeFeature).toEqual({
-        version: packageJson.engines.node,
-        pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
-      });
       expect(devcontainer).not.toHaveProperty("postCreateCommand");
 
       const extensions = devcontainer.customizations.vscode.extensions;
@@ -497,20 +511,47 @@ describe("template init", () => {
     }
   }, 240_000);
 
-  it("generates single-package Node metadata as the Node and pnpm version authority", async () => {
+  it("generates the TypeScript library Development Container from the Node pnpm toolchain baseline", async () => {
     const projectDir = await generatePresetProject("ts-lib");
     const packageJson = await readJson<{
       engines: { node: string };
       packageManager: string;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
+    const tsconfig = await readJson<{
+      compilerOptions: { paths?: Record<string, string[]> };
+    }>(path.join(projectDir, "tsconfig.json"));
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    const devcontainer = await readJson<{
-      features?: Record<string, { version?: string; pnpmVersion?: string }>;
+    const devcontainerText = await readFile(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+      "utf8",
+    );
+    const devcontainer = JSON.parse(devcontainerText) as {
+      name: string;
+      build: {
+        dockerfile: string;
+        args: {
+          NODE_VERSION: string;
+          PACKAGE_MANAGER_PIN: string;
+        };
+      };
+      features?: Record<string, unknown>;
+      customizations: {
+        vscode: {
+          extensions: string[];
+          settings: Record<string, unknown>;
+        };
+      };
       postCreateCommand?: string;
-    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    };
+    const dockerfile = await readFile(
+      path.join(projectDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
 
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
@@ -519,14 +560,44 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
     expect(checkWorkflow).not.toContain("version: 10.0.0");
     expect(checkWorkflow).not.toContain("node-version:");
-    const nodeFeature = Object.entries(devcontainer.features ?? {}).find(
-      ([id]) => id.includes("features/node"),
-    )?.[1];
-    expect(nodeFeature).toEqual({
-      version: packageJson.engines.node,
-      pnpmVersion: packageJson.packageManager.replace(/^pnpm@/, ""),
+    expect(Object.keys(devcontainer)).toEqual([
+      "name",
+      "build",
+      "customizations",
+    ]);
+    expect(devcontainer.build).toEqual({
+      dockerfile: "Dockerfile",
+      args: {
+        NODE_VERSION: packageJson.engines.node,
+        PACKAGE_MANAGER_PIN: packageJson.packageManager,
+      },
     });
+    expect(devcontainer).not.toHaveProperty("features");
     expect(devcontainer).not.toHaveProperty("postCreateCommand");
+    expect(devcontainer.customizations.vscode.extensions).toContain(
+      "oxc.oxc-vscode",
+    );
+    expect(devcontainer.customizations.vscode.extensions).not.toContain(
+      "dbaeumer.vscode-eslint",
+    );
+    expect(devcontainer.customizations.vscode.settings).toHaveProperty(
+      "oxc.enable",
+      true,
+    );
+    expect(devcontainerText).toMatch(
+      /^\{\n  "name": "demo-ts-lib development",\n  "build": \{/,
+    );
+    expect(dockerfile).toContain(
+      `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+    );
+    expect(dockerfile).toContain(
+      `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
+    );
+    expect(packageJson.scripts.build).toBe(
+      "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
+    );
+    expect(packageJson.devDependencies["tsc-alias"]).toBe("catalog:");
+    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
   }, 120_000);
 
   it("generates workspace Node metadata as the Node and pnpm version authority", async () => {
@@ -711,6 +782,7 @@ describe("template init", () => {
     expect(gitignore).toContain(".pnpm-store/\n");
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    await stat(path.join(projectDir, ".devcontainer/Dockerfile"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "src/index.ts"));
