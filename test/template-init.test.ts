@@ -143,6 +143,28 @@ function oxcConfigDirectoriesForPreset(preset: string): string[] {
   return ["."];
 }
 
+function manifestCatalogReferences(packageJson: {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}): string[] {
+  return [
+    ...Object.keys(packageJson.dependencies ?? {}),
+    ...Object.keys(packageJson.devDependencies ?? {}),
+  ].sort();
+}
+
+function expectCatalogDependencySpecifiers(packageJson: {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}): void {
+  const specifiers = [
+    ...Object.values(packageJson.dependencies ?? {}),
+    ...Object.values(packageJson.devDependencies ?? {}),
+  ];
+
+  expect(specifiers.every((specifier) => specifier === "catalog:")).toBe(true);
+}
+
 function editorCustomizationOptionsForPreset(
   preset: string,
 ): EditorCustomizationOptions | undefined {
@@ -226,6 +248,7 @@ describe("template init", () => {
       "tsc-alias": "^1.8.17",
       turbo: "^2.10.2",
       typescript: "^6.0.3",
+      valibot: "^1.4.2",
     });
   });
 
@@ -360,6 +383,86 @@ describe("template init", () => {
     });
 
     await stat(path.join(projectDir, "packages/demo-ts-lib/src/index.ts"));
+  }, 120_000);
+
+  it("generates truthful ts-lib root and member manifests backed by the Dependency Catalog", async () => {
+    const projectDir = await generatePresetProject("ts-lib");
+    const rootPackageJson = await readJson<{
+      scripts: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies: Record<string, string>;
+      engines: { node: string };
+      packageManager: string;
+    }>(path.join(projectDir, "package.json"));
+    const libraryPackageJson = await readJson<{
+      scripts: Record<string, string>;
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+      engines: { node: string };
+      packageManager?: string;
+    }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const workspace = parseYaml(workspaceYaml) as {
+      catalog: Record<string, string>;
+    };
+    const dependabot = await readFile(
+      path.join(projectDir, ".github/dependabot.yml"),
+      "utf8",
+    );
+    const devcontainer = await readJson<{
+      build?: {
+        args?: Record<string, string>;
+      };
+    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
+
+    expect(rootPackageJson.devDependencies).toEqual({
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+      typescript: "catalog:",
+    });
+    expect(rootPackageJson.scripts.check).toContain("turbo run check");
+    expect(rootPackageJson.scripts.typecheck).toContain("tsc ");
+
+    expect(libraryPackageJson.dependencies).toEqual({
+      valibot: "catalog:",
+    });
+    expect(libraryPackageJson.devDependencies).toEqual({
+      "@types/node": "catalog:",
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      "tsc-alias": "catalog:",
+      typescript: "catalog:",
+    });
+    expect(libraryPackageJson.scripts.build).toContain("tsc-alias");
+    expect(libraryPackageJson.scripts.lint).toContain("oxlint");
+
+    expectCatalogDependencySpecifiers(rootPackageJson);
+    expectCatalogDependencySpecifiers(libraryPackageJson);
+    expect(Object.keys(workspace.catalog).sort()).toEqual(
+      [
+        ...new Set([
+          ...manifestCatalogReferences(rootPackageJson),
+          ...manifestCatalogReferences(libraryPackageJson),
+        ]),
+      ].sort(),
+    );
+
+    expect(rootPackageJson.engines.node).toBe("24");
+    expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(libraryPackageJson.engines.node).toBe("24");
+    expect(libraryPackageJson).not.toHaveProperty("packageManager");
+    expect(devcontainer.build?.args).toMatchObject({
+      NODE_VERSION: rootPackageJson.engines.node,
+      PACKAGE_MANAGER_PIN: rootPackageJson.packageManager,
+    });
+    expect(dependabot).toContain("package-ecosystem: npm");
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain("package-ecosystem: docker");
+    expect(dependabot).toContain('dependency-name: "@types/node"');
   }, 120_000);
 
   it("generates a minimal Template Dependency Catalog projection for the Vue app preset", async () => {
@@ -1030,6 +1133,7 @@ describe("template init", () => {
       "tsc-alias": templateWorkspace.catalog["tsc-alias"],
       turbo: templateWorkspace.catalog.turbo,
       typescript: templateWorkspace.catalog.typescript,
+      valibot: templateWorkspace.catalog.valibot,
     });
     expect(generatedWorkspace.catalog).not.toHaveProperty("hono");
 

@@ -6,7 +6,10 @@ import type {
   BuiltInPreset,
   ProjectBlueprint,
 } from "../../src/declarations.js";
-import { renderGeneratedPnpmWorkspaceYaml } from "../../src/dependency-catalog.js";
+import {
+  collectGeneratedManifestCatalogDependencies,
+  renderGeneratedPnpmWorkspaceYaml,
+} from "../../src/dependency-catalog.js";
 import {
   dockerfileFirstNodePnpmDevcontainer,
   nodePnpmToolLayer,
@@ -240,6 +243,9 @@ function libraryPackageJson(
         types: "./dist/index.d.ts",
       },
     },
+    dependencies: {
+      valibot: "catalog:",
+    },
     scripts: projectTsLibPackageScripts(),
     devDependencies: {
       "@types/node": "catalog:",
@@ -282,26 +288,24 @@ function operationsForTsLib(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const rootManifest = rootPackageJson(context, packageScripts);
+  const packageManifest = libraryPackageJson(context);
 
   return [
     {
       kind: "writeJson",
       to: "package.json",
-      value: rootPackageJson(context, packageScripts),
+      value: rootManifest,
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
         packages: ["packages/*"],
-        dependencies: [
-          "@types/node",
-          "oxfmt",
-          "oxlint",
-          "turbo",
-          "tsc-alias",
-          "typescript",
-        ],
+        dependencies: collectGeneratedManifestCatalogDependencies([
+          rootManifest,
+          packageManifest,
+        ]),
       }),
     },
     {
@@ -350,7 +354,7 @@ function operationsForTsLib(
     {
       kind: "writeJson",
       to: `${workspacePackagePath(context)}/package.json`,
-      value: libraryPackageJson(context),
+      value: packageManifest,
       multilineArrays: ["files"],
     },
     {
@@ -472,6 +476,9 @@ function packageAdditionOperations(
             default: "./dist/index.js",
             types: "./dist/index.d.ts",
           },
+        },
+        dependencies: {
+          valibot: "catalog:",
         },
         scripts: projectTsLibPackageScripts(),
         devDependencies: {

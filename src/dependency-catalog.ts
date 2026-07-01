@@ -10,6 +10,13 @@ export type GeneratedDependencyCatalogOptions = {
   readonly allowBuilds?: Record<string, boolean>;
 };
 
+export type GeneratedPackageManifestDependencies = {
+  readonly dependencies?: Record<string, string>;
+  readonly devDependencies?: Record<string, string>;
+  readonly optionalDependencies?: Record<string, string>;
+  readonly peerDependencies?: Record<string, string>;
+};
+
 function templateRepositoryRoot(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -78,6 +85,35 @@ export function selectTemplateDependencyCatalogEntries(
   }
 
   return selected;
+}
+
+export function collectGeneratedManifestCatalogDependencies(
+  manifests: readonly GeneratedPackageManifestDependencies[],
+): string[] {
+  const dependencies = new Set<string>();
+
+  for (const manifest of manifests) {
+    for (const dependencyMap of [
+      manifest.dependencies,
+      manifest.devDependencies,
+      manifest.optionalDependencies,
+      manifest.peerDependencies,
+    ]) {
+      for (const [dependency, specifier] of Object.entries(
+        dependencyMap ?? {},
+      )) {
+        if (specifier !== "catalog:") {
+          throw new Error(
+            `Generated manifest dependency ${dependency} must use catalog:, got ${specifier}`,
+          );
+        }
+
+        dependencies.add(dependency);
+      }
+    }
+  }
+
+  return [...dependencies].sort();
 }
 
 function renderCatalogKey(key: string): string {
