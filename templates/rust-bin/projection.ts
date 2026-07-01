@@ -61,11 +61,6 @@ export const rustBinPresetMetadata: BuiltInPreset = {
   ],
 };
 
-const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
-  ecosystems: ["npm", "cargo", "github-actions", "docker", "rust-toolchain"],
-  interval: "weekly",
-};
-
 const rustPackageBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: ".",
@@ -97,6 +92,18 @@ function rustWorkspacePackageName(projectName: string): string {
 
 function rustWorkspacePackagePath(projectName: string): string {
   return `packages/${cargoPackageNameFromProjectName(projectName)}`;
+}
+
+function rustDependencyMaintenancePolicy(
+  projectName: string,
+): DependencyMaintenancePolicy {
+  return {
+    ecosystems: ["npm", "cargo", "github-actions", "docker", "rust-toolchain"],
+    directories: {
+      cargo: `/${rustWorkspacePackagePath(projectName)}`,
+    },
+    interval: "weekly",
+  };
 }
 
 export function planRustBinChecks(): CheckPlan {
@@ -290,6 +297,8 @@ function operationsForRustBin(
   const workspacePackagePath = rustWorkspacePackagePath(projectName);
   const rootManifest = packageJson(context, projectName, packageScripts);
   const packageManifest = rustWorkspacePackageJson(context, projectName);
+  const dependencyMaintenancePolicy =
+    rustDependencyMaintenancePolicy(projectName);
 
   return [
     {
@@ -429,6 +438,8 @@ export const rustBinPresetProjection: PresetProjection = {
     const projectName = cargoPackageNameFromProjectName(
       context.projectName.value,
     );
+    const dependencyMaintenancePolicy =
+      rustDependencyMaintenancePolicy(projectName);
 
     return {
       sourceRoot: templateSourceRoot(),

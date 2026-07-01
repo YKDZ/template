@@ -2350,6 +2350,9 @@ describe("template init", () => {
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(checkWorkflow).not.toContain("./scripts/check");
     expect(dependabot).toContain("package-ecosystem: cargo");
+    expect(dependabot).toContain(
+      "package-ecosystem: cargo\n    directory: /packages/demo-rust",
+    );
     expect(dependabot).toContain("package-ecosystem: npm");
     expect(dependabot).toContain("package-ecosystem: github-actions");
     expect(files.some((file) => file.endsWith("oxlint.config.ts"))).toBe(false);

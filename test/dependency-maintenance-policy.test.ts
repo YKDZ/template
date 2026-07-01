@@ -17,13 +17,16 @@ type DependabotUpdate = {
   }[];
 };
 
-function projectedDependabotConfig(presetName: string): DependabotConfig {
+function projectedDependabotConfig(
+  presetName: string,
+  projectName = "generated-repository",
+): DependabotConfig {
   const projection = findBuiltInPresetProjection(presetName);
   const plan = projection?.project({
-    projectName: { kind: "ProjectName", value: "generated-repository" },
+    projectName: { kind: "ProjectName", value: projectName },
     preset: presetName,
     packageManager: { kind: "PackageManager", value: "pnpm" },
-    blueprint: projection.blueprint({ targetDir: "generated-repository" }),
+    blueprint: projection.blueprint({ targetDir: projectName }),
     toolchain: {
       nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
       packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
@@ -101,6 +104,14 @@ describe("Generated Repository dependency maintenance policy", () => {
       "dependency-name": "mcr.microsoft.com/devcontainers/typescript-node",
       "update-types": ["version-update:semver-major"],
     });
+  });
+
+  it("maintains the Rust package manifest through Cargo Dependabot in its generated package boundary", () => {
+    const dependabot = projectedDependabotConfig("rust-bin", "My Demo App");
+
+    expect(updateFor(dependabot, "cargo").directory).toBe(
+      "/packages/my-demo-app",
+    );
   });
 
   it("uses Dockerfile-first Dependabot policy for every supported generated repository", () => {

@@ -9,7 +9,7 @@ updates:
         update-types:
           - version-update:semver-major
   - package-ecosystem: cargo
-    directory: /
+    directory: /packages/generated-repository
     schedule:
       interval: weekly
   - package-ecosystem: github-actions

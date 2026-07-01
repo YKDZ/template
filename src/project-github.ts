@@ -23,8 +23,13 @@ export type DependencyEcosystem =
   | "docker"
   | "rust-toolchain";
 
+export type DependabotDirectory = `/${string}`;
+
 export type DependencyMaintenancePolicy = {
   readonly ecosystems: DependencyEcosystem[];
+  readonly directories?: Partial<
+    Record<DependencyEcosystem, DependabotDirectory>
+  >;
   readonly interval: "weekly";
 };
 
@@ -108,7 +113,11 @@ export function projectDependabotConfig(
     "version: 2",
     "updates:",
     ...policy.ecosystems.flatMap((ecosystem) =>
-      renderDependabotUpdate(ecosystem, policy.interval),
+      renderDependabotUpdate(
+        ecosystem,
+        policy.directories?.[ecosystem] ?? defaultDependabotDirectory(ecosystem),
+        policy.interval,
+      ),
     ),
     "",
   ].join("\n");
@@ -116,11 +125,12 @@ export function projectDependabotConfig(
 
 function renderDependabotUpdate(
   ecosystem: DependencyEcosystem,
+  directory: DependabotDirectory,
   interval: DependencyMaintenancePolicy["interval"],
 ): string[] {
   const lines = [
     `  - package-ecosystem: ${ecosystem}`,
-    `    directory: ${dependabotDirectory(ecosystem)}`,
+    `    directory: ${directory}`,
     "    schedule:",
     `      interval: ${interval}`,
   ];
@@ -146,7 +156,9 @@ function renderDependabotUpdate(
   return lines;
 }
 
-function dependabotDirectory(ecosystem: DependencyEcosystem): string {
+function defaultDependabotDirectory(
+  ecosystem: DependencyEcosystem,
+): DependabotDirectory {
   return ecosystem === "docker" ? "/.devcontainer" : "/";
 }
 
