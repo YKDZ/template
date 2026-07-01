@@ -38,8 +38,7 @@
     "RUST_BACKTRACE": "1"
   },
   "postCreateCommand": {
-    "installNodeDependencies": "pnpm install",
-    "prefetchRustDependencies": "cargo fetch"
+    "installNodeDependencies": "pnpm install"
   },
   "remoteUser": "root",
   "mounts": [

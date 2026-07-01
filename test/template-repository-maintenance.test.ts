@@ -195,6 +195,7 @@ describe("template Repository maintenance", () => {
         };
       };
       features?: unknown;
+      postCreateCommand?: Record<string, string>;
     };
 
     expect(Object.keys(devcontainer).slice(0, 3)).toEqual([
@@ -216,6 +217,20 @@ describe("template Repository maintenance", () => {
       "editor.formatOnSave": true,
       "rust-analyzer.check.command": "clippy",
     });
+
+    await expect(
+      readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ).resolves.toContain('"packageManager"');
+    expect(devcontainer.postCreateCommand).toMatchObject({
+      installNodeDependencies: "pnpm install",
+    });
+
+    await expect(
+      readFile(path.join(repoRoot, "Cargo.toml"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(Object.values(devcontainer.postCreateCommand ?? {})).not.toContain(
+      "cargo fetch",
+    );
   });
 
   it("uses official root Dependabot config for npm, GitHub Actions, and the Development Container Dockerfile", async () => {
