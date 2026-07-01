@@ -6,7 +6,13 @@ import {
   validateProjectBlueprint,
   type ProjectBlueprint,
 } from "./declarations.js";
+import {
+  collectGeneratedManifestCatalogReferences,
+  pnpmWorkspaceYamlWithCatalogDependencies,
+  type GeneratedPackageManifestDependencies,
+} from "./dependency-catalog.js";
 import { renderProject } from "./renderer.js";
+import type { RenderOperation } from "./renderer.js";
 
 export type AddPackageOptions = {
   cwd: string;
@@ -232,6 +238,31 @@ function rootTsconfigWithReferences(
   return { ...tsconfig, references };
 }
 
+function packageAdditionCatalogDependencies(
+  operations: readonly RenderOperation[],
+): string[] {
+  const manifests: GeneratedPackageManifestDependencies[] = [];
+
+  for (const operation of operations) {
+    if (
+      operation.kind !== "writeJson" ||
+      path.basename(operation.to) !== "package.json"
+    ) {
+      continue;
+    }
+
+    if (!isRecord(operation.value)) {
+      throw new Error(
+        `Package Addition package manifest must be an object: ${operation.to}`,
+      );
+    }
+
+    manifests.push(operation.value);
+  }
+
+  return collectGeneratedManifestCatalogReferences(manifests);
+}
+
 function blueprintWithPackage(
   blueprint: ProjectBlueprint,
   packageName: string,
@@ -262,10 +293,14 @@ async function planRootUpdates(
   packagePath: string,
   workspacePackageGlob: string,
   rootTsconfigReferences: readonly string[],
+  catalogDependencies: readonly string[],
 ): Promise<RootUpdatePlan> {
-  const workspaceText = workspaceTextWithPackageGlob(
-    await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
-    workspacePackageGlob,
+  const workspaceText = pnpmWorkspaceYamlWithCatalogDependencies(
+    workspaceTextWithPackageGlob(
+      await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
+      workspacePackageGlob,
+    ),
+    catalogDependencies,
   );
   const rootTsconfig = rootTsconfigWithReferences(
     await readJson<unknown>(path.join(root, "tsconfig.json")),
@@ -327,6 +362,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.packagePath,
     additionPlan.workspacePackageGlob,
     additionPlan.rootTsconfigReferences,
+    packageAdditionCatalogDependencies(additionPlan.operations),
   );
 
   await mkdir(path.join(root, additionPlan.packagePath), { recursive: true });

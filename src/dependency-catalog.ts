@@ -116,8 +116,88 @@ export function collectGeneratedManifestCatalogDependencies(
   return [...dependencies].sort();
 }
 
+export function collectGeneratedManifestCatalogReferences(
+  manifests: readonly GeneratedPackageManifestDependencies[],
+): string[] {
+  const dependencies = new Set<string>();
+
+  for (const manifest of manifests) {
+    for (const dependencyMap of [
+      manifest.dependencies,
+      manifest.devDependencies,
+      manifest.optionalDependencies,
+      manifest.peerDependencies,
+    ]) {
+      for (const [dependency, specifier] of Object.entries(
+        dependencyMap ?? {},
+      )) {
+        if (specifier.startsWith("catalog:")) {
+          dependencies.add(dependency);
+        }
+      }
+    }
+  }
+
+  return [...dependencies].sort();
+}
+
 function renderCatalogKey(key: string): string {
   return key.startsWith("@") ? JSON.stringify(key) : key;
+}
+
+export function pnpmWorkspaceYamlWithCatalogDependencies(
+  workspaceYaml: string,
+  dependencies: readonly string[],
+  templateCatalog: TemplateDependencyCatalog = loadTemplateDependencyCatalog(),
+): string {
+  const catalogStart = workspaceYaml
+    .split(/\r?\n/)
+    .findIndex((line) => line === "catalog:");
+
+  if (catalogStart === -1) {
+    throw new Error(
+      "Cannot update pnpm Dependency Catalog: missing catalog section",
+    );
+  }
+
+  const existingCatalog = parseTemplateDependencyCatalog(workspaceYaml);
+  const missingDependencies = dependencies.filter(
+    (dependency) => existingCatalog[dependency] === undefined,
+  );
+
+  if (missingDependencies.length === 0) {
+    return workspaceYaml;
+  }
+
+  const nextCatalog = {
+    ...existingCatalog,
+    ...selectTemplateDependencyCatalogEntries(
+      missingDependencies,
+      templateCatalog,
+    ),
+  };
+  const lines = workspaceYaml.split(/\r?\n/);
+  const catalogEnd = lines.findIndex(
+    (line, index) =>
+      index > catalogStart && line.length > 0 && !line.startsWith("  "),
+  );
+  const replacementEnd = catalogEnd === -1 ? lines.length : catalogEnd;
+  const catalogLines = [
+    "catalog:",
+    ...Object.entries(nextCatalog)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(
+        ([dependency, version]) =>
+          `  ${renderCatalogKey(dependency)}: ${version}`,
+      ),
+    "",
+  ];
+
+  return [
+    ...lines.slice(0, catalogStart),
+    ...catalogLines,
+    ...lines.slice(replacementEnd),
+  ].join("\n");
 }
 
 export function renderGeneratedPnpmWorkspaceYaml(

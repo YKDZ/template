@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -36,6 +37,40 @@ function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
   expect(scripts["lint:fix"]).toBe(
     "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
   );
+}
+
+function catalogFromWorkspaceYaml(
+  workspaceYaml: string,
+): Record<string, string> {
+  const parsed = parseYaml(workspaceYaml) as {
+    catalog?: Record<string, string>;
+  };
+
+  return parsed.catalog ?? {};
+}
+
+function catalogDependencyNames(manifest: {
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+}): string[] {
+  const dependencies = new Set<string>();
+
+  for (const dependencyMap of [
+    manifest.dependencies,
+    manifest.devDependencies,
+    manifest.optionalDependencies,
+    manifest.peerDependencies,
+  ]) {
+    for (const [dependency, specifier] of Object.entries(dependencyMap ?? {})) {
+      if (specifier.startsWith("catalog:")) {
+        dependencies.add(dependency);
+      }
+    }
+  }
+
+  return [...dependencies].sort();
 }
 
 async function expectPathMissing(filePath: string): Promise<void> {
@@ -75,6 +110,59 @@ function playwrightWebServerPorts(configText: string): number[] {
 }
 
 describe("template add package", () => {
+  it("keeps the generated Dependency Catalog complete when an added package introduces catalog dependencies", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    const initialWorkspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    expect(catalogFromWorkspaceYaml(initialWorkspaceYaml)).not.toHaveProperty(
+      "valibot",
+    );
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+      ],
+      { cwd: projectDir },
+    );
+
+    const workspaceCatalog = catalogFromWorkspaceYaml(
+      await readFile(path.join(projectDir, "pnpm-workspace.yaml"), "utf8"),
+    );
+    const templateCatalog = catalogFromWorkspaceYaml(
+      await readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
+    );
+    const packageJson = await readJson<{
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    }>(path.join(projectDir, "packages/shared/package.json"));
+    const addedPackageCatalogDependencies = catalogDependencyNames(packageJson);
+
+    expect(workspaceCatalog).toHaveProperty("valibot");
+    expect(workspaceCatalog.valibot).toBe(templateCatalog.valibot);
+    expect(
+      addedPackageCatalogDependencies.filter(
+        (dependency) => workspaceCatalog[dependency] === undefined,
+      ),
+    ).toEqual([]);
+  }, 120_000);
+
   it("adds packages while keeping the stored blueprint valid for later additions", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
