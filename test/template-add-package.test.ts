@@ -248,7 +248,16 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*' --filter './packages/*'",
+    );
+    expect(rootPackageJson.scripts.check).not.toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+    );
+    expect(rootPackageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*' --filter './packages/*'",
+    );
+    expect(rootPackageJson.scripts.fix).not.toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
     );
     expect(rootTsconfig.references).toContainEqual({
       path: "./packages/shared/tsconfig.json",

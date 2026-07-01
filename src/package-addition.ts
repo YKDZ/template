@@ -25,8 +25,14 @@ type RootTsconfig = {
   [key: string]: unknown;
 };
 
+type RootPackageJson = {
+  scripts: Record<string, string>;
+  [key: string]: unknown;
+};
+
 type RootUpdatePlan = {
   blueprint: ProjectBlueprint;
+  rootPackageJson: RootPackageJson;
   rootTsconfig: RootTsconfig;
   workspaceText: string;
 };
@@ -101,6 +107,30 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertRootPackageJson(
+  input: unknown,
+): asserts input is RootPackageJson {
+  if (!isRecord(input)) {
+    throw new Error(
+      "Cannot update root Package Addition scripts: package.json must be an object",
+    );
+  }
+
+  if (!isRecord(input.scripts)) {
+    throw new Error(
+      "Cannot update root Package Addition scripts: scripts must be an object",
+    );
+  }
+
+  for (const scriptName of ["check", "fix"] as const) {
+    if (typeof input.scripts[scriptName] !== "string") {
+      throw new Error(
+        `Cannot update root Package Addition scripts: scripts.${scriptName} must be a string`,
+      );
+    }
+  }
 }
 
 async function readGeneratedWorkspaceBlueprint(
@@ -286,6 +316,88 @@ function blueprintWithPackage(
   return result.value;
 }
 
+function workspacePackageGlobsFromBlueprint(
+  blueprint: ProjectBlueprint,
+): string[] {
+  const globs: string[] = [];
+
+  for (const packageDefinition of blueprint.packages ?? []) {
+    const [workspaceDir] = packageDefinition.path.split("/");
+
+    if (!workspaceDir) {
+      throw new Error(
+        `Cannot update root Package Addition scripts: invalid package path ${packageDefinition.path}`,
+      );
+    }
+
+    const glob = `${workspaceDir}/*`;
+    if (!globs.includes(glob)) {
+      globs.push(glob);
+    }
+  }
+
+  return globs;
+}
+
+function turboPackageTaskCommand(
+  task: "check" | "fix",
+  workspacePackageGlobs: readonly string[],
+): string {
+  const filters = workspacePackageGlobs.map((glob) => `--filter './${glob}'`);
+
+  return [`turbo run ${task}`, ...filters].join(" ");
+}
+
+function rootScriptWithTurboPackageTask(
+  script: string,
+  task: "check" | "fix",
+  workspacePackageGlobs: readonly string[],
+): string {
+  const commands = script.split(" && ");
+  const turboCommandIndex = commands.findIndex((command) =>
+    command.startsWith(`turbo run ${task}`),
+  );
+
+  if (turboCommandIndex === -1) {
+    throw new Error(
+      `Cannot update root Package Addition scripts: scripts.${task} must run Turbo package tasks`,
+    );
+  }
+
+  commands[turboCommandIndex] = turboPackageTaskCommand(
+    task,
+    workspacePackageGlobs,
+  );
+
+  return commands.join(" && ");
+}
+
+function rootPackageJsonWithPackageTaskFilters(
+  input: unknown,
+  blueprint: ProjectBlueprint,
+): RootPackageJson {
+  assertRootPackageJson(input);
+
+  const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
+
+  return {
+    ...input,
+    scripts: {
+      ...input.scripts,
+      check: rootScriptWithTurboPackageTask(
+        input.scripts.check,
+        "check",
+        workspacePackageGlobs,
+      ),
+      fix: rootScriptWithTurboPackageTask(
+        input.scripts.fix,
+        "fix",
+        workspacePackageGlobs,
+      ),
+    },
+  };
+}
+
 async function planRootUpdates(
   root: string,
   blueprint: ProjectBlueprint,
@@ -295,6 +407,11 @@ async function planRootUpdates(
   rootTsconfigReferences: readonly string[],
   catalogDependencies: readonly string[],
 ): Promise<RootUpdatePlan> {
+  const nextBlueprint = blueprintWithPackage(
+    blueprint,
+    packageName,
+    packagePath,
+  );
   const workspaceText = pnpmWorkspaceYamlWithCatalogDependencies(
     workspaceTextWithPackageGlob(
       await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
@@ -306,9 +423,14 @@ async function planRootUpdates(
     await readJson<unknown>(path.join(root, "tsconfig.json")),
     rootTsconfigReferences,
   );
+  const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
+    await readJson<unknown>(path.join(root, "package.json")),
+    nextBlueprint,
+  );
 
   return {
-    blueprint: blueprintWithPackage(blueprint, packageName, packagePath),
+    blueprint: nextBlueprint,
+    rootPackageJson,
     rootTsconfig,
     workspaceText,
   };
@@ -385,6 +507,10 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     path.join(root, "pnpm-workspace.yaml"),
     rootUpdatePlan.workspaceText,
     "utf8",
+  );
+  await writeJson(
+    path.join(root, "package.json"),
+    rootUpdatePlan.rootPackageJson,
   );
   await writeJson(
     path.join(root, "tsconfig.json"),
