@@ -46,14 +46,12 @@ describe("template add package", () => {
       ["exec", "tsx", cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
       { cwd: projectDir },
     );
+    await execa(tsxBin, [cliPath, "blueprint", "validate", ".project-kit/blueprint.json"], {
+      cwd: projectDir,
+    });
     await execa(
-      "pnpm",
-      ["exec", "tsx", cliPath, "blueprint", "validate", ".project-kit/blueprint.json"],
-      { cwd: projectDir },
-    );
-    await execa(
-      "pnpm",
-      ["exec", "tsx", cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
+      tsxBin,
+      [cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
       { cwd: projectDir },
     );
 
