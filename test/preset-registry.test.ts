@@ -39,11 +39,20 @@ describe("Preset Registry", () => {
 
     expect(
       plan.checkPlan.components.map((component) => component.kind),
-    ).toEqual(["turbo-check"]);
-    expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
-      "turbo-fix",
+    ).toEqual([
+      "oxc-format-check",
+      "oxc-lint",
+      "typescript-typecheck",
+      "turbo-package-check",
     ]);
-    expect(plan.packageScripts.check).toBe("turbo run check");
+    expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
+      "oxc-format-write",
+      "oxc-lint-fix",
+      "turbo-package-fix",
+    ]);
+    expect(plan.packageScripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+    );
 
     const packageJson = await readJson<{
       engines: { node: string };

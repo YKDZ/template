@@ -263,6 +263,9 @@ describe("template init", () => {
       files: string[];
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
+    const rootConfigTsconfig = await readJson<{
+      include: string[];
+    }>(path.join(projectDir, "tsconfig.config.json"));
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
@@ -281,9 +284,26 @@ describe("template init", () => {
       oxfmt: "catalog:",
       oxlint: "catalog:",
       turbo: "catalog:",
+      typescript: "catalog:",
     });
-    expect(rootPackageJson.scripts.check).toBe("turbo run check");
-    expect(rootPackageJson.scripts.fix).toBe("turbo run fix");
+    expect(rootPackageJson.scripts).toMatchObject({
+      check:
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+      "format:check":
+        "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "format:write":
+        "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      lint:
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "lint:fix":
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+      typecheck: "tsc -p tsconfig.config.json --noEmit",
+    });
+    expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
+    expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
+    expect(rootPackageJson.scripts.check).not.toBe("turbo run check");
+    expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix");
 
     expect(libraryPackageJson).toMatchObject({
       name: "@demo-ts-lib/demo-ts-lib",
@@ -315,6 +335,10 @@ describe("template init", () => {
       files: [],
       references: [{ path: "./packages/demo-ts-lib/tsconfig.json" }],
     });
+    expect(rootConfigTsconfig.include).toEqual([
+      "oxlint.config.ts",
+      "oxfmt.config.ts",
+    ]);
     expect(blueprint).toMatchObject({
       preset: "ts-lib",
       projectKind: "multi-package",
@@ -749,7 +773,9 @@ describe("template init", () => {
     expect(dockerfile).toContain(
       `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
     );
-    expect(packageJson.scripts.check).toBe("turbo run check");
+    expect(packageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+    );
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
     expect(libraryPackageJson.scripts.build).toBe(
       "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
@@ -847,6 +873,25 @@ describe("template init", () => {
           );
           expect(packageJson.scripts["lint:fix"]).toBe(
             "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+          );
+          const rootPackageJson = await readJson<{
+            scripts: Record<string, string>;
+          }>(path.join(projectDir, "package.json"));
+          const rootConfigTsconfig = await readJson<{ include: string[] }>(
+            path.join(projectDir, "tsconfig.config.json"),
+          );
+          expect(rootPackageJson.scripts.typecheck).toBe(
+            "tsc -p tsconfig.config.json --noEmit",
+          );
+          expect(rootConfigTsconfig.include).toEqual([
+            "oxlint.config.ts",
+            "oxfmt.config.ts",
+          ]);
+          expect(rootPackageJson.scripts["format:check"]).toBe(
+            "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+          );
+          expect(rootPackageJson.scripts.lint).toBe(
+            "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
           );
           continue;
         }
@@ -946,11 +991,15 @@ describe("template init", () => {
 
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
-    expect(packageJson.scripts.check).toBe("turbo run check");
-    expect(packageJson.scripts.fix).toBe("turbo run fix");
+    expect(packageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+    );
+    expect(packageJson.scripts.fix).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+    );
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
+    expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
-    expect(packageJson.scripts.check).toBe("turbo run check");
     expect(libraryPackageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );

@@ -40,14 +40,34 @@ describe("module graph plans", () => {
 
     expect(plan.checkPlan.components).toEqual([
       {
-        kind: "turbo-check",
+        kind: "oxc-format-check",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "oxc-lint",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "typescript-typecheck",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "turbo-package-check",
         owner: { kind: "package-boundary", path: "." },
       },
     ]);
 
     expect(plan.fixPlan.components).toEqual([
       {
-        kind: "turbo-fix",
+        kind: "oxc-format-write",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "oxc-lint-fix",
+        owner: { kind: "workspace-orchestration", path: "." },
+      },
+      {
+        kind: "turbo-package-fix",
         owner: { kind: "package-boundary", path: "." },
       },
     ]);
@@ -71,14 +91,23 @@ describe("module graph plans", () => {
     const fixPlan = plan.fixPlan;
 
     expect(checkPlan.components.map((component) => component.kind)).toEqual([
-      "turbo-check",
+      "oxc-format-check",
+      "oxc-lint",
+      "typescript-typecheck",
+      "turbo-package-check",
     ]);
     expect(fixPlan.components.map((component) => component.kind)).toEqual([
-      "turbo-fix",
+      "oxc-format-write",
+      "oxc-lint-fix",
+      "turbo-package-fix",
     ]);
 
-    expect(renderRootCheckCommand(checkPlan)).toBe("turbo run check");
-    expect(renderFixCommand(fixPlan)).toBe("turbo run fix");
+    expect(renderRootCheckCommand(checkPlan)).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+    );
+    expect(renderFixCommand(fixPlan)).toBe(
+      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+    );
   });
 
   it("projects ts-lib root and member package scripts from Check and Fix Plans", () => {
@@ -97,8 +126,16 @@ describe("module graph plans", () => {
     });
 
     expect(plan.packageScripts).toEqual({
-      check: "turbo run check",
-      fix: "turbo run fix",
+      check:
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+      "format:check": "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "format:write": "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      lint:
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "lint:fix":
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+      typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(projectTsLibPackageScripts()).toEqual({
       build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",

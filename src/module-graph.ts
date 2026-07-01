@@ -1,9 +1,14 @@
 export type PackageBoundaryOwner = {
   readonly kind: "package-boundary";
-  readonly path: "." | "apps/api" | "apps/web";
+  readonly path: string;
 };
 
-export type ComponentOwner = PackageBoundaryOwner;
+export type WorkspaceOrchestrationOwner = {
+  readonly kind: "workspace-orchestration";
+  readonly path: ".";
+};
+
+export type ComponentOwner = PackageBoundaryOwner | WorkspaceOrchestrationOwner;
 
 export type CheckComponentKind =
   | "typescript-typecheck"
@@ -13,6 +18,7 @@ export type CheckComponentKind =
   | "unit-test"
   | "e2e-test"
   | "turbo-check"
+  | "turbo-package-check"
   | "rustfmt-check"
   | "cargo-clippy"
   | "cargo-test";
@@ -21,6 +27,7 @@ export type FixComponentKind =
   | "oxc-format-write"
   | "oxc-lint-fix"
   | "turbo-fix"
+  | "turbo-package-fix"
   | "rustfmt-write";
 
 export type CheckEnvironmentNeed = {
@@ -64,6 +71,8 @@ function renderCheckComponentCommand(component: CheckComponent): string {
       return "pnpm run test:e2e";
     case "turbo-check":
       return "turbo run check";
+    case "turbo-package-check":
+      return "turbo run check --filter './packages/*'";
     case "rustfmt-check":
       return "cargo fmt --all -- --check";
     case "cargo-clippy":
@@ -81,6 +90,8 @@ function renderFixComponentCommand(component: FixComponent): string {
       return "pnpm run lint:fix";
     case "turbo-fix":
       return "turbo run fix";
+    case "turbo-package-fix":
+      return "turbo run fix --filter './packages/*'";
     case "rustfmt-write":
       return "cargo fmt --all";
   }

@@ -70,6 +70,11 @@ const tsLibPackageBoundary: ComponentOwner = {
 };
 
 const tsLibRootBoundary: ComponentOwner = {
+  kind: "workspace-orchestration",
+  path: ".",
+};
+
+const tsLibWorkspacePackageBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: ".",
 };
@@ -87,7 +92,12 @@ function planTsLibPackageChecks(): CheckPlan {
 
 function planTsLibRootChecks(): CheckPlan {
   return {
-    components: [{ kind: "turbo-check", owner: tsLibRootBoundary }],
+    components: [
+      { kind: "oxc-format-check", owner: tsLibRootBoundary },
+      { kind: "oxc-lint", owner: tsLibRootBoundary },
+      { kind: "typescript-typecheck", owner: tsLibRootBoundary },
+      { kind: "turbo-package-check", owner: tsLibWorkspacePackageBoundary },
+    ],
     environmentNeeds: [],
   };
 }
@@ -103,7 +113,11 @@ function planTsLibPackageFixes(): FixPlan {
 
 function planTsLibRootFixes(): FixPlan {
   return {
-    components: [{ kind: "turbo-fix", owner: tsLibRootBoundary }],
+    components: [
+      { kind: "oxc-format-write", owner: tsLibRootBoundary },
+      { kind: "oxc-lint-fix", owner: tsLibRootBoundary },
+      { kind: "turbo-package-fix", owner: tsLibWorkspacePackageBoundary },
+    ],
   };
 }
 
@@ -159,6 +173,15 @@ function projectTsLibRootPackageScripts(): Record<string, string> {
   return {
     check: renderRootCheckCommand(planTsLibRootChecks()),
     fix: renderFixCommand(planTsLibRootFixes()),
+    "format:check":
+      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    "format:write":
+      "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+    lint:
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    "lint:fix":
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+    typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }
 
@@ -193,6 +216,7 @@ function rootPackageJson(
       oxfmt: "catalog:",
       oxlint: "catalog:",
       turbo: "catalog:",
+      typescript: "catalog:",
     },
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
@@ -306,6 +330,21 @@ function operationsForTsLib(
         references: [
           { path: `./${workspacePackagePath(context)}/tsconfig.json` },
         ],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: "tsconfig.config.json",
+      value: {
+        compilerOptions: {
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          noEmitOnError: true,
+          skipLibCheck: false,
+          strict: true,
+          target: "ES2022",
+        },
+        include: ["oxlint.config.ts", "oxfmt.config.ts"],
       },
     },
     {
