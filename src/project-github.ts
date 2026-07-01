@@ -16,7 +16,12 @@ export type PnpmTaskLayer = {
   readonly checkCommand: "pnpm run check";
 };
 
-export type DependencyEcosystem = "npm" | "cargo" | "github-actions";
+export type DependencyEcosystem =
+  | "npm"
+  | "cargo"
+  | "github-actions"
+  | "docker"
+  | "rust-toolchain";
 
 export type DependencyMaintenancePolicy = {
   readonly ecosystems: DependencyEcosystem[];
@@ -102,14 +107,47 @@ export function projectDependabotConfig(
   return [
     "version: 2",
     "updates:",
-    ...policy.ecosystems.flatMap((ecosystem) => [
-      `  - package-ecosystem: ${ecosystem}`,
-      "    directory: /",
-      "    schedule:",
-      `      interval: ${policy.interval}`,
-    ]),
+    ...policy.ecosystems.flatMap((ecosystem) =>
+      renderDependabotUpdate(ecosystem, policy.interval),
+    ),
     "",
   ].join("\n");
+}
+
+function renderDependabotUpdate(
+  ecosystem: DependencyEcosystem,
+  interval: DependencyMaintenancePolicy["interval"],
+): string[] {
+  const lines = [
+    `  - package-ecosystem: ${ecosystem}`,
+    `    directory: ${dependabotDirectory(ecosystem)}`,
+    "    schedule:",
+    `      interval: ${interval}`,
+  ];
+
+  if (ecosystem === "npm") {
+    lines.push(
+      "    ignore:",
+      "      - dependency-name: \"@types/node\"",
+      "        update-types:",
+      "          - version-update:semver-major",
+    );
+  }
+
+  if (ecosystem === "docker") {
+    lines.push(
+      "    ignore:",
+      "      - dependency-name: mcr.microsoft.com/devcontainers/typescript-node",
+      "        update-types:",
+      "          - version-update:semver-major",
+    );
+  }
+
+  return lines;
+}
+
+function dependabotDirectory(ecosystem: DependencyEcosystem): string {
+  return ecosystem === "docker" ? "/.devcontainer" : "/";
 }
 
 function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {

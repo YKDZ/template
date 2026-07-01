@@ -364,10 +364,22 @@ describe("module graph plans", () => {
         "    directory: /",
         "    schedule:",
         "      interval: weekly",
+        "    ignore:",
+        "      - dependency-name: \"@types/node\"",
+        "        update-types:",
+        "          - version-update:semver-major",
         "  - package-ecosystem: github-actions",
         "    directory: /",
         "    schedule:",
         "      interval: weekly",
+        "  - package-ecosystem: docker",
+        "    directory: /.devcontainer",
+        "    schedule:",
+        "      interval: weekly",
+        "    ignore:",
+        "      - dependency-name: mcr.microsoft.com/devcontainers/typescript-node",
+        "        update-types:",
+        "          - version-update:semver-major",
         "",
       ].join("\n"),
     );
@@ -389,6 +401,9 @@ describe("module graph plans", () => {
     expect(
       projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
     ).toContain("package-ecosystem: cargo");
+    expect(
+      projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
+    ).toContain("package-ecosystem: rust-toolchain");
     const vueHonoProjection = findBuiltInPresetProjection("vue-hono-app");
     const vueHonoPlan = vueHonoProjection!.project({
       projectName: { kind: "ProjectName", value: "demo-stack" },

@@ -368,6 +368,8 @@ describe("Preset Registry", () => {
       "npm",
       "cargo",
       "github-actions",
+      "docker",
+      "rust-toolchain",
     ]);
 
     const packageJson = await readJson<{

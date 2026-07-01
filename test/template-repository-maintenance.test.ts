@@ -242,6 +242,10 @@ describe("template Repository maintenance", () => {
         "package-ecosystem": string;
         directory: string;
         schedule: { interval: string };
+        ignore?: {
+          "dependency-name": string;
+          "update-types": string[];
+        }[];
       }[];
     };
 
@@ -252,6 +256,12 @@ describe("template Repository maintenance", () => {
           "package-ecosystem": "npm",
           directory: "/",
           schedule: { interval: "weekly" },
+          ignore: [
+            {
+              "dependency-name": "@types/node",
+              "update-types": ["version-update:semver-major"],
+            },
+          ],
         },
         {
           "package-ecosystem": "github-actions",
@@ -262,6 +272,12 @@ describe("template Repository maintenance", () => {
           "package-ecosystem": "docker",
           directory: "/.devcontainer",
           schedule: { interval: "weekly" },
+          ignore: [
+            {
+              "dependency-name": "node",
+              "update-types": ["version-update:semver-major"],
+            },
+          ],
         },
       ],
     });

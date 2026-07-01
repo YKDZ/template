@@ -57,7 +57,7 @@ export const rustBinPresetMetadata: BuiltInPreset = {
 };
 
 const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
-  ecosystems: ["npm", "cargo", "github-actions"],
+  ecosystems: ["npm", "cargo", "github-actions", "docker", "rust-toolchain"],
   interval: "weekly",
 };
 

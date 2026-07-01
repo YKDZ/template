@@ -58,7 +58,7 @@ export const honoApiPresetMetadata: BuiltInPreset = {
 };
 
 const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
-  ecosystems: ["npm", "github-actions"],
+  ecosystems: ["npm", "github-actions", "docker"],
   interval: "weekly",
 };
 
