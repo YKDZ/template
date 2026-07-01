@@ -23,6 +23,7 @@ import {
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
+  PresetBlueprintOptions,
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
@@ -45,7 +46,7 @@ export const tsLibPresetMetadata: BuiltInPreset = {
   description: "Strict TypeScript package with pnpm catalog tooling.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
-  supportedProjectKinds: ["single-package"],
+  supportedProjectKinds: ["multi-package"],
   features: [
     "pnpm-catalog",
     "oxc-format-lint",
@@ -68,7 +69,12 @@ const tsLibPackageBoundary: ComponentOwner = {
   path: ".",
 };
 
-function planTsLibChecks(): CheckPlan {
+const tsLibRootBoundary: ComponentOwner = {
+  kind: "package-boundary",
+  path: ".",
+};
+
+function planTsLibPackageChecks(): CheckPlan {
   return {
     components: [
       { kind: "typescript-typecheck", owner: tsLibPackageBoundary },
@@ -79,7 +85,14 @@ function planTsLibChecks(): CheckPlan {
   };
 }
 
-function planTsLibFixes(): FixPlan {
+function planTsLibRootChecks(): CheckPlan {
+  return {
+    components: [{ kind: "turbo-check", owner: tsLibRootBoundary }],
+    environmentNeeds: [],
+  };
+}
+
+function planTsLibPackageFixes(): FixPlan {
   return {
     components: [
       { kind: "oxc-format-write", owner: tsLibPackageBoundary },
@@ -88,38 +101,121 @@ function planTsLibFixes(): FixPlan {
   };
 }
 
-export function tsLibBlueprint(): ProjectBlueprint {
+function planTsLibRootFixes(): FixPlan {
+  return {
+    components: [{ kind: "turbo-fix", owner: tsLibRootBoundary }],
+  };
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function packageScopeFromOptions(options: PresetBlueprintOptions): string {
+  return options.scope ?? projectNameFromDir(options.targetDir);
+}
+
+function packageName(packageScope: string, packageLeafName: string): string {
+  return `@${packageScope}/${packageLeafName}`;
+}
+
+export function tsLibBlueprint(
+  options: PresetBlueprintOptions = { targetDir: process.cwd() },
+): ProjectBlueprint {
+  const packageScope = packageScopeFromOptions(options);
+  const packageLeafName = projectNameFromDir(options.targetDir);
+
   return {
     schemaVersion: 1,
     preset: "ts-lib",
     packageManager: "pnpm",
-    projectKind: "single-package",
+    projectKind: "multi-package",
     features: [...tsLibPresetMetadata.features],
+    packages: [
+      {
+        name: packageName(packageScope, packageLeafName),
+        path: `packages/${packageLeafName}`,
+      },
+    ],
+  };
+}
+
+function workspacePackagePath(context: GenerationContext): string {
+  return `packages/${context.projectName.value}`;
+}
+
+function workspacePackageName(context: GenerationContext): string {
+  const packageDefinition = context.blueprint.packages?.find(
+    (pkg) => pkg.path === workspacePackagePath(context),
+  );
+
+  return (
+    packageDefinition?.name ??
+    packageName(context.projectName.value, context.projectName.value)
+  );
+}
+
+function projectTsLibRootPackageScripts(): Record<string, string> {
+  return {
+    check: renderRootCheckCommand(planTsLibRootChecks()),
+    fix: renderFixCommand(planTsLibRootFixes()),
   };
 }
 
 export function projectTsLibPackageScripts(): Record<string, string> {
-  const checkPlan = planTsLibChecks();
-  const fixPlan = planTsLibFixes();
+  const checkPlan = planTsLibPackageChecks();
+  const fixPlan = planTsLibPackageFixes();
 
   return {
     build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     check: renderRootCheckCommand(checkPlan),
     fix: renderFixCommand(fixPlan),
-    "format:check": "oxfmt --check .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint . --deny-warnings",
-    "lint:fix": "oxlint . --fix --deny-warnings",
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+    "lint:fix":
+      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
     typecheck: "tsc -p tsconfig.json --noEmit",
   };
 }
 
-function packageJson(
+function projectTsLibLocalOxcPackageScripts(): Record<string, string> {
+  return {
+    ...projectTsLibPackageScripts(),
+    "format:check": "oxfmt --check .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint . --deny-warnings",
+    "lint:fix": "oxlint . --fix --deny-warnings",
+  };
+}
+
+function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
 ): Record<string, unknown> {
   return {
     name: context.projectName.value,
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    scripts: packageScripts,
+    devDependencies: {
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function libraryPackageJson(
+  context: GenerationContext,
+): Record<string, unknown> {
+  return {
+    name: workspacePackageName(context),
     version: "0.0.0",
     private: true,
     files: ["dist"],
@@ -130,7 +226,7 @@ function packageJson(
         types: "./dist/index.d.ts",
       },
     },
-    scripts: packageScripts,
+    scripts: projectTsLibPackageScripts(),
     devDependencies: {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
@@ -141,7 +237,6 @@ function packageJson(
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
-    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
@@ -178,17 +273,18 @@ function operationsForTsLib(
     {
       kind: "writeJson",
       to: "package.json",
-      value: packageJson(context, packageScripts),
-      multilineArrays: ["files"],
+      value: rootPackageJson(context, packageScripts),
     },
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
+        packages: ["packages/*"],
         dependencies: [
           "@types/node",
           "oxfmt",
           "oxlint",
+          "turbo",
           "tsc-alias",
           "typescript",
         ],
@@ -196,9 +292,44 @@ function operationsForTsLib(
     },
     {
       kind: "writeJson",
+      to: "turbo.json",
+      value: {
+        tasks: {
+          build: {
+            dependsOn: ["^build"],
+            outputs: ["dist/**"],
+          },
+          check: {
+            dependsOn: ["^build"],
+          },
+          fix: {
+            cache: false,
+          },
+        },
+      },
+    },
+    {
+      kind: "writeJson",
       to: "tsconfig.json",
       value: {
+        files: [],
+        references: [
+          { path: `./${workspacePackagePath(context)}/tsconfig.json` },
+        ],
+      },
+    },
+    {
+      kind: "writeJson",
+      to: `${workspacePackagePath(context)}/package.json`,
+      value: libraryPackageJson(context),
+      multilineArrays: ["files"],
+    },
+    {
+      kind: "writeJson",
+      to: `${workspacePackagePath(context)}/tsconfig.json`,
+      value: {
         compilerOptions: {
+          composite: true,
           declaration: true,
           declarationMap: true,
           module: "NodeNext",
@@ -244,12 +375,12 @@ function operationsForTsLib(
     {
       kind: "copyFile",
       from: "src/index.ts",
-      to: "src/index.ts",
+      to: `${workspacePackagePath(context)}/src/index.ts`,
     },
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
-      value: tsLibBlueprint(),
+      value: context.blueprint,
     },
     {
       kind: "writeJson",
@@ -313,7 +444,7 @@ function packageAdditionOperations(
             types: "./dist/index.d.ts",
           },
         },
-        scripts: projectTsLibPackageScripts(),
+        scripts: projectTsLibLocalOxcPackageScripts(),
         devDependencies: {
           "@types/node": "catalog:",
           oxfmt: "catalog:",
@@ -440,9 +571,9 @@ export const tsLibPresetProjection: PresetProjection = {
   },
   blueprint: tsLibBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planTsLibChecks();
-    const fixPlan = planTsLibFixes();
-    const packageScripts = projectTsLibPackageScripts();
+    const checkPlan = planTsLibRootChecks();
+    const fixPlan = planTsLibRootFixes();
+    const packageScripts = projectTsLibRootPackageScripts();
 
     return {
       sourceRoot: templateSourceRoot(),

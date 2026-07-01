@@ -224,9 +224,110 @@ describe("template init", () => {
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
       "tsc-alias": "^1.8.17",
+      turbo: "^2.10.2",
       typescript: "^6.0.3",
     });
   });
+
+  it("generates the TypeScript library preset as a workspace monorepo", async () => {
+    const projectDir = await generatePresetProject("ts-lib");
+    const rootPackageJson = await readJson<{
+      name: string;
+      private: boolean;
+      files?: string[];
+      exports?: unknown;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+      engines: { node: string };
+      packageManager: string;
+    }>(path.join(projectDir, "package.json"));
+    const libraryPackageJson = await readJson<{
+      name: string;
+      private: boolean;
+      files: string[];
+      exports: unknown;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+      engines: { node: string };
+      packageManager?: string;
+    }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const workspace = parseYaml(workspaceYaml) as {
+      packages: string[];
+      catalog: Record<string, string>;
+    };
+    const rootTsconfig = await readJson<{
+      files: string[];
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const blueprint = await readJson<{
+      preset: string;
+      projectKind: string;
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+
+    expect(rootPackageJson).toMatchObject({
+      name: "demo-ts-lib",
+      private: true,
+      engines: { node: "24" },
+    });
+    expect(rootPackageJson).not.toHaveProperty("files");
+    expect(rootPackageJson).not.toHaveProperty("exports");
+    expect(rootPackageJson.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/);
+    expect(rootPackageJson.devDependencies).toEqual({
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      turbo: "catalog:",
+    });
+    expect(rootPackageJson.scripts.check).toBe("turbo run check");
+    expect(rootPackageJson.scripts.fix).toBe("turbo run fix");
+
+    expect(libraryPackageJson).toMatchObject({
+      name: "@demo-ts-lib/demo-ts-lib",
+      private: true,
+      files: ["dist"],
+      engines: { node: "24" },
+    });
+    expect(libraryPackageJson).not.toHaveProperty("packageManager");
+    expect(libraryPackageJson.exports).toEqual({
+      ".": {
+        default: "./dist/index.js",
+        types: "./dist/index.d.ts",
+      },
+    });
+    expect(libraryPackageJson.scripts.check).toBe(
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    );
+    expect(libraryPackageJson.devDependencies).toMatchObject({
+      "@types/node": "catalog:",
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      "tsc-alias": "catalog:",
+      typescript: "catalog:",
+    });
+
+    expect(workspace.packages).toEqual(["packages/*"]);
+    expect(workspace.catalog).toHaveProperty("turbo");
+    expect(rootTsconfig).toEqual({
+      files: [],
+      references: [{ path: "./packages/demo-ts-lib/tsconfig.json" }],
+    });
+    expect(blueprint).toMatchObject({
+      preset: "ts-lib",
+      projectKind: "multi-package",
+      packages: [
+        {
+          name: "@demo-ts-lib/demo-ts-lib",
+          path: "packages/demo-ts-lib",
+        },
+      ],
+    });
+
+    await stat(path.join(projectDir, "packages/demo-ts-lib/src/index.ts"));
+  }, 120_000);
 
   it("generates a minimal Template Dependency Catalog projection for the Vue app preset", async () => {
     const projectDir = await generatePresetProject("vue-app");
@@ -444,7 +545,9 @@ describe("template init", () => {
           expect.arrayContaining([
             expect.stringContaining("target=/usr/local/cargo/registry"),
             expect.stringContaining("target=/usr/local/cargo/git"),
-            expect.stringContaining("target=${containerWorkspaceFolder}/target"),
+            expect.stringContaining(
+              "target=${containerWorkspaceFolder}/target",
+            ),
           ]),
         );
         expect(dockerfile).toContain(
@@ -568,9 +671,13 @@ describe("template init", () => {
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
+    const libraryPackageJson = await readJson<{
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
     const tsconfig = await readJson<{
       compilerOptions: { paths?: Record<string, string[]> };
-    }>(path.join(projectDir, "tsconfig.json"));
+    }>(path.join(projectDir, "packages/demo-ts-lib/tsconfig.json"));
     const checkWorkflow = await readFile(
       path.join(projectDir, ".github/workflows/check.yml"),
       "utf8",
@@ -642,10 +749,12 @@ describe("template init", () => {
     expect(dockerfile).toContain(
       `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
     );
-    expect(packageJson.scripts.build).toBe(
+    expect(packageJson.scripts.check).toBe("turbo run check");
+    expect(packageJson.devDependencies.turbo).toBe("catalog:");
+    expect(libraryPackageJson.scripts.build).toBe(
       "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     );
-    expect(packageJson.devDependencies["tsc-alias"]).toBe("catalog:");
+    expect(libraryPackageJson.devDependencies["tsc-alias"]).toBe("catalog:");
     expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
   }, 120_000);
 
@@ -723,6 +832,25 @@ describe("template init", () => {
         expect(files).toContain(`${prefix}oxlint.config.ts`);
         expect(files).toContain(`${prefix}oxfmt.config.ts`);
 
+        if (preset === "ts-lib") {
+          const packageJson = await readJson<{
+            scripts: Record<string, string>;
+          }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
+          expect(packageJson.scripts["format:check"]).toBe(
+            "oxfmt --check --config ../../oxfmt.config.ts .",
+          );
+          expect(packageJson.scripts["format:write"]).toBe(
+            "oxfmt --write --config ../../oxfmt.config.ts .",
+          );
+          expect(packageJson.scripts.lint).toBe(
+            "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+          );
+          expect(packageJson.scripts["lint:fix"]).toBe(
+            "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+          );
+          continue;
+        }
+
         const packageJson = await readJson<{ scripts: Record<string, string> }>(
           path.join(projectDir, configDir, "package.json"),
         );
@@ -764,6 +892,12 @@ describe("template init", () => {
       dependencies?: Record<string, string>;
       devDependencies: Record<string, string>;
     }>(path.join(projectDir, "package.json"));
+    const libraryPackageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      dependencies?: Record<string, string>;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "packages/demo-lib/package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
@@ -774,7 +908,7 @@ describe("template init", () => {
     );
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
-    }>(path.join(projectDir, "tsconfig.json"));
+    }>(path.join(projectDir, "packages/demo-lib/tsconfig.json"));
     const gitignore = await readFile(
       path.join(projectDir, ".gitignore"),
       "utf8",
@@ -812,15 +946,20 @@ describe("template init", () => {
 
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
-    expect(packageJson.scripts.check).toBe(
+    expect(packageJson.scripts.check).toBe("turbo run check");
+    expect(packageJson.scripts.fix).toBe("turbo run fix");
+    expect(packageJson.devDependencies.turbo).toBe("catalog:");
+    expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
+    expect(packageJson.scripts.check).toBe("turbo run check");
+    expect(libraryPackageJson.scripts.check).toBe(
       "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
-    expect(packageJson.scripts.fix).toBe(
+    expect(libraryPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix",
     );
-    expect(packageJson.devDependencies.typescript).toBe("catalog:");
-    expect(packageJson.devDependencies.oxlint).toBe("catalog:");
-    expect(packageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(libraryPackageJson.devDependencies.typescript).toBe("catalog:");
+    expect(libraryPackageJson.devDependencies.oxlint).toBe("catalog:");
+    expect(libraryPackageJson.devDependencies.oxfmt).toBe("catalog:");
 
     expect(workspaceYaml).toContain("catalog:");
     expect(workspaceYaml).toContain("typescript:");
@@ -831,6 +970,7 @@ describe("template init", () => {
       oxfmt: templateWorkspace.catalog.oxfmt,
       oxlint: templateWorkspace.catalog.oxlint,
       "tsc-alias": templateWorkspace.catalog["tsc-alias"],
+      turbo: templateWorkspace.catalog.turbo,
       typescript: templateWorkspace.catalog.typescript,
     });
     expect(generatedWorkspace.catalog).not.toHaveProperty("hono");
@@ -849,7 +989,7 @@ describe("template init", () => {
     await stat(path.join(projectDir, ".devcontainer/Dockerfile"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
-    await stat(path.join(projectDir, "src/index.ts"));
+    await stat(path.join(projectDir, "packages/demo-lib/src/index.ts"));
     await expect(
       stat(path.join(projectDir, ".project-kit")),
     ).rejects.toMatchObject({
@@ -1862,9 +2002,7 @@ describe("template init", () => {
     expect(cargoToml).toContain('strip = "symbols"');
     expect(rustfmtToml).toContain('edition = "2024"');
     expect(rustToolchainToml).toContain('[toolchain]\nchannel = "stable"\n');
-    expect(rustToolchainToml).toContain(
-      'components = ["rustfmt", "clippy"]',
-    );
+    expect(rustToolchainToml).toContain('components = ["rustfmt", "clippy"]');
 
     expect(devcontainer.build).toEqual({
       dockerfile: "Dockerfile",

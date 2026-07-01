@@ -39,20 +39,21 @@ describe("Preset Registry", () => {
 
     expect(
       plan.checkPlan.components.map((component) => component.kind),
-    ).toEqual(["typescript-typecheck", "oxc-lint", "oxc-format-check"]);
+    ).toEqual(["turbo-check"]);
     expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
-      "oxc-format-write",
-      "oxc-lint-fix",
+      "turbo-fix",
     ]);
-    expect(plan.packageScripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-    );
+    expect(plan.packageScripts.check).toBe("turbo run check");
 
     const packageJson = await readJson<{
       engines: { node: string };
       packageManager: string;
       scripts: Record<string, string>;
     }>(path.join(targetDir, "package.json"));
+    const libraryPackageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+    }>(path.join(targetDir, "packages/demo-lib/package.json"));
     const generationRecord = await readJson<{
       command: string;
       toolchain: { nodeLtsMajor: string; packageManagerPin: string };
@@ -61,6 +62,10 @@ describe("Preset Registry", () => {
     expect(packageJson.scripts).toEqual(plan.packageScripts);
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
+    expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
+    expect(libraryPackageJson.scripts.check).toBe(
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    );
     expect(generationRecord).toMatchObject({
       command: "template init --preset ts-lib",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.2.3" },

@@ -190,7 +190,7 @@ describe("template add package", () => {
     });
   }, 120_000);
 
-  it("fails clearly in a generated Single-Package Project", async () => {
+  it("adds a package to the generated TypeScript library workspace tracer", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
     );
@@ -211,33 +211,58 @@ describe("template add package", () => {
       { cwd: repoRoot },
     );
 
-    await expect(
-      execa(
-        "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "ts-lib",
-          "--name",
-          "shared",
-        ],
-        { cwd: projectDir },
-      ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition only supports existing workspace Generated Repositories",
-      ),
-    });
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+      ],
+      { cwd: projectDir },
+    );
 
-    await expect(
-      stat(path.join(projectDir, "packages/shared")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    const blueprint = await readJson<{
+      projectKind: string;
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const rootTsconfig = await readJson<{
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const packageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+      devDependencies: Record<string, string>;
+      packageManager?: string;
+    }>(path.join(projectDir, "packages/shared/package.json"));
+
+    expect(blueprint.projectKind).toBe("multi-package");
+    expect(blueprint.packages).toEqual([
+      { name: "@demo-lib/demo-lib", path: "packages/demo-lib" },
+      { name: "@demo-lib/shared", path: "packages/shared" },
+    ]);
+    expect(workspaceYaml).toContain("  - packages/*");
+    expect(rootTsconfig.references).toEqual([
+      { path: "./packages/demo-lib/tsconfig.json" },
+      { path: "./packages/shared/tsconfig.json" },
+    ]);
+    expect(packageJson.name).toBe("@demo-lib/shared");
+    expect(packageJson).not.toHaveProperty("packageManager");
+    expect(packageJson.scripts.check).toBe(
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    );
+    expect(packageJson.devDependencies.typescript).toBe("catalog:");
+
+    await stat(path.join(projectDir, "packages/shared/src/index.ts"));
   });
 
   it("fails clearly when the requested preset does not support Package Addition", async () => {

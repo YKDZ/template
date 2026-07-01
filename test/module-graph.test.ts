@@ -14,6 +14,7 @@ import {
   planRustBinFixes,
   projectRustBinPackageScripts,
 } from "../templates/rust-bin/projection.js";
+import { projectTsLibPackageScripts } from "../templates/ts-lib/projection.js";
 import { projectVueAppPackageScripts } from "../templates/vue-app/projection.js";
 import {
   projectVueHonoApiPackageScripts,
@@ -22,7 +23,7 @@ import {
 } from "../templates/vue-hono-app/projection.js";
 
 describe("module graph plans", () => {
-  it("selects semantic Check and Fix Components for the ts-lib package boundary", () => {
+  it("selects semantic Check and Fix Components for the ts-lib workspace root", () => {
     const projection = findBuiltInPresetProjection("ts-lib");
     const plan = projection!.project({
       projectName: { kind: "ProjectName", value: "demo-lib" },
@@ -39,32 +40,20 @@ describe("module graph plans", () => {
 
     expect(plan.checkPlan.components).toEqual([
       {
-        kind: "typescript-typecheck",
-        owner: { kind: "package-boundary", path: "." },
-      },
-      {
-        kind: "oxc-lint",
-        owner: { kind: "package-boundary", path: "." },
-      },
-      {
-        kind: "oxc-format-check",
+        kind: "turbo-check",
         owner: { kind: "package-boundary", path: "." },
       },
     ]);
 
     expect(plan.fixPlan.components).toEqual([
       {
-        kind: "oxc-format-write",
-        owner: { kind: "package-boundary", path: "." },
-      },
-      {
-        kind: "oxc-lint-fix",
+        kind: "turbo-fix",
         owner: { kind: "package-boundary", path: "." },
       },
     ]);
   });
 
-  it("orders ts-lib Check and Fix Plans before rendering Root Check and Fix Command strings", () => {
+  it("renders ts-lib Root Check and Fix Command strings through Turbo", () => {
     const projection = findBuiltInPresetProjection("ts-lib");
     const plan = projection!.project({
       projectName: { kind: "ProjectName", value: "demo-lib" },
@@ -82,24 +71,17 @@ describe("module graph plans", () => {
     const fixPlan = plan.fixPlan;
 
     expect(checkPlan.components.map((component) => component.kind)).toEqual([
-      "typescript-typecheck",
-      "oxc-lint",
-      "oxc-format-check",
+      "turbo-check",
     ]);
     expect(fixPlan.components.map((component) => component.kind)).toEqual([
-      "oxc-format-write",
-      "oxc-lint-fix",
+      "turbo-fix",
     ]);
 
-    expect(renderRootCheckCommand(checkPlan)).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-    );
-    expect(renderFixCommand(fixPlan)).toBe(
-      "pnpm run format:write && pnpm run lint:fix",
-    );
+    expect(renderRootCheckCommand(checkPlan)).toBe("turbo run check");
+    expect(renderFixCommand(fixPlan)).toBe("turbo run fix");
   });
 
-  it("projects ts-lib package scripts from Check and Fix Plans", () => {
+  it("projects ts-lib root and member package scripts from Check and Fix Plans", () => {
     const projection = findBuiltInPresetProjection("ts-lib");
     const plan = projection!.project({
       projectName: { kind: "ProjectName", value: "demo-lib" },
@@ -115,13 +97,18 @@ describe("module graph plans", () => {
     });
 
     expect(plan.packageScripts).toEqual({
+      check: "turbo run check",
+      fix: "turbo run fix",
+    });
+    expect(projectTsLibPackageScripts()).toEqual({
       build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
       check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
       fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check .",
-      "format:write": "oxfmt --write .",
-      lint: "oxlint . --deny-warnings",
-      "lint:fix": "oxlint . --fix --deny-warnings",
+      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "lint:fix":
+        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
       typecheck: "tsc -p tsconfig.json --noEmit",
     });
   });
@@ -365,7 +352,7 @@ describe("module graph plans", () => {
         "    schedule:",
         "      interval: weekly",
         "    ignore:",
-        "      - dependency-name: \"@types/node\"",
+        '      - dependency-name: "@types/node"',
         "        update-types:",
         "          - version-update:semver-major",
         "  - package-ecosystem: github-actions",
