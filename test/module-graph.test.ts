@@ -431,6 +431,7 @@ describe("module graph plans", () => {
     expect(projectDependabotConfig(tsLibPlan.dependencyMaintenancePolicy)).toBe(
       [
         "version: 2",
+        "",
         "updates:",
         "  - package-ecosystem: npm",
         "    directory: /",

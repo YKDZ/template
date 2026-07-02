@@ -1,6 +1,6 @@
 {
   "name": "@ykdz/template",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": false,
   "description": "Project template generator for YKDZ starter projects.",
   "keywords": [
@@ -24,6 +24,9 @@
     "dist",
     "pnpm-workspace.yaml",
     "templates",
+    "!templates/registry.ts",
+    "!templates/projection-plans.ts",
+    "!templates/*/projection.ts",
     "!templates/shared/oxc/tsconfig.json",
     "!templates/**/node_modules"
   ],
@@ -32,7 +35,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
     "check": "pnpm run check:format && pnpm run typecheck && pnpm run test && pnpm run check:templates && pnpm run check:fixtures",
     "check:format": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",

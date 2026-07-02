@@ -111,6 +111,7 @@ export function projectDependabotConfig(
 ): string {
   return [
     "version: 2",
+    "",
     "updates:",
     ...policy.ecosystems.flatMap((ecosystem) =>
       renderDependabotUpdate(

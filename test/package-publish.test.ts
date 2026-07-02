@@ -205,9 +205,13 @@ async function copyCleanPackage(targetDir: string): Promise<void> {
 }
 
 async function checkedTemplatePackagePaths(): Promise<string[]> {
-  return (await packageFiles())
-    .filter((file) => file.startsWith("templates/"))
-    .filter((file) => file !== "templates/shared/oxc/tsconfig.json")
+  return [
+    ...new Set([
+      ...projectionTemplateSourceFiles(),
+      ...checkedGithubTemplateFiles(),
+      "templates/shared/editor-customization/capabilities.json",
+    ]),
+  ]
     .map((file) => `package/${file}`)
     .sort();
 }
@@ -297,6 +301,16 @@ describe("package publishing", () => {
     expect(packedPaths).toContain("package/LICENSE");
     expect(packedPaths).toContain("package/pnpm-workspace.yaml");
     expect(packedPaths).toContain("package/README.md");
+    expect(
+      packedPaths.filter((packedPath) => packedPath.endsWith(".map")),
+    ).toEqual([]);
+    expect(packedPaths).not.toContain("package/templates/registry.ts");
+    expect(packedPaths).not.toContain("package/templates/projection-plans.ts");
+    expect(packedPaths).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^package\/templates\/[^/]+\/projection\.ts$/),
+      ]),
+    );
     const localTemplateArtifact = path.join(
       templatesRoot,
       `.package-publish-artifact-${process.pid}.tmp`,
