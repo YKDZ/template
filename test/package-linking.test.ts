@@ -94,6 +94,43 @@ describe("Package Link Planning", () => {
     );
   });
 
+  it("derives one provider exposure and idempotent workspace dependencies for repeated link intents", () => {
+    const plan = planPackageLinks(
+      [
+        {
+          name: "@demo/shared",
+          path: "packages/shared",
+          role: "shared-library",
+          sourcePreset: "ts-lib",
+        },
+      ],
+      [
+        {
+          consumerPackagePath: "apps/web",
+          providerPackagePath: "packages/shared",
+        },
+        {
+          consumerPackagePath: "apps/api",
+          providerPackagePath: "packages/shared",
+        },
+        {
+          consumerPackagePath: "apps/web",
+          providerPackagePath: "packages/shared",
+        },
+      ],
+    );
+
+    expect([...plan.exposuresByPackagePath.keys()]).toEqual([
+      "packages/shared",
+    ]);
+    expect(plan.manifestDependenciesByPackagePath.get("apps/web")).toEqual({
+      "@demo/shared": "workspace:*",
+    });
+    expect(plan.manifestDependenciesByPackagePath.get("apps/api")).toEqual({
+      "@demo/shared": "workspace:*",
+    });
+  });
+
   it("derives Turbo task relationships for typecheck invalidation and compiled runtime artifacts", () => {
     const jitPlan = planPackageLinks(
       [

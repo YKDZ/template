@@ -31,7 +31,7 @@ export type AddPackageOptions = {
   preset: string;
   name: string;
   path?: string;
-  linkFrom?: string;
+  linkFrom?: readonly string[];
 };
 
 type RootPackageJson = {
@@ -269,6 +269,32 @@ function packageLinkIntentForSingleConsumer(options: {
     consumerPackagePath: options.consumerPackagePath,
     providerPackagePath: options.providerPackagePath,
   };
+}
+
+function packageLinkIntentsForConsumers(options: {
+  readonly blueprint: ProjectBlueprint;
+  readonly consumerPackagePaths: readonly string[];
+  readonly providerPackagePath: string;
+}): PackageLinkIntent[] {
+  const packageLinkIntents: PackageLinkIntent[] = [];
+  const seenConsumerPackagePaths = new Set<string>();
+
+  for (const consumerPackagePath of options.consumerPackagePaths) {
+    if (seenConsumerPackagePaths.has(consumerPackagePath)) {
+      continue;
+    }
+
+    seenConsumerPackagePaths.add(consumerPackagePath);
+    packageLinkIntents.push(
+      packageLinkIntentForSingleConsumer({
+        blueprint: options.blueprint,
+        consumerPackagePath,
+        providerPackagePath: options.providerPackagePath,
+      }),
+    );
+  }
+
+  return packageLinkIntents;
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
@@ -586,6 +612,12 @@ function assertObjectManifest(
   }
 }
 
+function recordSortedByKey<T>(record: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
 async function consumerManifestUpdatesForPackageLinkIntents(options: {
   readonly root: string;
   readonly manifestDependenciesByPackagePath: ReadonlyMap<
@@ -616,10 +648,10 @@ async function consumerManifestUpdatesForPackageLinkIntents(options: {
       packagePath,
       manifest: {
         ...manifest,
-        dependencies: {
+        dependencies: recordSortedByKey({
           ...manifest.dependencies,
           ...packageLinkDependencies,
-        },
+        }),
       },
     });
   }
@@ -1123,15 +1155,11 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.sourceRoots?.sharedOxc !== undefined;
 
   assertNoPackageConflict(blueprint, packageName, additionPlan.packagePath);
-  const packageLinkIntents = options.linkFrom
-    ? [
-        packageLinkIntentForSingleConsumer({
-          blueprint,
-          consumerPackagePath: options.linkFrom,
-          providerPackagePath: additionPlan.packagePath,
-        }),
-      ]
-    : [];
+  const packageLinkIntents = packageLinkIntentsForConsumers({
+    blueprint,
+    consumerPackagePaths: options.linkFrom ?? [],
+    providerPackagePath: additionPlan.packagePath,
+  });
 
   await assertMissingPackagePath(
     additionPlan.packagePath,

@@ -46,14 +46,14 @@ type AddPackageOptions = {
   preset: string;
   name: string;
   path?: string;
-  linkFrom?: string;
+  linkFrom: readonly string[];
 };
 
 function usage(): string {
   return [
     "Usage:",
     "  template init <dir> --preset <name> --yes",
-    "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]",
+    "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]...",
     "  template presets",
     "  template schema preset",
     "  template schema blueprint",
@@ -64,7 +64,7 @@ function usage(): string {
     "  --preset <name>  Project preset to generate",
     "  --name <name>    Package name to add",
     "  --path <path>    Two-segment Package Path to add",
-    "  --link-from <path>  Existing consumer Package Path to link from",
+    "  --link-from <path>  Existing consumer Package Path to link from; repeatable",
     "  --scope <name>   Package scope for workspace package names",
     "  --yes            Accept defaults for non-interactive generation",
     "  --dry-run        Print the planned generation without writing files",
@@ -425,7 +425,7 @@ function parseAddPackageOptions(args: string[]): AddPackageOptions {
   let preset = "";
   let name = "";
   let packagePath: string | undefined;
-  let linkFrom: string | undefined;
+  const linkFrom: string[] = [];
 
   for (let index = 2; index < args.length; index += 1) {
     const arg = args[index];
@@ -465,7 +465,7 @@ function parseAddPackageOptions(args: string[]): AddPackageOptions {
       if (!value) {
         throw new Error("--link-from requires a value");
       }
-      linkFrom = value;
+      linkFrom.push(value);
       index += 1;
       continue;
     }
