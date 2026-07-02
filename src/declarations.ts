@@ -97,7 +97,7 @@ export const presetFileJsonSchema = {
     supportedProjectKinds: {
       type: "array",
       minItems: 1,
-      items: { enum: ["single-package", "multi-package"] },
+      items: { enum: ["multi-package"] },
       uniqueItems: true,
     },
     features: {
@@ -119,7 +119,7 @@ export const blueprintJsonSchema = {
     schemaVersion: { const: 1 },
     preset: { type: "string", minLength: 1 },
     packageManager: { enum: ["pnpm"] },
-    projectKind: { enum: ["single-package", "multi-package"] },
+    projectKind: { enum: ["multi-package"] },
     features: {
       type: "array",
       items: { enum: featureNames },
@@ -229,6 +229,16 @@ function generationSupportIssue(
   };
 }
 
+function unsupportedSinglePackageProjectShapeIssue(
+  path: string,
+): ValidationIssue {
+  return {
+    path,
+    message:
+      "single-package Project Shape is unsupported in V1; use the workspace monorepo Project Shape",
+  };
+}
+
 export function validatePresetFile(
   input: unknown,
 ): ValidationResult<PresetFile> {
@@ -249,6 +259,12 @@ export function validatePresetFile(
     ),
     ...duplicateIssues(result.output.features, "$.features"),
   ];
+
+  if (result.output.supportedProjectKinds.includes("single-package")) {
+    semanticIssues.push(
+      unsupportedSinglePackageProjectShapeIssue("$.supportedProjectKinds"),
+    );
+  }
 
   const builtInPreset = findBuiltInPreset(result.output.name);
   const unsupportedGeneration = builtInPreset
@@ -284,6 +300,12 @@ export function validateProjectBlueprint(
   const semanticIssues: ValidationIssue[] = [
     ...duplicateIssues(blueprint.features, "$.features"),
   ];
+
+  if (blueprint.projectKind === "single-package") {
+    semanticIssues.push(
+      unsupportedSinglePackageProjectShapeIssue("$.projectKind"),
+    );
+  }
 
   if (!preset) {
     semanticIssues.push({
@@ -336,16 +358,6 @@ export function validateProjectBlueprint(
   }
 
   if (blueprint.packages) {
-    if (
-      blueprint.projectKind === "single-package" &&
-      blueprint.packages.length > 1
-    ) {
-      semanticIssues.push({
-        path: "$.packages",
-        message: "single-package blueprints support exactly one package",
-      });
-    }
-
     semanticIssues.push(
       ...duplicateIssues(
         blueprint.packages.map((projectPackage) => projectPackage.name),

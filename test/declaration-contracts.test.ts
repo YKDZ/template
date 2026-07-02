@@ -34,10 +34,22 @@ describe("declaration contracts", () => {
   it("prints published JSON Schemas for declarations", async () => {
     const presetSchema = JSON.parse(
       (await template(["schema", "preset"])).stdout,
-    ) as { title: string; type: string; required: string[] };
+    ) as {
+      title: string;
+      type: string;
+      required: string[];
+      properties: {
+        supportedProjectKinds: { items: { enum: string[] } };
+      };
+    };
     const blueprintSchema = JSON.parse(
       (await template(["schema", "blueprint"])).stdout,
-    ) as { title: string; type: string; required: string[] };
+    ) as {
+      title: string;
+      type: string;
+      required: string[];
+      properties: { projectKind: { enum: string[] } };
+    };
 
     expect(presetSchema).toMatchObject({
       title: "Project Kit Preset File",
@@ -45,6 +57,9 @@ describe("declaration contracts", () => {
     });
     expect(presetSchema.required).toContain("name");
     expect(presetSchema.required).toContain("features");
+    expect(presetSchema.properties.supportedProjectKinds.items.enum).toEqual([
+      "multi-package",
+    ]);
 
     expect(blueprintSchema).toMatchObject({
       title: "Project Kit Blueprint",
@@ -52,6 +67,9 @@ describe("declaration contracts", () => {
     });
     expect(blueprintSchema.required).toContain("preset");
     expect(blueprintSchema.required).not.toContain("packageManager");
+    expect(blueprintSchema.properties.projectKind.enum).toEqual([
+      "multi-package",
+    ]);
   });
 
   it("advertises pnpm support for the Rust preset task layer", () => {
@@ -60,8 +78,36 @@ describe("declaration contracts", () => {
     ]);
   });
 
-  it("validates a JSON preset file through the CLI", async () => {
+  it("validates a workspace monorepo JSON preset file through the CLI", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-preset-"));
+    const presetPath = path.join(workspace, "preset.json");
+    await writeFile(
+      presetPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "custom-lib",
+          title: "Custom library",
+          description: "A custom strict TypeScript library preset.",
+          supportedPackageManagers: ["pnpm"],
+          supportedProjectKinds: ["multi-package"],
+          features: ["strict-typescript", "root-check"],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await template(["preset", "validate", presetPath]);
+
+    expect(result.stdout).toContain("Preset file is valid");
+    expect(result.stdout).toContain("custom-lib");
+  });
+
+  it("rejects preset files that claim single-package support in V1", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-single-package-preset-"),
+    );
     const presetPath = path.join(workspace, "preset.json");
     await writeFile(
       presetPath,
@@ -80,10 +126,13 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    const result = await template(["preset", "validate", presetPath]);
-
-    expect(result.stdout).toContain("Preset file is valid");
-    expect(result.stdout).toContain("custom-lib");
+    await expect(
+      template(["preset", "validate", presetPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "single-package Project Shape is unsupported in V1",
+      ),
+    });
   });
 
   it("rejects future built-in preset references in preset files", async () => {
@@ -100,7 +149,7 @@ describe("declaration contracts", () => {
           title: "Node CLI",
           description: "A future built-in preset reference.",
           supportedPackageManagers: ["pnpm"],
-          supportedProjectKinds: ["single-package"],
+          supportedProjectKinds: ["multi-package"],
           features: [],
         },
         null,
@@ -278,7 +327,7 @@ describe("declaration contracts", () => {
     });
   });
 
-  it("rejects multiple distinct packages in a single-package blueprint", async () => {
+  it("rejects single-package blueprints because V1 only supports workspace monorepos", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-single-package-"),
     );
@@ -292,10 +341,7 @@ describe("declaration contracts", () => {
           packageManager: "pnpm",
           projectKind: "single-package",
           features: ["strict-typescript", "root-check"],
-          packages: [
-            { name: "api", path: "packages/api" },
-            { name: "web", path: "packages/web" },
-          ],
+          packages: [{ name: "api", path: "packages/api" }],
         },
         null,
         2,
@@ -306,7 +352,7 @@ describe("declaration contracts", () => {
       template(["blueprint", "validate", blueprintPath]),
     ).rejects.toMatchObject({
       stderr: expect.stringContaining(
-        "single-package blueprints support exactly one package",
+        "single-package Project Shape is unsupported in V1",
       ),
     });
   });

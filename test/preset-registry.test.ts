@@ -2,9 +2,16 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import {
+  builtInPresets,
+  validateProjectBlueprint,
+} from "../src/declarations.js";
 import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import {
+  builtInPresetProjections,
+  findBuiltInPresetProjection,
+} from "../templates/registry.js";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
@@ -15,6 +22,43 @@ async function readJson<T>(filePath: string): Promise<T> {
 }
 
 describe("Preset Registry", () => {
+  it("advertises only workspace monorepo Project Shape metadata for built-in presets", () => {
+    expect(
+      builtInPresets.map((preset) => ({
+        name: preset.name,
+        supportedProjectKinds: preset.supportedProjectKinds,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        { name: "ts-lib", supportedProjectKinds: ["multi-package"] },
+        { name: "hono-api", supportedProjectKinds: ["multi-package"] },
+        { name: "vue-app", supportedProjectKinds: ["multi-package"] },
+        { name: "vue-hono-app", supportedProjectKinds: ["multi-package"] },
+        { name: "rust-bin", supportedProjectKinds: ["multi-package"] },
+      ]),
+    );
+    expect(
+      builtInPresets.flatMap((preset) => preset.supportedProjectKinds),
+    ).not.toContain("single-package");
+  });
+
+  it("generates valid workspace monorepo Project Blueprints for supported presets", async () => {
+    for (const projection of builtInPresetProjections) {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-preset-blueprint-"),
+      );
+      const targetDir = path.join(
+        workspace,
+        `demo-${projection.metadata.name}`,
+      );
+      const blueprint = projection.blueprint({ targetDir, scope: "acme" });
+      const validation = validateProjectBlueprint(blueprint);
+
+      expect(validation).toMatchObject({ ok: true });
+      expect(blueprint.projectKind).toBe("multi-package");
+    }
+  });
+
   it("projects a ts-lib Generated Repository through the Preset Projection contract", async () => {
     const projection = findBuiltInPresetProjection("ts-lib");
     expect(projection?.metadata).toMatchObject({

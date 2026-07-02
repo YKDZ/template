@@ -949,6 +949,61 @@ describe("template add package", () => {
     });
   });
 
+  it("fails clearly when Local Template Metadata declares a single-package Project Shape", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+    await writeFile(
+      path.join(projectDir, ".template/blueprint.json"),
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "ts-lib",
+          packageManager: "pnpm",
+          projectKind: "single-package",
+          features: ["strict-typescript", "root-check"],
+          packages: [
+            { name: "@demo-fullstack/shared", path: "packages/shared" },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "extra",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Addition only supports existing workspace Generated Repositories",
+      ),
+    });
+
+    await expect(
+      stat(path.join(projectDir, "packages/extra")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("adds a Hono API package to a generated workspace repository", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),

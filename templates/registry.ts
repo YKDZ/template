@@ -17,7 +17,7 @@ const futurePresetMetadata = [
     description: "Future application preset metadata.",
     generation: "future",
     supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
+    supportedProjectKinds: ["multi-package"],
     features: [],
   },
   {
@@ -26,7 +26,7 @@ const futurePresetMetadata = [
     description: "Future command-line preset metadata.",
     generation: "future",
     supportedPackageManagers: ["pnpm"],
-    supportedProjectKinds: ["single-package"],
+    supportedProjectKinds: ["multi-package"],
     features: [],
   },
 ] satisfies readonly BuiltInPreset[];

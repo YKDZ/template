@@ -277,6 +277,15 @@ async function readGeneratedWorkspaceBlueprint(
   const result = validateProjectBlueprint(blueprintJson);
 
   if (!result.ok) {
+    if (
+      isRecord(blueprintJson) &&
+      blueprintJson.projectKind === "single-package"
+    ) {
+      throw new Error(
+        "Package Addition only supports existing workspace Generated Repositories",
+      );
+    }
+
     throw new Error(
       "Package Addition requires a valid .template/blueprint.json",
     );
