@@ -40,12 +40,25 @@ export type PackageLinkPlan = {
     string,
     Readonly<Record<string, "workspace:*">>
   >;
+  readonly turboTasks: TurboTaskGraph;
 };
 
 export type PackageManifestExposureFields = {
   readonly exports: Record<string, unknown>;
   readonly imports: Record<string, unknown>;
   readonly types?: string;
+};
+
+export type TurboTaskDefinition = {
+  readonly dependsOn?: readonly string[];
+  readonly outputs?: readonly string[];
+  readonly cache?: boolean;
+};
+
+export type TurboTaskGraph = Readonly<Record<string, TurboTaskDefinition>>;
+
+export type PackageTurboTaskOptions = {
+  readonly dependencyBuildsRequired: boolean;
 };
 
 export function derivePackageExposure(
@@ -93,6 +106,13 @@ export function planPackageLinks(
     string,
     Record<string, "workspace:*">
   >();
+  const exposuresByPackagePath = new Map(
+    definitions.map((definition) => [
+      definition.path,
+      derivePackageExposure(definition),
+    ]),
+  );
+  let dependencyBuildsRequired = false;
 
   for (const intent of intents) {
     const provider = definitionsByPath.get(intent.providerPackagePath);
@@ -101,6 +121,10 @@ export function planPackageLinks(
       throw new Error(
         `Package Link Intent references unknown provider package at ${intent.providerPackagePath}`,
       );
+    }
+
+    if (exposuresByPackagePath.get(provider.path)?.kind === "compiled") {
+      dependencyBuildsRequired = true;
     }
 
     const dependencies =
@@ -113,13 +137,26 @@ export function planPackageLinks(
   }
 
   return {
-    exposuresByPackagePath: new Map(
-      definitions.map((definition) => [
-        definition.path,
-        derivePackageExposure(definition),
-      ]),
-    ),
+    exposuresByPackagePath,
     manifestDependenciesByPackagePath,
+    turboTasks: packageTurboTasks({ dependencyBuildsRequired }),
+  };
+}
+
+export function packageTurboTasks({
+  dependencyBuildsRequired,
+}: PackageTurboTaskOptions): TurboTaskGraph {
+  return {
+    typecheck: { dependsOn: ["^typecheck"] },
+    build: dependencyBuildsRequired
+      ? { dependsOn: ["^build"], outputs: ["dist/**"] }
+      : { outputs: ["dist/**"] },
+    test: { dependsOn: ["^typecheck"] },
+    "test:e2e": {
+      dependsOn: dependencyBuildsRequired ? ["build", "^build"] : ["build"],
+    },
+    check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+    fix: { cache: false },
   };
 }
 

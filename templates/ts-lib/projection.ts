@@ -102,6 +102,7 @@ function planTsLibRootChecks(): CheckPlan {
       { kind: "oxc-format-check", owner: tsLibRootBoundary },
       { kind: "oxc-lint", owner: tsLibRootBoundary },
       { kind: "typescript-typecheck", owner: tsLibRootBoundary },
+      { kind: "turbo-package-typecheck", owner: tsLibWorkspacePackageBoundary },
       { kind: "turbo-package-check", owner: tsLibWorkspacePackageBoundary },
     ],
     environmentNeeds: [],
@@ -329,9 +330,11 @@ function operationsForTsLib(
       to: "turbo.json",
       value: {
         tasks: {
-          check: {
-            dependsOn: ["^check"],
-          },
+          build: packageLinkPlan.turboTasks.build,
+          check: packageLinkPlan.turboTasks.check,
+          typecheck: packageLinkPlan.turboTasks.typecheck,
+          test: packageLinkPlan.turboTasks.test,
+          "test:e2e": packageLinkPlan.turboTasks["test:e2e"],
           fix: {
             cache: false,
           },

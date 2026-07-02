@@ -128,6 +128,10 @@ function planVueHonoRootChecks(): CheckPlan {
       { kind: "oxc-format-check", owner: rootBoundary },
       { kind: "oxc-lint", owner: rootBoundary },
       { kind: "typescript-typecheck", owner: rootBoundary },
+      { kind: "turbo-package-typecheck", owner: workspacePackageBoundary },
+      { kind: "turbo-package-build", owner: workspacePackageBoundary },
+      { kind: "turbo-package-test", owner: workspacePackageBoundary },
+      { kind: "turbo-package-e2e-test", owner: workspacePackageBoundary },
       { kind: "turbo-package-check", owner: workspacePackageBoundary },
     ],
     environmentNeeds: [
@@ -459,12 +463,13 @@ function operationsForVueHonoApp(
       value: {
         tasks: {
           build: {
-            dependsOn: ["^build"],
+            dependsOn: packageLinkPlan.turboTasks.build.dependsOn,
             outputs: ["dist/**"],
           },
-          check: {
-            dependsOn: ["^build"],
-          },
+          check: packageLinkPlan.turboTasks.check,
+          typecheck: packageLinkPlan.turboTasks.typecheck,
+          test: packageLinkPlan.turboTasks.test,
+          "test:e2e": packageLinkPlan.turboTasks["test:e2e"],
           dev: {
             cache: false,
             persistent: true,

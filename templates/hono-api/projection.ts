@@ -24,6 +24,7 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import { PackageAdditionSupport } from "../../src/package-addition-support.js";
+import { packageTurboTasks } from "../../src/package-linking.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
@@ -99,6 +100,9 @@ function planHonoApiRootChecks(): CheckPlan {
       { kind: "oxc-format-check", owner: rootBoundary },
       { kind: "oxc-lint", owner: rootBoundary },
       { kind: "typescript-typecheck", owner: rootBoundary },
+      { kind: "turbo-package-typecheck", owner: workspacePackageBoundary },
+      { kind: "turbo-package-build", owner: workspacePackageBoundary },
+      { kind: "turbo-package-test", owner: workspacePackageBoundary },
       { kind: "turbo-package-check", owner: workspacePackageBoundary },
     ],
     environmentNeeds: [],
@@ -275,6 +279,7 @@ function operationsForHonoApi(
   });
   const rootManifest = rootPackageJson(context, packageScripts);
   const apiManifest = apiPackageJson(context);
+  const turboTasks = packageTurboTasks({ dependencyBuildsRequired: false });
 
   return [
     {
@@ -298,13 +303,11 @@ function operationsForHonoApi(
       to: "turbo.json",
       value: {
         tasks: {
-          build: {
-            dependsOn: ["^build"],
-            outputs: ["dist/**"],
-          },
-          check: {
-            dependsOn: ["^build"],
-          },
+          build: turboTasks.build,
+          check: turboTasks.check,
+          typecheck: turboTasks.typecheck,
+          test: turboTasks.test,
+          "test:e2e": turboTasks["test:e2e"],
           fix: {
             cache: false,
           },

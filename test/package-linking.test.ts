@@ -93,4 +93,65 @@ describe("Package Link Planning", () => {
       expect.objectContaining({ kind: "compiled" }),
     );
   });
+
+  it("derives Turbo task relationships for typecheck invalidation and compiled runtime artifacts", () => {
+    const jitPlan = planPackageLinks(
+      [
+        {
+          name: "@demo/web",
+          path: "apps/web",
+          role: "shared-library",
+          sourcePreset: "ts-lib",
+        },
+        {
+          name: "@demo/shared",
+          path: "packages/shared",
+          role: "shared-library",
+          sourcePreset: "ts-lib",
+        },
+      ],
+      [
+        {
+          consumerPackagePath: "apps/web",
+          providerPackagePath: "packages/shared",
+        },
+      ],
+    );
+
+    expect(jitPlan.turboTasks).toEqual({
+      typecheck: { dependsOn: ["^typecheck"] },
+      build: { outputs: ["dist/**"] },
+      test: { dependsOn: ["^typecheck"] },
+      "test:e2e": { dependsOn: ["build"] },
+      check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+      fix: { cache: false },
+    });
+
+    const compiledPlan = planPackageLinks(
+      [
+        {
+          name: "@demo/web",
+          path: "apps/web",
+          role: "shared-library",
+          sourcePreset: "ts-lib",
+        },
+        {
+          name: "@demo/api",
+          path: "apps/api",
+          role: "runtime-service",
+          sourcePreset: "hono-api",
+        },
+      ],
+      [{ consumerPackagePath: "apps/web", providerPackagePath: "apps/api" }],
+    );
+
+    expect(compiledPlan.turboTasks).toEqual({
+      typecheck: { dependsOn: ["^typecheck"] },
+      build: { dependsOn: ["^build"], outputs: ["dist/**"] },
+      test: { dependsOn: ["^typecheck"] },
+      "test:e2e": { dependsOn: ["build", "^build"] },
+      check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+      fix: { cache: false },
+    });
+  });
 });

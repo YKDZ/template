@@ -18,6 +18,10 @@ export type CheckComponentKind =
   | "unit-test"
   | "e2e-test"
   | "turbo-check"
+  | "turbo-package-typecheck"
+  | "turbo-package-build"
+  | "turbo-package-test"
+  | "turbo-package-e2e-test"
   | "turbo-package-check"
   | "rustfmt-check"
   | "cargo-clippy"
@@ -79,6 +83,14 @@ function renderCheckComponentCommand(component: CheckComponent): string {
       return "pnpm run test:e2e";
     case "turbo-check":
       return "turbo run check";
+    case "turbo-package-typecheck":
+      return `turbo run typecheck ${renderTurboPackageFilter(component.owner)}`;
+    case "turbo-package-build":
+      return `turbo run build ${renderTurboPackageFilter(component.owner)}`;
+    case "turbo-package-test":
+      return `turbo run test ${renderTurboPackageFilter(component.owner)}`;
+    case "turbo-package-e2e-test":
+      return `turbo run test:e2e ${renderTurboPackageFilter(component.owner)}`;
     case "turbo-package-check":
       return `turbo run check ${renderTurboPackageFilter(component.owner)}`;
     case "rustfmt-check":

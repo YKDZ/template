@@ -15,6 +15,7 @@ import {
   type GeneratedPackageManifestDependencies,
 } from "./dependency-catalog.js";
 import { PackageAdditionSupport } from "./package-addition-support.js";
+import { packageTurboTasks, type TurboTaskGraph } from "./package-linking.js";
 import { renderProject } from "./renderer.js";
 import type { RenderOperation } from "./renderer.js";
 
@@ -46,7 +47,15 @@ type RootUpdatePlan = {
   blueprint: ProjectBlueprint;
   rootPackageJson: RootPackageJson;
   rootTsconfig: RootTsconfig;
+  turboConfig: { tasks: TurboTaskGraph };
   workspaceText: string;
+};
+
+type PackageManifestForTaskGraph = {
+  name?: string;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  exports?: unknown;
 };
 
 function projectNameFromBlueprint(
@@ -491,6 +500,54 @@ function packageAdditionCatalogDependencies(
   return collectGeneratedManifestCatalogReferences(manifests);
 }
 
+function generatedPackageManifestFromOperations(
+  operations: readonly RenderOperation[],
+  packagePath: string,
+): PackageManifestForTaskGraph | undefined {
+  for (const operation of operations) {
+    if (
+      operation.kind !== "writeJson" ||
+      operation.to !== `${packagePath}/package.json`
+    ) {
+      continue;
+    }
+
+    if (!isRecord(operation.value)) {
+      throw new Error(
+        `Package Addition package manifest must be an object: ${operation.to}`,
+      );
+    }
+
+    return operation.value as PackageManifestForTaskGraph;
+  }
+
+  return undefined;
+}
+
+async function packageManifestsForTaskGraph(options: {
+  readonly root: string;
+  readonly blueprint: ProjectBlueprint;
+  readonly operations: readonly RenderOperation[];
+}): Promise<PackageManifestForTaskGraph[]> {
+  const manifests: PackageManifestForTaskGraph[] = [];
+
+  for (const packageDefinition of options.blueprint.packages ?? []) {
+    const manifestFromOperations = generatedPackageManifestFromOperations(
+      options.operations,
+      packageDefinition.path,
+    );
+
+    manifests.push(
+      manifestFromOperations ??
+        (await readJson<PackageManifestForTaskGraph>(
+          path.join(options.root, packageDefinition.path, "package.json"),
+        )),
+    );
+  }
+
+  return manifests;
+}
+
 function blueprintWithPackage(
   blueprint: ProjectBlueprint,
   packageName: string,
@@ -538,7 +595,7 @@ function workspacePackageGlobsFromBlueprint(
 }
 
 function turboPackageTaskCommand(
-  task: "check" | "fix",
+  task: "typecheck" | "build" | "test" | "test:e2e" | "check" | "fix",
   workspacePackageGlobs: readonly string[],
 ): string {
   const filters = workspacePackageGlobs.map((glob) => `--filter './${glob}'`);
@@ -548,7 +605,7 @@ function turboPackageTaskCommand(
 
 function rootScriptWithTurboPackageTask(
   script: string,
-  task: "check" | "fix",
+  task: "typecheck" | "build" | "test" | "test:e2e" | "check" | "fix",
   workspacePackageGlobs: readonly string[],
 ): string {
   const commands = script.split(" && ");
@@ -570,29 +627,126 @@ function rootScriptWithTurboPackageTask(
   return commands.join(" && ");
 }
 
+function turboTaskNamesForPackageManifests(
+  manifests: readonly PackageManifestForTaskGraph[],
+): Array<"typecheck" | "build" | "test" | "test:e2e" | "check"> {
+  const taskNames: Array<
+    "typecheck" | "build" | "test" | "test:e2e" | "check"
+  > = [];
+
+  for (const taskName of [
+    "typecheck",
+    "build",
+    "test",
+    "test:e2e",
+    "check",
+  ] as const) {
+    if (
+      manifests.some(
+        (manifest) => typeof manifest.scripts?.[taskName] === "string",
+      )
+    ) {
+      taskNames.push(taskName);
+    }
+  }
+
+  return taskNames;
+}
+
+function rootScriptWithTurboPackageTasks(options: {
+  readonly script: string;
+  readonly taskNames: readonly (
+    | "typecheck"
+    | "build"
+    | "test"
+    | "test:e2e"
+    | "check"
+  )[];
+  readonly workspacePackageGlobs: readonly string[];
+}): string {
+  const rootCommands = options.script
+    .split(" && ")
+    .filter((command) => !command.startsWith("turbo run "));
+  const turboCommands = options.taskNames.map((taskName) =>
+    turboPackageTaskCommand(taskName, options.workspacePackageGlobs),
+  );
+
+  return [...rootCommands, ...turboCommands].join(" && ");
+}
+
 function rootPackageJsonWithPackageTaskFilters(
   input: unknown,
   blueprint: ProjectBlueprint,
+  packageManifests: readonly PackageManifestForTaskGraph[],
 ): RootPackageJson {
   assertRootPackageJson(input);
 
   const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
+  const taskNames = turboTaskNamesForPackageManifests(packageManifests);
 
   return {
     ...input,
     scripts: {
       ...input.scripts,
-      check: rootScriptWithTurboPackageTask(
-        input.scripts.check,
-        "check",
+      check: rootScriptWithTurboPackageTasks({
+        script: input.scripts.check,
+        taskNames,
         workspacePackageGlobs,
-      ),
+      }),
       fix: rootScriptWithTurboPackageTask(
         input.scripts.fix,
         "fix",
         workspacePackageGlobs,
       ),
     },
+  };
+}
+
+function manifestExportUsesCompiledRuntime(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const rootExport = value["."];
+  if (!isRecord(rootExport)) {
+    return false;
+  }
+
+  return (
+    typeof rootExport.default === "string" &&
+    rootExport.default.startsWith("./dist/")
+  );
+}
+
+function packageManifestsNeedDependencyBuilds(
+  manifests: readonly PackageManifestForTaskGraph[],
+): boolean {
+  const compiledPackageNames = new Set(
+    manifests
+      .filter((manifest) => manifestExportUsesCompiledRuntime(manifest.exports))
+      .map((manifest) => manifest.name)
+      .filter((name): name is string => typeof name === "string"),
+  );
+
+  if (compiledPackageNames.size === 0) {
+    return false;
+  }
+
+  return manifests.some((manifest) =>
+    Object.entries(manifest.dependencies ?? {}).some(
+      ([dependencyName, specifier]) =>
+        specifier === "workspace:*" && compiledPackageNames.has(dependencyName),
+    ),
+  );
+}
+
+function turboConfigForPackageManifests(
+  manifests: readonly PackageManifestForTaskGraph[],
+): { tasks: TurboTaskGraph } {
+  return {
+    tasks: packageTurboTasks({
+      dependencyBuildsRequired: packageManifestsNeedDependencyBuilds(manifests),
+    }),
   };
 }
 
@@ -655,12 +809,18 @@ async function planRootUpdates(
   rootTsconfigReferences: readonly string[],
   catalogDependencies: readonly string[],
   requiresSharedOxcConfiguration: boolean,
+  operations: readonly RenderOperation[],
 ): Promise<RootUpdatePlan> {
   const nextBlueprint = blueprintWithPackage(
     blueprint,
     packageName,
     packagePath,
   );
+  const packageManifests = await packageManifestsForTaskGraph({
+    root,
+    blueprint: nextBlueprint,
+    operations,
+  });
   const workspaceText = pnpmWorkspaceYamlWithCatalogDependencies(
     workspaceTextWithPackageGlob(
       await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
@@ -680,6 +840,7 @@ async function planRootUpdates(
   const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
     await readJson<unknown>(path.join(root, "package.json")),
     nextBlueprint,
+    packageManifests,
   );
 
   return {
@@ -689,6 +850,7 @@ async function planRootUpdates(
       requiresSharedOxcConfiguration,
     ),
     rootTsconfig,
+    turboConfig: turboConfigForPackageManifests(packageManifests),
     workspaceText,
   };
 }
@@ -896,6 +1058,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.rootTsconfigReferences,
     packageAdditionCatalogDependencies(additionPlan.operations),
     requiresSharedOxcConfiguration,
+    additionPlan.operations,
   );
 
   await mkdir(path.join(root, additionPlan.packagePath), { recursive: true });
@@ -939,6 +1102,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     path.join(root, "tsconfig.json"),
     rootUpdatePlan.rootTsconfig,
   );
+  await writeJson(path.join(root, "turbo.json"), rootUpdatePlan.turboConfig);
   await writeJson(
     path.join(root, ".template/blueprint.json"),
     rootUpdatePlan.blueprint,

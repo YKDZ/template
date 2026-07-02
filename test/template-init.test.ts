@@ -313,6 +313,7 @@ describe("template init", () => {
           dependsOn: string[];
           command?: string;
         };
+        typecheck: { dependsOn: string[] };
       };
     }>(path.join(projectDir, "turbo.json"));
     const rootConfigTsconfig = await readJson<{
@@ -344,7 +345,7 @@ describe("template init", () => {
     });
     expect(rootPackageJson.scripts).toMatchObject({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
       fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
       "format:check":
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
@@ -360,7 +361,12 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.check).not.toBe("turbo run check");
     expect(rootPackageJson.scripts.check).toContain("--filter './packages/*'");
     expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix");
-    expect(turboConfig.tasks.check).toEqual({ dependsOn: ["^check"] });
+    expect(turboConfig.tasks.typecheck).toEqual({
+      dependsOn: ["^typecheck"],
+    });
+    expect(turboConfig.tasks.check).toEqual({
+      dependsOn: ["typecheck", "build", "test", "test:e2e"],
+    });
 
     expect(libraryPackageJson).toMatchObject({
       name: "@demo-ts-lib/demo-ts-lib",
@@ -998,7 +1004,7 @@ describe("template init", () => {
     expect(dockerfile).not.toContain("vitest");
     expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
     );
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
@@ -1219,7 +1225,7 @@ describe("template init", () => {
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
     expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
     );
     expect(packageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
@@ -2132,7 +2138,12 @@ describe("template init", () => {
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "apps/api/tsconfig.json"));
     const turboConfig = await readJson<{
-      tasks: { check: { dependsOn: string[] } };
+      tasks: {
+        build: { dependsOn?: string[]; outputs: string[] };
+        check: { dependsOn: string[] };
+        typecheck: { dependsOn: string[] };
+        test: { dependsOn: string[] };
+      };
     }>(path.join(projectDir, "turbo.json"));
     const blueprint = await readJson<{
       preset: string;
@@ -2162,7 +2173,7 @@ describe("template init", () => {
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -2234,7 +2245,15 @@ describe("template init", () => {
     expect(apiTsconfig.compilerOptions.strict).toBe(true);
     expect(apiTsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(apiTsconfig.compilerOptions).not.toHaveProperty("paths");
-    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
+    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks.build).toEqual({ outputs: ["dist/**"] });
+    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual([
+      "typecheck",
+      "build",
+      "test",
+      "test:e2e",
+    ]);
 
     expect(blueprint).toMatchObject({
       preset: "hono-api",
@@ -2614,7 +2633,13 @@ describe("template init", () => {
       include: string[];
     }>(path.join(projectDir, "apps/web/tsconfig.node.json"));
     const turboConfig = await readJson<{
-      tasks: { check: { dependsOn: string[] } };
+      tasks: {
+        build: { dependsOn?: string[]; outputs: string[] };
+        check: { dependsOn: string[] };
+        typecheck: { dependsOn: string[] };
+        test: { dependsOn: string[] };
+        "test:e2e": { dependsOn: string[] };
+      };
     }>(path.join(projectDir, "turbo.json"));
     const blueprint = await readJson<{
       preset: string;
@@ -2640,7 +2665,7 @@ describe("template init", () => {
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -2769,7 +2794,16 @@ describe("template init", () => {
       "vite.config.ts",
       "vitest.config.ts",
     ]);
-    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
+    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks.build).toEqual({ outputs: ["dist/**"] });
+    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual(["build"]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual([
+      "typecheck",
+      "build",
+      "test",
+      "test:e2e",
+    ]);
 
     expect(blueprint).toMatchObject({
       preset: "vue-app",
@@ -2888,7 +2922,13 @@ describe("template init", () => {
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "apps/web/tsconfig.test.json"));
     const turboConfig = await readJson<{
-      tasks: { check: { dependsOn: string[] } };
+      tasks: {
+        build: { dependsOn: string[]; outputs: string[] };
+        check: { dependsOn: string[] };
+        typecheck: { dependsOn: string[] };
+        test: { dependsOn: string[] };
+        "test:e2e": { dependsOn: string[] };
+      };
     }>(path.join(projectDir, "turbo.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -2933,7 +2973,7 @@ describe("template init", () => {
     expect(rootPackageJson.name).toBe("demo-fullstack");
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -3038,7 +3078,19 @@ describe("template init", () => {
     expect(webAppTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(webAppTsconfig).not.toHaveProperty("references");
     expect(webTestTsconfig).not.toHaveProperty("references");
-    expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
+    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks.build.dependsOn).toEqual(["^build"]);
+    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual([
+      "build",
+      "^build",
+    ]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual([
+      "typecheck",
+      "build",
+      "test",
+      "test:e2e",
+    ]);
     expect(devcontainer.name).toBe("demo-fullstack");
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
     expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");

@@ -52,6 +52,10 @@ describe("module graph plans", () => {
         owner: { kind: "workspace-orchestration", path: "." },
       },
       {
+        kind: "turbo-package-typecheck",
+        owner: { kind: "package-boundary", path: "packages/*" },
+      },
+      {
         kind: "turbo-package-check",
         owner: { kind: "package-boundary", path: "packages/*" },
       },
@@ -94,6 +98,7 @@ describe("module graph plans", () => {
       "oxc-format-check",
       "oxc-lint",
       "typescript-typecheck",
+      "turbo-package-typecheck",
       "turbo-package-check",
     ]);
     expect(fixPlan.components.map((component) => component.kind)).toEqual([
@@ -103,7 +108,7 @@ describe("module graph plans", () => {
     ]);
 
     expect(renderRootCheckCommand(checkPlan)).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
     );
     expect(renderFixCommand(fixPlan)).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
@@ -115,13 +120,19 @@ describe("module graph plans", () => {
       renderRootCheckCommand({
         components: [
           {
+            kind: "turbo-package-typecheck",
+            owner: { kind: "package-boundary", path: "apps/*" },
+          },
+          {
             kind: "turbo-package-check",
             owner: { kind: "package-boundary", path: "apps/*" },
           },
         ],
         environmentNeeds: [],
       }),
-    ).toBe("turbo run check --filter './apps/*'");
+    ).toBe(
+      "turbo run typecheck --filter './apps/*' && turbo run check --filter './apps/*'",
+    );
 
     expect(
       renderFixCommand({
@@ -152,7 +163,7 @@ describe("module graph plans", () => {
 
     expect(plan.packageScripts).toEqual({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
       fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
       "format:check":
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
@@ -271,7 +282,7 @@ describe("module graph plans", () => {
     );
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),
       "format:check":

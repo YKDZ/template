@@ -208,6 +208,15 @@ describe("template add package", () => {
       scripts: Record<string, string>;
       engines: { node: string };
     }>(path.join(projectDir, "package.json"));
+    const turboConfig = await readJson<{
+      tasks: {
+        build: { dependsOn?: string[]; outputs: string[] };
+        check: { dependsOn: string[] };
+        typecheck: { dependsOn: string[] };
+        test: { dependsOn: string[] };
+        "test:e2e": { dependsOn: string[] };
+      };
+    }>(path.join(projectDir, "turbo.json"));
     const rootTsconfig = await readJson<{
       references?: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
@@ -242,11 +251,27 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*' --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' --filter './packages/*' && turbo run build --filter './apps/*' --filter './packages/*' && turbo run test --filter './apps/*' --filter './packages/*' && turbo run test:e2e --filter './apps/*' --filter './packages/*' && turbo run check --filter './apps/*' --filter './packages/*'",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run check --filter './apps/*'",
     );
+    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks.build).toEqual({
+      dependsOn: ["^build"],
+      outputs: ["dist/**"],
+    });
+    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
+    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual([
+      "build",
+      "^build",
+    ]);
+    expect(turboConfig.tasks.check.dependsOn).toEqual([
+      "typecheck",
+      "build",
+      "test",
+      "test:e2e",
+    ]);
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*' --filter './packages/*'",
     );
@@ -352,6 +377,9 @@ describe("template add package", () => {
       path: "services/worker",
     });
     expect(workspaceYaml).toContain("  - services/*");
+    expect(rootPackageJson.scripts.check).toContain(
+      "turbo run typecheck --filter './apps/*' --filter './services/*'",
+    );
     expect(rootPackageJson.scripts.check).toContain(
       "turbo run check --filter './apps/*' --filter './services/*'",
     );
