@@ -1844,6 +1844,71 @@ describe("template add package", () => {
     await stat(path.join(projectDir, "oxfmt.config.ts"));
   });
 
+  it("rejects linking a TypeScript package from a native package without partial writes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-native");
+
+    await initGeneratedWorkspace(projectDir, "rust-bin");
+
+    const blueprintPath = path.join(projectDir, ".template/blueprint.json");
+    const workspaceYamlPath = path.join(projectDir, "pnpm-workspace.yaml");
+    const rootPackageJsonPath = path.join(projectDir, "package.json");
+    const beforeBlueprint = await readFile(blueprintPath, "utf8");
+    const blueprint = await readJson<{
+      packages: Array<{ path: string }>;
+    }>(blueprintPath);
+    const nativePackagePath = blueprint.packages[0]?.path;
+
+    if (!nativePackagePath) {
+      throw new Error("Expected rust-bin fixture to include a native package");
+    }
+
+    const beforeWorkspaceYaml = await readFile(workspaceYamlPath, "utf8");
+    const beforeRootPackageJson = await readFile(rootPackageJsonPath, "utf8");
+    const nativeCargoTomlPath = path.join(
+      projectDir,
+      nativePackagePath,
+      "Cargo.toml",
+    );
+    const beforeNativeCargoToml = await readFile(nativeCargoTomlPath, "utf8");
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "shared",
+          "--link-from",
+          nativePackagePath,
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        `Package Link Intent from native package ${nativePackagePath} is unsupported in V1 TypeScript-only Project Linking`,
+      ),
+    });
+
+    await expectPathMissing(path.join(projectDir, "packages/shared"));
+    expect(await readFile(blueprintPath, "utf8")).toBe(beforeBlueprint);
+    expect(await readFile(workspaceYamlPath, "utf8")).toBe(beforeWorkspaceYaml);
+    expect(await readFile(rootPackageJsonPath, "utf8")).toBe(
+      beforeRootPackageJson,
+    );
+    expect(await readFile(nativeCargoTomlPath, "utf8")).toBe(
+      beforeNativeCargoToml,
+    );
+  }, 120_000);
+
   it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),

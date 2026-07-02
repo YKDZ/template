@@ -131,6 +131,58 @@ describe("Package Link Planning", () => {
     });
   });
 
+  it("rejects a Package Link Intent to a native provider in V1 TypeScript-only Project Linking", () => {
+    expect(() =>
+      planPackageLinks(
+        [
+          {
+            name: "@demo/shared",
+            path: "packages/shared",
+            role: "shared-library",
+            sourcePreset: "ts-lib",
+          },
+          {
+            name: "demo-native",
+            path: "packages/native",
+          },
+        ],
+        [
+          {
+            consumerPackagePath: "packages/shared",
+            providerPackagePath: "packages/native",
+          },
+        ],
+      ),
+    ).toThrow(
+      "Package Link Intent to native package packages/native is unsupported in V1 TypeScript-only Project Linking",
+    );
+  });
+
+  it("rejects a Package Link Intent from a native package to a native provider in V1 TypeScript-only Project Linking", () => {
+    expect(() =>
+      planPackageLinks(
+        [
+          {
+            name: "demo-consumer",
+            path: "packages/consumer",
+          },
+          {
+            name: "demo-provider",
+            path: "packages/provider",
+          },
+        ],
+        [
+          {
+            consumerPackagePath: "packages/consumer",
+            providerPackagePath: "packages/provider",
+          },
+        ],
+      ),
+    ).toThrow(
+      "Package Link Intent from native package packages/consumer is unsupported in V1 TypeScript-only Project Linking",
+    );
+  });
+
   it("derives Turbo task relationships for typecheck invalidation and compiled runtime artifacts", () => {
     const jitPlan = planPackageLinks(
       [

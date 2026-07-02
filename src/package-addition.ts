@@ -16,6 +16,7 @@ import {
 } from "./dependency-catalog.js";
 import { PackageAdditionSupport } from "./package-addition-support.js";
 import {
+  assertTypeScriptPackageBoundaryForLinkIntent,
   packageTurboTasks,
   planPackageLinks,
   type PackageLinkIntent,
@@ -295,6 +296,51 @@ function packageLinkIntentsForConsumers(options: {
   }
 
   return packageLinkIntents;
+}
+
+async function assertPackageLinkIntentConsumersAreTypeScriptBoundaries(options: {
+  readonly root: string;
+  readonly blueprint: ProjectBlueprint;
+  readonly packageLinkIntents: readonly PackageLinkIntent[];
+}): Promise<void> {
+  for (const intent of options.packageLinkIntents) {
+    const consumer = options.blueprint.packages?.find(
+      (projectPackage) => projectPackage.path === intent.consumerPackagePath,
+    );
+
+    if (!consumer) {
+      continue;
+    }
+
+    if (consumer.role !== undefined && consumer.sourcePreset !== undefined) {
+      assertTypeScriptPackageBoundaryForLinkIntent(consumer, "consumer");
+      continue;
+    }
+
+    try {
+      const manifest = await readJson<unknown>(
+        path.join(options.root, consumer.path, "package.json"),
+      );
+      const scripts = isRecord(manifest) ? manifest.scripts : undefined;
+      const hasTypeScriptPackageShape =
+        isRecord(manifest) &&
+        manifest.type === "module" &&
+        isRecord(scripts) &&
+        typeof scripts.typecheck === "string";
+
+      if (hasTypeScriptPackageShape) {
+        continue;
+      }
+
+      assertTypeScriptPackageBoundaryForLinkIntent(consumer, "consumer");
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        assertTypeScriptPackageBoundaryForLinkIntent(consumer, "consumer");
+      }
+
+      throw error;
+    }
+  }
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
@@ -1161,6 +1207,11 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     providerPackagePath: additionPlan.packagePath,
   });
 
+  await assertPackageLinkIntentConsumersAreTypeScriptBoundaries({
+    root,
+    blueprint,
+    packageLinkIntents,
+  });
   await assertMissingPackagePath(
     additionPlan.packagePath,
     path.join(root, additionPlan.packagePath),

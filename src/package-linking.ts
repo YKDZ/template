@@ -5,8 +5,8 @@ export type PackageSourcePreset = "hono-api" | "ts-lib" | "vue-app";
 export type PackageDefinition = {
   readonly name: string;
   readonly path: string;
-  readonly role: PackageRole;
-  readonly sourcePreset: PackageSourcePreset;
+  readonly role?: PackageRole;
+  readonly sourcePreset?: PackageSourcePreset;
 };
 
 export type PackageLinkIntent = {
@@ -48,6 +48,8 @@ export type PackageManifestExposureFields = {
   readonly imports: Record<string, unknown>;
   readonly types?: string;
 };
+
+export type PackageLinkBoundaryDirection = "consumer" | "provider";
 
 export type TurboTaskDefinition = {
   readonly dependsOn?: readonly string[];
@@ -95,6 +97,25 @@ export function derivePackageExposure(
   );
 }
 
+export function assertTypeScriptPackageBoundaryForLinkIntent(
+  definition: PackageDefinition,
+  direction: PackageLinkBoundaryDirection,
+): asserts definition is PackageDefinition & {
+  readonly role: PackageRole;
+  readonly sourcePreset: PackageSourcePreset;
+} {
+  if (definition.role !== undefined && definition.sourcePreset !== undefined) {
+    return;
+  }
+
+  const relationship =
+    direction === "consumer" ? "from native package" : "to native package";
+
+  throw new Error(
+    `Package Link Intent ${relationship} ${definition.path} is unsupported in V1 TypeScript-only Project Linking`,
+  );
+}
+
 export function planPackageLinks(
   definitions: readonly PackageDefinition[],
   intents: readonly PackageLinkIntent[] = [],
@@ -106,6 +127,24 @@ export function planPackageLinks(
     string,
     Record<string, "workspace:*">
   >();
+
+  for (const intent of intents) {
+    const consumer = definitionsByPath.get(intent.consumerPackagePath);
+    const provider = definitionsByPath.get(intent.providerPackagePath);
+
+    if (consumer !== undefined) {
+      assertTypeScriptPackageBoundaryForLinkIntent(consumer, "consumer");
+    }
+
+    if (provider === undefined) {
+      throw new Error(
+        `Package Link Intent references unknown provider package at ${intent.providerPackagePath}`,
+      );
+    }
+
+    assertTypeScriptPackageBoundaryForLinkIntent(provider, "provider");
+  }
+
   const exposuresByPackagePath = new Map(
     definitions.map((definition) => [
       definition.path,
