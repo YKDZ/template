@@ -169,6 +169,7 @@ async function packageFiles(): Promise<string[]> {
       ...(await runtimeSourceFiles()),
       ...projectionTemplateSourceFiles(),
       ...checkedGithubTemplateFiles(),
+      "templates/shared/editor-customization/capabilities.json",
       "templates/shared/oxc/tsconfig.json",
     ]),
   ].sort();

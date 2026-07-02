@@ -55,8 +55,6 @@ const protectedInlineDebtPaths = [
   "tsconfig.config.json",
   ".devcontainer/devcontainer.json",
   ".devcontainer/Dockerfile",
-  ".vscode/extensions.json",
-  ".vscode/settings.json",
   ".github/workflows/check.yml",
   ".github/dependabot.yml",
 ] as const;
@@ -105,8 +103,6 @@ export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] = [
     "packages/demo-rust-bin/rustfmt.toml",
     "rust-toolchain.toml",
     ".devcontainer/devcontainer.json",
-    ".vscode/extensions.json",
-    ".vscode/settings.json",
     ".github/workflows/check.yml",
     ".github/dependabot.yml",
   ]),
@@ -279,12 +275,200 @@ function owningFunctionName(node: ts.Node): string {
   return "<module>";
 }
 
-function findOwningFunctionsForOperation(
+type OperationAstMatch = {
+  readonly node: ts.ObjectLiteralExpression;
+  readonly owningFunction: string;
+};
+
+function propertyNameText(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) {
+    return name.text;
+  }
+
+  if (ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+
+  return undefined;
+}
+
+function expressionLiteralJsonValue(
+  expression: ts.Expression,
+):
+  | { readonly known: true; readonly value: unknown }
+  | { readonly known: false } {
+  if (ts.isParenthesizedExpression(expression)) {
+    return expressionLiteralJsonValue(expression.expression);
+  }
+
+  if (
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isTypeAssertionExpression(expression)
+  ) {
+    return expressionLiteralJsonValue(expression.expression);
+  }
+
+  if (ts.isStringLiteralLike(expression)) {
+    return { known: true, value: expression.text };
+  }
+
+  if (ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return { known: true, value: expression.text };
+  }
+
+  if (ts.isNumericLiteral(expression)) {
+    return { known: true, value: Number(expression.text) };
+  }
+
+  if (expression.kind === ts.SyntaxKind.TrueKeyword) {
+    return { known: true, value: true };
+  }
+
+  if (expression.kind === ts.SyntaxKind.FalseKeyword) {
+    return { known: true, value: false };
+  }
+
+  if (expression.kind === ts.SyntaxKind.NullKeyword) {
+    return { known: true, value: null };
+  }
+
+  if (ts.isPrefixUnaryExpression(expression)) {
+    const operand = expressionLiteralJsonValue(expression.operand);
+
+    if (!operand.known || typeof operand.value !== "number") {
+      return { known: false };
+    }
+
+    if (expression.operator === ts.SyntaxKind.MinusToken) {
+      return { known: true, value: -operand.value };
+    }
+
+    if (expression.operator === ts.SyntaxKind.PlusToken) {
+      return { known: true, value: operand.value };
+    }
+
+    return { known: false };
+  }
+
+  if (ts.isArrayLiteralExpression(expression)) {
+    const values: unknown[] = [];
+
+    for (const element of expression.elements) {
+      if (ts.isSpreadElement(element)) {
+        return { known: false };
+      }
+
+      const value = expressionLiteralJsonValue(element);
+
+      if (!value.known) {
+        return { known: false };
+      }
+
+      values.push(value.value);
+    }
+
+    return { known: true, value: values };
+  }
+
+  if (ts.isObjectLiteralExpression(expression)) {
+    const value: Record<string, unknown> = {};
+
+    for (const property of expression.properties) {
+      if (!ts.isPropertyAssignment(property)) {
+        return { known: false };
+      }
+
+      const name = propertyNameText(property.name);
+
+      if (name === undefined) {
+        return { known: false };
+      }
+
+      const initializer = expressionLiteralJsonValue(property.initializer);
+
+      if (!initializer.known) {
+        return { known: false };
+      }
+
+      value[name] = initializer.value;
+    }
+
+    return { known: true, value };
+  }
+
+  return { known: false };
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true;
+  }
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => jsonValuesEqual(entry, right[index]))
+    );
+  }
+
+  if (
+    typeof left !== "object" ||
+    left === null ||
+    typeof right !== "object" ||
+    right === null
+  ) {
+    return false;
+  }
+
+  const leftEntries = Object.entries(left);
+  const rightRecord = right as Record<string, unknown>;
+  const rightKeys = new Set(Object.keys(rightRecord));
+
+  return (
+    leftEntries.length === rightKeys.size &&
+    leftEntries.every(([key, value]) => {
+      rightKeys.delete(key);
+      return jsonValuesEqual(value, rightRecord[key]);
+    }) &&
+    rightKeys.size === 0
+  );
+}
+
+function expressionMatchesJsonValue(
+  expression: ts.Expression,
+  expectedValue: unknown,
+): boolean {
+  const literalValue = expressionLiteralJsonValue(expression);
+
+  return (
+    literalValue.known && jsonValuesEqual(literalValue.value, expectedValue)
+  );
+}
+
+function isExactOperationAstMatch(
+  node: ts.ObjectLiteralExpression,
+  operation: InlineProtectedOperation,
+): boolean {
+  if (operation.kind === "writeText") {
+    return propertyStringValue(node, "text") === operation.text;
+  }
+
+  const value = propertyInitializer(node, "value");
+
+  return (
+    value !== undefined && expressionMatchesJsonValue(value, operation.value)
+  );
+}
+
+function findAstMatchesForOperation(
   sourceFile: ts.SourceFile,
   operation: InlineProtectedOperation,
-): readonly string[] {
-  const exactOwners = new Set<string>();
-  const candidateOwners = new Set<string>();
+): readonly OperationAstMatch[] {
+  const exactMatches: OperationAstMatch[] = [];
+  const candidateMatches: OperationAstMatch[] = [];
 
   function visit(node: ts.Node): void {
     if (!ts.isObjectLiteralExpression(node)) {
@@ -296,15 +480,15 @@ function findOwningFunctionsForOperation(
       propertyStringValue(node, "kind") === operation.kind &&
       propertyPathMatches(node, "to", operation.to)
     ) {
-      const owner = owningFunctionName(node);
+      const match = {
+        node,
+        owningFunction: owningFunctionName(node),
+      };
 
-      candidateOwners.add(owner);
+      candidateMatches.push(match);
 
-      if (
-        operation.kind === "writeText" &&
-        propertyStringValue(node, "text") === operation.text
-      ) {
-        exactOwners.add(owner);
+      if (isExactOperationAstMatch(node, operation)) {
+        exactMatches.push(match);
       }
     }
 
@@ -313,15 +497,91 @@ function findOwningFunctionsForOperation(
 
   visit(sourceFile);
 
-  if (exactOwners.size > 0) {
-    return [...exactOwners];
+  if (exactMatches.length > 0) {
+    return exactMatches;
   }
 
-  if (candidateOwners.size > 0) {
-    return [...candidateOwners];
+  return candidateMatches;
+}
+
+function findOwningFunctionsForOperation(
+  sourceFile: ts.SourceFile,
+  operation: InlineProtectedOperation,
+): readonly string[] {
+  const owners = new Set(
+    findAstMatchesForOperation(sourceFile, operation).map(
+      (match) => match.owningFunction,
+    ),
+  );
+
+  if (owners.size > 0) {
+    return [...owners];
   }
 
   return ["<unknown>"];
+}
+
+function isPropertyAccess(
+  expression: ts.Expression,
+  objectName: string,
+  propertyName: string,
+): boolean {
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === objectName &&
+    expression.name.text === propertyName
+  );
+}
+
+function isEditorExtensionsProjectionValue(expression: ts.Expression): boolean {
+  if (!ts.isObjectLiteralExpression(expression)) {
+    return false;
+  }
+
+  const [property] = expression.properties;
+
+  return (
+    expression.properties.length === 1 &&
+    property !== undefined &&
+    ts.isPropertyAssignment(property) &&
+    ts.isIdentifier(property.name) &&
+    property.name.text === "recommendations" &&
+    isPropertyAccess(property.initializer, "editorCustomization", "extensions")
+  );
+}
+
+function isStructuredEditorCustomizationOperation(
+  sourceFile: ts.SourceFile,
+  operation: InlineProtectedOperation,
+): boolean {
+  if (operation.kind !== "writeJson") {
+    return false;
+  }
+
+  if (
+    operation.to !== ".vscode/extensions.json" &&
+    operation.to !== ".vscode/settings.json"
+  ) {
+    return false;
+  }
+
+  const matches = findAstMatchesForOperation(sourceFile, operation);
+
+  if (matches.length === 0) {
+    return false;
+  }
+
+  return matches.every((match) => {
+    const value = propertyInitializer(match.node, "value");
+
+    return (
+      value !== undefined &&
+      (operation.to === ".vscode/settings.json"
+        ? isPropertyAccess(value, "editorCustomization", "settings")
+        : isEditorExtensionsProjectionValue(value))
+    );
+  });
 }
 
 function allowlistKey(
@@ -361,6 +621,10 @@ export async function checkTemplateSourceBoundary({
 
     for (const operation of projection.plan.operations) {
       if (!isInlineProtectedOperation(operation)) {
+        continue;
+      }
+
+      if (isStructuredEditorCustomizationOperation(sourceFile, operation)) {
         continue;
       }
 

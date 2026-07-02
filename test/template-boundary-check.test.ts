@@ -254,6 +254,176 @@ describe("Template Boundary Check", () => {
     );
   });
 
+  it("does not let a structured editor settings operation hide an inline settings body in the same function", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectEditorCustomization() {",
+        "  const editorCustomization = editorCustomizationForCapabilities([]);",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".vscode/settings.json",',
+        "        value: editorCustomization.settings,",
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".vscode/settings.json",',
+        '        value: { "editor.formatOnSave": true },',
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: ".vscode/settings.json",
+              value: { "editor.formatOnSave": true },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        generatedPath: ".vscode/settings.json",
+        owningFunction: "projectEditorCustomization",
+      }),
+    );
+  });
+
+  it("accepts editor extensions operations with exactly editor customization recommendations", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectEditorCustomization() {",
+        "  const editorCustomization = editorCustomizationForCapabilities([]);",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".vscode/extensions.json",',
+        "        value: {",
+        "          recommendations: editorCustomization.extensions,",
+        "        },",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: ".vscode/extensions.json",
+              value: {
+                recommendations: [],
+              },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      violations: [],
+      allowlistedDebt: [],
+    });
+  });
+
+  it("rejects editor extensions operations with extra inline value properties", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectEditorCustomization() {",
+        "  const editorCustomization = editorCustomizationForCapabilities([]);",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".vscode/extensions.json",',
+        "        value: {",
+        "          recommendations: editorCustomization.extensions,",
+        "        },",
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".vscode/extensions.json",',
+        "        value: {",
+        "          recommendations: editorCustomization.extensions,",
+        "          unwanted: true,",
+        "        },",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: ".vscode/extensions.json",
+              value: {
+                recommendations: [],
+                unwanted: true,
+              },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        generatedPath: ".vscode/extensions.json",
+        owningFunction: "projectEditorCustomization",
+      }),
+    );
+  });
+
   it("rejects unused allowlist entries for checked projections", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-boundary-check-"),
@@ -350,6 +520,18 @@ describe("Template Boundary Check", () => {
       expect.objectContaining({
         preset: "ts-lib",
         generatedPath: ".devcontainer/Dockerfile",
+      }),
+    );
+    expect(result.allowlistedDebt).not.toContainEqual(
+      expect.objectContaining({
+        preset: "ts-lib",
+        generatedPath: ".vscode/extensions.json",
+      }),
+    );
+    expect(result.allowlistedDebt).not.toContainEqual(
+      expect.objectContaining({
+        preset: "ts-lib",
+        generatedPath: ".vscode/settings.json",
       }),
     );
   });
