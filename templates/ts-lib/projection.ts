@@ -24,6 +24,11 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import { PackageAdditionSupport } from "../../src/package-addition-support.js";
+import {
+  packageManifestExposureFields,
+  planPackageLinks,
+  type PackageExposure,
+} from "../../src/package-linking.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
@@ -86,7 +91,6 @@ function planTsLibPackageChecks(): CheckPlan {
       { kind: "typescript-typecheck", owner: tsLibPackageBoundary },
       { kind: "oxc-lint", owner: tsLibPackageBoundary },
       { kind: "oxc-format-check", owner: tsLibPackageBoundary },
-      { kind: "build", owner: tsLibPackageBoundary },
     ],
     environmentNeeds: [],
   };
@@ -191,7 +195,6 @@ export function projectTsLibPackageScripts(): Record<string, string> {
   const fixPlan = planTsLibPackageFixes();
 
   return {
-    build: "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
     check: renderRootCheckCommand(checkPlan),
     fix: renderFixCommand(fixPlan),
     "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
@@ -228,19 +231,17 @@ function rootPackageJson(
 
 function libraryPackageJson(
   context: GenerationContext,
+  exposure: PackageExposure,
 ): Record<string, unknown> {
+  const exposureFields = packageManifestExposureFields(exposure);
+
   return {
     name: workspacePackageName(context),
     version: "0.0.0",
     private: true,
-    files: ["dist"],
     type: "module",
-    exports: {
-      ".": {
-        default: "./dist/index.js",
-        types: "./dist/index.d.ts",
-      },
-    },
+    imports: exposureFields.imports,
+    exports: exposureFields.exports,
     dependencies: {
       valibot: "catalog:",
     },
@@ -249,7 +250,6 @@ function libraryPackageJson(
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
-      "tsc-alias": "catalog:",
       typescript: "catalog:",
     },
     engines: {
@@ -287,7 +287,25 @@ function operationsForTsLib(
     settings: editorCustomization.settings,
   });
   const rootManifest = rootPackageJson(context, packageScripts);
-  const packageManifest = libraryPackageJson(context);
+  const packageLinkPlan = planPackageLinks([
+    {
+      name: workspacePackageName(context),
+      path: workspacePackagePath(context),
+      role: "shared-library",
+      sourcePreset: "ts-lib",
+    },
+  ]);
+  const packageExposure = packageLinkPlan.exposuresByPackagePath.get(
+    workspacePackagePath(context),
+  );
+
+  if (packageExposure === undefined) {
+    throw new Error(
+      `Missing Package Exposure for ${workspacePackagePath(context)}`,
+    );
+  }
+
+  const packageManifest = libraryPackageJson(context, packageExposure);
 
   return [
     {
@@ -311,12 +329,8 @@ function operationsForTsLib(
       to: "turbo.json",
       value: {
         tasks: {
-          build: {
-            dependsOn: ["^build"],
-            outputs: ["dist/**"],
-          },
           check: {
-            dependsOn: ["^build"],
+            dependsOn: ["^check"],
           },
           fix: {
             cache: false,
@@ -329,9 +343,6 @@ function operationsForTsLib(
       to: "tsconfig.json",
       value: {
         files: [],
-        references: [
-          { path: `./${workspacePackagePath(context)}/tsconfig.json` },
-        ],
       },
     },
     {
@@ -366,10 +377,6 @@ function operationsForTsLib(
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
-          outDir: "dist",
-          paths: {
-            "@/*": ["./src/*"],
-          },
           rootDir: "src",
           skipLibCheck: false,
           strict: true,
@@ -407,6 +414,11 @@ function operationsForTsLib(
       kind: "copyFile",
       from: "src/index.ts",
       to: `${workspacePackagePath(context)}/src/index.ts`,
+    },
+    {
+      kind: "copyFile",
+      from: "src/name-schema.ts",
+      to: `${workspacePackagePath(context)}/src/name-schema.ts`,
     },
     {
       kind: "writeJson",
@@ -460,6 +472,21 @@ function packageAdditionOperations(
   packageName: string,
   nodeVersion: string,
 ): RenderOperation[] {
+  const packageExposure = planPackageLinks([
+    {
+      name: packageName,
+      path: packagePath,
+      role: "shared-library",
+      sourcePreset: "ts-lib",
+    },
+  ]).exposuresByPackagePath.get(packagePath);
+
+  if (packageExposure === undefined) {
+    throw new Error(`Missing Package Exposure for ${packagePath}`);
+  }
+
+  const exposureFields = packageManifestExposureFields(packageExposure);
+
   return [
     {
       kind: "writeJson",
@@ -468,14 +495,9 @@ function packageAdditionOperations(
         name: packageName,
         version: "0.0.0",
         private: true,
-        files: ["dist"],
         type: "module",
-        exports: {
-          ".": {
-            default: "./dist/index.js",
-            types: "./dist/index.d.ts",
-          },
-        },
+        imports: exposureFields.imports,
+        exports: exposureFields.exports,
         dependencies: {
           valibot: "catalog:",
         },
@@ -484,7 +506,6 @@ function packageAdditionOperations(
           "@types/node": "catalog:",
           oxfmt: "catalog:",
           oxlint: "catalog:",
-          "tsc-alias": "catalog:",
           typescript: "catalog:",
         },
         engines: {
@@ -504,10 +525,6 @@ function packageAdditionOperations(
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
-          outDir: "dist",
-          paths: {
-            "@/*": ["./src/*"],
-          },
           rootDir: "src",
           skipLibCheck: false,
           strict: true,
@@ -522,6 +539,11 @@ function packageAdditionOperations(
       from: "src/index.ts",
       to: `${packagePath}/src/index.ts`,
     },
+    {
+      kind: "copyFile",
+      from: "src/name-schema.ts",
+      to: `${packagePath}/src/name-schema.ts`,
+    },
   ];
 }
 
@@ -535,7 +557,7 @@ function packageAdditionPlan(
   return {
     packagePath,
     workspacePackageGlob: `${workspaceCollection}/*`,
-    rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
+    rootTsconfigReferences: [],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     operations: packageAdditionOperations(

@@ -246,6 +246,7 @@ const packageJsonRootKeyOrder = [
   "files",
   "type",
   "types",
+  "imports",
   "exports",
   "scripts",
   "dependencies",

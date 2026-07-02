@@ -266,7 +266,6 @@ describe("template init", () => {
       "@types/node": "^24.0.0",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
-      "tsc-alias": "^1.8.17",
       turbo: "^2.10.2",
       typescript: "^6.0.3",
       valibot: "^1.4.2",
@@ -288,8 +287,9 @@ describe("template init", () => {
     const libraryPackageJson = await readJson<{
       name: string;
       private: boolean;
-      files: string[];
+      files?: string[];
       exports: unknown;
+      imports: unknown;
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
       engines: { node: string };
@@ -305,7 +305,7 @@ describe("template init", () => {
     };
     const rootTsconfig = await readJson<{
       files: string[];
-      references: Array<{ path: string }>;
+      references?: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
     const turboConfig = await readJson<{
       tasks: {
@@ -323,6 +323,10 @@ describe("template init", () => {
       projectKind: string;
       packages: Array<{ name: string; path: string }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
+    const libraryEntrySource = await readFile(
+      path.join(projectDir, "packages/demo-ts-lib/src/index.ts"),
+      "utf8",
+    );
 
     expect(rootPackageJson).toMatchObject({
       name: "demo-ts-lib",
@@ -356,37 +360,42 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.check).not.toBe("turbo run check");
     expect(rootPackageJson.scripts.check).toContain("--filter './packages/*'");
     expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix");
-    expect(turboConfig.tasks.check).toEqual({ dependsOn: ["^build"] });
+    expect(turboConfig.tasks.check).toEqual({ dependsOn: ["^check"] });
 
     expect(libraryPackageJson).toMatchObject({
       name: "@demo-ts-lib/demo-ts-lib",
       private: true,
-      files: ["dist"],
       engines: { node: "24" },
     });
+    expect(libraryPackageJson).not.toHaveProperty("files");
     expect(libraryPackageJson).not.toHaveProperty("packageManager");
     expect(libraryPackageJson.exports).toEqual({
       ".": {
-        default: "./dist/index.js",
-        types: "./dist/index.d.ts",
+        default: "./src/index.ts",
+        types: "./src/index.ts",
+      },
+    });
+    expect(libraryPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
       },
     });
     expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
     expect(libraryPackageJson.devDependencies).toMatchObject({
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
-      "tsc-alias": "catalog:",
       typescript: "catalog:",
     });
+    expect(libraryPackageJson.devDependencies).not.toHaveProperty("tsc-alias");
 
     expect(workspace.packages).toEqual(["packages/*"]);
     expect(workspace.catalog).toHaveProperty("turbo");
     expect(rootTsconfig).toEqual({
       files: [],
-      references: [{ path: "./packages/demo-ts-lib/tsconfig.json" }],
     });
     expect(rootConfigTsconfig.include).toEqual([
       "oxlint.config.ts",
@@ -403,7 +412,12 @@ describe("template init", () => {
       ],
     });
 
+    expect(libraryEntrySource).toContain('from "#/name-schema"');
+
     await stat(path.join(projectDir, "packages/demo-ts-lib/src/index.ts"));
+    await stat(
+      path.join(projectDir, "packages/demo-ts-lib/src/name-schema.ts"),
+    );
   }, 120_000);
 
   it("generates truthful ts-lib root and member manifests backed by the Dependency Catalog", async () => {
@@ -419,6 +433,8 @@ describe("template init", () => {
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
+      exports: unknown;
+      imports: unknown;
       engines: { node: string };
       packageManager?: string;
     }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
@@ -455,10 +471,21 @@ describe("template init", () => {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
-      "tsc-alias": "catalog:",
       typescript: "catalog:",
     });
-    expect(libraryPackageJson.scripts.build).toContain("tsc-alias");
+    expect(libraryPackageJson.exports).toEqual({
+      ".": {
+        default: "./src/index.ts",
+        types: "./src/index.ts",
+      },
+    });
+    expect(libraryPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
+    expect(libraryPackageJson.scripts).not.toHaveProperty("build");
     expect(libraryPackageJson.scripts.lint).toContain("oxlint");
 
     expectCatalogDependencySpecifiers(rootPackageJson);
@@ -886,6 +913,7 @@ describe("template init", () => {
     const libraryPackageJson = await readJson<{
       scripts: Record<string, string>;
       devDependencies: Record<string, string>;
+      imports: unknown;
     }>(path.join(projectDir, "packages/demo-ts-lib/package.json"));
     const tsconfig = await readJson<{
       compilerOptions: { paths?: Record<string, string[]> };
@@ -973,11 +1001,15 @@ describe("template init", () => {
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
-    expect(libraryPackageJson.scripts.build).toBe(
-      "tsc -p tsconfig.json && tsc-alias -p tsconfig.json",
-    );
-    expect(libraryPackageJson.devDependencies["tsc-alias"]).toBe("catalog:");
-    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(libraryPackageJson.scripts).not.toHaveProperty("build");
+    expect(libraryPackageJson.devDependencies).not.toHaveProperty("tsc-alias");
+    expect(libraryPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
+    expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
   }, 120_000);
 
   it("generates workspace Node metadata as the Node and pnpm version authority", async () => {
@@ -1196,8 +1228,9 @@ describe("template init", () => {
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
     expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
+    expect(libraryPackageJson.scripts).not.toHaveProperty("build");
     expect(libraryPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix",
     );
@@ -1213,7 +1246,6 @@ describe("template init", () => {
       "@types/node": templateWorkspace.catalog["@types/node"],
       oxfmt: templateWorkspace.catalog.oxfmt,
       oxlint: templateWorkspace.catalog.oxlint,
-      "tsc-alias": templateWorkspace.catalog["tsc-alias"],
       turbo: templateWorkspace.catalog.turbo,
       typescript: templateWorkspace.catalog.typescript,
       valibot: templateWorkspace.catalog.valibot,
@@ -1222,7 +1254,7 @@ describe("template init", () => {
 
     expect(tsconfig.compilerOptions.strict).toBe(true);
     expect(tsconfig.compilerOptions.skipLibCheck).toBe(false);
-    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
 
     expect(blueprint.preset).toBe("ts-lib");
     expect(generatedBy.packageName).toBe("@ykdz/template");

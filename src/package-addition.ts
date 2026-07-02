@@ -449,6 +449,11 @@ function rootTsconfigWithReferences(
   referencePaths: readonly string[],
 ): RootTsconfig {
   assertRootTsconfig(input);
+
+  if (referencePaths.length === 0) {
+    return input;
+  }
+
   const tsconfig = input;
   const references = tsconfig.references ?? [];
 

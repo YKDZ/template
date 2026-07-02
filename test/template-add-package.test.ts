@@ -209,7 +209,7 @@ describe("template add package", () => {
       engines: { node: string };
     }>(path.join(projectDir, "package.json"));
     const rootTsconfig = await readJson<{
-      references: Array<{ path: string }>;
+      references?: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
     const packageJson = await readJson<{
       name: string;
@@ -253,7 +253,7 @@ describe("template add package", () => {
     expect(rootPackageJson.scripts.fix).not.toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
     );
-    expect(rootTsconfig.references).toContainEqual({
+    expect(rootTsconfig.references).not.toContainEqual({
       path: "./packages/shared/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/shared");
@@ -261,8 +261,9 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe(rootPackageJson.engines.node);
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
+    expect(packageJson.scripts).not.toHaveProperty("build");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     const addedPackageDependencySpecifiers = [
@@ -274,7 +275,7 @@ describe("template add package", () => {
       addedPackageDependencySpecifiers.every((value) => value === "catalog:"),
     ).toBe(true);
     expect(tsconfig.compilerOptions.composite).toBe(true);
-    expect(tsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(tsconfig.include).toEqual(["src/**/*.ts"]);
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
@@ -420,7 +421,7 @@ describe("template add package", () => {
         "utf8",
       );
       const rootTsconfig = await readJson<{
-        references: Array<{ path: string }>;
+        references?: Array<{ path: string }>;
       }>(path.join(projectDir, "tsconfig.json"));
 
       expect(blueprint.packages).toContainEqual({
@@ -428,7 +429,15 @@ describe("template add package", () => {
         path: packagePath,
       });
       expect(workspaceYaml).toContain(`  - ${packagePath.split("/")[0]}/*`);
-      expect(rootTsconfig.references).toContainEqual({ path: referencePath });
+      if (preset === "ts-lib") {
+        expect(rootTsconfig.references).not.toContainEqual({
+          path: referencePath,
+        });
+      } else {
+        expect(rootTsconfig.references).toContainEqual({
+          path: referencePath,
+        });
+      }
       await stat(path.join(projectDir, packagePath, generatedFile));
     },
   );
@@ -713,7 +722,7 @@ describe("template add package", () => {
       "utf8",
     );
     const rootTsconfig = await readJson<{
-      references: Array<{ path: string }>;
+      references?: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
     const packageJson = await readJson<{
       name: string;
@@ -728,15 +737,13 @@ describe("template add package", () => {
       { name: "@demo-lib/shared", path: "packages/shared" },
     ]);
     expect(workspaceYaml).toContain("  - packages/*");
-    expect(rootTsconfig.references).toEqual([
-      { path: "./packages/demo-lib/tsconfig.json" },
-      { path: "./packages/shared/tsconfig.json" },
-    ]);
+    expect(rootTsconfig).toEqual({ files: [] });
     expect(packageJson.name).toBe("@demo-lib/shared");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
+    expect(packageJson.scripts).not.toHaveProperty("build");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
 
@@ -810,7 +817,7 @@ describe("template add package", () => {
         path: "packages/shared",
       });
       expect(workspaceYaml).toContain("  - packages/*");
-      expect(rootTsconfig.references).toContainEqual({
+      expect(rootTsconfig.references ?? []).not.toContainEqual({
         path: "./packages/shared/tsconfig.json",
       });
       expect(packageJson.name).toBe(`@${projectName}/shared`);
@@ -895,9 +902,9 @@ describe("template add package", () => {
           "add",
           "package",
           "--preset",
-          "ts-lib",
+          "hono-api",
           "--name",
-          "shared",
+          "worker",
         ],
         { cwd: projectDir },
       ),
@@ -908,7 +915,7 @@ describe("template add package", () => {
     });
 
     await expect(
-      stat(path.join(projectDir, "packages/shared")),
+      stat(path.join(projectDir, "apps/worker")),
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -1280,7 +1287,7 @@ describe("template add package", () => {
       path: "packages/shared",
     });
     expect(workspaceYaml).toContain("  - packages/*");
-    expect(rootTsconfig.references).toContainEqual({
+    expect(rootTsconfig.references ?? []).not.toContainEqual({
       path: "./packages/shared/tsconfig.json",
     });
     expect(rootPackageJson.type).toBe("module");

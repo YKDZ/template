@@ -171,7 +171,7 @@ describe("Preset Registry", () => {
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
     expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run build",
+      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
     );
     expect(generationRecord).toMatchObject({
       command: "template init --preset ts-lib",
