@@ -139,6 +139,9 @@ describe("Project Kit Root Check", () => {
       "pnpm run check:templates:github-yaml",
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
+      "pnpm run check:templates:boundary",
+    );
+    expect(rootPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:static-source",
     );
   });
