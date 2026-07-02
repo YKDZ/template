@@ -459,7 +459,9 @@ describe("template add package", () => {
       { cwd: projectDir },
     );
 
-    await execa("pnpm", ["install"], { cwd: projectDir });
+    await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+      cwd: projectDir,
+    });
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 180_000);
 
