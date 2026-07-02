@@ -354,6 +354,53 @@ describe("Template Boundary Check", () => {
     );
   });
 
+  it.each(["vue-app", "vue-hono-app"] as const)(
+    "accepts %s browser Dockerfile fragment composition without allowlisted debt",
+    async (presetName) => {
+      const targetDir = path.join(tmpdir(), `demo-${presetName}`);
+      const projection = findBuiltInPresetProjection(presetName)!;
+      const blueprint = projection.blueprint({ targetDir });
+      const plan = projection.project(
+        assembleGenerationContext({
+          targetDir,
+          blueprint,
+          toolchain: {
+            nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+            packageManagerPin: {
+              kind: "PackageManagerPin",
+              value: "pnpm@11.2.3",
+            },
+            source: "online",
+            diagnostics: [],
+          },
+        }),
+      );
+
+      const result = await checkTemplateSourceBoundary({
+        projections: [
+          {
+            name: presetName,
+            sourceFilePath: path.join(
+              repoRoot,
+              `templates/${presetName}/projection.ts`,
+            ),
+            plan,
+          },
+        ],
+        allowlist: templateBoundaryDebtAllowlist,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.violations).toEqual([]);
+      expect(result.allowlistedDebt).not.toContainEqual(
+        expect.objectContaining({
+          preset: presetName,
+          generatedPath: ".devcontainer/Dockerfile",
+        }),
+      );
+    },
+  );
+
   it("accepts protected Generated Repository outputs copied from template source", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-boundary-check-"),

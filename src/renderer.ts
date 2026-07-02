@@ -42,6 +42,15 @@ export type WriteTextOperation = {
   text: string;
 };
 
+export type WriteTextFromFragmentsOperation = {
+  kind: "writeTextFromFragments";
+  to: string;
+  fragments: readonly {
+    from: string;
+    sourceRoot?: string;
+  }[];
+};
+
 export type SetExecutableOperation = {
   kind: "setExecutable";
   path: string;
@@ -60,6 +69,7 @@ export type RenderOperation =
   | WriteJsonOperation
   | MergeJsonOperation
   | WriteTextOperation
+  | WriteTextFromFragmentsOperation
   | SetExecutableOperation
   | ReplaceAnchorsOperation;
 
@@ -433,6 +443,41 @@ async function renderWriteText(
   await writeGeneratedFile(to, operation.text);
 }
 
+async function renderWriteTextFromFragments(
+  operation: WriteTextFromFragmentsOperation,
+  options: RenderProjectOptions,
+): Promise<void> {
+  const toPath = expandOperationPath(operation.to, options);
+  assertFoundationTextPath(toPath);
+  const to = resolveContainedPath(options.targetRoot, toPath);
+  const texts = await Promise.all(
+    operation.fragments.map(async (fragment) => {
+      const sourceRoot =
+        fragment.sourceRoot === undefined
+          ? options.sourceRoot
+          : options.sourceRoots?.[fragment.sourceRoot];
+
+      if (sourceRoot === undefined) {
+        throw new Error(`Unknown renderer source root: ${fragment.sourceRoot}`);
+      }
+
+      const fromPath = expandTemplatePath(
+        fragment.from,
+        options.variables ?? {},
+      );
+      const from = resolveContainedPath(sourceRoot, fromPath);
+
+      return readFile(from, "utf8");
+    }),
+  );
+
+  await mkdir(path.dirname(to), { recursive: true });
+  await writeGeneratedFile(
+    to,
+    texts.map((text) => text.trimEnd()).join("\n\n") + "\n",
+  );
+}
+
 async function renderSetExecutable(
   operation: SetExecutableOperation,
   options: RenderProjectOptions,
@@ -663,6 +708,11 @@ export async function renderProject(
 
     if (operation.kind === "writeText") {
       await renderWriteText(operation, options);
+      continue;
+    }
+
+    if (operation.kind === "writeTextFromFragments") {
+      await renderWriteTextFromFragments(operation, options);
       continue;
     }
 

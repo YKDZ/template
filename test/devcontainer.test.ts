@@ -1,10 +1,17 @@
+import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import {
+  browserTestToolLayer,
   checkedDockerfileFirstNodePnpmDevcontainer,
   composeDevelopmentContainerDockerfile,
+  dockerfileFirstNodePnpmDevcontainer,
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
 } from "../src/devcontainer.js";
+
+const playwrightCliPackage = `@playwright/test@${
+  loadTemplateDependencyCatalog()["@playwright/test"]
+}`;
 
 describe("Development Container planning", () => {
   it("validates that exactly one Dockerfile base layer supplies the base image", () => {
@@ -91,6 +98,74 @@ describe("Development Container planning", () => {
     expect(plan.dockerfile).not.toContain("vitest");
     expect(plan.dockerfile).not.toContain("libnss3");
     expect(plan.dockerfile).not.toContain("xvfb");
+  });
+
+  it("plans a checked browser-test Dockerfile layer through Playwright dependency installation", () => {
+    const plan = checkedDockerfileFirstNodePnpmDevcontainer({
+      name: "demo",
+      layer: nodePnpmToolLayer({
+        nodeVersion: "24",
+        packageManagerPin: "pnpm@10.0.0",
+      }),
+      additionalLayers: [browserTestToolLayer()],
+      extensions: [],
+    });
+
+    expect(plan.dockerfile).toContain(
+      "FROM node:${NODE_VERSION}-bookworm-slim",
+    );
+    expect(plan.devcontainer).toMatchObject({
+      build: {
+        args: {
+          PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
+        },
+      },
+    });
+    expect(plan.dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+    expect(plan.dockerfile).toContain(
+      'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
+    );
+    expect(plan.dockerfile).not.toContain(
+      "npx --yes playwright install-deps chromium",
+    );
+    expect(plan.dockerfile).not.toContain("libnss3");
+    expect(plan.dockerfile).not.toContain("xvfb");
+    expect(plan.dockerfileOperation).toEqual({
+      kind: "writeTextFromFragments",
+      to: ".devcontainer/Dockerfile",
+      fragments: [
+        {
+          sourceRoot: "sharedDevcontainer",
+          from: "node-pnpm.Dockerfile",
+        },
+        {
+          sourceRoot: "sharedDevcontainer",
+          from: "browser-test.Dockerfile",
+        },
+      ],
+    });
+  });
+
+  it("keeps the legacy Node pnpm helper free of browser-test apt package ownership", () => {
+    const legacyCall = {
+      name: "demo",
+      layer: nodePnpmToolLayer({
+        nodeVersion: "24",
+        packageManagerPin: "pnpm@10.0.0",
+      }),
+      additionalLayers: [browserTestToolLayer()],
+      extensions: [],
+    } as Parameters<typeof dockerfileFirstNodePnpmDevcontainer>[0] & {
+      readonly additionalLayers: readonly ReturnType<
+        typeof browserTestToolLayer
+      >[];
+    };
+    const plan = dockerfileFirstNodePnpmDevcontainer(legacyCall);
+
+    expect(plan.dockerfile).not.toContain("libnss3");
+    expect(plan.dockerfile).not.toContain("libgbm1");
+    expect(plan.dockerfile).not.toContain("xvfb");
+    expect(plan.dockerfile).not.toContain("playwright install-deps chromium");
   });
 
   it("plans a Dockerfile-first Rust tool layer with Node pnpm task tooling", () => {

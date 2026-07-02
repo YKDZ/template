@@ -86,11 +86,19 @@ export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] = [
     ),
   ),
   ...currentDebt("hono-api", "operationsForHonoApi", protectedInlineDebtPaths),
-  ...currentDebt("vue-app", "operationsForVueApp", protectedInlineDebtPaths),
+  ...currentDebt(
+    "vue-app",
+    "operationsForVueApp",
+    protectedInlineDebtPaths.filter(
+      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
+    ),
+  ),
   ...currentDebt(
     "vue-hono-app",
     "operationsForVueHonoApp",
-    protectedInlineDebtPaths,
+    protectedInlineDebtPaths.filter(
+      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
+    ),
   ),
   ...currentDebt("rust-bin", "operationsForRustBin", [
     "turbo.json",

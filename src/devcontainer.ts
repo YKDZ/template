@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadTemplateDependencyCatalog } from "./dependency-catalog.js";
+import type { WriteTextFromFragmentsOperation } from "./renderer.js";
 import { packageTemplateRoot } from "./runtime-paths.js";
 
 export type DevelopmentContainerNodePnpmLayer = {
@@ -12,6 +14,7 @@ export type DevelopmentContainerNodePnpmLayer = {
 
 export type DevelopmentContainerBrowserTestLayer = {
   readonly kind: "browser-test";
+  readonly playwrightCliPackage: string;
 };
 
 export type DevelopmentContainerRustLayer = {
@@ -22,6 +25,7 @@ export type DevelopmentContainerRustLayer = {
 export type DevelopmentContainerPlan = {
   readonly devcontainer: Record<string, unknown>;
   readonly dockerfile: string;
+  readonly dockerfileOperation?: WriteTextFromFragmentsOperation;
 };
 
 export type DevelopmentContainerDockerfileLayer = {
@@ -103,7 +107,19 @@ export function nodePnpmToolLayer(options: {
 }
 
 export function browserTestToolLayer(): DevelopmentContainerBrowserTestLayer {
-  return { kind: "browser-test" };
+  const playwrightTestVersion =
+    loadTemplateDependencyCatalog()["@playwright/test"];
+
+  if (playwrightTestVersion === undefined) {
+    throw new Error(
+      "Template Dependency Catalog is missing dependency: @playwright/test",
+    );
+  }
+
+  return {
+    kind: "browser-test",
+    playwrightCliPackage: `@playwright/test@${playwrightTestVersion}`,
+  };
 }
 
 export function rustToolLayer(
@@ -126,7 +142,11 @@ function checkedDockerfileFragment(name: string): string {
   return readFileSync(path.join(sharedDevcontainerSourceRoot(), name), "utf8");
 }
 
-function checkedNodePnpmDockerfile(): string {
+function checkedNodePnpmDockerfile(
+  options: {
+    readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
+  } = {},
+): string {
   return composeDevelopmentContainerDockerfile({
     layers: [
       {
@@ -134,38 +154,52 @@ function checkedNodePnpmDockerfile(): string {
         name: "node-pnpm",
         text: checkedDockerfileFragment("node-pnpm.Dockerfile"),
       },
+      ...(options.additionalLayers ?? []).map((layer) => {
+        switch (layer.kind) {
+          case "browser-test":
+            return {
+              kind: "capability" as const,
+              name: "browser-test",
+              text: checkedDockerfileFragment("browser-test.Dockerfile"),
+            };
+        }
+      }),
     ],
   });
 }
 
-function renderBrowserTestLayer(): readonly string[] {
+function checkedNodePnpmDockerfileFragments(
+  options: {
+    readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
+  } = {},
+): WriteTextFromFragmentsOperation["fragments"] {
   return [
-    "RUN apt-get update && apt-get install -y --no-install-recommends \\",
-    "    libasound2 \\",
-    "    libatk-bridge2.0-0 \\",
-    "    libatk1.0-0 \\",
-    "    libatspi2.0-0 \\",
-    "    libcairo2 \\",
-    "    libcups2 \\",
-    "    libdbus-1-3 \\",
-    "    libdrm2 \\",
-    "    libgbm1 \\",
-    "    libglib2.0-0 \\",
-    "    libnspr4 \\",
-    "    libnss3 \\",
-    "    libpango-1.0-0 \\",
-    "    libx11-6 \\",
-    "    libxcb1 \\",
-    "    libxcomposite1 \\",
-    "    libxdamage1 \\",
-    "    libxext6 \\",
-    "    libxfixes3 \\",
-    "    libxkbcommon0 \\",
-    "    libxrandr2 \\",
-    "    xvfb \\",
-    "    && rm -rf /var/lib/apt/lists/*",
-    "",
+    {
+      sourceRoot: "sharedDevcontainer",
+      from: "node-pnpm.Dockerfile",
+    },
+    ...(options.additionalLayers ?? []).map((layer) => {
+      switch (layer.kind) {
+        case "browser-test":
+          return {
+            sourceRoot: "sharedDevcontainer",
+            from: "browser-test.Dockerfile",
+          };
+      }
+    }),
   ];
+}
+
+function browserTestBuildArgs(
+  layers: readonly DevelopmentContainerBrowserTestLayer[] = [],
+): Record<string, string> {
+  const browserTestLayer = layers.find(
+    (layer) => layer.kind === "browser-test",
+  );
+
+  return browserTestLayer === undefined
+    ? {}
+    : { PLAYWRIGHT_CLI_PACKAGE: browserTestLayer.playwrightCliPackage };
 }
 
 function renderRustLayer(
@@ -195,19 +229,9 @@ function renderRustLayer(
 export function dockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
-  readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
   readonly extensions: readonly string[];
   readonly settings?: Record<string, unknown>;
 }): DevelopmentContainerPlan {
-  const additionalDockerfileLines = (options.additionalLayers ?? []).flatMap(
-    (layer) => {
-      switch (layer.kind) {
-        case "browser-test":
-          return renderBrowserTestLayer();
-      }
-    },
-  );
-
   return {
     devcontainer: {
       name: options.name,
@@ -231,15 +255,14 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
       'SHELL ["/bin/bash", "-o", "pipefail", "-c"]',
       `RUN corepack enable && corepack prepare ${options.layer.packageManagerPin} --activate`,
       "",
-    ]
-      .concat(additionalDockerfileLines)
-      .join("\n"),
+    ].join("\n"),
   };
 }
 
 export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
+  readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
   readonly extensions: readonly string[];
   readonly settings?: Record<string, unknown>;
 }): DevelopmentContainerPlan {
@@ -251,6 +274,7 @@ export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
         args: {
           NODE_VERSION: options.layer.nodeVersion,
           PACKAGE_MANAGER_PIN: options.layer.packageManagerPin,
+          ...browserTestBuildArgs(options.additionalLayers),
         },
       },
       customizations: {
@@ -260,7 +284,16 @@ export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
         },
       },
     },
-    dockerfile: checkedNodePnpmDockerfile(),
+    dockerfile: checkedNodePnpmDockerfile({
+      additionalLayers: options.additionalLayers,
+    }),
+    dockerfileOperation: {
+      kind: "writeTextFromFragments",
+      to: ".devcontainer/Dockerfile",
+      fragments: checkedNodePnpmDockerfileFragments({
+        additionalLayers: options.additionalLayers,
+      }),
+    },
   };
 }
 

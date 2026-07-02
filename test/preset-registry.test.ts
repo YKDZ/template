@@ -2,8 +2,13 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
+
+const playwrightCliPackage = `@playwright/test@${
+  loadTemplateDependencyCatalog()["@playwright/test"]
+}`;
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
@@ -134,6 +139,7 @@ describe("Preset Registry", () => {
       args: {
         NODE_VERSION: "24",
         PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+        PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
       },
     });
     expect(devcontainer).not.toHaveProperty("features");
@@ -147,15 +153,20 @@ describe("Preset Registry", () => {
     expect(devcontainerText).toMatch(
       /^\{\n  "name": "demo-vue-app",\n  "build": \{/,
     );
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
+    expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
     expect(dockerfile).toContain(
-      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+      'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
+    );
+    expect(dockerfile).not.toContain(
+      "npx --yes playwright install-deps chromium",
     );
     expect(dockerfile).toContain(
-      "RUN apt-get update && apt-get install -y --no-install-recommends \\",
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
-    expect(dockerfile).toContain("libnss3");
-    expect(dockerfile).toContain("libgbm1");
-    expect(dockerfile).toContain("xvfb");
+    expect(dockerfile).not.toContain("libnss3");
+    expect(dockerfile).not.toContain("libgbm1");
+    expect(dockerfile).not.toContain("xvfb");
     expect(dockerfile).not.toContain("npm install -g");
   });
 
@@ -219,6 +230,7 @@ describe("Preset Registry", () => {
       args: {
         NODE_VERSION: "24",
         PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+        PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
       },
     });
     expect(devcontainer).not.toHaveProperty("features");
@@ -236,12 +248,17 @@ describe("Preset Registry", () => {
     expect(devcontainerText).toMatch(
       /^\{\n  "name": "demo-vue-hono",\n  "build": \{/,
     );
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
+    expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
     expect(dockerfile).toContain(
-      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+      'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
     );
-    expect(dockerfile).toContain("libnss3");
-    expect(dockerfile).toContain("libgbm1");
-    expect(dockerfile).toContain("xvfb");
+    expect(dockerfile).not.toContain(
+      "npx --yes playwright install-deps chromium",
+    );
+    expect(dockerfile).not.toContain("libnss3");
+    expect(dockerfile).not.toContain("libgbm1");
+    expect(dockerfile).not.toContain("xvfb");
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
     expect(rootPackageJson.scripts.check).toBe(
@@ -324,21 +341,37 @@ describe("Preset Registry", () => {
         args: {
           NODE_VERSION: "24",
           PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
+          ...(preset === "hono-api"
+            ? {}
+            : { PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage }),
         },
       });
       expect(devcontainer).not.toHaveProperty("features");
-      expect(dockerfile).toContain(
-        "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
-      );
-      expect(dockerfile).toContain(
-        "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
-      );
       if (preset === "hono-api") {
+        expect(dockerfile).toContain(
+          "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+        );
+        expect(dockerfile).toContain(
+          "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
+        );
         expect(devcontainerText).toMatch(
           /^\{\n  "name": "demo-hono-api",\n  "build": \{/,
         );
         expect(dockerfile).not.toContain("libnss3");
         expect(dockerfile).not.toContain("xvfb");
+        expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
+      } else {
+        expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
+        expect(dockerfile).toContain(
+          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        );
+        expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+        expect(dockerfile).toContain(
+          'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
+        );
+        expect(dockerfile).not.toContain(
+          "npx --yes playwright install-deps chromium",
+        );
       }
     },
   );

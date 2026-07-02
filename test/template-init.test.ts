@@ -15,6 +15,7 @@ import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
 
 import { builtInPresets } from "../src/declarations.js";
+import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import {
   editorCustomizationForCapabilities,
   type EditorCustomizationCapability,
@@ -32,6 +33,9 @@ const optionalGitDisplays = [
   "git add .",
   'git commit -m "Initial commit"',
 ];
+const playwrightCliPackage = `@playwright/test@${
+  loadTemplateDependencyCatalog()["@playwright/test"]
+}`;
 
 const defaultToolchainEnv = {
   TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
@@ -660,11 +664,16 @@ describe("template init", () => {
         preset.name === "vue-hono-app"
       ) {
         expect(files).toContain(".devcontainer/Dockerfile");
+        const isBrowserPreset =
+          preset.name === "vue-app" || preset.name === "vue-hono-app";
         expect(devcontainer.build).toEqual({
           dockerfile: "Dockerfile",
           args: {
             NODE_VERSION: packageJson.engines.node,
             PACKAGE_MANAGER_PIN: packageJson.packageManager,
+            ...(isBrowserPreset
+              ? { PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage }
+              : {}),
           },
         });
         expect(devcontainer).not.toHaveProperty("features");
@@ -684,18 +693,40 @@ describe("template init", () => {
           expect(dockerfile).not.toContain("typescript");
           expect(dockerfile).not.toContain("eslint");
           expect(dockerfile).not.toContain("vitest");
+        } else if (
+          preset.name === "vue-app" ||
+          preset.name === "vue-hono-app"
+        ) {
+          expect(dockerfile).toContain(
+            "FROM node:${NODE_VERSION}-bookworm-slim",
+          );
+          expect(dockerfile).toContain(
+            "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+          );
+          expect(dockerfile).not.toContain("typescript-node");
         } else {
           expect(dockerfile).toContain(
             `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
           );
         }
         if (preset.name === "hono-api" || preset.name === "ts-lib") {
+          expect(devcontainer.build?.args).not.toHaveProperty(
+            "PLAYWRIGHT_CLI_PACKAGE",
+          );
+          expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
           expect(dockerfile).not.toContain("libnss3");
           expect(dockerfile).not.toContain("xvfb");
         } else {
-          expect(dockerfile).toContain("libnss3");
-          expect(dockerfile).toContain("libgbm1");
-          expect(dockerfile).toContain("xvfb");
+          expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+          expect(dockerfile).toContain(
+            'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
+          );
+          expect(dockerfile).not.toContain(
+            "npx --yes playwright install-deps chromium",
+          );
+          expect(dockerfile).not.toContain("libnss3");
+          expect(dockerfile).not.toContain("libgbm1");
+          expect(dockerfile).not.toContain("xvfb");
           expect(dockerfile).not.toMatch(
             /\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/,
           );
@@ -928,6 +959,7 @@ describe("template init", () => {
     expect(dockerfile).not.toContain("typescript");
     expect(dockerfile).not.toContain("eslint");
     expect(dockerfile).not.toContain("vitest");
+    expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
     expect(packageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );
@@ -986,15 +1018,22 @@ describe("template init", () => {
       args: {
         NODE_VERSION: rootPackageJson.engines.node,
         PACKAGE_MANAGER_PIN: rootPackageJson.packageManager,
+        PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
       },
     });
     expect(devcontainer).not.toHaveProperty("features");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      `FROM mcr.microsoft.com/devcontainers/typescript-node:${rootPackageJson.engines.node}`,
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
+    expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
     expect(dockerfile).toContain(
-      `RUN corepack enable && corepack prepare ${rootPackageJson.packageManager} --activate`,
+      'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
     );
+    expect(dockerfile).not.toContain(
+      "npx --yes playwright install-deps chromium",
+    );
+    expect(dockerfile).not.toContain("typescript-node");
     expect(devcontainer).not.toHaveProperty("postCreateCommand");
   }, 120_000);
 

@@ -118,21 +118,37 @@ function projectionTemplateSourceFiles(): string[] {
     };
 
     for (const operation of plan.operations) {
-      if (operation.kind !== "copyFile") {
+      if (operation.kind === "writeTextFromFragments") {
+        for (const fragment of operation.fragments) {
+          const root = fragment.sourceRoot
+            ? sourceRoots[fragment.sourceRoot]
+            : sourceRoots.default;
+
+          if (!root) {
+            throw new Error(
+              `Missing sourceRoot ${fragment.sourceRoot} for ${projection.metadata.name}`,
+            );
+          }
+
+          files.add(relativeRepoPath(path.join(root, fragment.from)));
+        }
+
         continue;
       }
 
-      const root = operation.sourceRoot
-        ? sourceRoots[operation.sourceRoot]
-        : sourceRoots.default;
+      if (operation.kind === "copyFile") {
+        const root = operation.sourceRoot
+          ? sourceRoots[operation.sourceRoot]
+          : sourceRoots.default;
 
-      if (!root) {
-        throw new Error(
-          `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
-        );
+        if (!root) {
+          throw new Error(
+            `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
+          );
+        }
+
+        files.add(relativeRepoPath(path.join(root, operation.from)));
       }
-
-      files.add(relativeRepoPath(path.join(root, operation.from)));
     }
   }
 
@@ -276,6 +292,7 @@ describe("package publishing", () => {
       );
       expect(packedPaths).toEqual(
         expect.arrayContaining([
+          "package/templates/shared/devcontainer/browser-test.Dockerfile",
           "package/templates/shared/devcontainer/node-pnpm.Dockerfile",
           "package/templates/rust-bin/src/main.rs",
           "package/templates/shared/oxc/node/oxlint.config.ts",
