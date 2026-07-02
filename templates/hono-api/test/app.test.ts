@@ -1,4 +1,4 @@
-import { app } from "@/app.js";
+import { app } from "#/app";
 
 describe("Hono API", () => {
   it("responds to the health route", async () => {

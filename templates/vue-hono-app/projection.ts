@@ -282,6 +282,12 @@ function apiPackageJson(
     exports: {
       ".": "./dist/index.js",
     },
+    imports: {
+      "#/*": {
+        default: "./dist/*.js",
+        types: "./src/*.ts",
+      },
+    },
     scripts: projectVueHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
@@ -311,6 +317,12 @@ function webPackageJson(
     version: "0.0.0",
     private: true,
     type: "module",
+    imports: {
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    },
     scripts: projectVueHonoWebPackageScripts(),
     dependencies: {
       [packageName(packageScope, "api")]: "workspace:*",
@@ -545,9 +557,6 @@ function operationsForVueHonoApp(
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
-          paths: {
-            "@/*": ["./src/*"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
@@ -618,7 +627,6 @@ function operationsForVueHonoApp(
           moduleResolution: "Bundler",
           noEmitOnError: true,
           paths: {
-            "@/*": ["./src/*"],
             [apiName]: ["../api/src/index.ts"],
           },
           skipLibCheck: false,

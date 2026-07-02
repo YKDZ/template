@@ -1,6 +1,6 @@
 import { createPinia, setActivePinia } from "pinia";
 
-import { useCounterStore } from "@/stores/counter";
+import { useCounterStore } from "#/stores/counter";
 
 describe("counter store", () => {
   it("increments the count", () => {

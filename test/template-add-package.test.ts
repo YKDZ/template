@@ -1053,8 +1053,20 @@ describe("template add package", () => {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
       engines: { node: string };
+      imports: unknown;
       packageManager?: string;
     }>(path.join(projectDir, "apps/worker/package.json"));
+    const tsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+    }>(path.join(projectDir, "apps/worker/tsconfig.json"));
+    const serverSource = await readFile(
+      path.join(projectDir, "apps/worker/src/server.ts"),
+      "utf8",
+    );
+    const testSource = await readFile(
+      path.join(projectDir, "apps/worker/test/app.test.ts"),
+      "utf8",
+    );
 
     expect(blueprint.packages).toContainEqual({
       name: "@demo-fullstack/worker",
@@ -1067,8 +1079,19 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.hono).toBe("catalog:");
+    expect(packageJson.imports).toEqual({
+      "#/*": {
+        default: "./dist/*.js",
+        types: "./src/*.ts",
+      },
+    });
     expect(packageJson.scripts.check).toContain("pnpm run test");
     expectSharedRootOxcScripts(packageJson.scripts);
+    expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
+    expect(serverSource).toContain('from "#/app"');
+    expect(serverSource).not.toContain('from "#/app.js"');
+    expect(testSource).toContain('from "#/app"');
+    expect(testSource).not.toContain('from "#/app.js"');
 
     await stat(path.join(projectDir, "apps/worker/src/app.ts"));
     await stat(path.join(projectDir, "apps/worker/test/app.test.ts"));
@@ -1165,8 +1188,16 @@ describe("template add package", () => {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
       engines: { node: string };
+      imports: unknown;
       packageManager?: string;
     }>(path.join(projectDir, "apps/admin/package.json"));
+    const appTsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+    }>(path.join(projectDir, "apps/admin/tsconfig.app.json"));
+    const appSource = await readFile(
+      path.join(projectDir, "apps/admin/src/App.vue"),
+      "utf8",
+    );
 
     expect(blueprint.packages).toContainEqual({
       name: "@demo-fullstack/admin",
@@ -1183,8 +1214,16 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
+    expect(packageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
     expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
     expectSharedRootOxcScripts(packageJson.scripts);
+    expect(appTsconfig.compilerOptions).not.toHaveProperty("paths");
+    expect(appSource).toContain('from "#/stores/counter"');
 
     await stat(path.join(projectDir, "apps/admin/src/App.vue"));
     await stat(path.join(projectDir, "apps/admin/test/e2e/app.spec.ts"));

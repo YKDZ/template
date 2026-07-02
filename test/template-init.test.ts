@@ -2115,6 +2115,7 @@ describe("template init", () => {
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
+      imports: unknown;
     }>(path.join(projectDir, "apps/api/package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -2150,6 +2151,10 @@ describe("template init", () => {
     );
     const serverSource = await readFile(
       path.join(projectDir, "apps/api/src/server.ts"),
+      "utf8",
+    );
+    const apiTestSource = await readFile(
+      path.join(projectDir, "apps/api/test/app.test.ts"),
       "utf8",
     );
 
@@ -2201,6 +2206,12 @@ describe("template init", () => {
     expect(apiPackageJson.devDependencies.typescript).toBe("catalog:");
     expect(apiPackageJson.devDependencies.oxlint).toBe("catalog:");
     expect(apiPackageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(apiPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./dist/*.js",
+        types: "./src/*.ts",
+      },
+    });
 
     const parsedWorkspace = parseYaml(workspaceYaml) as {
       packages: string[];
@@ -2222,7 +2233,7 @@ describe("template init", () => {
     ]);
     expect(apiTsconfig.compilerOptions.strict).toBe(true);
     expect(apiTsconfig.compilerOptions.skipLibCheck).toBe(false);
-    expect(apiTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(apiTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
 
     expect(blueprint).toMatchObject({
@@ -2234,7 +2245,10 @@ describe("template init", () => {
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
     expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");
     expect(appSource).toContain('"/health"');
-    expect(serverSource).toContain('from "@/app.js"');
+    expect(serverSource).toContain('from "#/app"');
+    expect(serverSource).not.toContain('from "#/app.js"');
+    expect(apiTestSource).toContain('from "#/app"');
+    expect(apiTestSource).not.toContain('from "#/app.js"');
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
@@ -2570,6 +2584,7 @@ describe("template init", () => {
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
+      imports: unknown;
     }>(path.join(projectDir, "apps/web/package.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -2611,6 +2626,14 @@ describe("template init", () => {
     );
     const workspaceSettings = await readJson<Record<string, unknown>>(
       path.join(projectDir, ".vscode/settings.json"),
+    );
+    const appSource = await readFile(
+      path.join(projectDir, "apps/web/src/App.vue"),
+      "utf8",
+    );
+    const appTestSource = await readFile(
+      path.join(projectDir, "apps/web/test/app.test.ts"),
+      "utf8",
     );
 
     expect(rootPackageJson.name).toBe("demo-vue");
@@ -2669,6 +2692,12 @@ describe("template init", () => {
     );
     expect(webPackageJson.devDependencies.vitest).toBe("catalog:");
     expect(webPackageJson.devDependencies["@playwright/test"]).toBe("catalog:");
+    expect(webPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
     for (const excludedPackage of [
       "vue-router",
       "echarts",
@@ -2716,7 +2745,7 @@ describe("template init", () => {
     expect(appTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
     expect(appTsconfig.compilerOptions.strict).toBe(true);
     expect(appTsconfig.compilerOptions.skipLibCheck).toBe(false);
-    expect(appTsconfig.compilerOptions.paths).toEqual({ "@/*": ["./src/*"] });
+    expect(appTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(appTsconfig.compilerOptions.types).toEqual(["web-bluetooth"]);
     expect(appTsconfig.include).toEqual([
       "env.d.ts",
@@ -2750,6 +2779,8 @@ describe("template init", () => {
     expect(devcontainer.name).toBe("demo-vue");
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
     expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");
+    expect(appSource).toContain('from "#/stores/counter"');
+    expect(appTestSource).toContain('from "#/stores/counter"');
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
@@ -2824,6 +2855,7 @@ describe("template init", () => {
       name: string;
       types: string;
       exports: Record<string, string>;
+      imports: unknown;
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
@@ -2833,6 +2865,7 @@ describe("template init", () => {
       scripts: Record<string, string>;
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
+      imports: unknown;
     }>(path.join(projectDir, "apps/web/package.json"));
     const rootTsconfig = await readJson<{
       files: string[];
@@ -2844,6 +2877,9 @@ describe("template init", () => {
     const webTsconfig = await readJson<{
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "apps/web/tsconfig.json"));
+    const apiTsconfig = await readJson<{
+      compilerOptions: Record<string, unknown>;
+    }>(path.join(projectDir, "apps/api/tsconfig.json"));
     const webAppTsconfig = await readJson<{
       compilerOptions: { paths: Record<string, string[]> };
       references: Array<{ path: string }>;
@@ -2869,6 +2905,14 @@ describe("template init", () => {
     );
     const webApiClient = await readFile(
       path.join(projectDir, "apps/web/src/api.ts"),
+      "utf8",
+    );
+    const webAppSource = await readFile(
+      path.join(projectDir, "apps/web/src/App.vue"),
+      "utf8",
+    );
+    const webAppTestSource = await readFile(
+      path.join(projectDir, "apps/web/test/app.test.ts"),
       "utf8",
     );
     const viteConfig = await readFile(
@@ -2918,6 +2962,12 @@ describe("template init", () => {
     expect(apiPackageJson.name).toBe("@demo-fullstack/api");
     expect(apiPackageJson.types).toBe("./dist/index.d.ts");
     expect(apiPackageJson.exports).toEqual({ ".": "./dist/index.js" });
+    expect(apiPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./dist/*.js",
+        types: "./src/*.ts",
+      },
+    });
     expect(apiPackageJson.scripts["format:check"]).toBe(
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
@@ -2947,10 +2997,19 @@ describe("template init", () => {
     expect(webPackageJson.dependencies.hono).toBe("catalog:");
     expect(webPackageJson.devDependencies.oxfmt).toBe("catalog:");
     expect(webPackageJson.devDependencies.oxlint).toBe("catalog:");
+    expect(webPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
     expect(webApiClient).toMatch(
       /^import type \{ AppType \} from "@demo-fullstack\/api";$/m,
     );
     expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
+    expect(webAppSource).toContain('from "#/api"');
+    expect(webAppSource).toContain('from "#/stores/counter"');
+    expect(webAppTestSource).toContain('from "#/stores/counter"');
     expect(viteConfig).toContain('"/api"');
     expect(viteConfig).toContain("VITE_API_BASE_URL");
 
@@ -2970,8 +3029,11 @@ describe("template init", () => {
       { path: "./tsconfig.test.json" },
       { path: "./tsconfig.node.json" },
     ]);
+    expect(apiTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(webAppTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
-    expect(webAppTsconfig.compilerOptions.paths["@/*"]).toEqual(["./src/*"]);
+    expect(Object.keys(webAppTsconfig.compilerOptions.paths)).toEqual([
+      "@demo-fullstack/api",
+    ]);
     expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual(
       ["../api/src/index.ts"],
     );

@@ -3,7 +3,7 @@ import { usePreferredDark } from "@vueuse/core";
 import { storeToRefs } from "pinia";
 import { computed } from "vue";
 
-import { useCounterStore } from "@/stores/counter";
+import { useCounterStore } from "#/stores/counter";
 
 const counter = useCounterStore();
 const { count } = storeToRefs(counter);

@@ -219,6 +219,12 @@ function apiPackageJson(context: GenerationContext): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
+    imports: {
+      "#/*": {
+        default: "./dist/*.js",
+        types: "./src/*.ts",
+      },
+    },
     scripts: projectHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
@@ -342,9 +348,6 @@ function operationsForHonoApi(
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
-          paths: {
-            "@/*": ["./src/*"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
@@ -464,6 +467,12 @@ function packageAdditionOperations(
         version: "0.0.0",
         private: true,
         type: "module",
+        imports: {
+          "#/*": {
+            default: "./dist/*.js",
+            types: "./src/*.ts",
+          },
+        },
         scripts: projectHonoApiPackageScripts(),
         dependencies: {
           "@hono/node-server": "catalog:",
@@ -491,9 +500,6 @@ function packageAdditionOperations(
           module: "NodeNext",
           moduleResolution: "NodeNext",
           noEmitOnError: true,
-          paths: {
-            "@/*": ["./src/*"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",

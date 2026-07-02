@@ -236,6 +236,12 @@ function webPackageJson(context: GenerationContext): Record<string, unknown> {
     version: "0.0.0",
     private: true,
     type: "module",
+    imports: {
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    },
     scripts: projectVueAppPackageScripts(),
     dependencies: {
       "@vueuse/core": "catalog:",
@@ -394,9 +400,6 @@ function operationsForVueApp(
           module: "ESNext",
           moduleResolution: "Bundler",
           noEmitOnError: true,
-          paths: {
-            "@/*": ["./src/*"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
@@ -631,6 +634,12 @@ function packageAdditionOperations(
         version: "0.0.0",
         private: true,
         type: "module",
+        imports: {
+          "#/*": {
+            default: "./src/*.ts",
+            types: "./src/*.ts",
+          },
+        },
         scripts: projectVueAppPackageScripts(),
         dependencies: {
           "@vueuse/core": "catalog:",
@@ -679,9 +688,6 @@ function packageAdditionOperations(
           module: "ESNext",
           moduleResolution: "Bundler",
           noEmitOnError: true,
-          paths: {
-            "@/*": ["./src/*"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
