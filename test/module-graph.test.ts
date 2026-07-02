@@ -475,6 +475,11 @@ describe("module graph plans", () => {
     ).toContain("package-ecosystem: cargo");
     expect(
       projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
+    ).toContain(
+      'package-ecosystem: cargo\n    directory: "/packages/demo-rust"',
+    );
+    expect(
+      projectDependabotConfig(rustPlan.dependencyMaintenancePolicy),
     ).toContain("package-ecosystem: rust-toolchain");
     const vueHonoProjection = findBuiltInPresetProjection("vue-hono-app");
     const vueHonoPlan = vueHonoProjection!.project({

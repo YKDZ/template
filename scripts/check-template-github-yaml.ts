@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 
 import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+} from "../src/project-github.js";
+import {
   builtInPresetProjections,
   findBuiltInPresetProjection,
 } from "../templates/registry.js";
@@ -90,8 +94,16 @@ async function checkYamlTemplate(
   filePath: string,
 ): Promise<string[]> {
   const contents = await readFile(filePath, "utf8");
-  const document = parseDocument(contents);
   const relativePath = relativeTemplateFilePath(templatesRoot, filePath);
+  const templateKind = githubYamlTemplateKind(relativePath);
+  const renderedContents = templateKind
+    ? renderCheckedTemplateForProjection(
+        presetNameFromRelativePath(relativePath) ?? "",
+        contents.replace(/\r\n/g, "\n"),
+        templateKind,
+      )
+    : contents;
+  const document = parseDocument(renderedContents);
   const problems = [...document.errors, ...document.warnings].map(
     (error) => `${relativePath}: ${error.message}`,
   );
@@ -101,16 +113,12 @@ async function checkYamlTemplate(
     return problems;
   }
 
-  if (
-    /^templates\/[^/]+\/\.github\/workflows\/[^/]+\.ya?ml$/.test(relativePath)
-  ) {
+  if (templateKind === "workflow") {
     problems.push(...checkWorkflowTemplate(relativePath, document.contents));
     problems.push(
       ...checkProjectedTemplate(relativePath, contents, "workflow"),
     );
-  } else if (
-    /^templates\/[^/]+\/\.github\/dependabot\.ya?ml$/.test(relativePath)
-  ) {
+  } else if (templateKind === "dependabot") {
     problems.push(...checkDependabotTemplate(relativePath, document.contents));
     problems.push(
       ...checkProjectedTemplate(relativePath, contents, "dependabot"),
@@ -118,6 +126,22 @@ async function checkYamlTemplate(
   }
 
   return problems;
+}
+
+function githubYamlTemplateKind(
+  relativePath: string,
+): "workflow" | "dependabot" | undefined {
+  if (
+    /^templates\/[^/]+\/\.github\/workflows\/[^/]+\.ya?ml$/.test(relativePath)
+  ) {
+    return "workflow";
+  }
+
+  if (/^templates\/[^/]+\/\.github\/dependabot\.ya?ml$/.test(relativePath)) {
+    return "dependabot";
+  }
+
+  return undefined;
 }
 
 function checkProjectedTemplate(
@@ -131,12 +155,17 @@ function checkProjectedTemplate(
     return [];
   }
 
+  const renderedContents = renderCheckedTemplateForProjection(
+    presetName,
+    contents.replace(/\r\n/g, "\n"),
+    kind,
+  );
   const expected =
     kind === "workflow"
       ? projectGithubCheckWorkflow(presetName)
       : projectDependabotTemplate(presetName);
 
-  if (contents.replace(/\r\n/g, "\n") === expected) {
+  if (renderedContents === expected) {
     return [];
   }
 
@@ -147,6 +176,58 @@ function checkProjectedTemplate(
   return [
     `${relativePath}: expected checked template source to match ${projectionName}`,
   ];
+}
+
+function renderCheckedTemplateForProjection(
+  presetName: string,
+  contents: string,
+  kind: "workflow" | "dependabot",
+): string {
+  const projectionPlan = projectThroughPresetProjection(presetName);
+  const generatedPath =
+    kind === "workflow"
+      ? ".github/workflows/check.yml"
+      : ".github/dependabot.yml";
+  const operation = projectionPlan?.operations.find(
+    (candidate) =>
+      (candidate.kind === "copyFile" ||
+        candidate.kind === "writeTextTemplate") &&
+      candidate.to === generatedPath,
+  );
+
+  if (!operation || operation.kind !== "writeTextTemplate") {
+    return contents;
+  }
+
+  return renderCheckedTextTemplate(contents, operation.replacements);
+}
+
+function renderCheckedTextTemplate(
+  contents: string,
+  replacements: Record<string, string>,
+): string {
+  const used = new Set<string>();
+  const rendered = contents.replaceAll(
+    /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g,
+    (_placeholder, name: string) => {
+      const replacement = replacements[name];
+
+      if (replacement === undefined) {
+        throw new Error(`Missing text template variable: ${name}`);
+      }
+
+      used.add(name);
+      return replacement;
+    },
+  );
+
+  for (const name of Object.keys(replacements)) {
+    if (!used.has(name)) {
+      throw new Error(`Unused text template variable: ${name}`);
+    }
+  }
+
+  return rendered;
 }
 
 function presetNameFromRelativePath(relativePath: string): string | undefined {
@@ -163,27 +244,21 @@ function findSupportedPresetProjection(presetName: string) {
 
 function projectGithubCheckWorkflow(presetName: string): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
-  const projectedWorkflow = projectionPlan?.operations.find(
-    (operation) =>
-      operation.kind === "writeText" &&
-      operation.to === ".github/workflows/check.yml",
-  );
 
-  return projectedWorkflow?.kind === "writeText"
-    ? projectedWorkflow.text
+  return projectionPlan
+    ? projectCheckWorkflow({
+        checkPlan: projectionPlan.checkPlan,
+        environmentPreparation:
+          presetName === "rust-bin" ? { rustToolchain: true } : undefined,
+      })
     : missingProjectedGithubTemplate(presetName, "workflow");
 }
 
 function projectDependabotTemplate(presetName: string): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
-  const projectedDependabot = projectionPlan?.operations.find(
-    (operation) =>
-      operation.kind === "writeText" &&
-      operation.to === ".github/dependabot.yml",
-  );
 
-  return projectedDependabot?.kind === "writeText"
-    ? projectedDependabot.text
+  return projectionPlan
+    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
     : missingProjectedGithubTemplate(presetName, "dependabot");
 }
 

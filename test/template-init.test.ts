@@ -694,9 +694,11 @@ describe("template init", () => {
           expect(dockerfile).not.toContain("eslint");
           expect(dockerfile).not.toContain("vitest");
         } else if (
+          preset.name === "hono-api" ||
           preset.name === "vue-app" ||
           preset.name === "vue-hono-app"
         ) {
+          expect(dockerfile).toContain("ARG NODE_VERSION");
           expect(dockerfile).toContain(
             "FROM node:${NODE_VERSION}-bookworm-slim",
           );
@@ -2426,7 +2428,7 @@ describe("template init", () => {
     expect(checkWorkflow).not.toContain("./scripts/check");
     expect(dependabot).toContain("package-ecosystem: cargo");
     expect(dependabot).toContain(
-      "package-ecosystem: cargo\n    directory: /packages/demo-rust",
+      'package-ecosystem: cargo\n    directory: "/packages/demo-rust"',
     );
     expect(dependabot).toContain("package-ecosystem: npm");
     expect(dependabot).toContain("package-ecosystem: github-actions");

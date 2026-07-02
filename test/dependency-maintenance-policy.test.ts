@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 
+import { projectDependabotConfig } from "../src/project-github.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 type DependabotConfig = {
@@ -42,17 +43,13 @@ function projectedDependabotConfig(
       diagnostics: [],
     },
   });
-  const operation = plan?.operations.find(
-    (candidate) =>
-      candidate.kind === "writeText" &&
-      candidate.to === ".github/dependabot.yml",
-  );
-
-  if (!operation || operation.kind !== "writeText") {
+  if (!plan) {
     throw new Error(`${presetName} did not project .github/dependabot.yml`);
   }
 
-  return parseYaml(operation.text) as DependabotConfig;
+  return parseYaml(
+    projectDependabotConfig(plan.dependencyMaintenancePolicy),
+  ) as DependabotConfig;
 }
 
 function ecosystems(config: DependabotConfig): string[] {
@@ -95,7 +92,9 @@ describe("Generated Repository dependency maintenance policy", () => {
       });
       const hasWorkflow = plan?.operations.some(
         (operation) =>
-          operation.kind === "writeText" &&
+          (operation.kind === "writeText" ||
+            operation.kind === "copyFile" ||
+            operation.kind === "writeTextTemplate") &&
           operation.to.startsWith(".github/workflows/"),
       );
 

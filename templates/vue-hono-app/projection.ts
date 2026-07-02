@@ -29,11 +29,7 @@ import type {
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
-import {
-  projectCheckWorkflow,
-  projectDependabotConfig,
-  type DependencyMaintenancePolicy,
-} from "../../src/project-github.js";
+import type { DependencyMaintenancePolicy } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
@@ -522,14 +518,14 @@ function operationsForVueHonoApp(
       ].join("\n"),
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan }),
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(dependencyMaintenancePolicy),
     },
     {
       kind: "writeJson",

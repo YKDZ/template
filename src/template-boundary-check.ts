@@ -50,63 +50,8 @@ const inlineOperationKinds = new Set<RenderOperation["kind"]>([
   "mergeJson",
 ]);
 
-const protectedInlineDebtPaths = [
-  "turbo.json",
-  "tsconfig.config.json",
-  ".devcontainer/devcontainer.json",
-  ".devcontainer/Dockerfile",
-  ".github/workflows/check.yml",
-  ".github/dependabot.yml",
-] as const;
-
-const currentTemplateSourceBoundaryDebtReason =
-  "current protected Generated Repository output awaiting template-source migration";
-
-function currentDebt(
-  preset: string,
-  owningFunction: string,
-  generatedPaths: readonly string[],
-): readonly TemplateBoundaryDebt[] {
-  return generatedPaths.map((generatedPath) => ({
-    preset,
-    owningFunction,
-    generatedPath,
-    reason: currentTemplateSourceBoundaryDebtReason,
-  }));
-}
-
-export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] = [
-  ...currentDebt(
-    "ts-lib",
-    "operationsForTsLib",
-    protectedInlineDebtPaths.filter(
-      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
-    ),
-  ),
-  ...currentDebt("hono-api", "operationsForHonoApi", protectedInlineDebtPaths),
-  ...currentDebt(
-    "vue-app",
-    "operationsForVueApp",
-    protectedInlineDebtPaths.filter(
-      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
-    ),
-  ),
-  ...currentDebt(
-    "vue-hono-app",
-    "operationsForVueHonoApp",
-    protectedInlineDebtPaths.filter(
-      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
-    ),
-  ),
-  ...currentDebt("rust-bin", "operationsForRustBin", [
-    "turbo.json",
-    "packages/demo-rust-bin/rustfmt.toml",
-    "rust-toolchain.toml",
-    ".devcontainer/devcontainer.json",
-    ".github/workflows/check.yml",
-    ".github/dependabot.yml",
-  ]),
-];
+export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] =
+  [];
 
 function operationTarget(operation: RenderOperation): string | undefined {
   if ("to" in operation) {
@@ -584,6 +529,126 @@ function isStructuredEditorCustomizationOperation(
   });
 }
 
+function isStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expectedKeys: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  const expectedKeySet = new Set(expectedKeys);
+
+  return (
+    keys.length === expectedKeySet.size &&
+    keys.every((key) => expectedKeySet.has(key))
+  );
+}
+
+function isStructuralTurboValue(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["tasks"]) ||
+    !isRecord(value.tasks)
+  ) {
+    return false;
+  }
+
+  return Object.values(value.tasks).every((task) => {
+    if (!isRecord(task)) {
+      return false;
+    }
+
+    return Object.entries(task).every(([key, entryValue]) => {
+      if (key === "dependsOn" || key === "outputs") {
+        return isStringArray(entryValue);
+      }
+
+      if (key === "cache" || key === "persistent") {
+        return typeof entryValue === "boolean";
+      }
+
+      return false;
+    });
+  });
+}
+
+const rootTsconfigConfigCompilerOptions = {
+  module: "NodeNext",
+  moduleResolution: "NodeNext",
+  noEmitOnError: true,
+  skipLibCheck: false,
+  strict: true,
+  target: "ES2022",
+} as const;
+
+const rootTsconfigConfigIncludes = new Set([
+  "oxlint.config.ts",
+  "oxfmt.config.ts",
+  "playwright.config.ts",
+  "vite.config.ts",
+  "vitest.config.ts",
+]);
+
+function isStructuralTsconfigConfigValue(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["compilerOptions", "include"]) ||
+    !isRecord(value.compilerOptions) ||
+    !isStringArray(value.include)
+  ) {
+    return false;
+  }
+
+  return (
+    jsonValuesEqual(value.compilerOptions, rootTsconfigConfigCompilerOptions) &&
+    value.include.every((entry) => rootTsconfigConfigIncludes.has(entry))
+  );
+}
+
+function isDevelopmentContainerPlanValue(expression: ts.Expression): boolean {
+  return isPropertyAccess(expression, "developmentContainer", "devcontainer");
+}
+
+function isAllowedStructuralMachineDeclaration(
+  sourceFile: ts.SourceFile,
+  operation: InlineProtectedOperation,
+): boolean {
+  if (operation.kind !== "writeJson") {
+    return false;
+  }
+
+  if (operation.to === "turbo.json") {
+    return isStructuralTurboValue(operation.value);
+  }
+
+  if (operation.to === "tsconfig.config.json") {
+    return isStructuralTsconfigConfigValue(operation.value);
+  }
+
+  if (operation.to !== ".devcontainer/devcontainer.json") {
+    return false;
+  }
+
+  const matches = findAstMatchesForOperation(sourceFile, operation);
+
+  return (
+    matches.length > 0 &&
+    matches.every((match) => {
+      const value = propertyInitializer(match.node, "value");
+
+      return value !== undefined && isDevelopmentContainerPlanValue(value);
+    })
+  );
+}
+
 function allowlistKey(
   preset: string,
   generatedPath: string,
@@ -625,6 +690,10 @@ export async function checkTemplateSourceBoundary({
       }
 
       if (isStructuredEditorCustomizationOperation(sourceFile, operation)) {
+        continue;
+      }
+
+      if (isAllowedStructuralMachineDeclaration(sourceFile, operation)) {
         continue;
       }
 

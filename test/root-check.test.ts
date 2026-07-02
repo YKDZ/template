@@ -445,14 +445,13 @@ function validWorkflowTemplateForPreset(
   presetName: "ts-lib" | "rust-bin",
 ): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
-  const projectedWorkflow = projectionPlan?.operations.find(
-    (operation) =>
-      operation.kind === "writeText" &&
-      operation.to === ".github/workflows/check.yml",
-  );
 
-  return projectedWorkflow?.kind === "writeText"
-    ? projectedWorkflow.text
+  return projectionPlan
+    ? projectCheckWorkflow({
+        checkPlan: projectionPlan.checkPlan,
+        environmentPreparation:
+          presetName === "rust-bin" ? { rustToolchain: true } : undefined,
+      })
     : missingProjectedGithubTemplate(presetName, "workflow");
 }
 
@@ -460,14 +459,9 @@ function validDependabotTemplateForPreset(
   presetName: "ts-lib" | "rust-bin",
 ): string {
   const projectionPlan = projectThroughPresetProjection(presetName);
-  const projectedDependabot = projectionPlan?.operations.find(
-    (operation) =>
-      operation.kind === "writeText" &&
-      operation.to === ".github/dependabot.yml",
-  );
 
-  return projectedDependabot?.kind === "writeText"
-    ? projectedDependabot.text
+  return projectionPlan
+    ? projectDependabotConfig(projectionPlan.dependencyMaintenancePolicy)
     : missingProjectedGithubTemplate(presetName, "dependabot");
 }
 

@@ -11,7 +11,7 @@ import {
   renderGeneratedPnpmWorkspaceYaml,
 } from "../../src/dependency-catalog.js";
 import {
-  dockerfileFirstNodePnpmDevcontainer,
+  checkedDockerfileFirstNodePnpmDevcontainer,
   nodePnpmToolLayer,
 } from "../../src/devcontainer.js";
 import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
@@ -30,11 +30,7 @@ import type {
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
-import {
-  projectCheckWorkflow,
-  projectDependabotConfig,
-  type DependencyMaintenancePolicy,
-} from "../../src/project-github.js";
+import type { DependencyMaintenancePolicy } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
@@ -260,7 +256,7 @@ function operationsForHonoApi(
     "oxc-format-lint",
     "vitest",
   ]);
-  const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
+  const developmentContainer = checkedDockerfileFirstNodePnpmDevcontainer({
     name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
@@ -424,9 +420,7 @@ function operationsForHonoApi(
       value: developmentContainer.devcontainer,
     },
     {
-      kind: "writeText",
-      to: ".devcontainer/Dockerfile",
-      text: developmentContainer.dockerfile,
+      ...developmentContainer.dockerfileOperation!,
     },
     {
       kind: "writeJson",
@@ -442,14 +436,14 @@ function operationsForHonoApi(
       value: editorCustomization.settings,
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({ checkPlan }),
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(dependencyMaintenancePolicy),
     },
   ];
 }
@@ -592,6 +586,23 @@ function sharedOxcSourceRoot(): string {
     : path.join(projectionDir, "..", "shared", "oxc");
 }
 
+function sharedDevcontainerSourceRoot(): string {
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "devcontainer",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "node-pnpm.Dockerfile"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "devcontainer");
+}
+
 export const honoApiPresetProjection: PresetProjection = {
   metadata: honoApiPresetMetadata,
   capabilities: {
@@ -613,7 +624,10 @@ export const honoApiPresetProjection: PresetProjection = {
 
     return {
       sourceRoot: templateSourceRoot(),
-      sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+      sourceRoots: {
+        sharedDevcontainer: sharedDevcontainerSourceRoot(),
+        sharedOxc: sharedOxcSourceRoot(),
+      },
       operations: operationsForHonoApi(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,

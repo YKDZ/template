@@ -51,6 +51,57 @@ describe("renderer", () => {
     expect((await stat(targetFile)).mode & 0o111).toBe(0o111);
   });
 
+  it("renders checked text templates without stripping surrounding quotes", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+    const sourceFile = path.join(sourceRoot, "project.config");
+    await mkdir(path.dirname(sourceFile), { recursive: true });
+    await writeFile(
+      sourceFile,
+      [
+        "[toolchain]",
+        'channel = "{{RUST_TOOLCHAIN}}"',
+        "",
+        "version: 2",
+        "updates:",
+        "  - package-ecosystem: cargo",
+        '    directory: "{{CARGO_PACKAGE_DIRECTORY}}"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await renderProject({
+      sourceRoot,
+      targetRoot,
+      operations: [
+        {
+          kind: "writeTextTemplate",
+          from: "project.config",
+          to: ".github/dependabot.yml",
+          replacements: {
+            CARGO_PACKAGE_DIRECTORY: "/packages/demo",
+            RUST_TOOLCHAIN: "stable",
+          },
+        },
+      ],
+    });
+
+    await expect(
+      readFile(path.join(targetRoot, ".github/dependabot.yml"), "utf8"),
+    ).resolves.toBe(
+      [
+        "[toolchain]",
+        'channel = "stable"',
+        "",
+        "version: 2",
+        "updates:",
+        "  - package-ecosystem: cargo",
+        '    directory: "/packages/demo"',
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("writes and merges JSON deterministically", async () => {
     const { sourceRoot, targetRoot } = await tempWorkspace();
 

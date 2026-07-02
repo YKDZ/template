@@ -136,6 +136,21 @@ function projectionTemplateSourceFiles(): string[] {
         continue;
       }
 
+      if (operation.kind === "writeTextTemplate") {
+        const root = operation.sourceRoot
+          ? sourceRoots[operation.sourceRoot]
+          : sourceRoots.default;
+
+        if (!root) {
+          throw new Error(
+            `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
+          );
+        }
+
+        files.add(relativeRepoPath(path.join(root, operation.from)));
+        continue;
+      }
+
       if (operation.kind === "copyFile") {
         const root = operation.sourceRoot
           ? sourceRoots[operation.sourceRoot]
@@ -375,7 +390,9 @@ describe("package publishing", () => {
     await execa(
       templateBin,
       ["add", "package", "--preset", "ts-lib", "--name", "shared"],
-      { cwd: generatedWorkspaceDir },
+      {
+        cwd: generatedWorkspaceDir,
+      },
     );
     await expect(
       readFile(

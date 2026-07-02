@@ -29,11 +29,7 @@ import type {
   PresetProjection,
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
-import {
-  projectCheckWorkflow,
-  projectDependabotConfig,
-  type DependencyMaintenancePolicy,
-} from "../../src/project-github.js";
+import type { DependencyMaintenancePolicy } from "../../src/project-github.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
@@ -219,15 +215,6 @@ function cargoLock(projectName: string): string {
   ].join("\n");
 }
 
-function rustToolchainToml(toolchain: string): string {
-  return [
-    "[toolchain]",
-    `channel = "${toolchain}"`,
-    'components = ["rustfmt", "clippy"]',
-    "",
-  ].join("\n");
-}
-
 function packageJson(
   context: GenerationContext,
   projectName: string,
@@ -354,14 +341,17 @@ function operationsForRustBin(
       text: cargoLock(projectName),
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: "rustfmt.toml",
       to: `${workspacePackagePath}/rustfmt.toml`,
-      text: ['edition = "2024"', "max_width = 100", ""].join("\n"),
     },
     {
-      kind: "writeText",
+      kind: "writeTextTemplate",
+      from: "rust-toolchain.toml",
       to: "rust-toolchain.toml",
-      text: rustToolchainToml(rustLayer.toolchain),
+      replacements: {
+        RUST_TOOLCHAIN: rustLayer.toolchain,
+      },
     },
     {
       kind: "writeText",
@@ -404,17 +394,19 @@ function operationsForRustBin(
       value: editorCustomization.settings,
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({
-        checkPlan,
-        environmentPreparation: { rustToolchain: true },
-      }),
     },
     {
-      kind: "writeText",
+      kind: "writeTextTemplate",
+      from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(dependencyMaintenancePolicy),
+      replacements: {
+        CARGO_PACKAGE_DIRECTORY:
+          dependencyMaintenancePolicy.directories?.cargo ??
+          `/${workspacePackagePath}`,
+      },
     },
   ];
 }

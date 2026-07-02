@@ -348,15 +348,15 @@ describe("Preset Registry", () => {
       });
       expect(devcontainer).not.toHaveProperty("features");
       if (preset === "hono-api") {
+        expect(dockerfile).toContain("ARG NODE_VERSION");
+        expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
         expect(dockerfile).toContain(
-          "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
-        );
-        expect(dockerfile).toContain(
-          "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
+          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
         );
         expect(devcontainerText).toMatch(
           /^\{\n  "name": "demo-hono-api",\n  "build": \{/,
         );
+        expect(dockerfile).not.toContain("typescript-node");
         expect(dockerfile).not.toContain("libnss3");
         expect(dockerfile).not.toContain("xvfb");
         expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
@@ -537,6 +537,9 @@ describe("Preset Registry", () => {
     expect(checkWorkflow).toContain("uses: Swatinem/rust-cache@v2");
     expect(dependabot).toContain("package-ecosystem: npm");
     expect(dependabot).toContain("package-ecosystem: cargo");
+    expect(dependabot).toContain(
+      'package-ecosystem: cargo\n    directory: "/packages/demo-rust"',
+    );
     expect(dependabot).toContain("package-ecosystem: github-actions");
   });
 });

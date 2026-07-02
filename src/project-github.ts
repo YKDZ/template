@@ -131,7 +131,7 @@ function renderDependabotUpdate(
 ): string[] {
   const lines = [
     `  - package-ecosystem: ${ecosystem}`,
-    `    directory: ${directory}`,
+    `    directory: ${renderDependabotDirectory(ecosystem, directory)}`,
     "    schedule:",
     `      interval: ${interval}`,
   ];
@@ -155,6 +155,13 @@ function renderDependabotUpdate(
   }
 
   return lines;
+}
+
+function renderDependabotDirectory(
+  ecosystem: DependencyEcosystem,
+  directory: DependabotDirectory,
+): string {
+  return ecosystem === "cargo" ? JSON.stringify(directory) : directory;
 }
 
 function defaultDependabotDirectory(

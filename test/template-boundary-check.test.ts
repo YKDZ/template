@@ -37,6 +37,53 @@ function minimalPlan(
 }
 
 describe("Template Boundary Check", () => {
+  it("accepts all built-in projections without temporary allowlisted debt", async () => {
+    const projections = [
+      "ts-lib",
+      "hono-api",
+      "vue-app",
+      "vue-hono-app",
+      "rust-bin",
+    ].map((presetName) => {
+      const targetDir = path.join(tmpdir(), `demo-${presetName}`);
+      const projection = findBuiltInPresetProjection(presetName)!;
+      const blueprint = projection.blueprint({ targetDir });
+      const plan = projection.project(
+        assembleGenerationContext({
+          targetDir,
+          blueprint,
+          toolchain: {
+            nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+            packageManagerPin: {
+              kind: "PackageManagerPin",
+              value: "pnpm@11.2.3",
+            },
+            source: "online",
+            diagnostics: [],
+          },
+        }),
+      );
+
+      return {
+        name: presetName,
+        sourceFilePath: path.join(
+          repoRoot,
+          `templates/${presetName}/projection.ts`,
+        ),
+        plan,
+      };
+    });
+
+    const result = await checkTemplateSourceBoundary({ projections });
+
+    expect(result).toMatchObject({
+      ok: true,
+      violations: [],
+      allowlistedDebt: [],
+      unusedAllowlistEntries: [],
+    });
+  });
+
   it("fails unlisted protected Generated Repository outputs with path and owning function diagnostics", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-boundary-check-"),
@@ -133,6 +180,398 @@ describe("Template Boundary Check", () => {
         owningFunction: "projectRustPreset",
       }),
     );
+  });
+
+  it("accepts narrow structural machine declarations at protected JSON paths", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectStructuralMachineDeclarations() {",
+        "  const developmentContainer = planDevelopmentContainer();",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "turbo.json",',
+        "        value: {",
+        "          tasks: {",
+        '            check: { dependsOn: ["^build"] },',
+        "            dev: { cache: false, persistent: true },",
+        "          },",
+        "        },",
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "tsconfig.config.json",',
+        "        value: {",
+        "          compilerOptions: {",
+        '            module: "NodeNext",',
+        '            moduleResolution: "NodeNext",',
+        "            noEmitOnError: true,",
+        "            skipLibCheck: false,",
+        "            strict: true,",
+        '            target: "ES2022",',
+        "          },",
+        '          include: ["oxlint.config.ts", "oxfmt.config.ts"],',
+        "        },",
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".devcontainer/devcontainer.json",',
+        "        value: developmentContainer.devcontainer,",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: "turbo.json",
+              value: {
+                tasks: {
+                  check: { dependsOn: ["^build"] },
+                  dev: { cache: false, persistent: true },
+                },
+              },
+            },
+            {
+              kind: "writeJson",
+              to: "tsconfig.config.json",
+              value: {
+                compilerOptions: {
+                  module: "NodeNext",
+                  moduleResolution: "NodeNext",
+                  noEmitOnError: true,
+                  skipLibCheck: false,
+                  strict: true,
+                  target: "ES2022",
+                },
+                include: ["oxlint.config.ts", "oxfmt.config.ts"],
+              },
+            },
+            {
+              kind: "writeJson",
+              to: ".devcontainer/devcontainer.json",
+              value: {
+                name: "demo",
+                build: { dockerfile: "Dockerfile" },
+              },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      violations: [],
+      allowlistedDebt: [],
+    });
+  });
+
+  it("rejects arbitrary inline bodies at structurally classified protected JSON paths", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectArbitraryProtectedJson() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "turbo.json",',
+        '        value: { scripts: { check: "pnpm test" } },',
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: ".devcontainer/devcontainer.json",',
+        '        value: { name: "demo" },',
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: "turbo.json",
+              value: { scripts: { check: "pnpm test" } },
+            },
+            {
+              kind: "writeJson",
+              to: ".devcontainer/devcontainer.json",
+              value: { name: "demo" },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          generatedPath: "turbo.json",
+          owningFunction: "projectArbitraryProtectedJson",
+        }),
+        expect.objectContaining({
+          generatedPath: ".devcontainer/devcontainer.json",
+          owningFunction: "projectArbitraryProtectedJson",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects structural turbo.json declarations with extra root keys", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectTurboWithExtraRootKey() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "turbo.json",',
+        "        value: { tasks: {}, arbitrary: true },",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: "turbo.json",
+              value: { tasks: {}, arbitrary: true },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        generatedPath: "turbo.json",
+        owningFunction: "projectTurboWithExtraRootKey",
+      }),
+    );
+  });
+
+  it("rejects structural tsconfig.config.json declarations with extra root keys", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectTsconfigWithExtraRootKey() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "tsconfig.config.json",',
+        "        value: {",
+        "          compilerOptions: {",
+        '            module: "NodeNext",',
+        '            moduleResolution: "NodeNext",',
+        "            noEmitOnError: true,",
+        "            skipLibCheck: false,",
+        "            strict: true,",
+        '            target: "ES2022",',
+        "          },",
+        '          include: ["oxlint.config.ts"],',
+        "          arbitrary: true,",
+        "        },",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: "tsconfig.config.json",
+              value: {
+                compilerOptions: {
+                  module: "NodeNext",
+                  moduleResolution: "NodeNext",
+                  noEmitOnError: true,
+                  skipLibCheck: false,
+                  strict: true,
+                  target: "ES2022",
+                },
+                include: ["oxlint.config.ts"],
+                arbitrary: true,
+              },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        generatedPath: "tsconfig.config.json",
+        owningFunction: "projectTsconfigWithExtraRootKey",
+      }),
+    );
+  });
+
+  it("rejects structural tsconfig.config.json declarations with invalid compiler option values", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectTsconfigWithInvalidCompilerOptions() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "tsconfig.config.json",',
+        "        value: {",
+        "          compilerOptions: {",
+        '            module: "NodeNext",',
+        '            moduleResolution: "NodeNext",',
+        "            noEmitOnError: true,",
+        "            skipLibCheck: false,",
+        '            strict: "true",',
+        '            target: "ES2022",',
+        "          },",
+        '          include: ["oxlint.config.ts"],',
+        "        },",
+        "      },",
+        "      {",
+        '        kind: "writeJson",',
+        '        to: "tsconfig.config.json",',
+        "        value: {",
+        "          compilerOptions: {",
+        '            module: "CommonJS",',
+        '            moduleResolution: "NodeNext",',
+        "            noEmitOnError: true,",
+        "            skipLibCheck: false,",
+        "            strict: true,",
+        '            target: "ES2022",',
+        "          },",
+        '          include: ["oxlint.config.ts"],',
+        "        },",
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "writeJson",
+              to: "tsconfig.config.json",
+              value: {
+                compilerOptions: {
+                  module: "NodeNext",
+                  moduleResolution: "NodeNext",
+                  noEmitOnError: true,
+                  skipLibCheck: false,
+                  strict: "true",
+                  target: "ES2022",
+                },
+                include: ["oxlint.config.ts"],
+              },
+            },
+            {
+              kind: "writeJson",
+              to: "tsconfig.config.json",
+              value: {
+                compilerOptions: {
+                  module: "CommonJS",
+                  moduleResolution: "NodeNext",
+                  noEmitOnError: true,
+                  skipLibCheck: false,
+                  strict: true,
+                  target: "ES2022",
+                },
+                include: ["oxlint.config.ts"],
+              },
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          generatedPath: "tsconfig.config.json",
+          owningFunction: "projectTsconfigWithInvalidCompilerOptions",
+        }),
+        expect.objectContaining({
+          generatedPath: "tsconfig.config.json",
+          owningFunction: "projectTsconfigWithInvalidCompilerOptions",
+        }),
+      ]),
+    );
+    expect(result.violations).toHaveLength(2);
   });
 
   it("does not let duplicate protected paths inherit another owner's allowlist entry", async () => {

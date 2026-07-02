@@ -51,6 +51,14 @@ export type WriteTextFromFragmentsOperation = {
   }[];
 };
 
+export type WriteTextTemplateOperation = {
+  kind: "writeTextTemplate";
+  from: string;
+  to: string;
+  sourceRoot?: string;
+  replacements: Record<string, string>;
+};
+
 export type SetExecutableOperation = {
   kind: "setExecutable";
   path: string;
@@ -70,6 +78,7 @@ export type RenderOperation =
   | MergeJsonOperation
   | WriteTextOperation
   | WriteTextFromFragmentsOperation
+  | WriteTextTemplateOperation
   | SetExecutableOperation
   | ReplaceAnchorsOperation;
 
@@ -478,6 +487,63 @@ async function renderWriteTextFromFragments(
   );
 }
 
+function replaceTextTemplateVariables(
+  sourceText: string,
+  replacements: Record<string, string>,
+): string {
+  const used = new Set<string>();
+  const rendered = sourceText.replaceAll(
+    /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g,
+    (_placeholder, name: string) => {
+      const replacement = replacements[name];
+
+      if (replacement === undefined) {
+        throw new Error(`Missing text template variable: ${name}`);
+      }
+
+      used.add(name);
+      return replacement;
+    },
+  );
+
+  for (const name of Object.keys(replacements)) {
+    if (!used.has(name)) {
+      throw new Error(`Unused text template variable: ${name}`);
+    }
+  }
+
+  return rendered;
+}
+
+async function renderWriteTextTemplate(
+  operation: WriteTextTemplateOperation,
+  options: RenderProjectOptions,
+): Promise<void> {
+  const sourceRoot =
+    operation.sourceRoot === undefined
+      ? options.sourceRoot
+      : options.sourceRoots?.[operation.sourceRoot];
+
+  if (sourceRoot === undefined) {
+    throw new Error(`Unknown renderer source root: ${operation.sourceRoot}`);
+  }
+
+  const toPath = expandOperationPath(operation.to, options);
+  assertFoundationTextPath(toPath);
+  const from = resolveContainedPath(
+    sourceRoot,
+    expandTemplatePath(operation.from, options.variables ?? {}),
+  );
+  const to = resolveContainedPath(options.targetRoot, toPath);
+  const sourceText = await readFile(from, "utf8");
+
+  await mkdir(path.dirname(to), { recursive: true });
+  await writeGeneratedFile(
+    to,
+    replaceTextTemplateVariables(sourceText, operation.replacements),
+  );
+}
+
 async function renderSetExecutable(
   operation: SetExecutableOperation,
   options: RenderProjectOptions,
@@ -713,6 +779,11 @@ export async function renderProject(
 
     if (operation.kind === "writeTextFromFragments") {
       await renderWriteTextFromFragments(operation, options);
+      continue;
+    }
+
+    if (operation.kind === "writeTextTemplate") {
+      await renderWriteTextTemplate(operation, options);
       continue;
     }
 
