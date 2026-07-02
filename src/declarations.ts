@@ -1,4 +1,5 @@
 import * as v from "valibot";
+
 import { builtInPresetMetadata } from "../templates/registry.js";
 
 export type BuiltInPreset = {
@@ -65,7 +66,7 @@ const featureNames: FeatureName[] = [
   "dependabot",
   "rustfmt-clippy",
   "cargo-test",
-  "native-binary-release"
+  "native-binary-release",
 ];
 
 export const presetFileJsonSchema = {
@@ -81,7 +82,7 @@ export const presetFileJsonSchema = {
     "description",
     "supportedPackageManagers",
     "supportedProjectKinds",
-    "features"
+    "features",
   ],
   properties: {
     schemaVersion: { const: 1 },
@@ -91,20 +92,20 @@ export const presetFileJsonSchema = {
     supportedPackageManagers: {
       type: "array",
       items: { enum: ["pnpm"] },
-      uniqueItems: true
+      uniqueItems: true,
     },
     supportedProjectKinds: {
       type: "array",
       minItems: 1,
       items: { enum: ["single-package", "multi-package"] },
-      uniqueItems: true
+      uniqueItems: true,
     },
     features: {
       type: "array",
       items: { enum: featureNames },
-      uniqueItems: true
-    }
-  }
+      uniqueItems: true,
+    },
+  },
 } as const;
 
 export const blueprintJsonSchema = {
@@ -122,7 +123,7 @@ export const blueprintJsonSchema = {
     features: {
       type: "array",
       items: { enum: featureNames },
-      uniqueItems: true
+      uniqueItems: true,
     },
     packages: {
       type: "array",
@@ -132,16 +133,19 @@ export const blueprintJsonSchema = {
         required: ["name", "path"],
         properties: {
           name: { type: "string", minLength: 1 },
-          path: { type: "string", minLength: 1 }
-        }
-      }
-    }
-  }
+          path: { type: "string", minLength: 1 },
+        },
+      },
+    },
+  },
 } as const;
 
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
 const packageManagerSchema = v.picklist(["pnpm"] as const);
-const projectKindSchema = v.picklist(["single-package", "multi-package"] as const);
+const projectKindSchema = v.picklist([
+  "single-package",
+  "multi-package",
+] as const);
 const featureNameSchema = v.picklist(featureNames);
 
 export const presetFileSchema = v.strictObject({
@@ -151,7 +155,7 @@ export const presetFileSchema = v.strictObject({
   description: nonEmptyString,
   supportedPackageManagers: v.array(packageManagerSchema),
   supportedProjectKinds: v.pipe(v.array(projectKindSchema), v.minLength(1)),
-  features: v.array(featureNameSchema)
+  features: v.array(featureNameSchema),
 });
 
 export const projectBlueprintSchema = v.strictObject({
@@ -164,10 +168,10 @@ export const projectBlueprintSchema = v.strictObject({
     v.array(
       v.strictObject({
         name: nonEmptyString,
-        path: nonEmptyString
-      })
-    )
-  )
+        path: nonEmptyString,
+      }),
+    ),
+  ),
 });
 
 export type ValidationIssue = {
@@ -190,7 +194,7 @@ function formatIssuePath(issue: v.BaseIssue<unknown>): string {
 function shapeIssues(issues: v.BaseIssue<unknown>[]): ValidationIssue[] {
   return issues.map((issue) => ({
     path: formatIssuePath(issue),
-    message: issue.message
+    message: issue.message,
   }));
 }
 
@@ -207,13 +211,13 @@ function duplicateIssues(values: string[], path: string): ValidationIssue[] {
 
   return [...duplicates].map((value) => ({
     path,
-    message: `Duplicate value: ${value}`
+    message: `Duplicate value: ${value}`,
   }));
 }
 
 function generationSupportIssue(
   preset: BuiltInPreset,
-  path: string
+  path: string,
 ): ValidationIssue | undefined {
   if (preset.generation === "supported") {
     return undefined;
@@ -221,11 +225,13 @@ function generationSupportIssue(
 
   return {
     path,
-    message: `Preset ${preset.name} is not supported for generation in this version`
+    message: `Preset ${preset.name} is not supported for generation in this version`,
   };
 }
 
-export function validatePresetFile(input: unknown): ValidationResult<PresetFile> {
+export function validatePresetFile(
+  input: unknown,
+): ValidationResult<PresetFile> {
   const result = v.safeParse(presetFileSchema, input);
 
   if (!result.success) {
@@ -233,9 +239,15 @@ export function validatePresetFile(input: unknown): ValidationResult<PresetFile>
   }
 
   const semanticIssues = [
-    ...duplicateIssues(result.output.supportedPackageManagers, "$.supportedPackageManagers"),
-    ...duplicateIssues(result.output.supportedProjectKinds, "$.supportedProjectKinds"),
-    ...duplicateIssues(result.output.features, "$.features")
+    ...duplicateIssues(
+      result.output.supportedPackageManagers,
+      "$.supportedPackageManagers",
+    ),
+    ...duplicateIssues(
+      result.output.supportedProjectKinds,
+      "$.supportedProjectKinds",
+    ),
+    ...duplicateIssues(result.output.features, "$.features"),
   ];
 
   const builtInPreset = findBuiltInPreset(result.output.name);
@@ -259,7 +271,7 @@ export function findBuiltInPreset(name: string): BuiltInPreset | undefined {
 }
 
 export function validateProjectBlueprint(
-  input: unknown
+  input: unknown,
 ): ValidationResult<ProjectBlueprint> {
   const result = v.safeParse(projectBlueprintSchema, input);
 
@@ -270,13 +282,13 @@ export function validateProjectBlueprint(
   const blueprint = result.output;
   const preset = findBuiltInPreset(blueprint.preset);
   const semanticIssues: ValidationIssue[] = [
-    ...duplicateIssues(blueprint.features, "$.features")
+    ...duplicateIssues(blueprint.features, "$.features"),
   ];
 
   if (!preset) {
     semanticIssues.push({
       path: "$.preset",
-      message: `Unknown built-in preset: ${blueprint.preset}`
+      message: `Unknown built-in preset: ${blueprint.preset}`,
     });
   } else {
     const unsupportedGeneration = generationSupportIssue(preset, "$.preset");
@@ -291,21 +303,24 @@ export function validateProjectBlueprint(
     ) {
       semanticIssues.push({
         path: "$.packageManager",
-        message: `${blueprint.packageManager} is not supported by preset ${preset.name}`
+        message: `${blueprint.packageManager} is not supported by preset ${preset.name}`,
       });
     }
 
-    if (!blueprint.packageManager && preset.supportedPackageManagers.length > 0) {
+    if (
+      !blueprint.packageManager &&
+      preset.supportedPackageManagers.length > 0
+    ) {
       semanticIssues.push({
         path: "$.packageManager",
-        message: `packageManager is required by preset ${preset.name}`
+        message: `packageManager is required by preset ${preset.name}`,
       });
     }
 
     if (!preset.supportedProjectKinds.includes(blueprint.projectKind)) {
       semanticIssues.push({
         path: "$.projectKind",
-        message: `${blueprint.projectKind} is not supported by preset ${preset.name}`
+        message: `${blueprint.projectKind} is not supported by preset ${preset.name}`,
       });
     }
 
@@ -314,29 +329,32 @@ export function validateProjectBlueprint(
       if (!supportedFeatures.has(feature)) {
         semanticIssues.push({
           path: "$.features",
-          message: `${feature} is not supported by preset ${preset.name}`
+          message: `${feature} is not supported by preset ${preset.name}`,
         });
       }
     }
   }
 
   if (blueprint.packages) {
-    if (blueprint.projectKind === "single-package" && blueprint.packages.length > 1) {
+    if (
+      blueprint.projectKind === "single-package" &&
+      blueprint.packages.length > 1
+    ) {
       semanticIssues.push({
         path: "$.packages",
-        message: "single-package blueprints support exactly one package"
+        message: "single-package blueprints support exactly one package",
       });
     }
 
     semanticIssues.push(
       ...duplicateIssues(
         blueprint.packages.map((projectPackage) => projectPackage.name),
-        "$.packages.name"
+        "$.packages.name",
       ),
       ...duplicateIssues(
         blueprint.packages.map((projectPackage) => projectPackage.path),
-        "$.packages.path"
-      )
+        "$.packages.path",
+      ),
     );
   }
 

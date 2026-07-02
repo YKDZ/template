@@ -17,6 +17,14 @@ type DependabotUpdate = {
   }[];
 };
 
+const generatedRepositoryPresetNames = [
+  "hono-api",
+  "rust-bin",
+  "ts-lib",
+  "vue-app",
+  "vue-hono-app",
+];
+
 function projectedDependabotConfig(
   presetName: string,
   projectName = "generated-repository",
@@ -67,14 +75,47 @@ function updateFor(
 }
 
 describe("Generated Repository dependency maintenance policy", () => {
+  it("maintains GitHub Actions for every generated repository that has real workflows", () => {
+    for (const presetName of generatedRepositoryPresetNames) {
+      const projection = findBuiltInPresetProjection(presetName);
+      const plan = projection?.project({
+        projectName: { kind: "ProjectName", value: "generated-repository" },
+        preset: presetName,
+        packageManager: { kind: "PackageManager", value: "pnpm" },
+        blueprint: projection.blueprint({ targetDir: "generated-repository" }),
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@10.0.0",
+          },
+          source: "bundled-fallback",
+          diagnostics: [],
+        },
+      });
+      const hasWorkflow = plan?.operations.some(
+        (operation) =>
+          operation.kind === "writeText" &&
+          operation.to.startsWith(".github/workflows/"),
+      );
+
+      expect(hasWorkflow, presetName).toBe(true);
+      expect(
+        ecosystems(projectedDependabotConfig(presetName)),
+        presetName,
+      ).toContain("github-actions");
+      expect(
+        updateFor(projectedDependabotConfig(presetName), "github-actions")
+          .directory,
+        presetName,
+      ).toBe("/");
+    }
+  });
+
   it("maintains Node repositories through npm, GitHub Actions, and Docker without letting Dependabot move the Node baseline", () => {
     const dependabot = projectedDependabotConfig("ts-lib");
 
-    expect(ecosystems(dependabot)).toEqual([
-      "npm",
-      "github-actions",
-      "docker",
-    ]);
+    expect(ecosystems(dependabot)).toEqual(["npm", "github-actions", "docker"]);
     expect(ecosystems(dependabot)).not.toContain("devcontainers");
     expect(updateFor(dependabot, "docker").directory).toBe("/.devcontainer");
     expect(updateFor(dependabot, "npm").ignore).toContainEqual({
@@ -115,21 +156,11 @@ describe("Generated Repository dependency maintenance policy", () => {
   });
 
   it("uses Dockerfile-first Dependabot policy for every supported generated repository", () => {
-    const presetNames = [
-      "hono-api",
-      "rust-bin",
-      "ts-lib",
-      "vue-app",
-      "vue-hono-app",
-    ];
-
-    for (const presetName of presetNames) {
+    for (const presetName of generatedRepositoryPresetNames) {
       const dependabot = projectedDependabotConfig(presetName);
 
       expect(ecosystems(dependabot), presetName).toContain("docker");
-      expect(ecosystems(dependabot), presetName).not.toContain(
-        "devcontainers",
-      );
+      expect(ecosystems(dependabot), presetName).not.toContain("devcontainers");
       expect(updateFor(dependabot, "docker").directory, presetName).toBe(
         "/.devcontainer",
       );

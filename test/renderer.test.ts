@@ -5,17 +5,21 @@ import {
   readFile,
   readdir,
   stat,
-  writeFile
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
 import { renderNewProject, renderProject } from "../src/renderer.js";
 
-async function tempWorkspace(): Promise<{ sourceRoot: string; targetRoot: string }> {
+async function tempWorkspace(): Promise<{
+  sourceRoot: string;
+  targetRoot: string;
+}> {
   const workspace = await mkdtemp(path.join(tmpdir(), "template-renderer-"));
   return {
     sourceRoot: path.join(workspace, "source"),
-    targetRoot: path.join(workspace, "target")
+    targetRoot: path.join(workspace, "target"),
   };
 }
 
@@ -35,14 +39,14 @@ describe("renderer", () => {
         {
           kind: "copyFile",
           from: "bin/tool.sh",
-          to: "bin/{{commandName}}"
-        }
-      ]
+          to: "bin/{{commandName}}",
+        },
+      ],
     });
 
     const targetFile = path.join(targetRoot, "bin/demo-tool");
     await expect(readFile(targetFile, "utf8")).resolves.toBe(
-      "#!/usr/bin/env sh\necho checked\n"
+      "#!/usr/bin/env sh\necho checked\n",
     );
     expect((await stat(targetFile)).mode & 0o111).toBe(0o111);
   });
@@ -59,21 +63,23 @@ describe("renderer", () => {
           to: "package.json",
           value: {
             scripts: { test: "vitest" },
-            name: "demo"
-          }
+            name: "demo",
+          },
         },
         {
           kind: "mergeJson",
           to: "package.json",
           value: {
             scripts: { build: "tsc -p tsconfig.json" },
-            private: true
-          }
-        }
-      ]
+            private: true,
+          },
+        },
+      ],
     });
 
-    await expect(readFile(path.join(targetRoot, "package.json"), "utf8")).resolves.toBe(
+    await expect(
+      readFile(path.join(targetRoot, "package.json"), "utf8"),
+    ).resolves.toBe(
       [
         "{",
         '  "name": "demo",',
@@ -83,8 +89,8 @@ describe("renderer", () => {
         '    "test": "vitest"',
         "  }",
         "}",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
   });
 
@@ -102,15 +108,15 @@ describe("renderer", () => {
             z: 1,
             a: {
               y: 2,
-              x: 1
+              x: 1,
             },
             list: [
               {
                 b: 2,
-                a: 1
-              }
-            ]
-          }
+                a: 1,
+              },
+            ],
+          },
         },
         {
           kind: "writeJson",
@@ -119,15 +125,15 @@ describe("renderer", () => {
             list: [
               {
                 a: 1,
-                b: 2
-              }
+                b: 2,
+              },
             ],
             a: {
               x: 1,
-              y: 2
+              y: 2,
             },
-            z: 1
-          }
+            z: 1,
+          },
         },
         {
           kind: "writeJson",
@@ -135,9 +141,9 @@ describe("renderer", () => {
           value: {
             z: true,
             nested: {
-              b: 2
-            }
-          }
+              b: 2,
+            },
+          },
         },
         {
           kind: "mergeJson",
@@ -145,31 +151,31 @@ describe("renderer", () => {
           value: {
             a: true,
             nested: {
-              a: 1
-            }
-          }
+              a: 1,
+            },
+          },
         },
         {
           kind: "writeJson",
           to: "merged-b.json",
           value: {
             nested: {
-              b: 2
+              b: 2,
             },
-            z: true
-          }
+            z: true,
+          },
         },
         {
           kind: "mergeJson",
           to: "merged-b.json",
           value: {
             nested: {
-              a: 1
+              a: 1,
             },
-            a: true
-          }
-        }
-      ]
+            a: true,
+          },
+        },
+      ],
     });
 
     const canonical = [
@@ -186,17 +192,19 @@ describe("renderer", () => {
       "  ],",
       '  "z": 1',
       "}",
-      ""
+      "",
     ].join("\n");
-    await expect(readFile(path.join(targetRoot, "a.json"), "utf8")).resolves.toBe(
-      canonical
-    );
-    await expect(readFile(path.join(targetRoot, "b.json"), "utf8")).resolves.toBe(
-      canonical
-    );
     await expect(
-      readFile(path.join(targetRoot, "merged-a.json"), "utf8")
-    ).resolves.toBe(await readFile(path.join(targetRoot, "merged-b.json"), "utf8"));
+      readFile(path.join(targetRoot, "a.json"), "utf8"),
+    ).resolves.toBe(canonical);
+    await expect(
+      readFile(path.join(targetRoot, "b.json"), "utf8"),
+    ).resolves.toBe(canonical);
+    await expect(
+      readFile(path.join(targetRoot, "merged-a.json"), "utf8"),
+    ).resolves.toBe(
+      await readFile(path.join(targetRoot, "merged-b.json"), "utf8"),
+    );
   });
 
   it("writes limited foundation text files", async () => {
@@ -209,22 +217,22 @@ describe("renderer", () => {
         {
           kind: "writeText",
           to: "README.md",
-          text: "# Demo\n\nGenerated foundation text.\n"
+          text: "# Demo\n\nGenerated foundation text.\n",
         },
         {
           kind: "writeText",
           to: ".gitignore",
-          text: "node_modules\ndist\n"
-        }
-      ]
+          text: "node_modules\ndist\n",
+        },
+      ],
     });
 
-    await expect(readFile(path.join(targetRoot, "README.md"), "utf8")).resolves.toBe(
-      "# Demo\n\nGenerated foundation text.\n"
-    );
-    await expect(readFile(path.join(targetRoot, ".gitignore"), "utf8")).resolves.toBe(
-      "node_modules\ndist\n"
-    );
+    await expect(
+      readFile(path.join(targetRoot, "README.md"), "utf8"),
+    ).resolves.toBe("# Demo\n\nGenerated foundation text.\n");
+    await expect(
+      readFile(path.join(targetRoot, ".gitignore"), "utf8"),
+    ).resolves.toBe("node_modules\ndist\n");
   });
 
   it("rejects target files that appear before a renderer write lands", async () => {
@@ -238,20 +246,20 @@ describe("renderer", () => {
           {
             kind: "writeText",
             to: "README.md",
-            text: "first writer\n"
+            text: "first writer\n",
           },
           {
             kind: "writeText",
             to: "README.md",
-            text: "second writer\n"
-          }
-        ]
-      })
+            text: "second writer\n",
+          },
+        ],
+      }),
     ).rejects.toThrow("Refusing to overwrite existing file");
 
-    await expect(readFile(path.join(targetRoot, "README.md"), "utf8")).resolves.toBe(
-      "first writer\n"
-    );
+    await expect(
+      readFile(path.join(targetRoot, "README.md"), "utf8"),
+    ).resolves.toBe("first writer\n");
   });
 
   it("leaves the target untouched when a new-project render fails", async () => {
@@ -266,15 +274,15 @@ describe("renderer", () => {
           {
             kind: "writeText",
             to: "README.md",
-            text: "# Demo\n"
+            text: "# Demo\n",
           },
           {
             kind: "writeText",
             to: "src/index.ts",
-            text: "export const generated = true;\n"
-          }
-        ]
-      })
+            text: "export const generated = true;\n",
+          },
+        ],
+      }),
     ).rejects.toThrow("Text output is limited to foundation files");
 
     await expect(readdir(targetRoot)).resolves.toEqual([]);
@@ -290,18 +298,20 @@ describe("renderer", () => {
         {
           kind: "writeText",
           to: ".npmrc",
-          text: "shell-emulator=true\n"
+          text: "shell-emulator=true\n",
         },
         {
           kind: "setExecutable",
           path: ".npmrc",
-          executable: true
-        }
-      ]
+          executable: true,
+        },
+      ],
     });
 
     const renderedFile = path.join(targetRoot, ".npmrc");
-    await expect(readFile(renderedFile, "utf8")).resolves.toBe("shell-emulator=true\n");
+    await expect(readFile(renderedFile, "utf8")).resolves.toBe(
+      "shell-emulator=true\n",
+    );
     expect((await stat(renderedFile)).mode & 0o111).toBe(0o111);
   });
 
@@ -314,9 +324,9 @@ describe("renderer", () => {
       [
         "/* @template-anchor exports */",
         "export const existing = true;",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
 
     await renderProject({
@@ -326,70 +336,66 @@ describe("renderer", () => {
         configName: "demo",
         entryName: "index",
         npmrcName: ".npmrc",
-        readmeName: "README"
+        readmeName: "README",
       },
       operations: [
         {
           kind: "writeJson",
           to: ".template/{{configName}}.json",
           value: {
-            generated: true
-          }
+            generated: true,
+          },
         },
         {
           kind: "mergeJson",
           to: ".template/{{configName}}.json",
           value: {
-            preset: "ts-lib"
-          }
+            preset: "ts-lib",
+          },
         },
         {
           kind: "writeText",
           to: "{{readmeName}}.md",
-          text: "# Demo\n"
+          text: "# Demo\n",
         },
         {
           kind: "writeText",
           to: "{{npmrcName}}",
-          text: "shell-emulator=true\n"
+          text: "shell-emulator=true\n",
         },
         {
           kind: "setExecutable",
           path: "{{npmrcName}}",
-          executable: true
+          executable: true,
         },
         {
           kind: "replaceAnchors",
           path: "src/{{entryName}}.ts",
           language: "typescript",
           replacements: {
-            exports: "export const generated = true;"
-          }
-        }
-      ]
+            exports: "export const generated = true;",
+          },
+        },
+      ],
     });
 
     await expect(
-      readFile(path.join(targetRoot, ".template/demo.json"), "utf8")
+      readFile(path.join(targetRoot, ".template/demo.json"), "utf8"),
     ).resolves.toBe(
-      [
-        "{",
-        '  "generated": true,',
-        '  "preset": "ts-lib"',
-        "}",
-        ""
-      ].join("\n")
+      ["{", '  "generated": true,', '  "preset": "ts-lib"', "}", ""].join("\n"),
     );
-    await expect(readFile(path.join(targetRoot, "README.md"), "utf8")).resolves.toBe(
-      "# Demo\n"
+    await expect(
+      readFile(path.join(targetRoot, "README.md"), "utf8"),
+    ).resolves.toBe("# Demo\n");
+    expect((await stat(path.join(targetRoot, ".npmrc"))).mode & 0o111).toBe(
+      0o111,
     );
-    expect((await stat(path.join(targetRoot, ".npmrc"))).mode & 0o111).toBe(0o111);
     await expect(readFile(targetSourceFile, "utf8")).resolves.toBe(
       [
         "export const generated = true;",
         "export const existing = true;",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
   });
 
@@ -403,9 +409,9 @@ describe("renderer", () => {
         {
           kind: "writeText",
           to: "README.md",
-          text: "placeholder\n"
-        }
-      ]
+          text: "placeholder\n",
+        },
+      ],
     });
 
     const targetFile = path.join(targetRoot, "src/index.ts");
@@ -416,9 +422,9 @@ describe("renderer", () => {
         "export const before = true;",
         "/* @template-anchor exports */",
         "export const after = true;",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
 
     await renderProject({
@@ -430,10 +436,10 @@ describe("renderer", () => {
           path: "src/index.ts",
           language: "typescript",
           replacements: {
-            exports: "export const generated = 1;"
-          }
-        }
-      ]
+            exports: "export const generated = 1;",
+          },
+        },
+      ],
     });
 
     await expect(readFile(targetFile, "utf8")).resolves.toBe(
@@ -441,8 +447,8 @@ describe("renderer", () => {
         "export const before = true;",
         "export const generated = 1;",
         "export const after = true;",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
   });
 
@@ -457,9 +463,9 @@ describe("renderer", () => {
         'import type { Demo } from "./demo.js";',
         "/* @template-anchor exports */",
         "export const existing = true;",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
 
     await renderProject({
@@ -471,10 +477,10 @@ describe("renderer", () => {
           path: "src/index.ts",
           language: "typescript",
           replacements: {
-            exports: "export const generated = true;"
-          }
-        }
-      ]
+            exports: "export const generated = true;",
+          },
+        },
+      ],
     });
 
     await expect(readFile(targetFile, "utf8")).resolves.toBe(
@@ -483,8 +489,8 @@ describe("renderer", () => {
         'import type { Demo } from "./demo.js";',
         "export const generated = true;",
         "export const existing = true;",
-        ""
-      ].join("\n")
+        "",
+      ].join("\n"),
     );
   });
 
@@ -504,15 +510,15 @@ describe("renderer", () => {
             path: "src/index.ts",
             language: "javascript",
             replacements: {
-              exports: "export const generated = true;"
-            }
-          } as never
-        ]
-      })
+              exports: "export const generated = true;",
+            },
+          } as never,
+        ],
+      }),
     ).rejects.toThrow("Checked Transform Anchor only supports TypeScript");
 
     await expect(readFile(targetFile, "utf8")).resolves.toBe(
-      "/* @template-anchor exports */\n"
+      "/* @template-anchor exports */\n",
     );
   });
 
@@ -525,9 +531,9 @@ describe("renderer", () => {
       [
         "export const before = true;",
         "/* @template-anchor exports */",
-        ""
+        "",
       ].join("\n"),
-      "utf8"
+      "utf8",
     );
 
     await expect(
@@ -540,11 +546,11 @@ describe("renderer", () => {
             path: "src/index.ts",
             language: "typescript",
             replacements: {
-              exports: "export const generated = true;"
-            }
-          }
-        ]
-      })
+              exports: "export const generated = true;",
+            },
+          },
+        ],
+      }),
     ).rejects.toThrow("Missing Checked Transform Anchor: exports");
   });
 
@@ -553,16 +559,19 @@ describe("renderer", () => {
 
     for (const operation of [
       { kind: "patchString", path: "src/index.ts", find: "x", replace: "y" },
-      { kind: "downloadRemoteTemplate", url: "https://example.com/template.tgz" },
+      {
+        kind: "downloadRemoteTemplate",
+        url: "https://example.com/template.tgz",
+      },
       { kind: "postGenerationShellHook", command: "pnpm install" },
-      { kind: "userJavaScriptTransform", code: "export default () => null" }
+      { kind: "userJavaScriptTransform", code: "export default () => null" },
     ]) {
       await expect(
         renderProject({
           sourceRoot,
           targetRoot,
-          operations: [operation as never]
-        })
+          operations: [operation as never],
+        }),
       ).rejects.toThrow(`Unsupported renderer operation: ${operation.kind}`);
     }
 
@@ -574,10 +583,10 @@ describe("renderer", () => {
           {
             kind: "writeText",
             to: "src/index.ts",
-            text: "export const arbitrary = true;\n"
-          }
-        ]
-      })
+            text: "export const arbitrary = true;\n",
+          },
+        ],
+      }),
     ).rejects.toThrow("Text output is limited to foundation files");
 
     await expect(
@@ -588,10 +597,10 @@ describe("renderer", () => {
           {
             kind: "writeText",
             to: "src/README.md",
-            text: "# Not foundation text\n"
-          }
-        ]
-      })
+            text: "# Not foundation text\n",
+          },
+        ],
+      }),
     ).rejects.toThrow("Text output is limited to foundation files");
   });
 });

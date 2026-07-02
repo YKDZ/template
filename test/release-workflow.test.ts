@@ -2,13 +2,16 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 describe("npm release workflow", () => {
   it("publishes through GitHub Actions OIDC without a long-lived npm token", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),
-      "utf8"
+      "utf8",
     );
 
     expect(workflow).toContain("id-token: write");
@@ -21,7 +24,7 @@ describe("npm release workflow", () => {
   it("uses package metadata and pnpm for publishing", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),
-      "utf8"
+      "utf8",
     );
 
     expect(workflow).toContain("uses: actions/checkout@v6");
@@ -29,7 +32,9 @@ describe("npm release workflow", () => {
     expect(workflow).toContain("node-version-file: package.json");
     expect(workflow).toContain("run: corepack enable");
     expect(workflow).toContain("run: pnpm install --frozen-lockfile");
-    expect(workflow).toContain("run: pnpm publish --access public --provenance");
+    expect(workflow).toContain(
+      "run: pnpm publish --access public --provenance",
+    );
     expect(workflow).not.toContain("node-version:");
     expect(workflow).not.toContain("npm install -g");
     expect(workflow).not.toMatch(/run:\s+npm publish/);
@@ -38,7 +43,7 @@ describe("npm release workflow", () => {
   it("documents the human-owned trusted publishing setup checklist", async () => {
     const docs = await readFile(
       path.join(repoRoot, "public/npm-trusted-publishing.md"),
-      "utf8"
+      "utf8",
     );
 
     expect(docs).toContain("npm account");
@@ -54,7 +59,7 @@ describe("npm release workflow", () => {
   it("documents npm Trusted Publisher settings using npm's expected field values", async () => {
     const docs = await readFile(
       path.join(repoRoot, "public/npm-trusted-publishing.md"),
-      "utf8"
+      "utf8",
     );
     const trustedPublisherLine = docs
       .split("\n")

@@ -2362,16 +2362,16 @@ describe("template init", () => {
 
     await stat(path.join(rustPackageDir, "src/main.rs"));
     await stat(path.join(rustPackageDir, "Cargo.lock"));
-    await expect(stat(path.join(projectDir, "Cargo.toml"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
-    await expect(stat(path.join(projectDir, "src/main.rs"))).rejects.toMatchObject(
-      {
-        code: "ENOENT",
-      },
-    );
+    await expect(
+      stat(path.join(projectDir, "Cargo.toml")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(
+      stat(path.join(projectDir, "src/main.rs")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     await expect(
       stat(path.join(projectDir, "scripts/check")),
     ).rejects.toMatchObject({
@@ -2411,10 +2411,7 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const rustPackageDir = path.join(
-      projectDir,
-      "packages/my-demo-app-quoted",
-    );
+    const rustPackageDir = path.join(projectDir, "packages/my-demo-app-quoted");
     const cargoToml = await readFile(
       path.join(rustPackageDir, "Cargo.toml"),
       "utf8",

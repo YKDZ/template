@@ -352,9 +352,7 @@ async function generateInitProject(
     return;
   }
 
-  throw new Error(
-    formatSupportedPresetError(),
-  );
+  throw new Error(formatSupportedPresetError());
 }
 
 function printInitComplete(

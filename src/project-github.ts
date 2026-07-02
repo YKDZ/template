@@ -115,7 +115,8 @@ export function projectDependabotConfig(
     ...policy.ecosystems.flatMap((ecosystem) =>
       renderDependabotUpdate(
         ecosystem,
-        policy.directories?.[ecosystem] ?? defaultDependabotDirectory(ecosystem),
+        policy.directories?.[ecosystem] ??
+          defaultDependabotDirectory(ecosystem),
         policy.interval,
       ),
     ),
@@ -138,7 +139,7 @@ function renderDependabotUpdate(
   if (ecosystem === "npm") {
     lines.push(
       "    ignore:",
-      "      - dependency-name: \"@types/node\"",
+      '      - dependency-name: "@types/node"',
       "        update-types:",
       "          - version-update:semver-major",
     );

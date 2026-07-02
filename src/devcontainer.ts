@@ -33,9 +33,11 @@ export function browserTestToolLayer(): DevelopmentContainerBrowserTestLayer {
   return { kind: "browser-test" };
 }
 
-export function rustToolLayer(options: {
-  readonly toolchain?: string;
-} = {}): DevelopmentContainerRustLayer {
+export function rustToolLayer(
+  options: {
+    readonly toolchain?: string;
+  } = {},
+): DevelopmentContainerRustLayer {
   return { kind: "rust", toolchain: options.toolchain ?? "stable" };
 }
 
@@ -69,7 +71,9 @@ function renderBrowserTestLayer(): readonly string[] {
   ];
 }
 
-function renderRustLayer(layer: DevelopmentContainerRustLayer): readonly string[] {
+function renderRustLayer(
+  layer: DevelopmentContainerRustLayer,
+): readonly string[] {
   return [
     `ARG RUST_TOOLCHAIN=${layer.toolchain}`,
     "ENV RUSTUP_HOME=/usr/local/rustup",

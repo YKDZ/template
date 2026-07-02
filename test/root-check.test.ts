@@ -96,8 +96,7 @@ describe("Project Kit Root Check", () => {
       "pnpm --dir templates/shared/oxc",
     );
     expect(rootPackageJson.scripts).toMatchObject({
-      "check:templates:shared-oxc:format":
-        "oxfmt --check templates/shared/oxc",
+      "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
       "check:templates:shared-oxc:lint":
         "oxlint templates/shared/oxc --deny-warnings",
       "check:templates:shared-oxc:typecheck":
@@ -110,7 +109,10 @@ describe("Project Kit Root Check", () => {
     );
     expect(workspaceYaml).not.toContain("templates/shared/oxc");
     await expect(
-      readFile(path.join(repoRoot, "templates/shared/oxc/package.json"), "utf8"),
+      readFile(
+        path.join(repoRoot, "templates/shared/oxc/package.json"),
+        "utf8",
+      ),
     ).rejects.toMatchObject({ code: "ENOENT" });
 
     await execa("pnpm", ["run", "check:templates:shared-oxc"], {
@@ -141,7 +143,52 @@ describe("Project Kit Root Check", () => {
     );
   });
 
-  it("runs direct static template source format checks from Root Check", async () => {
+  it("runs whole-repository format checks before Fixture Checks", async () => {
+    const rootPackageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as { scripts: Record<string, string> };
+
+    expect(rootPackageJson.scripts).toHaveProperty("check:format");
+    expect(rootPackageJson.scripts.check).toContain("pnpm run check:format");
+    expect(
+      rootPackageJson.scripts.check.indexOf("pnpm run check:format"),
+    ).toBeLessThan(
+      rootPackageJson.scripts.check.indexOf("pnpm run check:fixtures"),
+    );
+    expect(rootPackageJson.scripts["check:format"]).toBe(
+      "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
+    );
+  });
+
+  it("keeps whole-repository format ignores limited to unmaintained workspace state", async () => {
+    const ignoreFile = await readFile(
+      path.join(repoRoot, ".oxfmtignore"),
+      "utf8",
+    );
+    const ignoredPaths = ignoreFile
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    expect(ignoredPaths).toEqual([
+      "node_modules",
+      "dist",
+      "coverage",
+      ".template",
+      ".project-kit",
+      ".pnpm-store",
+      ".agents",
+      ".scratch",
+      "templates/**/node_modules",
+    ]);
+    expect(ignoredPaths).not.toContain("src");
+    expect(ignoredPaths).not.toContain("templates");
+    expect(ignoredPaths).not.toContain(".github");
+    expect(ignoredPaths).not.toContain("docs");
+    expect(ignoredPaths).not.toContain("package.json");
+  });
+
+  it("runs direct Rust template source format checks from Root Check", async () => {
     const rootPackageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
@@ -150,7 +197,7 @@ describe("Project Kit Root Check", () => {
       "check:templates:static-source",
     );
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
-      "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
+      "rustfmt --check templates/rust-bin/src/main.rs",
     );
 
     await execa("pnpm", ["run", "check:templates:static-source"], {

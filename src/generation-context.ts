@@ -1,4 +1,5 @@
 import path from "node:path";
+
 import type { PackageManager, ProjectBlueprint } from "./declarations.js";
 import type { ResolvedToolchainVersions } from "./toolchain-resolution.js";
 
@@ -30,7 +31,10 @@ export function assembleGenerationContext(
   options: AssembleGenerationContextOptions,
 ): GenerationContext {
   return {
-    projectName: { kind: "ProjectName", value: path.basename(path.resolve(options.targetDir)) },
+    projectName: {
+      kind: "ProjectName",
+      value: path.basename(path.resolve(options.targetDir)),
+    },
     preset: options.blueprint.preset,
     packageManager: options.blueprint.packageManager
       ? { kind: "PackageManager", value: options.blueprint.packageManager }

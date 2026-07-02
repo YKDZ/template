@@ -224,7 +224,8 @@ export function renderGeneratedPnpmWorkspaceYaml(
   lines.push(
     "catalog:",
     ...Object.entries(catalog).map(
-      ([dependency, version]) => `  ${renderCatalogKey(dependency)}: ${version}`,
+      ([dependency, version]) =>
+        `  ${renderCatalogKey(dependency)}: ${version}`,
     ),
     "",
   );

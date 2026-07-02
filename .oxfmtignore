@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.template
+.project-kit
+.pnpm-store
+.agents
+.scratch
+templates/**/node_modules

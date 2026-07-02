@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -176,6 +176,33 @@ describe("template Repository maintenance", () => {
       ...Object.values(packageJson.dependencies ?? {}),
       ...Object.values(packageJson.devDependencies ?? {}),
     ]).not.toContain("catalog:");
+  });
+
+  it("maintains the template Repository's real GitHub Actions workflows through Dependabot", async () => {
+    const workflowFiles = await readdir(
+      path.join(repoRoot, ".github/workflows"),
+    );
+    const dependabot = parseYaml(
+      await readFile(path.join(repoRoot, ".github/dependabot.yml"), "utf8"),
+    ) as {
+      updates: {
+        "package-ecosystem": string;
+        directory: string;
+        schedule: { interval: string };
+      }[];
+    };
+
+    expect(workflowFiles).toEqual(
+      expect.arrayContaining([
+        "release.yml",
+        "toolchain-resolution-contract.yml",
+      ]),
+    );
+    expect(dependabot.updates).toContainEqual({
+      "package-ecosystem": "github-actions",
+      directory: "/",
+      schedule: { interval: "weekly" },
+    });
   });
 
   it("keeps Local Template Metadata and local pnpm store paths ignored", async () => {

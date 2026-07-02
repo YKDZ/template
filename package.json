@@ -34,7 +34,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "check": "pnpm run typecheck && pnpm run test && pnpm run check:templates && pnpm run check:fixtures",
+    "check": "pnpm run check:format && pnpm run typecheck && pnpm run test && pnpm run check:templates && pnpm run check:fixtures",
+    "check:format": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
     "check:fixtures": "tsx scripts/check-fixtures.ts",
     "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:templates:static-source",
     "check:toolchain:online": "tsx scripts/check-online-toolchain-resolution-contract.ts",
@@ -43,7 +44,7 @@
     "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
     "check:templates:shared-oxc:lint": "oxlint templates/shared/oxc --deny-warnings",
     "check:templates:shared-oxc:typecheck": "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
-    "check:templates:static-source": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts templates && rustfmt --check templates/rust-bin/src/main.rs",
+    "check:templates:static-source": "rustfmt --check templates/rust-bin/src/main.rs",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
