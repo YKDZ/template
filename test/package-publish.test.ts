@@ -276,6 +276,7 @@ describe("package publishing", () => {
       );
       expect(packedPaths).toEqual(
         expect.arrayContaining([
+          "package/templates/shared/devcontainer/node-pnpm.Dockerfile",
           "package/templates/rust-bin/src/main.rs",
           "package/templates/shared/oxc/node/oxlint.config.ts",
           "package/templates/shared/oxc/vue/oxlint.config.ts",

@@ -114,11 +114,10 @@ describe("generation context", () => {
         PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
       },
     });
+    expect(dockerfile).toContain("ARG NODE_VERSION");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
-    );
-    expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",

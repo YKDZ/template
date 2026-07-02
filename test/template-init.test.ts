@@ -668,9 +668,27 @@ describe("template init", () => {
           },
         });
         expect(devcontainer).not.toHaveProperty("features");
-        expect(dockerfile).toContain(
-          `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
-        );
+        if (preset.name === "ts-lib") {
+          expect(dockerfile).toContain("ARG NODE_VERSION");
+          expect(dockerfile).toContain(
+            "FROM node:${NODE_VERSION}-bookworm-slim",
+          );
+          expect(dockerfile).toContain(
+            "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+          );
+          expect(dockerfile).not.toContain("typescript-node");
+          expect(dockerfile).not.toMatch(
+            /npm install -g|pnpm add -g|corepack prepare (?!\$\{PACKAGE_MANAGER_PIN\})/,
+          );
+          expect(dockerfile).not.toContain("turbo");
+          expect(dockerfile).not.toContain("typescript");
+          expect(dockerfile).not.toContain("eslint");
+          expect(dockerfile).not.toContain("vitest");
+        } else {
+          expect(dockerfile).toContain(
+            `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+          );
+        }
         if (preset.name === "hono-api" || preset.name === "ts-lib") {
           expect(dockerfile).not.toContain("libnss3");
           expect(dockerfile).not.toContain("xvfb");
@@ -897,12 +915,19 @@ describe("template init", () => {
     expect(devcontainerText).toMatch(
       /^\{\n  "name": "demo-ts-lib",\n  "build": \{/,
     );
+    expect(dockerfile).toContain("ARG NODE_VERSION");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
-    expect(dockerfile).toContain(
-      `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
+    expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toMatch(
+      /npm install -g|pnpm add -g|corepack prepare (?!\$\{PACKAGE_MANAGER_PIN\})/,
     );
+    expect(dockerfile).not.toContain("turbo");
+    expect(dockerfile).not.toContain("typescript");
+    expect(dockerfile).not.toContain("eslint");
+    expect(dockerfile).not.toContain("vitest");
     expect(packageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );

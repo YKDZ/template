@@ -78,7 +78,13 @@ function currentDebt(
 }
 
 export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] = [
-  ...currentDebt("ts-lib", "operationsForTsLib", protectedInlineDebtPaths),
+  ...currentDebt(
+    "ts-lib",
+    "operationsForTsLib",
+    protectedInlineDebtPaths.filter(
+      (generatedPath) => generatedPath !== ".devcontainer/Dockerfile",
+    ),
+  ),
   ...currentDebt("hono-api", "operationsForHonoApi", protectedInlineDebtPaths),
   ...currentDebt("vue-app", "operationsForVueApp", protectedInlineDebtPaths),
   ...currentDebt(

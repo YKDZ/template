@@ -11,7 +11,7 @@ import {
   renderGeneratedPnpmWorkspaceYaml,
 } from "../../src/dependency-catalog.js";
 import {
-  dockerfileFirstNodePnpmDevcontainer,
+  checkedDockerfileFirstNodePnpmDevcontainer,
   nodePnpmToolLayer,
 } from "../../src/devcontainer.js";
 import { editorCustomizationForCapabilities } from "../../src/editor-customization.js";
@@ -279,7 +279,7 @@ function operationsForTsLib(
   const editorCustomization = editorCustomizationForCapabilities([
     "oxc-format-lint",
   ]);
-  const developmentContainer = dockerfileFirstNodePnpmDevcontainer({
+  const developmentContainer = checkedDockerfileFirstNodePnpmDevcontainer({
     name: context.projectName.value,
     layer: nodePnpmToolLayer({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
@@ -426,9 +426,10 @@ function operationsForTsLib(
       value: developmentContainer.devcontainer,
     },
     {
-      kind: "writeText",
+      kind: "copyFile",
+      sourceRoot: "sharedDevcontainer",
+      from: "node-pnpm.Dockerfile",
       to: ".devcontainer/Dockerfile",
-      text: developmentContainer.dockerfile,
     },
     {
       kind: "writeJson",
@@ -580,6 +581,23 @@ function sharedOxcSourceRoot(): string {
     : path.join(projectionDir, "..", "shared", "oxc");
 }
 
+function sharedDevcontainerSourceRoot(): string {
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "devcontainer",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "node-pnpm.Dockerfile"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "devcontainer");
+}
+
 export const tsLibPresetProjection: PresetProjection = {
   metadata: tsLibPresetMetadata,
   capabilities: {
@@ -601,7 +619,10 @@ export const tsLibPresetProjection: PresetProjection = {
 
     return {
       sourceRoot: templateSourceRoot(),
-      sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+      sourceRoots: {
+        sharedDevcontainer: sharedDevcontainerSourceRoot(),
+        sharedOxc: sharedOxcSourceRoot(),
+      },
       operations: operationsForTsLib(context, packageScripts, checkPlan),
       checkPlan,
       fixPlan,

@@ -1,3 +1,9 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { packageTemplateRoot } from "./runtime-paths.js";
+
 export type DevelopmentContainerNodePnpmLayer = {
   readonly kind: "node-pnpm";
   readonly nodeVersion: string;
@@ -17,6 +23,73 @@ export type DevelopmentContainerPlan = {
   readonly devcontainer: Record<string, unknown>;
   readonly dockerfile: string;
 };
+
+export type DevelopmentContainerDockerfileLayer = {
+  readonly kind: "base" | "capability";
+  readonly name: string;
+  readonly text: string;
+};
+
+const runtimeDockerfileInstructions = new Set([
+  "CMD",
+  "ENTRYPOINT",
+  "EXPOSE",
+  "HEALTHCHECK",
+  "STOPSIGNAL",
+  "VOLUME",
+]);
+
+function dockerfileInstructions(text: string): readonly string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"))
+    .map((line) => line.match(/^([A-Za-z]+)/)?.[1]?.toUpperCase())
+    .filter((instruction): instruction is string => instruction !== undefined);
+}
+
+export function composeDevelopmentContainerDockerfile(options: {
+  readonly layers: readonly DevelopmentContainerDockerfileLayer[];
+}): string {
+  const baseImageInstructionCount = options.layers.reduce(
+    (count, layer) =>
+      count +
+      dockerfileInstructions(layer.text).filter(
+        (instruction) => instruction === "FROM",
+      ).length,
+    0,
+  );
+
+  if (baseImageInstructionCount !== 1) {
+    throw new Error(
+      `Development Container Dockerfile must have exactly one base layer with a FROM instruction; found ${baseImageInstructionCount}.`,
+    );
+  }
+
+  for (const layer of options.layers) {
+    const instructions = dockerfileInstructions(layer.text);
+
+    if (layer.kind === "capability" && instructions.includes("FROM")) {
+      throw new Error(
+        `${layer.name} capability layer must not supply a Dockerfile FROM instruction.`,
+      );
+    }
+
+    if (layer.kind !== "capability") {
+      continue;
+    }
+
+    for (const instruction of instructions) {
+      if (runtimeDockerfileInstructions.has(instruction)) {
+        throw new Error(
+          `${layer.name} must not use runtime Dockerfile instruction ${instruction}.`,
+        );
+      }
+    }
+  }
+
+  return options.layers.map((layer) => layer.text.trimEnd()).join("\n\n");
+}
 
 export function nodePnpmToolLayer(options: {
   readonly nodeVersion: string;
@@ -39,6 +112,30 @@ export function rustToolLayer(
   } = {},
 ): DevelopmentContainerRustLayer {
   return { kind: "rust", toolchain: options.toolchain ?? "stable" };
+}
+
+function sharedDevcontainerSourceRoot(): string {
+  return packageTemplateRoot(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "shared",
+    "devcontainer",
+  );
+}
+
+function checkedDockerfileFragment(name: string): string {
+  return readFileSync(path.join(sharedDevcontainerSourceRoot(), name), "utf8");
+}
+
+function checkedNodePnpmDockerfile(): string {
+  return composeDevelopmentContainerDockerfile({
+    layers: [
+      {
+        kind: "base",
+        name: "node-pnpm",
+        text: checkedDockerfileFragment("node-pnpm.Dockerfile"),
+      },
+    ],
+  });
 }
 
 function renderBrowserTestLayer(): readonly string[] {
@@ -134,8 +231,36 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
       'SHELL ["/bin/bash", "-o", "pipefail", "-c"]',
       `RUN corepack enable && corepack prepare ${options.layer.packageManagerPin} --activate`,
       "",
-      ...additionalDockerfileLines,
-    ].join("\n"),
+    ]
+      .concat(additionalDockerfileLines)
+      .join("\n"),
+  };
+}
+
+export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
+  readonly name: string;
+  readonly layer: DevelopmentContainerNodePnpmLayer;
+  readonly extensions: readonly string[];
+  readonly settings?: Record<string, unknown>;
+}): DevelopmentContainerPlan {
+  return {
+    devcontainer: {
+      name: options.name,
+      build: {
+        dockerfile: "Dockerfile",
+        args: {
+          NODE_VERSION: options.layer.nodeVersion,
+          PACKAGE_MANAGER_PIN: options.layer.packageManagerPin,
+        },
+      },
+      customizations: {
+        vscode: {
+          extensions: options.extensions,
+          ...(options.settings ? { settings: options.settings } : {}),
+        },
+      },
+    },
+    dockerfile: checkedNodePnpmDockerfile(),
   };
 }
 

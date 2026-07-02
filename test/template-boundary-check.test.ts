@@ -346,13 +346,10 @@ describe("Template Boundary Check", () => {
 
     expect(result.ok).toBe(true);
     expect(result.violations).toEqual([]);
-    expect(result.allowlistedDebt).toContainEqual(
+    expect(result.allowlistedDebt).not.toContainEqual(
       expect.objectContaining({
         preset: "ts-lib",
         generatedPath: ".devcontainer/Dockerfile",
-        owningFunction: "operationsForTsLib",
-        allowlistReason:
-          "current protected Generated Repository output awaiting template-source migration",
       }),
     );
   });
