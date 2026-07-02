@@ -25,6 +25,11 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import { PackageAdditionSupport } from "../../src/package-addition-support.js";
+import {
+  packageManifestExposureFields,
+  planPackageLinks,
+  type PackageExposure,
+} from "../../src/package-linking.js";
 import type {
   PresetBlueprintOptions,
   PresetProjection,
@@ -272,22 +277,18 @@ function rootPackageJson(
 function apiPackageJson(
   context: GenerationContext,
   packageScope: string,
+  exposure: PackageExposure,
 ): Record<string, unknown> {
+  const exposureFields = packageManifestExposureFields(exposure);
+
   return {
     name: packageName(packageScope, "api"),
     version: "0.0.0",
     private: true,
     type: "module",
-    types: "./dist/index.d.ts",
-    exports: {
-      ".": "./dist/index.js",
-    },
-    imports: {
-      "#/*": {
-        default: "./dist/*.js",
-        types: "./src/*.ts",
-      },
-    },
+    types: exposureFields.types,
+    exports: exposureFields.exports,
+    imports: exposureFields.imports,
     scripts: projectVueHonoApiPackageScripts(),
     dependencies: {
       "@hono/node-server": "catalog:",
@@ -311,6 +312,7 @@ function apiPackageJson(
 function webPackageJson(
   context: GenerationContext,
   packageScope: string,
+  packageLinkDependencies: Readonly<Record<string, "workspace:*">>,
 ): Record<string, unknown> {
   return {
     name: packageName(packageScope, "web"),
@@ -325,7 +327,7 @@ function webPackageJson(
     },
     scripts: projectVueHonoWebPackageScripts(),
     dependencies: {
-      [packageName(packageScope, "api")]: "workspace:*",
+      ...packageLinkDependencies,
       "@vueuse/core": "catalog:",
       hono: "catalog:",
       pinia: "catalog:",
@@ -400,8 +402,35 @@ function operationsForVueHonoApp(
     settings: editorCustomization.settings,
   });
   const rootManifest = rootPackageJson(context, packageScripts);
-  const apiManifest = apiPackageJson(context, packageScope);
-  const webManifest = webPackageJson(context, packageScope);
+  const packageLinkPlan = planPackageLinks(
+    [
+      {
+        name: apiName,
+        path: "apps/api",
+        role: "runtime-service",
+        sourcePreset: "hono-api",
+      },
+    ],
+    [{ consumerPackagePath: "apps/web", providerPackagePath: "apps/api" }],
+  );
+  const apiExposure = packageLinkPlan.exposuresByPackagePath.get("apps/api");
+  const webPackageLinkDependencies =
+    packageLinkPlan.manifestDependenciesByPackagePath.get("apps/web");
+
+  if (apiExposure === undefined) {
+    throw new Error("Missing Package Exposure for apps/api");
+  }
+
+  if (webPackageLinkDependencies === undefined) {
+    throw new Error("Missing Package Link Dependencies for apps/web");
+  }
+
+  const apiManifest = apiPackageJson(context, packageScope, apiExposure);
+  const webManifest = webPackageJson(
+    context,
+    packageScope,
+    webPackageLinkDependencies,
+  );
 
   return [
     {
@@ -452,7 +481,6 @@ function operationsForVueHonoApp(
       value: {
         files: [],
         references: [
-          { path: "./apps/api/tsconfig.json" },
           { path: "./apps/web/tsconfig.app.json" },
           { path: "./apps/web/tsconfig.test.json" },
           { path: "./apps/web/tsconfig.node.json" },
@@ -626,9 +654,6 @@ function operationsForVueHonoApp(
           module: "ESNext",
           moduleResolution: "Bundler",
           noEmitOnError: true,
-          paths: {
-            [apiName]: ["../api/src/index.ts"],
-          },
           skipLibCheck: false,
           strict: true,
           target: "ES2022",
@@ -636,7 +661,6 @@ function operationsForVueHonoApp(
           types: ["web-bluetooth"],
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"],
-        references: [{ path: "../api/tsconfig.build.json" }],
       },
     },
     {
@@ -650,7 +674,6 @@ function operationsForVueHonoApp(
           types: ["node", "vitest/globals", "web-bluetooth"],
         },
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "test/**/*.ts"],
-        references: [{ path: "../api/tsconfig.build.json" }],
       },
     },
     {

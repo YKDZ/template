@@ -36,4 +36,61 @@ describe("Package Link Planning", () => {
       },
     });
   });
+
+  it("derives compiled runtime exposure with source types for a Hono API service", () => {
+    const plan = planPackageLinks([
+      {
+        name: "@demo/api",
+        path: "apps/api",
+        role: "runtime-service",
+        sourcePreset: "hono-api",
+      },
+    ]);
+    const exposure = plan.exposuresByPackagePath.get("apps/api");
+
+    expect(exposure).toEqual({
+      kind: "compiled",
+      entrypoint: "./dist/index.js",
+      sourceTypes: "./src/index.ts",
+      packageLocalImportPattern: "#/*",
+      packageLocalImportRuntimeTarget: "./dist/*.js",
+      packageLocalImportTypesTarget: "./src/*.ts",
+    });
+    expect(packageManifestExposureFields(exposure!)).toEqual({
+      types: "./src/index.ts",
+      exports: {
+        ".": {
+          default: "./dist/index.js",
+          types: "./src/index.ts",
+        },
+      },
+      imports: {
+        "#/*": {
+          default: "./dist/*.js",
+          types: "./src/*.ts",
+        },
+      },
+    });
+  });
+
+  it("derives a workspace dependency and provider exposure for a consumer link intent", () => {
+    const plan = planPackageLinks(
+      [
+        {
+          name: "@demo/api",
+          path: "apps/api",
+          role: "runtime-service",
+          sourcePreset: "hono-api",
+        },
+      ],
+      [{ consumerPackagePath: "apps/web", providerPackagePath: "apps/api" }],
+    );
+
+    expect(plan.manifestDependenciesByPackagePath.get("apps/web")).toEqual({
+      "@demo/api": "workspace:*",
+    });
+    expect(plan.exposuresByPackagePath.get("apps/api")).toEqual(
+      expect.objectContaining({ kind: "compiled" }),
+    );
+  });
 });

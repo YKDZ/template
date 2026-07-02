@@ -2960,8 +2960,13 @@ describe("template init", () => {
     expect(workspaceYaml).toContain("turbo:");
 
     expect(apiPackageJson.name).toBe("@demo-fullstack/api");
-    expect(apiPackageJson.types).toBe("./dist/index.d.ts");
-    expect(apiPackageJson.exports).toEqual({ ".": "./dist/index.js" });
+    expect(apiPackageJson.types).toBe("./src/index.ts");
+    expect(apiPackageJson.exports).toEqual({
+      ".": {
+        default: "./dist/index.js",
+        types: "./src/index.ts",
+      },
+    });
     expect(apiPackageJson.imports).toEqual({
       "#/*": {
         default: "./dist/*.js",
@@ -3015,7 +3020,6 @@ describe("template init", () => {
 
     expect(rootTsconfig.files).toEqual([]);
     expect(rootTsconfig.references).toEqual([
-      { path: "./apps/api/tsconfig.json" },
       { path: "./apps/web/tsconfig.app.json" },
       { path: "./apps/web/tsconfig.test.json" },
       { path: "./apps/web/tsconfig.node.json" },
@@ -3031,18 +3035,9 @@ describe("template init", () => {
     ]);
     expect(apiTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(webAppTsconfig.compilerOptions).not.toHaveProperty("baseUrl");
-    expect(Object.keys(webAppTsconfig.compilerOptions.paths)).toEqual([
-      "@demo-fullstack/api",
-    ]);
-    expect(webAppTsconfig.compilerOptions.paths["@demo-fullstack/api"]).toEqual(
-      ["../api/src/index.ts"],
-    );
-    expect(webAppTsconfig.references).toEqual([
-      { path: "../api/tsconfig.build.json" },
-    ]);
-    expect(webTestTsconfig.references).toEqual([
-      { path: "../api/tsconfig.build.json" },
-    ]);
+    expect(webAppTsconfig.compilerOptions).not.toHaveProperty("paths");
+    expect(webAppTsconfig).not.toHaveProperty("references");
+    expect(webTestTsconfig).not.toHaveProperty("references");
     expect(turboConfig.tasks.check.dependsOn).toEqual(["^build"]);
     expect(devcontainer.name).toBe("demo-fullstack");
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");

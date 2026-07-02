@@ -1,12 +1,17 @@
-export type PackageRole = "shared-library";
+export type PackageRole = "runtime-service" | "shared-library";
 
-export type PackageSourcePreset = "ts-lib";
+export type PackageSourcePreset = "hono-api" | "ts-lib";
 
 export type PackageDefinition = {
   readonly name: string;
   readonly path: string;
   readonly role: PackageRole;
   readonly sourcePreset: PackageSourcePreset;
+};
+
+export type PackageLinkIntent = {
+  readonly consumerPackagePath: string;
+  readonly providerPackagePath: string;
 };
 
 export type JitSourcePackageExposure = {
@@ -16,15 +21,31 @@ export type JitSourcePackageExposure = {
   readonly packageLocalImportTarget: string;
 };
 
-export type PackageExposure = JitSourcePackageExposure;
+export type CompiledPackageExposure = {
+  readonly kind: "compiled";
+  readonly entrypoint: string;
+  readonly sourceTypes: string;
+  readonly packageLocalImportPattern: string;
+  readonly packageLocalImportRuntimeTarget: string;
+  readonly packageLocalImportTypesTarget: string;
+};
+
+export type PackageExposure =
+  | CompiledPackageExposure
+  | JitSourcePackageExposure;
 
 export type PackageLinkPlan = {
   readonly exposuresByPackagePath: ReadonlyMap<string, PackageExposure>;
+  readonly manifestDependenciesByPackagePath: ReadonlyMap<
+    string,
+    Readonly<Record<string, "workspace:*">>
+  >;
 };
 
 export type PackageManifestExposureFields = {
   readonly exports: Record<string, unknown>;
   readonly imports: Record<string, unknown>;
+  readonly types?: string;
 };
 
 export function derivePackageExposure(
@@ -42,6 +63,20 @@ export function derivePackageExposure(
     };
   }
 
+  if (
+    definition.role === "runtime-service" &&
+    definition.sourcePreset === "hono-api"
+  ) {
+    return {
+      kind: "compiled",
+      entrypoint: "./dist/index.js",
+      sourceTypes: "./src/index.ts",
+      packageLocalImportPattern: "#/*",
+      packageLocalImportRuntimeTarget: "./dist/*.js",
+      packageLocalImportTypesTarget: "./src/*.ts",
+    };
+  }
+
   throw new Error(
     `Unsupported Package Exposure for ${definition.name} at ${definition.path}`,
   );
@@ -49,7 +84,34 @@ export function derivePackageExposure(
 
 export function planPackageLinks(
   definitions: readonly PackageDefinition[],
+  intents: readonly PackageLinkIntent[] = [],
 ): PackageLinkPlan {
+  const definitionsByPath = new Map(
+    definitions.map((definition) => [definition.path, definition]),
+  );
+  const manifestDependenciesByPackagePath = new Map<
+    string,
+    Record<string, "workspace:*">
+  >();
+
+  for (const intent of intents) {
+    const provider = definitionsByPath.get(intent.providerPackagePath);
+
+    if (provider === undefined) {
+      throw new Error(
+        `Package Link Intent references unknown provider package at ${intent.providerPackagePath}`,
+      );
+    }
+
+    const dependencies =
+      manifestDependenciesByPackagePath.get(intent.consumerPackagePath) ?? {};
+    dependencies[provider.name] = "workspace:*";
+    manifestDependenciesByPackagePath.set(
+      intent.consumerPackagePath,
+      dependencies,
+    );
+  }
+
   return {
     exposuresByPackagePath: new Map(
       definitions.map((definition) => [
@@ -57,6 +119,7 @@ export function planPackageLinks(
         derivePackageExposure(definition),
       ]),
     ),
+    manifestDependenciesByPackagePath,
   };
 }
 
@@ -76,6 +139,22 @@ export function packageManifestExposureFields(
           ".": {
             default: exposure.entrypoint,
             types: exposure.entrypoint,
+          },
+        },
+      };
+    case "compiled":
+      return {
+        types: exposure.sourceTypes,
+        imports: {
+          [exposure.packageLocalImportPattern]: {
+            default: exposure.packageLocalImportRuntimeTarget,
+            types: exposure.packageLocalImportTypesTarget,
+          },
+        },
+        exports: {
+          ".": {
+            default: exposure.entrypoint,
+            types: exposure.sourceTypes,
           },
         },
       };
