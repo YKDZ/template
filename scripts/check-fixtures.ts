@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ type SupportedFixturePreset =
 type FixtureScenario = {
   readonly basePreset: SupportedFixturePreset;
   readonly addedPreset?: SupportedFixturePreset;
+  readonly linkFrom?: readonly string[];
 };
 
 type FixtureCommandStep = {
@@ -105,6 +106,11 @@ function fixtureScenarios(): FixtureScenario[] {
     ...basePresets.flatMap((basePreset) =>
       addablePresets.map((addedPreset) => ({ basePreset, addedPreset })),
     ),
+    {
+      basePreset: "vue-hono-app",
+      addedPreset: "ts-lib",
+      linkFrom: ["apps/web"],
+    },
   ];
 }
 
@@ -113,12 +119,24 @@ function fixtureScenarioId(scenario: FixtureScenario): string {
     return scenario.basePreset;
   }
 
+  if (scenario.linkFrom && scenario.linkFrom.length > 0) {
+    const linkFromId = scenario.linkFrom
+      .map((packagePath) => packagePath.replaceAll("/", "-"))
+      .join("-");
+
+    return `${scenario.basePreset}-add-${scenario.addedPreset}-link-from-${linkFromId}`;
+  }
+
   return `${scenario.basePreset}-add-${scenario.addedPreset}`;
 }
 
 function fixtureScenarioLabel(scenario: FixtureScenario): string {
   if (!scenario.addedPreset) {
     return scenario.basePreset;
+  }
+
+  if (scenario.linkFrom && scenario.linkFrom.length > 0) {
+    return `${scenario.basePreset} + ${scenario.addedPreset} linked from ${scenario.linkFrom.join(", ")}`;
   }
 
   return `${scenario.basePreset} + ${scenario.addedPreset}`;
@@ -198,6 +216,10 @@ async function applyPackageAddition(
   }
 
   const packageLeafName = packageLeafNameForAddedPreset(scenario.addedPreset);
+  const beforeConsumerSources = await linkedConsumerSourceSnapshots(
+    projectDir,
+    scenario.linkFrom ?? [],
+  );
   await run(
     "pnpm",
     [
@@ -210,12 +232,78 @@ async function applyPackageAddition(
       scenario.addedPreset,
       "--name",
       packageLeafName,
+      ...linkFromArgs(scenario.linkFrom ?? []),
     ],
     projectDir,
     { logPrefix: fixtureScenarioLabel(scenario) },
   );
+  await assertLinkedConsumerSourcesUnchanged(projectDir, beforeConsumerSources);
 
   return readAddedPackagePath(projectDir, packageLeafName);
+}
+
+function linkFromArgs(packagePaths: readonly string[]): string[] {
+  return packagePaths.flatMap((packagePath) => ["--link-from", packagePath]);
+}
+
+async function linkedConsumerSourceSnapshots(
+  projectDir: string,
+  packagePaths: readonly string[],
+): Promise<ReadonlyMap<string, Record<string, string>>> {
+  const snapshots = new Map<string, Record<string, string>>();
+
+  for (const packagePath of packagePaths) {
+    snapshots.set(
+      packagePath,
+      await sourceFileSnapshot(path.join(projectDir, packagePath, "src")),
+    );
+  }
+
+  return snapshots;
+}
+
+async function sourceFileSnapshot(
+  sourceDir: string,
+  currentDir = sourceDir,
+): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  const entries = await readdir(currentDir, { withFileTypes: true });
+
+  for (const entry of entries.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const entryPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      Object.assign(snapshot, await sourceFileSnapshot(sourceDir, entryPath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      snapshot[path.relative(sourceDir, entryPath)] = await readFile(
+        entryPath,
+        "utf8",
+      );
+    }
+  }
+
+  return snapshot;
+}
+
+async function assertLinkedConsumerSourcesUnchanged(
+  projectDir: string,
+  beforeSnapshots: ReadonlyMap<string, Record<string, string>>,
+): Promise<void> {
+  for (const [packagePath, beforeSnapshot] of beforeSnapshots) {
+    const afterSnapshot = await sourceFileSnapshot(
+      path.join(projectDir, packagePath, "src"),
+    );
+
+    if (JSON.stringify(afterSnapshot) !== JSON.stringify(beforeSnapshot)) {
+      throw new Error(
+        `Package Link Intent fixture modified consumer source files for ${packagePath}`,
+      );
+    }
+  }
 }
 
 async function readAddedPackagePath(

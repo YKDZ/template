@@ -23,6 +23,7 @@ type CommandRecord = {
 type FixtureScenario = {
   basePreset: string;
   addedPreset?: string;
+  linkFrom?: readonly string[];
 };
 
 const supportedPresetNames = builtInPresetProjections
@@ -41,11 +42,24 @@ const fixtureScenarios: FixtureScenario[] = [
   ...supportedPresetNames.flatMap((basePreset) =>
     addablePresetNames.map((addedPreset) => ({ basePreset, addedPreset })),
   ),
+  {
+    basePreset: "vue-hono-app",
+    addedPreset: "ts-lib",
+    linkFrom: ["apps/web"],
+  },
 ];
 
 function fixtureScenarioId(scenario: FixtureScenario): string {
   if (!scenario.addedPreset) {
     return scenario.basePreset;
+  }
+
+  if (scenario.linkFrom && scenario.linkFrom.length > 0) {
+    const linkFromId = scenario.linkFrom
+      .map((packagePath) => packagePath.replaceAll("/", "-"))
+      .join("-");
+
+    return `${scenario.basePreset}-add-${scenario.addedPreset}-link-from-${linkFromId}`;
   }
 
   return `${scenario.basePreset}-add-${scenario.addedPreset}`;
@@ -325,6 +339,14 @@ describe("fixture checks", () => {
           }),
         ),
       ),
+    );
+    expect(packageAdditionCommands).toContainEqual(
+      expect.objectContaining({
+        cwd: expect.stringContaining(
+          "fixture-vue-hono-app-add-ts-lib-link-from-apps-web",
+        ),
+        args: expect.arrayContaining(["--link-from", "apps/web"]),
+      }),
     );
 
     const generatedFixes = pnpmRecords.filter(
