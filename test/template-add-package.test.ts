@@ -303,6 +303,368 @@ describe("template add package", () => {
     await expectPathMissing(path.join(projectDir, "apps/worker/.oxfmtrc.json"));
   }, 120_000);
 
+  it("adds a package at an explicit two-segment Package Path", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "hono-api",
+        "--name",
+        "worker",
+        "--path",
+        "services/worker",
+      ],
+      { cwd: projectDir },
+    );
+
+    const blueprint = await readJson<{
+      packages: Array<{ name: string; path: string; preset?: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const rootPackageJson = await readJson<{
+      scripts: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const rootTsconfig = await readJson<{
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const packageJson = await readJson<{ name: string }>(
+      path.join(projectDir, "services/worker/package.json"),
+    );
+
+    expect(blueprint.packages).toContainEqual({
+      name: "@demo-fullstack/worker",
+      path: "services/worker",
+    });
+    expect(workspaceYaml).toContain("  - services/*");
+    expect(rootPackageJson.scripts.check).toContain(
+      "turbo run check --filter './apps/*' --filter './services/*'",
+    );
+    expect(rootTsconfig.references).toContainEqual({
+      path: "./services/worker/tsconfig.json",
+    });
+    expect(packageJson.name).toBe("@demo-fullstack/worker");
+    await stat(path.join(projectDir, "services/worker/src/app.ts"));
+    await expectPathMissing(path.join(projectDir, "apps/worker/package.json"));
+  }, 120_000);
+
+  it.each([
+    {
+      preset: "vue-app",
+      name: "admin",
+      packagePath: "apps/admin",
+      referencePath: "./apps/admin/tsconfig.app.json",
+      generatedFile: "src/App.vue",
+    },
+    {
+      preset: "ts-lib",
+      name: "ui",
+      packagePath: "packages/ui",
+      referencePath: "./packages/ui/tsconfig.json",
+      generatedFile: "src/index.ts",
+    },
+    {
+      preset: "ts-lib",
+      name: "cli",
+      packagePath: "tools/cli",
+      referencePath: "./tools/cli/tsconfig.json",
+      generatedFile: "src/index.ts",
+    },
+  ])(
+    "adds an explicit Package Path in $packagePath",
+    async ({ preset, name, packagePath, referencePath, generatedFile }) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-add-package-"),
+      );
+      const projectDir = path.join(workspace, "demo-fullstack");
+
+      await initGeneratedWorkspace(projectDir);
+
+      await execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          preset,
+          "--name",
+          name,
+          "--path",
+          packagePath,
+        ],
+        { cwd: projectDir },
+      );
+
+      const blueprint = await readJson<{
+        packages: Array<{ name: string; path: string }>;
+      }>(path.join(projectDir, ".template/blueprint.json"));
+      const workspaceYaml = await readFile(
+        path.join(projectDir, "pnpm-workspace.yaml"),
+        "utf8",
+      );
+      const rootTsconfig = await readJson<{
+        references: Array<{ path: string }>;
+      }>(path.join(projectDir, "tsconfig.json"));
+
+      expect(blueprint.packages).toContainEqual({
+        name: `@demo-fullstack/${name}`,
+        path: packagePath,
+      });
+      expect(workspaceYaml).toContain(`  - ${packagePath.split("/")[0]}/*`);
+      expect(rootTsconfig.references).toContainEqual({ path: referencePath });
+      await stat(path.join(projectDir, packagePath, generatedFile));
+    },
+  );
+
+  it("keeps generated Root Check passing after an explicit Package Path addition", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-lib");
+
+    await initGeneratedWorkspace(projectDir, "ts-lib");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "cli",
+        "--path",
+        "tools/cli",
+      ],
+      { cwd: projectDir },
+    );
+
+    await execa("pnpm", ["install"], { cwd: projectDir });
+    await execa("pnpm", ["run", "check"], { cwd: projectDir });
+  }, 180_000);
+
+  it("rejects nested explicit Package Paths", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "hono-api",
+          "--name",
+          "admin",
+          "--path",
+          "apps/api/admin",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Path apps/api/admin must be exactly two safe path segments",
+      ),
+    });
+
+    await expectPathMissing(path.join(projectDir, "apps/api/admin"));
+  }, 120_000);
+
+  it.each([
+    {
+      packagePath: "admin",
+      diagnostic: "Package Path admin must be exactly two safe path segments",
+    },
+    {
+      packagePath: "/apps/admin",
+      diagnostic: "Package Path /apps/admin must be relative",
+    },
+    {
+      packagePath: "../admin",
+      diagnostic: "Package Path ../admin must not escape the workspace",
+    },
+    {
+      packagePath: ".github/admin",
+      diagnostic: "Package Path .github/admin uses reserved collection .github",
+    },
+    {
+      packagePath: "node_modules/admin",
+      diagnostic:
+        "Package Path node_modules/admin uses reserved collection node_modules",
+    },
+    {
+      packagePath: "dist/admin",
+      diagnostic: "Package Path dist/admin uses reserved collection dist",
+    },
+    {
+      packagePath: "target/admin",
+      diagnostic: "Package Path target/admin uses reserved collection target",
+    },
+  ])(
+    "rejects invalid explicit Package Path $packagePath",
+    async ({ packagePath, diagnostic }) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-add-package-"),
+      );
+      const projectDir = path.join(workspace, "demo-fullstack");
+
+      await initGeneratedWorkspace(projectDir);
+
+      await expect(
+        execa(
+          "pnpm",
+          [
+            "exec",
+            "tsx",
+            cliPath,
+            "add",
+            "package",
+            "--preset",
+            "hono-api",
+            "--name",
+            "admin",
+            "--path",
+            packagePath,
+          ],
+          { cwd: projectDir },
+        ),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining(diagnostic),
+      });
+    },
+    120_000,
+  );
+
+  it("rejects duplicate package names with a semantic Package Path diagnostic", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "web",
+          "--path",
+          "packages/web",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Path packages/web conflicts with existing package @demo-fullstack/web",
+      ),
+    });
+
+    await expectPathMissing(path.join(projectDir, "packages/web"));
+  }, 120_000);
+
+  it("rejects duplicate Package Paths with a semantic Package Path diagnostic", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "admin",
+          "--path",
+          "apps/api",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Path apps/api conflicts with existing package @demo-fullstack/api",
+      ),
+    });
+  }, 120_000);
+
+  it("rejects existing filesystem target paths with a semantic Package Path diagnostic", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+    await mkdir(path.join(projectDir, "services/cache"), { recursive: true });
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "hono-api",
+          "--name",
+          "cache",
+          "--path",
+          "services/cache",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Path services/cache conflicts with existing filesystem path",
+      ),
+    });
+  }, 120_000);
+
   it("adds a package to the generated TypeScript library workspace tracer", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
@@ -839,7 +1201,7 @@ describe("template add package", () => {
       ),
     ).rejects.toMatchObject({
       stderr: expect.stringContaining(
-        "Package Addition would overwrite an existing path",
+        "Package Path packages/shared conflicts with existing filesystem path",
       ),
     });
 

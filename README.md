@@ -12,7 +12,7 @@ Available commands:
 
 ```sh
 template init <dir> --preset <name> --yes
-template add package --preset <name> --name <name>
+template add package --preset <name> --name <name> [--path <package-path>]
 template presets
 template schema preset
 template schema blueprint

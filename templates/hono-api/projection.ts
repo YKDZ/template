@@ -533,15 +533,15 @@ function packageAdditionOperations(
 }
 
 function packageAdditionPlan(
-  packageLeafName: string,
   packageName: string,
+  packagePath: string,
   nodeVersion: string,
 ): PresetPackageAdditionPlan {
-  const packagePath = `apps/${packageLeafName}`;
+  const [workspaceCollection] = packagePath.split("/");
 
   return {
     packagePath,
-    workspacePackageGlob: "apps/*",
+    workspacePackageGlob: `${workspaceCollection}/*`,
     rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
@@ -608,11 +608,11 @@ export const honoApiPresetProjection: PresetProjection = {
   capabilities: {
     packageAddition: {
       planPackageAddition({
-        packageLeafName,
         packageName,
+        packagePath,
         nodeVersion,
       }: PresetPackageAdditionOptions) {
-        return packageAdditionPlan(packageLeafName, packageName, nodeVersion);
+        return packageAdditionPlan(packageName, packagePath, nodeVersion);
       },
     },
   },

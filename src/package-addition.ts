@@ -18,6 +18,7 @@ export type AddPackageOptions = {
   cwd: string;
   preset: string;
   name: string;
+  path?: string;
 };
 
 type RootTsconfig = {
@@ -58,6 +59,122 @@ function assertSafePackageLeaf(name: string): void {
   }
 }
 
+const reservedPackagePathCollections = new Set([
+  ".devcontainer",
+  ".git",
+  ".github",
+  ".template",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+]);
+
+function assertSafePackagePathSegment(
+  packagePath: string,
+  segment: string,
+): void {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(segment)) {
+    throw new Error(
+      `Package Path ${packagePath} must use safe path segments with lowercase letters, numbers, and hyphens`,
+    );
+  }
+}
+
+function validateExplicitPackagePath(packagePath: string): string {
+  if (path.isAbsolute(packagePath)) {
+    throw new Error(`Package Path ${packagePath} must be relative`);
+  }
+
+  if (packagePath !== packagePath.trim()) {
+    throw new Error(`Package Path ${packagePath} must not contain whitespace`);
+  }
+
+  if (
+    packagePath === ".." ||
+    packagePath.startsWith("../") ||
+    packagePath.endsWith("/..") ||
+    packagePath.includes("/../")
+  ) {
+    throw new Error(
+      `Package Path ${packagePath} must not escape the workspace`,
+    );
+  }
+
+  const normalized = path.posix.normalize(packagePath);
+  if (normalized !== packagePath || packagePath.includes("\\")) {
+    throw new Error(
+      `Package Path ${packagePath} must be exactly two safe path segments`,
+    );
+  }
+
+  const segments = packagePath.split("/");
+  if (segments.length !== 2) {
+    throw new Error(
+      `Package Path ${packagePath} must be exactly two safe path segments`,
+    );
+  }
+
+  const [collection, packageDirectory] = segments;
+  if (!collection || !packageDirectory) {
+    throw new Error(
+      `Package Path ${packagePath} must be exactly two safe path segments`,
+    );
+  }
+
+  if (reservedPackagePathCollections.has(collection)) {
+    throw new Error(
+      `Package Path ${packagePath} uses reserved collection ${collection}`,
+    );
+  }
+
+  assertSafePackagePathSegment(packagePath, collection);
+  assertSafePackagePathSegment(packagePath, packageDirectory);
+
+  if (reservedPackagePathCollections.has(packageDirectory)) {
+    throw new Error(
+      `Package Path ${packagePath} uses reserved package directory ${packageDirectory}`,
+    );
+  }
+
+  return packagePath;
+}
+
+function defaultPackagePathForPreset(
+  preset: string,
+  packageLeafName: string,
+): string {
+  return preset === "ts-lib"
+    ? `packages/${packageLeafName}`
+    : `apps/${packageLeafName}`;
+}
+
+function assertNoPackageConflict(
+  blueprint: ProjectBlueprint,
+  packageName: string,
+  packagePath: string,
+): void {
+  const existingByName = blueprint.packages?.find(
+    (pkg) => pkg.name === packageName,
+  );
+  if (existingByName) {
+    throw new Error(
+      `Package Path ${packagePath} conflicts with existing package ${existingByName.name} at ${existingByName.path}`,
+    );
+  }
+
+  const existingByPath = blueprint.packages?.find(
+    (pkg) => pkg.path === packagePath,
+  );
+  if (existingByPath) {
+    throw new Error(
+      `Package Path ${packagePath} conflicts with existing package ${existingByPath.name} at ${existingByPath.path}`,
+    );
+  }
+}
+
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
 }
@@ -66,7 +183,10 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
   await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-async function assertMissing(targetPath: string): Promise<void> {
+async function assertMissingPackagePath(
+  packagePath: string,
+  targetPath: string,
+): Promise<void> {
   try {
     await stat(targetPath);
   } catch (error: unknown) {
@@ -77,7 +197,7 @@ async function assertMissing(targetPath: string): Promise<void> {
   }
 
   throw new Error(
-    `Package Addition would overwrite an existing path: ${targetPath}`,
+    `Package Path ${packagePath} conflicts with existing filesystem path ${targetPath}`,
   );
 }
 
@@ -444,6 +564,9 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
   const nodeVersion = await readGeneratedRepositoryNodeVersion(root);
   const projectName = projectNameFromBlueprint(blueprint);
   const packageName = `@${projectName}/${options.name}`;
+  const packagePath = options.path
+    ? validateExplicitPackagePath(options.path)
+    : defaultPackagePathForPreset(options.preset, options.name);
   const projection = findBuiltInPresetProjection(options.preset);
   const packageAddition = projection?.capabilities?.packageAddition;
 
@@ -462,21 +585,16 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     blueprint,
     packageLeafName: options.name,
     packageName,
+    packagePath,
     nodeVersion,
   });
 
-  if (
-    blueprint.packages?.some(
-      (pkg) =>
-        pkg.name === packageName || pkg.path === additionPlan.packagePath,
-    )
-  ) {
-    throw new Error(
-      `Package Addition conflicts with an existing package definition: ${packageName}`,
-    );
-  }
+  assertNoPackageConflict(blueprint, packageName, additionPlan.packagePath);
 
-  await assertMissing(path.join(root, additionPlan.packagePath));
+  await assertMissingPackagePath(
+    additionPlan.packagePath,
+    path.join(root, additionPlan.packagePath),
+  );
   const rootUpdatePlan = await planRootUpdates(
     root,
     blueprint,

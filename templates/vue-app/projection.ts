@@ -766,16 +766,16 @@ function packageAdditionOperations(
 async function packageAdditionPlan({
   root,
   blueprint,
-  packageLeafName,
   packageName,
+  packagePath,
   nodeVersion,
 }: PresetPackageAdditionOptions): Promise<PresetPackageAdditionPlan> {
-  const packagePath = `apps/${packageLeafName}`;
+  const [workspaceCollection] = packagePath.split("/");
   const previewPort = await nextVuePreviewPort(root, blueprint);
 
   return {
     packagePath,
-    workspacePackageGlob: "apps/*",
+    workspacePackageGlob: `${workspaceCollection}/*`,
     rootTsconfigReferences: [
       `./${packagePath}/tsconfig.app.json`,
       `./${packagePath}/tsconfig.test.json`,

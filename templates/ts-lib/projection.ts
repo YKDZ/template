@@ -524,15 +524,15 @@ function packageAdditionOperations(
 }
 
 function packageAdditionPlan(
-  packageLeafName: string,
   packageName: string,
+  packagePath: string,
   nodeVersion: string,
 ): PresetPackageAdditionPlan {
-  const packagePath = `packages/${packageLeafName}`;
+  const [workspaceCollection] = packagePath.split("/");
 
   return {
     packagePath,
-    workspacePackageGlob: "packages/*",
+    workspacePackageGlob: `${workspaceCollection}/*`,
     rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
@@ -599,11 +599,11 @@ export const tsLibPresetProjection: PresetProjection = {
   capabilities: {
     packageAddition: {
       planPackageAddition({
-        packageLeafName,
         packageName,
+        packagePath,
         nodeVersion,
       }: PresetPackageAdditionOptions) {
-        return packageAdditionPlan(packageLeafName, packageName, nodeVersion);
+        return packageAdditionPlan(packageName, packagePath, nodeVersion);
       },
     },
   },
