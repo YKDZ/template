@@ -401,6 +401,50 @@ describe("Template Boundary Check", () => {
     },
   );
 
+  it("accepts rust-bin Dockerfile fragment composition without allowlisted Dockerfile debt", async () => {
+    const targetDir = path.join(tmpdir(), "demo-rust-bin");
+    const projection = findBuiltInPresetProjection("rust-bin")!;
+    const blueprint = projection.blueprint({ targetDir });
+    const plan = projection.project(
+      assembleGenerationContext({
+        targetDir,
+        blueprint,
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@11.2.3",
+          },
+          source: "online",
+          diagnostics: [],
+        },
+      }),
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "rust-bin",
+          sourceFilePath: path.join(
+            repoRoot,
+            "templates/rust-bin/projection.ts",
+          ),
+          plan,
+        },
+      ],
+      allowlist: templateBoundaryDebtAllowlist,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.violations).toEqual([]);
+    expect(result.allowlistedDebt).not.toContainEqual(
+      expect.objectContaining({
+        preset: "rust-bin",
+        generatedPath: ".devcontainer/Dockerfile",
+      }),
+    );
+  });
+
   it("accepts protected Generated Repository outputs copied from template source", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-boundary-check-"),

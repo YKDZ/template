@@ -22,6 +22,10 @@ export type DevelopmentContainerRustLayer = {
   readonly toolchain: string;
 };
 
+type DevelopmentContainerCapabilityLayer =
+  | DevelopmentContainerBrowserTestLayer
+  | DevelopmentContainerRustLayer;
+
 export type DevelopmentContainerPlan = {
   readonly devcontainer: Record<string, unknown>;
   readonly dockerfile: string;
@@ -144,7 +148,7 @@ function checkedDockerfileFragment(name: string): string {
 
 function checkedNodePnpmDockerfile(
   options: {
-    readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
+    readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
   } = {},
 ): string {
   return composeDevelopmentContainerDockerfile({
@@ -162,6 +166,12 @@ function checkedNodePnpmDockerfile(
               name: "browser-test",
               text: checkedDockerfileFragment("browser-test.Dockerfile"),
             };
+          case "rust":
+            return {
+              kind: "capability" as const,
+              name: "rust",
+              text: checkedDockerfileFragment("rust.Dockerfile"),
+            };
         }
       }),
     ],
@@ -170,7 +180,7 @@ function checkedNodePnpmDockerfile(
 
 function checkedNodePnpmDockerfileFragments(
   options: {
-    readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
+    readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
   } = {},
 ): WriteTextFromFragmentsOperation["fragments"] {
   return [
@@ -185,13 +195,18 @@ function checkedNodePnpmDockerfileFragments(
             sourceRoot: "sharedDevcontainer",
             from: "browser-test.Dockerfile",
           };
+        case "rust":
+          return {
+            sourceRoot: "sharedDevcontainer",
+            from: "rust.Dockerfile",
+          };
       }
     }),
   ];
 }
 
 function browserTestBuildArgs(
-  layers: readonly DevelopmentContainerBrowserTestLayer[] = [],
+  layers: readonly DevelopmentContainerCapabilityLayer[] = [],
 ): Record<string, string> {
   const browserTestLayer = layers.find(
     (layer) => layer.kind === "browser-test",
@@ -202,28 +217,12 @@ function browserTestBuildArgs(
     : { PLAYWRIGHT_CLI_PACKAGE: browserTestLayer.playwrightCliPackage };
 }
 
-function renderRustLayer(
-  layer: DevelopmentContainerRustLayer,
-): readonly string[] {
-  return [
-    `ARG RUST_TOOLCHAIN=${layer.toolchain}`,
-    "ENV RUSTUP_HOME=/usr/local/rustup",
-    "ENV CARGO_HOME=/usr/local/cargo",
-    'ENV PATH="/usr/local/cargo/bin:${PATH}"',
-    "RUN apt-get update && apt-get install -y --no-install-recommends \\",
-    "    build-essential \\",
-    "    ca-certificates \\",
-    "    curl \\",
-    "    pkg-config \\",
-    "    libssl-dev \\",
-    "    && rm -rf /var/lib/apt/lists/*",
-    "RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \\",
-    "    sh -s -- -y --profile minimal --default-toolchain none \\",
-    "    && rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy \\",
-    "    && rustup default ${RUST_TOOLCHAIN} \\",
-    "    && chmod -R a+w ${RUSTUP_HOME} ${CARGO_HOME}",
-    "",
-  ];
+function rustBuildArgs(
+  layers: readonly DevelopmentContainerCapabilityLayer[] = [],
+): Record<string, string> {
+  const rustLayer = layers.find((layer) => layer.kind === "rust");
+
+  return rustLayer === undefined ? {} : { RUST_TOOLCHAIN: rustLayer.toolchain };
 }
 
 export function dockerfileFirstNodePnpmDevcontainer(options: {
@@ -262,9 +261,10 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
 export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
-  readonly additionalLayers?: readonly DevelopmentContainerBrowserTestLayer[];
+  readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
   readonly extensions: readonly string[];
   readonly settings?: Record<string, unknown>;
+  readonly mounts?: readonly string[];
 }): DevelopmentContainerPlan {
   return {
     devcontainer: {
@@ -275,6 +275,7 @@ export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
           NODE_VERSION: options.layer.nodeVersion,
           PACKAGE_MANAGER_PIN: options.layer.packageManagerPin,
           ...browserTestBuildArgs(options.additionalLayers),
+          ...rustBuildArgs(options.additionalLayers),
         },
       },
       customizations: {
@@ -283,6 +284,7 @@ export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
           ...(options.settings ? { settings: options.settings } : {}),
         },
       },
+      ...(options.mounts ? { mounts: options.mounts } : {}),
     },
     dockerfile: checkedNodePnpmDockerfile({
       additionalLayers: options.additionalLayers,
@@ -304,36 +306,16 @@ export function dockerfileFirstRustPnpmDevcontainer(options: {
   readonly extensions: readonly string[];
   readonly settings?: Record<string, unknown>;
 }): DevelopmentContainerPlan {
-  return {
-    devcontainer: {
-      name: options.name,
-      build: {
-        dockerfile: "Dockerfile",
-        args: {
-          NODE_VERSION: options.nodeLayer.nodeVersion,
-          PACKAGE_MANAGER_PIN: options.nodeLayer.packageManagerPin,
-          RUST_TOOLCHAIN: options.rustLayer.toolchain,
-        },
-      },
-      customizations: {
-        vscode: {
-          extensions: options.extensions,
-          ...(options.settings ? { settings: options.settings } : {}),
-        },
-      },
-      mounts: [
-        "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
-        "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
-        "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
-      ],
-    },
-    dockerfile: [
-      `FROM mcr.microsoft.com/devcontainers/typescript-node:${options.nodeLayer.nodeVersion}`,
-      "",
-      'SHELL ["/bin/bash", "-o", "pipefail", "-c"]',
-      `RUN corepack enable && corepack prepare ${options.nodeLayer.packageManagerPin} --activate`,
-      "",
-      ...renderRustLayer(options.rustLayer),
-    ].join("\n"),
-  };
+  return checkedDockerfileFirstNodePnpmDevcontainer({
+    name: options.name,
+    layer: options.nodeLayer,
+    additionalLayers: [options.rustLayer],
+    extensions: options.extensions,
+    settings: options.settings,
+    mounts: [
+      "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+      "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
+      "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
+    ],
+  });
 }

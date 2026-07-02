@@ -295,6 +295,14 @@ function operationsForRustBin(
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
+  const dockerfileOperation = developmentContainer.dockerfileOperation;
+
+  if (dockerfileOperation === undefined) {
+    throw new Error(
+      "Rust Development Container Dockerfile must use fragments.",
+    );
+  }
+
   const workspacePackagePath = rustWorkspacePackagePath(projectName);
   const rootManifest = packageJson(context, projectName, packageScripts);
   const packageManifest = rustWorkspacePackageJson(context, projectName);
@@ -381,9 +389,7 @@ function operationsForRustBin(
       value: developmentContainer.devcontainer,
     },
     {
-      kind: "writeText",
-      to: ".devcontainer/Dockerfile",
-      text: developmentContainer.dockerfile,
+      ...dockerfileOperation,
     },
     {
       kind: "writeJson",
@@ -429,6 +435,23 @@ function templateSourceRoot(): string {
     : projectionDir;
 }
 
+function sharedDevcontainerSourceRoot(): string {
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "devcontainer",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "node-pnpm.Dockerfile"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "devcontainer");
+}
+
 export const rustBinPresetProjection: PresetProjection = {
   metadata: rustBinPresetMetadata,
   blueprint: rustBinBlueprint,
@@ -445,6 +468,9 @@ export const rustBinPresetProjection: PresetProjection = {
 
     return {
       sourceRoot: templateSourceRoot(),
+      sourceRoots: {
+        sharedDevcontainer: sharedDevcontainerSourceRoot(),
+      },
       operations: operationsForRustBin(
         context,
         devcontainerName,

@@ -105,7 +105,6 @@ export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] = [
     "packages/demo-rust-bin/rustfmt.toml",
     "rust-toolchain.toml",
     ".devcontainer/devcontainer.json",
-    ".devcontainer/Dockerfile",
     ".vscode/extensions.json",
     ".vscode/settings.json",
     ".github/workflows/check.yml",

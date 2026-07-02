@@ -753,12 +753,19 @@ describe("template init", () => {
             ),
           ]),
         );
+        expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
         expect(dockerfile).toContain(
-          `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
         );
-        expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+        expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
         expect(dockerfile).toContain(
           "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
+        );
+        expect(dockerfile).toContain("gcc");
+        expect(dockerfile).toContain("libc6-dev");
+        expect(dockerfile).not.toContain("typescript-node");
+        expect(dockerfile).not.toMatch(
+          /\b(build-essential|pkg-config|libssl-dev)\b/,
         );
         expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
       } else {
@@ -2368,15 +2375,19 @@ describe("template init", () => {
       },
     });
     expect(devcontainer).not.toHaveProperty("features");
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      `FROM mcr.microsoft.com/devcontainers/typescript-node:${packageJson.engines.node}`,
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
-    expect(dockerfile).toContain(
-      `RUN corepack enable && corepack prepare ${packageJson.packageManager} --activate`,
-    );
-    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
     expect(dockerfile).toContain(
       "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
+    );
+    expect(dockerfile).toContain("gcc");
+    expect(dockerfile).toContain("libc6-dev");
+    expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toMatch(
+      /\b(build-essential|pkg-config|libssl-dev)\b/,
     );
     expect(devcontainer).not.toHaveProperty("postCreateCommand");
     expect(devcontainer.mounts).toEqual(

@@ -1,3 +1,7 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import {
   browserTestToolLayer,
@@ -8,6 +12,8 @@ import {
   nodePnpmToolLayer,
   rustToolLayer,
 } from "../src/devcontainer.js";
+import { assembleGenerationContext } from "../src/generation-context.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
@@ -204,14 +210,115 @@ describe("Development Container planning", () => {
     });
     expect(plan.devcontainer).not.toHaveProperty("features");
     expect(plan.dockerfile).toContain(
-      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+      "FROM node:${NODE_VERSION}-bookworm-slim",
     );
     expect(plan.dockerfile).toContain(
-      "RUN corepack enable && corepack prepare pnpm@10.0.0 --activate",
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
-    expect(plan.dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+    expect(plan.dockerfile).toContain("ARG RUST_TOOLCHAIN");
     expect(plan.dockerfile).toContain(
       "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
     );
+    expect(plan.dockerfile).toContain("ENV CARGO_HOME=/usr/local/cargo");
+    expect(plan.dockerfile).toContain("gcc");
+    expect(plan.dockerfile).toContain("libc6-dev");
+    expect(plan.dockerfile).not.toContain("typescript-node");
+    expect(plan.dockerfile).not.toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+    expect(plan.dockerfile).not.toContain("playwright install-deps chromium");
+    expect(plan.dockerfile).not.toMatch(
+      /\b(build-essential|pkg-config|libssl-dev)\b/,
+    );
+    expect(plan.dockerfileOperation).toEqual({
+      kind: "writeTextFromFragments",
+      to: ".devcontainer/Dockerfile",
+      fragments: [
+        {
+          sourceRoot: "sharedDevcontainer",
+          from: "node-pnpm.Dockerfile",
+        },
+        {
+          sourceRoot: "sharedDevcontainer",
+          from: "rust.Dockerfile",
+        },
+      ],
+    });
+  });
+
+  it("renders the rust-bin preset with the Rust layer on the shared Node pnpm base", async () => {
+    const targetDir = await mkdtemp(path.join(tmpdir(), "rust-bin-preset-"));
+    const projection = findBuiltInPresetProjection("rust-bin")!;
+    const blueprint = projection.blueprint({ targetDir });
+    const plan = projection.project(
+      assembleGenerationContext({
+        targetDir,
+        blueprint,
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@10.0.0",
+          },
+          source: "bundled-fallback",
+          diagnostics: [],
+        },
+      }),
+    );
+
+    await projection.render({ targetDir, plan });
+
+    const dockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+    const devcontainer = JSON.parse(
+      await readFile(
+        path.join(targetDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    ) as {
+      build?: { args?: Record<string, string> };
+      mounts?: string[];
+    };
+    const rootPackageJson = JSON.parse(
+      await readFile(path.join(targetDir, "package.json"), "utf8"),
+    ) as { scripts?: Record<string, string> };
+    const rustPackagePath = blueprint.packages?.[0]?.path;
+
+    if (rustPackagePath === undefined) {
+      throw new Error("rust-bin blueprint must include a workspace package.");
+    }
+
+    const rustPackageJson = JSON.parse(
+      await readFile(
+        path.join(targetDir, rustPackagePath, "package.json"),
+        "utf8",
+      ),
+    ) as { scripts?: Record<string, string> };
+
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
+    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
+    expect(dockerfile).toContain(
+      "rustup toolchain install ${RUST_TOOLCHAIN} --profile minimal --component rustfmt --component clippy",
+    );
+    expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+    expect(dockerfile).not.toContain("playwright install-deps chromium");
+    expect(devcontainer.build?.args).toMatchObject({
+      NODE_VERSION: "24",
+      PACKAGE_MANAGER_PIN: "pnpm@10.0.0",
+      RUST_TOOLCHAIN: "stable",
+    });
+    expect(devcontainer.build?.args).not.toHaveProperty(
+      "PLAYWRIGHT_CLI_PACKAGE",
+    );
+    expect(devcontainer.mounts).toEqual(
+      expect.arrayContaining([
+        "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+        "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
+        "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
+      ]),
+    );
+    expect(rootPackageJson.scripts?.check).toContain("turbo run check");
+    expect(rustPackageJson.scripts?.check).toContain("cargo clippy");
   });
 });

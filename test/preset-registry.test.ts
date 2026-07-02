@@ -517,16 +517,20 @@ describe("Preset Registry", () => {
       "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
       "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
     ]);
+    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      "FROM mcr.microsoft.com/devcontainers/typescript-node:24",
+      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
     );
-    expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare pnpm@11.2.3 --activate",
-    );
-    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN=stable");
+    expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
     expect(dockerfile).toContain("rustup toolchain install");
     expect(dockerfile).toContain("rustfmt");
     expect(dockerfile).toContain("clippy");
+    expect(dockerfile).toContain("gcc");
+    expect(dockerfile).toContain("libc6-dev");
+    expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toMatch(
+      /\b(build-essential|pkg-config|libssl-dev)\b/,
+    );
     expect(rustToolchain).toContain('[toolchain]\nchannel = "stable"\n');
     expect(rustToolchain).toContain('components = ["rustfmt", "clippy"]');
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");

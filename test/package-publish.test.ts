@@ -294,6 +294,7 @@ describe("package publishing", () => {
         expect.arrayContaining([
           "package/templates/shared/devcontainer/browser-test.Dockerfile",
           "package/templates/shared/devcontainer/node-pnpm.Dockerfile",
+          "package/templates/shared/devcontainer/rust.Dockerfile",
           "package/templates/rust-bin/src/main.rs",
           "package/templates/shared/oxc/node/oxlint.config.ts",
           "package/templates/shared/oxc/vue/oxlint.config.ts",
