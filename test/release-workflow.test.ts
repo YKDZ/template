@@ -16,7 +16,9 @@ describe("npm release workflow", () => {
 
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("contents: read");
-    expect(workflow).toContain("pnpm publish --access public --provenance");
+    expect(workflow).toContain(
+      "pnpm publish --no-git-checks --access public --provenance",
+    );
     expect(workflow).not.toContain("NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
   });
@@ -33,7 +35,7 @@ describe("npm release workflow", () => {
     expect(workflow).toContain("run: corepack enable");
     expect(workflow).toContain("run: pnpm install --frozen-lockfile");
     expect(workflow).toContain(
-      "run: pnpm publish --access public --provenance",
+      "run: pnpm publish --no-git-checks --access public --provenance",
     );
     expect(workflow).not.toContain("node-version:");
     expect(workflow).not.toContain("npm install -g");
