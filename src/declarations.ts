@@ -2,7 +2,11 @@ import * as v from "valibot";
 
 import { builtInPresetMetadata } from "../templates/registry.js";
 import type { PackageAdditionSupport } from "./package-addition-support.js";
-import type { PackageRole, PackageSourcePreset } from "./package-linking.js";
+import type {
+  PackageLinkIntent,
+  PackageRole,
+  PackageSourcePreset,
+} from "./package-linking.js";
 
 export type BuiltInPreset = {
   name: string;
@@ -56,6 +60,7 @@ export type ProjectBlueprint = {
   projectKind: ProjectKind;
   features: FeatureName[];
   packages?: ProjectPackage[];
+  packageLinkIntents?: PackageLinkIntent[];
 };
 
 export const builtInPresets: readonly BuiltInPreset[] = builtInPresetMetadata;
@@ -144,6 +149,18 @@ export const blueprintJsonSchema = {
         },
       },
     },
+    packageLinkIntents: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["consumerPackagePath", "providerPackagePath"],
+        properties: {
+          consumerPackagePath: { type: "string", minLength: 1 },
+          providerPackagePath: { type: "string", minLength: 1 },
+        },
+      },
+    },
   },
 } as const;
 
@@ -187,6 +204,14 @@ export const projectBlueprintSchema = v.strictObject({
         path: nonEmptyString,
         role: v.optional(packageRoleSchema),
         sourcePreset: v.optional(packageSourcePresetSchema),
+      }),
+    ),
+  ),
+  packageLinkIntents: v.optional(
+    v.array(
+      v.strictObject({
+        consumerPackagePath: nonEmptyString,
+        providerPackagePath: nonEmptyString,
       }),
     ),
   ),

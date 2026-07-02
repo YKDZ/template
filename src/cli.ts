@@ -46,13 +46,14 @@ type AddPackageOptions = {
   preset: string;
   name: string;
   path?: string;
+  linkFrom?: string;
 };
 
 function usage(): string {
   return [
     "Usage:",
     "  template init <dir> --preset <name> --yes",
-    "  template add package --preset <name> --name <name> [--path <package-path>]",
+    "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]",
     "  template presets",
     "  template schema preset",
     "  template schema blueprint",
@@ -63,6 +64,7 @@ function usage(): string {
     "  --preset <name>  Project preset to generate",
     "  --name <name>    Package name to add",
     "  --path <path>    Two-segment Package Path to add",
+    "  --link-from <path>  Existing consumer Package Path to link from",
     "  --scope <name>   Package scope for workspace package names",
     "  --yes            Accept defaults for non-interactive generation",
     "  --dry-run        Print the planned generation without writing files",
@@ -423,6 +425,7 @@ function parseAddPackageOptions(args: string[]): AddPackageOptions {
   let preset = "";
   let name = "";
   let packagePath: string | undefined;
+  let linkFrom: string | undefined;
 
   for (let index = 2; index < args.length; index += 1) {
     const arg = args[index];
@@ -457,6 +460,16 @@ function parseAddPackageOptions(args: string[]): AddPackageOptions {
       continue;
     }
 
+    if (arg === "--link-from") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--link-from requires a value");
+      }
+      linkFrom = value;
+      index += 1;
+      continue;
+    }
+
     throw new Error(`Unknown option: ${arg}`);
   }
 
@@ -468,7 +481,7 @@ function parseAddPackageOptions(args: string[]): AddPackageOptions {
     throw new Error("add package requires --name");
   }
 
-  return { preset, name, path: packagePath };
+  return { preset, name, path: packagePath, linkFrom };
 }
 
 async function main(args: string[]): Promise<void> {
@@ -597,6 +610,7 @@ async function main(args: string[]): Promise<void> {
       preset: options.preset,
       name: options.name,
       path: options.path,
+      linkFrom: options.linkFrom,
     });
     console.log(`Added ${options.preset} package ${options.name}`);
     return;

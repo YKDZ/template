@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -22,6 +23,33 @@ const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
+}
+
+async function sourceFileSnapshot(
+  sourceDir: string,
+  currentDir = sourceDir,
+): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  const entries = await readdir(currentDir, { withFileTypes: true });
+
+  for (const entry of entries.sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    const entryPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      Object.assign(snapshot, await sourceFileSnapshot(sourceDir, entryPath));
+      continue;
+    }
+
+    if (entry.isFile()) {
+      snapshot[path.relative(sourceDir, entryPath)] = await readFile(
+        entryPath,
+        "utf8",
+      );
+    }
+  }
+
+  return snapshot;
 }
 
 function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
@@ -413,6 +441,153 @@ describe("template add package", () => {
     expect(packageJson.name).toBe("@demo-fullstack/worker");
     await stat(path.join(projectDir, "services/worker/src/app.ts"));
     await expectPathMissing(path.join(projectDir, "apps/worker/package.json"));
+  }, 120_000);
+
+  it("links an added TypeScript library from one existing consumer without editing consumer source", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+    const webSourceDir = path.join(projectDir, "apps/web/src");
+    const beforeWebSource = await sourceFileSnapshot(webSourceDir);
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+        "--link-from",
+        "apps/web",
+      ],
+      { cwd: projectDir },
+    );
+
+    await execa(
+      tsxBin,
+      [cliPath, "blueprint", "validate", ".template/blueprint.json"],
+      {
+        cwd: projectDir,
+      },
+    );
+
+    const blueprint = await readJson<{
+      packageLinkIntents?: Array<{
+        consumerPackagePath: string;
+        providerPackagePath: string;
+      }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const webPackageJson = await readJson<{
+      dependencies: Record<string, string>;
+    }>(path.join(projectDir, "apps/web/package.json"));
+    const sharedPackageJson = await readJson<{
+      exports: unknown;
+      imports: unknown;
+    }>(path.join(projectDir, "packages/shared/package.json"));
+
+    expect(webPackageJson.dependencies["@demo-fullstack/shared"]).toBe(
+      "workspace:*",
+    );
+    expect(sharedPackageJson.exports).toEqual({
+      ".": {
+        default: "./src/index.ts",
+        types: "./src/index.ts",
+      },
+    });
+    expect(sharedPackageJson.imports).toEqual({
+      "#/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    });
+    expect(blueprint.packageLinkIntents).toEqual([
+      {
+        consumerPackagePath: "apps/web",
+        providerPackagePath: "packages/shared",
+      },
+    ]);
+    expect(await sourceFileSnapshot(webSourceDir)).toEqual(beforeWebSource);
+  }, 120_000);
+
+  it("rejects unknown --link-from Package Paths with available Package Paths", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    const unknownConsumerPackagePath = execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+        "--link-from",
+        "apps/admin",
+      ],
+      { cwd: projectDir },
+    );
+
+    await expect(unknownConsumerPackagePath).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Unknown Package Path for --link-from: apps/admin",
+      ),
+    });
+    await expect(unknownConsumerPackagePath).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Available Package Paths: apps/web, apps/api",
+      ),
+    });
+    await expectPathMissing(path.join(projectDir, "packages/shared"));
+  }, 120_000);
+
+  it("rejects self-linking the added package from itself", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    await expect(
+      execa(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "shared",
+          "--link-from",
+          "packages/shared",
+        ],
+        { cwd: projectDir },
+      ),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Package Link Intent cannot link packages/shared from itself",
+      ),
+    });
+    await expectPathMissing(path.join(projectDir, "packages/shared"));
   }, 120_000);
 
   it.each([

@@ -17,6 +17,8 @@ import {
 import { PackageAdditionSupport } from "./package-addition-support.js";
 import {
   packageTurboTasks,
+  planPackageLinks,
+  type PackageLinkIntent,
   type PackageRole,
   type PackageSourcePreset,
   type TurboTaskGraph,
@@ -29,6 +31,7 @@ export type AddPackageOptions = {
   preset: string;
   name: string;
   path?: string;
+  linkFrom?: string;
 };
 
 type RootPackageJson = {
@@ -48,6 +51,7 @@ type RootUpdatePlan = {
   rootPackageJson: RootPackageJson;
   turboConfig: { tasks: TurboTaskGraph };
   workspaceText: string;
+  consumerManifestUpdates: readonly ConsumerManifestUpdate[];
 };
 
 type PackageManifestForTaskGraph = {
@@ -55,6 +59,11 @@ type PackageManifestForTaskGraph = {
   scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   exports?: unknown;
+};
+
+type ConsumerManifestUpdate = {
+  readonly packagePath: string;
+  readonly manifest: PackageManifestForTaskGraph & Record<string, unknown>;
 };
 
 function projectNameFromBlueprint(
@@ -217,6 +226,49 @@ function assertNoPackageConflict(
       `Package Path ${packagePath} conflicts with existing package ${existingByPath.name} at ${existingByPath.path}`,
     );
   }
+}
+
+function formatAvailablePackagePaths(blueprint: ProjectBlueprint): string {
+  return (blueprint.packages ?? [])
+    .map((projectPackage) => projectPackage.path)
+    .join(", ");
+}
+
+function packageLinkIntentForSingleConsumer(options: {
+  readonly blueprint: ProjectBlueprint;
+  readonly consumerPackagePath: string;
+  readonly providerPackagePath: string;
+}): PackageLinkIntent {
+  if (options.consumerPackagePath === options.providerPackagePath) {
+    throw new Error(
+      `Package Link Intent cannot link ${options.providerPackagePath} from itself`,
+    );
+  }
+
+  const consumer = options.blueprint.packages?.find(
+    (projectPackage) => projectPackage.path === options.consumerPackagePath,
+  );
+
+  if (!consumer) {
+    const availablePackagePaths = formatAvailablePackagePaths(
+      options.blueprint,
+    );
+    throw new Error(
+      [
+        `Unknown Package Path for --link-from: ${options.consumerPackagePath}`,
+        availablePackagePaths
+          ? `Available Package Paths: ${availablePackagePaths}`
+          : undefined,
+      ]
+        .filter((line): line is string => line !== undefined)
+        .join("\n"),
+    );
+  }
+
+  return {
+    consumerPackagePath: options.consumerPackagePath,
+    providerPackagePath: options.providerPackagePath,
+  };
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
@@ -463,17 +515,22 @@ async function packageManifestsForTaskGraph(options: {
   readonly root: string;
   readonly blueprint: ProjectBlueprint;
   readonly operations: readonly RenderOperation[];
+  readonly manifestOverrides?: ReadonlyMap<string, PackageManifestForTaskGraph>;
 }): Promise<PackageManifestForTaskGraph[]> {
   const manifests: PackageManifestForTaskGraph[] = [];
 
   for (const packageDefinition of options.blueprint.packages ?? []) {
+    const manifestOverride = options.manifestOverrides?.get(
+      packageDefinition.path,
+    );
     const manifestFromOperations = generatedPackageManifestFromOperations(
       options.operations,
       packageDefinition.path,
     );
 
     manifests.push(
-      manifestFromOperations ??
+      manifestOverride ??
+        manifestFromOperations ??
         (await readJson<PackageManifestForTaskGraph>(
           path.join(options.root, packageDefinition.path, "package.json"),
         )),
@@ -489,6 +546,7 @@ function blueprintWithPackage(
   packagePath: string,
   packageRole: PackageRole,
   packageSourcePreset: PackageSourcePreset,
+  packageLinkIntents: readonly PackageLinkIntent[],
 ): ProjectBlueprint {
   const nextBlueprint = {
     ...blueprint,
@@ -501,6 +559,10 @@ function blueprintWithPackage(
         sourcePreset: packageSourcePreset,
       },
     ],
+    packageLinkIntents:
+      packageLinkIntents.length > 0
+        ? [...(blueprint.packageLinkIntents ?? []), ...packageLinkIntents]
+        : blueprint.packageLinkIntents,
   };
   const result = validateProjectBlueprint(nextBlueprint);
 
@@ -511,6 +573,58 @@ function blueprintWithPackage(
   }
 
   return result.value;
+}
+
+function assertObjectManifest(
+  input: unknown,
+  packagePath: string,
+): asserts input is PackageManifestForTaskGraph & Record<string, unknown> {
+  if (!isRecord(input)) {
+    throw new Error(
+      `Cannot update Package Link Intent manifest for ${packagePath}: package.json must be an object`,
+    );
+  }
+}
+
+async function consumerManifestUpdatesForPackageLinkIntents(options: {
+  readonly root: string;
+  readonly manifestDependenciesByPackagePath: ReadonlyMap<
+    string,
+    Readonly<Record<string, "workspace:*">>
+  >;
+}): Promise<ConsumerManifestUpdate[]> {
+  const updates: ConsumerManifestUpdate[] = [];
+
+  for (const [
+    packagePath,
+    packageLinkDependencies,
+  ] of options.manifestDependenciesByPackagePath) {
+    const manifest = await readJson<unknown>(
+      path.join(options.root, packagePath, "package.json"),
+    );
+    assertObjectManifest(manifest, packagePath);
+    if (
+      manifest.dependencies !== undefined &&
+      !isRecord(manifest.dependencies)
+    ) {
+      throw new Error(
+        `Cannot update Package Link Intent manifest for ${packagePath}: dependencies must be an object`,
+      );
+    }
+
+    updates.push({
+      packagePath,
+      manifest: {
+        ...manifest,
+        dependencies: {
+          ...manifest.dependencies,
+          ...packageLinkDependencies,
+        },
+      },
+    });
+  }
+
+  return updates;
 }
 
 function workspacePackageGlobsFromBlueprint(
@@ -749,6 +863,7 @@ async function planRootUpdates(
   packagePath: string,
   packageRole: PackageRole,
   packageSourcePreset: PackageSourcePreset,
+  packageLinkIntents: readonly PackageLinkIntent[],
   workspacePackageGlob: string,
   catalogDependencies: readonly string[],
   requiresSharedOxcConfiguration: boolean,
@@ -760,11 +875,36 @@ async function planRootUpdates(
     packagePath,
     packageRole,
     packageSourcePreset,
+    packageLinkIntents,
+  );
+  const consumerManifestUpdates =
+    packageLinkIntents.length > 0
+      ? await consumerManifestUpdatesForPackageLinkIntents({
+          root,
+          manifestDependenciesByPackagePath: planPackageLinks(
+            [
+              {
+                name: packageName,
+                path: packagePath,
+                role: packageRole,
+                sourcePreset: packageSourcePreset,
+              },
+            ],
+            packageLinkIntents,
+          ).manifestDependenciesByPackagePath,
+        })
+      : [];
+  const manifestOverrides = new Map(
+    consumerManifestUpdates.map((update) => [
+      update.packagePath,
+      update.manifest,
+    ]),
   );
   const packageManifests = await packageManifestsForTaskGraph({
     root,
     blueprint: nextBlueprint,
     operations,
+    manifestOverrides,
   });
   const workspaceText = pnpmWorkspaceYamlWithCatalogDependencies(
     workspaceTextWithPackageGlob(
@@ -790,6 +930,7 @@ async function planRootUpdates(
     ),
     turboConfig: turboConfigForPackageManifests(packageManifests),
     workspaceText,
+    consumerManifestUpdates,
   };
 }
 
@@ -982,6 +1123,15 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.sourceRoots?.sharedOxc !== undefined;
 
   assertNoPackageConflict(blueprint, packageName, additionPlan.packagePath);
+  const packageLinkIntents = options.linkFrom
+    ? [
+        packageLinkIntentForSingleConsumer({
+          blueprint,
+          consumerPackagePath: options.linkFrom,
+          providerPackagePath: additionPlan.packagePath,
+        }),
+      ]
+    : [];
 
   await assertMissingPackagePath(
     additionPlan.packagePath,
@@ -994,6 +1144,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.packagePath,
     additionPlan.packageRole,
     additionPlan.packageSourcePreset,
+    packageLinkIntents,
     additionPlan.workspacePackageGlob,
     packageAdditionCatalogDependencies(additionPlan.operations),
     requiresSharedOxcConfiguration,
@@ -1038,6 +1189,12 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     rootUpdatePlan.rootPackageJson,
   );
   await writeJson(path.join(root, "turbo.json"), rootUpdatePlan.turboConfig);
+  for (const update of rootUpdatePlan.consumerManifestUpdates) {
+    await writeJson(
+      path.join(root, update.packagePath, "package.json"),
+      update.manifest,
+    );
+  }
   await writeJson(
     path.join(root, ".template/blueprint.json"),
     rootUpdatePlan.blueprint,
