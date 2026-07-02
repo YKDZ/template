@@ -41,6 +41,10 @@ type StoredBlueprint = {
   }[];
 };
 
+type ExclusiveLock = {
+  readonly run: <T>(callback: () => Promise<T>) => Promise<T>;
+};
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -49,6 +53,31 @@ const cliPath = path.join(repoRoot, "src/cli.ts");
 const deterministicToolchainEnv = {
   TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
 };
+const defaultFixtureConcurrency = 2;
+
+function createExclusiveLock(): ExclusiveLock {
+  let tail = Promise.resolve();
+
+  return {
+    async run<T>(callback: () => Promise<T>): Promise<T> {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      await previous;
+
+      try {
+        return await callback();
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+const playwrightRootCheckLock = createExclusiveLock();
 
 function supportedFixturePresets(): SupportedFixturePreset[] {
   return builtInPresetProjections
@@ -116,16 +145,26 @@ async function run(
   command: string,
   args: string[],
   cwd: string,
-  env?: Record<string, string>,
+  options: {
+    readonly env?: Record<string, string>;
+    readonly logPrefix?: string;
+  } = {},
 ): Promise<void> {
-  console.log(`$ ${[command, ...args].join(" ")}`);
-  await execa(command, args, { cwd, env, stdio: "inherit" });
+  const prefix = options.logPrefix ? `[${options.logPrefix}] ` : "";
+
+  console.log(`${prefix}$ ${[command, ...args].join(" ")}`);
+  await execa(command, args, {
+    cwd,
+    env: options.env,
+    stdio: "inherit",
+  });
 }
 
 async function generateScenario(
   scenario: FixtureScenario,
   workspace: string,
 ): Promise<string> {
+  const label = fixtureScenarioLabel(scenario);
   const projectDir = path.join(
     workspace,
     `fixture-${fixtureScenarioId(scenario)}`,
@@ -144,7 +183,7 @@ async function generateScenario(
       "--yes",
     ],
     repoRoot,
-    deterministicToolchainEnv,
+    { env: deterministicToolchainEnv, logPrefix: label },
   );
 
   return projectDir;
@@ -173,6 +212,7 @@ async function applyPackageAddition(
       packageLeafName,
     ],
     projectDir,
+    { logPrefix: fixtureScenarioLabel(scenario) },
   );
 
   return readAddedPackagePath(projectDir, packageLeafName);
@@ -336,13 +376,26 @@ async function runFixtureQualityGate(
   projectDir: string,
   addedPackagePath: string | undefined,
 ): Promise<void> {
-  for (const step of fixtureQualityGateSteps(
-    scenario,
-    projectDir,
-    addedPackagePath,
-  )) {
+  const steps = fixtureQualityGateSteps(scenario, projectDir, addedPackagePath);
+  const requiresSerializedPlaywrightRootCheck = steps.some((step) =>
+    step.id.endsWith("-playwright-browsers"),
+  );
+
+  for (const step of steps) {
     const env = step.id === "run-root-check" ? { CI: "1" } : undefined;
-    await run(step.command, [...step.args], step.cwd, env);
+    const runStep = async () => {
+      await run(step.command, [...step.args], step.cwd, {
+        env,
+        logPrefix: fixtureScenarioLabel(scenario),
+      });
+    };
+
+    if (step.id === "run-root-check" && requiresSerializedPlaywrightRootCheck) {
+      await playwrightRootCheckLock.run(runStep);
+      continue;
+    }
+
+    await runStep();
   }
 }
 
@@ -356,14 +409,86 @@ async function checkScenario(
   await runFixtureQualityGate(scenario, projectDir, addedPackagePath);
 }
 
+function fixtureConcurrency(scenarioCount: number): number {
+  const rawValue = process.env.TEMPLATE_FIXTURE_CONCURRENCY;
+
+  if (rawValue === undefined || rawValue === "") {
+    return Math.min(defaultFixtureConcurrency, scenarioCount);
+  }
+
+  const value = Number(rawValue);
+
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error("TEMPLATE_FIXTURE_CONCURRENCY must be a positive integer");
+  }
+
+  return Math.min(value, scenarioCount);
+}
+
+function errorForFailedScenario(
+  scenario: FixtureScenario,
+  error: unknown,
+): Error {
+  if (error instanceof Error) {
+    return new Error(
+      `Fixture scenario failed: ${fixtureScenarioLabel(scenario)}`,
+      { cause: error },
+    );
+  }
+
+  return new Error(
+    `Fixture scenario failed: ${fixtureScenarioLabel(scenario)}: ${String(error)}`,
+  );
+}
+
+async function runScenariosConcurrently(
+  scenarios: readonly FixtureScenario[],
+  workspace: string,
+  concurrency: number,
+): Promise<void> {
+  let nextScenarioIndex = 0;
+  let firstFailure: Error | undefined;
+
+  async function worker(): Promise<void> {
+    while (firstFailure === undefined) {
+      const scenario = scenarios[nextScenarioIndex];
+      nextScenarioIndex += 1;
+
+      if (!scenario) {
+        return;
+      }
+
+      try {
+        await checkScenario(scenario, workspace);
+      } catch (error: unknown) {
+        firstFailure ??= errorForFailedScenario(scenario, error);
+        return;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      await worker();
+    }),
+  );
+
+  if (firstFailure) {
+    throw firstFailure;
+  }
+}
+
 async function main(): Promise<void> {
   const workspace = await mkdtemp(path.join(tmpdir(), "template-fixtures-"));
+  const scenarios = fixtureScenarios();
+  const concurrency = fixtureConcurrency(scenarios.length);
   let shouldRemoveWorkspace = false;
 
   try {
-    for (const scenario of fixtureScenarios()) {
-      await checkScenario(scenario, workspace);
-    }
+    console.log(
+      `Checking ${scenarios.length} fixture scenarios with concurrency ${concurrency}.`,
+    );
+    await runScenariosConcurrently(scenarios, workspace, concurrency);
 
     shouldRemoveWorkspace = true;
   } finally {

@@ -85,6 +85,7 @@ describe("fixture checks", () => {
     const binDir = path.join(workspace, "bin");
     const logPath = path.join(workspace, "commands.jsonl");
     const officialFetchLogPath = path.join(workspace, "official-fetches.txt");
+    const webRootCheckLockPath = path.join(workspace, "web-root-check.lock");
     const fetchGuardPath = path.join(
       workspace,
       "guard-official-toolchain-fetches.mjs",
@@ -121,10 +122,19 @@ describe("fixture checks", () => {
       path.join(binDir, "pnpm"),
       [
         "#!/usr/bin/env node",
-        'import { appendFileSync } from "node:fs";',
+        'import { appendFileSync, closeSync, openSync, rmSync } from "node:fs";',
+        'import path from "node:path";',
         'import { spawnSync } from "node:child_process";',
         "",
         "const args = process.argv.slice(2);",
+        "const sleep = async (ms) => {",
+        "  await new Promise((resolve) => setTimeout(resolve, ms));",
+        "};",
+        "const scenarioId = path.basename(process.cwd()).replace(/^fixture-/, '');",
+        "const needsWebRootCheckLock =",
+        "  scenarioId.startsWith('vue-app') ||",
+        "  scenarioId.startsWith('vue-hono-app') ||",
+        "  scenarioId.includes('-add-vue-app');",
         "appendFileSync(",
         "  process.env.FIXTURE_COMMAND_LOG,",
         "  JSON.stringify({",
@@ -134,6 +144,31 @@ describe("fixture checks", () => {
         "    ci: process.env.CI ?? null",
         "  }) + '\\n'",
         ");",
+        "",
+        "if (",
+        "  args[0] === 'run' &&",
+        "  args[1] === 'check' &&",
+        "  needsWebRootCheckLock",
+        ") {",
+        "  let fd;",
+        "  try {",
+        "    fd = openSync(process.env.FIXTURE_WEB_ROOT_CHECK_LOCK, 'wx');",
+        "  } catch {",
+        "    appendFileSync(",
+        "      process.env.FIXTURE_COMMAND_LOG,",
+        "      JSON.stringify({",
+        "        command: 'web-root-check-concurrency-violation',",
+        "        args,",
+        "        cwd: process.cwd(),",
+        "        ci: process.env.CI ?? null",
+        "      }) + '\\n'",
+        "    );",
+        "    process.exit(1);",
+        "  }",
+        "  await sleep(20);",
+        "  closeSync(fd);",
+        "  rmSync(process.env.FIXTURE_WEB_ROOT_CHECK_LOCK, { force: true });",
+        "}",
         "",
         "if (",
         "  args[0] === 'exec' &&",
@@ -217,7 +252,9 @@ describe("fixture checks", () => {
       cwd: repoRoot,
       env: {
         FIXTURE_COMMAND_LOG: logPath,
+        FIXTURE_WEB_ROOT_CHECK_LOCK: webRootCheckLockPath,
         OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
+        TEMPLATE_FIXTURE_CONCURRENCY: "4",
         NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
           .filter(Boolean)
           .join(" "),
@@ -325,6 +362,11 @@ describe("fixture checks", () => {
 
     expect(records).not.toContainEqual(
       expect.objectContaining({ command: "sh" }),
+    );
+    expect(records).not.toContainEqual(
+      expect.objectContaining({
+        command: "web-root-check-concurrency-violation",
+      }),
     );
 
     for (const generatedRootCheck of generatedRootChecks) {
