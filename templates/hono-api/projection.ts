@@ -24,7 +24,11 @@ import {
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
 import { PackageAdditionSupport } from "../../src/package-addition-support.js";
-import { packageTurboTasks } from "../../src/package-linking.js";
+import {
+  packageManifestExposureFields,
+  planPackageLinks,
+  packageTurboTasks,
+} from "../../src/package-linking.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
@@ -461,6 +465,21 @@ function packageAdditionOperations(
   packageName: string,
   nodeVersion: string,
 ): RenderOperation[] {
+  const packageExposure = planPackageLinks([
+    {
+      name: packageName,
+      path: packagePath,
+      role: "runtime-service",
+      sourcePreset: "hono-api",
+    },
+  ]).exposuresByPackagePath.get(packagePath);
+
+  if (packageExposure === undefined) {
+    throw new Error(`Missing Package Exposure for ${packagePath}`);
+  }
+
+  const exposureFields = packageManifestExposureFields(packageExposure);
+
   return [
     {
       kind: "writeJson",
@@ -470,12 +489,9 @@ function packageAdditionOperations(
         version: "0.0.0",
         private: true,
         type: "module",
-        imports: {
-          "#/*": {
-            default: "./dist/*.js",
-            types: "./src/*.ts",
-          },
-        },
+        types: exposureFields.types,
+        exports: exposureFields.exports,
+        imports: exposureFields.imports,
         scripts: projectHonoApiPackageScripts(),
         dependencies: {
           "@hono/node-server": "catalog:",
@@ -553,7 +569,8 @@ function packageAdditionPlan(
   return {
     packagePath,
     workspacePackageGlob: `${workspaceCollection}/*`,
-    rootTsconfigReferences: [`./${packagePath}/tsconfig.json`],
+    packageRole: "runtime-service",
+    packageSourcePreset: "hono-api",
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     operations: packageAdditionOperations(

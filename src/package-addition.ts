@@ -15,7 +15,12 @@ import {
   type GeneratedPackageManifestDependencies,
 } from "./dependency-catalog.js";
 import { PackageAdditionSupport } from "./package-addition-support.js";
-import { packageTurboTasks, type TurboTaskGraph } from "./package-linking.js";
+import {
+  packageTurboTasks,
+  type PackageRole,
+  type PackageSourcePreset,
+  type TurboTaskGraph,
+} from "./package-linking.js";
 import { renderProject } from "./renderer.js";
 import type { RenderOperation } from "./renderer.js";
 
@@ -24,11 +29,6 @@ export type AddPackageOptions = {
   preset: string;
   name: string;
   path?: string;
-};
-
-type RootTsconfig = {
-  references?: Array<{ path: string }>;
-  [key: string]: unknown;
 };
 
 type RootPackageJson = {
@@ -46,7 +46,6 @@ type GeneratedRepositoryPackageMetadata = {
 type RootUpdatePlan = {
   blueprint: ProjectBlueprint;
   rootPackageJson: RootPackageJson;
-  rootTsconfig: RootTsconfig;
   turboConfig: { tasks: TurboTaskGraph };
   workspaceText: string;
 };
@@ -222,21 +221,6 @@ function assertNoPackageConflict(
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
-}
-
-async function readJsonOrDefault<T>(
-  filePath: string,
-  defaultValue: T,
-): Promise<T> {
-  try {
-    return await readJson<T>(filePath);
-  } catch (error: unknown) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return defaultValue;
-    }
-
-    throw error;
-  }
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -426,55 +410,6 @@ function workspaceTextWithPackageGlob(text: string, glob: string): string {
   return nextText;
 }
 
-function assertRootTsconfig(input: unknown): asserts input is RootTsconfig {
-  if (!isRecord(input)) {
-    throw new Error(
-      "Cannot update root TypeScript project references: tsconfig.json must be an object",
-    );
-  }
-
-  const references = input.references;
-  if (references === undefined) {
-    return;
-  }
-
-  if (!Array.isArray(references)) {
-    throw new Error(
-      "Cannot update root TypeScript project references: references must be an array",
-    );
-  }
-
-  for (const reference of references) {
-    if (!isRecord(reference) || typeof reference.path !== "string") {
-      throw new Error(
-        "Cannot update root TypeScript project references: each reference must have a string path",
-      );
-    }
-  }
-}
-
-function rootTsconfigWithReferences(
-  input: unknown,
-  referencePaths: readonly string[],
-): RootTsconfig {
-  assertRootTsconfig(input);
-
-  if (referencePaths.length === 0) {
-    return input;
-  }
-
-  const tsconfig = input;
-  const references = tsconfig.references ?? [];
-
-  for (const referencePath of referencePaths) {
-    if (!references.some((reference) => reference.path === referencePath)) {
-      references.push({ path: referencePath });
-    }
-  }
-
-  return { ...tsconfig, references };
-}
-
 function packageAdditionCatalogDependencies(
   operations: readonly RenderOperation[],
 ): string[] {
@@ -552,12 +487,19 @@ function blueprintWithPackage(
   blueprint: ProjectBlueprint,
   packageName: string,
   packagePath: string,
+  packageRole: PackageRole,
+  packageSourcePreset: PackageSourcePreset,
 ): ProjectBlueprint {
   const nextBlueprint = {
     ...blueprint,
     packages: [
       ...(blueprint.packages ?? []),
-      { name: packageName, path: packagePath },
+      {
+        name: packageName,
+        path: packagePath,
+        role: packageRole,
+        sourcePreset: packageSourcePreset,
+      },
     ],
   };
   const result = validateProjectBlueprint(nextBlueprint);
@@ -805,8 +747,9 @@ async function planRootUpdates(
   blueprint: ProjectBlueprint,
   packageName: string,
   packagePath: string,
+  packageRole: PackageRole,
+  packageSourcePreset: PackageSourcePreset,
   workspacePackageGlob: string,
-  rootTsconfigReferences: readonly string[],
   catalogDependencies: readonly string[],
   requiresSharedOxcConfiguration: boolean,
   operations: readonly RenderOperation[],
@@ -815,6 +758,8 @@ async function planRootUpdates(
     blueprint,
     packageName,
     packagePath,
+    packageRole,
+    packageSourcePreset,
   );
   const packageManifests = await packageManifestsForTaskGraph({
     root,
@@ -831,12 +776,6 @@ async function planRootUpdates(
       requiresSharedOxcConfiguration,
     ),
   );
-  const rootTsconfig = rootTsconfigWithReferences(
-    await readJsonOrDefault<unknown>(path.join(root, "tsconfig.json"), {
-      files: [],
-    }),
-    rootTsconfigReferences,
-  );
   const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
     await readJson<unknown>(path.join(root, "package.json")),
     nextBlueprint,
@@ -849,7 +788,6 @@ async function planRootUpdates(
       rootPackageJson,
       requiresSharedOxcConfiguration,
     ),
-    rootTsconfig,
     turboConfig: turboConfigForPackageManifests(packageManifests),
     workspaceText,
   };
@@ -1054,8 +992,9 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     blueprint,
     packageName,
     additionPlan.packagePath,
+    additionPlan.packageRole,
+    additionPlan.packageSourcePreset,
     additionPlan.workspacePackageGlob,
-    additionPlan.rootTsconfigReferences,
     packageAdditionCatalogDependencies(additionPlan.operations),
     requiresSharedOxcConfiguration,
     additionPlan.operations,
@@ -1097,10 +1036,6 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
   await writeJson(
     path.join(root, "package.json"),
     rootUpdatePlan.rootPackageJson,
-  );
-  await writeJson(
-    path.join(root, "tsconfig.json"),
-    rootUpdatePlan.rootTsconfig,
   );
   await writeJson(path.join(root, "turbo.json"), rootUpdatePlan.turboConfig);
   await writeJson(

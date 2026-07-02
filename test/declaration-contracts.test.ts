@@ -231,6 +231,40 @@ describe("declaration contracts", () => {
     expect(result.stdout).toContain("ts-lib");
   });
 
+  it("validates stable Package Definition intent in project blueprints", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-package-definition-"),
+    );
+    const blueprintPath = path.join(workspace, "blueprint.json");
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "ts-lib",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: ["strict-typescript", "root-check"],
+          packages: [
+            {
+              name: "@demo-lib/demo-lib",
+              path: "packages/demo-lib",
+              role: "shared-library",
+              sourcePreset: "ts-lib",
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await template(["blueprint", "validate", blueprintPath]);
+
+    expect(result.stdout).toContain("Blueprint is valid");
+    expect(result.stdout).toContain("ts-lib");
+  });
+
   it("validates a multi-package vue-hono-app blueprint", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-fullstack-blueprint-"),

@@ -560,7 +560,8 @@ function packageAdditionPlan(
   return {
     packagePath,
     workspacePackageGlob: `${workspaceCollection}/*`,
-    rootTsconfigReferences: [],
+    packageRole: "shared-library",
+    packageSourcePreset: "ts-lib",
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     operations: packageAdditionOperations(

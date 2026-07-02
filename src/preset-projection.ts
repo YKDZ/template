@@ -5,6 +5,7 @@ import {
   planNextStepInstructions,
   type NextStepInstruction,
 } from "./next-step-instructions.js";
+import type { PackageRole, PackageSourcePreset } from "./package-linking.js";
 import type { DependencyMaintenancePolicy } from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
 
@@ -20,7 +21,8 @@ export type PresetPackageAdditionOptions = {
 export type PresetPackageAdditionPlan = {
   readonly packagePath: string;
   readonly workspacePackageGlob: string;
-  readonly rootTsconfigReferences: readonly string[];
+  readonly packageRole: PackageRole;
+  readonly packageSourcePreset: PackageSourcePreset;
   readonly sourceRoot: string;
   readonly sourceRoots?: Record<string, string>;
   readonly operations: readonly RenderOperation[];

@@ -788,11 +788,8 @@ async function packageAdditionPlan({
   return {
     packagePath,
     workspacePackageGlob: `${workspaceCollection}/*`,
-    rootTsconfigReferences: [
-      `./${packagePath}/tsconfig.app.json`,
-      `./${packagePath}/tsconfig.test.json`,
-      `./${packagePath}/tsconfig.node.json`,
-    ],
+    packageRole: "runtime-service",
+    packageSourcePreset: "vue-app",
     sourceRoot: templateSourceRoot(),
     sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
     operations: packageAdditionOperations(

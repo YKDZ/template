@@ -1,6 +1,6 @@
 export type PackageRole = "runtime-service" | "shared-library";
 
-export type PackageSourcePreset = "hono-api" | "ts-lib";
+export type PackageSourcePreset = "hono-api" | "ts-lib" | "vue-app";
 
 export type PackageDefinition = {
   readonly name: string;

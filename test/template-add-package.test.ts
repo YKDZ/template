@@ -198,7 +198,12 @@ describe("template add package", () => {
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
-      packages: Array<{ name: string; path: string; preset?: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -240,14 +245,24 @@ describe("template add package", () => {
       expect.objectContaining({
         preset: "vue-hono-app",
         projectKind: "multi-package",
-        packages: [
-          { name: "@demo-fullstack/web", path: "apps/web" },
-          { name: "@demo-fullstack/api", path: "apps/api" },
-          { name: "@demo-fullstack/shared", path: "packages/shared" },
-          { name: "@demo-fullstack/worker", path: "apps/worker" },
-        ],
       }),
     );
+    expect(blueprint.packages).toEqual([
+      { name: "@demo-fullstack/web", path: "apps/web" },
+      { name: "@demo-fullstack/api", path: "apps/api" },
+      {
+        name: "@demo-fullstack/shared",
+        path: "packages/shared",
+        role: "shared-library",
+        sourcePreset: "ts-lib",
+      },
+      {
+        name: "@demo-fullstack/worker",
+        path: "apps/worker",
+        role: "runtime-service",
+        sourcePreset: "hono-api",
+      },
+    ]);
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
@@ -356,7 +371,12 @@ describe("template add package", () => {
     );
 
     const blueprint = await readJson<{
-      packages: Array<{ name: string; path: string; preset?: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -372,10 +392,14 @@ describe("template add package", () => {
       path.join(projectDir, "services/worker/package.json"),
     );
 
-    expect(blueprint.packages).toContainEqual({
-      name: "@demo-fullstack/worker",
-      path: "services/worker",
-    });
+    expect(blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo-fullstack/worker",
+        path: "services/worker",
+        role: "runtime-service",
+        sourcePreset: "hono-api",
+      }),
+    );
     expect(workspaceYaml).toContain("  - services/*");
     expect(rootPackageJson.scripts.check).toContain(
       "turbo run typecheck --filter './apps/*' --filter './services/*'",
@@ -383,7 +407,7 @@ describe("template add package", () => {
     expect(rootPackageJson.scripts.check).toContain(
       "turbo run check --filter './apps/*' --filter './services/*'",
     );
-    expect(rootTsconfig.references).toContainEqual({
+    expect(rootTsconfig.references).not.toContainEqual({
       path: "./services/worker/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/worker");
@@ -442,7 +466,12 @@ describe("template add package", () => {
       );
 
       const blueprint = await readJson<{
-        packages: Array<{ name: string; path: string }>;
+        packages: Array<{
+          name: string;
+          path: string;
+          role?: string;
+          sourcePreset?: string;
+        }>;
       }>(path.join(projectDir, ".template/blueprint.json"));
       const workspaceYaml = await readFile(
         path.join(projectDir, "pnpm-workspace.yaml"),
@@ -452,20 +481,18 @@ describe("template add package", () => {
         references?: Array<{ path: string }>;
       }>(path.join(projectDir, "tsconfig.json"));
 
-      expect(blueprint.packages).toContainEqual({
-        name: `@demo-fullstack/${name}`,
-        path: packagePath,
-      });
+      expect(blueprint.packages).toContainEqual(
+        expect.objectContaining({
+          name: `@demo-fullstack/${name}`,
+          path: packagePath,
+          role: preset === "ts-lib" ? "shared-library" : "runtime-service",
+          sourcePreset: preset,
+        }),
+      );
       expect(workspaceYaml).toContain(`  - ${packagePath.split("/")[0]}/*`);
-      if (preset === "ts-lib") {
-        expect(rootTsconfig.references).not.toContainEqual({
-          path: referencePath,
-        });
-      } else {
-        expect(rootTsconfig.references).toContainEqual({
-          path: referencePath,
-        });
-      }
+      expect(rootTsconfig.references).not.toContainEqual({
+        path: referencePath,
+      });
       await stat(path.join(projectDir, packagePath, generatedFile));
     },
   );
@@ -743,7 +770,12 @@ describe("template add package", () => {
 
     const blueprint = await readJson<{
       projectKind: string;
-      packages: Array<{ name: string; path: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
@@ -762,7 +794,12 @@ describe("template add package", () => {
     expect(blueprint.projectKind).toBe("multi-package");
     expect(blueprint.packages).toEqual([
       { name: "@demo-lib/demo-lib", path: "packages/demo-lib" },
-      { name: "@demo-lib/shared", path: "packages/shared" },
+      {
+        name: "@demo-lib/shared",
+        path: "packages/shared",
+        role: "shared-library",
+        sourcePreset: "ts-lib",
+      },
     ]);
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootTsconfig).toEqual({ files: [] });
@@ -822,7 +859,12 @@ describe("template add package", () => {
 
       const blueprint = await readJson<{
         projectKind: string;
-        packages: Array<{ name: string; path: string }>;
+        packages: Array<{
+          name: string;
+          path: string;
+          role?: string;
+          sourcePreset?: string;
+        }>;
       }>(path.join(projectDir, ".template/blueprint.json"));
       const workspaceYaml = await readFile(
         path.join(projectDir, "pnpm-workspace.yaml"),
@@ -840,10 +882,14 @@ describe("template add package", () => {
       }>(path.join(projectDir, "packages/shared/package.json"));
 
       expect(blueprint.projectKind).toBe("multi-package");
-      expect(blueprint.packages).toContainEqual({
-        name: `@${projectName}/shared`,
-        path: "packages/shared",
-      });
+      expect(blueprint.packages).toContainEqual(
+        expect.objectContaining({
+          name: `@${projectName}/shared`,
+          path: "packages/shared",
+          role: "shared-library",
+          sourcePreset: "ts-lib",
+        }),
+      );
       expect(workspaceYaml).toContain("  - packages/*");
       expect(rootTsconfig.references ?? []).not.toContainEqual({
         path: "./packages/shared/tsconfig.json",
@@ -1071,7 +1117,12 @@ describe("template add package", () => {
     );
 
     const blueprint = await readJson<{
-      packages: Array<{ name: string; path: string; preset?: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
     const rootTsconfig = await readJson<{
       references: Array<{ path: string }>;
@@ -1081,6 +1132,8 @@ describe("template add package", () => {
       dependencies: Record<string, string>;
       scripts: Record<string, string>;
       engines: { node: string };
+      types: string;
+      exports: unknown;
       imports: unknown;
       packageManager?: string;
     }>(path.join(projectDir, "apps/worker/package.json"));
@@ -1096,17 +1149,28 @@ describe("template add package", () => {
       "utf8",
     );
 
-    expect(blueprint.packages).toContainEqual({
-      name: "@demo-fullstack/worker",
-      path: "apps/worker",
-    });
-    expect(rootTsconfig.references).toContainEqual({
+    expect(blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo-fullstack/worker",
+        path: "apps/worker",
+        role: "runtime-service",
+        sourcePreset: "hono-api",
+      }),
+    );
+    expect(rootTsconfig.references).not.toContainEqual({
       path: "./apps/worker/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/worker");
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.hono).toBe("catalog:");
+    expect(packageJson.types).toBe("./src/index.ts");
+    expect(packageJson.exports).toEqual({
+      ".": {
+        default: "./dist/index.js",
+        types: "./src/index.ts",
+      },
+    });
     expect(packageJson.imports).toEqual({
       "#/*": {
         default: "./dist/*.js",
@@ -1181,7 +1245,7 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe(inheritedNodeVersion);
   });
 
-  it("adds a Vue app package with root TypeScript project references", async () => {
+  it("adds a Vue app package without root TypeScript project references", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
     );
@@ -1206,7 +1270,12 @@ describe("template add package", () => {
     );
 
     const blueprint = await readJson<{
-      packages: Array<{ name: string; path: string; preset?: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
     const rootTsconfig = await readJson<{
       references: Array<{ path: string }>;
@@ -1227,11 +1296,15 @@ describe("template add package", () => {
       "utf8",
     );
 
-    expect(blueprint.packages).toContainEqual({
-      name: "@demo-fullstack/admin",
-      path: "apps/admin",
-    });
-    expect(rootTsconfig.references).toEqual(
+    expect(blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo-fullstack/admin",
+        path: "apps/admin",
+        role: "runtime-service",
+        sourcePreset: "vue-app",
+      }),
+    );
+    expect(rootTsconfig.references).not.toEqual(
       expect.arrayContaining([
         { path: "./apps/admin/tsconfig.app.json" },
         { path: "./apps/admin/tsconfig.test.json" },
@@ -1327,11 +1400,13 @@ describe("template add package", () => {
     );
 
     const blueprint = await readJson<{
-      packages: Array<{ name: string; path: string }>;
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
     }>(path.join(projectDir, ".template/blueprint.json"));
-    const rootTsconfig = await readJson<{
-      references: Array<{ path: string }>;
-    }>(path.join(projectDir, "tsconfig.json"));
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
@@ -1349,14 +1424,16 @@ describe("template add package", () => {
       scripts: Record<string, string>;
     }>(path.join(projectDir, "packages/shared/package.json"));
 
-    expect(blueprint.packages).toContainEqual({
-      name: "@demo-native/shared",
-      path: "packages/shared",
-    });
+    expect(blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo-native/shared",
+        path: "packages/shared",
+        role: "shared-library",
+        sourcePreset: "ts-lib",
+      }),
+    );
     expect(workspaceYaml).toContain("  - packages/*");
-    expect(rootTsconfig.references ?? []).not.toContainEqual({
-      path: "./packages/shared/tsconfig.json",
-    });
+    await expectPathMissing(path.join(projectDir, "tsconfig.json"));
     expect(rootPackageJson.type).toBe("module");
     expect(rootPackageJson.devDependencies.oxfmt).toBe("catalog:");
     expect(rootPackageJson.devDependencies.oxlint).toBe("catalog:");
@@ -1483,45 +1560,58 @@ describe("template add package", () => {
     });
   });
 
-  it("fails before writing package files when root TypeScript references cannot be updated", async () => {
+  it("adds a package without reading root TypeScript project references", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
     );
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await initGeneratedWorkspace(projectDir);
+    const invalidRootTsconfig = '{ "files": [], "references": ';
     await writeFile(
       path.join(projectDir, "tsconfig.json"),
-      JSON.stringify({ files: [], references: "./apps/web" }, null, 2),
+      invalidRootTsconfig,
       "utf8",
     );
 
-    await expect(
-      execa(
-        "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "ts-lib",
-          "--name",
-          "shared",
-        ],
-        { cwd: projectDir },
-      ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Cannot update root TypeScript project references: references must be an array",
-      ),
-    });
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+      ],
+      { cwd: projectDir },
+    );
 
-    await expect(
-      stat(path.join(projectDir, "packages/shared")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    const rootTsconfig = await readFile(
+      path.join(projectDir, "tsconfig.json"),
+      "utf8",
+    );
+    const blueprint = await readJson<{
+      packages: Array<{
+        name: string;
+        path: string;
+        role?: string;
+        sourcePreset?: string;
+      }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+
+    expect(rootTsconfig).toBe(invalidRootTsconfig);
+    expect(blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo-fullstack/shared",
+        path: "packages/shared",
+        role: "shared-library",
+        sourcePreset: "ts-lib",
+      }),
+    );
+    await stat(path.join(projectDir, "packages/shared/src/index.ts"));
   });
 });

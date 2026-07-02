@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import { builtInPresetMetadata } from "../templates/registry.js";
 import type { PackageAdditionSupport } from "./package-addition-support.js";
+import type { PackageRole, PackageSourcePreset } from "./package-linking.js";
 
 export type BuiltInPreset = {
   name: string;
@@ -44,6 +45,8 @@ export type PresetFile = {
 export type ProjectPackage = {
   name: string;
   path: string;
+  role?: PackageRole;
+  sourcePreset?: PackageSourcePreset;
 };
 
 export type ProjectBlueprint = {
@@ -136,6 +139,8 @@ export const blueprintJsonSchema = {
         properties: {
           name: { type: "string", minLength: 1 },
           path: { type: "string", minLength: 1 },
+          role: { enum: ["runtime-service", "shared-library"] },
+          sourcePreset: { enum: ["hono-api", "ts-lib", "vue-app"] },
         },
       },
     },
@@ -149,6 +154,15 @@ const projectKindSchema = v.picklist([
   "multi-package",
 ] as const);
 const featureNameSchema = v.picklist(featureNames);
+const packageRoleSchema = v.picklist([
+  "runtime-service",
+  "shared-library",
+] as const);
+const packageSourcePresetSchema = v.picklist([
+  "hono-api",
+  "ts-lib",
+  "vue-app",
+] as const);
 
 export const presetFileSchema = v.strictObject({
   schemaVersion: v.literal(1),
@@ -171,6 +185,8 @@ export const projectBlueprintSchema = v.strictObject({
       v.strictObject({
         name: nonEmptyString,
         path: nonEmptyString,
+        role: v.optional(packageRoleSchema),
+        sourcePreset: v.optional(packageSourcePresetSchema),
       }),
     ),
   ),
