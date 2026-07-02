@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
+import { PackageAdditionSupport } from "../src/package-addition-support.js";
 import { builtInPresetProjections } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
@@ -19,9 +20,54 @@ type CommandRecord = {
   ci: string | null;
 };
 
+type FixtureScenario = {
+  basePreset: string;
+  addedPreset?: string;
+};
+
 const supportedPresetNames = builtInPresetProjections
   .filter((projection) => projection.metadata.generation === "supported")
   .map((projection) => projection.metadata.name);
+const addablePresetNames = builtInPresetProjections
+  .filter(
+    (projection) =>
+      projection.metadata.generation === "supported" &&
+      projection.metadata.packageAdditionSupport ===
+        PackageAdditionSupport.Supported,
+  )
+  .map((projection) => projection.metadata.name);
+const fixtureScenarios: FixtureScenario[] = [
+  ...supportedPresetNames.map((basePreset) => ({ basePreset })),
+  ...supportedPresetNames.flatMap((basePreset) =>
+    addablePresetNames.map((addedPreset) => ({ basePreset, addedPreset })),
+  ),
+];
+
+function fixtureScenarioId(scenario: FixtureScenario): string {
+  if (!scenario.addedPreset) {
+    return scenario.basePreset;
+  }
+
+  return `${scenario.basePreset}-add-${scenario.addedPreset}`;
+}
+
+function fixtureScenarioFromCwd(cwd: string): FixtureScenario | undefined {
+  const fixtureDirectory = path.basename(cwd).replace(/^fixture-/, "");
+
+  return fixtureScenarios.find(
+    (scenario) => fixtureScenarioId(scenario) === fixtureDirectory,
+  );
+}
+
+function scenarioNeedsPlaywrightEnvironment(
+  scenario: FixtureScenario,
+): boolean {
+  return (
+    scenario.basePreset === "vue-app" ||
+    scenario.basePreset === "vue-hono-app" ||
+    scenario.addedPreset === "vue-app"
+  );
+}
 
 async function writeExecutable(
   filePath: string,
@@ -218,15 +264,43 @@ describe("fixture checks", () => {
       }),
     );
 
+    const packageAdditionCommands = pnpmRecords.filter(
+      (record) =>
+        record.args[0] === "exec" &&
+        record.args[1] === "tsx" &&
+        record.args[3] === "add" &&
+        record.args[4] === "package",
+    );
+    const packageAdditionScenarios = fixtureScenarios.filter(
+      (scenario) => scenario.addedPreset,
+    );
+    expect(packageAdditionCommands).toHaveLength(
+      packageAdditionScenarios.length,
+    );
+    expect(packageAdditionCommands).toEqual(
+      expect.arrayContaining(
+        packageAdditionScenarios.map((scenario) =>
+          expect.objectContaining({
+            cwd: expect.stringContaining(
+              `fixture-${fixtureScenarioId(scenario)}`,
+            ),
+            args: expect.arrayContaining(["--preset", scenario.addedPreset]),
+          }),
+        ),
+      ),
+    );
+
     const generatedFixes = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "fix",
     );
-    expect(generatedFixes).toHaveLength(supportedPresetNames.length);
+    expect(generatedFixes).toHaveLength(fixtureScenarios.length);
     expect(generatedFixes).toEqual(
       expect.arrayContaining(
-        supportedPresetNames.map((presetName) =>
+        fixtureScenarios.map((scenario) =>
           expect.objectContaining({
-            cwd: expect.stringContaining(`fixture-${presetName}`),
+            cwd: expect.stringContaining(
+              `fixture-${fixtureScenarioId(scenario)}`,
+            ),
           }),
         ),
       ),
@@ -235,13 +309,15 @@ describe("fixture checks", () => {
     const generatedRootChecks = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "check",
     );
-    expect(generatedRootChecks).toHaveLength(supportedPresetNames.length);
+    expect(generatedRootChecks).toHaveLength(fixtureScenarios.length);
     expect(generatedRootChecks).toEqual(
       expect.arrayContaining(
-        supportedPresetNames.map((presetName) =>
+        fixtureScenarios.map((scenario) =>
           expect.objectContaining({
             ci: "1",
-            cwd: expect.stringContaining(`fixture-${presetName}`),
+            cwd: expect.stringContaining(
+              `fixture-${fixtureScenarioId(scenario)}`,
+            ),
           }),
         ),
       ),
@@ -252,6 +328,9 @@ describe("fixture checks", () => {
     );
 
     for (const generatedRootCheck of generatedRootChecks) {
+      const scenario = fixtureScenarioFromCwd(generatedRootCheck.cwd);
+      expect(scenario).toBeDefined();
+
       const projectRecords = records.filter(
         (record) => record.cwd === generatedRootCheck.cwd,
       );
@@ -264,10 +343,11 @@ describe("fixture checks", () => {
           return false;
         }
 
-        if (generatedRootCheck.cwd.includes("fixture-vue")) {
+        if (scenario && scenarioNeedsPlaywrightEnvironment(scenario)) {
           return (
-            record.args.join(" ") ===
-            "--filter ./apps/web exec playwright install chromium"
+            record.args.includes("playwright") &&
+            record.args.includes("install") &&
+            record.args.includes("chromium")
           );
         }
 
@@ -284,7 +364,7 @@ describe("fixture checks", () => {
 
       expect(installIndex).toBeGreaterThanOrEqual(0);
       expect(fixIndex).toBeGreaterThan(installIndex);
-      if (generatedRootCheck.cwd.includes("fixture-vue")) {
+      if (scenario && scenarioNeedsPlaywrightEnvironment(scenario)) {
         expect(playwrightIndex).toBeGreaterThan(fixIndex);
         expect(checkIndex).toBeGreaterThan(playwrightIndex);
         continue;
@@ -292,5 +372,5 @@ describe("fixture checks", () => {
 
       expect(checkIndex).toBeGreaterThan(fixIndex);
     }
-  }, 120_000);
+  }, 240_000);
 });

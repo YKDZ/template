@@ -19,7 +19,7 @@ const repoRoot = path.resolve(
 );
 
 describe("Project Kit Root Check", () => {
-  it("invokes built-in preset fixture checks", async () => {
+  it("keeps Fixture Matrix checks explicit and outside the default Root Check", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as {
@@ -27,7 +27,43 @@ describe("Project Kit Root Check", () => {
     };
 
     expect(packageJson.scripts).toHaveProperty("check:fixtures");
-    expect(packageJson.scripts.check).toContain("pnpm run check:fixtures");
+    expect(packageJson.scripts["check:fixtures"]).toBe(
+      "tsx scripts/check-fixtures.ts",
+    );
+    expect(packageJson.scripts.check).not.toContain("check:fixtures");
+  });
+
+  it("runs Fixture Matrix checks from the reusable check workflow", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github/workflows/check.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("name: Check");
+    expect(workflow).toContain("pull_request:");
+    expect(workflow).toContain("push:");
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("workflow_call:");
+    expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("run: pnpm run check");
+    expect(workflow).toContain("run: pnpm run check:fixtures");
+    expect(workflow.indexOf("run: pnpm run check\n")).toBeLessThan(
+      workflow.indexOf("run: pnpm run check:fixtures"),
+    );
+    expect(workflow).not.toContain("id-token: write");
+    expect(workflow).not.toContain("pnpm publish");
+  });
+
+  it("reuses the check workflow before release publishing", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github/workflows/release.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("uses: ./.github/workflows/check.yml");
+    expect(workflow).toContain("needs: check");
+    expect(workflow).not.toContain("run: pnpm run check\n");
+    expect(workflow).not.toContain("run: pnpm run check:fixtures");
   });
 
   it("keeps ordinary checks separate from npm publishing", async () => {
@@ -120,18 +156,14 @@ describe("Project Kit Root Check", () => {
     });
   });
 
-  it("runs direct template source checks before Fixture Checks", async () => {
+  it("runs direct template source checks from Root Check", async () => {
     const rootPackageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
 
     expect(rootPackageJson.scripts).toHaveProperty("check:templates");
     expect(rootPackageJson.scripts.check).toContain("pnpm run check:templates");
-    expect(
-      rootPackageJson.scripts.check.indexOf("pnpm run check:templates"),
-    ).toBeLessThan(
-      rootPackageJson.scripts.check.indexOf("pnpm run check:fixtures"),
-    );
+    expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:shared-oxc",
     );
@@ -146,18 +178,14 @@ describe("Project Kit Root Check", () => {
     );
   });
 
-  it("runs whole-repository format checks before Fixture Checks", async () => {
+  it("runs whole-repository format checks from Root Check", async () => {
     const rootPackageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as { scripts: Record<string, string> };
 
     expect(rootPackageJson.scripts).toHaveProperty("check:format");
     expect(rootPackageJson.scripts.check).toContain("pnpm run check:format");
-    expect(
-      rootPackageJson.scripts.check.indexOf("pnpm run check:format"),
-    ).toBeLessThan(
-      rootPackageJson.scripts.check.indexOf("pnpm run check:fixtures"),
-    );
+    expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:format"]).toBe(
       "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
     );

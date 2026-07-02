@@ -1,5 +1,6 @@
 import type { BuiltInPreset } from "../src/declarations.js";
 import type { GenerationContext } from "../src/generation-context.js";
+import { PackageAdditionSupport } from "../src/package-addition-support.js";
 import type {
   PresetProjection,
   PresetProjectionPlan,
@@ -18,6 +19,7 @@ const futurePresetMetadata = [
     generation: "future",
     supportedPackageManagers: ["pnpm"],
     supportedProjectKinds: ["multi-package"],
+    packageAdditionSupport: PackageAdditionSupport.Unsupported,
     features: [],
   },
   {
@@ -27,6 +29,7 @@ const futurePresetMetadata = [
     generation: "future",
     supportedPackageManagers: ["pnpm"],
     supportedProjectKinds: ["multi-package"],
+    packageAdditionSupport: PackageAdditionSupport.Unsupported,
     features: [],
   },
 ] satisfies readonly BuiltInPreset[];

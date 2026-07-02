@@ -7,17 +7,24 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  check:
+    name: Check package
+    uses: ./.github/workflows/check.yml
+
   publish:
     name: Publish to npm
+    needs: check
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -34,9 +41,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Check package
-        run: pnpm run check
 
       - name: Publish package
         run: pnpm publish --no-git-checks --access public --provenance

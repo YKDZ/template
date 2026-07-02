@@ -24,6 +24,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
+import { PackageAdditionSupport } from "../../src/package-addition-support.js";
 import type {
   PresetBlueprintOptions,
   PresetProjection,
@@ -46,6 +47,7 @@ export const rustBinPresetMetadata: BuiltInPreset = {
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
   supportedProjectKinds: ["multi-package"],
+  packageAdditionSupport: PackageAdditionSupport.Unsupported,
   features: [
     "root-check",
     "fix-command",
@@ -356,7 +358,15 @@ function operationsForRustBin(
     {
       kind: "writeText",
       to: ".gitignore",
-      text: ["target", ".env", ".template/", ".pnpm-store/", ""].join("\n"),
+      text: [
+        "target",
+        "node_modules",
+        "dist",
+        ".env",
+        ".template/",
+        ".pnpm-store/",
+        "",
+      ].join("\n"),
     },
     {
       kind: "copyFile",

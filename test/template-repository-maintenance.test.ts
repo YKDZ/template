@@ -194,6 +194,7 @@ describe("template Repository maintenance", () => {
 
     expect(workflowFiles).toEqual(
       expect.arrayContaining([
+        "check.yml",
         "release.yml",
         "toolchain-resolution-contract.yml",
       ]),

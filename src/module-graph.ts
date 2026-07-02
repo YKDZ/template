@@ -116,8 +116,8 @@ export function renderFixCommand(plan: FixPlan): string {
 export function renderPlaywrightBrowserInstallCommand(
   need: CheckEnvironmentNeed,
 ): string {
-  if (need.owner.path === "apps/web") {
-    return `pnpm --filter ./apps/web exec playwright install ${need.browser}`;
+  if (need.owner.kind === "package-boundary" && need.owner.path !== ".") {
+    return `pnpm --filter ./${need.owner.path} exec playwright install ${need.browser}`;
   }
 
   return `pnpm exec playwright install ${need.browser}`;

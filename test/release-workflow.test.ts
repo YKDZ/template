@@ -16,6 +16,7 @@ describe("npm release workflow", () => {
 
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("needs: check");
     expect(workflow).toContain(
       "pnpm publish --no-git-checks --access public --provenance",
     );
@@ -40,6 +41,18 @@ describe("npm release workflow", () => {
     expect(workflow).not.toContain("node-version:");
     expect(workflow).not.toContain("npm install -g");
     expect(workflow).not.toMatch(/run:\s+npm publish/);
+  });
+
+  it("reuses the repository check workflow before publishing", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github/workflows/release.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("uses: ./.github/workflows/check.yml");
+    expect(workflow).toContain("needs: check");
+    expect(workflow).not.toContain("run: pnpm run check\n");
+    expect(workflow).not.toContain("run: pnpm run check:fixtures");
   });
 
   it("documents the human-owned trusted publishing setup checklist", async () => {

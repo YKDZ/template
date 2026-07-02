@@ -25,6 +25,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
+import { PackageAdditionSupport } from "../../src/package-addition-support.js";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
@@ -49,6 +50,7 @@ export const vueAppPresetMetadata: BuiltInPreset = {
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
   supportedProjectKinds: ["multi-package"],
+  packageAdditionSupport: PackageAdditionSupport.Supported,
   features: [
     "pnpm-catalog",
     "oxc-format-lint",

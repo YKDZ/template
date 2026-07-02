@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
 import { builtInPresetMetadata } from "../templates/registry.js";
+import type { PackageAdditionSupport } from "./package-addition-support.js";
 
 export type BuiltInPreset = {
   name: string;
@@ -9,6 +10,7 @@ export type BuiltInPreset = {
   generation: "supported" | "future";
   supportedPackageManagers: readonly PackageManager[];
   supportedProjectKinds: readonly ProjectKind[];
+  packageAdditionSupport: PackageAdditionSupport;
   features: readonly FeatureName[];
 };
 

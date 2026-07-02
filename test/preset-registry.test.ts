@@ -8,6 +8,7 @@ import {
 } from "../src/declarations.js";
 import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
+import { PackageAdditionSupport } from "../src/package-addition-support.js";
 import {
   builtInPresetProjections,
   findBuiltInPresetProjection,
@@ -40,6 +41,54 @@ describe("Preset Registry", () => {
     expect(
       builtInPresets.flatMap((preset) => preset.supportedProjectKinds),
     ).not.toContain("single-package");
+  });
+
+  it("declares Package Addition Support consistently with projection implementations", () => {
+    expect(
+      builtInPresetProjections.map((projection) => ({
+        name: projection.metadata.name,
+        packageAdditionSupport: projection.metadata.packageAdditionSupport,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          name: "ts-lib",
+          packageAdditionSupport: PackageAdditionSupport.Supported,
+        },
+        {
+          name: "hono-api",
+          packageAdditionSupport: PackageAdditionSupport.Supported,
+        },
+        {
+          name: "vue-app",
+          packageAdditionSupport: PackageAdditionSupport.Supported,
+        },
+        {
+          name: "vue-hono-app",
+          packageAdditionSupport: PackageAdditionSupport.Unsupported,
+        },
+        {
+          name: "rust-bin",
+          packageAdditionSupport: PackageAdditionSupport.Unsupported,
+        },
+      ]),
+    );
+
+    for (const projection of builtInPresetProjections) {
+      const hasImplementation = Boolean(
+        projection.capabilities?.packageAddition,
+      );
+
+      if (
+        projection.metadata.packageAdditionSupport ===
+        PackageAdditionSupport.Supported
+      ) {
+        expect(hasImplementation).toBe(true);
+        continue;
+      }
+
+      expect(hasImplementation).toBe(false);
+    }
   });
 
   it("generates valid workspace monorepo Project Blueprints for supported presets", async () => {

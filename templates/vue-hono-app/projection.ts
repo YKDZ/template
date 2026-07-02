@@ -24,6 +24,7 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "../../src/module-graph.js";
+import { PackageAdditionSupport } from "../../src/package-addition-support.js";
 import type {
   PresetBlueprintOptions,
   PresetProjection,
@@ -45,6 +46,7 @@ export const vueHonoAppPresetMetadata: BuiltInPreset = {
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
   supportedProjectKinds: ["multi-package"],
+  packageAdditionSupport: PackageAdditionSupport.Unsupported,
   features: [
     "pnpm-catalog",
     "oxc-format-lint",

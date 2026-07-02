@@ -837,25 +837,30 @@ describe("template add package", () => {
 
     await initGeneratedWorkspace(projectDir);
 
-    await expect(
-      execa(
-        "pnpm",
-        [
-          "exec",
-          "tsx",
-          cliPath,
-          "add",
-          "package",
-          "--preset",
-          "rust-bin",
-          "--name",
-          "native",
-        ],
-        { cwd: projectDir },
-      ),
-    ).rejects.toMatchObject({
+    const unsupportedPackageAddition = execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "rust-bin",
+        "--name",
+        "native",
+      ],
+      { cwd: projectDir },
+    );
+
+    await expect(unsupportedPackageAddition).rejects.toMatchObject({
       stderr: expect.stringContaining(
-        "Package Addition is not supported by preset: rust-bin",
+        "Preset rust-bin cannot be used for Package Addition.",
+      ),
+    });
+    await expect(unsupportedPackageAddition).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Supported Package Addition presets: ts-lib, hono-api, vue-app",
       ),
     });
 
@@ -1182,6 +1187,111 @@ describe("template add package", () => {
     await expectPathMissing(
       path.join(projectDir, "apps/admin/oxfmt.config.ts"),
     );
+  });
+
+  it("updates root OXC lint configuration when adding a Vue app to a Node-only base", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-api");
+
+    await initGeneratedWorkspace(projectDir, "hono-api");
+
+    const beforeOxlintConfig = await readFile(
+      path.join(projectDir, "oxlint.config.ts"),
+      "utf8",
+    );
+    expect(beforeOxlintConfig).toContain('plugins: ["typescript", "oxc"]');
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "vue-app",
+        "--name",
+        "admin",
+      ],
+      { cwd: projectDir },
+    );
+
+    const afterOxlintConfig = await readFile(
+      path.join(projectDir, "oxlint.config.ts"),
+      "utf8",
+    );
+    expect(afterOxlintConfig).toContain(
+      'plugins: ["typescript", "oxc", "vue"]',
+    );
+  });
+
+  it("adds a TypeScript package to a Rust base repository", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-native");
+
+    await initGeneratedWorkspace(projectDir, "rust-bin");
+
+    await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "ts-lib",
+        "--name",
+        "shared",
+      ],
+      { cwd: projectDir },
+    );
+
+    const blueprint = await readJson<{
+      packages: Array<{ name: string; path: string }>;
+    }>(path.join(projectDir, ".template/blueprint.json"));
+    const rootTsconfig = await readJson<{
+      references: Array<{ path: string }>;
+    }>(path.join(projectDir, "tsconfig.json"));
+    const workspaceYaml = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const gitignore = await readFile(
+      path.join(projectDir, ".gitignore"),
+      "utf8",
+    );
+    const rootPackageJson = await readJson<{
+      type: string;
+      devDependencies: Record<string, string>;
+    }>(path.join(projectDir, "package.json"));
+    const packageJson = await readJson<{
+      name: string;
+      scripts: Record<string, string>;
+    }>(path.join(projectDir, "packages/shared/package.json"));
+
+    expect(blueprint.packages).toContainEqual({
+      name: "@demo-native/shared",
+      path: "packages/shared",
+    });
+    expect(workspaceYaml).toContain("  - packages/*");
+    expect(rootTsconfig.references).toContainEqual({
+      path: "./packages/shared/tsconfig.json",
+    });
+    expect(rootPackageJson.type).toBe("module");
+    expect(rootPackageJson.devDependencies.oxfmt).toBe("catalog:");
+    expect(rootPackageJson.devDependencies.oxlint).toBe("catalog:");
+    expect(gitignore).toContain("node_modules\n");
+    expect(gitignore).toContain("dist\n");
+    expect(packageJson.name).toBe("@demo-native/shared");
+    expect(packageJson.scripts.check).toContain("pnpm run typecheck");
+    await stat(path.join(projectDir, "oxlint.config.ts"));
+    await stat(path.join(projectDir, "oxfmt.config.ts"));
   });
 
   it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {

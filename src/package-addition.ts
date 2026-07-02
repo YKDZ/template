@@ -1,7 +1,10 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import {
+  builtInPresetProjections,
+  findBuiltInPresetProjection,
+} from "../templates/registry.js";
 import {
   validateProjectBlueprint,
   type ProjectBlueprint,
@@ -11,6 +14,7 @@ import {
   pnpmWorkspaceYamlWithCatalogDependencies,
   type GeneratedPackageManifestDependencies,
 } from "./dependency-catalog.js";
+import { PackageAdditionSupport } from "./package-addition-support.js";
 import { renderProject } from "./renderer.js";
 import type { RenderOperation } from "./renderer.js";
 
@@ -28,7 +32,14 @@ type RootTsconfig = {
 
 type RootPackageJson = {
   scripts: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  type?: string;
   [key: string]: unknown;
+};
+
+type GeneratedRepositoryPackageMetadata = {
+  projectName: string;
+  nodeVersion: string;
 };
 
 type RootUpdatePlan = {
@@ -38,17 +49,24 @@ type RootUpdatePlan = {
   workspaceText: string;
 };
 
-function projectNameFromBlueprint(blueprint: ProjectBlueprint): string {
+function projectNameFromBlueprint(
+  blueprint: ProjectBlueprint,
+  fallbackProjectName: string,
+): string {
   const firstPackage = blueprint.packages?.[0];
   const match = firstPackage?.name.match(/^@([^/]+)\//);
 
-  if (!match) {
-    throw new Error(
-      "Cannot infer workspace package scope from the stored Project Blueprint",
-    );
+  if (match) {
+    return match[1];
   }
 
-  return match[1];
+  if (/^[a-z0-9][a-z0-9._-]*$/.test(fallbackProjectName)) {
+    return fallbackProjectName;
+  }
+
+  throw new Error(
+    "Cannot infer workspace package scope from the stored Project Blueprint or root package.json",
+  );
 }
 
 function assertSafePackageLeaf(name: string): void {
@@ -151,6 +169,24 @@ function defaultPackagePathForPreset(
     : `apps/${packageLeafName}`;
 }
 
+function supportedPackageAdditionPresetNames(): string[] {
+  return builtInPresetProjections
+    .filter(
+      (projection) =>
+        projection.metadata.packageAdditionSupport ===
+        PackageAdditionSupport.Supported,
+    )
+    .map((projection) => projection.metadata.name);
+}
+
+function formatUnsupportedPackageAdditionPresetError(preset: string): string {
+  return [
+    `Preset ${preset} cannot be used for Package Addition.`,
+    "It can still initialize a Generated Repository, but it cannot be added to an existing one.",
+    `Supported Package Addition presets: ${supportedPackageAdditionPresetNames().join(", ")}`,
+  ].join("\n");
+}
+
 function assertNoPackageConflict(
   blueprint: ProjectBlueprint,
   packageName: string,
@@ -177,6 +213,21 @@ function assertNoPackageConflict(
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
+}
+
+async function readJsonOrDefault<T>(
+  filePath: string,
+  defaultValue: T,
+): Promise<T> {
+  try {
+    return await readJson<T>(filePath);
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return defaultValue;
+    }
+
+    throw error;
+  }
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -317,12 +368,25 @@ async function readGeneratedWorkspaceBlueprint(
   return blueprint;
 }
 
-async function readGeneratedRepositoryNodeVersion(
+async function readGeneratedRepositoryPackageMetadata(
   root: string,
-): Promise<string> {
+): Promise<GeneratedRepositoryPackageMetadata> {
   const packageJson = await readJson<unknown>(path.join(root, "package.json"));
 
-  if (!isRecord(packageJson) || !isRecord(packageJson.engines)) {
+  if (!isRecord(packageJson)) {
+    throw new Error(
+      "Package Addition requires root package.json to be an object",
+    );
+  }
+
+  const projectName = packageJson.name;
+  if (typeof projectName !== "string" || projectName.length === 0) {
+    throw new Error(
+      "Package Addition requires root package.json to declare name",
+    );
+  }
+
+  if (!isRecord(packageJson.engines)) {
     throw new Error(
       "Package Addition requires root package.json to declare engines.node",
     );
@@ -335,7 +399,7 @@ async function readGeneratedRepositoryNodeVersion(
     );
   }
 
-  return nodeVersion;
+  return { projectName, nodeVersion };
 }
 
 function workspaceTextWithPackageGlob(text: string, glob: string): string {
@@ -527,6 +591,56 @@ function rootPackageJsonWithPackageTaskFilters(
   };
 }
 
+function rootPackageJsonWithSharedOxcRuntimeDependencies(
+  input: RootPackageJson,
+  requiresSharedOxcConfiguration: boolean,
+): RootPackageJson {
+  if (!requiresSharedOxcConfiguration) {
+    return input;
+  }
+
+  if (input.type !== undefined && input.type !== "module") {
+    throw new Error(
+      'Cannot update root OXC configuration: package.json type must be "module" or omitted',
+    );
+  }
+
+  if (input.devDependencies !== undefined && !isRecord(input.devDependencies)) {
+    throw new Error(
+      "Cannot update root OXC configuration dependencies: devDependencies must be an object",
+    );
+  }
+
+  return {
+    ...input,
+    type: "module",
+    devDependencies: {
+      ...input.devDependencies,
+      oxfmt: input.devDependencies?.oxfmt ?? "catalog:",
+      oxlint: input.devDependencies?.oxlint ?? "catalog:",
+    },
+  };
+}
+
+function catalogDependenciesWithSharedOxcRuntimeDependencies(
+  catalogDependencies: readonly string[],
+  requiresSharedOxcConfiguration: boolean,
+): string[] {
+  const dependencies = [...catalogDependencies];
+
+  if (!requiresSharedOxcConfiguration) {
+    return dependencies;
+  }
+
+  for (const dependency of ["oxfmt", "oxlint"]) {
+    if (!dependencies.includes(dependency)) {
+      dependencies.push(dependency);
+    }
+  }
+
+  return dependencies;
+}
+
 async function planRootUpdates(
   root: string,
   blueprint: ProjectBlueprint,
@@ -535,6 +649,7 @@ async function planRootUpdates(
   workspacePackageGlob: string,
   rootTsconfigReferences: readonly string[],
   catalogDependencies: readonly string[],
+  requiresSharedOxcConfiguration: boolean,
 ): Promise<RootUpdatePlan> {
   const nextBlueprint = blueprintWithPackage(
     blueprint,
@@ -546,10 +661,15 @@ async function planRootUpdates(
       await readFile(path.join(root, "pnpm-workspace.yaml"), "utf8"),
       workspacePackageGlob,
     ),
-    catalogDependencies,
+    catalogDependenciesWithSharedOxcRuntimeDependencies(
+      catalogDependencies,
+      requiresSharedOxcConfiguration,
+    ),
   );
   const rootTsconfig = rootTsconfigWithReferences(
-    await readJson<unknown>(path.join(root, "tsconfig.json")),
+    await readJsonOrDefault<unknown>(path.join(root, "tsconfig.json"), {
+      files: [],
+    }),
     rootTsconfigReferences,
   );
   const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
@@ -559,10 +679,153 @@ async function planRootUpdates(
 
   return {
     blueprint: nextBlueprint,
-    rootPackageJson,
+    rootPackageJson: rootPackageJsonWithSharedOxcRuntimeDependencies(
+      rootPackageJson,
+      requiresSharedOxcConfiguration,
+    ),
     rootTsconfig,
     workspaceText,
   };
+}
+
+async function readTextIfExists(filePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
+async function writeIfMissing(filePath: string, text: string): Promise<void> {
+  if ((await readTextIfExists(filePath)) !== undefined) {
+    return;
+  }
+
+  await writeFile(filePath, text, "utf8");
+}
+
+async function ensureRootOxfmtConfig(
+  root: string,
+  sharedOxcRoot: string,
+): Promise<void> {
+  await writeIfMissing(
+    path.join(root, "oxfmt.config.ts"),
+    await readFile(path.join(sharedOxcRoot, "oxfmt.config.ts"), "utf8"),
+  );
+}
+
+async function ensureRootOxlintConfig(options: {
+  root: string;
+  sharedOxcRoot: string;
+  addedPreset: string;
+}): Promise<void> {
+  const nodeConfig = await readFile(
+    path.join(options.sharedOxcRoot, "node", "oxlint.config.ts"),
+    "utf8",
+  );
+  const vueConfig = await readFile(
+    path.join(options.sharedOxcRoot, "vue", "oxlint.config.ts"),
+    "utf8",
+  );
+  const targetPath = path.join(options.root, "oxlint.config.ts");
+  const currentConfig = await readTextIfExists(targetPath);
+
+  if (currentConfig === undefined) {
+    await writeFile(
+      targetPath,
+      options.addedPreset === "vue-app" ? vueConfig : nodeConfig,
+      "utf8",
+    );
+    return;
+  }
+
+  if (options.addedPreset !== "vue-app" || currentConfig === vueConfig) {
+    return;
+  }
+
+  if (currentConfig === nodeConfig) {
+    await writeFile(targetPath, vueConfig, "utf8");
+    return;
+  }
+
+  throw new Error(
+    "Cannot update root OXC lint configuration for Vue Package Addition: oxlint.config.ts has local changes",
+  );
+}
+
+async function ensureRootOxcConfiguration(options: {
+  root: string;
+  sharedOxcRoot?: string;
+  addedPreset: string;
+}): Promise<void> {
+  if (!options.sharedOxcRoot) {
+    return;
+  }
+
+  await ensureRootOxfmtConfig(options.root, options.sharedOxcRoot);
+  await ensureRootOxlintConfig({
+    root: options.root,
+    sharedOxcRoot: options.sharedOxcRoot,
+    addedPreset: options.addedPreset,
+  });
+}
+
+function gitignoreContainsEntry(text: string, entry: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .some((line) => line.trim() === entry || line.trim() === `${entry}/`);
+}
+
+function gitignoreTextWithEntries(
+  text: string,
+  entries: readonly string[],
+): string {
+  const missingEntries = entries.filter(
+    (entry) => !gitignoreContainsEntry(text, entry),
+  );
+
+  if (missingEntries.length === 0) {
+    return text;
+  }
+
+  const prefix = text.trimEnd();
+  return `${prefix}${prefix.length > 0 ? "\n" : ""}${missingEntries.join("\n")}\n`;
+}
+
+function rootGitignoreEntriesForPackageAddition(
+  preset: string,
+  requiresSharedOxcConfiguration: boolean,
+): string[] {
+  const entries = requiresSharedOxcConfiguration
+    ? ["node_modules", "dist"]
+    : [];
+
+  if (preset === "vue-app") {
+    entries.push("playwright-report", "test-results");
+  }
+
+  return entries;
+}
+
+async function ensureRootGitignoreEntries(
+  root: string,
+  entries: readonly string[],
+): Promise<void> {
+  if (entries.length === 0) {
+    return;
+  }
+
+  const gitignorePath = path.join(root, ".gitignore");
+  const currentText = (await readTextIfExists(gitignorePath)) ?? "";
+  const nextText = gitignoreTextWithEntries(currentText, entries);
+
+  if (nextText !== currentText) {
+    await writeFile(gitignorePath, nextText, "utf8");
+  }
 }
 
 export async function addPackage(options: AddPackageOptions): Promise<void> {
@@ -570,22 +833,35 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
 
   const root = path.resolve(options.cwd);
   const blueprint = await readGeneratedWorkspaceBlueprint(root);
-  const nodeVersion = await readGeneratedRepositoryNodeVersion(root);
-  const projectName = projectNameFromBlueprint(blueprint);
+  const repositoryMetadata = await readGeneratedRepositoryPackageMetadata(root);
+  const projectName = projectNameFromBlueprint(
+    blueprint,
+    repositoryMetadata.projectName,
+  );
   const packageName = `@${projectName}/${options.name}`;
   const packagePath = options.path
     ? validateExplicitPackagePath(options.path)
     : defaultPackagePathForPreset(options.preset, options.name);
   const projection = findBuiltInPresetProjection(options.preset);
-  const packageAddition = projection?.capabilities?.packageAddition;
 
   if (!projection) {
     throw new Error(`Unknown preset for Package Addition: ${options.preset}`);
   }
 
+  if (
+    projection.metadata.packageAdditionSupport !==
+    PackageAdditionSupport.Supported
+  ) {
+    throw new Error(
+      formatUnsupportedPackageAdditionPresetError(options.preset),
+    );
+  }
+
+  const packageAddition = projection.capabilities?.packageAddition;
+
   if (!packageAddition) {
     throw new Error(
-      `Package Addition is not supported by preset: ${options.preset}`,
+      `Preset ${options.preset} declares Package Addition support but has no Package Addition implementation`,
     );
   }
 
@@ -595,8 +871,10 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     packageLeafName: options.name,
     packageName,
     packagePath,
-    nodeVersion,
+    nodeVersion: repositoryMetadata.nodeVersion,
   });
+  const requiresSharedOxcConfiguration =
+    additionPlan.sourceRoots?.sharedOxc !== undefined;
 
   assertNoPackageConflict(blueprint, packageName, additionPlan.packagePath);
 
@@ -612,9 +890,22 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.workspacePackageGlob,
     additionPlan.rootTsconfigReferences,
     packageAdditionCatalogDependencies(additionPlan.operations),
+    requiresSharedOxcConfiguration,
   );
 
   await mkdir(path.join(root, additionPlan.packagePath), { recursive: true });
+  await ensureRootOxcConfiguration({
+    root,
+    sharedOxcRoot: additionPlan.sourceRoots?.sharedOxc,
+    addedPreset: options.preset,
+  });
+  await ensureRootGitignoreEntries(
+    root,
+    rootGitignoreEntriesForPackageAddition(
+      options.preset,
+      requiresSharedOxcConfiguration,
+    ),
+  );
   await renderProject({
     sourceRoot: additionPlan.sourceRoot,
     sourceRoots: additionPlan.sourceRoots,
