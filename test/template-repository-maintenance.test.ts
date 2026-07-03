@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
+import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
+import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 import { builtInPresetProjections } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
@@ -161,6 +163,29 @@ describe("template Repository maintenance", () => {
       );
 
       expectNoStaleInlineDependencyVersions(source);
+    }
+  });
+
+  it("keeps Preset Source Dependency Catalog references backed by maintained versions", () => {
+    const templateCatalog = loadTemplateDependencyCatalog();
+    const manifest = loadBuiltInPresetSourceManifest();
+    const presetReferences = Object.fromEntries(
+      manifest.presets
+        .filter((preset) => preset.generation === "supported")
+        .map((preset) => [preset.name, preset.dependencyCatalog ?? []]),
+    );
+
+    expect(presetReferences).not.toEqual({});
+    for (const [presetName, dependencies] of Object.entries(presetReferences)) {
+      expect(dependencies, `${presetName} declares catalog refs`).not.toEqual(
+        [],
+      );
+      for (const dependency of dependencies) {
+        expect(
+          templateCatalog[dependency],
+          `${presetName} ${dependency}`,
+        ).toMatch(/^\^?\d/);
+      }
     }
   });
 

@@ -49,6 +49,75 @@ describe("Preset Source Manifest validation", () => {
     });
   });
 
+  it("accepts maintained Dependency Catalog entry references", () => {
+    const manifest = validManifest();
+    manifest.presets[0].dependencyCatalog = ["typescript", "valibot"];
+
+    expect(validatePresetSourceManifest(manifest)).toMatchObject({
+      ok: true,
+      value: {
+        presets: [
+          {
+            name: "custom-lib",
+            dependencyCatalog: ["typescript", "valibot"],
+          },
+        ],
+      },
+    });
+  });
+
+  it("reports missing Dependency Catalog entry references with semantic diagnostics", () => {
+    const manifest = validManifest();
+    manifest.presets[0].dependencyCatalog = ["missing-package"];
+
+    expect(
+      validatePresetSourceManifest(manifest, { dependencyCatalog: {} }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].dependencyCatalog",
+          message:
+            "Preset custom-lib references missing Template Dependency Catalog entry: missing-package",
+        },
+      ],
+    });
+  });
+
+  it("rejects inline Dependency Catalog semver specifiers in manifest-shaped references", () => {
+    const manifest = validManifest();
+    manifest.presets[0].dependencyCatalog = ["^6.0.3"];
+
+    expect(validatePresetSourceManifest(manifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].dependencyCatalog[0]",
+          message:
+            "Preset Source Manifests must reference Template Dependency Catalog entries by name, not inline semver specifier ^6.0.3",
+        },
+      ],
+    });
+  });
+
+  it("rejects inline Dependency Catalog semver specifiers in object-shaped declarations", () => {
+    const manifest = validManifest();
+    manifest.presets[0].dependencyCatalog = {
+      typescript: "^6.0.3",
+    };
+
+    expect(validatePresetSourceManifest(manifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].dependencyCatalog.typescript",
+          message:
+            "Preset Source Manifests must reference Template Dependency Catalog entries by name, not inline semver specifier ^6.0.3",
+        },
+      ],
+    });
+  });
+
   it("rejects missing Shared Resource paths through manifest loading", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
     const manifestPath = path.join(workspace, "preset-source.json");
@@ -234,6 +303,76 @@ describe("Preset Source Manifest validation", () => {
         },
       ]),
     );
+    expect(
+      Object.fromEntries(
+        manifest.presets
+          .filter((preset) => preset.generation === "supported")
+          .map((preset) => [preset.name, preset.dependencyCatalog]),
+      ),
+    ).toEqual({
+      "hono-api": [
+        "@hono/node-server",
+        "@types/node",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "tsc-alias",
+        "turbo",
+        "typescript",
+        "vitest",
+      ],
+      "rust-bin": ["turbo"],
+      "ts-lib": [
+        "@types/node",
+        "oxfmt",
+        "oxlint",
+        "turbo",
+        "typescript",
+        "valibot",
+      ],
+      "vue-app": [
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@types/web-bluetooth",
+        "@vitejs/plugin-vue",
+        "@vue/tsconfig",
+        "@vueuse/core",
+        "oxfmt",
+        "oxlint",
+        "pinia",
+        "tailwindcss",
+        "turbo",
+        "typescript",
+        "vite",
+        "vitest",
+        "vue",
+        "vue-tsc",
+      ],
+      "vue-hono-app": [
+        "@hono/node-server",
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@types/web-bluetooth",
+        "@vitejs/plugin-vue",
+        "@vue/tsconfig",
+        "@vueuse/core",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "pinia",
+        "tailwindcss",
+        "tsc-alias",
+        "tsx",
+        "turbo",
+        "typescript",
+        "vite",
+        "vitest",
+        "vue",
+        "vue-tsc",
+      ],
+    });
   });
 
   it("reports duplicate Preset names with an actionable diagnostic", () => {

@@ -1,7 +1,10 @@
 import {
   collectGeneratedManifestCatalogDependencies,
+  loadTemplateDependencyCatalog,
+  renderGeneratedPnpmWorkspaceYaml,
   selectTemplateDependencyCatalogEntries,
 } from "../src/dependency-catalog.js";
+import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 
 describe("Template Dependency Catalog projection", () => {
   it("selects only requested dependency versions in stable dependency order", () => {
@@ -48,5 +51,36 @@ describe("Template Dependency Catalog projection", () => {
     ).toThrow(
       "Generated manifest dependency valibot must use catalog:, got ^1.4.2",
     );
+  });
+
+  it("renders Dependency Catalog versions required by built-in Preset Source declarations", () => {
+    const dependencies = [
+      ...new Set(
+        loadBuiltInPresetSourceManifest().presets.flatMap(
+          (preset) => preset.dependencyCatalog ?? [],
+        ),
+      ),
+    ].sort();
+    const templateCatalog = loadTemplateDependencyCatalog();
+    const workspaceYaml = renderGeneratedPnpmWorkspaceYaml({ dependencies });
+    const selectedCatalog =
+      selectTemplateDependencyCatalogEntries(dependencies);
+
+    expect(selectedCatalog).toEqual(
+      Object.fromEntries(
+        dependencies.map((dependency) => [
+          dependency,
+          templateCatalog[dependency],
+        ]),
+      ),
+    );
+
+    for (const [dependency, version] of Object.entries(selectedCatalog)) {
+      const key = dependency.startsWith("@")
+        ? JSON.stringify(dependency)
+        : dependency;
+
+      expect(workspaceYaml).toContain(`${key}: ${version}`);
+    }
   });
 });

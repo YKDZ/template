@@ -42,6 +42,14 @@
         "github-actions",
         "dependabot"
       ],
+      "dependencyCatalog": [
+        "@types/node",
+        "oxfmt",
+        "oxlint",
+        "turbo",
+        "typescript",
+        "valibot"
+      ],
       "source": {
         "roots": ["ts-lib/.github", "ts-lib/src"],
         "sharedResources": [
@@ -69,6 +77,17 @@
         "devcontainer",
         "github-actions",
         "dependabot"
+      ],
+      "dependencyCatalog": [
+        "@hono/node-server",
+        "@types/node",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "tsc-alias",
+        "turbo",
+        "typescript",
+        "vitest"
       ],
       "source": {
         "roots": ["hono-api/.github", "hono-api/src", "hono-api/test"],
@@ -98,6 +117,25 @@
         "devcontainer",
         "github-actions",
         "dependabot"
+      ],
+      "dependencyCatalog": [
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@types/web-bluetooth",
+        "@vitejs/plugin-vue",
+        "@vue/tsconfig",
+        "@vueuse/core",
+        "oxfmt",
+        "oxlint",
+        "pinia",
+        "tailwindcss",
+        "turbo",
+        "typescript",
+        "vite",
+        "vitest",
+        "vue",
+        "vue-tsc"
       ],
       "source": {
         "roots": ["vue-app/.github", "vue-app/src", "vue-app/test"],
@@ -133,6 +171,29 @@
         "devcontainer",
         "github-actions",
         "dependabot"
+      ],
+      "dependencyCatalog": [
+        "@hono/node-server",
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@types/web-bluetooth",
+        "@vitejs/plugin-vue",
+        "@vue/tsconfig",
+        "@vueuse/core",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "pinia",
+        "tailwindcss",
+        "tsc-alias",
+        "tsx",
+        "turbo",
+        "typescript",
+        "vite",
+        "vitest",
+        "vue",
+        "vue-tsc"
       ],
       "source": {
         "roots": [
@@ -176,6 +237,7 @@
         "rustfmt-clippy",
         "cargo-test"
       ],
+      "dependencyCatalog": ["turbo"],
       "source": {
         "roots": ["rust-bin/.github", "rust-bin/src"],
         "files": ["rust-bin/rust-toolchain.toml", "rust-bin/rustfmt.toml"],

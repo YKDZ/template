@@ -19,6 +19,10 @@ import type {
   ValidationIssue,
   ValidationResult,
 } from "./declarations.js";
+import {
+  loadTemplateDependencyCatalog,
+  type TemplateDependencyCatalog,
+} from "./dependency-catalog.js";
 import { PackageAdditionSupport } from "./package-addition-support.js";
 import { packageTemplateRoot } from "./runtime-paths.js";
 
@@ -29,6 +33,7 @@ export type PresetSourceManifestPresetSource = {
 };
 
 export type PresetSourceManifestPreset = BuiltInPreset & {
+  dependencyCatalog?: string[];
   source?: PresetSourceManifestPresetSource;
 };
 
@@ -46,6 +51,7 @@ export type PresetSourceManifest = {
 
 export type PresetSourceManifestValidationOptions = {
   readonly sourceRoot?: string;
+  readonly dependencyCatalog?: TemplateDependencyCatalog;
 };
 
 const featureNames = [
@@ -127,6 +133,11 @@ export const presetSourceManifestJsonSchema = {
             items: { enum: featureNames },
             uniqueItems: true,
           },
+          dependencyCatalog: {
+            type: "array",
+            items: { type: "string", minLength: 1 },
+            uniqueItems: true,
+          },
           source: {
             type: "object",
             additionalProperties: false,
@@ -194,6 +205,7 @@ const presetSourceManifestSchema = v.strictObject({
         ),
         packageAdditionSupport: packageAdditionSupportSchema,
         features: v.array(featureNameSchema),
+        dependencyCatalog: v.optional(v.array(nonEmptyString), []),
         source: v.optional(presetSourceManifestPresetSourceSchema),
       }),
     ),
@@ -300,7 +312,25 @@ function duplicatePresetMetadataArrayIssues(
       `$.presets[${index}].supportedProjectKinds`,
     ),
     ...duplicateValueIssues(preset.features, `$.presets[${index}].features`),
+    ...duplicateValueIssues(
+      preset.dependencyCatalog ?? [],
+      `$.presets[${index}].dependencyCatalog`,
+    ),
   ]);
+}
+
+function dependencyCatalogReferenceIssues(
+  presets: readonly PresetSourceManifestPreset[],
+  dependencyCatalog: TemplateDependencyCatalog,
+): ValidationIssue[] {
+  return presets.flatMap((preset, presetIndex) =>
+    (preset.dependencyCatalog ?? [])
+      .filter((dependency) => dependencyCatalog[dependency] === undefined)
+      .map((dependency) => ({
+        path: `$.presets[${presetIndex}].dependencyCatalog`,
+        message: `Preset ${preset.name} references missing Template Dependency Catalog entry: ${dependency}`,
+      })),
+  );
 }
 
 function unsupportedProjectShapeIssues(
@@ -401,6 +431,57 @@ function sharedResourcePathIssues(
     }
 
     return [];
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDependencySemverSpecifier(value: string): boolean {
+  return /^(?:[~^]|[<>=]=?)?\d+(?:\.\d+){0,2}(?:[-+][\w.-]+)?(?:\s|$|\|\|)/.test(
+    value,
+  );
+}
+
+function inlineDependencyCatalogSpecifierIssues(
+  input: unknown,
+): ValidationIssue[] {
+  if (!isRecord(input) || !Array.isArray(input.presets)) {
+    return [];
+  }
+
+  return input.presets.flatMap((preset, presetIndex) => {
+    if (!isRecord(preset)) {
+      return [];
+    }
+
+    if (Array.isArray(preset.dependencyCatalog)) {
+      return preset.dependencyCatalog.flatMap((specifier, dependencyIndex) =>
+        typeof specifier === "string" && isDependencySemverSpecifier(specifier)
+          ? [
+              {
+                path: `$.presets[${presetIndex}].dependencyCatalog[${dependencyIndex}]`,
+                message: `Preset Source Manifests must reference Template Dependency Catalog entries by name, not inline semver specifier ${specifier}`,
+              },
+            ]
+          : [],
+      );
+    }
+
+    if (!isRecord(preset.dependencyCatalog)) {
+      return [];
+    }
+
+    return Object.entries(preset.dependencyCatalog)
+      .filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === "string" && isDependencySemverSpecifier(entry[1]),
+      )
+      .map(([dependency, specifier]) => ({
+        path: `$.presets[${presetIndex}].dependencyCatalog.${dependency}`,
+        message: `Preset Source Manifests must reference Template Dependency Catalog entries by name, not inline semver specifier ${specifier}`,
+      }));
   });
 }
 
@@ -538,6 +619,11 @@ export function validatePresetSourceManifest(
   input: unknown,
   options: PresetSourceManifestValidationOptions = {},
 ): ValidationResult<PresetSourceManifest> {
+  const inlineDependencyIssues = inlineDependencyCatalogSpecifierIssues(input);
+  if (inlineDependencyIssues.length > 0) {
+    return { ok: false, issues: inlineDependencyIssues };
+  }
+
   const result = v.safeParse(presetSourceManifestSchema, input);
 
   if (!result.success) {
@@ -552,6 +638,10 @@ export function validatePresetSourceManifest(
     ...duplicatePresetNameIssues(result.output.presets),
     ...duplicatePresetMetadataArrayIssues(result.output.presets),
     ...unsupportedProjectShapeIssues(result.output.presets),
+    ...dependencyCatalogReferenceIssues(
+      result.output.presets,
+      options.dependencyCatalog ?? loadTemplateDependencyCatalog(),
+    ),
     ...sharedResourcePathIssues(result.output, options.sourceRoot),
     ...presetSourceReferenceIssues(result.output, options.sourceRoot),
   ];
@@ -576,6 +666,7 @@ export function validatePresetSourceManifest(
           ...preset.supportedProjectKinds,
         ] as ProjectKind[],
         features: [...preset.features] as FeatureName[],
+        dependencyCatalog: [...(preset.dependencyCatalog ?? [])],
         source: preset.source
           ? {
               roots: [...preset.source.roots],
