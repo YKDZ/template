@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import { parse } from "yaml";
 
 import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
 import {
@@ -64,6 +65,23 @@ describe("Project Kit Root Check", () => {
     expect(workflow.indexOf("run: pnpm run check\n")).toBeLessThan(
       workflow.indexOf("run: pnpm run check:fixtures"),
     );
+    const parsedWorkflow = parse(workflow) as {
+      jobs: Record<string, { steps: { name?: string; run?: string }[] }>;
+    };
+    const runSteps = parsedWorkflow.jobs.check.steps.filter((step) =>
+      Boolean(step.run),
+    );
+    const packageCheckIndex = runSteps.findIndex(
+      (step) => step.name === "Check package" && step.run === "pnpm run check",
+    );
+    const fixtureMatrixCheckIndex = runSteps.findIndex(
+      (step) =>
+        step.name === "Check fixture matrix" &&
+        step.run === "pnpm run check:fixtures",
+    );
+
+    expect(packageCheckIndex).toBeGreaterThanOrEqual(0);
+    expect(fixtureMatrixCheckIndex).toBeGreaterThan(packageCheckIndex);
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).not.toContain("pnpm publish");
   });

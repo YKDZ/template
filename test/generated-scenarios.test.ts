@@ -15,6 +15,13 @@ import type { PresetSourceManifest } from "../src/preset-source.js";
 import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 import { findBuiltInPresetProjection } from "../templates/registry.js";
 
+function matrixPairKey(input: {
+  readonly basePreset: string;
+  readonly addedPreset: string;
+}): string {
+  return `${input.basePreset}\0${input.addedPreset}`;
+}
+
 function minimalManifest(): PresetSourceManifest {
   return {
     schemaVersion: 1,
@@ -101,12 +108,6 @@ describe("generated scenarios", () => {
         {
           set: "package-addition-matrix",
           basePreset: "base",
-          id: "base",
-          label: "base",
-        },
-        {
-          set: "package-addition-matrix",
-          basePreset: "base",
           addedPreset: "addon",
           id: "base-add-addon",
           label: "base + addon",
@@ -133,6 +134,20 @@ describe("generated scenarios", () => {
     });
   });
 
+  it("excludes init-only scenarios from the Package Addition matrix", () => {
+    const selection = selectGeneratedScenarios(
+      minimalManifest(),
+      "package-addition-matrix",
+    );
+
+    expect(selection.runnable.every((scenario) => scenario.addedPreset)).toBe(
+      true,
+    );
+    expect(selection.runnable.map((scenario) => scenario.id)).not.toContain(
+      "base",
+    );
+  });
+
   it("uses manifest-declared Package Addition leaf names", () => {
     expect(packageLeafNameForAddedPreset(minimalManifest(), "addon")).toBe(
       "fixture-addon",
@@ -148,12 +163,62 @@ describe("generated scenarios", () => {
     expect(selection.runnable.map((scenario) => scenario.id)).toContain(
       "vue-hono-app-add-ts-lib-link-from-apps-web",
     );
+    expect(selection.runnable.every((scenario) => scenario.addedPreset)).toBe(
+      true,
+    );
     expect(
       selection.skipped.map((scenario) => [scenario.id, scenario.reason]),
     ).toContainEqual([
       "ts-lib-add-rust-bin",
       "rust-bin is an initialization-only native binary preset.",
     ]);
+  });
+
+  it("covers the built-in Package Addition matrix from the Fixture Matrix Contract", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const contract = manifest.fixtureMatrix;
+
+    expect(contract).toBeDefined();
+
+    const initSupportedPresets = contract!.initSupport.map(
+      (support) => support.preset,
+    );
+    const packageAdditionSupportedPresets = new Set(
+      contract!.packageAdditionSupport.map((support) => support.preset),
+    );
+    const expectedPairs = new Set(
+      initSupportedPresets.flatMap((basePreset) =>
+        initSupportedPresets.map((addedPreset) =>
+          matrixPairKey({ basePreset, addedPreset }),
+        ),
+      ),
+    );
+    const selection = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    );
+    const runnablePairs = new Set(
+      selection.runnable.map((scenario) =>
+        matrixPairKey({
+          basePreset: scenario.basePreset,
+          addedPreset: scenario.addedPreset!,
+        }),
+      ),
+    );
+    const skippedPairs = new Set(selection.skipped.map(matrixPairKey));
+
+    expect(new Set([...runnablePairs, ...skippedPairs])).toEqual(expectedPairs);
+    for (const scenario of selection.runnable) {
+      expect(packageAdditionSupportedPresets.has(scenario.addedPreset!)).toBe(
+        true,
+      );
+    }
+    for (const scenario of selection.skipped) {
+      expect(packageAdditionSupportedPresets.has(scenario.addedPreset)).toBe(
+        false,
+      );
+      expect(scenario.reason.length).toBeGreaterThan(0);
+    }
   });
 
   it("wraps runner failures with the preset combination label", () => {

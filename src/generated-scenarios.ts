@@ -193,7 +193,7 @@ export function selectGeneratedScenarios(
   }));
 
   return {
-    runnable: [...initScenarios, ...matrixScenarios],
+    runnable: matrixScenarios,
     skipped,
   };
 }
