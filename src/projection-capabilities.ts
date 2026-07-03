@@ -11,7 +11,9 @@ import {
 import {
   browserTestToolLayer,
   checkedDockerfileFirstNodePnpmDevcontainer,
+  dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
+  rustToolLayer,
 } from "./devcontainer.js";
 import {
   editorCustomizationForCapabilities,
@@ -40,6 +42,7 @@ import { packageTemplateRoot } from "./runtime-paths.js";
 export type ProjectionCapabilityKind =
   | "workspace-library-package"
   | "workspace-node-packages"
+  | "rust-binary-workspace"
   | "strict-typescript-root"
   | "oxc-format-lint"
   | "node-pnpm-devcontainer"
@@ -71,6 +74,12 @@ export type WorkspaceNodePackagesCapabilityDeclaration = {
   }[];
 };
 
+export type RustBinaryWorkspaceCapabilityDeclaration = {
+  readonly kind: "rust-binary-workspace";
+  readonly workspacePackageGlob: "packages/*";
+  readonly sourceFiles: readonly string[];
+};
+
 export type StrictTypescriptRootCapabilityDeclaration = {
   readonly kind: "strict-typescript-root";
 };
@@ -90,6 +99,7 @@ export type GithubMaintenanceCapabilityDeclaration = {
 export type ProjectionCapabilityDeclaration =
   | WorkspaceLibraryPackageCapabilityDeclaration
   | WorkspaceNodePackagesCapabilityDeclaration
+  | RustBinaryWorkspaceCapabilityDeclaration
   | StrictTypescriptRootCapabilityDeclaration
   | OxcFormatLintCapabilityDeclaration
   | NodePnpmDevcontainerCapabilityDeclaration
@@ -134,6 +144,7 @@ type ProjectionCompositionState = {
   dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"];
   package?: WorkspaceLibraryPackageCapabilityDeclaration;
   nodeWorkspace?: WorkspaceNodePackagesCapabilityDeclaration;
+  rustWorkspace?: RustBinaryWorkspaceCapabilityDeclaration;
   editorCustomizationCapabilities: EditorCustomizationCapability[];
   operationFactories: ProjectionOperationFactory[];
   flags: Partial<Record<ProjectionPlanCapabilityFlag, true>>;
@@ -142,6 +153,7 @@ type ProjectionCompositionState = {
 const projectionCapabilityKinds = [
   "workspace-library-package",
   "workspace-node-packages",
+  "rust-binary-workspace",
   "strict-typescript-root",
   "oxc-format-lint",
   "node-pnpm-devcontainer",
@@ -212,6 +224,7 @@ const exactCapabilityKeys: Record<ProjectionCapabilityKind, readonly string[]> =
       "packages",
       "packageLinks",
     ],
+    "rust-binary-workspace": ["kind", "workspacePackageGlob", "sourceFiles"],
     "strict-typescript-root": ["kind"],
     "oxc-format-lint": ["kind"],
     "node-pnpm-devcontainer": ["kind"],
@@ -251,6 +264,45 @@ const capabilityInterpreters = {
         state.editorCustomizationCapabilities.push("vue", "tailwind");
       }
       state.editorCustomizationCapabilities.push("vitest");
+    },
+  },
+  "rust-binary-workspace": {
+    kind: "rust-binary-workspace",
+    contribute({ capability, state }) {
+      state.rustWorkspace = capability;
+      state.sourceRoot = templateSourceRootForPreset("rust-bin");
+      state.sourceRoots.sharedDevcontainer = sharedDevcontainerSourceRoot();
+      state.rootCheckComponents.push({
+        kind: "turbo-package-check",
+        owner: workspaceGlobBoundary(capability.workspacePackageGlob),
+      });
+      state.rootFixComponents.push({
+        kind: "turbo-package-fix",
+        owner: workspaceGlobBoundary(capability.workspacePackageGlob),
+      });
+      state.packageCheckComponents.push(
+        { kind: "rustfmt-check", owner: workspacePackageBoundary },
+        { kind: "cargo-clippy", owner: workspacePackageBoundary },
+        { kind: "cargo-test", owner: workspacePackageBoundary },
+      );
+      state.packageFixComponents.push({
+        kind: "rustfmt-write",
+        owner: workspacePackageBoundary,
+      });
+      state.dependencyMaintenanceEcosystems.push(
+        "npm",
+        "cargo",
+        "github-actions",
+        "docker",
+        "rust-toolchain",
+      );
+      state.editorCustomizationCapabilities.push("rust-tooling");
+      state.flags.rootCheck = true;
+      state.flags.fixCommand = true;
+      state.flags.githubActions = true;
+      state.flags.dependabot = true;
+      state.flags.devcontainer = true;
+      state.operationFactories.push(rustBinaryWorkspaceOperations);
     },
   },
   "strict-typescript-root": {
@@ -459,6 +511,19 @@ export function validateProjectionCapabilities(
       return;
     }
 
+    if (kind === "rust-binary-workspace") {
+      const workspaceCapability = parseRustBinaryWorkspaceCapability(
+        capability,
+        pathPrefix,
+      );
+      if (Array.isArray(workspaceCapability)) {
+        issues.push(...workspaceCapability);
+        return;
+      }
+      capabilities.push(workspaceCapability);
+      return;
+    }
+
     capabilities.push({ kind } as ProjectionCapabilityDeclaration);
   });
 
@@ -551,6 +616,13 @@ export function interpretPresetProjectionDeclaration(options: {
   const packageScriptsByPath = packageScriptsByWorkspacePath(state);
   const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
     ecosystems: uniqueValues(state.dependencyMaintenanceEcosystems),
+    ...(state.rustWorkspace === undefined
+      ? {}
+      : {
+          directories: {
+            cargo: `/${rustWorkspacePackagePath(options.context)}`,
+          },
+        }),
     interval: "weekly",
   };
 
@@ -918,6 +990,47 @@ function parseWorkspaceNodePackageLinks(
   });
 }
 
+function parseRustBinaryWorkspaceCapability(
+  capability: Record<string, unknown>,
+  pathPrefix: string,
+): RustBinaryWorkspaceCapabilityDeclaration | ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  if (capability.workspacePackageGlob !== "packages/*") {
+    issues.push({
+      path: `${pathPrefix}.workspacePackageGlob`,
+      message:
+        "rust-binary-workspace currently supports workspacePackageGlob: packages/*",
+    });
+  }
+
+  if (!Array.isArray(capability.sourceFiles)) {
+    issues.push({
+      path: `${pathPrefix}.sourceFiles`,
+      message: "rust-binary-workspace sourceFiles must be a non-empty array",
+    });
+  } else if (
+    capability.sourceFiles.length === 0 ||
+    !capability.sourceFiles.every(isNonEmptyString)
+  ) {
+    issues.push({
+      path: `${pathPrefix}.sourceFiles`,
+      message:
+        "rust-binary-workspace sourceFiles must be a non-empty array of paths",
+    });
+  }
+
+  if (issues.length > 0) {
+    return issues;
+  }
+
+  return {
+    kind: "rust-binary-workspace",
+    workspacePackageGlob: "packages/*",
+    sourceFiles: capability.sourceFiles as string[],
+  };
+}
+
 function duplicateCapabilityIssues(
   capabilities: readonly ProjectionCapabilityDeclaration[],
 ): ValidationIssue[] {
@@ -945,10 +1058,26 @@ function capabilityCompositionIssues(
 ): ValidationIssue[] {
   const kinds = new Set(capabilities.map((capability) => capability.kind));
   const issues: ValidationIssue[] = [];
+  const companionKinds = uniqueValues(
+    capabilities
+      .map((capability) => capability.kind)
+      .filter((kind) => kind !== "rust-binary-workspace"),
+  );
+
+  if (kinds.has("rust-binary-workspace") && companionKinds.length > 0) {
+    issues.push({
+      path: "$.capabilities",
+      message:
+        "rust-binary-workspace is a complete domain capability and must be selected by itself; remove companion Projection Capabilities: " +
+        companionKinds.join(", "),
+    });
+    return issues;
+  }
 
   if (
     !kinds.has("workspace-library-package") &&
-    !kinds.has("workspace-node-packages")
+    !kinds.has("workspace-node-packages") &&
+    !kinds.has("rust-binary-workspace")
   ) {
     issues.push({
       path: "$.capabilities",
@@ -978,7 +1107,7 @@ function capabilityCompositionIssues(
   }
 
   for (const requirement of requiredPlanCapabilityProviders) {
-    if (!kinds.has(requirement.kind)) {
+    if (!kinds.has(requirement.kind) && !kinds.has("rust-binary-workspace")) {
       issues.push({
         path: "$.capabilities",
         message: `Projection Capability composition must include ${requirement.kind} to provide ${requirement.label}`,
@@ -1020,13 +1149,31 @@ function completePlanCapabilityFlags(
 function packageScriptsByWorkspacePath(
   state: ProjectionCompositionState,
 ): ReadonlyMap<string, Record<string, string>> {
-  if (state.package === undefined) {
+  if (state.package === undefined && state.rustWorkspace === undefined) {
     return new Map();
+  }
+
+  if (state.rustWorkspace !== undefined) {
+    return new Map([
+      [
+        state.rustWorkspace.workspacePackageGlob,
+        projectPackageScripts(
+          {
+            components: state.packageCheckComponents,
+            environmentNeeds: [],
+          },
+          {
+            components: state.packageFixComponents,
+          },
+          state.packageScriptFragments,
+        ),
+      ],
+    ]);
   }
 
   return new Map([
     [
-      state.package.workspacePackageGlob,
+      state.package!.workspacePackageGlob,
       projectPackageScripts(
         {
           components: state.packageCheckComponents,
@@ -1047,6 +1194,7 @@ function workspaceBoundaryForState(
   return workspaceGlobBoundary(
     state.nodeWorkspace?.workspacePackageGlob ??
       state.package?.workspacePackageGlob ??
+      state.rustWorkspace?.workspacePackageGlob ??
       "packages/*",
   );
 }
@@ -1127,6 +1275,29 @@ function workspacePackageName(
     packageDefinition?.name ??
     `@${context.projectName.value}/${context.projectName.value}`
   );
+}
+
+function cargoPackageNameFromProjectName(projectName: string): string {
+  const slug = projectName
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || "rust-bin";
+}
+
+function rustProjectName(context: GenerationContext): string {
+  return cargoPackageNameFromProjectName(context.projectName.value);
+}
+
+function rustWorkspacePackagePath(context: GenerationContext): string {
+  return `packages/${rustProjectName(context)}`;
+}
+
+function rustWorkspacePackageName(context: GenerationContext): string {
+  return `${rustProjectName(context)}-native`;
 }
 
 function packageLinkPlanFor(
@@ -1362,6 +1533,84 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
   };
 }
 
+function rustCargoToml(projectName: string): string {
+  return [
+    "[package]",
+    `name = "${projectName}"`,
+    'version = "0.1.0"',
+    'edition = "2024"',
+    "",
+    "[dependencies]",
+    "",
+    "[lints]",
+    "workspace = true",
+    "",
+    "[workspace]",
+    'members = ["."]',
+    'resolver = "3"',
+    "",
+    "[workspace.lints.rust]",
+    'unsafe_code = "forbid"',
+    "",
+    "[workspace.lints.clippy]",
+    'all = "deny"',
+    'pedantic = "deny"',
+    'nursery = "deny"',
+    "",
+    "[profile.release]",
+    'strip = "symbols"',
+    'lto = "thin"',
+    "codegen-units = 1",
+    "",
+  ].join("\n");
+}
+
+function rustCargoLock(projectName: string): string {
+  return [
+    "# This file is automatically @generated by Cargo.",
+    "# It is not intended for manual editing.",
+    "version = 4",
+    "",
+    "[[package]]",
+    `name = "${projectName}"`,
+    'version = "0.1.0"',
+    "",
+  ].join("\n");
+}
+
+function rustRootPackageJson(
+  context: GenerationContext,
+  packageScripts: Record<string, string>,
+  state: ProjectionCompositionState,
+): Record<string, unknown> {
+  return {
+    name: rustProjectName(context),
+    version: "0.0.0",
+    private: true,
+    scripts: packageScripts,
+    devDependencies: catalogDependencies(state.rootDevDependencies),
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function rustWorkspacePackageJson(
+  context: GenerationContext,
+  scripts: Record<string, string>,
+): Record<string, unknown> {
+  return {
+    name: rustWorkspacePackageName(context),
+    version: "0.0.0",
+    private: true,
+    scripts,
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+  };
+}
+
 function workspaceLibraryPackageOperations({
   context,
   state,
@@ -1463,6 +1712,174 @@ function workspaceLibraryPackageOperations({
       kind: "writeJson",
       to: ".template/generated-by.json",
       value: generationRecord(context),
+    },
+  ];
+}
+
+function rustBinaryWorkspaceOperations({
+  context,
+  state,
+  packageScripts,
+  packageScriptsByPath,
+}: {
+  readonly context: GenerationContext;
+  readonly state: ProjectionCompositionState;
+  readonly packageScripts: Record<string, string>;
+  readonly packageScriptsByPath: ReadonlyMap<string, Record<string, string>>;
+}): RenderOperation[] {
+  if (state.rustWorkspace === undefined) {
+    throw new Error("rust-binary-workspace capability state is missing");
+  }
+
+  const capability = state.rustWorkspace;
+  const packagePath = rustWorkspacePackagePath(context);
+  const workspacePackageScripts = packageScriptsByPath.get(
+    capability.workspacePackageGlob,
+  );
+
+  if (workspacePackageScripts === undefined) {
+    throw new Error(
+      `Missing package scripts for ${capability.workspacePackageGlob}`,
+    );
+  }
+
+  const rootManifest = rustRootPackageJson(context, packageScripts, state);
+  const packageManifest = rustWorkspacePackageJson(
+    context,
+    workspacePackageScripts,
+  );
+  const rustLayer = rustToolLayer();
+  const editorCustomization = editorCustomizationForCapabilities(
+    state.editorCustomizationCapabilities,
+  );
+  const developmentContainer = dockerfileFirstRustPnpmDevcontainer({
+    name: context.projectName.value,
+    nodeLayer: nodePnpmToolLayer({
+      nodeVersion: context.toolchain.nodeLtsMajor.value,
+      packageManagerPin: context.toolchain.packageManagerPin.value,
+    }),
+    rustLayer,
+    extensions: editorCustomization.extensions,
+    settings: editorCustomization.settings,
+  });
+
+  return [
+    {
+      kind: "writeJson",
+      to: "package.json",
+      value: rootManifest,
+    },
+    {
+      kind: "writeText",
+      to: "pnpm-workspace.yaml",
+      text: renderGeneratedPnpmWorkspaceYaml({
+        packages: [capability.workspacePackageGlob],
+        dependencies: collectGeneratedManifestCatalogDependencies([
+          rootManifest,
+          packageManifest,
+        ]),
+      }),
+    },
+    {
+      kind: "writeJson",
+      to: "turbo.json",
+      value: {
+        tasks: {
+          check: {},
+          fix: {
+            cache: false,
+          },
+        },
+      },
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/package.json`,
+      value: packageManifest,
+    },
+    {
+      kind: "writeText",
+      to: `${packagePath}/Cargo.toml`,
+      text: rustCargoToml(rustProjectName(context)),
+    },
+    {
+      kind: "writeText",
+      to: `${packagePath}/Cargo.lock`,
+      text: rustCargoLock(rustProjectName(context)),
+    },
+    {
+      kind: "copyFile",
+      from: "rustfmt.toml",
+      to: `${packagePath}/rustfmt.toml`,
+    },
+    {
+      kind: "writeTextTemplate",
+      from: "rust-toolchain.toml",
+      to: "rust-toolchain.toml",
+      replacements: {
+        RUST_TOOLCHAIN: rustLayer.toolchain,
+      },
+    },
+    {
+      kind: "writeText",
+      to: ".gitignore",
+      text: [
+        "target",
+        "node_modules",
+        "dist",
+        ".env",
+        ".template/",
+        ".pnpm-store/",
+        "",
+      ].join("\n"),
+    },
+    ...capability.sourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${packagePath}/${sourceFile}`,
+    })),
+    {
+      kind: "writeJson",
+      to: ".template/blueprint.json",
+      value: context.blueprint,
+    },
+    {
+      kind: "writeJson",
+      to: ".template/generated-by.json",
+      value: generationRecord(context),
+    },
+    {
+      kind: "writeJson",
+      to: ".devcontainer/devcontainer.json",
+      value: developmentContainer.devcontainer,
+    },
+    {
+      ...developmentContainer.dockerfileOperation!,
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/extensions.json",
+      value: {
+        recommendations: editorCustomization.extensions,
+      },
+    },
+    {
+      kind: "writeJson",
+      to: ".vscode/settings.json",
+      value: editorCustomization.settings,
+    },
+    {
+      kind: "copyFile",
+      from: ".github/workflows/check.yml",
+      to: ".github/workflows/check.yml",
+    },
+    {
+      kind: "writeTextTemplate",
+      from: ".github/dependabot.yml",
+      to: ".github/dependabot.yml",
+      replacements: {
+        CARGO_PACKAGE_DIRECTORY: `/${packagePath}`,
+      },
     },
   ];
 }
@@ -2044,7 +2461,7 @@ function templateSourceRoot(
 }
 
 function templateSourceRootForPreset(
-  sourcePreset: "hono-api" | "ts-lib" | "vue-app" | "vue-hono-app",
+  sourcePreset: "hono-api" | "rust-bin" | "ts-lib" | "vue-app" | "vue-hono-app",
 ): string {
   return packageTemplateRoot(
     path.dirname(fileURLToPath(import.meta.url)),

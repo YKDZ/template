@@ -29,12 +29,7 @@ function builtInManifestReferencedSourceFiles(): string[] {
 }
 
 function builtInProjectionSourceFile(presetName: string): string {
-  return path.join(
-    repoRoot,
-    presetName === "rust-bin"
-      ? `templates/${presetName}/projection.ts`
-      : "src/projection-capabilities.ts",
-  );
+  return path.join(repoRoot, "src/projection-capabilities.ts");
 }
 
 function minimalPlan(
@@ -1239,10 +1234,7 @@ describe("Template Boundary Check", () => {
       projections: [
         {
           name: "rust-bin",
-          sourceFilePath: path.join(
-            repoRoot,
-            "templates/rust-bin/projection.ts",
-          ),
+          sourceFilePath: path.join(repoRoot, "src/projection-capabilities.ts"),
           plan,
         },
       ],

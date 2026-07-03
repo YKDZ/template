@@ -406,6 +406,82 @@ describe("Projection Capability declarations", () => {
     await expectFile(path.join(targetDir, "apps/web/src/api.ts"));
   });
 
+  it("renders the rust-bin built-in declaration into expected public generated files", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "rust-bin",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await presetContext("rust-bin");
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: preset!.projection!,
+      context,
+    });
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const rootPackageJson = await readJson(
+      path.join(targetDir, "package.json"),
+    );
+    const packageJson = await readJson(
+      path.join(targetDir, "packages", "demo-rust-bin", "package.json"),
+    );
+    const cargoToml = await readFile(
+      path.join(targetDir, "packages", "demo-rust-bin", "Cargo.toml"),
+      "utf8",
+    );
+    const cargoLock = await readFile(
+      path.join(targetDir, "packages", "demo-rust-bin", "Cargo.lock"),
+      "utf8",
+    );
+    const dependabot = await readFile(
+      path.join(targetDir, ".github", "dependabot.yml"),
+      "utf8",
+    );
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer", "Dockerfile"),
+      "utf8",
+    );
+
+    expect(rootPackageJson).toMatchObject({
+      name: "demo-rust-bin",
+      scripts: {
+        check: "turbo run check --filter './packages/*'",
+        fix: "turbo run fix --filter './packages/*'",
+      },
+      devDependencies: {
+        turbo: "catalog:",
+      },
+      packageManager: "pnpm@11.2.3",
+    });
+    expect(packageJson).toMatchObject({
+      name: "demo-rust-bin-native",
+      scripts: {
+        check:
+          "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+        fix: "cargo fmt --all",
+      },
+    });
+    expect(cargoToml).toContain('name = "demo-rust-bin"');
+    expect(cargoToml).toContain("[workspace.lints.clippy]");
+    expect(cargoLock).toContain('name = "demo-rust-bin"');
+    expect(dependabot).toContain('directory: "/packages/demo-rust-bin"');
+    expect(devcontainerDockerfile).toContain("RUSTUP_HOME");
+    await expectFile(
+      path.join(targetDir, "packages/demo-rust-bin/src/main.rs"),
+    );
+    await expectFile(
+      path.join(targetDir, "packages/demo-rust-bin/rustfmt.toml"),
+    );
+    await expectFile(path.join(targetDir, "rust-toolchain.toml"));
+  });
+
   it("rejects unknown Projection Capability kinds with semantic diagnostics", () => {
     expect(
       validateProjectionCapabilities({
@@ -421,6 +497,30 @@ describe("Projection Capability declarations", () => {
         {
           path: "$.capabilities[0].kind",
           message: "Unknown Projection Capability kind: write-my-private-file",
+        },
+      ],
+    });
+  });
+
+  it("rejects rust-binary-workspace mixed with companion capabilities", () => {
+    expect(
+      validateProjectionCapabilities({
+        capabilities: [
+          {
+            kind: "rust-binary-workspace",
+            workspacePackageGlob: "packages/*",
+            sourceFiles: ["src/main.rs"],
+          },
+          { kind: "github-maintenance" },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities",
+          message:
+            "rust-binary-workspace is a complete domain capability and must be selected by itself; remove companion Projection Capabilities: github-maintenance",
         },
       ],
     });

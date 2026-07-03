@@ -220,6 +220,20 @@ export const presetSourceManifestJsonSchema = {
                     {
                       type: "object",
                       additionalProperties: false,
+                      required: ["kind", "workspacePackageGlob", "sourceFiles"],
+                      properties: {
+                        kind: { const: "rust-binary-workspace" },
+                        workspacePackageGlob: { const: "packages/*" },
+                        sourceFiles: {
+                          type: "array",
+                          minItems: 1,
+                          items: { type: "string", minLength: 1 },
+                        },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
                       required: ["kind"],
                       properties: {
                         kind: { const: "strict-typescript-root" },

@@ -432,6 +432,26 @@ describe("Preset Source Manifest validation", () => {
         "vue-tsc",
       ],
     });
+
+    const rustPreset = manifest.presets.find(
+      (preset) => preset.name === "rust-bin",
+    );
+    expect(rustPreset).toMatchObject({
+      projection: {
+        capabilities: [
+          {
+            kind: "rust-binary-workspace",
+            workspacePackageGlob: "packages/*",
+            sourceFiles: ["src/main.rs"],
+          },
+        ],
+      },
+      source: {
+        roots: ["rust-bin/.github", "rust-bin/src"],
+        files: ["rust-bin/rust-toolchain.toml", "rust-bin/rustfmt.toml"],
+        sharedResources: ["shared-devcontainer", "shared-editor-customization"],
+      },
+    });
   });
 
   it("reports duplicate Preset names with an actionable diagnostic", () => {
