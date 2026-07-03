@@ -891,6 +891,11 @@ describe("template add package", () => {
     await execa("pnpm", ["install", "--no-frozen-lockfile"], {
       cwd: projectDir,
     });
+    await execa(
+      "pnpm",
+      ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+      { cwd: projectDir },
+    );
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 180_000);
 
@@ -925,6 +930,11 @@ describe("template add package", () => {
     await execa("pnpm", ["install", "--no-frozen-lockfile"], {
       cwd: projectDir,
     });
+    await execa(
+      "pnpm",
+      ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+      { cwd: projectDir },
+    );
     await execa("pnpm", ["run", "check"], { cwd: projectDir });
   }, 180_000);
 
