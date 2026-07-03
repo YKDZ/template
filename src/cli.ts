@@ -554,8 +554,12 @@ async function main(args: string[]): Promise<void> {
         : undefined;
     const result =
       sourceName === "built-in"
-        ? validateBuiltInPresetSourceManifest(declaration)
-        : validatePresetSourceManifest(declaration);
+        ? validateBuiltInPresetSourceManifest(declaration, {
+            sourceRoot: path.dirname(filePath),
+          })
+        : validatePresetSourceManifest(declaration, {
+            sourceRoot: path.dirname(filePath),
+          });
     if (!result.ok) {
       throw new Error(
         `Preset Source Manifest is invalid:\n${formatValidationIssues(

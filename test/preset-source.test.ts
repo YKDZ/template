@@ -1,10 +1,15 @@
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import {
   validateBuiltInPresetSourceManifest,
+  loadPresetSourceManifestFile,
   loadBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
 } from "../src/preset-source.js";
 
-function validManifest() {
+function validManifest(): any {
   return {
     schemaVersion: 1,
     name: "custom-source",
@@ -20,13 +25,192 @@ function validManifest() {
         features: ["strict-typescript", "root-check"],
       },
     ],
+    sharedResources: [
+      {
+        id: "shared-oxc-node",
+        path: "shared/oxc/node",
+      },
+    ],
   };
 }
 
 describe("Preset Source Manifest validation", () => {
-  it("loads the built-in Preset Source Manifest metadata", () => {
+  it("accepts reference-only Shared Resource declarations with stable identities", () => {
+    expect(validatePresetSourceManifest(validManifest())).toMatchObject({
+      ok: true,
+      value: {
+        sharedResources: [
+          {
+            id: "shared-oxc-node",
+            path: "shared/oxc/node",
+          },
+        ],
+      },
+    });
+  });
+
+  it("rejects missing Shared Resource paths through manifest loading", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
+    const manifestPath = path.join(workspace, "preset-source.json");
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(validManifest(), null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(() => loadPresetSourceManifestFile(manifestPath)).toThrow(
+      [
+        "Preset Source Manifest is invalid:",
+        "  - $.sharedResources[0].path: Shared Resource shared-oxc-node path does not exist: shared/oxc/node",
+      ].join("\n"),
+    );
+  });
+
+  it("loads Preset-owned source references and Shared Resource identity references", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
+    await mkdir(path.join(workspace, "shared/oxc/node"), { recursive: true });
+    await mkdir(path.join(workspace, "custom-lib/src"), { recursive: true });
+    await writeFile(
+      path.join(workspace, "custom-lib/src/index.ts"),
+      "export function greet() {}\n",
+      "utf8",
+    );
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validManifest();
+    manifest.presets[0].source = {
+      roots: ["custom-lib/src"],
+      files: ["custom-lib/src/index.ts"],
+      sharedResources: ["shared-oxc-node"],
+    };
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
     expect(
-      loadBuiltInPresetSourceManifest().presets.map((preset) => ({
+      loadPresetSourceManifestFile(manifestPath).presets[0].source,
+    ).toEqual({
+      roots: ["custom-lib/src"],
+      files: ["custom-lib/src/index.ts"],
+      sharedResources: ["shared-oxc-node"],
+    });
+  });
+
+  it("rejects missing Preset source references and undeclared Shared Resource identities", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
+    await mkdir(path.join(workspace, "shared/oxc/node"), { recursive: true });
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validManifest();
+    manifest.presets[0].source = {
+      files: ["custom-lib/src/index.ts"],
+      sharedResources: ["missing-resource"],
+    };
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(() => loadPresetSourceManifestFile(manifestPath)).toThrow(
+      [
+        "Preset Source Manifest is invalid:",
+        "  - $.presets[0].source.sharedResources: Preset custom-lib references undeclared Shared Resource: missing-resource",
+        "  - $.presets[0].source.files[0]: Preset custom-lib source file does not exist: custom-lib/src/index.ts",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects Preset Source references that escape the source boundary", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validManifest();
+    manifest.sharedResources[0].path = "../shared/oxc/node";
+    manifest.presets[0].source = {
+      roots: ["../custom-lib/src"],
+    };
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(() => loadPresetSourceManifestFile(manifestPath)).toThrow(
+      [
+        "Preset Source Manifest is invalid:",
+        "  - $.sharedResources[0].path: Preset Source path escapes its source boundary: ../shared/oxc/node",
+        "  - $.presets[0].source.roots[0]: Preset Source path escapes its source boundary: ../custom-lib/src",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects Preset Source symlinks that escape the source boundary", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
+    const outside = await mkdtemp(
+      path.join(tmpdir(), "preset-source-outside-"),
+    );
+    await mkdir(path.join(outside, "shared/oxc/node"), { recursive: true });
+    await symlink(
+      path.join(outside, "shared"),
+      path.join(workspace, "shared"),
+      "dir",
+    );
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validManifest();
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
+    expect(() => loadPresetSourceManifestFile(manifestPath)).toThrow(
+      [
+        "Preset Source Manifest is invalid:",
+        "  - $.sharedResources[0].path: Preset Source path escapes its source boundary: shared/oxc/node",
+      ].join("\n"),
+    );
+  });
+
+  it("rejects inline Generated Repository file bodies in manifest declarations", () => {
+    const manifest = validManifest();
+    manifest.sharedResources[0] = {
+      ...manifest.sharedResources[0],
+      body: "version: 2\nupdates: []\n",
+    } as (typeof manifest.sharedResources)[number];
+
+    expect(validatePresetSourceManifest(manifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.sharedResources[0].body",
+          message:
+            "Preset Source Manifests must reference Generated Repository file bodies by path, not inline body",
+        },
+      ],
+    });
+  });
+
+  it("loads the built-in Preset Source Manifest metadata", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+
+    expect(manifest.sharedResources).toEqual(
+      expect.arrayContaining([
+        { id: "shared-oxc-node", path: "shared/oxc/node" },
+        { id: "shared-oxc-vue", path: "shared/oxc/vue" },
+        { id: "shared-devcontainer", path: "shared/devcontainer" },
+        {
+          id: "shared-editor-customization",
+          path: "shared/editor-customization/capabilities.json",
+        },
+      ]),
+    );
+    expect(
+      manifest.presets.map((preset) => ({
         name: preset.name,
         generation: preset.generation,
         packageAdditionSupport: preset.packageAdditionSupport,

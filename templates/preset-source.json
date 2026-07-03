@@ -1,6 +1,28 @@
 {
   "schemaVersion": 1,
   "name": "built-in",
+  "sharedResources": [
+    {
+      "id": "shared-devcontainer",
+      "path": "shared/devcontainer"
+    },
+    {
+      "id": "shared-editor-customization",
+      "path": "shared/editor-customization/capabilities.json"
+    },
+    {
+      "id": "shared-oxc-node",
+      "path": "shared/oxc/node"
+    },
+    {
+      "id": "shared-oxc-format",
+      "path": "shared/oxc/oxfmt.config.ts"
+    },
+    {
+      "id": "shared-oxc-vue",
+      "path": "shared/oxc/vue"
+    }
+  ],
   "presets": [
     {
       "name": "ts-lib",
@@ -19,7 +41,16 @@
         "devcontainer",
         "github-actions",
         "dependabot"
-      ]
+      ],
+      "source": {
+        "roots": ["ts-lib/.github", "ts-lib/src"],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-node",
+          "shared-oxc-format"
+        ]
+      }
     },
     {
       "name": "hono-api",
@@ -38,7 +69,17 @@
         "devcontainer",
         "github-actions",
         "dependabot"
-      ]
+      ],
+      "source": {
+        "roots": ["hono-api/.github", "hono-api/src", "hono-api/test"],
+        "files": ["hono-api/vitest.config.ts"],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-node",
+          "shared-oxc-format"
+        ]
+      }
     },
     {
       "name": "vue-app",
@@ -57,7 +98,23 @@
         "devcontainer",
         "github-actions",
         "dependabot"
-      ]
+      ],
+      "source": {
+        "roots": ["vue-app/.github", "vue-app/src", "vue-app/test"],
+        "files": [
+          "vue-app/env.d.ts",
+          "vue-app/index.html",
+          "vue-app/playwright.config.ts",
+          "vue-app/vite.config.ts",
+          "vue-app/vitest.config.ts"
+        ],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-format",
+          "shared-oxc-vue"
+        ]
+      }
     },
     {
       "name": "vue-hono-app",
@@ -76,7 +133,31 @@
         "devcontainer",
         "github-actions",
         "dependabot"
-      ]
+      ],
+      "source": {
+        "roots": [
+          "vue-hono-app/.github",
+          "vue-hono-app/api/src",
+          "vue-hono-app/api/test",
+          "vue-hono-app/web/src",
+          "vue-hono-app/web/test"
+        ],
+        "files": [
+          "vue-hono-app/api/vitest.config.ts",
+          "vue-hono-app/web/env.d.ts",
+          "vue-hono-app/web/index.html",
+          "vue-hono-app/web/playwright.config.ts",
+          "vue-hono-app/web/vite.config.ts",
+          "vue-hono-app/web/vitest.config.ts"
+        ],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-node",
+          "shared-oxc-format",
+          "shared-oxc-vue"
+        ]
+      }
     },
     {
       "name": "rust-bin",
@@ -94,7 +175,15 @@
         "dependabot",
         "rustfmt-clippy",
         "cargo-test"
-      ]
+      ],
+      "source": {
+        "roots": ["rust-bin/.github", "rust-bin/src"],
+        "files": ["rust-bin/rust-toolchain.toml", "rust-bin/rustfmt.toml"],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization"
+        ]
+      }
     },
     {
       "name": "ts-app",

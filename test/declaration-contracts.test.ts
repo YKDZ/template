@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +15,26 @@ const cliPath = path.join(repoRoot, "src/cli.ts");
 
 function template(args: string[]) {
   return execa("pnpm", ["exec", "tsx", cliPath, ...args], { cwd: repoRoot });
+}
+
+function validPresetSourceManifest(): any {
+  return {
+    schemaVersion: 1,
+    name: "custom-source",
+    sharedResources: [{ id: "shared-oxc-node", path: "shared/oxc/node" }],
+    presets: [
+      {
+        name: "custom-lib",
+        title: "Custom library",
+        description: "A custom strict TypeScript library preset.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: "unsupported",
+        features: ["strict-typescript", "root-check"],
+      },
+    ],
+  };
 }
 
 describe("declaration contracts", () => {
@@ -112,6 +132,51 @@ describe("declaration contracts", () => {
       presetSourceSchema.properties.presets.items.properties
         .packageAdditionSupport.enum,
     ).toEqual(["supported", "unsupported"]);
+  });
+
+  it("validates Preset Source Manifest references relative to the manifest file through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-cli-"));
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validPresetSourceManifest();
+    manifest.presets[0].source = {
+      files: ["custom-lib/src/index.ts"],
+    };
+
+    await mkdir(path.join(workspace, "shared/oxc/node"), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Preset custom-lib source file does not exist: custom-lib/src/index.ts",
+      ),
+    });
+  });
+
+  it("rejects Preset Source Manifest path escapes through the CLI", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-cli-"));
+    const manifestPath = path.join(workspace, "preset-source.json");
+    const manifest = validPresetSourceManifest();
+    manifest.sharedResources[0].path = "../shared/oxc/node";
+
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      "utf8",
+    );
+
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Preset Source path escapes its source boundary: ../shared/oxc/node",
+      ),
+    });
   });
 
   it("advertises pnpm support for the Rust preset task layer", () => {

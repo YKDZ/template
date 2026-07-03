@@ -1,10 +1,14 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assembleGenerationContext } from "../src/generation-context.js";
 import type { PresetProjectionPlan } from "../src/preset-projection.js";
+import {
+  loadBuiltInPresetSourceManifest,
+  manifestReferencedSourceFiles,
+} from "../src/preset-source.js";
 import {
   checkTemplateSourceBoundary,
   templateBoundaryDebtAllowlist,
@@ -15,6 +19,14 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const templatesRoot = path.join(repoRoot, "templates");
+
+function builtInManifestReferencedSourceFiles(): string[] {
+  return manifestReferencedSourceFiles(
+    loadBuiltInPresetSourceManifest(),
+    templatesRoot,
+  );
+}
 
 function minimalPlan(
   operations: PresetProjectionPlan["operations"],
@@ -74,7 +86,10 @@ describe("Template Boundary Check", () => {
       };
     });
 
-    const result = await checkTemplateSourceBoundary({ projections });
+    const result = await checkTemplateSourceBoundary({
+      projections,
+      manifestReferencedSourceFiles: builtInManifestReferencedSourceFiles(),
+    });
 
     expect(result).toMatchObject({
       ok: true,
@@ -129,6 +144,176 @@ describe("Template Boundary Check", () => {
       expect.objectContaining({
         generatedPath: ".github/dependabot.yml",
         owningFunction: "projectSyntheticPreset",
+      }),
+    ]);
+  });
+
+  it("fails protected Generated Repository outputs copied from undeclared template source", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectCopiedTemplateSource() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "copyFile",',
+        '        from: "github/dependabot.yml",',
+        '        to: ".github/dependabot.yml",',
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: minimalPlan([
+            {
+              kind: "copyFile",
+              from: "github/dependabot.yml",
+              to: ".github/dependabot.yml",
+            },
+          ]),
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual([
+      expect.objectContaining({
+        generatedPath: ".github/dependabot.yml",
+        operationKind: "copyFile",
+        owningFunction: "projectCopiedTemplateSource",
+      }),
+    ]);
+  });
+
+  it("accepts protected Generated Repository outputs copied from manifest-declared template source", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    const referencedSourcePath = path.join(workspace, "github/dependabot.yml");
+    await mkdir(path.dirname(referencedSourcePath), { recursive: true });
+    await writeFile(referencedSourcePath, "version: 2\n", "utf8");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectCopiedTemplateSource() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "copyFile",',
+        '        from: "github/dependabot.yml",',
+        '        to: ".github/dependabot.yml",',
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: {
+            ...minimalPlan([
+              {
+                kind: "copyFile",
+                from: "github/dependabot.yml",
+                to: ".github/dependabot.yml",
+              },
+            ]),
+            sourceRoot: workspace,
+          },
+        },
+      ],
+      manifestReferencedSourceFiles: [referencedSourcePath],
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      violations: [],
+      allowlistedDebt: [],
+    });
+  });
+
+  it("accepts manifest-referenced protected source files without hiding inline protected bodies", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-boundary-check-"),
+    );
+    const projectionPath = path.join(workspace, "projection.ts");
+    const referencedSourcePath = path.join(workspace, "dependabot.yml");
+    await writeFile(referencedSourcePath, "version: 2\n", "utf8");
+    await writeFile(
+      projectionPath,
+      [
+        "function projectManifestReferencedSource() {",
+        "  return {",
+        "    operations: [",
+        "      {",
+        '        kind: "copyFile",',
+        '        from: "dependabot.yml",',
+        '        to: ".github/dependabot.yml",',
+        "      },",
+        "      {",
+        '        kind: "writeText",',
+        '        to: ".github/dependabot.yml",',
+        '        text: "version: 2\\nupdates: []\\n",',
+        "      },",
+        "    ],",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = await checkTemplateSourceBoundary({
+      projections: [
+        {
+          name: "synthetic",
+          sourceFilePath: projectionPath,
+          plan: {
+            ...minimalPlan([
+              {
+                kind: "copyFile",
+                from: "dependabot.yml",
+                to: ".github/dependabot.yml",
+              },
+              {
+                kind: "writeText",
+                to: ".github/dependabot.yml",
+                text: "version: 2\nupdates: []\n",
+              },
+            ]),
+            sourceRoot: workspace,
+          },
+        },
+      ],
+      manifestReferencedSourceFiles: [referencedSourcePath],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toEqual([
+      expect.objectContaining({
+        generatedPath: ".github/dependabot.yml",
+        operationKind: "writeText",
+        owningFunction: "projectManifestReferencedSource",
       }),
     ]);
   });
@@ -950,6 +1135,7 @@ describe("Template Boundary Check", () => {
           plan,
         },
       ],
+      manifestReferencedSourceFiles: builtInManifestReferencedSourceFiles(),
       allowlist: templateBoundaryDebtAllowlist,
     });
 
@@ -1008,6 +1194,7 @@ describe("Template Boundary Check", () => {
             plan,
           },
         ],
+        manifestReferencedSourceFiles: builtInManifestReferencedSourceFiles(),
         allowlist: templateBoundaryDebtAllowlist,
       });
 
@@ -1053,6 +1240,7 @@ describe("Template Boundary Check", () => {
           plan,
         },
       ],
+      manifestReferencedSourceFiles: builtInManifestReferencedSourceFiles(),
       allowlist: templateBoundaryDebtAllowlist,
     });
 
@@ -1066,11 +1254,14 @@ describe("Template Boundary Check", () => {
     );
   });
 
-  it("accepts protected Generated Repository outputs copied from template source", async () => {
+  it("accepts protected Generated Repository outputs copied from manifest-declared template source", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-boundary-check-"),
     );
     const projectionPath = path.join(workspace, "projection.ts");
+    const referencedSourcePath = path.join(workspace, "github/dependabot.yml");
+    await mkdir(path.dirname(referencedSourcePath), { recursive: true });
+    await writeFile(referencedSourcePath, "version: 2\n", "utf8");
     await writeFile(
       projectionPath,
       [
@@ -1095,15 +1286,19 @@ describe("Template Boundary Check", () => {
         {
           name: "synthetic",
           sourceFilePath: projectionPath,
-          plan: minimalPlan([
-            {
-              kind: "copyFile",
-              from: "github/dependabot.yml",
-              to: ".github/dependabot.yml",
-            },
-          ]),
+          plan: {
+            ...minimalPlan([
+              {
+                kind: "copyFile",
+                from: "github/dependabot.yml",
+                to: ".github/dependabot.yml",
+              },
+            ]),
+            sourceRoot: workspace,
+          },
         },
       ],
+      manifestReferencedSourceFiles: [referencedSourcePath],
     });
 
     expect(result).toMatchObject({

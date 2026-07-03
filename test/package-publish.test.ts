@@ -5,6 +5,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import { execa } from "execa";
 
 import { assembleGenerationContext } from "../src/generation-context.js";
 import type { PresetProjection } from "../src/preset-projection.js";
+import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 import type { CopyFileOperation } from "../src/renderer.js";
 import { builtInPresetProjections } from "../templates/registry.js";
 
@@ -178,6 +180,43 @@ function checkedGithubTemplateFiles(): string[] {
   ]);
 }
 
+async function manifestReferencedTemplateFiles(): Promise<string[]> {
+  const manifest = loadBuiltInPresetSourceManifest();
+  const files = new Set<string>();
+
+  async function addReference(referencePath: string): Promise<void> {
+    const absolutePath = path.join(templatesRoot, referencePath);
+    const stats = await stat(absolutePath);
+
+    if (stats.isDirectory()) {
+      for (const file of await listFiles(absolutePath)) {
+        files.add(relativeRepoPath(file));
+      }
+      return;
+    }
+
+    if (stats.isFile()) {
+      files.add(relativeRepoPath(absolutePath));
+    }
+  }
+
+  for (const resource of manifest.sharedResources) {
+    await addReference(resource.path);
+  }
+
+  for (const preset of manifest.presets) {
+    for (const root of preset.source?.roots ?? []) {
+      await addReference(root);
+    }
+
+    for (const file of preset.source?.files ?? []) {
+      await addReference(file);
+    }
+  }
+
+  return [...files];
+}
+
 async function packageFiles(): Promise<string[]> {
   return [
     ...new Set([
@@ -185,6 +224,7 @@ async function packageFiles(): Promise<string[]> {
       ...(await runtimeSourceFiles()),
       ...projectionTemplateSourceFiles(),
       ...checkedGithubTemplateFiles(),
+      ...(await manifestReferencedTemplateFiles()),
       "templates/shared/editor-customization/capabilities.json",
       "templates/shared/oxc/tsconfig.json",
     ]),
@@ -210,7 +250,7 @@ async function checkedTemplatePackagePaths(): Promise<string[]> {
     ...new Set([
       ...projectionTemplateSourceFiles(),
       ...checkedGithubTemplateFiles(),
-      "templates/shared/editor-customization/capabilities.json",
+      ...(await manifestReferencedTemplateFiles()),
     ]),
   ]
     .map((file) => `package/${file}`)

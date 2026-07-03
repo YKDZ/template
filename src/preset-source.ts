@@ -1,4 +1,10 @@
-import { readFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,12 +22,30 @@ import type {
 import { PackageAdditionSupport } from "./package-addition-support.js";
 import { packageTemplateRoot } from "./runtime-paths.js";
 
-export type PresetSourceManifestPreset = BuiltInPreset;
+export type PresetSourceManifestPresetSource = {
+  roots: string[];
+  files: string[];
+  sharedResources: string[];
+};
+
+export type PresetSourceManifestPreset = BuiltInPreset & {
+  source?: PresetSourceManifestPresetSource;
+};
+
+export type PresetSourceManifestSharedResource = {
+  id: string;
+  path: string;
+};
 
 export type PresetSourceManifest = {
   schemaVersion: 1;
   name: string;
+  sharedResources: PresetSourceManifestSharedResource[];
   presets: PresetSourceManifestPreset[];
+};
+
+export type PresetSourceManifestValidationOptions = {
+  readonly sourceRoot?: string;
 };
 
 const featureNames = [
@@ -48,6 +72,18 @@ export const presetSourceManifestJsonSchema = {
   properties: {
     schemaVersion: { const: 1 },
     name: { type: "string", minLength: 1 },
+    sharedResources: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "path"],
+        properties: {
+          id: { type: "string", minLength: 1 },
+          path: { type: "string", minLength: 1 },
+        },
+      },
+    },
     presets: {
       type: "array",
       minItems: 1,
@@ -91,6 +127,24 @@ export const presetSourceManifestJsonSchema = {
             items: { enum: featureNames },
             uniqueItems: true,
           },
+          source: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              roots: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+              },
+              files: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+              },
+              sharedResources: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+              },
+            },
+          },
         },
       },
     },
@@ -108,10 +162,24 @@ const packageAdditionSupportSchema = v.picklist([
   PackageAdditionSupport.Unsupported,
 ] as const);
 const featureNameSchema = v.picklist(featureNames);
+const presetSourceManifestPresetSourceSchema = v.strictObject({
+  roots: v.optional(v.array(nonEmptyString), []),
+  files: v.optional(v.array(nonEmptyString), []),
+  sharedResources: v.optional(v.array(nonEmptyString), []),
+});
 
 const presetSourceManifestSchema = v.strictObject({
   schemaVersion: v.literal(1),
   name: nonEmptyString,
+  sharedResources: v.optional(
+    v.array(
+      v.strictObject({
+        id: nonEmptyString,
+        path: nonEmptyString,
+      }),
+    ),
+    [],
+  ),
   presets: v.pipe(
     v.array(
       v.strictObject({
@@ -126,6 +194,7 @@ const presetSourceManifestSchema = v.strictObject({
         ),
         packageAdditionSupport: packageAdditionSupportSchema,
         features: v.array(featureNameSchema),
+        source: v.optional(presetSourceManifestPresetSourceSchema),
       }),
     ),
     v.minLength(1),
@@ -155,6 +224,18 @@ function shapeIssues(issues: v.BaseIssue<unknown>[]): ValidationIssue[] {
       return {
         path,
         message: `Preset metadata is missing required field: ${missingPresetMetadata[1]}`,
+      };
+    }
+
+    if (
+      issue.message.startsWith("Invalid key:") &&
+      /\.(body|content|text)$/.test(path)
+    ) {
+      const key = path.split(".").at(-1);
+
+      return {
+        path,
+        message: `Preset Source Manifests must reference Generated Repository file bodies by path, not inline ${key}`,
       };
     }
 
@@ -238,6 +319,162 @@ function unsupportedProjectShapeIssues(
   );
 }
 
+function resolvePresetSourcePath(
+  sourceRoot: string,
+  referencePath: string,
+): string | { issue: string } {
+  if (path.isAbsolute(referencePath)) {
+    return { issue: `Preset Source paths must be relative: ${referencePath}` };
+  }
+
+  const resolvedRoot = path.resolve(sourceRoot);
+  const resolvedPath = path.resolve(resolvedRoot, referencePath);
+  const insideRoot =
+    resolvedPath === resolvedRoot ||
+    resolvedPath.startsWith(`${resolvedRoot}${path.sep}`);
+
+  if (!insideRoot) {
+    return {
+      issue: `Preset Source path escapes its source boundary: ${referencePath}`,
+    };
+  }
+
+  return resolvedPath;
+}
+
+function realPresetSourcePathIssue(
+  sourceRoot: string,
+  referencePath: string,
+  resolvedPath: string,
+): string | undefined {
+  const realRoot = realpathSync(sourceRoot);
+  const realPath = realpathSync(resolvedPath);
+  const insideRoot =
+    realPath === realRoot || realPath.startsWith(`${realRoot}${path.sep}`);
+
+  return insideRoot
+    ? undefined
+    : `Preset Source path escapes its source boundary: ${referencePath}`;
+}
+
+function sharedResourcePathIssues(
+  manifest: PresetSourceManifest,
+  sourceRoot: string | undefined,
+): ValidationIssue[] {
+  if (sourceRoot === undefined) {
+    return [];
+  }
+
+  return manifest.sharedResources.flatMap((resource, index) => {
+    const resolvedPath = resolvePresetSourcePath(sourceRoot, resource.path);
+
+    if (typeof resolvedPath !== "string") {
+      return [
+        {
+          path: `$.sharedResources[${index}].path`,
+          message: resolvedPath.issue,
+        },
+      ];
+    }
+
+    if (!existsSync(resolvedPath)) {
+      return [
+        {
+          path: `$.sharedResources[${index}].path`,
+          message: `Shared Resource ${resource.id} path does not exist: ${resource.path}`,
+        },
+      ];
+    }
+
+    const realPathIssue = realPresetSourcePathIssue(
+      sourceRoot,
+      resource.path,
+      resolvedPath,
+    );
+    if (realPathIssue) {
+      return [
+        {
+          path: `$.sharedResources[${index}].path`,
+          message: realPathIssue,
+        },
+      ];
+    }
+
+    return [];
+  });
+}
+
+function presetSourceReferenceIssues(
+  manifest: PresetSourceManifest,
+  sourceRoot: string | undefined,
+): ValidationIssue[] {
+  const sharedResourceIds = new Set(
+    manifest.sharedResources.map((resource) => resource.id),
+  );
+
+  return manifest.presets.flatMap((preset, presetIndex) => {
+    const source = preset.source;
+
+    if (!source) {
+      return [];
+    }
+
+    const sharedResourceIssues = source.sharedResources
+      .filter((resourceId) => !sharedResourceIds.has(resourceId))
+      .map((resourceId) => ({
+        path: `$.presets[${presetIndex}].source.sharedResources`,
+        message: `Preset ${preset.name} references undeclared Shared Resource: ${resourceId}`,
+      }));
+
+    const pathIssues =
+      sourceRoot === undefined
+        ? []
+        : [
+            ...source.roots.map((sourcePath, index) => ({
+              path: `$.presets[${presetIndex}].source.roots[${index}]`,
+              sourcePath,
+              kind: "source root",
+            })),
+            ...source.files.map((sourcePath, index) => ({
+              path: `$.presets[${presetIndex}].source.files[${index}]`,
+              sourcePath,
+              kind: "source file",
+            })),
+          ].flatMap(({ path: issuePath, sourcePath, kind }) => {
+            const resolvedPath = resolvePresetSourcePath(
+              sourceRoot,
+              sourcePath,
+            );
+
+            if (typeof resolvedPath !== "string") {
+              return [{ path: issuePath, message: resolvedPath.issue }];
+            }
+
+            if (!existsSync(resolvedPath)) {
+              return [
+                {
+                  path: issuePath,
+                  message: `Preset ${preset.name} ${kind} does not exist: ${sourcePath}`,
+                },
+              ];
+            }
+
+            const realPathIssue = realPresetSourcePathIssue(
+              sourceRoot,
+              sourcePath,
+              resolvedPath,
+            );
+            if (realPathIssue) {
+              return [{ path: issuePath, message: realPathIssue }];
+            }
+
+            return [];
+          });
+
+    return [...sharedResourceIssues, ...pathIssues];
+  });
+}
+
 function builtInRegistryBridgeIssues(
   manifest: PresetSourceManifest,
 ): ValidationIssue[] {
@@ -299,6 +536,7 @@ function builtInRegistryBridgeIssues(
 
 export function validatePresetSourceManifest(
   input: unknown,
+  options: PresetSourceManifestValidationOptions = {},
 ): ValidationResult<PresetSourceManifest> {
   const result = v.safeParse(presetSourceManifestSchema, input);
 
@@ -307,9 +545,15 @@ export function validatePresetSourceManifest(
   }
 
   const semanticIssues = [
+    ...duplicateValueIssues(
+      result.output.sharedResources.map((resource) => resource.id),
+      "$.sharedResources.id",
+    ),
     ...duplicatePresetNameIssues(result.output.presets),
     ...duplicatePresetMetadataArrayIssues(result.output.presets),
     ...unsupportedProjectShapeIssues(result.output.presets),
+    ...sharedResourcePathIssues(result.output, options.sourceRoot),
+    ...presetSourceReferenceIssues(result.output, options.sourceRoot),
   ];
 
   if (semanticIssues.length > 0) {
@@ -320,6 +564,9 @@ export function validatePresetSourceManifest(
     ok: true,
     value: {
       ...result.output,
+      sharedResources: result.output.sharedResources.map((resource) => ({
+        ...resource,
+      })),
       presets: result.output.presets.map((preset) => ({
         ...preset,
         supportedPackageManagers: [
@@ -329,6 +576,13 @@ export function validatePresetSourceManifest(
           ...preset.supportedProjectKinds,
         ] as ProjectKind[],
         features: [...preset.features] as FeatureName[],
+        source: preset.source
+          ? {
+              roots: [...preset.source.roots],
+              files: [...preset.source.files],
+              sharedResources: [...preset.source.sharedResources],
+            }
+          : undefined,
       })),
     },
   };
@@ -336,8 +590,9 @@ export function validatePresetSourceManifest(
 
 export function validateBuiltInPresetSourceManifest(
   input: unknown,
+  options: PresetSourceManifestValidationOptions = {},
 ): ValidationResult<PresetSourceManifest> {
-  const result = validatePresetSourceManifest(input);
+  const result = validatePresetSourceManifest(input, options);
 
   if (!result.ok) {
     return result;
@@ -351,11 +606,59 @@ export function validateBuiltInPresetSourceManifest(
   return result;
 }
 
+function listPresetSourceFiles(sourcePath: string): string[] {
+  const stats = statSync(sourcePath);
+
+  if (stats.isFile()) {
+    return [sourcePath];
+  }
+
+  if (!stats.isDirectory()) {
+    return [];
+  }
+
+  return readdirSync(sourcePath, { withFileTypes: true }).flatMap((entry) =>
+    listPresetSourceFiles(path.join(sourcePath, entry.name)),
+  );
+}
+
+export function manifestReferencedSourceFiles(
+  manifest: PresetSourceManifest,
+  sourceRoot: string,
+): string[] {
+  const files = new Set<string>();
+
+  function addReference(referencePath: string): void {
+    for (const file of listPresetSourceFiles(
+      path.resolve(sourceRoot, referencePath),
+    )) {
+      files.add(file);
+    }
+  }
+
+  for (const resource of manifest.sharedResources) {
+    addReference(resource.path);
+  }
+
+  for (const preset of manifest.presets) {
+    for (const root of preset.source?.roots ?? []) {
+      addReference(root);
+    }
+
+    for (const file of preset.source?.files ?? []) {
+      addReference(file);
+    }
+  }
+
+  return [...files].sort();
+}
+
 export function loadPresetSourceManifestFile(
   filePath: string,
 ): PresetSourceManifest {
   const result = validatePresetSourceManifest(
     JSON.parse(readFileSync(filePath, "utf8")) as unknown,
+    { sourceRoot: path.dirname(filePath) },
   );
 
   if (!result.ok) {
@@ -374,6 +677,7 @@ export function loadBuiltInPresetSourceManifest(): PresetSourceManifest {
   const filePath = packageTemplateRoot(moduleDir, "preset-source.json");
   const result = validateBuiltInPresetSourceManifest(
     JSON.parse(readFileSync(filePath, "utf8")) as unknown,
+    { sourceRoot: path.dirname(filePath) },
   );
 
   if (!result.ok) {

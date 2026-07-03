@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { assembleGenerationContext } from "../src/generation-context.js";
 import {
+  loadBuiltInPresetSourceManifest,
+  manifestReferencedSourceFiles,
+} from "../src/preset-source.js";
+import {
   checkTemplateSourceBoundary,
   templateBoundaryDebtAllowlist,
   type TemplateBoundaryCheckProjection,
@@ -88,9 +92,15 @@ function formatAllowlistEntry(entry: TemplateBoundaryDebt): string {
 }
 
 export async function checkBuiltInTemplateBoundaries(): Promise<void> {
+  const templatesRoot = path.join(repoRoot, "templates");
+  const manifest = loadBuiltInPresetSourceManifest();
   const result = await checkTemplateSourceBoundary({
     projections: builtInPresetProjections.map((projection) =>
       projectionPlanForPreset(projection.metadata.name),
+    ),
+    manifestReferencedSourceFiles: manifestReferencedSourceFiles(
+      manifest,
+      templatesRoot,
     ),
     allowlist: templateBoundaryDebtAllowlist,
   });

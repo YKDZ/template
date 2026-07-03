@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import ts from "typescript";
 
@@ -36,12 +37,17 @@ export type TemplateBoundaryCheckResult = {
 
 export type CheckTemplateSourceBoundaryOptions = {
   readonly projections: readonly TemplateBoundaryCheckProjection[];
+  readonly manifestReferencedSourceFiles?: readonly string[];
   readonly allowlist?: readonly TemplateBoundaryDebt[];
 };
 
 type InlineProtectedOperation = Extract<
   RenderOperation,
   { kind: "writeText" | "writeJson" | "mergeJson" }
+>;
+type SourceBackedOperation = Extract<
+  RenderOperation,
+  { kind: "copyFile" | "writeTextTemplate" | "writeTextFromFragments" }
 >;
 
 const inlineOperationKinds = new Set<RenderOperation["kind"]>([
@@ -69,6 +75,20 @@ function isInlineProtectedOperation(
   return (
     generatedPath !== undefined &&
     inlineOperationKinds.has(operation.kind) &&
+    isProtectedGeneratedPath(generatedPath)
+  );
+}
+
+function isProtectedSourceBackedOperation(
+  operation: RenderOperation,
+): operation is SourceBackedOperation {
+  const generatedPath = operationTarget(operation);
+
+  return (
+    generatedPath !== undefined &&
+    (operation.kind === "copyFile" ||
+      operation.kind === "writeTextTemplate" ||
+      operation.kind === "writeTextFromFragments") &&
     isProtectedGeneratedPath(generatedPath)
   );
 }
@@ -466,6 +486,43 @@ function findOwningFunctionsForOperation(
   return ["<unknown>"];
 }
 
+function findOwningFunctionsForProtectedOperation(
+  sourceFile: ts.SourceFile,
+  operation: SourceBackedOperation,
+): readonly string[] {
+  const generatedPath = operationTarget(operation);
+  if (generatedPath === undefined) {
+    return ["<unknown>"];
+  }
+
+  const targetPath = generatedPath;
+  const owners = new Set<string>();
+
+  function visit(node: ts.Node): void {
+    if (!ts.isObjectLiteralExpression(node)) {
+      ts.forEachChild(node, visit);
+      return;
+    }
+
+    if (
+      propertyStringValue(node, "kind") === operation.kind &&
+      propertyPathMatches(node, "to", targetPath)
+    ) {
+      owners.add(owningFunctionName(node));
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  if (owners.size > 0) {
+    return [...owners];
+  }
+
+  return ["<unknown>"];
+}
+
 function isPropertyAccess(
   expression: ts.Expression,
   objectName: string,
@@ -657,10 +714,85 @@ function allowlistKey(
   return `${preset}\0${owningFunction}\0${generatedPath}`;
 }
 
+function resolveOperationSourceRoot(
+  projection: TemplateBoundaryCheckProjection,
+  sourceRootName: string | undefined,
+): string | undefined {
+  if (sourceRootName === undefined) {
+    return projection.plan.sourceRoot;
+  }
+
+  return projection.plan.sourceRoots?.[sourceRootName];
+}
+
+function sourceBackedOperationSourceFiles(
+  projection: TemplateBoundaryCheckProjection,
+  operation: SourceBackedOperation,
+): readonly string[] {
+  if (operation.kind === "writeTextFromFragments") {
+    return operation.fragments.map((fragment) => {
+      const root = resolveOperationSourceRoot(projection, fragment.sourceRoot);
+
+      return root === undefined
+        ? `missing-source-root:${fragment.sourceRoot}`
+        : path.resolve(root, fragment.from);
+    });
+  }
+
+  const root = resolveOperationSourceRoot(projection, operation.sourceRoot);
+
+  return [
+    root === undefined
+      ? `missing-source-root:${operation.sourceRoot}`
+      : path.resolve(root, operation.from),
+  ];
+}
+
+function operationUsesManifestReferencedSource(
+  projection: TemplateBoundaryCheckProjection,
+  operation: SourceBackedOperation,
+  manifestReferencedSourceFiles: ReadonlySet<string>,
+): boolean {
+  return sourceBackedOperationSourceFiles(projection, operation).every(
+    (sourceFile) => manifestReferencedSourceFiles.has(sourceFile),
+  );
+}
+
+function pushSourceBackedOperationViolations(options: {
+  readonly projection: TemplateBoundaryCheckProjection;
+  readonly sourceFile: ts.SourceFile;
+  readonly operation: SourceBackedOperation;
+  readonly violations: TemplateBoundaryViolation[];
+}): void {
+  const generatedPath = operationTarget(options.operation);
+  if (generatedPath === undefined) {
+    return;
+  }
+
+  const owningFunctions = findOwningFunctionsForProtectedOperation(
+    options.sourceFile,
+    options.operation,
+  );
+
+  for (const owningFunction of owningFunctions) {
+    options.violations.push({
+      preset: options.projection.name,
+      generatedPath,
+      owningFunction,
+      operationKind: options.operation.kind,
+      sourceFilePath: options.projection.sourceFilePath,
+    });
+  }
+}
+
 export async function checkTemplateSourceBoundary({
   projections,
+  manifestReferencedSourceFiles = [],
   allowlist = [],
 }: CheckTemplateSourceBoundaryOptions): Promise<TemplateBoundaryCheckResult> {
+  const manifestReferencedSourceFileSet = new Set(
+    manifestReferencedSourceFiles.map((sourceFile) => path.resolve(sourceFile)),
+  );
   const allowed = new Map(
     allowlist.map((entry) => [
       allowlistKey(entry.preset, entry.generatedPath, entry.owningFunction),
@@ -685,6 +817,25 @@ export async function checkTemplateSourceBoundary({
     );
 
     for (const operation of projection.plan.operations) {
+      if (isProtectedSourceBackedOperation(operation)) {
+        if (
+          !operationUsesManifestReferencedSource(
+            projection,
+            operation,
+            manifestReferencedSourceFileSet,
+          )
+        ) {
+          pushSourceBackedOperationViolations({
+            projection,
+            sourceFile,
+            operation,
+            violations,
+          });
+        }
+
+        continue;
+      }
+
       if (!isInlineProtectedOperation(operation)) {
         continue;
       }
