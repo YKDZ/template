@@ -1366,6 +1366,48 @@ describe("template add package", () => {
     });
   });
 
+  it("fails clearly when vue-hono-app is requested for Package Addition", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-package-"),
+    );
+    const projectDir = path.join(workspace, "demo-fullstack");
+
+    await initGeneratedWorkspace(projectDir);
+
+    const unsupportedPackageAddition = execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        cliPath,
+        "add",
+        "package",
+        "--preset",
+        "vue-hono-app",
+        "--name",
+        "fullstack",
+      ],
+      { cwd: projectDir },
+    );
+
+    await expect(unsupportedPackageAddition).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Preset vue-hono-app cannot be used for Package Addition.",
+      ),
+    });
+    await expect(unsupportedPackageAddition).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Supported Package Addition presets: ts-lib, hono-api, vue-app",
+      ),
+    });
+
+    await expect(
+      stat(path.join(projectDir, "apps/fullstack")),
+    ).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("fails clearly when Local Template Metadata is missing", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),

@@ -178,6 +178,48 @@ export const presetSourceManifestJsonSchema = {
                     {
                       type: "object",
                       additionalProperties: false,
+                      required: ["kind", "workspacePackageGlob", "packages"],
+                      properties: {
+                        kind: { const: "workspace-node-packages" },
+                        workspacePackageGlob: { const: "apps/*" },
+                        packages: {
+                          type: "array",
+                          minItems: 1,
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: ["kind", "path", "sourceFiles"],
+                            properties: {
+                              kind: { enum: ["hono-api", "vue-app"] },
+                              path: { enum: ["apps/api", "apps/web"] },
+                              sourceFiles: {
+                                type: "array",
+                                minItems: 1,
+                                items: { type: "string", minLength: 1 },
+                              },
+                            },
+                          },
+                        },
+                        packageLinks: {
+                          type: "array",
+                          items: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: [
+                              "consumerPackagePath",
+                              "providerPackagePath",
+                            ],
+                            properties: {
+                              consumerPackagePath: { const: "apps/web" },
+                              providerPackagePath: { const: "apps/api" },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
                       required: ["kind"],
                       properties: {
                         kind: { const: "strict-typescript-root" },

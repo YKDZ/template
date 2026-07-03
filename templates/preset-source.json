@@ -104,6 +104,30 @@
         "typescript",
         "vitest"
       ],
+      "projection": {
+        "capabilities": [
+          {
+            "kind": "workspace-node-packages",
+            "workspacePackageGlob": "apps/*",
+            "packages": [
+              {
+                "kind": "hono-api",
+                "path": "apps/api",
+                "sourceFiles": [
+                  "src/app.ts",
+                  "src/server.ts",
+                  "test/app.test.ts",
+                  "vitest.config.ts"
+                ]
+              }
+            ]
+          },
+          { "kind": "strict-typescript-root" },
+          { "kind": "oxc-format-lint" },
+          { "kind": "node-pnpm-devcontainer" },
+          { "kind": "github-maintenance" }
+        ]
+      },
       "source": {
         "roots": ["hono-api/.github", "hono-api/src", "hono-api/test"],
         "files": ["hono-api/vitest.config.ts"],
@@ -152,6 +176,37 @@
         "vue",
         "vue-tsc"
       ],
+      "projection": {
+        "capabilities": [
+          {
+            "kind": "workspace-node-packages",
+            "workspacePackageGlob": "apps/*",
+            "packages": [
+              {
+                "kind": "vue-app",
+                "path": "apps/web",
+                "sourceFiles": [
+                  "env.d.ts",
+                  "index.html",
+                  "playwright.config.ts",
+                  "vite.config.ts",
+                  "vitest.config.ts",
+                  "src/App.vue",
+                  "src/main.ts",
+                  "src/style.css",
+                  "src/stores/counter.ts",
+                  "test/app.test.ts",
+                  "test/e2e/app.spec.ts"
+                ]
+              }
+            ]
+          },
+          { "kind": "strict-typescript-root" },
+          { "kind": "oxc-format-lint" },
+          { "kind": "node-pnpm-devcontainer" },
+          { "kind": "github-maintenance" }
+        ]
+      },
       "source": {
         "roots": ["vue-app/.github", "vue-app/src", "vue-app/test"],
         "files": [
@@ -210,6 +265,55 @@
         "vue",
         "vue-tsc"
       ],
+      "projection": {
+        "capabilities": [
+          {
+            "kind": "workspace-node-packages",
+            "workspacePackageGlob": "apps/*",
+            "packages": [
+              {
+                "kind": "vue-app",
+                "path": "apps/web",
+                "sourceFiles": [
+                  "web/env.d.ts",
+                  "web/index.html",
+                  "web/playwright.config.ts",
+                  "web/vite.config.ts",
+                  "web/vitest.config.ts",
+                  "web/src/api.ts",
+                  "web/src/App.vue",
+                  "web/src/main.ts",
+                  "web/src/style.css",
+                  "web/src/stores/counter.ts",
+                  "web/test/app.test.ts",
+                  "web/test/e2e/app.spec.ts"
+                ]
+              },
+              {
+                "kind": "hono-api",
+                "path": "apps/api",
+                "sourceFiles": [
+                  "api/src/index.ts",
+                  "api/src/runtime.ts",
+                  "api/src/server.ts",
+                  "api/test/app.test.ts",
+                  "api/vitest.config.ts"
+                ]
+              }
+            ],
+            "packageLinks": [
+              {
+                "consumerPackagePath": "apps/web",
+                "providerPackagePath": "apps/api"
+              }
+            ]
+          },
+          { "kind": "strict-typescript-root" },
+          { "kind": "oxc-format-lint" },
+          { "kind": "node-pnpm-devcontainer" },
+          { "kind": "github-maintenance" }
+        ]
+      },
       "source": {
         "roots": [
           "vue-hono-app/.github",

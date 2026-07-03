@@ -28,6 +28,32 @@ const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
   ],
 };
 
+async function presetContext(presetName: string) {
+  const legacyProjection = findBuiltInPresetProjection(presetName);
+  expect(legacyProjection).toBeDefined();
+
+  const workspace = await mkdtemp(
+    path.join(tmpdir(), "template-projection-capabilities-"),
+  );
+  const targetDir = path.join(workspace, `demo-${presetName}`);
+  const blueprint = legacyProjection!.blueprint({ targetDir });
+
+  return {
+    legacyProjection: legacyProjection!,
+    targetDir,
+    context: assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    }),
+  };
+}
+
 async function tsLibContext() {
   const legacyProjection = findBuiltInPresetProjection("ts-lib");
   expect(legacyProjection).toBeDefined();
@@ -182,6 +208,204 @@ describe("Projection Capability declarations", () => {
     await expectFile(path.join(targetDir, ".devcontainer/Dockerfile"));
   });
 
+  it("renders the hono-api built-in declaration into expected public generated files", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "hono-api",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await presetContext("hono-api");
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: preset!.projection!,
+      context,
+    });
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const rootPackageJson = await readJson(
+      path.join(targetDir, "package.json"),
+    );
+    const packageJson = await readJson(
+      path.join(targetDir, "apps", "api", "package.json"),
+    );
+    const workspaceYaml = await readFile(
+      path.join(targetDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const generatedByJson = await readJson(
+      path.join(targetDir, ".template/generated-by.json"),
+    );
+
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
+    );
+    expect(packageJson).toMatchObject({
+      name: "@demo-hono-api/api",
+      dependencies: {
+        "@hono/node-server": "catalog:",
+        hono: "catalog:",
+      },
+      scripts: {
+        build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+        start: "node dist/server.js",
+        test: "vitest run",
+      },
+      devDependencies: {
+        "@types/node": "catalog:",
+        "tsc-alias": "catalog:",
+        vitest: "catalog:",
+      },
+    });
+    expect(workspaceYaml).toContain("apps/*");
+    expect(workspaceYaml).toContain('"@hono/node-server":');
+    expect(generatedByJson).toMatchObject({
+      command: "template init --preset hono-api",
+    });
+    await expectFile(path.join(targetDir, "apps/api/src/app.ts"));
+    await expectFile(path.join(targetDir, "apps/api/test/app.test.ts"));
+    await expectFile(path.join(targetDir, ".github/workflows/check.yml"));
+    await expectFile(path.join(targetDir, ".devcontainer/Dockerfile"));
+  });
+
+  it("renders the vue-app built-in declaration into expected public generated files", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "vue-app",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await presetContext("vue-app");
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: preset!.projection!,
+      context,
+    });
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const rootPackageJson = await readJson(
+      path.join(targetDir, "package.json"),
+    );
+    const packageJson = await readJson(
+      path.join(targetDir, "apps", "web", "package.json"),
+    );
+    const workspaceYaml = await readFile(
+      path.join(targetDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer", "Dockerfile"),
+      "utf8",
+    );
+
+    expect(rootPackageJson.scripts.check).toBe(
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
+    );
+    expect(packageJson).toMatchObject({
+      name: "@demo-vue-app/web",
+      scripts: {
+        build: "vite build",
+        dev: "vite",
+        preview: "vite preview",
+        test: "vitest run",
+        "test:e2e": "pnpm run build && playwright test",
+        typecheck: "vue-tsc --build --noEmit",
+      },
+      dependencies: {
+        "@vueuse/core": "catalog:",
+        pinia: "catalog:",
+        vue: "catalog:",
+      },
+      devDependencies: {
+        "@playwright/test": "catalog:",
+        "@vitejs/plugin-vue": "catalog:",
+        "vue-tsc": "catalog:",
+      },
+    });
+    expect(workspaceYaml).toContain("allowBuilds:");
+    expect(workspaceYaml).toContain("esbuild: true");
+    expect(devcontainerDockerfile).toContain("PLAYWRIGHT_CLI_PACKAGE");
+    await expectFile(path.join(targetDir, "apps/web/src/App.vue"));
+    await expectFile(path.join(targetDir, "apps/web/test/e2e/app.spec.ts"));
+  });
+
+  it("renders the vue-hono-app built-in declaration with package linking", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "vue-hono-app",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await presetContext("vue-hono-app");
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: preset!.projection!,
+      context,
+    });
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const apiPackageJson = await readJson(
+      path.join(targetDir, "apps", "api", "package.json"),
+    );
+    const webPackageJson = await readJson(
+      path.join(targetDir, "apps", "web", "package.json"),
+    );
+    const turboConfig = await readJson(path.join(targetDir, "turbo.json"));
+    const webApiSource = await readFile(
+      path.join(targetDir, "apps", "web", "src", "api.ts"),
+      "utf8",
+    );
+
+    expect(apiPackageJson).toMatchObject({
+      name: "@demo-vue-hono-app/api",
+      types: "./src/index.ts",
+      scripts: {
+        dev: "tsx watch src/server.ts",
+      },
+      devDependencies: {
+        tsx: "catalog:",
+      },
+    });
+    expect(webPackageJson).toMatchObject({
+      name: "@demo-vue-hono-app/web",
+      dependencies: {
+        "@demo-vue-hono-app/api": "workspace:*",
+        hono: "catalog:",
+      },
+      scripts: {
+        typecheck: "vue-tsc --build",
+      },
+    });
+    expect(turboConfig).toMatchObject({
+      tasks: {
+        build: {
+          dependsOn: ["^build"],
+          outputs: ["dist/**"],
+        },
+      },
+    });
+    expect(webApiSource).toContain(
+      'import type { AppType } from "@demo-vue-hono-app/api";',
+    );
+    await expectFile(path.join(targetDir, "apps/api/src/index.ts"));
+    await expectFile(path.join(targetDir, "apps/web/src/api.ts"));
+  });
+
   it("rejects unknown Projection Capability kinds with semantic diagnostics", () => {
     expect(
       validateProjectionCapabilities({
@@ -197,6 +421,115 @@ describe("Projection Capability declarations", () => {
         {
           path: "$.capabilities[0].kind",
           message: "Unknown Projection Capability kind: write-my-private-file",
+        },
+      ],
+    });
+  });
+
+  it("rejects packageLinks with extra fields", () => {
+    expect(
+      validateProjectionCapabilities({
+        capabilities: [
+          {
+            kind: "workspace-node-packages",
+            workspacePackageGlob: "apps/*",
+            packages: [
+              {
+                kind: "vue-app",
+                path: "apps/web",
+                sourceFiles: ["src/main.ts"],
+              },
+              {
+                kind: "hono-api",
+                path: "apps/api",
+                sourceFiles: ["src/server.ts"],
+              },
+            ],
+            packageLinks: [
+              {
+                consumerPackagePath: "apps/web",
+                providerPackagePath: "apps/api",
+                relationship: "runtime",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].packageLinks[0].relationship",
+          message:
+            "workspace-node-packages packageLink does not support property: relationship",
+        },
+      ],
+    });
+  });
+
+  it("rejects packageLinks that reference packages outside the same declaration", () => {
+    expect(
+      validateProjectionCapabilities({
+        capabilities: [
+          {
+            kind: "workspace-node-packages",
+            workspacePackageGlob: "apps/*",
+            packages: [
+              {
+                kind: "hono-api",
+                path: "apps/api",
+                sourceFiles: ["src/server.ts"],
+              },
+            ],
+            packageLinks: [
+              {
+                consumerPackagePath: "apps/web",
+                providerPackagePath: "apps/api",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].packageLinks[0].consumerPackagePath",
+          message:
+            "workspace-node-packages packageLink consumerPackagePath must reference a package declared in the same packages array: apps/web",
+        },
+      ],
+    });
+
+    expect(
+      validateProjectionCapabilities({
+        capabilities: [
+          {
+            kind: "workspace-node-packages",
+            workspacePackageGlob: "apps/*",
+            packages: [
+              {
+                kind: "vue-app",
+                path: "apps/web",
+                sourceFiles: ["src/main.ts"],
+              },
+            ],
+            packageLinks: [
+              {
+                consumerPackagePath: "apps/web",
+                providerPackagePath: "apps/api",
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].packageLinks[0].providerPackagePath",
+          message:
+            "workspace-node-packages packageLink providerPackagePath must reference a package declared in the same packages array: apps/api",
         },
       ],
     });

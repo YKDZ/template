@@ -35,6 +35,10 @@ import type {
   PresetProjectionPlan,
 } from "../../src/preset-projection.js";
 import type { DependencyMaintenancePolicy } from "../../src/project-github.js";
+import {
+  interpretPresetProjectionDeclaration,
+  loadBuiltInPresetProjectionDeclaration,
+} from "../../src/projection-capabilities.js";
 import { renderNewProject, type RenderOperation } from "../../src/renderer.js";
 
 const generatedBy = {
@@ -865,29 +869,11 @@ export const vueAppPresetProjection: PresetProjection = {
   },
   blueprint: vueAppBlueprint,
   project(context: GenerationContext): PresetProjectionPlan {
-    const checkPlan = planVueAppRootChecks();
-    const fixPlan = planVueAppRootFixes();
-    const packageScripts = projectVueAppRootPackageScripts();
-
-    return {
-      sourceRoot: templateSourceRoot(),
-      sourceRoots: {
-        sharedDevcontainer: sharedDevcontainerSourceRoot(),
-        sharedOxc: sharedOxcSourceRoot(),
-      },
-      operations: operationsForVueApp(context, packageScripts, checkPlan),
-      checkPlan,
-      fixPlan,
-      dependencyMaintenancePolicy,
-      packageScripts,
-      capabilities: {
-        rootCheck: true,
-        fixCommand: true,
-        githubActions: true,
-        dependabot: true,
-        devcontainer: true,
-      },
-    };
+    return interpretPresetProjectionDeclaration({
+      preset: vueAppPresetMetadata,
+      declaration: loadBuiltInPresetProjectionDeclaration("vue-app"),
+      context,
+    });
   },
   async render({ targetDir, plan }): Promise<void> {
     await renderNewProject({

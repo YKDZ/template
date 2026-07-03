@@ -31,9 +31,9 @@ function builtInManifestReferencedSourceFiles(): string[] {
 function builtInProjectionSourceFile(presetName: string): string {
   return path.join(
     repoRoot,
-    presetName === "ts-lib"
-      ? "src/projection-capabilities.ts"
-      : `templates/${presetName}/projection.ts`,
+    presetName === "rust-bin"
+      ? `templates/${presetName}/projection.ts`
+      : "src/projection-capabilities.ts",
   );
 }
 

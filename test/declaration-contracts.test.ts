@@ -132,6 +132,43 @@ describe("declaration contracts", () => {
       presetSourceSchema.properties.presets.items.properties
         .packageAdditionSupport.enum,
     ).toEqual(["supported", "unsupported"]);
+
+    const capabilitySchemas = (presetSourceSchema as any).properties.presets
+      .items.properties.projection.properties.capabilities.items.oneOf;
+    const nodeWorkspaceSchema = capabilitySchemas.find(
+      (schema: any) =>
+        schema.properties.kind.const === "workspace-node-packages",
+    );
+
+    expect(nodeWorkspaceSchema).toMatchObject({
+      additionalProperties: false,
+      required: ["kind", "workspacePackageGlob", "packages"],
+      properties: {
+        workspacePackageGlob: { const: "apps/*" },
+        packages: {
+          minItems: 1,
+          items: {
+            additionalProperties: false,
+            required: ["kind", "path", "sourceFiles"],
+            properties: {
+              kind: { enum: ["hono-api", "vue-app"] },
+              path: { enum: ["apps/api", "apps/web"] },
+              sourceFiles: { minItems: 1 },
+            },
+          },
+        },
+        packageLinks: {
+          items: {
+            additionalProperties: false,
+            required: ["consumerPackagePath", "providerPackagePath"],
+            properties: {
+              consumerPackagePath: { const: "apps/web" },
+              providerPackagePath: { const: "apps/api" },
+            },
+          },
+        },
+      },
+    });
   });
 
   it("validates Preset Source Manifest references relative to the manifest file through the CLI", async () => {
