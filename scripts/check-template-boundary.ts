@@ -23,7 +23,7 @@ const repoRoot = path.resolve(
 const projectionSourceFiles: Record<string, string> = {
   "hono-api": "templates/hono-api/projection.ts",
   "rust-bin": "templates/rust-bin/projection.ts",
-  "ts-lib": "templates/ts-lib/projection.ts",
+  "ts-lib": "src/projection-capabilities.ts",
   "vue-app": "templates/vue-app/projection.ts",
   "vue-hono-app": "templates/vue-hono-app/projection.ts",
 };

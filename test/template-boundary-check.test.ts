@@ -28,6 +28,15 @@ function builtInManifestReferencedSourceFiles(): string[] {
   );
 }
 
+function builtInProjectionSourceFile(presetName: string): string {
+  return path.join(
+    repoRoot,
+    presetName === "ts-lib"
+      ? "src/projection-capabilities.ts"
+      : `templates/${presetName}/projection.ts`,
+  );
+}
+
 function minimalPlan(
   operations: PresetProjectionPlan["operations"],
 ): PresetProjectionPlan {
@@ -78,10 +87,7 @@ describe("Template Boundary Check", () => {
 
       return {
         name: presetName,
-        sourceFilePath: path.join(
-          repoRoot,
-          `templates/${presetName}/projection.ts`,
-        ),
+        sourceFilePath: builtInProjectionSourceFile(presetName),
         plan,
       };
     });
@@ -1131,7 +1137,7 @@ describe("Template Boundary Check", () => {
       projections: [
         {
           name: "ts-lib",
-          sourceFilePath: path.join(repoRoot, "templates/ts-lib/projection.ts"),
+          sourceFilePath: builtInProjectionSourceFile("ts-lib"),
           plan,
         },
       ],

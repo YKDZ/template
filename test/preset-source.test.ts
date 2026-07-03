@@ -66,6 +66,65 @@ describe("Preset Source Manifest validation", () => {
     });
   });
 
+  it("rejects unknown Projection Capability kinds with semantic diagnostics", () => {
+    const manifest = validManifest();
+    manifest.presets[0].projection = {
+      capabilities: [
+        {
+          kind: "write-my-private-file",
+        },
+      ],
+    };
+
+    expect(validatePresetSourceManifest(manifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].projection.capabilities[0].kind",
+          message: "Unknown Projection Capability kind: write-my-private-file",
+        },
+      ],
+    });
+  });
+
+  it("rejects missing Projection Capabilities with semantic diagnostics", () => {
+    const manifest = validManifest();
+    manifest.presets[0].projection = {
+      capabilities: [
+        {
+          kind: "workspace-library-package",
+          workspacePackageGlob: "packages/*",
+          packageRole: "shared-library",
+          packageSourcePreset: "ts-lib",
+          sourceFiles: ["src/index.ts", "src/name-schema.ts"],
+        },
+        { kind: "strict-typescript-root" },
+        { kind: "oxc-format-lint" },
+      ],
+    };
+
+    expect(validatePresetSourceManifest(manifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].projection.capabilities",
+          message:
+            "Projection Capability composition must include github-maintenance to provide GitHub Actions maintenance",
+        },
+        {
+          path: "$.presets[0].projection.capabilities",
+          message:
+            "Projection Capability composition must include github-maintenance to provide Dependabot maintenance",
+        },
+        {
+          path: "$.presets[0].projection.capabilities",
+          message:
+            "Projection Capability composition must include node-pnpm-devcontainer to provide development container support",
+        },
+      ],
+    });
+  });
+
   it("reports missing Dependency Catalog entry references with semantic diagnostics", () => {
     const manifest = validManifest();
     manifest.presets[0].dependencyCatalog = ["missing-package"];

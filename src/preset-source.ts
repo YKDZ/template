@@ -24,6 +24,11 @@ import {
   type TemplateDependencyCatalog,
 } from "./dependency-catalog.js";
 import { PackageAdditionSupport } from "./package-addition-support.js";
+import {
+  normalizePresetProjectionDeclaration,
+  projectionCapabilityIssues,
+  type PresetProjectionDeclaration,
+} from "./projection-capabilities.js";
 import { packageTemplateRoot } from "./runtime-paths.js";
 
 export type PresetSourceManifestPresetSource = {
@@ -34,6 +39,7 @@ export type PresetSourceManifestPresetSource = {
 
 export type PresetSourceManifestPreset = BuiltInPreset & {
   dependencyCatalog?: string[];
+  projection?: PresetProjectionDeclaration;
   source?: PresetSourceManifestPresetSource;
 };
 
@@ -138,6 +144,74 @@ export const presetSourceManifestJsonSchema = {
             items: { type: "string", minLength: 1 },
             uniqueItems: true,
           },
+          projection: {
+            type: "object",
+            additionalProperties: false,
+            required: ["capabilities"],
+            properties: {
+              capabilities: {
+                type: "array",
+                items: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: [
+                        "kind",
+                        "workspacePackageGlob",
+                        "packageRole",
+                        "packageSourcePreset",
+                        "sourceFiles",
+                      ],
+                      properties: {
+                        kind: { const: "workspace-library-package" },
+                        workspacePackageGlob: { const: "packages/*" },
+                        packageRole: { const: "shared-library" },
+                        packageSourcePreset: { const: "ts-lib" },
+                        sourceFiles: {
+                          type: "array",
+                          minItems: 1,
+                          items: { type: "string", minLength: 1 },
+                        },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["kind"],
+                      properties: {
+                        kind: { const: "strict-typescript-root" },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["kind"],
+                      properties: {
+                        kind: { const: "oxc-format-lint" },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["kind"],
+                      properties: {
+                        kind: { const: "node-pnpm-devcontainer" },
+                      },
+                    },
+                    {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["kind"],
+                      properties: {
+                        kind: { const: "github-maintenance" },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
           source: {
             type: "object",
             additionalProperties: false,
@@ -178,6 +252,14 @@ const presetSourceManifestPresetSourceSchema = v.strictObject({
   files: v.optional(v.array(nonEmptyString), []),
   sharedResources: v.optional(v.array(nonEmptyString), []),
 });
+const projectionCapabilityKindSchema = v.string();
+const presetProjectionDeclarationSchema = v.strictObject({
+  capabilities: v.array(
+    v.looseObject({
+      kind: projectionCapabilityKindSchema,
+    }),
+  ),
+});
 
 const presetSourceManifestSchema = v.strictObject({
   schemaVersion: v.literal(1),
@@ -206,6 +288,7 @@ const presetSourceManifestSchema = v.strictObject({
         packageAdditionSupport: packageAdditionSupportSchema,
         features: v.array(featureNameSchema),
         dependencyCatalog: v.optional(v.array(nonEmptyString), []),
+        projection: v.optional(presetProjectionDeclarationSchema),
         source: v.optional(presetSourceManifestPresetSourceSchema),
       }),
     ),
@@ -630,20 +713,22 @@ export function validatePresetSourceManifest(
     return { ok: false, issues: shapeIssues(result.issues) };
   }
 
+  const parsedManifest = result.output as PresetSourceManifest;
   const semanticIssues = [
     ...duplicateValueIssues(
-      result.output.sharedResources.map((resource) => resource.id),
+      parsedManifest.sharedResources.map((resource) => resource.id),
       "$.sharedResources.id",
     ),
-    ...duplicatePresetNameIssues(result.output.presets),
-    ...duplicatePresetMetadataArrayIssues(result.output.presets),
-    ...unsupportedProjectShapeIssues(result.output.presets),
+    ...duplicatePresetNameIssues(parsedManifest.presets),
+    ...duplicatePresetMetadataArrayIssues(parsedManifest.presets),
+    ...unsupportedProjectShapeIssues(parsedManifest.presets),
     ...dependencyCatalogReferenceIssues(
-      result.output.presets,
+      parsedManifest.presets,
       options.dependencyCatalog ?? loadTemplateDependencyCatalog(),
     ),
-    ...sharedResourcePathIssues(result.output, options.sourceRoot),
-    ...presetSourceReferenceIssues(result.output, options.sourceRoot),
+    ...projectionCapabilityIssues(parsedManifest.presets),
+    ...sharedResourcePathIssues(parsedManifest, options.sourceRoot),
+    ...presetSourceReferenceIssues(parsedManifest, options.sourceRoot),
   ];
 
   if (semanticIssues.length > 0) {
@@ -657,7 +742,7 @@ export function validatePresetSourceManifest(
       sharedResources: result.output.sharedResources.map((resource) => ({
         ...resource,
       })),
-      presets: result.output.presets.map((preset) => ({
+      presets: parsedManifest.presets.map((preset) => ({
         ...preset,
         supportedPackageManagers: [
           ...preset.supportedPackageManagers,
@@ -667,6 +752,9 @@ export function validatePresetSourceManifest(
         ] as ProjectKind[],
         features: [...preset.features] as FeatureName[],
         dependencyCatalog: [...(preset.dependencyCatalog ?? [])],
+        projection: preset.projection
+          ? normalizePresetProjectionDeclaration(preset.projection)
+          : undefined,
         source: preset.source
           ? {
               roots: [...preset.source.roots],

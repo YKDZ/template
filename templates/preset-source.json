@@ -50,6 +50,21 @@
         "typescript",
         "valibot"
       ],
+      "projection": {
+        "capabilities": [
+          {
+            "kind": "workspace-library-package",
+            "workspacePackageGlob": "packages/*",
+            "packageRole": "shared-library",
+            "packageSourcePreset": "ts-lib",
+            "sourceFiles": ["src/index.ts", "src/name-schema.ts"]
+          },
+          { "kind": "strict-typescript-root" },
+          { "kind": "oxc-format-lint" },
+          { "kind": "node-pnpm-devcontainer" },
+          { "kind": "github-maintenance" }
+        ]
+      },
       "source": {
         "roots": ["ts-lib/.github", "ts-lib/src"],
         "sharedResources": [
