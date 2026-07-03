@@ -28,6 +28,11 @@ import {
   type PresetProjectionPlan,
 } from "./preset-projection.js";
 import {
+  presetSourceManifestJsonSchema,
+  validateBuiltInPresetSourceManifest,
+  validatePresetSourceManifest,
+} from "./preset-source.js";
+import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
   type ToolchainResolutionSource,
@@ -56,8 +61,10 @@ function usage(): string {
     "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]...",
     "  template presets",
     "  template schema preset",
+    "  template schema preset-source",
     "  template schema blueprint",
     "  template preset validate <path>",
+    "  template preset-source validate <path>",
     "  template blueprint validate <path>",
     "",
     "Options:",
@@ -505,7 +512,12 @@ async function main(args: string[]): Promise<void> {
       return;
     }
 
-    throw new Error("schema requires preset or blueprint");
+    if (schemaName === "preset-source") {
+      printJson(presetSourceManifestJsonSchema);
+      return;
+    }
+
+    throw new Error("schema requires preset, preset-source, or blueprint");
   }
 
   if (command === "preset" && args[1] === "validate") {
@@ -522,6 +534,41 @@ async function main(args: string[]): Promise<void> {
     }
 
     console.log(`Preset file is valid: ${result.value.name}`);
+    return;
+  }
+
+  if (command === "preset-source" && args[1] === "validate") {
+    const filePath = args[2];
+    if (!filePath) {
+      throw new Error("preset-source validate requires a path");
+    }
+
+    const declaration = await readJsonDeclaration(filePath);
+    const sourceName =
+      typeof declaration === "object" &&
+      declaration !== null &&
+      !Array.isArray(declaration) &&
+      "name" in declaration &&
+      typeof declaration.name === "string"
+        ? declaration.name
+        : undefined;
+    const result =
+      sourceName === "built-in"
+        ? validateBuiltInPresetSourceManifest(declaration)
+        : validatePresetSourceManifest(declaration);
+    if (!result.ok) {
+      throw new Error(
+        `Preset Source Manifest is invalid:\n${formatValidationIssues(
+          result.issues,
+        )}`,
+      );
+    }
+
+    console.log(
+      `Preset Source Manifest is valid: ${
+        result.value.name
+      } (${result.value.presets.map((preset) => preset.name).join(", ")})`,
+    );
     return;
   }
 

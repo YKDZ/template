@@ -1,12 +1,12 @@
 import * as v from "valibot";
 
-import { builtInPresetMetadata } from "../templates/registry.js";
 import type { PackageAdditionSupport } from "./package-addition-support.js";
 import type {
   PackageLinkIntent,
   PackageRole,
   PackageSourcePreset,
 } from "./package-linking.js";
+import { loadBuiltInPresetSourceManifest } from "./preset-source.js";
 
 export type BuiltInPreset = {
   name: string;
@@ -63,7 +63,8 @@ export type ProjectBlueprint = {
   packageLinkIntents?: PackageLinkIntent[];
 };
 
-export const builtInPresets: readonly BuiltInPreset[] = builtInPresetMetadata;
+export const builtInPresets: readonly BuiltInPreset[] =
+  loadBuiltInPresetSourceManifest().presets;
 
 const featureNames: FeatureName[] = [
   "pnpm-catalog",

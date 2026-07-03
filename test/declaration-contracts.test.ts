@@ -72,6 +72,48 @@ describe("declaration contracts", () => {
     ]);
   });
 
+  it("prints the Preset Source Manifest JSON Schema", async () => {
+    const presetSourceSchema = JSON.parse(
+      (await template(["schema", "preset-source"])).stdout,
+    ) as {
+      title: string;
+      type: string;
+      required: string[];
+      properties: {
+        presets: {
+          items: {
+            required: string[];
+            properties: {
+              packageAdditionSupport: { enum: string[] };
+            };
+          };
+        };
+      };
+    };
+
+    expect(presetSourceSchema).toMatchObject({
+      title: "Preset Source Manifest",
+      type: "object",
+    });
+    expect(presetSourceSchema.required).toContain("presets");
+    expect(presetSourceSchema.properties.presets.items.required).toEqual(
+      expect.arrayContaining([
+        "name",
+        "title",
+        "description",
+        "generation",
+        "supportedPackageManagers",
+        "supportedProjectKinds",
+        "packageAdditionSupport",
+        "features",
+      ]),
+    );
+    expect(
+      presetSourceSchema.properties.presets.items.properties
+        .packageAdditionSupport.enum,
+    ).toEqual(["supported", "unsupported"]);
+  });
+
   it("advertises pnpm support for the Rust preset task layer", () => {
     expect(findBuiltInPreset("rust-bin")?.supportedPackageManagers).toEqual([
       "pnpm",
@@ -102,6 +144,146 @@ describe("declaration contracts", () => {
 
     expect(result.stdout).toContain("Preset file is valid");
     expect(result.stdout).toContain("custom-lib");
+  });
+
+  it("validates a Preset Source Manifest through the CLI", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-preset-source-"),
+    );
+    const manifestPath = path.join(workspace, "preset-source.json");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "custom-source",
+          presets: [
+            {
+              name: "custom-lib",
+              title: "Custom library",
+              description: "A custom strict TypeScript library preset.",
+              generation: "supported",
+              supportedPackageManagers: ["pnpm"],
+              supportedProjectKinds: ["multi-package"],
+              packageAdditionSupport: "unsupported",
+              features: ["strict-typescript", "root-check"],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await template(["preset-source", "validate", manifestPath]);
+
+    expect(result.stdout).toContain("Preset Source Manifest is valid");
+    expect(result.stdout).toContain("custom-source");
+    expect(result.stdout).toContain("custom-lib");
+  });
+
+  it("rejects duplicate Preset Source Manifest array values through the CLI", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-preset-source-duplicates-"),
+    );
+    const manifestPath = path.join(workspace, "preset-source.json");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "custom-source",
+          presets: [
+            {
+              name: "custom-lib",
+              title: "Custom library",
+              description: "A custom strict TypeScript library preset.",
+              generation: "supported",
+              supportedPackageManagers: ["pnpm", "pnpm"],
+              supportedProjectKinds: ["multi-package", "multi-package"],
+              packageAdditionSupport: "unsupported",
+              features: ["strict-typescript", "strict-typescript"],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "$.presets[0].supportedPackageManagers: Duplicate value: pnpm",
+      ),
+    });
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "$.presets[0].supportedProjectKinds: Duplicate value: multi-package",
+      ),
+    });
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "$.presets[0].features: Duplicate value: strict-typescript",
+      ),
+    });
+  });
+
+  it("validates the built-in Preset Source Manifest through the CLI", async () => {
+    const result = await template([
+      "preset-source",
+      "validate",
+      "templates/preset-source.json",
+    ]);
+
+    expect(result.stdout).toContain("Preset Source Manifest is valid");
+    expect(result.stdout).toContain("built-in");
+    expect(result.stdout).toContain("ts-lib");
+    expect(result.stdout).toContain("vue-hono-app");
+    expect(result.stdout).toContain("rust-bin");
+  });
+
+  it("rejects built-in Preset Source Manifests that drift from registry projections through the CLI", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-preset-source-bridge-"),
+    );
+    const manifestPath = path.join(workspace, "preset-source.json");
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          name: "built-in",
+          presets: [
+            {
+              name: "missing-supported",
+              title: "Missing supported preset",
+              description: "A supported built-in preset with no projection.",
+              generation: "supported",
+              supportedPackageManagers: ["pnpm"],
+              supportedProjectKinds: ["multi-package"],
+              packageAdditionSupport: "unsupported",
+              features: [],
+            },
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await expect(
+      template(["preset-source", "validate", manifestPath]),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining(
+        "Supported built-in Preset missing-supported must have a registry projection",
+      ),
+    });
   });
 
   it("rejects preset files that claim single-package support in V1", async () => {

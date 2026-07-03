@@ -83,6 +83,7 @@ async function runtimeSourceFiles(): Promise<string[]> {
 
   return [
     ...srcFiles,
+    "templates/preset-source.json",
     "templates/projection-plans.ts",
     "templates/registry.ts",
     ...projectionRuntimeFiles,
@@ -293,6 +294,7 @@ describe("package publishing", () => {
     expect(packedPaths).not.toContain("package/dist/post-commands.js");
     expect(packedPaths).toContain("package/dist/templates/registry.js");
     expect(packedPaths).toContain("package/dist/templates/projection-plans.js");
+    expect(packedPaths).toContain("package/templates/preset-source.json");
     expect(packedPaths).not.toContain("package/dist/src/preset-registry.js");
     expect(packedPaths).toEqual(
       expect.arrayContaining(compiledProjectionRuntimePackagePaths()),
