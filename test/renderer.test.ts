@@ -258,6 +258,45 @@ describe("renderer", () => {
     );
   });
 
+  it("writes tsconfig extends before other root keys", async () => {
+    const { sourceRoot, targetRoot } = await tempWorkspace();
+
+    await renderProject({
+      sourceRoot,
+      targetRoot,
+      operations: [
+        {
+          kind: "writeJson",
+          to: "apps/api/tsconfig.build.json",
+          value: {
+            include: ["src/**/*.ts"],
+            compilerOptions: {
+              rootDir: "src",
+              outDir: "dist",
+            },
+            extends: "./tsconfig.json",
+          },
+        },
+      ],
+    });
+
+    await expect(
+      readFile(path.join(targetRoot, "apps/api/tsconfig.build.json"), "utf8"),
+    ).resolves.toBe(
+      [
+        "{",
+        '  "extends": "./tsconfig.json",',
+        '  "compilerOptions": {',
+        '    "outDir": "dist",',
+        '    "rootDir": "src"',
+        "  },",
+        '  "include": ["src/**/*.ts"]',
+        "}",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("writes limited foundation text files", async () => {
     const { sourceRoot, targetRoot } = await tempWorkspace();
 

@@ -264,6 +264,15 @@ const devcontainerJsonRootKeyOrder = [
   "customizations",
 ];
 
+const tsconfigJsonRootKeyOrder = [
+  "extends",
+  "compilerOptions",
+  "files",
+  "references",
+  "include",
+  "exclude",
+];
+
 function compareJsonKeys(
   left: string,
   right: string,
@@ -285,6 +294,10 @@ function compareJsonKeys(
 function rootKeyOrderForPath(toPath: string): Map<string, number> | undefined {
   if (path.basename(toPath) === "package.json") {
     return new Map(packageJsonRootKeyOrder.map((key, index) => [key, index]));
+  }
+
+  if (/^tsconfig(?:\..*)?\.json$/.test(path.basename(toPath))) {
+    return new Map(tsconfigJsonRootKeyOrder.map((key, index) => [key, index]));
   }
 
   if (toPath.split(path.sep).join("/") === ".devcontainer/devcontainer.json") {
