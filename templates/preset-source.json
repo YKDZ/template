@@ -23,6 +23,105 @@
       "path": "shared/oxc/vue"
     }
   ],
+  "fixtureMatrix": {
+    "initSupport": [
+      { "preset": "ts-lib" },
+      { "preset": "hono-api" },
+      { "preset": "vue-app" },
+      { "preset": "vue-hono-app" },
+      { "preset": "rust-bin" }
+    ],
+    "packageAdditionSupport": [
+      {
+        "preset": "ts-lib",
+        "packageLeafName": "fixture-lib"
+      },
+      {
+        "preset": "hono-api",
+        "packageLeafName": "fixture-api"
+      },
+      {
+        "preset": "vue-app",
+        "packageLeafName": "fixture-web"
+      }
+    ],
+    "supportedCombinations": [
+      { "basePreset": "ts-lib", "addedPreset": "ts-lib" },
+      { "basePreset": "ts-lib", "addedPreset": "hono-api" },
+      { "basePreset": "ts-lib", "addedPreset": "vue-app" },
+      { "basePreset": "hono-api", "addedPreset": "ts-lib" },
+      { "basePreset": "hono-api", "addedPreset": "hono-api" },
+      { "basePreset": "hono-api", "addedPreset": "vue-app" },
+      { "basePreset": "vue-app", "addedPreset": "ts-lib" },
+      { "basePreset": "vue-app", "addedPreset": "hono-api" },
+      { "basePreset": "vue-app", "addedPreset": "vue-app" },
+      { "basePreset": "vue-hono-app", "addedPreset": "ts-lib" },
+      {
+        "basePreset": "vue-hono-app",
+        "addedPreset": "ts-lib",
+        "linkFrom": ["apps/web"]
+      },
+      { "basePreset": "vue-hono-app", "addedPreset": "hono-api" },
+      { "basePreset": "vue-hono-app", "addedPreset": "vue-app" },
+      { "basePreset": "rust-bin", "addedPreset": "ts-lib" },
+      { "basePreset": "rust-bin", "addedPreset": "hono-api" },
+      { "basePreset": "rust-bin", "addedPreset": "vue-app" }
+    ],
+    "semanticSkips": [
+      {
+        "basePreset": "ts-lib",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "ts-lib",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      },
+      {
+        "basePreset": "hono-api",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "hono-api",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      },
+      {
+        "basePreset": "vue-app",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "vue-app",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      },
+      {
+        "basePreset": "vue-hono-app",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "vue-hono-app",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      },
+      {
+        "basePreset": "rust-bin",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "rust-bin",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      }
+    ],
+    "checkRequirements": ["machine-verifiable-next-steps", "root-check-ci"],
+    "environmentPreparation": ["playwright-browser-assets"]
+  },
   "presets": [
     {
       "name": "ts-lib",

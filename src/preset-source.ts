@@ -48,10 +48,41 @@ export type PresetSourceManifestSharedResource = {
   path: string;
 };
 
+export type PresetSourceFixtureMatrixPresetSupport = {
+  preset: string;
+};
+
+export type PresetSourceFixtureMatrixPackageAdditionSupport = {
+  preset: string;
+  packageLeafName: string;
+};
+
+export type PresetSourceFixtureMatrixCombination = {
+  basePreset: string;
+  addedPreset: string;
+  linkFrom?: string[];
+};
+
+export type PresetSourceFixtureMatrixSemanticSkip = {
+  basePreset: string;
+  addedPreset: string;
+  reason: string;
+};
+
+export type PresetSourceFixtureMatrixContract = {
+  initSupport: PresetSourceFixtureMatrixPresetSupport[];
+  packageAdditionSupport: PresetSourceFixtureMatrixPackageAdditionSupport[];
+  supportedCombinations: PresetSourceFixtureMatrixCombination[];
+  semanticSkips: PresetSourceFixtureMatrixSemanticSkip[];
+  checkRequirements: string[];
+  environmentPreparation: string[];
+};
+
 export type PresetSourceManifest = {
   schemaVersion: 1;
   name: string;
   sharedResources: PresetSourceManifestSharedResource[];
+  fixtureMatrix?: PresetSourceFixtureMatrixContract;
   presets: PresetSourceManifestPreset[];
 };
 
@@ -74,6 +105,16 @@ const featureNames = [
   "native-binary-release",
 ] satisfies FeatureName[];
 
+const packageLeafNamePattern = "^[a-z0-9][a-z0-9-]*$";
+const packageLeafNameRegExp = new RegExp(packageLeafNamePattern);
+const requiredFixtureMatrixCheckRequirements = [
+  "machine-verifiable-next-steps",
+  "root-check-ci",
+] as const;
+const requiredFixtureMatrixEnvironmentPreparation = [
+  "playwright-browser-assets",
+] as const;
+
 export const presetSourceManifestJsonSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://ykdz.dev/schemas/template/preset-source-manifest.schema.json",
@@ -93,6 +134,90 @@ export const presetSourceManifestJsonSchema = {
         properties: {
           id: { type: "string", minLength: 1 },
           path: { type: "string", minLength: 1 },
+        },
+      },
+    },
+    fixtureMatrix: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "initSupport",
+        "packageAdditionSupport",
+        "supportedCombinations",
+        "semanticSkips",
+        "checkRequirements",
+        "environmentPreparation",
+      ],
+      properties: {
+        initSupport: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["preset"],
+            properties: {
+              preset: { type: "string", minLength: 1 },
+            },
+          },
+        },
+        packageAdditionSupport: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["preset", "packageLeafName"],
+            properties: {
+              preset: { type: "string", minLength: 1 },
+              packageLeafName: {
+                type: "string",
+                minLength: 1,
+                pattern: packageLeafNamePattern,
+              },
+            },
+          },
+        },
+        supportedCombinations: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["basePreset", "addedPreset"],
+            properties: {
+              basePreset: { type: "string", minLength: 1 },
+              addedPreset: { type: "string", minLength: 1 },
+              linkFrom: {
+                type: "array",
+                items: { type: "string", minLength: 1 },
+              },
+            },
+          },
+        },
+        semanticSkips: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["basePreset", "addedPreset", "reason"],
+            properties: {
+              basePreset: { type: "string", minLength: 1 },
+              addedPreset: { type: "string", minLength: 1 },
+              reason: { type: "string", minLength: 1 },
+            },
+          },
+        },
+        checkRequirements: {
+          type: "array",
+          items: {
+            enum: [...requiredFixtureMatrixCheckRequirements],
+          },
+          uniqueItems: true,
+        },
+        environmentPreparation: {
+          type: "array",
+          items: {
+            enum: [...requiredFixtureMatrixEnvironmentPreparation],
+          },
+          uniqueItems: true,
         },
       },
     },
@@ -308,6 +433,41 @@ const presetSourceManifestPresetSourceSchema = v.strictObject({
   files: v.optional(v.array(nonEmptyString), []),
   sharedResources: v.optional(v.array(nonEmptyString), []),
 });
+const fixtureMatrixPresetSupportSchema = v.strictObject({
+  preset: nonEmptyString,
+});
+const fixtureMatrixPackageAdditionSupportSchema = v.strictObject({
+  preset: nonEmptyString,
+  packageLeafName: v.pipe(
+    v.string(),
+    v.regex(
+      packageLeafNameRegExp,
+      "Fixture Matrix Package Addition packageLeafName must be a lowercase package leaf name using letters, numbers, and hyphens",
+    ),
+  ),
+});
+const fixtureMatrixCombinationSchema = v.strictObject({
+  basePreset: nonEmptyString,
+  addedPreset: nonEmptyString,
+  linkFrom: v.optional(v.array(nonEmptyString), []),
+});
+const fixtureMatrixSemanticSkipSchema = v.strictObject({
+  basePreset: nonEmptyString,
+  addedPreset: nonEmptyString,
+  reason: nonEmptyString,
+});
+const fixtureMatrixContractSchema = v.strictObject({
+  initSupport: v.array(fixtureMatrixPresetSupportSchema),
+  packageAdditionSupport: v.array(fixtureMatrixPackageAdditionSupportSchema),
+  supportedCombinations: v.array(fixtureMatrixCombinationSchema),
+  semanticSkips: v.array(fixtureMatrixSemanticSkipSchema),
+  checkRequirements: v.array(
+    v.picklist(requiredFixtureMatrixCheckRequirements),
+  ),
+  environmentPreparation: v.array(
+    v.picklist(requiredFixtureMatrixEnvironmentPreparation),
+  ),
+});
 const projectionCapabilityKindSchema = v.string();
 const presetProjectionDeclarationSchema = v.strictObject({
   capabilities: v.array(
@@ -329,6 +489,7 @@ const presetSourceManifestSchema = v.strictObject({
     ),
     [],
   ),
+  fixtureMatrix: v.optional(fixtureMatrixContractSchema),
   presets: v.pipe(
     v.array(
       v.strictObject({
@@ -456,6 +617,231 @@ function duplicatePresetMetadataArrayIssues(
       `$.presets[${index}].dependencyCatalog`,
     ),
   ]);
+}
+
+function fixtureCombinationKey(
+  combination: Pick<
+    PresetSourceFixtureMatrixCombination,
+    "basePreset" | "addedPreset" | "linkFrom"
+  >,
+): string {
+  return [
+    combination.basePreset,
+    combination.addedPreset,
+    ...(combination.linkFrom ?? []),
+  ].join("\0");
+}
+
+function fixtureCombinationPairKey(
+  combination: Pick<
+    PresetSourceFixtureMatrixCombination,
+    "basePreset" | "addedPreset"
+  >,
+): string {
+  return [combination.basePreset, combination.addedPreset].join("\0");
+}
+
+function fixtureMatrixContractIssues(
+  manifest: PresetSourceManifest,
+): ValidationIssue[] {
+  if (!manifest.fixtureMatrix) {
+    return [];
+  }
+
+  const issues: ValidationIssue[] = [];
+  const presetsByName = new Map(
+    manifest.presets.map((preset) => [preset.name, preset]),
+  );
+  const initPresets = new Set(
+    manifest.fixtureMatrix.initSupport.map((support) => support.preset),
+  );
+  const addablePresets = new Set(
+    manifest.fixtureMatrix.packageAdditionSupport.map(
+      (support) => support.preset,
+    ),
+  );
+  const validInitPresets = new Set<string>();
+  const validAddablePresets = new Set<string>();
+  const supportedCombinationKeys = new Set<string>();
+  const supportedCombinationPairKeys = new Set<string>();
+  const semanticSkipKeys = new Set<string>();
+  const semanticSkipPairKeys = new Set<string>();
+
+  manifest.fixtureMatrix.initSupport.forEach((support, index) => {
+    const preset = presetsByName.get(support.preset);
+    if (!preset) {
+      issues.push({
+        path: `$.fixtureMatrix.initSupport[${index}].preset`,
+        message: `Fixture Matrix init support references unknown Preset: ${support.preset}`,
+      });
+      return;
+    }
+
+    if (preset.generation !== "supported") {
+      issues.push({
+        path: `$.fixtureMatrix.initSupport[${index}].preset`,
+        message: `Fixture Matrix init support must reference supported Presets: ${support.preset}`,
+      });
+      return;
+    }
+
+    validInitPresets.add(support.preset);
+  });
+
+  manifest.presets.forEach((preset, index) => {
+    if (
+      preset.generation === "supported" &&
+      preset.packageAdditionSupport === PackageAdditionSupport.Supported &&
+      !addablePresets.has(preset.name)
+    ) {
+      issues.push({
+        path: `$.presets[${index}].packageAdditionSupport`,
+        message: `Fixture Matrix Package Addition support must declare supported Preset: ${preset.name}`,
+      });
+    }
+  });
+
+  manifest.fixtureMatrix.packageAdditionSupport.forEach((support, index) => {
+    const preset = presetsByName.get(support.preset);
+    if (!preset) {
+      issues.push({
+        path: `$.fixtureMatrix.packageAdditionSupport[${index}].preset`,
+        message: `Fixture Matrix Package Addition support references unknown Preset: ${support.preset}`,
+      });
+      return;
+    }
+
+    if (preset.packageAdditionSupport !== PackageAdditionSupport.Supported) {
+      issues.push({
+        path: `$.fixtureMatrix.packageAdditionSupport[${index}].preset`,
+        message: `Fixture Matrix Package Addition support must match Preset metadata: ${support.preset} is ${preset.packageAdditionSupport}`,
+      });
+      return;
+    }
+
+    validAddablePresets.add(support.preset);
+  });
+
+  manifest.fixtureMatrix.supportedCombinations.forEach((combination, index) => {
+    const key = fixtureCombinationKey(combination);
+    supportedCombinationPairKeys.add(fixtureCombinationPairKey(combination));
+    if (supportedCombinationKeys.has(key)) {
+      issues.push({
+        path: `$.fixtureMatrix.supportedCombinations[${index}]`,
+        message: `Duplicate Fixture Matrix supported combination: ${combination.basePreset} + ${combination.addedPreset}`,
+      });
+    }
+    supportedCombinationKeys.add(key);
+
+    if (!initPresets.has(combination.basePreset)) {
+      issues.push({
+        path: `$.fixtureMatrix.supportedCombinations[${index}].basePreset`,
+        message: `Fixture Matrix supported combination base Preset is not init-supported: ${combination.basePreset}`,
+      });
+    }
+
+    if (!addablePresets.has(combination.addedPreset)) {
+      issues.push({
+        path: `$.fixtureMatrix.supportedCombinations[${index}].addedPreset`,
+        message: `Fixture Matrix supported combination added Preset is not Package Addition-supported: ${combination.addedPreset}`,
+      });
+    }
+  });
+
+  manifest.fixtureMatrix.semanticSkips.forEach((skip, index) => {
+    const key = fixtureCombinationKey(skip);
+    semanticSkipPairKeys.add(fixtureCombinationPairKey(skip));
+    if (semanticSkipKeys.has(key)) {
+      issues.push({
+        path: `$.fixtureMatrix.semanticSkips[${index}]`,
+        message: `Duplicate Fixture Matrix semantic skip: ${skip.basePreset} + ${skip.addedPreset}`,
+      });
+    }
+    semanticSkipKeys.add(key);
+
+    if (!initPresets.has(skip.basePreset)) {
+      issues.push({
+        path: `$.fixtureMatrix.semanticSkips[${index}].basePreset`,
+        message: `Fixture Matrix semantic skip base Preset is not init-supported: ${skip.basePreset}`,
+      });
+    }
+
+    if (!presetsByName.has(skip.addedPreset)) {
+      issues.push({
+        path: `$.fixtureMatrix.semanticSkips[${index}].addedPreset`,
+        message: `Fixture Matrix semantic skip references unknown added Preset: ${skip.addedPreset}`,
+      });
+    }
+  });
+
+  for (const basePreset of validInitPresets) {
+    for (const addedPreset of validAddablePresets) {
+      const key = fixtureCombinationPairKey({ basePreset, addedPreset });
+      if (
+        !supportedCombinationPairKeys.has(key) &&
+        !semanticSkipPairKeys.has(key)
+      ) {
+        issues.push({
+          path: "$.fixtureMatrix.supportedCombinations",
+          message: `Fixture Matrix must explicitly cover supported combination or semantic skip: ${basePreset} + ${addedPreset}`,
+        });
+      }
+    }
+  }
+
+  for (const checkRequirement of requiredFixtureMatrixCheckRequirements) {
+    if (!manifest.fixtureMatrix.checkRequirements.includes(checkRequirement)) {
+      issues.push({
+        path: "$.fixtureMatrix.checkRequirements",
+        message: `Fixture Matrix check requirements must include ${checkRequirement}`,
+      });
+    }
+  }
+
+  for (const environmentPreparation of requiredFixtureMatrixEnvironmentPreparation) {
+    if (
+      !manifest.fixtureMatrix.environmentPreparation.includes(
+        environmentPreparation,
+      )
+    ) {
+      issues.push({
+        path: "$.fixtureMatrix.environmentPreparation",
+        message: `Fixture Matrix environment preparation must include ${environmentPreparation}`,
+      });
+    }
+  }
+
+  for (const key of semanticSkipPairKeys) {
+    if (supportedCombinationPairKeys.has(key)) {
+      issues.push({
+        path: "$.fixtureMatrix.semanticSkips",
+        message:
+          "Fixture Matrix semantic skips must not duplicate supported combinations",
+      });
+    }
+  }
+
+  return [
+    ...duplicateValueIssues(
+      manifest.fixtureMatrix.initSupport.map((support) => support.preset),
+      "$.fixtureMatrix.initSupport.preset",
+    ),
+    ...duplicateValueIssues(
+      manifest.fixtureMatrix.packageAdditionSupport.map(
+        (support) => support.preset,
+      ),
+      "$.fixtureMatrix.packageAdditionSupport.preset",
+    ),
+    ...duplicateValueIssues(
+      manifest.fixtureMatrix.checkRequirements,
+      "$.fixtureMatrix.checkRequirements",
+    ),
+    ...duplicateValueIssues(
+      manifest.fixtureMatrix.environmentPreparation,
+      "$.fixtureMatrix.environmentPreparation",
+    ),
+    ...issues,
+  ];
 }
 
 function dependencyCatalogReferenceIssues(
@@ -778,6 +1164,7 @@ export function validatePresetSourceManifest(
     ...duplicatePresetNameIssues(parsedManifest.presets),
     ...duplicatePresetMetadataArrayIssues(parsedManifest.presets),
     ...unsupportedProjectShapeIssues(parsedManifest.presets),
+    ...fixtureMatrixContractIssues(parsedManifest),
     ...dependencyCatalogReferenceIssues(
       parsedManifest.presets,
       options.dependencyCatalog ?? loadTemplateDependencyCatalog(),
@@ -798,6 +1185,33 @@ export function validatePresetSourceManifest(
       sharedResources: result.output.sharedResources.map((resource) => ({
         ...resource,
       })),
+      fixtureMatrix: result.output.fixtureMatrix
+        ? {
+            initSupport: result.output.fixtureMatrix.initSupport.map(
+              (support) => ({ ...support }),
+            ),
+            packageAdditionSupport:
+              result.output.fixtureMatrix.packageAdditionSupport.map(
+                (support) => ({ ...support }),
+              ),
+            supportedCombinations:
+              result.output.fixtureMatrix.supportedCombinations.map(
+                (combination) => ({
+                  ...combination,
+                  linkFrom: [...(combination.linkFrom ?? [])],
+                }),
+              ),
+            semanticSkips: result.output.fixtureMatrix.semanticSkips.map(
+              (skip) => ({ ...skip }),
+            ),
+            checkRequirements: [
+              ...result.output.fixtureMatrix.checkRequirements,
+            ],
+            environmentPreparation: [
+              ...result.output.fixtureMatrix.environmentPreparation,
+            ],
+          }
+        : undefined,
       presets: parsedManifest.presets.map((preset) => ({
         ...preset,
         supportedPackageManagers: [

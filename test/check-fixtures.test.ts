@@ -5,8 +5,12 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
-import { PackageAdditionSupport } from "../src/package-addition-support.js";
-import { builtInPresetProjections } from "../templates/registry.js";
+import {
+  generatedScenarioId,
+  selectGeneratedScenarios,
+  type GeneratedScenario,
+} from "../src/generated-scenarios.js";
+import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -20,61 +24,19 @@ type CommandRecord = {
   ci: string | null;
 };
 
-type FixtureScenario = {
-  basePreset: string;
-  addedPreset?: string;
-  linkFrom?: readonly string[];
-};
+const fixtureScenarios = selectGeneratedScenarios(
+  loadBuiltInPresetSourceManifest(),
+  "package-addition-matrix",
+).runnable;
 
-const supportedPresetNames = builtInPresetProjections
-  .filter((projection) => projection.metadata.generation === "supported")
-  .map((projection) => projection.metadata.name);
-const addablePresetNames = builtInPresetProjections
-  .filter(
-    (projection) =>
-      projection.metadata.generation === "supported" &&
-      projection.metadata.packageAdditionSupport ===
-        PackageAdditionSupport.Supported,
-  )
-  .map((projection) => projection.metadata.name);
-const fixtureScenarios: FixtureScenario[] = [
-  ...supportedPresetNames.map((basePreset) => ({ basePreset })),
-  ...supportedPresetNames.flatMap((basePreset) =>
-    addablePresetNames.map((addedPreset) => ({ basePreset, addedPreset })),
-  ),
-  {
-    basePreset: "vue-hono-app",
-    addedPreset: "ts-lib",
-    linkFrom: ["apps/web"],
-  },
-];
-
-function fixtureScenarioId(scenario: FixtureScenario): string {
-  if (!scenario.addedPreset) {
-    return scenario.basePreset;
-  }
-
-  if (scenario.linkFrom && scenario.linkFrom.length > 0) {
-    const linkFromId = scenario.linkFrom
-      .map((packagePath) => packagePath.replaceAll("/", "-"))
-      .join("-");
-
-    return `${scenario.basePreset}-add-${scenario.addedPreset}-link-from-${linkFromId}`;
-  }
-
-  return `${scenario.basePreset}-add-${scenario.addedPreset}`;
-}
-
-function fixtureScenarioFromCwd(cwd: string): FixtureScenario | undefined {
+function fixtureScenarioFromCwd(cwd: string): GeneratedScenario | undefined {
   const fixtureDirectory = path.basename(cwd).replace(/^fixture-/, "");
 
-  return fixtureScenarios.find(
-    (scenario) => fixtureScenarioId(scenario) === fixtureDirectory,
-  );
+  return fixtureScenarios.find((scenario) => scenario.id === fixtureDirectory);
 }
 
 function scenarioNeedsPlaywrightEnvironment(
-  scenario: FixtureScenario,
+  scenario: GeneratedScenario,
 ): boolean {
   return (
     scenario.basePreset === "vue-app" ||
@@ -333,7 +295,7 @@ describe("fixture checks", () => {
         packageAdditionScenarios.map((scenario) =>
           expect.objectContaining({
             cwd: expect.stringContaining(
-              `fixture-${fixtureScenarioId(scenario)}`,
+              `fixture-${generatedScenarioId(scenario)}`,
             ),
             args: expect.arrayContaining(["--preset", scenario.addedPreset]),
           }),
@@ -358,7 +320,7 @@ describe("fixture checks", () => {
         fixtureScenarios.map((scenario) =>
           expect.objectContaining({
             cwd: expect.stringContaining(
-              `fixture-${fixtureScenarioId(scenario)}`,
+              `fixture-${generatedScenarioId(scenario)}`,
             ),
           }),
         ),
@@ -375,7 +337,7 @@ describe("fixture checks", () => {
           expect.objectContaining({
             ci: "1",
             cwd: expect.stringContaining(
-              `fixture-${fixtureScenarioId(scenario)}`,
+              `fixture-${generatedScenarioId(scenario)}`,
             ),
           }),
         ),

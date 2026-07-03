@@ -100,6 +100,13 @@ describe("declaration contracts", () => {
       type: string;
       required: string[];
       properties: {
+        fixtureMatrix: {
+          required: string[];
+          properties: {
+            environmentPreparation: { items: { enum: string[] } };
+            checkRequirements: { items: { enum: string[] } };
+          };
+        };
         presets: {
           items: {
             required: string[];
@@ -116,6 +123,22 @@ describe("declaration contracts", () => {
       type: "object",
     });
     expect(presetSourceSchema.required).toContain("presets");
+    expect(presetSourceSchema.properties.fixtureMatrix.required).toEqual([
+      "initSupport",
+      "packageAdditionSupport",
+      "supportedCombinations",
+      "semanticSkips",
+      "checkRequirements",
+      "environmentPreparation",
+    ]);
+    expect(
+      presetSourceSchema.properties.fixtureMatrix.properties.checkRequirements
+        .items.enum,
+    ).toEqual(["machine-verifiable-next-steps", "root-check-ci"]);
+    expect(
+      presetSourceSchema.properties.fixtureMatrix.properties
+        .environmentPreparation.items.enum,
+    ).toEqual(["playwright-browser-assets"]);
     expect(presetSourceSchema.properties.presets.items.required).toEqual(
       expect.arrayContaining([
         "name",
