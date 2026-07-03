@@ -19,6 +19,20 @@ const repoRoot = path.resolve(
 );
 
 describe("Project Kit Root Check", () => {
+  it("runs Single Preset Generated Check from the default Root Check", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+    ) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts).toHaveProperty("check:generated");
+    expect(packageJson.scripts["check:generated"]).toBe(
+      "tsx scripts/check-generated.ts",
+    );
+    expect(packageJson.scripts.check).toContain("pnpm run check:generated");
+  });
+
   it("keeps Fixture Matrix checks explicit and outside the default Root Check", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),

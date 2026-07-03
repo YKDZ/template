@@ -6,6 +6,7 @@ import {
   errorForFailedGeneratedScenario,
   generatedScenarioId,
   packageLeafNameForAddedPreset,
+  runGeneratedScenarioSet,
   runGeneratedScenariosConcurrently,
   selectGeneratedScenarios,
 } from "../src/generated-scenarios.js";
@@ -169,6 +170,18 @@ describe("generated scenarios", () => {
     });
   });
 
+  it("wraps init runner failures with the initialization preset label", () => {
+    const scenario = selectGeneratedScenarios(minimalManifest(), "init")
+      .runnable[0];
+
+    expect(
+      errorForFailedGeneratedScenario(scenario, new Error("inner")),
+    ).toMatchObject({
+      message: "Fixture scenario failed: base",
+      cause: expect.objectContaining({ message: "inner" }),
+    });
+  });
+
   it("runs selected scenarios through the shared runner", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "generated-scenario-runner-"),
@@ -221,6 +234,53 @@ describe("generated scenarios", () => {
         expect.stringContaining("pnpm run fix"),
         expect.stringContaining("pnpm run check"),
       ]),
+    );
+  });
+
+  it("runs initialization presets through production generation and generated Root Check", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "generated-init-scenario-runner-"),
+    );
+    const commands: string[] = [];
+    const selection = await runGeneratedScenarioSet(
+      loadBuiltInPresetSourceManifest(),
+      "init",
+      workspace,
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/src/cli.ts",
+        findPresetProjection: findBuiltInPresetProjection,
+        runCommand: async (command, args, cwd) => {
+          commands.push(`${cwd}: ${command} ${args.join(" ")}`);
+        },
+        reporter: {},
+      },
+    );
+
+    const initPresetNames = selection.runnable.map(
+      (scenario) => scenario.basePreset,
+    );
+
+    expect(initPresetNames).toEqual(
+      selectGeneratedScenarios(
+        loadBuiltInPresetSourceManifest(),
+        "init",
+      ).runnable.map((scenario) => scenario.basePreset),
+    );
+    for (const presetName of initPresetNames) {
+      expect(commands).toContainEqual(
+        expect.stringContaining(
+          `/repo: pnpm exec tsx /repo/src/cli.ts init ${path.join(workspace, `fixture-${presetName}`)} --preset ${presetName} --yes`,
+        ),
+      );
+      expect(commands).toContainEqual(
+        expect.stringContaining(
+          `${path.join(workspace, `fixture-${presetName}`)}: pnpm run check`,
+        ),
+      );
+    }
+    expect(commands).not.toContainEqual(
+      expect.stringContaining(" add package "),
     );
   });
 

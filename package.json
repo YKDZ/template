@@ -37,9 +37,10 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "check": "pnpm run check:format && pnpm run typecheck && pnpm run test && pnpm run check:templates",
+    "check": "pnpm run check:format && pnpm run typecheck && pnpm run test && pnpm run check:generated && pnpm run check:templates",
     "check:format": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
     "check:fixtures": "tsx scripts/check-fixtures.ts",
+    "check:generated": "tsx scripts/check-generated.ts",
     "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:templates:boundary && pnpm run check:templates:static-source",
     "check:toolchain:online": "tsx scripts/check-online-toolchain-resolution-contract.ts",
     "check:templates:boundary": "tsx scripts/check-template-boundary.ts",
