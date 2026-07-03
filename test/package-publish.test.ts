@@ -15,10 +15,16 @@ import { fileURLToPath } from "node:url";
 import { execa } from "execa";
 
 import { assembleGenerationContext } from "../src/generation-context.js";
-import type { PresetProjection } from "../src/preset-projection.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+import type { PresetProjectionPlan } from "../src/preset-projection.js";
+import {
+  loadBuiltInPresetSourceManifest,
+  type PresetSourceManifestPreset,
+} from "../src/preset-source.js";
+import {
+  blueprintForPresetSourcePreset,
+  projectPresetSourcePreset,
+} from "../src/projection-capabilities.js";
 import type { CopyFileOperation } from "../src/renderer.js";
-import { builtInPresetProjections } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -51,9 +57,11 @@ const packageRootFiles = [
   "tsconfig.json",
 ];
 
-const supportedPresetProjections = builtInPresetProjections.filter(
-  (projection) => projection.metadata.generation === "supported",
-);
+const supportedPresetSourcePresets =
+  loadBuiltInPresetSourceManifest().presets.filter(
+    (preset) =>
+      preset.generation === "supported" && preset.projection !== undefined,
+  );
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
@@ -79,25 +87,22 @@ async function runtimeSourceFiles(): Promise<string[]> {
   const srcFiles = (await listFiles(path.join(repoRoot, "src")))
     .filter((file) => file.endsWith(".ts"))
     .map((file) => relativeRepoPath(file));
-  const projectionRuntimeFiles = supportedPresetProjections.map(
-    (projection) => `templates/${projection.metadata.name}/projection.ts`,
-  );
 
-  return [
-    ...srcFiles,
-    "templates/preset-source.json",
-    "templates/projection-plans.ts",
-    "templates/registry.ts",
-    ...projectionRuntimeFiles,
-  ];
+  return [...srcFiles, "templates/preset-source.json"];
 }
 
-function projectionPlanFor(projection: PresetProjection) {
-  const targetDir = path.join("/tmp", `generated-${projection.metadata.name}`);
-  const blueprint = projection.blueprint({ targetDir, scope: "acme" });
+function projectionPlanFor(
+  preset: PresetSourceManifestPreset,
+): PresetProjectionPlan {
+  const targetDir = path.join("/tmp", `generated-${preset.name}`);
+  const blueprint = blueprintForPresetSourcePreset(preset, {
+    targetDir,
+    scope: "acme",
+  });
 
-  return projection.project(
-    assembleGenerationContext({
+  return projectPresetSourcePreset({
+    preset,
+    context: assembleGenerationContext({
       targetDir,
       blueprint,
       toolchain: {
@@ -107,14 +112,14 @@ function projectionPlanFor(projection: PresetProjection) {
         diagnostics: [],
       },
     }),
-  );
+  });
 }
 
 function projectionTemplateSourceFiles(): string[] {
   const files = new Set<string>();
 
-  for (const projection of supportedPresetProjections) {
-    const plan = projectionPlanFor(projection);
+  for (const preset of supportedPresetSourcePresets) {
+    const plan = projectionPlanFor(preset);
     const sourceRoots: Record<string, string> = {
       ...(plan.sourceRoots ?? {}),
       default: plan.sourceRoot,
@@ -129,7 +134,7 @@ function projectionTemplateSourceFiles(): string[] {
 
           if (!root) {
             throw new Error(
-              `Missing sourceRoot ${fragment.sourceRoot} for ${projection.metadata.name}`,
+              `Missing sourceRoot ${fragment.sourceRoot} for ${preset.name}`,
             );
           }
 
@@ -146,7 +151,7 @@ function projectionTemplateSourceFiles(): string[] {
 
         if (!root) {
           throw new Error(
-            `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
+            `Missing sourceRoot ${operation.sourceRoot} for ${preset.name}`,
           );
         }
 
@@ -161,7 +166,7 @@ function projectionTemplateSourceFiles(): string[] {
 
         if (!root) {
           throw new Error(
-            `Missing sourceRoot ${operation.sourceRoot} for ${projection.metadata.name}`,
+            `Missing sourceRoot ${operation.sourceRoot} for ${preset.name}`,
           );
         }
 
@@ -174,9 +179,9 @@ function projectionTemplateSourceFiles(): string[] {
 }
 
 function checkedGithubTemplateFiles(): string[] {
-  return supportedPresetProjections.flatMap((projection) => [
-    `templates/${projection.metadata.name}/.github/dependabot.yml`,
-    `templates/${projection.metadata.name}/.github/workflows/check.yml`,
+  return supportedPresetSourcePresets.flatMap((preset) => [
+    `templates/${preset.name}/.github/dependabot.yml`,
+    `templates/${preset.name}/.github/workflows/check.yml`,
   ]);
 }
 
@@ -257,21 +262,16 @@ async function checkedTemplatePackagePaths(): Promise<string[]> {
     .sort();
 }
 
-function compiledProjectionRuntimePackagePaths(): string[] {
-  return supportedPresetProjections.map(
-    (projection) =>
-      `package/dist/templates/${projection.metadata.name}/projection.js`,
-  );
-}
-
-function firstCopyOperation(projection: PresetProjection): CopyFileOperation {
-  const operation = projectionPlanFor(projection).operations.find(
+function firstCopyOperation(
+  preset: PresetSourceManifestPreset,
+): CopyFileOperation {
+  const operation = projectionPlanFor(preset).operations.find(
     (candidate) => candidate.kind === "copyFile",
   );
 
   if (!operation) {
     throw new Error(
-      `Preset Projection ${projection.metadata.name} does not copy template source`,
+      `Preset Projection ${preset.name} does not copy template source`,
     );
   }
 
@@ -332,12 +332,16 @@ describe("package publishing", () => {
     expect(packedPaths).toContain("package/dist/src/module-graph.js");
     expect(packedPaths).toContain("package/dist/src/next-step-instructions.js");
     expect(packedPaths).not.toContain("package/dist/post-commands.js");
-    expect(packedPaths).toContain("package/dist/templates/registry.js");
-    expect(packedPaths).toContain("package/dist/templates/projection-plans.js");
     expect(packedPaths).toContain("package/templates/preset-source.json");
+    expect(packedPaths).not.toContain("package/dist/templates/registry.js");
+    expect(packedPaths).not.toContain(
+      "package/dist/templates/projection-plans.js",
+    );
     expect(packedPaths).not.toContain("package/dist/src/preset-registry.js");
-    expect(packedPaths).toEqual(
-      expect.arrayContaining(compiledProjectionRuntimePackagePaths()),
+    expect(packedPaths).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^package\/dist\/templates\/.+\.js$/),
+      ]),
     );
     expect(packedPaths).toContain("package/dist/src/toolchain-resolution.js");
     expect(packedPaths).toContain("package/LICENSE");
@@ -403,10 +407,10 @@ describe("package publishing", () => {
     });
     expect(result.stdout).toContain("Usage:");
 
-    for (const projection of supportedPresetProjections) {
-      const presetName = projection.metadata.name;
+    for (const preset of supportedPresetSourcePresets) {
+      const presetName = preset.name;
       const generatedDir = path.join(consumerDir, `generated-${presetName}`);
-      const copyOperation = firstCopyOperation(projection);
+      const copyOperation = firstCopyOperation(preset);
 
       await execa(
         "pnpm",

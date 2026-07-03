@@ -311,6 +311,7 @@
         "files": [
           "vue-app/env.d.ts",
           "vue-app/index.html",
+          "vue-app/playwright.package-addition.config.ts",
           "vue-app/playwright.config.ts",
           "vue-app/vite.config.ts",
           "vue-app/vitest.config.ts"

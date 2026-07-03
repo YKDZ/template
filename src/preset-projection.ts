@@ -21,6 +21,7 @@ export type PresetPackageAdditionOptions = {
 export type PresetPackageAdditionPlan = {
   readonly packagePath: string;
   readonly workspacePackageGlob: string;
+  readonly workspaceMembershipGlob?: string;
   readonly packageRole: PackageRole;
   readonly packageSourcePreset: PackageSourcePreset;
   readonly sourceRoot: string;

@@ -7,7 +7,6 @@ import { parse as parseYaml } from "yaml";
 
 import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
-import { builtInPresetProjections } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,9 +24,9 @@ const staleGeneratedCatalogLinePattern =
   /["']\s{2}(?:"@?[\w./-]+"|[\w.-]+): \^\d+\.\d+\.\d+/;
 
 function dependencyVersionGateProjectionFiles(): string[] {
-  return builtInPresetProjections
-    .filter((projection) => projection.metadata.generation === "supported")
-    .map((projection) => `templates/${projection.metadata.name}/projection.ts`)
+  return loadBuiltInPresetSourceManifest()
+    .presets.filter((preset) => preset.generation === "supported")
+    .map((preset) => `templates/${preset.name}/projection.ts`)
     .sort();
 }
 

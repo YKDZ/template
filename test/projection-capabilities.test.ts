@@ -5,7 +5,9 @@ import path from "node:path";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 import {
+  defaultPackagePathForPresetSourcePackageAddition,
   interpretPresetProjectionDeclaration,
+  planPresetSourcePackageAddition,
   type PresetProjectionDeclaration,
   validateProjectionCapabilities,
 } from "../src/projection-capabilities.js";
@@ -91,6 +93,65 @@ async function expectFile(pathName: string): Promise<void> {
 }
 
 describe("Projection Capability declarations", () => {
+  it("derives Package Addition defaults and workspace glob from Projection Declarations", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const tsLib = manifest.presets.find((preset) => preset.name === "ts-lib")!;
+    const honoApi = manifest.presets.find(
+      (preset) => preset.name === "hono-api",
+    )!;
+    const vueApp = manifest.presets.find(
+      (preset) => preset.name === "vue-app",
+    )!;
+    const root = await mkdtemp(
+      path.join(tmpdir(), "template-projection-capabilities-"),
+    );
+
+    expect(
+      defaultPackagePathForPresetSourcePackageAddition(tsLib, "shared"),
+    ).toBe("packages/shared");
+    expect(
+      defaultPackagePathForPresetSourcePackageAddition(honoApi, "worker"),
+    ).toBe("apps/worker");
+    expect(
+      defaultPackagePathForPresetSourcePackageAddition(vueApp, "admin"),
+    ).toBe("apps/admin");
+
+    const additionPlan = await planPresetSourcePackageAddition({
+      preset: vueApp,
+      addition: {
+        root,
+        blueprint: {
+          schemaVersion: 1,
+          preset: "vue-hono-app",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: [],
+          packages: [{ name: "@demo/web", path: "apps/web" }],
+        },
+        packageLeafName: "admin",
+        packageName: "@demo/admin",
+        packagePath: "services/admin",
+        nodeVersion: "24",
+      },
+    });
+
+    expect(additionPlan.workspacePackageGlob).toBe("apps/*");
+    expect(additionPlan.workspaceMembershipGlob).toBe("services/*");
+    expect(additionPlan.textFiles).toBeUndefined();
+    expect(additionPlan.operations).not.toContainEqual(
+      expect.objectContaining({
+        kind: "copyFile",
+        to: "services/admin/playwright.config.ts",
+      }),
+    );
+    expect(additionPlan.operations).toContainEqual({
+      kind: "writeTextTemplate",
+      from: "playwright.package-addition.config.ts",
+      to: "services/admin/playwright.config.ts",
+      replacements: { VUE_PREVIEW_PORT: "4173" },
+    });
+  });
+
   it("interprets a synthetic ts-lib declaration into Generated Repository behavior", async () => {
     const { legacyProjection, context } = await tsLibContext();
 

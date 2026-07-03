@@ -9,8 +9,12 @@ import {
   type CheckEnvironmentNeed,
 } from "./module-graph.js";
 import { planNextStepInstructions } from "./next-step-instructions.js";
-import type { PresetProjection } from "./preset-projection.js";
 import type { PresetSourceManifest } from "./preset-source.js";
+import { findPresetSourceManifestPreset } from "./preset-source.js";
+import {
+  blueprintForPresetSourcePreset,
+  projectPresetSourcePreset,
+} from "./projection-capabilities.js";
 
 export type GeneratedScenarioSet = "init" | "package-addition-matrix";
 
@@ -63,9 +67,6 @@ export type GeneratedScenarioReporter = {
 export type GeneratedScenarioRunnerOptions = {
   readonly repoRoot: string;
   readonly cliPath: string;
-  readonly findPresetProjection: (
-    presetName: string,
-  ) => PresetProjection | undefined;
   readonly runCommand?: GeneratedScenarioCommandRunner;
   readonly reporter?: GeneratedScenarioReporter;
   readonly deterministicToolchainEnv?: Record<string, string>;
@@ -393,23 +394,25 @@ async function readAddedPackagePath(
 function projectionPlanForPreset(
   presetName: string,
   projectDir: string,
+  manifest: PresetSourceManifest,
   options: RequiredRunnerOptions,
   packageScope?: string,
 ) {
-  const projection = options.findPresetProjection(presetName);
+  const preset = findPresetSourceManifestPreset(manifest, presetName);
 
-  if (!projection) {
+  if (!preset?.projection) {
     throw new Error(
       `Missing Preset Projection for fixture preset ${presetName}`,
     );
   }
 
-  const blueprint = projection.blueprint({
+  const blueprint = blueprintForPresetSourcePreset(preset, {
     targetDir: projectDir,
     scope: packageScope,
   });
-  return projection.project(
-    assembleGenerationContext({
+  return projectPresetSourcePreset({
+    preset,
+    context: assembleGenerationContext({
       targetDir: projectDir,
       blueprint,
       toolchain: {
@@ -419,17 +422,19 @@ function projectionPlanForPreset(
         diagnostics: [],
       },
     }),
-  );
+  });
 }
 
 function machineVerifiableNextStepsForPreset(
   presetName: string,
   projectDir: string,
+  manifest: PresetSourceManifest,
   options: RequiredRunnerOptions,
 ): GeneratedScenarioCommandStep[] {
   const projectionPlan = projectionPlanForPreset(
     presetName,
     projectDir,
+    manifest,
     options,
   );
   const plan = planNextStepInstructions({
@@ -449,6 +454,7 @@ function machineVerifiableNextStepsForPreset(
 }
 
 function addedPresetEnvironmentNeeds(
+  manifest: PresetSourceManifest,
   scenario: GeneratedScenario,
   projectDir: string,
   addedPackagePath: string | undefined,
@@ -461,6 +467,7 @@ function addedPresetEnvironmentNeeds(
   return projectionPlanForPreset(
     scenario.addedPreset,
     projectDir,
+    manifest,
     options,
     path.basename(projectDir),
   ).checkPlan.environmentNeeds.map((need) => {
@@ -492,6 +499,7 @@ function environmentNeedStep(
 }
 
 export function generatedScenarioQualityGateSteps(
+  manifest: PresetSourceManifest,
   scenario: GeneratedScenario,
   projectDir: string,
   addedPackagePath: string | undefined,
@@ -501,9 +509,11 @@ export function generatedScenarioQualityGateSteps(
   const steps = machineVerifiableNextStepsForPreset(
     scenario.basePreset,
     projectDir,
+    manifest,
     normalizedOptions,
   );
   const addedEnvironmentSteps = addedPresetEnvironmentNeeds(
+    manifest,
     scenario,
     projectDir,
     addedPackagePath,
@@ -533,12 +543,14 @@ export function generatedScenarioQualityGateSteps(
 }
 
 async function runGeneratedScenarioQualityGate(
+  manifest: PresetSourceManifest,
   scenario: GeneratedScenario,
   projectDir: string,
   addedPackagePath: string | undefined,
   options: RequiredRunnerOptions,
 ): Promise<void> {
   const steps = generatedScenarioQualityGateSteps(
+    manifest,
     scenario,
     projectDir,
     addedPackagePath,
@@ -581,6 +593,7 @@ async function checkGeneratedScenario(
     options,
   );
   await runGeneratedScenarioQualityGate(
+    manifest,
     scenario,
     projectDir,
     addedPackagePath,
@@ -624,7 +637,6 @@ type RequiredRunnerOptions = Required<
     GeneratedScenarioRunnerOptions,
     | "repoRoot"
     | "cliPath"
-    | "findPresetProjection"
     | "runCommand"
     | "reporter"
     | "deterministicToolchainEnv"
@@ -638,7 +650,6 @@ function normalizeRunnerOptions(
   return {
     repoRoot: options.repoRoot,
     cliPath: options.cliPath,
-    findPresetProjection: options.findPresetProjection,
     runCommand: options.runCommand ?? defaultGeneratedScenarioCommandRunner,
     reporter: options.reporter ?? {
       info: console.log,

@@ -2,10 +2,6 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  builtInPresetProjections,
-  findBuiltInPresetProjection,
-} from "../templates/registry.js";
-import {
   validateProjectBlueprint,
   type ProjectBlueprint,
 } from "./declarations.js";
@@ -24,6 +20,14 @@ import {
   type PackageSourcePreset,
   type TurboTaskGraph,
 } from "./package-linking.js";
+import {
+  findBuiltInPresetSourceManifestPreset,
+  loadBuiltInPresetSourceManifest,
+} from "./preset-source.js";
+import {
+  defaultPackagePathForPresetSourcePackageAddition,
+  planPresetSourcePackageAddition,
+} from "./projection-capabilities.js";
 import { renderProject } from "./renderer.js";
 import type { RenderOperation } from "./renderer.js";
 
@@ -178,23 +182,13 @@ function validateExplicitPackagePath(packagePath: string): string {
   return packagePath;
 }
 
-function defaultPackagePathForPreset(
-  preset: string,
-  packageLeafName: string,
-): string {
-  return preset === "ts-lib"
-    ? `packages/${packageLeafName}`
-    : `apps/${packageLeafName}`;
-}
-
 function supportedPackageAdditionPresetNames(): string[] {
-  return builtInPresetProjections
-    .filter(
-      (projection) =>
-        projection.metadata.packageAdditionSupport ===
-        PackageAdditionSupport.Supported,
+  return loadBuiltInPresetSourceManifest()
+    .presets.filter(
+      (preset) =>
+        preset.packageAdditionSupport === PackageAdditionSupport.Supported,
     )
-    .map((projection) => projection.metadata.name);
+    .map((preset) => preset.name);
 }
 
 function formatUnsupportedPackageAdditionPresetError(preset: string): string {
@@ -1163,39 +1157,32 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     repositoryMetadata.projectName,
   );
   const packageName = `@${projectName}/${options.name}`;
-  const packagePath = options.path
-    ? validateExplicitPackagePath(options.path)
-    : defaultPackagePathForPreset(options.preset, options.name);
-  const projection = findBuiltInPresetProjection(options.preset);
+  const preset = findBuiltInPresetSourceManifestPreset(options.preset);
 
-  if (!projection) {
+  if (!preset) {
     throw new Error(`Unknown preset for Package Addition: ${options.preset}`);
   }
 
-  if (
-    projection.metadata.packageAdditionSupport !==
-    PackageAdditionSupport.Supported
-  ) {
+  if (preset.packageAdditionSupport !== PackageAdditionSupport.Supported) {
     throw new Error(
       formatUnsupportedPackageAdditionPresetError(options.preset),
     );
   }
 
-  const packageAddition = projection.capabilities?.packageAddition;
+  const packagePath = options.path
+    ? validateExplicitPackagePath(options.path)
+    : defaultPackagePathForPresetSourcePackageAddition(preset, options.name);
 
-  if (!packageAddition) {
-    throw new Error(
-      `Preset ${options.preset} declares Package Addition support but has no Package Addition implementation`,
-    );
-  }
-
-  const additionPlan = await packageAddition.planPackageAddition({
-    root,
-    blueprint,
-    packageLeafName: options.name,
-    packageName,
-    packagePath,
-    nodeVersion: repositoryMetadata.nodeVersion,
+  const additionPlan = await planPresetSourcePackageAddition({
+    preset,
+    addition: {
+      root,
+      blueprint,
+      packageLeafName: options.name,
+      packageName,
+      packagePath,
+      nodeVersion: repositoryMetadata.nodeVersion,
+    },
   });
   const requiresSharedOxcConfiguration =
     additionPlan.sourceRoots?.sharedOxc !== undefined;
@@ -1224,7 +1211,7 @@ export async function addPackage(options: AddPackageOptions): Promise<void> {
     additionPlan.packageRole,
     additionPlan.packageSourcePreset,
     packageLinkIntents,
-    additionPlan.workspacePackageGlob,
+    additionPlan.workspaceMembershipGlob ?? additionPlan.workspacePackageGlob,
     packageAdditionCatalogDependencies(additionPlan.operations),
     requiresSharedOxcConfiguration,
     additionPlan.operations,

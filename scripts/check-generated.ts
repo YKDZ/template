@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 import { runGeneratedScenarioSet } from "../src/generated-scenarios.js";
 import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,7 +25,6 @@ async function main(): Promise<void> {
       {
         repoRoot,
         cliPath,
-        findPresetProjection: findBuiltInPresetProjection,
       },
     );
 

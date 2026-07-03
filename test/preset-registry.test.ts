@@ -9,10 +9,12 @@ import {
 import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import { PackageAdditionSupport } from "../src/package-addition-support.js";
+import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 import {
-  builtInPresetProjections,
-  findBuiltInPresetProjection,
-} from "../templates/registry.js";
+  blueprintForPresetSourcePreset,
+  defaultPackagePathForPresetSourcePackageAddition,
+} from "../src/projection-capabilities.js";
+import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
@@ -43,11 +45,15 @@ describe("Preset Registry", () => {
     ).not.toContain("single-package");
   });
 
-  it("declares Package Addition Support consistently with projection implementations", () => {
+  it("declares Package Addition Support consistently with Projection Declarations", () => {
+    const supportedPresets = loadBuiltInPresetSourceManifest().presets.filter(
+      (preset) => preset.generation === "supported",
+    );
+
     expect(
-      builtInPresetProjections.map((projection) => ({
-        name: projection.metadata.name,
-        packageAdditionSupport: projection.metadata.packageAdditionSupport,
+      supportedPresets.map((preset) => ({
+        name: preset.name,
+        packageAdditionSupport: preset.packageAdditionSupport,
       })),
     ).toEqual(
       expect.arrayContaining([
@@ -74,33 +80,32 @@ describe("Preset Registry", () => {
       ]),
     );
 
-    for (const projection of builtInPresetProjections) {
-      const hasImplementation = Boolean(
-        projection.capabilities?.packageAddition,
-      );
-
-      if (
-        projection.metadata.packageAdditionSupport ===
-        PackageAdditionSupport.Supported
-      ) {
-        expect(hasImplementation).toBe(true);
+    for (const preset of supportedPresets) {
+      if (preset.packageAdditionSupport === PackageAdditionSupport.Supported) {
+        expect(
+          defaultPackagePathForPresetSourcePackageAddition(preset, "example"),
+        ).toMatch(/^(apps|packages)\/example$/);
         continue;
       }
 
-      expect(hasImplementation).toBe(false);
+      expect(preset.projection).toBeDefined();
     }
   });
 
   it("generates valid workspace monorepo Project Blueprints for supported presets", async () => {
-    for (const projection of builtInPresetProjections) {
+    const supportedPresets = loadBuiltInPresetSourceManifest().presets.filter(
+      (preset) => preset.generation === "supported",
+    );
+
+    for (const preset of supportedPresets) {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-preset-blueprint-"),
       );
-      const targetDir = path.join(
-        workspace,
-        `demo-${projection.metadata.name}`,
-      );
-      const blueprint = projection.blueprint({ targetDir, scope: "acme" });
+      const targetDir = path.join(workspace, `demo-${preset.name}`);
+      const blueprint = blueprintForPresetSourcePreset(preset, {
+        targetDir,
+        scope: "acme",
+      });
       const validation = validateProjectBlueprint(blueprint);
 
       expect(validation).toMatchObject({ ok: true });

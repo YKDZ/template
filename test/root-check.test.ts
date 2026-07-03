@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import ts from "typescript";
 import { parse } from "yaml";
 
 import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
@@ -20,6 +21,45 @@ const repoRoot = path.resolve(
 );
 
 describe("Project Kit Root Check", () => {
+  it("rejects production source imports from template modules", async () => {
+    const sourceFiles = [
+      ...(await listTypeScriptSourceFiles(path.join(repoRoot, "src"))),
+      ...(await listTypeScriptSourceFiles(path.join(repoRoot, "scripts"))),
+    ];
+    const violations: string[] = [];
+
+    for (const sourceFile of sourceFiles) {
+      const sourceText = await readFile(sourceFile, "utf8");
+
+      violations.push(
+        ...templateModuleReferenceDiagnostics({
+          sourceFilePath: sourceFile,
+          sourceText,
+        }),
+      );
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it("detects import, export, and dynamic production references to template modules", () => {
+    expect(
+      templateModuleReferenceDiagnostics({
+        sourceFilePath: path.join(repoRoot, "src/synthetic.ts"),
+        sourceText: [
+          'import { a } from "../templates/registry.js";',
+          'export { b } from "../templates/projection-plans.js";',
+          'const c = await import("../templates/ts-lib/projection.js");',
+          "",
+        ].join("\n"),
+      }),
+    ).toEqual([
+      "src/synthetic.ts imports ../templates/registry.js",
+      "src/synthetic.ts exports from ../templates/projection-plans.js",
+      "src/synthetic.ts dynamically imports ../templates/ts-lib/projection.js",
+    ]);
+  });
+
   it("runs Single Preset Generated Check from the default Root Check", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
@@ -553,4 +593,101 @@ function projectThroughPresetProjection(presetName: "ts-lib" | "rust-bin") {
       diagnostics: [],
     },
   });
+}
+
+async function listTypeScriptSourceFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listTypeScriptSourceFiles(entryPath)));
+      continue;
+    }
+
+    if (entry.isFile() && entry.name.endsWith(".ts")) {
+      files.push(entryPath);
+    }
+  }
+
+  return files.sort();
+}
+
+type TemplateModuleReference = {
+  readonly specifier: string;
+  readonly verb: "imports" | "exports from" | "dynamically imports";
+};
+
+function templateModuleReferenceDiagnostics(options: {
+  readonly sourceFilePath: string;
+  readonly sourceText: string;
+}): string[] {
+  return templateModuleReferences(options.sourceText)
+    .filter((reference) =>
+      resolvesToTemplateModule(options.sourceFilePath, reference.specifier),
+    )
+    .map(
+      (reference) =>
+        `${path.relative(repoRoot, options.sourceFilePath)} ${reference.verb} ${reference.specifier}`,
+    );
+}
+
+function templateModuleReferences(
+  sourceText: string,
+): TemplateModuleReference[] {
+  const sourceFile = ts.createSourceFile(
+    "source.ts",
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const references: TemplateModuleReference[] = [];
+
+  function addModuleSpecifier(
+    specifier: ts.Expression | undefined,
+    verb: TemplateModuleReference["verb"],
+  ): void {
+    if (specifier && ts.isStringLiteralLike(specifier)) {
+      references.push({ specifier: specifier.text, verb });
+    }
+  }
+
+  function visit(node: ts.Node): void {
+    if (ts.isImportDeclaration(node)) {
+      addModuleSpecifier(node.moduleSpecifier, "imports");
+    }
+
+    if (ts.isExportDeclaration(node)) {
+      addModuleSpecifier(node.moduleSpecifier, "exports from");
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword
+    ) {
+      addModuleSpecifier(node.arguments[0], "dynamically imports");
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+
+  return references;
+}
+
+function resolvesToTemplateModule(
+  sourceFilePath: string,
+  specifier: string,
+): boolean {
+  if (!specifier.startsWith(".")) {
+    return false;
+  }
+
+  const resolved = path.resolve(path.dirname(sourceFilePath), specifier);
+  const relative = path.relative(repoRoot, resolved).split(path.sep).join("/");
+
+  return relative === "templates" || relative.startsWith("templates/");
 }

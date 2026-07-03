@@ -454,6 +454,20 @@ function assertFoundationTextPath(relativePath: string): void {
   );
 }
 
+function assertTextTemplatePath(relativePath: string): void {
+  const normalizedPath = relativePath.split(path.sep).join("/");
+
+  if (
+    /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(?:playwright|vite|vitest|oxfmt|oxlint)\.config\.ts$/.test(
+      normalizedPath,
+    )
+  ) {
+    return;
+  }
+
+  assertFoundationTextPath(relativePath);
+}
+
 async function renderWriteText(
   operation: WriteTextOperation,
   options: RenderProjectOptions,
@@ -543,7 +557,7 @@ async function renderWriteTextTemplate(
   }
 
   const toPath = expandOperationPath(operation.to, options);
-  assertFoundationTextPath(toPath);
+  assertTextTemplatePath(toPath);
   const from = resolveContainedPath(
     sourceRoot,
     expandTemplatePath(operation.from, options.variables ?? {}),

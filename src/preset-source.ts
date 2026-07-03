@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 
 import * as v from "valibot";
 
-import { builtInPresetProjections } from "../templates/registry.js";
 import type {
   BuiltInPreset,
   FeatureName,
@@ -1081,63 +1080,19 @@ function presetSourceReferenceIssues(
   });
 }
 
-function builtInRegistryBridgeIssues(
-  manifest: PresetSourceManifest,
+function supportedProjectionDeclarationIssues(
+  presets: readonly PresetSourceManifestPreset[],
 ): ValidationIssue[] {
-  const projectionsByName = new Map(
-    builtInPresetProjections.map((projection) => [
-      projection.metadata.name,
-      projection,
-    ]),
+  return presets.flatMap((preset, index) =>
+    preset.generation === "supported" && preset.projection === undefined
+      ? [
+          {
+            path: `$.presets[${index}].projection`,
+            message: `Supported Preset ${preset.name} must declare a Projection Declaration`,
+          },
+        ]
+      : [],
   );
-  const presetsByName = new Map(
-    manifest.presets.map((preset, index) => [preset.name, { preset, index }]),
-  );
-  const issues: ValidationIssue[] = [];
-
-  manifest.presets.forEach((preset, index) => {
-    const projection = projectionsByName.get(preset.name);
-
-    if (preset.generation === "supported" && !projection) {
-      issues.push({
-        path: `$.presets[${index}].name`,
-        message: `Supported built-in Preset ${preset.name} must have a registry projection until generation no longer uses the registry bridge`,
-      });
-      return;
-    }
-
-    if (
-      projection &&
-      preset.packageAdditionSupport !==
-        projection.metadata.packageAdditionSupport
-    ) {
-      issues.push({
-        path: `$.presets[${index}].packageAdditionSupport`,
-        message: `Built-in Preset ${preset.name} Package Addition Support must match the registry projection: ${projection.metadata.packageAdditionSupport}`,
-      });
-    }
-  });
-
-  builtInPresetProjections.forEach((projection) => {
-    const manifestPreset = presetsByName.get(projection.metadata.name);
-
-    if (!manifestPreset) {
-      issues.push({
-        path: "$.presets",
-        message: `Registry projection ${projection.metadata.name} must be declared as a supported built-in Preset until generation no longer uses the registry bridge`,
-      });
-      return;
-    }
-
-    if (manifestPreset.preset.generation !== "supported") {
-      issues.push({
-        path: `$.presets[${manifestPreset.index}].generation`,
-        message: `Registry projection ${projection.metadata.name} must be declared as a supported built-in Preset until generation no longer uses the registry bridge`,
-      });
-    }
-  });
-
-  return issues;
 }
 
 export function validatePresetSourceManifest(
@@ -1247,9 +1202,11 @@ export function validateBuiltInPresetSourceManifest(
     return result;
   }
 
-  const bridgeIssues = builtInRegistryBridgeIssues(result.value);
-  if (bridgeIssues.length > 0) {
-    return { ok: false, issues: bridgeIssues };
+  const projectionIssues = supportedProjectionDeclarationIssues(
+    result.value.presets,
+  );
+  if (projectionIssues.length > 0) {
+    return { ok: false, issues: projectionIssues };
   }
 
   return result;
@@ -1338,4 +1295,20 @@ export function loadBuiltInPresetSourceManifest(): PresetSourceManifest {
   }
 
   return result.value;
+}
+
+export function findPresetSourceManifestPreset(
+  manifest: PresetSourceManifest,
+  presetName: string,
+): PresetSourceManifestPreset | undefined {
+  return manifest.presets.find((preset) => preset.name === presetName);
+}
+
+export function findBuiltInPresetSourceManifestPreset(
+  presetName: string,
+): PresetSourceManifestPreset | undefined {
+  return findPresetSourceManifestPreset(
+    loadBuiltInPresetSourceManifest(),
+    presetName,
+  );
 }

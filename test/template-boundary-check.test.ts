@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { builtInTemplateBoundaryProjections } from "../scripts/check-template-boundary.js";
 import { assembleGenerationContext } from "../src/generation-context.js";
 import type { PresetProjectionPlan } from "../src/preset-projection.js";
 import {
@@ -53,39 +54,33 @@ function minimalPlan(
 }
 
 describe("Template Boundary Check", () => {
-  it("accepts all built-in projections without temporary allowlisted debt", async () => {
-    const projections = [
-      "ts-lib",
-      "hono-api",
-      "vue-app",
-      "vue-hono-app",
-      "rust-bin",
-    ].map((presetName) => {
-      const targetDir = path.join(tmpdir(), `demo-${presetName}`);
-      const projection = findBuiltInPresetProjection(presetName)!;
-      const blueprint = projection.blueprint({ targetDir });
-      const plan = projection.project(
-        assembleGenerationContext({
-          targetDir,
-          blueprint,
-          toolchain: {
-            nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-            packageManagerPin: {
-              kind: "PackageManagerPin",
-              value: "pnpm@11.2.3",
-            },
-            source: "online",
-            diagnostics: [],
-          },
-        }),
-      );
+  it("accepts all built-in init and Package Addition projections without temporary allowlisted debt", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const projections = await builtInTemplateBoundaryProjections(manifest);
 
-      return {
-        name: presetName,
-        sourceFilePath: builtInProjectionSourceFile(presetName),
-        plan,
-      };
-    });
+    expect(projections.map((projection) => projection.name)).toEqual(
+      expect.arrayContaining([
+        "ts-lib",
+        "hono-api",
+        "vue-app",
+        "vue-hono-app",
+        "rust-bin",
+        "ts-lib package addition",
+        "hono-api package addition",
+        "vue-app package addition",
+      ]),
+    );
+    expect(
+      projections.find(
+        (projection) => projection.name === "vue-app package addition",
+      )?.plan.operations,
+    ).toContainEqual(
+      expect.objectContaining({
+        kind: "writeTextTemplate",
+        from: "playwright.package-addition.config.ts",
+        to: "apps/template-boundary-check/playwright.config.ts",
+      }),
+    );
 
     const result = await checkTemplateSourceBoundary({
       projections,
@@ -98,6 +93,35 @@ describe("Template Boundary Check", () => {
       allowlistedDebt: [],
       unusedAllowlistEntries: [],
     });
+  });
+
+  it("fails built-in Package Addition protected templates missing manifest source declarations", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const projections = await builtInTemplateBoundaryProjections(manifest);
+    const result = await checkTemplateSourceBoundary({
+      projections,
+      manifestReferencedSourceFiles:
+        builtInManifestReferencedSourceFiles().filter(
+          (sourceFile) =>
+            !sourceFile.endsWith(
+              path.join(
+                "templates",
+                "vue-app",
+                "playwright.package-addition.config.ts",
+              ),
+            ),
+        ),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        preset: "vue-app package addition",
+        generatedPath: "apps/template-boundary-check/playwright.config.ts",
+        operationKind: "writeTextTemplate",
+        owningFunction: "planPresetSourcePackageAddition",
+      }),
+    );
   });
 
   it("fails unlisted protected Generated Repository outputs with path and owning function diagnostics", async () => {

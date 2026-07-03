@@ -4,10 +4,6 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import {
-  findBuiltInPresetProjection,
-  projectPresetThroughRegistry,
-} from "../templates/registry.js";
-import {
   blueprintJsonSchema,
   builtInPresets,
   presetFileJsonSchema,
@@ -28,10 +24,16 @@ import {
   type PresetProjectionPlan,
 } from "./preset-projection.js";
 import {
+  findBuiltInPresetSourceManifestPreset,
   presetSourceManifestJsonSchema,
   validateBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
 } from "./preset-source.js";
+import {
+  blueprintForPresetSourcePreset,
+  projectPresetSourcePreset,
+} from "./projection-capabilities.js";
+import { renderNewProject } from "./renderer.js";
 import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
@@ -214,26 +216,10 @@ function formatList(values: readonly string[]): string {
 
 function blueprintForInit(options: InitOptions): ProjectBlueprint {
   const preset = supportedPreset(options.preset);
-  const projection = findBuiltInPresetProjection(preset.name);
-  if (projection) {
-    return projection.blueprint({
-      targetDir: options.dir,
-      scope: options.scope,
-    });
-  }
-
-  const blueprint: ProjectBlueprint = {
-    schemaVersion: 1,
-    preset: preset.name,
-    projectKind: preset.supportedProjectKinds[0],
-    features: [...preset.features],
-  };
-
-  if (preset.supportedPackageManagers[0]) {
-    blueprint.packageManager = preset.supportedPackageManagers[0];
-  }
-
-  return blueprint;
+  return blueprintForPresetSourcePreset(preset, {
+    targetDir: options.dir,
+    scope: options.scope,
+  });
 }
 
 function formatBlueprintSummary(
@@ -331,7 +317,10 @@ async function generationContextForInit(
   options: InitOptions,
   blueprint: ProjectBlueprint,
 ): Promise<GenerationContext | undefined> {
-  if (!findBuiltInPresetProjection(options.preset)) {
+  if (
+    findBuiltInPresetSourceManifestPreset(options.preset)?.projection ===
+    undefined
+  ) {
     return undefined;
   }
 
@@ -351,19 +340,27 @@ async function generateInitProject(
   options: InitOptions,
   generationContext?: GenerationContext,
 ): Promise<void> {
-  const projection = findBuiltInPresetProjection(options.preset);
-  if (projection) {
-    if (!generationContext) {
-      throw new Error(
-        `Missing Generation Context for Preset Projection: ${options.preset}`,
-      );
-    }
-    const plan = projection.project(generationContext);
-    await projection.render({ targetDir: options.dir, plan });
-    return;
+  const preset = findBuiltInPresetSourceManifestPreset(options.preset);
+  if (!preset?.projection) {
+    throw new Error(formatSupportedPresetError());
   }
 
-  throw new Error(formatSupportedPresetError());
+  if (!generationContext) {
+    throw new Error(
+      `Missing Generation Context for Preset Projection: ${options.preset}`,
+    );
+  }
+
+  const plan = projectPresetSourcePreset({
+    preset,
+    context: generationContext,
+  });
+  await renderNewProject({
+    sourceRoot: plan.sourceRoot,
+    sourceRoots: plan.sourceRoots,
+    targetRoot: options.dir,
+    operations: [...plan.operations],
+  });
 }
 
 function printInitComplete(
@@ -371,9 +368,11 @@ function printInitComplete(
   blueprint: ProjectBlueprint,
   generationContext?: GenerationContext,
 ): void {
-  const projectionPlan = generationContext
-    ? projectPresetThroughRegistry(generationContext)
-    : undefined;
+  const preset = findBuiltInPresetSourceManifestPreset(blueprint.preset);
+  const projectionPlan =
+    generationContext && preset?.projection
+      ? projectPresetSourcePreset({ preset, context: generationContext })
+      : undefined;
   if (!projectionPlan) {
     throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
   }
@@ -604,8 +603,11 @@ async function main(args: string[]): Promise<void> {
         options,
         blueprint,
       );
+      const preset = findBuiltInPresetSourceManifestPreset(options.preset);
       const projectionPlan = generationContext
-        ? projectPresetThroughRegistry(generationContext)
+        ? preset?.projection
+          ? projectPresetSourcePreset({ preset, context: generationContext })
+          : undefined
         : undefined;
       if (!projectionPlan) {
         throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);

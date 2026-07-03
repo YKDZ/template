@@ -5,14 +5,19 @@ import { fileURLToPath } from "node:url";
 
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 
+import { assembleGenerationContext } from "../src/generation-context.js";
+import {
+  findBuiltInPresetSourceManifestPreset,
+  loadBuiltInPresetSourceManifest,
+} from "../src/preset-source.js";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "../src/project-github.js";
 import {
-  builtInPresetProjections,
-  findBuiltInPresetProjection,
-} from "../templates/registry.js";
+  blueprintForPresetSourcePreset,
+  projectPresetSourcePreset,
+} from "../src/projection-capabilities.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -235,10 +240,10 @@ function presetNameFromRelativePath(relativePath: string): string | undefined {
 }
 
 function findSupportedPresetProjection(presetName: string) {
-  const projection = findBuiltInPresetProjection(presetName);
+  const preset = findBuiltInPresetSourceManifestPreset(presetName);
 
-  return projection?.metadata.generation === "supported"
-    ? projection
+  return preset?.generation === "supported" && preset.projection
+    ? preset
     : undefined;
 }
 
@@ -272,23 +277,27 @@ function missingProjectedGithubTemplate(
 }
 
 function projectThroughPresetProjection(presetName: string) {
-  const projection = findSupportedPresetProjection(presetName);
+  const preset = findSupportedPresetProjection(presetName);
 
-  if (!projection) {
+  if (!preset) {
     return undefined;
   }
 
-  return projection.project({
-    projectName: { kind: "ProjectName", value: "generated-repository" },
-    preset: presetName,
-    packageManager: { kind: "PackageManager", value: "pnpm" },
-    blueprint: projection.blueprint({ targetDir: "generated-repository" }),
-    toolchain: {
-      nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
-      source: "bundled-fallback",
-      diagnostics: [],
-    },
+  const targetDir = "generated-repository";
+  const blueprint = blueprintForPresetSourcePreset(preset, { targetDir });
+
+  return projectPresetSourcePreset({
+    preset,
+    context: assembleGenerationContext({
+      targetDir,
+      blueprint,
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+        source: "bundled-fallback",
+        diagnostics: [],
+      },
+    }),
   });
 }
 
@@ -414,9 +423,9 @@ export async function checkTemplateGithubYaml(
   const templatesRoot = options.templatesRoot ?? defaultTemplatesRoot;
   const supportedPresetNames =
     options.supportedPresetNames ??
-    builtInPresetProjections
-      .filter((projection) => projection.metadata.generation === "supported")
-      .map((projection) => projection.metadata.name);
+    loadBuiltInPresetSourceManifest()
+      .presets.filter((preset) => preset.generation === "supported")
+      .map((preset) => preset.name);
   const templateFiles = await listGithubYamlTemplates(templatesRoot);
 
   if (templateFiles.length === 0) {

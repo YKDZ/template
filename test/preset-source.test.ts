@@ -779,7 +779,7 @@ describe("Preset Source Manifest validation", () => {
     });
   });
 
-  it("rejects supported built-in Presets without a registry projection", () => {
+  it("rejects supported Presets without a Projection Declaration", () => {
     const manifest = loadBuiltInPresetSourceManifest();
 
     expect(
@@ -803,63 +803,31 @@ describe("Preset Source Manifest validation", () => {
       ok: false,
       issues: [
         {
-          path: "$.presets[7].name",
+          path: "$.presets[7].projection",
           message:
-            "Supported built-in Preset missing-supported must have a registry projection until generation no longer uses the registry bridge",
+            "Supported Preset missing-supported must declare a Projection Declaration",
         },
       ],
     });
   });
 
-  it("rejects built-in Package Addition Support drift from registry projections", () => {
+  it("allows future built-in Presets to carry metadata without Projection Declarations", () => {
     const manifest = loadBuiltInPresetSourceManifest();
-    const presets = manifest.presets.map((preset) =>
-      preset.name === "ts-lib"
-        ? { ...preset, packageAdditionSupport: "unsupported" as const }
-        : preset,
-    );
 
-    expect(
-      validateBuiltInPresetSourceManifest({
-        ...manifest,
-        fixtureMatrix: undefined,
-        presets,
-      }),
-    ).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.presets[0].packageAdditionSupport",
-          message:
-            "Built-in Preset ts-lib Package Addition Support must match the registry projection: supported",
-        },
-      ],
+    const result = validateBuiltInPresetSourceManifest({
+      ...manifest,
+      fixtureMatrix: undefined,
+      presets: manifest.presets.map((preset) =>
+        preset.name === "ts-app"
+          ? {
+              ...preset,
+              projection: undefined,
+              source: undefined,
+            }
+          : preset,
+      ),
     });
-  });
 
-  it("rejects registry projections that are not supported by the built-in manifest", () => {
-    const manifest = loadBuiltInPresetSourceManifest();
-    const presets = manifest.presets.map((preset) =>
-      preset.name === "ts-lib"
-        ? { ...preset, generation: "future" as const }
-        : preset,
-    );
-
-    expect(
-      validateBuiltInPresetSourceManifest({
-        ...manifest,
-        fixtureMatrix: undefined,
-        presets,
-      }),
-    ).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.presets[0].generation",
-          message:
-            "Registry projection ts-lib must be declared as a supported built-in Preset until generation no longer uses the registry bridge",
-        },
-      ],
-    });
+    expect(result.ok).toBe(true);
   });
 });

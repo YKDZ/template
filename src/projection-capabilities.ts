@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ValidationIssue, ValidationResult } from "./declarations.js";
+import type {
+  ProjectBlueprint,
+  ValidationIssue,
+  ValidationResult,
+} from "./declarations.js";
 import {
   collectGeneratedManifestCatalogDependencies,
   collectGeneratedManifestCatalogReferences,
@@ -33,7 +38,12 @@ import {
   type PackageSourcePreset,
   planPackageLinks,
 } from "./package-linking.js";
-import type { PresetProjectionPlan } from "./preset-projection.js";
+import type {
+  PresetBlueprintOptions,
+  PresetPackageAdditionOptions,
+  PresetPackageAdditionPlan,
+  PresetProjectionPlan,
+} from "./preset-projection.js";
 import type { PresetSourceManifestPreset } from "./preset-source.js";
 import type { DependencyMaintenancePolicy } from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
@@ -651,6 +661,132 @@ export function interpretPresetProjectionDeclaration(options: {
   };
 }
 
+export function blueprintForPresetSourcePreset(
+  preset: PresetSourceManifestPreset,
+  options: PresetBlueprintOptions = { targetDir: process.cwd() },
+): ProjectBlueprint {
+  const packageScope = options.scope ?? projectNameFromDir(options.targetDir);
+  const projectName = projectNameFromDir(options.targetDir);
+  const blueprint: ProjectBlueprint = {
+    schemaVersion: 1,
+    preset: preset.name,
+    packageManager: preset.supportedPackageManagers[0],
+    projectKind: preset.supportedProjectKinds[0] ?? "multi-package",
+    features: [...preset.features],
+  };
+
+  if (preset.projection === undefined) {
+    return blueprint;
+  }
+
+  const validation = validateProjectionCapabilities(preset.projection);
+  if (!validation.ok) {
+    throw new Error(
+      `Projection Declaration is invalid:\n${validation.issues
+        .map((issue) => `  - ${issue.path}: ${issue.message}`)
+        .join("\n")}`,
+    );
+  }
+
+  const packages = blueprintPackagesForCapabilities(
+    validation.value.capabilities,
+    packageScope,
+    projectName,
+  );
+
+  return packages.length === 0 ? blueprint : { ...blueprint, packages };
+}
+
+export function projectPresetSourcePreset(options: {
+  readonly preset: PresetSourceManifestPreset;
+  readonly context: GenerationContext;
+}): PresetProjectionPlan {
+  if (options.preset.projection === undefined) {
+    throw new Error(
+      `Preset ${options.preset.name} must declare a Projection Declaration`,
+    );
+  }
+
+  return interpretPresetProjectionDeclaration({
+    preset: options.preset,
+    declaration: options.preset.projection,
+    context: options.context,
+  });
+}
+
+export async function planPresetSourcePackageAddition(options: {
+  readonly preset: PresetSourceManifestPreset;
+  readonly addition: PresetPackageAdditionOptions;
+}): Promise<PresetPackageAdditionPlan> {
+  if (options.preset.projection === undefined) {
+    throw new Error(
+      `Preset ${options.preset.name} declares Package Addition support but has no Projection Declaration`,
+    );
+  }
+
+  const state = stateForProjectionDeclaration(options.preset.projection);
+  const additionCapability = packageAdditionCapabilityForState(
+    options.preset.name,
+    state,
+  );
+
+  return {
+    packagePath: options.addition.packagePath,
+    workspacePackageGlob: additionCapability.workspacePackageGlob,
+    workspaceMembershipGlob: `${packageCollectionFromPackagePath(
+      options.addition.packagePath,
+    )}/*`,
+    packageRole: additionCapability.packageRole,
+    packageSourcePreset: additionCapability.packageSourcePreset,
+    sourceRoot: templateSourceRootForPreset(additionCapability.sourcePreset),
+    sourceRoots: state.sourceRoots,
+    operations: [
+      ...packageAdditionOperationsForCapability({
+        capability: additionCapability,
+        packageName: options.addition.packageName,
+        packagePath: options.addition.packagePath,
+        nodeVersion: options.addition.nodeVersion,
+      }),
+      ...(additionCapability.packageSourcePreset === "vue-app"
+        ? [
+            {
+              kind: "writeTextTemplate" as const,
+              from: "playwright.package-addition.config.ts",
+              to: `${options.addition.packagePath}/playwright.config.ts`,
+              replacements: {
+                VUE_PREVIEW_PORT: String(
+                  await nextVuePreviewPort(
+                    options.addition.root,
+                    options.addition.blueprint,
+                  ),
+                ),
+              },
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+export function defaultPackagePathForPresetSourcePackageAddition(
+  preset: PresetSourceManifestPreset,
+  packageLeafName: string,
+): string {
+  if (preset.projection === undefined) {
+    throw new Error(
+      `Preset ${preset.name} declares Package Addition support but has no Projection Declaration`,
+    );
+  }
+
+  const state = stateForProjectionDeclaration(preset.projection);
+  const additionCapability = packageAdditionCapabilityForState(
+    preset.name,
+    state,
+  );
+
+  return `${packageCollection(additionCapability.workspacePackageGlob)}/${packageLeafName}`;
+}
+
 export function loadBuiltInPresetProjectionDeclaration(
   presetName: string,
 ): PresetProjectionDeclaration {
@@ -1120,6 +1256,398 @@ function capabilityCompositionIssues(
 
 function uniqueValues<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
+}
+
+function projectNameFromDir(targetDir: string): string {
+  return path.basename(path.resolve(targetDir));
+}
+
+function blueprintPackagesForCapabilities(
+  capabilities: readonly ProjectionCapabilityDeclaration[],
+  packageScope: string,
+  projectName: string,
+): NonNullable<ProjectBlueprint["packages"]> {
+  return capabilities.flatMap((capability) => {
+    if (capability.kind === "workspace-library-package") {
+      return [
+        {
+          name: `@${packageScope}/${projectName}`,
+          path: `${packageCollection(capability.workspacePackageGlob)}/${projectName}`,
+        },
+      ];
+    }
+
+    if (capability.kind === "workspace-node-packages") {
+      return capability.packages.map((nodePackage) => {
+        const leaf = nodePackage.path.split("/").at(-1) ?? nodePackage.path;
+        return {
+          name: `@${packageScope}/${leaf}`,
+          path: nodePackage.path,
+        };
+      });
+    }
+
+    if (capability.kind === "rust-binary-workspace") {
+      const rustPackageName = cargoPackageNameFromProjectName(projectName);
+      return [
+        {
+          name: `${rustPackageName}-native`,
+          path: `packages/${rustPackageName}`,
+        },
+      ];
+    }
+
+    return [];
+  });
+}
+
+function stateForProjectionDeclaration(
+  declaration: PresetProjectionDeclaration,
+): ProjectionCompositionState {
+  const validation = validateProjectionCapabilities(declaration);
+  if (!validation.ok) {
+    throw new Error(
+      `Projection Declaration is invalid:\n${validation.issues
+        .map((issue) => `  - ${issue.path}: ${issue.message}`)
+        .join("\n")}`,
+    );
+  }
+
+  const state = createProjectionCompositionState();
+  for (const capability of validation.value.capabilities) {
+    capabilityInterpreters[capability.kind].contribute({
+      capability: capability as never,
+      state,
+    });
+  }
+
+  return state;
+}
+
+type PackageAdditionProjectionCapability = {
+  readonly sourcePreset: "hono-api" | "ts-lib" | "vue-app";
+  readonly workspacePackageGlob: "apps/*" | "packages/*";
+  readonly packageRole: PackageRole;
+  readonly packageSourcePreset: PackageSourcePreset;
+  readonly sourceFiles: readonly string[];
+  readonly packageScripts: Record<string, string>;
+  readonly nodePackage?: WorkspaceNodePackageDeclaration;
+  readonly nodeWorkspace?: WorkspaceNodePackagesCapabilityDeclaration;
+};
+
+function packageAdditionCapabilityForState(
+  presetName: string,
+  state: ProjectionCompositionState,
+): PackageAdditionProjectionCapability {
+  if (state.package !== undefined) {
+    const scripts = packageScriptsByWorkspacePath(state).get(
+      state.package.workspacePackageGlob,
+    );
+    if (scripts === undefined) {
+      throw new Error(
+        `Missing package scripts for ${state.package.workspacePackageGlob}`,
+      );
+    }
+
+    return {
+      sourcePreset: state.package.packageSourcePreset,
+      workspacePackageGlob: state.package.workspacePackageGlob,
+      packageRole: state.package.packageRole,
+      packageSourcePreset: state.package.packageSourcePreset,
+      sourceFiles: state.package.sourceFiles,
+      packageScripts: scripts,
+    };
+  }
+
+  if (state.nodeWorkspace !== undefined) {
+    if (state.nodeWorkspace.packages.length !== 1) {
+      throw new Error(
+        `Preset ${presetName} is an initialization-only workspace and cannot be used for Package Addition`,
+      );
+    }
+
+    const nodePackage = state.nodeWorkspace.packages[0]!;
+    return {
+      sourcePreset: nodePackage.kind,
+      workspacePackageGlob: state.nodeWorkspace.workspacePackageGlob,
+      packageRole: "runtime-service",
+      packageSourcePreset: nodePackage.kind,
+      sourceFiles: nodePackage.sourceFiles,
+      packageScripts: nodePackageScripts(nodePackage, state.nodeWorkspace),
+      nodePackage,
+      nodeWorkspace: state.nodeWorkspace,
+    };
+  }
+
+  throw new Error(
+    `Preset ${presetName} is an initialization-only workspace and cannot be used for Package Addition`,
+  );
+}
+
+function packageCollectionFromPackagePath(packagePath: string): string {
+  const [workspaceCollection] = packagePath.split("/");
+  if (!workspaceCollection) {
+    throw new Error(
+      `Invalid Package Path for Package Addition: ${packagePath}`,
+    );
+  }
+
+  return workspaceCollection;
+}
+
+function packageAdditionOperationsForCapability(options: {
+  readonly capability: PackageAdditionProjectionCapability;
+  readonly packageName: string;
+  readonly packagePath: string;
+  readonly nodeVersion: string;
+}): RenderOperation[] {
+  switch (options.capability.packageSourcePreset) {
+    case "ts-lib":
+      return libraryPackageAdditionOperations(options);
+    case "hono-api":
+      return honoApiPackageAdditionOperations(options);
+    case "vue-app":
+      return vueAppPackageAdditionOperations(options);
+  }
+}
+
+function generationContextForPackageAddition(options: {
+  readonly preset: string;
+  readonly packageName: string;
+  readonly packagePath: string;
+  readonly nodeVersion: string;
+}): GenerationContext {
+  return {
+    projectName: {
+      kind: "ProjectName",
+      value: options.packageName.split("/").at(0)?.replace(/^@/, "") ?? "app",
+    },
+    preset: options.preset,
+    packageManager: { kind: "PackageManager", value: "pnpm" },
+    blueprint: {
+      schemaVersion: 1,
+      preset: options.preset,
+      packageManager: "pnpm",
+      projectKind: "multi-package",
+      features: [],
+      packages: [{ name: options.packageName, path: options.packagePath }],
+    },
+    toolchain: {
+      nodeLtsMajor: { kind: "NodeLtsMajor", value: options.nodeVersion },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      source: "bundled-fallback",
+      diagnostics: [],
+    },
+  };
+}
+
+function libraryPackageAdditionOperations(options: {
+  readonly capability: PackageAdditionProjectionCapability;
+  readonly packageName: string;
+  readonly packagePath: string;
+  readonly nodeVersion: string;
+}): RenderOperation[] {
+  const packageExposure = planPackageLinks([
+    {
+      name: options.packageName,
+      path: options.packagePath,
+      role: "shared-library",
+      sourcePreset: "ts-lib",
+    },
+  ]).exposuresByPackagePath.get(options.packagePath);
+
+  if (packageExposure === undefined) {
+    throw new Error(`Missing Package Exposure for ${options.packagePath}`);
+  }
+
+  const exposureFields = packageManifestExposureFields(packageExposure);
+
+  return [
+    {
+      kind: "writeJson",
+      to: `${options.packagePath}/package.json`,
+      value: {
+        name: options.packageName,
+        version: "0.0.0",
+        private: true,
+        type: "module",
+        imports: exposureFields.imports,
+        exports: exposureFields.exports,
+        dependencies: {
+          valibot: "catalog:",
+        },
+        scripts: options.capability.packageScripts,
+        devDependencies: {
+          "@types/node": "catalog:",
+          oxfmt: "catalog:",
+          oxlint: "catalog:",
+          typescript: "catalog:",
+        },
+        engines: {
+          node: options.nodeVersion,
+        },
+      },
+      multilineArrays: ["files"],
+    },
+    {
+      kind: "writeJson",
+      to: `${options.packagePath}/tsconfig.json`,
+      value: libraryTsconfigJson(),
+    },
+    ...options.capability.sourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${options.packagePath}/${sourceFile}`,
+    })),
+  ];
+}
+
+function libraryTsconfigJson(): Record<string, unknown> {
+  return {
+    compilerOptions: {
+      composite: true,
+      declaration: true,
+      declarationMap: true,
+      module: "NodeNext",
+      moduleResolution: "NodeNext",
+      noEmitOnError: true,
+      rootDir: "src",
+      skipLibCheck: false,
+      strict: true,
+      target: "ES2022",
+      types: ["node"],
+    },
+    include: ["src/**/*.ts"],
+  };
+}
+
+function honoApiPackageAdditionOperations(options: {
+  readonly capability: PackageAdditionProjectionCapability;
+  readonly packageName: string;
+  readonly packagePath: string;
+  readonly nodeVersion: string;
+}): RenderOperation[] {
+  const packageExposure = planPackageLinks([
+    {
+      name: options.packageName,
+      path: options.packagePath,
+      role: "runtime-service",
+      sourcePreset: "hono-api",
+    },
+  ]).exposuresByPackagePath.get(options.packagePath);
+
+  if (packageExposure === undefined) {
+    throw new Error(`Missing Package Exposure for ${options.packagePath}`);
+  }
+
+  return [
+    {
+      kind: "writeJson",
+      to: `${options.packagePath}/package.json`,
+      value: honoApiPackageJson(
+        generationContextForPackageAddition({
+          preset: "hono-api",
+          packageName: options.packageName,
+          packagePath: options.packagePath,
+          nodeVersion: options.nodeVersion,
+        }),
+        options.packageName,
+        options.capability.packageScripts,
+        packageManifestExposureFields(packageExposure),
+      ),
+    },
+    ...honoApiTsconfigOperations(options.packagePath),
+    ...options.capability.sourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${options.packagePath}/${sourceFile}`,
+    })),
+  ];
+}
+
+function vueAppPackageAdditionOperations(options: {
+  readonly capability: PackageAdditionProjectionCapability;
+  readonly packageName: string;
+  readonly packagePath: string;
+  readonly nodeVersion: string;
+}): RenderOperation[] {
+  return [
+    {
+      kind: "writeJson",
+      to: `${options.packagePath}/package.json`,
+      value: vuePackageJson(
+        generationContextForPackageAddition({
+          preset: "vue-app",
+          packageName: options.packageName,
+          packagePath: options.packagePath,
+          nodeVersion: options.nodeVersion,
+        }),
+        options.packageName,
+        options.capability.packageScripts,
+      ),
+    },
+    ...vueAppTsconfigOperations(options.packagePath),
+    ...options.capability.sourceFiles
+      .filter(
+        (sourceFile) => path.basename(sourceFile) !== "playwright.config.ts",
+      )
+      .map((sourceFile) => ({
+        kind: "copyFile" as const,
+        from: sourceFile,
+        to: `${options.packagePath}/${sourceFile}`,
+      })),
+  ];
+}
+
+function localPortsFromText(text: string): number[] {
+  return [
+    ...text.matchAll(/--port\s+(\d+)/g),
+    ...text.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g),
+  ].map((match) => Number(match[1]));
+}
+
+async function usedPlaywrightPorts(
+  root: string,
+  blueprint: ProjectBlueprint,
+): Promise<Set<number>> {
+  const ports = new Set<number>();
+
+  for (const projectPackage of blueprint.packages ?? []) {
+    try {
+      const configText = await readFile(
+        path.join(root, projectPackage.path, "playwright.config.ts"),
+        "utf8",
+      );
+
+      for (const port of localPortsFromText(configText)) {
+        ports.add(port);
+      }
+    } catch (error: unknown) {
+      if (!isNodeError(error) || error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return ports;
+}
+
+async function nextVuePreviewPort(
+  root: string,
+  blueprint: ProjectBlueprint,
+): Promise<number> {
+  const usedPorts = await usedPlaywrightPorts(root, blueprint);
+  let port = 4173;
+
+  while (usedPorts.has(port)) {
+    port += 1;
+  }
+
+  return port;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function completePlanCapabilityFlags(
@@ -2200,6 +2728,58 @@ function nodePackageTsconfigOperations(
       },
     },
   ];
+}
+
+function honoApiTsconfigOperations(packagePath: string): RenderOperation[] {
+  const operations = nodePackageTsconfigOperations(
+    {
+      kind: "hono-api",
+      path: "apps/api",
+      sourceFiles: [],
+    },
+    {
+      kind: "workspace-node-packages",
+      workspacePackageGlob: "apps/*",
+      packages: [
+        {
+          kind: "hono-api",
+          path: "apps/api",
+          sourceFiles: [],
+        },
+      ],
+    },
+  ) as Extract<RenderOperation, { kind: "writeJson" }>[];
+
+  return operations.map((operation) => ({
+    ...operation,
+    to: operation.to.replace(/^apps\/api/, packagePath),
+  }));
+}
+
+function vueAppTsconfigOperations(packagePath: string): RenderOperation[] {
+  const operations = nodePackageTsconfigOperations(
+    {
+      kind: "vue-app",
+      path: "apps/web",
+      sourceFiles: [],
+    },
+    {
+      kind: "workspace-node-packages",
+      workspacePackageGlob: "apps/*",
+      packages: [
+        {
+          kind: "vue-app",
+          path: "apps/web",
+          sourceFiles: [],
+        },
+      ],
+    },
+  ) as Extract<RenderOperation, { kind: "writeJson" }>[];
+
+  return operations.map((operation) => ({
+    ...operation,
+    to: operation.to.replace(/^apps\/web/, packagePath),
+  }));
 }
 
 function sourcePathWithinNodePackage(

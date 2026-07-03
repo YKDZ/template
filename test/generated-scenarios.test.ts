@@ -13,7 +13,6 @@ import {
 import { PackageAdditionSupport } from "../src/package-addition-support.js";
 import type { PresetSourceManifest } from "../src/preset-source.js";
 import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 function matrixPairKey(input: {
   readonly basePreset: string;
@@ -268,7 +267,6 @@ describe("generated scenarios", () => {
       {
         repoRoot: "/repo",
         cliPath: "/repo/src/cli.ts",
-        findPresetProjection: findBuiltInPresetProjection,
         runCommand: async (command, args, cwd) => {
           commands.push(`${cwd}: ${command} ${args.join(" ")}`);
 
@@ -314,7 +312,6 @@ describe("generated scenarios", () => {
       {
         repoRoot: "/repo",
         cliPath: "/repo/src/cli.ts",
-        findPresetProjection: findBuiltInPresetProjection,
         runCommand: async (command, args, cwd) => {
           commands.push(`${cwd}: ${command} ${args.join(" ")}`);
         },

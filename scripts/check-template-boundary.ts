@@ -2,10 +2,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assembleGenerationContext } from "../src/generation-context.js";
+import { PackageAdditionSupport } from "../src/package-addition-support.js";
 import {
+  findPresetSourceManifestPreset,
   loadBuiltInPresetSourceManifest,
   manifestReferencedSourceFiles,
+  type PresetSourceManifest,
 } from "../src/preset-source.js";
+import {
+  blueprintForPresetSourcePreset,
+  defaultPackagePathForPresetSourcePackageAddition,
+  planPresetSourcePackageAddition,
+  projectPresetSourcePreset,
+} from "../src/projection-capabilities.js";
 import {
   checkTemplateSourceBoundary,
   templateBoundaryDebtAllowlist,
@@ -13,7 +22,6 @@ import {
   type TemplateBoundaryDebt,
   type TemplateBoundaryViolation,
 } from "../src/template-boundary-check.js";
-import { builtInPresetProjections } from "../templates/registry.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,23 +41,23 @@ function projectionTargetDir(presetName: string): string {
 }
 
 function projectionPlanForPreset(
+  manifest: PresetSourceManifest,
   presetName: string,
 ): TemplateBoundaryCheckProjection {
-  const projection = builtInPresetProjections.find(
-    (candidate) => candidate.metadata.name === presetName,
-  );
+  const preset = findPresetSourceManifestPreset(manifest, presetName);
   const sourceFile = projectionSourceFiles[presetName];
 
-  if (!projection || !sourceFile) {
+  if (!preset?.projection || !sourceFile) {
     throw new Error(
       `Missing Template Boundary Check projection: ${presetName}`,
     );
   }
 
   const targetDir = projectionTargetDir(presetName);
-  const blueprint = projection.blueprint({ targetDir });
-  const plan = projection.project(
-    assembleGenerationContext({
+  const blueprint = blueprintForPresetSourcePreset(preset, { targetDir });
+  const plan = projectPresetSourcePreset({
+    preset,
+    context: assembleGenerationContext({
       targetDir,
       blueprint,
       toolchain: {
@@ -62,13 +70,81 @@ function projectionPlanForPreset(
         diagnostics: [],
       },
     }),
-  );
+  });
 
   return {
     name: presetName,
     sourceFilePath: path.join(repoRoot, sourceFile),
     plan,
   };
+}
+
+async function packageAdditionPlanForPreset(
+  manifest: PresetSourceManifest,
+  presetName: string,
+): Promise<TemplateBoundaryCheckProjection> {
+  const preset = findPresetSourceManifestPreset(manifest, presetName);
+  const sourceFile = projectionSourceFiles[presetName];
+
+  if (!preset?.projection || !sourceFile) {
+    throw new Error(
+      `Missing Template Boundary Check Package Addition projection: ${presetName}`,
+    );
+  }
+
+  const root = path.join(
+    repoRoot,
+    ".template-boundary-check",
+    "package-addition-root",
+  );
+  const packageLeafName = "template-boundary-check";
+  const packagePath = defaultPackagePathForPresetSourcePackageAddition(
+    preset,
+    packageLeafName,
+  );
+  const plan = await planPresetSourcePackageAddition({
+    preset,
+    addition: {
+      root,
+      blueprint: {
+        schemaVersion: 1,
+        preset: "vue-hono-app",
+        packageManager: "pnpm",
+        projectKind: "multi-package",
+        features: [],
+        packages: [{ name: "@demo/web", path: "apps/web" }],
+      },
+      packageLeafName,
+      packageName: `@demo/${packageLeafName}`,
+      packagePath,
+      nodeVersion: "24",
+    },
+  });
+
+  return {
+    name: `${presetName} package addition`,
+    sourceFilePath: path.join(repoRoot, sourceFile),
+    plan,
+  };
+}
+
+export async function builtInTemplateBoundaryProjections(
+  manifest: PresetSourceManifest,
+): Promise<TemplateBoundaryCheckProjection[]> {
+  const initProjections = manifest.presets
+    .filter((preset) => preset.generation === "supported")
+    .map((preset) => projectionPlanForPreset(manifest, preset.name));
+  const packageAdditionProjections = await Promise.all(
+    manifest.presets
+      .filter(
+        (preset) =>
+          preset.generation === "supported" &&
+          preset.packageAdditionSupport === PackageAdditionSupport.Supported,
+      )
+      .map((preset) => packageAdditionPlanForPreset(manifest, preset.name)),
+  );
+
+  return [...initProjections, ...packageAdditionProjections];
 }
 
 function formatDiagnostic(diagnostic: TemplateBoundaryViolation): string {
@@ -95,9 +171,7 @@ export async function checkBuiltInTemplateBoundaries(): Promise<void> {
   const templatesRoot = path.join(repoRoot, "templates");
   const manifest = loadBuiltInPresetSourceManifest();
   const result = await checkTemplateSourceBoundary({
-    projections: builtInPresetProjections.map((projection) =>
-      projectionPlanForPreset(projection.metadata.name),
-    ),
+    projections: await builtInTemplateBoundaryProjections(manifest),
     manifestReferencedSourceFiles: manifestReferencedSourceFiles(
       manifest,
       templatesRoot,

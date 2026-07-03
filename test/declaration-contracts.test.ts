@@ -373,7 +373,7 @@ describe("declaration contracts", () => {
     expect(result.stdout).toContain("rust-bin");
   });
 
-  it("rejects built-in Preset Source Manifests that drift from registry projections through the CLI", async () => {
+  it("rejects supported built-in Preset Source Manifests without Projection Declarations through the CLI", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-preset-source-bridge-"),
     );
@@ -406,7 +406,7 @@ describe("declaration contracts", () => {
       template(["preset-source", "validate", manifestPath]),
     ).rejects.toMatchObject({
       stderr: expect.stringContaining(
-        "Supported built-in Preset missing-supported must have a registry projection",
+        "Supported Preset missing-supported must declare a Projection Declaration",
       ),
     });
   });

@@ -3,7 +3,6 @@ import path from "node:path";
 
 import ts from "typescript";
 
-import type { PresetProjectionPlan } from "./preset-projection.js";
 import type { RenderOperation } from "./renderer.js";
 
 export type TemplateBoundaryDebt = {
@@ -25,7 +24,11 @@ export type TemplateBoundaryViolation = {
 export type TemplateBoundaryCheckProjection = {
   readonly name: string;
   readonly sourceFilePath: string;
-  readonly plan: PresetProjectionPlan;
+  readonly plan: {
+    readonly sourceRoot: string;
+    readonly sourceRoots?: Record<string, string>;
+    readonly operations: readonly RenderOperation[];
+  };
 };
 
 export type TemplateBoundaryCheckResult = {
@@ -115,28 +118,39 @@ export function isProtectedGeneratedPath(generatedPath: string): boolean {
   );
 }
 
+function expressionStringValue(expression: ts.Expression): string | undefined {
+  if (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isTypeAssertionExpression(expression)
+  ) {
+    return expressionStringValue(expression.expression);
+  }
+
+  if (ts.isStringLiteralLike(expression)) {
+    return expression.text;
+  }
+
+  if (
+    ts.isNoSubstitutionTemplateLiteral(expression) ||
+    ts.isTemplateExpression(expression)
+  ) {
+    return expression.getText();
+  }
+
+  return undefined;
+}
+
 function propertyStringValue(
   objectLiteral: ts.ObjectLiteralExpression,
   name: string,
 ): string | undefined {
   const initializer = propertyInitializer(objectLiteral, name);
 
-  if (!initializer) {
-    return undefined;
-  }
-
-  if (ts.isStringLiteralLike(initializer)) {
-    return initializer.text;
-  }
-
-  if (
-    ts.isNoSubstitutionTemplateLiteral(initializer) ||
-    ts.isTemplateExpression(initializer)
-  ) {
-    return initializer.getText();
-  }
-
-  return undefined;
+  return initializer === undefined
+    ? undefined
+    : expressionStringValue(initializer);
 }
 
 function propertyInitializer(
