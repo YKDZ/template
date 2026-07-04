@@ -11,3 +11,4 @@ CONTEXT.md
 .pnpm-store/
 .turbo/
 packages/**/.turbo/
+coverage

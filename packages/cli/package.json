@@ -32,8 +32,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
     "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "prepack": "pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",

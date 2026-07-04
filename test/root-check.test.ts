@@ -336,7 +336,7 @@ describe("Project Kit Root Check", () => {
       "turbo run format:check format:check:root",
     );
     expect(rootPackageJson.scripts["format:check:root"]).toBe(
-      "oxfmt --check --config oxfmt.config.ts --ignore-path .oxfmtignore package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
+      "oxfmt --check --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
     );
   });
 
@@ -430,35 +430,30 @@ describe("Project Kit Root Check", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("keeps whole-repository format ignores limited to unmaintained workspace state", async () => {
-    const ignoreFile = await readFile(
-      path.join(repoRoot, ".oxfmtignore"),
-      "utf8",
-    );
-    const ignoredPaths = ignoreFile
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+  it("keeps repository format scripts free of non-standard oxfmt ignore files", async () => {
+    const packageJsonFiles = [
+      "package.json",
+      "packages/cli/package.json",
+      "packages/core/package.json",
+      "packages/builtin-source/package.json",
+      "packages/checks/package.json",
+    ];
 
-    expect(ignoredPaths).toEqual([
-      "node_modules",
-      "dist",
-      "coverage",
-      ".template",
-      ".project-kit",
-      ".pnpm-store",
-      ".turbo",
-      "packages/**/.turbo",
-      ".agents",
-      ".scratch",
-      "templates/**/node_modules",
-      "packages/builtin-source/templates/**/node_modules",
-    ]);
-    expect(ignoredPaths).not.toContain("src");
-    expect(ignoredPaths).not.toContain("templates");
-    expect(ignoredPaths).not.toContain(".github");
-    expect(ignoredPaths).not.toContain("docs");
-    expect(ignoredPaths).not.toContain("package.json");
+    for (const packageJsonFile of packageJsonFiles) {
+      const packageJson = await readJsonWithSchema(
+        path.join(repoRoot, packageJsonFile),
+        packageJsonWithScriptsSchema,
+      );
+
+      expect(packageJson.scripts["format:check"]).not.toContain(
+        "--ignore-path",
+      );
+      expect(packageJson.scripts["format:write"]).not.toContain(
+        "--ignore-path",
+      );
+      expect(packageJson.scripts["format:check"]).not.toContain(".oxfmtignore");
+      expect(packageJson.scripts["format:write"]).not.toContain(".oxfmtignore");
+    }
   });
 
   it("runs direct Rust template source format checks from Root Check", async () => {

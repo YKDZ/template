@@ -14,8 +14,8 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../pnpm-workspace.yaml dist/pnpm-workspace.yaml",
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
     "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"
