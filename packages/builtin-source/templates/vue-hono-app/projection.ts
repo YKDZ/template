@@ -107,7 +107,6 @@ function planVueHonoRootChecks(): CheckPlan {
       { kind: "turbo-package-typecheck", owner: workspacePackageBoundary },
       { kind: "turbo-package-build", owner: workspacePackageBoundary },
       { kind: "turbo-package-test", owner: workspacePackageBoundary },
-      { kind: "turbo-package-e2e-test", owner: workspacePackageBoundary },
       { kind: "turbo-package-check", owner: workspacePackageBoundary },
     ],
     environmentNeeds: [

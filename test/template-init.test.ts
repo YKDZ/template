@@ -2717,7 +2717,7 @@ describe("template init", () => {
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -3026,7 +3026,7 @@ describe("template init", () => {
     expect(rootPackageJson.name).toBe("demo-fullstack");
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",

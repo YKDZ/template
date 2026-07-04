@@ -830,6 +830,9 @@ function rootPackageJsonWithPackageTaskFilters(
 
   const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
   const taskNames = turboTaskNamesForPackageManifests(packageManifests);
+  const rootCheckTaskNames = taskNames.filter(
+    (taskName) => taskName !== "test:e2e",
+  );
   const checkScript = input.scripts.check;
   const fixScript = input.scripts.fix;
   if (checkScript === undefined || fixScript === undefined) {
@@ -844,7 +847,7 @@ function rootPackageJsonWithPackageTaskFilters(
       ...input.scripts,
       check: rootScriptWithTurboPackageTasks({
         script: checkScript,
-        taskNames,
+        taskNames: rootCheckTaskNames,
         workspacePackageGlobs,
       }),
       fix: rootScriptWithTurboPackageTask(

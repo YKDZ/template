@@ -330,7 +330,7 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' --filter './packages/*' && turbo run build --filter './apps/*' --filter './packages/*' && turbo run test --filter './apps/*' --filter './packages/*' && turbo run test:e2e --filter './apps/*' --filter './packages/*' && turbo run check --filter './apps/*' --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' --filter './packages/*' && turbo run build --filter './apps/*' --filter './packages/*' && turbo run test --filter './apps/*' --filter './packages/*' && turbo run check --filter './apps/*' --filter './packages/*'",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run check --filter './apps/*'",

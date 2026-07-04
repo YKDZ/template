@@ -282,7 +282,7 @@ describe("module graph plans", () => {
     );
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),
       "format:check":

@@ -373,12 +373,6 @@ const capabilityInterpreters = {
           kind: "turbo-package-test",
           owner: workspaceBoundary,
         });
-        if (hasVuePackage(state.nodeWorkspace)) {
-          state.rootCheckComponents.push({
-            kind: "turbo-package-e2e-test",
-            owner: workspaceBoundary,
-          });
-        }
       }
       state.rootCheckComponents.push({
         kind: "turbo-package-check",

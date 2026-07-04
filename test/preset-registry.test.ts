@@ -396,7 +396,7 @@ describe("Preset Registry", () => {
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(rootPackageJson.devDependencies?.turbo).toBe("catalog:");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
   });
