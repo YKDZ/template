@@ -8,7 +8,7 @@ import {
   loadPresetSourceManifestFile,
   loadBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
-} from "../src/preset-source.js";
+} from "@ykdz/template-builtin-source";
 
 function validManifest(): any {
   return {

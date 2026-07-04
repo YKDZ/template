@@ -2,6 +2,11 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import type { PresetSourceManifest } from "@ykdz/template-builtin-source";
+import {
+  builtInPresetProjectionSourceRoots,
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
 import {
   errorForFailedGeneratedScenario,
   generatedScenarioId,
@@ -9,10 +14,8 @@ import {
   runGeneratedScenarioSet,
   runGeneratedScenariosConcurrently,
   selectGeneratedScenarios,
-} from "../src/generated-scenarios.js";
-import { PackageAdditionSupport } from "../src/package-addition-support.js";
-import type { PresetSourceManifest } from "../src/preset-source.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+} from "@ykdz/template-core/generated-scenarios";
+import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
 
 function matrixPairKey(input: {
   readonly basePreset: string;
@@ -266,7 +269,8 @@ describe("generated scenarios", () => {
       1,
       {
         repoRoot: "/repo",
-        cliPath: "/repo/src/cli.ts",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
         runCommand: async (command, args, cwd) => {
           commands.push(`${cwd}: ${command} ${args.join(" ")}`);
 
@@ -289,9 +293,11 @@ describe("generated scenarios", () => {
 
     expect(commands).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("pnpm exec tsx /repo/src/cli.ts init"),
         expect.stringContaining(
-          "pnpm exec tsx /repo/src/cli.ts add package --preset ts-lib --name fixture-lib",
+          "pnpm exec tsx /repo/packages/cli/src/cli.ts init",
+        ),
+        expect.stringContaining(
+          "pnpm exec tsx /repo/packages/cli/src/cli.ts add package --preset ts-lib --name fixture-lib",
         ),
         expect.stringContaining("pnpm install"),
         expect.stringContaining("pnpm run fix"),
@@ -311,7 +317,8 @@ describe("generated scenarios", () => {
       workspace,
       {
         repoRoot: "/repo",
-        cliPath: "/repo/src/cli.ts",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
         runCommand: async (command, args, cwd) => {
           commands.push(`${cwd}: ${command} ${args.join(" ")}`);
         },
@@ -332,7 +339,7 @@ describe("generated scenarios", () => {
     for (const presetName of initPresetNames) {
       expect(commands).toContainEqual(
         expect.stringContaining(
-          `/repo: pnpm exec tsx /repo/src/cli.ts init ${path.join(workspace, `fixture-${presetName}`)} --preset ${presetName} --yes`,
+          `/repo: pnpm exec tsx /repo/packages/cli/src/cli.ts init ${path.join(workspace, `fixture-${presetName}`)} --preset ${presetName} --yes`,
         ),
       );
       expect(commands).toContainEqual(

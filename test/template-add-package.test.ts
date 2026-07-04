@@ -18,7 +18,7 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const cliPath = path.join(repoRoot, "src/cli.ts");
+const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
 
 async function readJson<T>(filePath: string): Promise<T> {

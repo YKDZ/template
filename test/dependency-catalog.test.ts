@@ -1,10 +1,10 @@
+import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import {
   collectGeneratedManifestCatalogDependencies,
   loadTemplateDependencyCatalog,
   renderGeneratedPnpmWorkspaceYaml,
   selectTemplateDependencyCatalogEntries,
-} from "../src/dependency-catalog.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+} from "@ykdz/template-core/dependency-catalog";
 
 describe("Template Dependency Catalog projection", () => {
   it("selects only requested dependency versions in stable dependency order", () => {

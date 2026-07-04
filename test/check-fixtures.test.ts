@@ -3,14 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
+import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import {
   generatedScenarioId,
   selectGeneratedScenarios,
   type GeneratedScenario,
-} from "../src/generated-scenarios.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+} from "@ykdz/template-core/generated-scenarios";
+import { execa } from "execa";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -224,20 +223,30 @@ describe("fixture checks", () => {
       ].join("\n"),
     );
 
-    await execa(realPnpm, ["exec", "tsx", "scripts/check-fixtures.ts"], {
-      cwd: repoRoot,
-      env: {
-        FIXTURE_COMMAND_LOG: logPath,
-        FIXTURE_WEB_ROOT_CHECK_LOCK: webRootCheckLockPath,
-        OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
-        TEMPLATE_FIXTURE_CONCURRENCY: "4",
-        NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
-          .filter(Boolean)
-          .join(" "),
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-        REAL_PNPM: realPnpm,
+    await execa(
+      realPnpm,
+      [
+        "exec",
+        "tsx",
+        "--tsconfig",
+        "tsconfig.json",
+        "packages/checks/src/check-fixtures.ts",
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          FIXTURE_COMMAND_LOG: logPath,
+          FIXTURE_WEB_ROOT_CHECK_LOCK: webRootCheckLockPath,
+          OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
+          TEMPLATE_FIXTURE_CONCURRENCY: "4",
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
+            .filter(Boolean)
+            .join(" "),
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          REAL_PNPM: realPnpm,
+        },
       },
-    });
+    );
 
     const records = (await readFile(logPath, "utf8"))
       .trim()

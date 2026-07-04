@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { renderNewProject, renderProject } from "../src/renderer.js";
+import { renderNewProject, renderProject } from "@ykdz/template-core/renderer";
 
 async function tempWorkspace(): Promise<{
   sourceRoot: string;

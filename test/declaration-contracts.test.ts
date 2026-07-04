@@ -3,15 +3,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { findBuiltInPreset } from "@ykdz/template-builtin-source";
 import { execa } from "execa";
-
-import { findBuiltInPreset } from "../src/declarations.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const cliPath = path.join(repoRoot, "src/cli.ts");
+const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 
 function template(args: string[]) {
   return execa("pnpm", ["exec", "tsx", cliPath, ...args], { cwd: repoRoot });
@@ -363,7 +362,7 @@ describe("declaration contracts", () => {
     const result = await template([
       "preset-source",
       "validate",
-      "templates/preset-source.json",
+      "packages/builtin-source/templates/preset-source.json",
     ]);
 
     expect(result.stdout).toContain("Preset Source Manifest is valid");

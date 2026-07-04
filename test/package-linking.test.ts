@@ -1,7 +1,7 @@
 import {
   packageManifestExposureFields,
   planPackageLinks,
-} from "../src/package-linking.js";
+} from "@ykdz/template-core/package-linking";
 
 describe("Package Link Planning", () => {
   it("derives JIT source exposure and Package-Local Imports for a TypeScript shared library", () => {

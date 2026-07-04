@@ -6,10 +6,32 @@
     "moduleResolution": "NodeNext",
     "noEmitOnError": true,
     "outDir": "dist",
+    "paths": {
+      "@ykdz/template-builtin-source": [
+        "./packages/builtin-source/src/index.ts"
+      ],
+      "@ykdz/template-builtin-source/templates/*": [
+        "./packages/builtin-source/templates/*.ts"
+      ],
+      "@ykdz/template-builtin-source/*": [
+        "./packages/builtin-source/src/*.ts",
+        "./packages/builtin-source/templates/*.ts",
+        "./packages/builtin-source/templates/*"
+      ],
+      "@ykdz/template-checks/*": ["./packages/checks/src/*.ts"],
+      "@ykdz/template-core/*": ["./packages/core/src/*.ts"]
+    },
     "skipLibCheck": false,
     "strict": true,
     "target": "ES2022",
     "types": ["node", "vitest/globals"]
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/builtin-source/templates/*/projection.ts",
+    "packages/builtin-source/templates/projection-plans.ts",
+    "packages/builtin-source/templates/registry.ts",
+    "test/**/*.ts",
+    "vitest.config.ts"
+  ]
 }

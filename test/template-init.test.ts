@@ -11,18 +11,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-import { parse as parseYaml } from "yaml";
-
-import { builtInPresets } from "../src/declarations.js";
-import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
+import { builtInPresets } from "@ykdz/template-builtin-source";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import {
   editorCustomizationForCapabilities,
   type EditorCustomizationCapability,
   type EditorCustomizationOptions,
-} from "../src/editor-customization.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/editor-customization";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { execa } from "execa";
+import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -116,7 +115,7 @@ async function generatePresetProject(preset: string): Promise<string> {
     [
       "exec",
       "tsx",
-      path.join(repoRoot, "src/cli.ts"),
+      path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
       "init",
       projectDir,
       "--preset",
@@ -140,6 +139,7 @@ const forbiddenWorkspaceLifecycleFeatures = [
 ] as const;
 
 function oxcConfigDirectoriesForPreset(preset: string): string[] {
+  void preset;
   return ["."];
 }
 
@@ -188,6 +188,7 @@ function expectCatalogDependencySpecifiers(packageJson: {
 function editorCustomizationOptionsForPreset(
   preset: string,
 ): EditorCustomizationOptions | undefined {
+  void preset;
   return undefined;
 }
 
@@ -1154,7 +1155,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1307,7 +1308,7 @@ describe("template init", () => {
     const result = await execa(
       path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1341,7 +1342,7 @@ describe("template init", () => {
     const result = await execa(
       path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1443,7 +1444,7 @@ describe("template init", () => {
     const result = await execa(
       path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1500,7 +1501,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1623,7 +1624,7 @@ describe("template init", () => {
     const result = await execa(
       path.join(repoRoot, "node_modules/.bin/tsx"),
       [
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         "demo-lib",
         "--preset",
@@ -1674,7 +1675,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1734,7 +1735,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1804,7 +1805,7 @@ describe("template init", () => {
       [
         "--import",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -1840,7 +1841,12 @@ describe("template init", () => {
 
     const result = await execa(
       "pnpm",
-      ["exec", "tsx", path.join(repoRoot, "src/cli.ts"), "--help"],
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
+        "--help",
+      ],
       {
         cwd: repoRoot,
       },
@@ -1864,7 +1870,7 @@ describe("template init", () => {
         [
           "exec",
           "tsx",
-          path.join(repoRoot, "src/cli.ts"),
+          path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
           "init",
           projectDir,
           "--preset",
@@ -1898,7 +1904,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         emptyDir,
         "--preset",
@@ -1915,7 +1921,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         nonEmptyDir,
         "--preset",
@@ -1939,7 +1945,7 @@ describe("template init", () => {
       path.join(tmpdir(), "template-interactive-"),
     );
     const projectDir = path.join(workspace, "demo-lib");
-    const cliPath = path.join(repoRoot, "src/cli.ts");
+    const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 
     const result = await execa(
       "bash",
@@ -1971,7 +1977,7 @@ describe("template init", () => {
       path.join(tmpdir(), "template-interactive-"),
     );
     const projectDir = path.join(workspace, "demo-lib");
-    const cliPath = path.join(repoRoot, "src/cli.ts");
+    const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 
     await expect(
       execa(
@@ -2009,7 +2015,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2065,7 +2071,7 @@ describe("template init", () => {
       [
         "--import",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2101,7 +2107,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2319,7 +2325,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2528,7 +2534,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "blueprint",
         "validate",
         blueprintPath,
@@ -2546,7 +2552,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2583,7 +2589,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -2872,7 +2878,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -3153,7 +3159,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -3211,7 +3217,7 @@ describe("template init", () => {
       [
         "exec",
         "tsx",
-        path.join(repoRoot, "src/cli.ts"),
+        path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
         "--preset",
@@ -3255,7 +3261,7 @@ describe("template init", () => {
         [
           "exec",
           "tsx",
-          path.join(repoRoot, "src/cli.ts"),
+          path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
           "init",
           projectDir,
           "--preset",

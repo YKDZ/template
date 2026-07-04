@@ -1,7 +1,6 @@
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { projectDependabotConfig } from "@ykdz/template-core/project-github";
 import { parse as parseYaml } from "yaml";
-
-import { projectDependabotConfig } from "../src/project-github.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
 
 type DependabotConfig = {
   version: number;

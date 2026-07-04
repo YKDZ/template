@@ -3,24 +3,29 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { builtInTemplateBoundaryProjections } from "../scripts/check-template-boundary.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import type { PresetProjectionPlan } from "../src/preset-projection.js";
 import {
   loadBuiltInPresetSourceManifest,
   manifestReferencedSourceFiles,
-} from "../src/preset-source.js";
+} from "@ykdz/template-builtin-source";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { builtInTemplateBoundaryProjections } from "@ykdz/template-checks/check-template-boundary";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
 import {
   checkTemplateSourceBoundary,
   templateBoundaryDebtAllowlist,
-} from "../src/template-boundary-check.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/template-boundary-check";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const templatesRoot = path.join(repoRoot, "templates");
+const templatesRoot = path.join(
+  repoRoot,
+  "packages",
+  "builtin-source",
+  "templates",
+);
 
 function builtInManifestReferencedSourceFiles(): string[] {
   return manifestReferencedSourceFiles(
@@ -29,8 +34,8 @@ function builtInManifestReferencedSourceFiles(): string[] {
   );
 }
 
-function builtInProjectionSourceFile(presetName: string): string {
-  return path.join(repoRoot, "src/projection-capabilities.ts");
+function builtInProjectionSourceFile(): string {
+  return path.join(repoRoot, "packages/core/src/projection-capabilities.ts");
 }
 
 function minimalPlan(
@@ -1156,7 +1161,7 @@ describe("Template Boundary Check", () => {
       projections: [
         {
           name: "ts-lib",
-          sourceFilePath: builtInProjectionSourceFile("ts-lib"),
+          sourceFilePath: builtInProjectionSourceFile(),
           plan,
         },
       ],
@@ -1212,10 +1217,7 @@ describe("Template Boundary Check", () => {
         projections: [
           {
             name: presetName,
-            sourceFilePath: path.join(
-              repoRoot,
-              `templates/${presetName}/projection.ts`,
-            ),
+            sourceFilePath: builtInProjectionSourceFile(),
             plan,
           },
         ],
@@ -1258,7 +1260,7 @@ describe("Template Boundary Check", () => {
       projections: [
         {
           name: "rust-bin",
-          sourceFilePath: path.join(repoRoot, "src/projection-capabilities.ts"),
+          sourceFilePath: builtInProjectionSourceFile(),
           plan,
         },
       ],

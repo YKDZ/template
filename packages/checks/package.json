@@ -1,0 +1,31 @@
+{
+  "name": "@ykdz/template-checks",
+  "version": "0.0.8",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "default": "./dist/*.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check:fixtures": "tsx --tsconfig ../../tsconfig.json src/check-fixtures.ts",
+    "check:generated": "tsx --tsconfig ../../tsconfig.json src/check-generated.ts",
+    "check:templates:boundary": "tsx --tsconfig ../../tsconfig.json src/check-template-boundary.ts",
+    "check:templates:github-yaml": "tsx --tsconfig ../../tsconfig.json src/check-template-github-yaml.ts",
+    "check:toolchain:online": "tsx --tsconfig ../../tsconfig.json src/check-online-toolchain-resolution-contract.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ykdz/template-builtin-source": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "execa": "catalog:",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

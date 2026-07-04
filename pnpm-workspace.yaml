@@ -1,5 +1,5 @@
 packages:
-  - .
+  - packages/*
 
 catalog:
   "@hono/node-server": ^2.0.6
@@ -10,6 +10,7 @@ catalog:
   "@vitejs/plugin-vue": ^6.0.7
   "@vue/tsconfig": ^0.9.1
   "@vueuse/core": ^14.3.0
+  execa: ^9.6.1
   hono: ^4.12.27
   oxfmt: ^0.57.0
   oxlint: ^1.72.0
@@ -24,6 +25,7 @@ catalog:
   vitest: ^4.1.9
   vue: ^3.5.39
   vue-tsc: ^3.3.6
+  yaml: ^2.9.0
 
 allowBuilds:
   esbuild: true

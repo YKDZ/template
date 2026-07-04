@@ -2,17 +2,20 @@ import { readFile, stat, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+import {
+  builtInPresetProjectionSourceRoots,
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
 import {
   defaultPackagePathForPresetSourcePackageAddition,
   interpretPresetProjectionDeclaration,
   planPresetSourcePackageAddition,
   type PresetProjectionDeclaration,
   validateProjectionCapabilities,
-} from "../src/projection-capabilities.js";
-import { renderNewProject } from "../src/renderer.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/projection-capabilities";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 
 const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
   capabilities: [
@@ -107,17 +110,30 @@ describe("Projection Capability declarations", () => {
     );
 
     expect(
-      defaultPackagePathForPresetSourcePackageAddition(tsLib, "shared"),
+      defaultPackagePathForPresetSourcePackageAddition(
+        tsLib,
+        "shared",
+        builtInPresetProjectionSourceRoots(),
+      ),
     ).toBe("packages/shared");
     expect(
-      defaultPackagePathForPresetSourcePackageAddition(honoApi, "worker"),
+      defaultPackagePathForPresetSourcePackageAddition(
+        honoApi,
+        "worker",
+        builtInPresetProjectionSourceRoots(),
+      ),
     ).toBe("apps/worker");
     expect(
-      defaultPackagePathForPresetSourcePackageAddition(vueApp, "admin"),
+      defaultPackagePathForPresetSourcePackageAddition(
+        vueApp,
+        "admin",
+        builtInPresetProjectionSourceRoots(),
+      ),
     ).toBe("apps/admin");
 
     const additionPlan = await planPresetSourcePackageAddition({
       preset: vueApp,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
       addition: {
         root,
         blueprint: {
@@ -159,6 +175,7 @@ describe("Projection Capability declarations", () => {
       preset: legacyProjection.metadata,
       declaration: syntheticTsLibDeclaration,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
 
     expect(
@@ -204,6 +221,7 @@ describe("Projection Capability declarations", () => {
       preset: preset!,
       declaration: preset!.projection!,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
     await renderNewProject({
       sourceRoot: plan.sourceRoot,
@@ -281,6 +299,7 @@ describe("Projection Capability declarations", () => {
       preset: preset!,
       declaration: preset!.projection!,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
     await renderNewProject({
       sourceRoot: plan.sourceRoot,
@@ -346,6 +365,7 @@ describe("Projection Capability declarations", () => {
       preset: preset!,
       declaration: preset!.projection!,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
     await renderNewProject({
       sourceRoot: plan.sourceRoot,
@@ -412,6 +432,7 @@ describe("Projection Capability declarations", () => {
       preset: preset!,
       declaration: preset!.projection!,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
     await renderNewProject({
       sourceRoot: plan.sourceRoot,
@@ -479,6 +500,7 @@ describe("Projection Capability declarations", () => {
       preset: preset!,
       declaration: preset!.projection!,
       context,
+      sourceRoots: builtInPresetProjectionSourceRoots(),
     });
     await renderNewProject({
       sourceRoot: plan.sourceRoot,

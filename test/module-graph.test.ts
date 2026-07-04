@@ -1,26 +1,26 @@
-import {
-  renderPlaywrightBrowserInstallCommand,
-  renderRootCheckCommand,
-  renderFixCommand,
-} from "../src/module-graph.js";
-import {
-  projectCheckWorkflow,
-  projectDependabotConfig,
-} from "../src/project-github.js";
-import { projectHonoApiPackageScripts } from "../templates/hono-api/projection.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { projectHonoApiPackageScripts } from "@ykdz/template-builtin-source/templates/hono-api/projection";
 import {
   planRustBinChecks,
   planRustBinFixes,
   projectRustBinPackageScripts,
-} from "../templates/rust-bin/projection.js";
-import { projectTsLibPackageScripts } from "../templates/ts-lib/projection.js";
-import { projectVueAppPackageScripts } from "../templates/vue-app/projection.js";
+} from "@ykdz/template-builtin-source/templates/rust-bin/projection";
+import { projectTsLibPackageScripts } from "@ykdz/template-builtin-source/templates/ts-lib/projection";
+import { projectVueAppPackageScripts } from "@ykdz/template-builtin-source/templates/vue-app/projection";
 import {
   projectVueHonoApiPackageScripts,
   projectVueHonoRootPackageScripts,
   projectVueHonoWebPackageScripts,
-} from "../templates/vue-hono-app/projection.js";
+} from "@ykdz/template-builtin-source/templates/vue-hono-app/projection";
+import {
+  renderPlaywrightBrowserInstallCommand,
+  renderRootCheckCommand,
+  renderFixCommand,
+} from "@ykdz/template-core/module-graph";
+import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+} from "@ykdz/template-core/project-github";
 
 describe("module graph plans", () => {
   it("selects semantic Check and Fix Components for the ts-lib workspace root", () => {

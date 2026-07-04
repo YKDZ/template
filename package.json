@@ -1,72 +1,40 @@
 {
-  "name": "@ykdz/template",
-  "version": "0.0.7",
-  "private": false,
-  "description": "Project template generator for YKDZ starter projects.",
-  "keywords": [
-    "cli",
-    "project-template",
-    "starter"
-  ],
-  "homepage": "https://github.com/YKDZ/template#readme",
-  "bugs": {
-    "url": "https://github.com/YKDZ/template/issues"
-  },
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/YKDZ/template.git"
-  },
-  "bin": {
-    "template": "dist/src/cli.js"
-  },
-  "files": [
-    "dist",
-    "pnpm-workspace.yaml",
-    "templates",
-    "!templates/registry.ts",
-    "!templates/projection-plans.ts",
-    "!templates/*/projection.ts",
-    "!templates/shared/oxc/tsconfig.json",
-    "!templates/**/node_modules"
-  ],
+  "name": "@ykdz/template-repository",
+  "version": "0.0.8",
+  "private": true,
+  "description": "Repository workspace for the YKDZ template generator.",
   "type": "module",
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "prepack": "pnpm run build",
-    "check": "pnpm run check:format && pnpm run typecheck && pnpm run test && pnpm run check:generated && pnpm run check:templates",
-    "check:format": "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
-    "check:fixtures": "tsx scripts/check-fixtures.ts",
-    "check:generated": "tsx scripts/check-generated.ts",
+    "build": "pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm --filter @ykdz/template run build && pnpm --filter @ykdz/template-checks run build",
+    "check": "pnpm run check:format && pnpm run check:lint && pnpm run typecheck && pnpm run test && pnpm run check:generated && pnpm run check:templates",
+    "check:format": "oxfmt --check --config packages/builtin-source/templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
+    "check:fixtures": "pnpm --filter @ykdz/template-checks run check:fixtures",
+    "check:generated": "pnpm --filter @ykdz/template-checks run check:generated",
+    "check:lint": "oxlint --config packages/builtin-source/templates/shared/oxc/node/oxlint.config.ts packages test vitest.config.ts --deny-warnings",
     "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:github-yaml && pnpm run check:templates:boundary && pnpm run check:templates:static-source",
-    "check:toolchain:online": "tsx scripts/check-online-toolchain-resolution-contract.ts",
-    "check:templates:boundary": "tsx scripts/check-template-boundary.ts",
-    "check:templates:github-yaml": "tsx scripts/check-template-github-yaml.ts",
+    "check:toolchain:online": "pnpm --filter @ykdz/template-checks run check:toolchain:online",
+    "check:templates:boundary": "pnpm --filter @ykdz/template-checks run check:templates:boundary",
+    "check:templates:github-yaml": "pnpm --filter @ykdz/template-checks run check:templates:github-yaml",
     "check:templates:shared-oxc": "pnpm run check:templates:shared-oxc:format && pnpm run check:templates:shared-oxc:lint && pnpm run check:templates:shared-oxc:typecheck",
-    "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
-    "check:templates:shared-oxc:lint": "oxlint templates/shared/oxc --deny-warnings",
-    "check:templates:shared-oxc:typecheck": "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
-    "check:templates:static-source": "rustfmt --check templates/rust-bin/src/main.rs",
+    "check:templates:shared-oxc:format": "oxfmt --check packages/builtin-source/templates/shared/oxc",
+    "check:templates:shared-oxc:lint": "oxlint --config packages/builtin-source/templates/shared/oxc/node/oxlint.config.ts packages/builtin-source/templates/shared/oxc --deny-warnings",
+    "check:templates:shared-oxc:typecheck": "tsc -p packages/builtin-source/templates/shared/oxc/tsconfig.json --noEmit",
+    "check:templates:static-source": "rustfmt --check packages/builtin-source/templates/rust-bin/src/main.rs",
     "fix": "pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "typescript": "^6.0.3",
-    "valibot": "^1.4.2"
-  },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "execa": "^9.6.1",
-    "oxfmt": "^0.57.0",
-    "oxlint": "^1.72.0",
+    "@types/node": "catalog:",
+    "execa": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
     "oxlint-tsgolint": "^0.24.0",
-    "tsx": "^4.22.4",
-    "vitest": "^4.1.9",
-    "yaml": "^2.9.0"
+    "tsx": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "yaml": "catalog:"
   },
   "engines": {
     "node": ">=24.0.0"

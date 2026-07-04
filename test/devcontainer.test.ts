@@ -2,7 +2,8 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import {
   browserTestToolLayer,
   checkedDockerfileFirstNodePnpmDevcontainer,
@@ -11,9 +12,8 @@ import {
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
-} from "../src/devcontainer.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/devcontainer";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]

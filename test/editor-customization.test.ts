@@ -2,14 +2,14 @@ import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import {
   editorCustomizationForCapabilities,
   type EditorCustomizationCapability,
   type EditorCustomizationOptions,
-} from "../src/editor-customization.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { renderProject } from "../src/renderer.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/editor-customization";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { renderProject } from "@ykdz/template-core/renderer";
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;
@@ -64,6 +64,7 @@ function oxcConfigPathSettings(
 function editorCustomizationOptionsForPreset(
   preset: string,
 ): EditorCustomizationOptions | undefined {
+  void preset;
   return undefined;
 }
 

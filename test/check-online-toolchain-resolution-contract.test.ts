@@ -1,8 +1,8 @@
-import { runOnlineToolchainResolutionContractCheck } from "../scripts/check-online-toolchain-resolution-contract.js";
+import { runOnlineToolchainResolutionContractCheck } from "@ykdz/template-checks/check-online-toolchain-resolution-contract";
 import {
   nodeReleaseIndexUrl,
   pnpmRegistryUrl,
-} from "../src/toolchain-resolution.js";
+} from "@ykdz/template-core/toolchain-resolution";
 
 describe("check-online-toolchain-resolution-contract script", () => {
   it("prints selected online toolchain versions when the contract passes", async () => {

@@ -2,9 +2,9 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { ProjectBlueprint } from "../src/declarations.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import type { ProjectBlueprint } from "@ykdz/template-core/declarations";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
 
 async function readJson<T>(filePath: string): Promise<T> {
   return JSON.parse(await readFile(filePath, "utf8")) as T;

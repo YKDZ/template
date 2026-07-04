@@ -2,11 +2,10 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
+import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import * as ts from "typescript";
 import { parse as parseYaml } from "yaml";
-
-import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,7 +25,10 @@ const staleGeneratedCatalogLinePattern =
 function dependencyVersionGateProjectionFiles(): string[] {
   return loadBuiltInPresetSourceManifest()
     .presets.filter((preset) => preset.generation === "supported")
-    .map((preset) => `templates/${preset.name}/projection.ts`)
+    .map(
+      (preset) =>
+        `packages/builtin-source/templates/${preset.name}/projection.ts`,
+    )
     .sort();
 }
 
@@ -150,7 +152,9 @@ describe("template Repository maintenance", () => {
 
   it("covers every supported Preset Projection in the dependency version gate", () => {
     expect(dependencyVersionGateProjectionFiles()).toEqual(
-      expect.arrayContaining(["templates/rust-bin/projection.ts"]),
+      expect.arrayContaining([
+        "packages/builtin-source/templates/rust-bin/projection.ts",
+      ]),
     );
   });
 
@@ -188,18 +192,20 @@ describe("template Repository maintenance", () => {
     }
   });
 
-  it("keeps root package metadata on publishable semver ranges", async () => {
+  it("keeps root package metadata private and catalog-backed", async () => {
     const packageJson = JSON.parse(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
     ) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
+      private?: boolean;
     };
 
+    expect(packageJson.private).toBe(true);
     expect([
       ...Object.values(packageJson.dependencies ?? {}),
       ...Object.values(packageJson.devDependencies ?? {}),
-    ]).not.toContain("catalog:");
+    ]).toContain("catalog:");
   });
 
   it("maintains the template Repository's real GitHub Actions workflows through Dependabot", async () => {

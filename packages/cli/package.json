@@ -1,0 +1,54 @@
+{
+  "name": "@ykdz/template",
+  "version": "0.0.8",
+  "private": false,
+  "description": "Project template generator for YKDZ starter projects.",
+  "keywords": [
+    "cli",
+    "project-template",
+    "starter"
+  ],
+  "homepage": "https://github.com/YKDZ/template#readme",
+  "bugs": {
+    "url": "https://github.com/YKDZ/template/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YKDZ/template.git"
+  },
+  "bin": {
+    "template": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "node_modules/@ykdz/template-core",
+    "node_modules/@ykdz/template-builtin-source",
+    "!**/node_modules/**/node_modules"
+  ],
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "prepack": "pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ykdz/template-builtin-source": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "typescript": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  },
+  "bundledDependencies": [
+    "@ykdz/template-builtin-source",
+    "@ykdz/template-core"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

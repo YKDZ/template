@@ -3,18 +3,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  builtInPresetProjectionSourceRoots,
   builtInPresets,
-  validateProjectBlueprint,
-} from "../src/declarations.js";
-import { loadTemplateDependencyCatalog } from "../src/dependency-catalog.js";
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { PackageAdditionSupport } from "../src/package-addition-support.js";
-import { loadBuiltInPresetSourceManifest } from "../src/preset-source.js";
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { validateProjectBlueprint } from "@ykdz/template-core/declarations";
+import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
 import {
   blueprintForPresetSourcePreset,
   defaultPackagePathForPresetSourcePackageAddition,
-} from "../src/projection-capabilities.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/projection-capabilities";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
@@ -83,7 +84,11 @@ describe("Preset Registry", () => {
     for (const preset of supportedPresets) {
       if (preset.packageAdditionSupport === PackageAdditionSupport.Supported) {
         expect(
-          defaultPackagePathForPresetSourcePackageAddition(preset, "example"),
+          defaultPackagePathForPresetSourcePackageAddition(
+            preset,
+            "example",
+            builtInPresetProjectionSourceRoots(),
+          ),
         ).toMatch(/^(apps|packages)\/example$/);
         continue;
       }
@@ -106,7 +111,9 @@ describe("Preset Registry", () => {
         targetDir,
         scope: "acme",
       });
-      const validation = validateProjectBlueprint(blueprint);
+      const validation = validateProjectBlueprint(blueprint, {
+        presets: builtInPresets,
+      });
 
       expect(validation).toMatchObject({ ok: true });
       expect(blueprint.projectKind).toBe("multi-package");

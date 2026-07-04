@@ -1,9 +1,9 @@
 import path from "node:path";
 
-import { assembleGenerationContext } from "../src/generation-context.js";
-import { planNextStepInstructions } from "../src/next-step-instructions.js";
-import type { PresetProjectionPlan } from "../src/preset-projection.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { planNextStepInstructions } from "@ykdz/template-core/next-step-instructions";
+import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
 
 const optionalGitDisplays = [
   "git init",

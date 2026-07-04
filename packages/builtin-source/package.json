@@ -1,0 +1,46 @@
+{
+  "name": "@ykdz/template-builtin-source",
+  "version": "0.0.8",
+  "private": true,
+  "files": [
+    "dist",
+    "templates",
+    "!templates/*.tmp",
+    "!templates/registry.ts",
+    "!templates/projection-plans.ts",
+    "!templates/*/projection.ts",
+    "!templates/shared/oxc/tsconfig.json",
+    "!templates/**/node_modules"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./registry": {
+      "types": "./dist/templates/registry.d.ts",
+      "default": "./dist/templates/registry.js"
+    },
+    "./projection-plans": {
+      "types": "./dist/templates/projection-plans.d.ts",
+      "default": "./dist/templates/projection-plans.js"
+    },
+    "./templates/*": {
+      "types": "./dist/templates/*.d.ts",
+      "default": "./dist/templates/*.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "typescript": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:"
+  }
+}

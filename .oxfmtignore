@@ -7,3 +7,4 @@ coverage
 .agents
 .scratch
 templates/**/node_modules
+packages/builtin-source/templates/**/node_modules

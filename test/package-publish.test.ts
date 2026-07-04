@@ -12,25 +12,27 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
-import { assembleGenerationContext } from "../src/generation-context.js";
-import type { PresetProjectionPlan } from "../src/preset-projection.js";
 import {
   loadBuiltInPresetSourceManifest,
+  projectBuiltInPresetSourcePreset,
   type PresetSourceManifestPreset,
-} from "../src/preset-source.js";
-import {
-  blueprintForPresetSourcePreset,
-  projectPresetSourcePreset,
-} from "../src/projection-capabilities.js";
-import type { CopyFileOperation } from "../src/renderer.js";
+} from "@ykdz/template-builtin-source";
+import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
+import { blueprintForPresetSourcePreset } from "@ykdz/template-core/projection-capabilities";
+import type { CopyFileOperation } from "@ykdz/template-core/renderer";
+import { execa } from "execa";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const templatesRoot = path.join(repoRoot, "templates");
+const templatesRoot = path.join(
+  repoRoot,
+  "packages",
+  "builtin-source",
+  "templates",
+);
 
 process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
   { version: "v24.11.0", lts: "Krypton" },
@@ -47,14 +49,20 @@ function jsonDataUrl(value: unknown): string {
 }
 
 const packageRootFiles = [
-  ".npmignore",
-  "LICENSE",
-  "README.md",
+  ".npmrc",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
-  "tsconfig.build.json",
   "tsconfig.json",
+  "packages/cli/package.json",
+  "packages/cli/tsconfig.build.json",
+  "packages/cli/tsconfig.json",
+  "packages/core/package.json",
+  "packages/core/tsconfig.build.json",
+  "packages/core/tsconfig.json",
+  "packages/builtin-source/package.json",
+  "packages/builtin-source/tsconfig.build.json",
+  "packages/builtin-source/tsconfig.json",
 ];
 
 const supportedPresetSourcePresets =
@@ -84,11 +92,22 @@ async function listFiles(root: string): Promise<string[]> {
 }
 
 async function runtimeSourceFiles(): Promise<string[]> {
-  const srcFiles = (await listFiles(path.join(repoRoot, "src")))
+  const packageSourceFiles = (
+    await Promise.all([
+      listFiles(path.join(repoRoot, "packages/cli/src")),
+      listFiles(path.join(repoRoot, "packages/core/src")),
+      listFiles(path.join(repoRoot, "packages/builtin-source/src")),
+      listFiles(path.join(repoRoot, "packages/builtin-source/templates")),
+    ])
+  )
+    .flat()
     .filter((file) => file.endsWith(".ts"))
     .map((file) => relativeRepoPath(file));
 
-  return [...srcFiles, "templates/preset-source.json"];
+  return [
+    ...packageSourceFiles,
+    "packages/builtin-source/templates/preset-source.json",
+  ];
 }
 
 function projectionPlanFor(
@@ -100,7 +119,7 @@ function projectionPlanFor(
     scope: "acme",
   });
 
-  return projectPresetSourcePreset({
+  return projectBuiltInPresetSourcePreset({
     preset,
     context: assembleGenerationContext({
       targetDir,
@@ -180,8 +199,8 @@ function projectionTemplateSourceFiles(): string[] {
 
 function checkedGithubTemplateFiles(): string[] {
   return supportedPresetSourcePresets.flatMap((preset) => [
-    `templates/${preset.name}/.github/dependabot.yml`,
-    `templates/${preset.name}/.github/workflows/check.yml`,
+    `packages/builtin-source/templates/${preset.name}/.github/dependabot.yml`,
+    `packages/builtin-source/templates/${preset.name}/.github/workflows/check.yml`,
   ]);
 }
 
@@ -230,8 +249,8 @@ async function packageFiles(): Promise<string[]> {
       ...projectionTemplateSourceFiles(),
       ...checkedGithubTemplateFiles(),
       ...(await manifestReferencedTemplateFiles()),
-      "templates/shared/editor-customization/capabilities.json",
-      "templates/shared/oxc/tsconfig.json",
+      "packages/builtin-source/templates/shared/editor-customization/capabilities.json",
+      "packages/builtin-source/templates/shared/oxc/tsconfig.json",
     ]),
   ].sort();
 }
@@ -258,7 +277,12 @@ async function checkedTemplatePackagePaths(): Promise<string[]> {
       ...(await manifestReferencedTemplateFiles()),
     ]),
   ]
-    .map((file) => `package/${file}`)
+    .map((file) =>
+      file.replace(
+        "packages/builtin-source/",
+        "package/node_modules/@ykdz/template-builtin-source/",
+      ),
+    )
     .sort();
 }
 
@@ -281,7 +305,7 @@ function firstCopyOperation(
 describe("package publishing", () => {
   it("declares public npm metadata for the template CLI", async () => {
     const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+      await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"),
     ) as {
       bin: Record<string, string>;
       dependencies?: Record<string, string>;
@@ -299,7 +323,7 @@ describe("package publishing", () => {
       type: "git",
       url: "git+https://github.com/YKDZ/template.git",
     });
-    expect(packageJson.bin.template).toBe("dist/src/cli.js");
+    expect(packageJson.bin.template).toBe("dist/cli.js");
     expect(packageJson.dependencies ?? {}).not.toHaveProperty("execa");
     expect(packageJson.publishConfig?.access).toBe("public");
   });
@@ -316,7 +340,7 @@ describe("package publishing", () => {
 
     await execa("pnpm", ["install", "--frozen-lockfile"], { cwd: packageDir });
     await execa("pnpm", ["pack", "--pack-destination", packDir], {
-      cwd: packageDir,
+      cwd: path.join(packageDir, "packages/cli"),
     });
 
     const packedFiles = await readdir(packDir);
@@ -326,35 +350,46 @@ describe("package publishing", () => {
     const tarballPath = path.join(packDir, tarball!);
     const tarballContents = await execa("tar", ["-tf", tarballPath]);
     const packedPaths = tarballContents.stdout.split("\n");
-    expect(packedPaths).toContain("package/dist/src/cli.js");
-    expect(packedPaths).toContain("package/dist/src/devcontainer.js");
-    expect(packedPaths).toContain("package/dist/src/generation-context.js");
-    expect(packedPaths).toContain("package/dist/src/module-graph.js");
-    expect(packedPaths).toContain("package/dist/src/next-step-instructions.js");
-    expect(packedPaths).not.toContain("package/dist/post-commands.js");
-    expect(packedPaths).toContain("package/templates/preset-source.json");
-    expect(packedPaths).not.toContain("package/dist/templates/registry.js");
-    expect(packedPaths).not.toContain(
-      "package/dist/templates/projection-plans.js",
+    expect(packedPaths).toContain("package/dist/cli.js");
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-core/dist/devcontainer.js",
     );
-    expect(packedPaths).not.toContain("package/dist/src/preset-registry.js");
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-core/dist/generation-context.js",
+    );
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-core/dist/module-graph.js",
+    );
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-core/dist/next-step-instructions.js",
+    );
+    expect(packedPaths).not.toContain("package/dist/post-commands.js");
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-builtin-source/templates/preset-source.json",
+    );
+    expect(packedPaths).not.toContain("package/templates/preset-source.json");
     expect(packedPaths).not.toEqual(
       expect.arrayContaining([
-        expect.stringMatching(/^package\/dist\/templates\/.+\.js$/),
+        expect.stringMatching(/^package\/templates\/.+/),
       ]),
     );
-    expect(packedPaths).toContain("package/dist/src/toolchain-resolution.js");
-    expect(packedPaths).toContain("package/LICENSE");
-    expect(packedPaths).toContain("package/pnpm-workspace.yaml");
-    expect(packedPaths).toContain("package/README.md");
+    expect(packedPaths).toContain(
+      "package/node_modules/@ykdz/template-core/dist/toolchain-resolution.js",
+    );
     expect(
       packedPaths.filter((packedPath) => packedPath.endsWith(".map")),
     ).toEqual([]);
-    expect(packedPaths).not.toContain("package/templates/registry.ts");
-    expect(packedPaths).not.toContain("package/templates/projection-plans.ts");
+    expect(packedPaths).not.toContain(
+      "package/node_modules/@ykdz/template-builtin-source/templates/registry.ts",
+    );
+    expect(packedPaths).not.toContain(
+      "package/node_modules/@ykdz/template-builtin-source/templates/projection-plans.ts",
+    );
     expect(packedPaths).not.toEqual(
       expect.arrayContaining([
-        expect.stringMatching(/^package\/templates\/[^/]+\/projection\.ts$/),
+        expect.stringMatching(
+          /^package\/node_modules\/@ykdz\/template-builtin-source\/templates\/[^/]+\/projection\.ts$/,
+        ),
       ]),
     );
     const localTemplateArtifact = path.join(
@@ -368,32 +403,31 @@ describe("package publishing", () => {
       );
       expect(packedPaths).toEqual(
         expect.arrayContaining([
-          "package/templates/shared/devcontainer/browser-test.Dockerfile",
-          "package/templates/shared/devcontainer/node-pnpm.Dockerfile",
-          "package/templates/shared/devcontainer/rust.Dockerfile",
-          "package/templates/rust-bin/src/main.rs",
-          "package/templates/shared/oxc/node/oxlint.config.ts",
-          "package/templates/shared/oxc/vue/oxlint.config.ts",
-          "package/templates/shared/oxc/oxfmt.config.ts",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/browser-test.Dockerfile",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/node-pnpm.Dockerfile",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/rust.Dockerfile",
+          "package/node_modules/@ykdz/template-builtin-source/templates/rust-bin/src/main.rs",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/node/oxlint.config.ts",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/vue/oxlint.config.ts",
+          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxfmt.config.ts",
         ]),
       );
       expect(packedPaths).not.toContain(
-        `package/templates/${path.basename(localTemplateArtifact)}`,
-      );
-      expect(packedPaths).not.toEqual(
-        expect.arrayContaining([expect.stringContaining("/node_modules/")]),
+        `package/node_modules/@ykdz/template-builtin-source/templates/${path.basename(
+          localTemplateArtifact,
+        )}`,
       );
     } finally {
       await rm(localTemplateArtifact, { force: true });
     }
     expect(packedPaths).not.toContain(
-      "package/templates/shared/oxc/oxc-config-modules.d.ts",
+      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxc-config-modules.d.ts",
     );
     expect(packedPaths).not.toContain(
-      "package/templates/shared/oxc/package.json",
+      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/package.json",
     );
     expect(packedPaths).not.toContain(
-      "package/templates/shared/oxc/tsconfig.json",
+      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/tsconfig.json",
     );
 
     await writeFile(
@@ -468,6 +502,6 @@ describe("package publishing", () => {
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
       bin: Record<string, string>;
     };
-    expect(packageJson.bin.template).toBe("dist/src/cli.js");
+    expect(packageJson.bin.template).toBe("dist/cli.js");
   });
 });

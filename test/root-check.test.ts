@@ -4,16 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-import ts from "typescript";
-import { parse } from "yaml";
-
-import { checkTemplateGithubYaml } from "../scripts/check-template-github-yaml.js";
+import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
+import { checkTemplateGithubYaml } from "@ykdz/template-checks/check-template-github-yaml";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
-} from "../src/project-github.js";
-import { findBuiltInPresetProjection } from "../templates/registry.js";
+} from "@ykdz/template-core/project-github";
+import { execa } from "execa";
+import ts from "typescript";
+import { parse } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,8 +22,18 @@ const repoRoot = path.resolve(
 describe("Project Kit Root Check", () => {
   it("rejects production source imports from template modules", async () => {
     const sourceFiles = [
-      ...(await listTypeScriptSourceFiles(path.join(repoRoot, "src"))),
-      ...(await listTypeScriptSourceFiles(path.join(repoRoot, "scripts"))),
+      ...(await listTypeScriptSourceFiles(
+        path.join(repoRoot, "packages/core/src"),
+      )),
+      ...(await listTypeScriptSourceFiles(
+        path.join(repoRoot, "packages/cli/src"),
+      )),
+      ...(await listTypeScriptSourceFiles(
+        path.join(repoRoot, "packages/builtin-source/src"),
+      )),
+      ...(await listTypeScriptSourceFiles(
+        path.join(repoRoot, "packages/checks/src"),
+      )),
     ];
     const violations: string[] = [];
 
@@ -47,16 +56,16 @@ describe("Project Kit Root Check", () => {
       templateModuleReferenceDiagnostics({
         sourceFilePath: path.join(repoRoot, "src/synthetic.ts"),
         sourceText: [
-          'import { a } from "../templates/registry.js";',
-          'export { b } from "../templates/projection-plans.js";',
-          'const c = await import("../templates/ts-lib/projection.js");',
+          'import { a } from "@ykdz/template-builtin-source/registry";',
+          'export { b } from "@ykdz/template-builtin-source/projection-plans";',
+          'const c = await import("@ykdz/template-builtin-source/templates/ts-lib/projection");',
           "",
         ].join("\n"),
       }),
     ).toEqual([
-      "src/synthetic.ts imports ../templates/registry.js",
-      "src/synthetic.ts exports from ../templates/projection-plans.js",
-      "src/synthetic.ts dynamically imports ../templates/ts-lib/projection.js",
+      "src/synthetic.ts imports @ykdz/template-builtin-source/registry",
+      "src/synthetic.ts exports from @ykdz/template-builtin-source/projection-plans",
+      "src/synthetic.ts dynamically imports @ykdz/template-builtin-source/templates/ts-lib/projection",
     ]);
   });
 
@@ -69,7 +78,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:generated");
     expect(packageJson.scripts["check:generated"]).toBe(
-      "tsx scripts/check-generated.ts",
+      "pnpm --filter @ykdz/template-checks run check:generated",
     );
     expect(packageJson.scripts.check).toContain("pnpm run check:generated");
   });
@@ -83,7 +92,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:fixtures");
     expect(packageJson.scripts["check:fixtures"]).toBe(
-      "tsx scripts/check-fixtures.ts",
+      "pnpm --filter @ykdz/template-checks run check:fixtures",
     );
     expect(packageJson.scripts.check).not.toContain("check:fixtures");
   });
@@ -166,7 +175,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:toolchain:online");
     expect(packageJson.scripts["check:toolchain:online"]).toBe(
-      "tsx scripts/check-online-toolchain-resolution-contract.ts",
+      "pnpm --filter @ykdz/template-checks run check:toolchain:online",
     );
     expect(packageJson.scripts.check).not.toContain("check:toolchain:online");
   });
@@ -204,11 +213,12 @@ describe("Project Kit Root Check", () => {
       "pnpm --dir templates/shared/oxc",
     );
     expect(rootPackageJson.scripts).toMatchObject({
-      "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
+      "check:templates:shared-oxc:format":
+        "oxfmt --check packages/builtin-source/templates/shared/oxc",
       "check:templates:shared-oxc:lint":
-        "oxlint templates/shared/oxc --deny-warnings",
+        "oxlint --config packages/builtin-source/templates/shared/oxc/node/oxlint.config.ts packages/builtin-source/templates/shared/oxc --deny-warnings",
       "check:templates:shared-oxc:typecheck":
-        "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
+        "tsc -p packages/builtin-source/templates/shared/oxc/tsconfig.json --noEmit",
     });
 
     const workspaceYaml = await readFile(
@@ -218,7 +228,10 @@ describe("Project Kit Root Check", () => {
     expect(workspaceYaml).not.toContain("templates/shared/oxc");
     await expect(
       readFile(
-        path.join(repoRoot, "templates/shared/oxc/package.json"),
+        path.join(
+          repoRoot,
+          "packages/builtin-source/templates/shared/oxc/package.json",
+        ),
         "utf8",
       ),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -259,7 +272,7 @@ describe("Project Kit Root Check", () => {
     expect(rootPackageJson.scripts.check).toContain("pnpm run check:format");
     expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:format"]).toBe(
-      "oxfmt --check --config templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
+      "oxfmt --check --config packages/builtin-source/templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
     );
   });
 
@@ -283,6 +296,7 @@ describe("Project Kit Root Check", () => {
       ".agents",
       ".scratch",
       "templates/**/node_modules",
+      "packages/builtin-source/templates/**/node_modules",
     ]);
     expect(ignoredPaths).not.toContain("src");
     expect(ignoredPaths).not.toContain("templates");
@@ -300,7 +314,7 @@ describe("Project Kit Root Check", () => {
       "check:templates:static-source",
     );
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
-      "rustfmt --check templates/rust-bin/src/main.rs",
+      "rustfmt --check packages/builtin-source/templates/rust-bin/src/main.rs",
     );
 
     await execa("pnpm", ["run", "check:templates:static-source"], {
@@ -320,7 +334,7 @@ describe("Project Kit Root Check", () => {
       "pnpm run check:templates:github-yaml",
     );
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "tsx scripts/check-template-github-yaml.ts",
+      "pnpm --filter @ykdz/template-checks run check:templates:github-yaml",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {
@@ -334,7 +348,7 @@ describe("Project Kit Root Check", () => {
     ) as { scripts: Record<string, string> };
 
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "tsx scripts/check-template-github-yaml.ts",
+      "pnpm --filter @ykdz/template-checks run check:templates:github-yaml",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {
@@ -345,7 +359,7 @@ describe("Project Kit Root Check", () => {
   it("fails when a supported preset is missing checked GitHub YAML template source", async () => {
     const workspace = await mkdirTempTemplateWorkspace();
 
-    await writeValidGithubTemplatePair(workspace, "ts-lib", "npm");
+    await writeValidGithubTemplatePair(workspace, "ts-lib");
 
     await expect(
       checkTemplateGithubYaml({
@@ -479,7 +493,7 @@ describe("Project Kit Root Check", () => {
   it("fails when checked GitHub YAML template source diverges from plan projections", async () => {
     const workspace = await mkdirTempTemplateWorkspace();
 
-    await writeValidGithubTemplatePair(workspace, "ts-lib", "npm");
+    await writeValidGithubTemplatePair(workspace, "ts-lib");
     await writeTemplateFile(
       workspace,
       "ts-lib/.github/workflows/check.yml",
@@ -517,7 +531,6 @@ async function writeTemplateFile(
 async function writeValidGithubTemplatePair(
   workspace: string,
   presetName: "ts-lib" | "rust-bin",
-  ecosystem: "npm" | "cargo",
 ): Promise<void> {
   await writeTemplateFile(
     workspace,
@@ -682,6 +695,14 @@ function resolvesToTemplateModule(
   sourceFilePath: string,
   specifier: string,
 ): boolean {
+  if (
+    specifier === "@ykdz/template-builtin-source/registry" ||
+    specifier === "@ykdz/template-builtin-source/projection-plans" ||
+    specifier.startsWith("@ykdz/template-builtin-source/templates/")
+  ) {
+    return true;
+  }
+
   if (!specifier.startsWith(".")) {
     return false;
   }
@@ -689,5 +710,8 @@ function resolvesToTemplateModule(
   const resolved = path.resolve(path.dirname(sourceFilePath), specifier);
   const relative = path.relative(repoRoot, resolved).split(path.sep).join("/");
 
-  return relative === "templates" || relative.startsWith("templates/");
+  return (
+    relative === "packages/builtin-source/templates" ||
+    relative.startsWith("packages/builtin-source/templates/")
+  );
 }
