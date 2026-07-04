@@ -14,10 +14,13 @@ const repoRoot = path.resolve(
 );
 const stringRecordSchema = v.record(v.string(), v.string());
 const packageMetadataSchema = v.object({
+  bundleDependencies: v.optional(v.array(v.string())),
   dependencies: v.optional(stringRecordSchema),
   devDependencies: v.optional(stringRecordSchema),
+  name: v.optional(v.string()),
   packageManager: v.optional(v.string()),
   private: v.optional(v.boolean()),
+  version: v.optional(v.string()),
 });
 const dependabotUpdateSchema = v.object({
   "package-ecosystem": v.string(),
@@ -258,6 +261,78 @@ describe("template Repository maintenance", () => {
       ...Object.values(packageJson.dependencies ?? {}),
       ...Object.values(packageJson.devDependencies ?? {}),
     ]).toContain("catalog:");
+  });
+
+  it("keeps private workspace package versions out of the release train", async () => {
+    const packageDirs = await readdir(path.join(repoRoot, "packages"), {
+      withFileTypes: true,
+    });
+
+    for (const packageDir of packageDirs) {
+      if (!packageDir.isDirectory()) {
+        continue;
+      }
+
+      const packageJson = parseJsonWithSchema(
+        await readFile(
+          path.join(repoRoot, "packages", packageDir.name, "package.json"),
+          "utf8",
+        ),
+        packageMetadataSchema,
+      );
+
+      if (packageJson.private === true) {
+        expect(packageJson.version).toBe(
+          packageJson.version === undefined ? undefined : "0.0.0",
+        );
+      }
+    }
+  });
+
+  it("keeps bundled private workspace packages on sentinel versions for pnpm pack", async () => {
+    const cliPackageJson = parseJsonWithSchema(
+      await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"),
+      packageMetadataSchema,
+    );
+    const packageDirs = await readdir(path.join(repoRoot, "packages"), {
+      withFileTypes: true,
+    });
+    const workspacePackages = new Map<
+      string,
+      v.InferOutput<typeof packageMetadataSchema>
+    >();
+
+    for (const packageDir of packageDirs) {
+      if (!packageDir.isDirectory()) {
+        continue;
+      }
+
+      const packageJson = parseJsonWithSchema(
+        await readFile(
+          path.join(repoRoot, "packages", packageDir.name, "package.json"),
+          "utf8",
+        ),
+        packageMetadataSchema,
+      );
+
+      if (packageJson.name !== undefined) {
+        workspacePackages.set(packageJson.name, packageJson);
+      }
+    }
+
+    expect(cliPackageJson.bundleDependencies).toEqual(
+      expect.arrayContaining([
+        "@ykdz/template-builtin-source",
+        "@ykdz/template-core",
+      ]),
+    );
+
+    for (const dependency of cliPackageJson.bundleDependencies ?? []) {
+      const packageJson = workspacePackages.get(dependency);
+
+      expect(packageJson?.private).toBe(true);
+      expect(packageJson?.version).toBe("0.0.0");
+    }
   });
 
   it("maintains the template Repository's real GitHub Actions workflows through Dependabot", async () => {

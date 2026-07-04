@@ -121,7 +121,8 @@ export function projectVueAppPackageScripts(): Record<string, string> {
     "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run",
-    "test:e2e": "pnpm run build && playwright test",
+    "test:e2e":
+      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
     typecheck: "vue-tsc --build --noEmit",
   };
 }
@@ -226,7 +227,6 @@ function packageAdditionOperations(
         },
         scripts: projectVueAppPackageScripts(),
         dependencies: {
-          "@vueuse/core": "catalog:",
           pinia: "catalog:",
           vue: "catalog:",
         },
@@ -307,6 +307,7 @@ function packageAdditionOperations(
     {
       kind: "writeJson",
       to: `${packagePath}/tsconfig.node.json`,
+      multilineArrays: ["include"],
       value: {
         compilerOptions: {
           composite: true,
@@ -329,7 +330,12 @@ function packageAdditionOperations(
           types: ["node"],
           verbatimModuleSyntax: true,
         },
-        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
+        include: [
+          "playwright.config.ts",
+          "scripts/**/*.ts",
+          "vite.config.ts",
+          "vitest.config.ts",
+        ],
       },
     },
     { kind: "copyFile", from: "env.d.ts", to: `${packagePath}/env.d.ts` },

@@ -760,7 +760,7 @@ function projectThroughPresetProjection(presetName: "ts-lib" | "rust-bin") {
     blueprint: projection.blueprint({ targetDir: "generated-repository" }),
     toolchain: {
       nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
       source: "bundled-fallback",
       diagnostics: [],
     },

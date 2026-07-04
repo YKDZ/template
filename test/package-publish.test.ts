@@ -65,7 +65,7 @@ process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
 ]);
 process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL ??= jsonDataUrl({
   versions: {
-    "10.0.0": { engines: { node: ">=18.12" } },
+    "10.34.4": { engines: { node: ">=18.12" } },
   },
 });
 
@@ -74,7 +74,6 @@ function jsonDataUrl(value: unknown): string {
 }
 
 const packageRootFiles = [
-  ".npmrc",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
@@ -153,7 +152,7 @@ function projectionPlanFor(
       blueprint,
       toolchain: {
         nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
         source: "bundled-fallback",
         diagnostics: [],
       },

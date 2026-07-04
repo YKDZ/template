@@ -58,7 +58,7 @@ function projectedDependabotConfig(
     blueprint: projection.blueprint({ targetDir: projectName }),
     toolchain: {
       nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
       source: "bundled-fallback",
       diagnostics: [],
     },
@@ -107,7 +107,7 @@ describe("Generated Repository dependency maintenance policy", () => {
           nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
           packageManagerPin: {
             kind: "PackageManagerPin",
-            value: "pnpm@10.0.0",
+            value: "pnpm@10.34.4",
           },
           source: "bundled-fallback",
           diagnostics: [],

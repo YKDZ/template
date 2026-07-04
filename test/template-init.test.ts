@@ -44,7 +44,7 @@ const defaultToolchainEnv = {
   ]),
   TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
     versions: {
-      "10.0.0": { engines: { node: ">=18.12" } },
+      "10.34.4": { engines: { node: ">=18.12" } },
     },
   }),
 };
@@ -373,7 +373,7 @@ describe("template init", () => {
       oxlint: "^1.72.0",
       "oxlint-tsgolint": "^0.24.0",
       "tsc-alias": "^1.8.17",
-      turbo: "^2.10.2",
+      turbo: "2.10.2",
       typescript: "^6.0.3",
       vitest: "^4.1.9",
     });
@@ -391,7 +391,7 @@ describe("template init", () => {
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
       "oxlint-tsgolint": "^0.24.0",
-      turbo: "^2.10.2",
+      turbo: "2.10.2",
       typescript: "^6.0.3",
       valibot: "^1.4.2",
     });
@@ -663,13 +663,12 @@ describe("template init", () => {
       "@types/web-bluetooth": "^0.0.21",
       "@vitejs/plugin-vue": "^6.0.7",
       "@vue/tsconfig": "^0.9.1",
-      "@vueuse/core": "^14.3.0",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
       "oxlint-tsgolint": "^0.24.0",
       pinia: "^3.0.4",
       tailwindcss: "^4.3.2",
-      turbo: "^2.10.2",
+      turbo: "2.10.2",
       typescript: "^6.0.3",
       vite: "^8.1.2",
       vitest: "^4.1.9",
@@ -694,7 +693,6 @@ describe("template init", () => {
       "@types/web-bluetooth": "^0.0.21",
       "@vitejs/plugin-vue": "^6.0.7",
       "@vue/tsconfig": "^0.9.1",
-      "@vueuse/core": "^14.3.0",
       hono: "^4.12.27",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
@@ -703,7 +701,7 @@ describe("template init", () => {
       tailwindcss: "^4.3.2",
       "tsc-alias": "^1.8.17",
       tsx: "^4.22.4",
-      turbo: "^2.10.2",
+      turbo: "2.10.2",
       typescript: "^6.0.3",
       vite: "^8.1.2",
       vitest: "^4.1.9",
@@ -1030,7 +1028,7 @@ describe("template init", () => {
       );
 
       expect(packageJson.engines.node).toBe("24");
-      expect(packageJson.packageManager).toBe("pnpm@10.0.0");
+      expect(packageJson.packageManager).toBe("pnpm@10.34.4");
       expect(checkWorkflow).toContain("node-version-file: package.json");
       expect(checkWorkflow).toContain("run: corepack enable");
       expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
@@ -1334,7 +1332,7 @@ describe("template init", () => {
           nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
           packageManagerPin: {
             kind: "PackageManagerPin",
-            value: "pnpm@10.0.0",
+            value: "pnpm@10.34.4",
           },
           source: "online",
           diagnostics: [],
@@ -1657,7 +1655,7 @@ describe("template init", () => {
     ]);
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.0.0",
+      packageManagerPin: "pnpm@10.34.4",
       source: "online",
       diagnostics: [],
     });
@@ -1761,7 +1759,7 @@ describe("template init", () => {
 
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.0.0",
+      packageManagerPin: "pnpm@10.34.4",
       source: "bundled-fallback",
       diagnostics: [
         expect.stringContaining("Using bundled fallback toolchain metadata"),
@@ -1769,7 +1767,7 @@ describe("template init", () => {
     });
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.0.0",
+      packageManagerPin: "pnpm@10.34.4",
       source: "bundled-fallback",
     });
   });
@@ -1805,7 +1803,7 @@ describe("template init", () => {
     expect(result.stdout).toContain("Toolchain Resolution:");
     expect(result.stdout).toMatch(/Source:\s+bundled-fallback/);
     expect(result.stdout).toMatch(/Node LTS major:\s+24/);
-    expect(result.stdout).toMatch(/Package Manager Pin:\s+pnpm@10\.0\.0/);
+    expect(result.stdout).toMatch(/Package Manager Pin:\s+pnpm@10\.34\.4/);
     expect(result.stdout).toContain(
       "Using bundled fallback toolchain metadata",
     );
@@ -2475,7 +2473,7 @@ describe("template init", () => {
     });
     expect(rustPackageJson.scripts.fix).not.toContain("clippy");
     expect(workspaceYaml).toContain("packages:\n  - packages/*\n");
-    expect(catalogFromWorkspaceYaml(workspaceYaml).turbo).toMatch(/^\^/);
+    expect(catalogFromWorkspaceYaml(workspaceYaml).turbo).toBe("2.10.2");
 
     expect(cargoToml).toContain('name = "demo-rust"');
     expect(cargoToml).toContain('edition = "2024"');
@@ -2756,12 +2754,11 @@ describe("template init", () => {
       "oxlint --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.scripts["test:e2e"]).toBe(
-      "pnpm run build && playwright test",
+      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
     );
     expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
     expect(webPackageJson.dependencies.vue).toBe("catalog:");
     expect(webPackageJson.dependencies.pinia).toBe("catalog:");
-    expect(webPackageJson.dependencies["@vueuse/core"]).toBe("catalog:");
     expect(webPackageJson.devDependencies.vite).toBe("catalog:");
     expect(webPackageJson.devDependencies["@vitejs/plugin-vue"]).toBe(
       "catalog:",
@@ -2799,7 +2796,6 @@ describe("template init", () => {
     expect(parsedWorkspace.catalog).toHaveProperty("turbo");
     expect(workspaceYaml).toContain("vue:");
     expect(workspaceYaml).toContain("pinia:");
-    expect(workspaceYaml).toContain('"@vueuse/core":');
     expect(workspaceYaml).toContain("vite:");
     expect(workspaceYaml).toContain('"@playwright/test":');
     expect(workspaceYaml).toContain('"@types/web-bluetooth":');
@@ -2846,6 +2842,7 @@ describe("template init", () => {
     expect(nodeTsconfig.compilerOptions.types).toEqual(["node"]);
     expect(nodeTsconfig.include).toEqual([
       "playwright.config.ts",
+      "scripts/**/*.ts",
       "vite.config.ts",
       "vitest.config.ts",
     ]);
@@ -2872,6 +2869,7 @@ describe("template init", () => {
     expect(appTestSource).toContain('from "#/stores/counter"');
 
     await stat(path.join(projectDir, ".devcontainer/devcontainer.json"));
+    await stat(path.join(projectDir, "apps/web/scripts/run-playwright.ts"));
     await stat(path.join(projectDir, ".github/workflows/check.yml"));
     await stat(path.join(projectDir, ".github/dependabot.yml"));
     await stat(path.join(projectDir, "apps/web/src/App.vue"));

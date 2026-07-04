@@ -1,6 +1,8 @@
 packages:
   - packages/*
 
+nodeLinker: hoisted
+
 catalog:
   "@hono/node-server": ^2.0.6
   "@playwright/test": ^1.61.1
@@ -9,7 +11,6 @@ catalog:
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.7
   "@vue/tsconfig": ^0.9.1
-  "@vueuse/core": ^14.3.0
   execa: ^9.6.1
   hono: ^4.12.27
   oxfmt: ^0.57.0
@@ -19,7 +20,7 @@ catalog:
   tailwindcss: ^4.3.2
   tsc-alias: ^1.8.17
   tsx: ^4.22.4
-  turbo: ^2.10.2
+  turbo: 2.10.2
   typescript: ^6.0.3
   valibot: ^1.4.2
   vite: ^8.1.2
@@ -30,9 +31,6 @@ catalog:
 
 allowBuilds:
   esbuild: true
-
-minimumReleaseAgeExclude:
-  - valibot@1.4.2
 
 onlyBuiltDependencies:
   - esbuild

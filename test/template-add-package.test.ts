@@ -1771,6 +1771,7 @@ describe("template add package", () => {
     expect(appSource).toContain('from "#/stores/counter"');
 
     await stat(path.join(projectDir, "apps/admin/src/App.vue"));
+    await stat(path.join(projectDir, "apps/admin/scripts/run-playwright.ts"));
     await stat(path.join(projectDir, "apps/admin/test/e2e/app.spec.ts"));
     await expectPathMissing(
       path.join(projectDir, "apps/admin/oxlint.config.ts"),
@@ -1992,7 +1993,7 @@ describe("template add package", () => {
     expect(playwrightWebServerPorts(webPlaywright)).not.toContain(adminPort);
     expect(adminPackageJson.scripts.check).toContain("pnpm run test:e2e");
     expect(adminPackageJson.scripts["test:e2e"]).toBe(
-      "pnpm run build && playwright test",
+      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
     );
   });
 

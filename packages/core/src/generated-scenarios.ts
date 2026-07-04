@@ -95,6 +95,18 @@ const storedBlueprintSchema = v.object({
   ),
 });
 
+export function generatedScenarioChildProcessEnv(
+  env: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, ...env };
+
+  if (childEnv.NO_COLOR !== undefined && childEnv.FORCE_COLOR !== undefined) {
+    delete childEnv.FORCE_COLOR;
+  }
+
+  return childEnv;
+}
+
 function cliSourceExecutionEnv(
   options: RequiredRunnerOptions,
   env: Record<string, string> = {},
@@ -250,7 +262,8 @@ export async function defaultGeneratedScenarioCommandRunner(
   console.log(`${prefix}$ ${[command, ...args].join(" ")}`);
   await execa(command, [...args], {
     cwd,
-    ...(options.env === undefined ? {} : { env: options.env }),
+    env: generatedScenarioChildProcessEnv(options.env),
+    extendEnv: false,
     stdio: "inherit",
   });
 }
@@ -450,7 +463,7 @@ function projectionPlanForPreset(
       blueprint,
       toolchain: {
         nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
         source: "bundled-fallback",
         diagnostics: [],
       },

@@ -86,7 +86,7 @@ describe("Development Container planning", () => {
       name: "demo",
       layer: nodePnpmToolLayer({
         nodeVersion: "24",
-        packageManagerPin: "pnpm@10.0.0",
+        packageManagerPin: "pnpm@10.34.4",
       }),
       extensions: ["oxc.oxc-vscode"],
       settings: { "oxc.enable": true },
@@ -98,7 +98,7 @@ describe("Development Container planning", () => {
         dockerfile: "Dockerfile",
         args: {
           NODE_VERSION: "24",
-          PACKAGE_MANAGER_PIN: "pnpm@10.0.0",
+          PACKAGE_MANAGER_PIN: "pnpm@10.34.4",
         },
       },
       customizations: {
@@ -133,7 +133,7 @@ describe("Development Container planning", () => {
       name: "demo",
       layer: nodePnpmToolLayer({
         nodeVersion: "24",
-        packageManagerPin: "pnpm@10.0.0",
+        packageManagerPin: "pnpm@10.34.4",
       }),
       additionalLayers: [browserTestToolLayer()],
       extensions: [],
@@ -179,7 +179,7 @@ describe("Development Container planning", () => {
       name: "demo",
       layer: nodePnpmToolLayer({
         nodeVersion: "24",
-        packageManagerPin: "pnpm@10.0.0",
+        packageManagerPin: "pnpm@10.34.4",
       }),
       additionalLayers: [browserTestToolLayer()],
       extensions: [],
@@ -201,7 +201,7 @@ describe("Development Container planning", () => {
       name: "demo",
       nodeLayer: nodePnpmToolLayer({
         nodeVersion: "24",
-        packageManagerPin: "pnpm@10.0.0",
+        packageManagerPin: "pnpm@10.34.4",
       }),
       rustLayer: rustToolLayer({ toolchain: "stable" }),
       extensions: ["rust-lang.rust-analyzer"],
@@ -214,7 +214,7 @@ describe("Development Container planning", () => {
         dockerfile: "Dockerfile",
         args: {
           NODE_VERSION: "24",
-          PACKAGE_MANAGER_PIN: "pnpm@10.0.0",
+          PACKAGE_MANAGER_PIN: "pnpm@10.34.4",
           RUST_TOOLCHAIN: "stable",
         },
       },
@@ -278,7 +278,7 @@ describe("Development Container planning", () => {
           nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
           packageManagerPin: {
             kind: "PackageManagerPin",
-            value: "pnpm@10.0.0",
+            value: "pnpm@10.34.4",
           },
           source: "bundled-fallback",
           diagnostics: [],
@@ -321,7 +321,7 @@ describe("Development Container planning", () => {
     expect(dockerfile).not.toContain("playwright install-deps chromium");
     expect(devcontainer.build?.args).toMatchObject({
       NODE_VERSION: "24",
-      PACKAGE_MANAGER_PIN: "pnpm@10.0.0",
+      PACKAGE_MANAGER_PIN: "pnpm@10.34.4",
       RUST_TOOLCHAIN: "stable",
     });
     expect(devcontainer.build?.args).not.toHaveProperty(

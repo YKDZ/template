@@ -224,7 +224,8 @@ export function projectVueHonoWebPackageScripts(): Record<string, string> {
     "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run",
-    "test:e2e": "pnpm run build && playwright test",
+    "test:e2e":
+      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
     typecheck: "vue-tsc --build",
   };
 }

@@ -1559,7 +1559,7 @@ function generationContextForPackageAddition(options: {
     },
     toolchain: {
       nodeLtsMajor: { kind: "NodeLtsMajor", value: options.nodeVersion },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.0.0" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
       source: "bundled-fallback",
       diagnostics: [],
     },
@@ -2139,7 +2139,6 @@ function vuePackageJson(
     scripts,
     dependencies: {
       ...packageLinkDependencies,
-      "@vueuse/core": "catalog:",
       ...(Object.keys(packageLinkDependencies).length === 0
         ? {}
         : { hono: "catalog:" }),
@@ -2737,7 +2736,8 @@ function nodePackageScripts(
     ...oxcScripts,
     preview: "vite preview",
     test: "vitest run",
-    "test:e2e": "pnpm run build && playwright test",
+    "test:e2e":
+      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
     typecheck:
       workspace.packages.length > 1
         ? "vue-tsc --build"
@@ -2827,6 +2827,7 @@ function nodePackageTsconfigOperations(
     {
       kind: "writeJson",
       to: `${nodePackage.path}/tsconfig.node.json`,
+      multilineArrays: ["include"],
       value: {
         compilerOptions: strictTypeScriptCompilerOptions({
           composite: true,
@@ -2839,7 +2840,12 @@ function nodePackageTsconfigOperations(
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
           types: ["node"],
         }),
-        include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
+        include: [
+          "playwright.config.ts",
+          "scripts/**/*.ts",
+          "vite.config.ts",
+          "vitest.config.ts",
+        ],
       },
     },
   ];

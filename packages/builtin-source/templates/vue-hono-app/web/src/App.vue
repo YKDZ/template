@@ -1,16 +1,30 @@
 <script setup lang="ts">
-import { usePreferredDark } from "@vueuse/core";
 import { storeToRefs } from "pinia";
-import { computed, onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 
 import { api } from "#/api";
 import { useCounterStore } from "#/stores/counter";
 
 const counter = useCounterStore();
 const { count } = storeToRefs(counter);
-const prefersDark = usePreferredDark();
-const themeLabel = computed(() => (prefersDark.value ? "dark" : "light"));
+const themeLabel = ref<"dark" | "light">("light");
 const apiStatus = ref("checking");
+
+let preferredThemeQuery: MediaQueryList | undefined;
+
+function updateThemeLabel(event: MediaQueryList | MediaQueryListEvent): void {
+  themeLabel.value = event.matches ? "dark" : "light";
+}
+
+onMounted(() => {
+  preferredThemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  updateThemeLabel(preferredThemeQuery);
+  preferredThemeQuery.addEventListener("change", updateThemeLabel);
+});
+
+onUnmounted(() => {
+  preferredThemeQuery?.removeEventListener("change", updateThemeLabel);
+});
 
 onMounted(async () => {
   const response = await api.api.health.$get();

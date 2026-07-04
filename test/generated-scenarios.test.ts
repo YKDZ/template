@@ -9,6 +9,7 @@ import {
 } from "@ykdz/template-builtin-source";
 import {
   errorForFailedGeneratedScenario,
+  generatedScenarioChildProcessEnv,
   generatedScenarioId,
   packageLeafNameForAddedPreset,
   runGeneratedScenarioSet,
@@ -88,6 +89,16 @@ function minimalManifest(): PresetSourceManifest {
 }
 
 describe("generated scenarios", () => {
+  it("does not pass conflicting color environment variables to child checks", () => {
+    const env = generatedScenarioChildProcessEnv({
+      FORCE_COLOR: "1",
+      NO_COLOR: "1",
+    });
+
+    expect(env.FORCE_COLOR).toBeUndefined();
+    expect(env.NO_COLOR).toBe("1");
+  });
+
   it("derives the init-only scenario set from the Fixture Matrix Contract", () => {
     expect(selectGeneratedScenarios(minimalManifest(), "init")).toEqual({
       runnable: [
