@@ -28,5 +28,5 @@ export function packageTemplateRoot(
   ];
 
   const found = candidates.find((candidate) => existsSync(candidate));
-  return found ?? candidates[0];
+  return found ?? candidates[0]!;
 }

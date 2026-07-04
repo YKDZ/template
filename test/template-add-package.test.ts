@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
@@ -20,9 +21,48 @@ const repoRoot = path.resolve(
 );
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
+const workspaceCatalogSchema = v.object({
+  catalog: v.optional(v.record(v.string(), v.string())),
+});
 
 async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+  const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Large generated-fixture tests still use typed JSON reads; schema-backed reads are being introduced around high-risk assertions.
+  return parsed as T;
+}
+
+async function expectCommandFailure(
+  command: Promise<unknown>,
+  expectedStderr: string | readonly string[],
+): Promise<void> {
+  try {
+    await command;
+  } catch (error) {
+    const stderr = commandErrorStderr(error);
+    const expectedMessages =
+      typeof expectedStderr === "string" ? [expectedStderr] : expectedStderr;
+
+    for (const expectedMessage of expectedMessages) {
+      expect(stderr).toContain(expectedMessage);
+    }
+
+    return;
+  }
+
+  throw new Error("Expected command to fail");
+}
+
+function commandErrorStderr(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+  ) {
+    return error.stderr;
+  }
+
+  throw error;
 }
 
 async function sourceFileSnapshot(
@@ -32,7 +72,7 @@ async function sourceFileSnapshot(
   const snapshot: Record<string, string> = {};
   const entries = await readdir(currentDir, { withFileTypes: true });
 
-  for (const entry of entries.sort((left, right) =>
+  for (const entry of entries.toSorted((left, right) =>
     left.name.localeCompare(right.name),
   )) {
     const entryPath = path.join(currentDir, entry.name);
@@ -59,20 +99,16 @@ function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
   expect(scripts["format:write"]).toBe(
     "oxfmt --write --config ../../oxfmt.config.ts .",
   );
-  expect(scripts.lint).toBe(
-    "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-  );
+  expect(scripts.lint).toBe("oxlint --config ../../oxlint.config.ts .");
   expect(scripts["lint:fix"]).toBe(
-    "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+    "oxlint --config ../../oxlint.config.ts . --fix",
   );
 }
 
 function catalogFromWorkspaceYaml(
   workspaceYaml: string,
 ): Record<string, string> {
-  const parsed = parseYaml(workspaceYaml) as {
-    catalog?: Record<string, string>;
-  };
+  const parsed = v.parse(workspaceCatalogSchema, parseYaml(workspaceYaml));
 
   return parsed.catalog ?? {};
 }
@@ -98,7 +134,7 @@ function catalogDependencyNames(manifest: {
     }
   }
 
-  return [...dependencies].sort();
+  return [...dependencies].toSorted();
 }
 
 async function expectPathMissing(filePath: string): Promise<void> {
@@ -733,16 +769,10 @@ describe("template add package", () => {
       { cwd: projectDir },
     );
 
-    await expect(unknownConsumerPackagePath).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Unknown Package Path for --link-from: apps/admin",
-      ),
-    });
-    await expect(unknownConsumerPackagePath).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Available Package Paths: apps/web, apps/api",
-      ),
-    });
+    await expectCommandFailure(unknownConsumerPackagePath, [
+      "Unknown Package Path for --link-from: apps/admin",
+      "Available Package Paths: apps/web, apps/api",
+    ]);
     await expectPathMissing(path.join(projectDir, "packages/shared"));
   }, 120_000);
 
@@ -754,7 +784,7 @@ describe("template add package", () => {
 
     await initGeneratedWorkspace(projectDir);
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -772,11 +802,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Link Intent cannot link packages/shared from itself",
-      ),
-    });
+      "Package Link Intent cannot link packages/shared from itself",
+    );
     await expectPathMissing(path.join(projectDir, "packages/shared"));
   }, 120_000);
 
@@ -946,7 +973,7 @@ describe("template add package", () => {
 
     await initGeneratedWorkspace(projectDir);
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -964,11 +991,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Path apps/api/admin must be exactly two safe path segments",
-      ),
-    });
+      "Package Path apps/api/admin must be exactly two safe path segments",
+    );
 
     await expectPathMissing(path.join(projectDir, "apps/api/admin"));
   }, 120_000);
@@ -1013,7 +1037,7 @@ describe("template add package", () => {
 
       await initGeneratedWorkspace(projectDir);
 
-      await expect(
+      await expectCommandFailure(
         execa(
           "pnpm",
           [
@@ -1031,9 +1055,8 @@ describe("template add package", () => {
           ],
           { cwd: projectDir },
         ),
-      ).rejects.toMatchObject({
-        stderr: expect.stringContaining(diagnostic),
-      });
+        diagnostic,
+      );
     },
     120_000,
   );
@@ -1046,7 +1069,7 @@ describe("template add package", () => {
 
     await initGeneratedWorkspace(projectDir);
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1064,11 +1087,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Path packages/web conflicts with existing package @demo-fullstack/web",
-      ),
-    });
+      "Package Path packages/web conflicts with existing package @demo-fullstack/web",
+    );
 
     await expectPathMissing(path.join(projectDir, "packages/web"));
   }, 120_000);
@@ -1081,7 +1101,7 @@ describe("template add package", () => {
 
     await initGeneratedWorkspace(projectDir);
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1099,11 +1119,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Path apps/api conflicts with existing package @demo-fullstack/api",
-      ),
-    });
+      "Package Path apps/api conflicts with existing package @demo-fullstack/api",
+    );
   }, 120_000);
 
   it("rejects existing filesystem target paths with a semantic Package Path diagnostic", async () => {
@@ -1115,7 +1132,7 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
     await mkdir(path.join(projectDir, "services/cache"), { recursive: true });
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1133,11 +1150,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Path services/cache conflicts with existing filesystem path",
-      ),
-    });
+      "Package Path services/cache conflicts with existing filesystem path",
+    );
   }, 120_000);
 
   it("adds a package to the generated TypeScript library workspace tracer", async () => {
@@ -1343,16 +1357,10 @@ describe("template add package", () => {
       { cwd: projectDir },
     );
 
-    await expect(unsupportedPackageAddition).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset rust-bin cannot be used for Package Addition.",
-      ),
-    });
-    await expect(unsupportedPackageAddition).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Supported Package Addition presets: ts-lib, hono-api, vue-app",
-      ),
-    });
+    await expectCommandFailure(unsupportedPackageAddition, [
+      "Preset rust-bin cannot be used for Package Addition.",
+      "Supported Package Addition presets: ts-lib, hono-api, vue-app",
+    ]);
 
     await expect(
       stat(path.join(projectDir, "packages/native")),
@@ -1390,16 +1398,10 @@ describe("template add package", () => {
       { cwd: projectDir },
     );
 
-    await expect(unsupportedPackageAddition).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset vue-hono-app cannot be used for Package Addition.",
-      ),
-    });
-    await expect(unsupportedPackageAddition).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Supported Package Addition presets: ts-lib, hono-api, vue-app",
-      ),
-    });
+    await expectCommandFailure(unsupportedPackageAddition, [
+      "Preset vue-hono-app cannot be used for Package Addition.",
+      "Supported Package Addition presets: ts-lib, hono-api, vue-app",
+    ]);
 
     await expect(
       stat(path.join(projectDir, "apps/fullstack")),
@@ -1417,7 +1419,7 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
     await rm(path.join(projectDir, ".template"), { recursive: true });
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1433,11 +1435,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition requires a valid .template/blueprint.json",
-      ),
-    });
+      "Package Addition requires a valid .template/blueprint.json",
+    );
 
     await expect(
       stat(path.join(projectDir, "apps/worker")),
@@ -1459,7 +1458,7 @@ describe("template add package", () => {
       "utf8",
     );
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1475,11 +1474,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition requires a valid .template/blueprint.json",
-      ),
-    });
+      "Package Addition requires a valid .template/blueprint.json",
+    );
 
     await expect(
       stat(path.join(projectDir, "packages/shared")),
@@ -1514,7 +1510,7 @@ describe("template add package", () => {
       "utf8",
     );
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1530,11 +1526,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Addition only supports existing workspace Generated Repositories",
-      ),
-    });
+      "Package Addition only supports existing workspace Generated Repositories",
+    );
 
     await expect(
       stat(path.join(projectDir, "packages/extra")),
@@ -1799,7 +1792,9 @@ describe("template add package", () => {
       path.join(projectDir, "oxlint.config.ts"),
       "utf8",
     );
-    expect(beforeOxlintConfig).toContain('plugins: ["typescript", "oxc"]');
+    expect(beforeOxlintConfig).toContain('"typescript"');
+    expect(beforeOxlintConfig).toContain('"oxc"');
+    expect(beforeOxlintConfig).not.toContain('"vue"');
 
     await execa(
       "pnpm",
@@ -1821,9 +1816,7 @@ describe("template add package", () => {
       path.join(projectDir, "oxlint.config.ts"),
       "utf8",
     );
-    expect(afterOxlintConfig).toContain(
-      'plugins: ["typescript", "oxc", "vue"]',
-    );
+    expect(afterOxlintConfig).toContain('"vue"');
   });
 
   it("adds a TypeScript package to a Rust base repository", async () => {
@@ -1926,7 +1919,7 @@ describe("template add package", () => {
     );
     const beforeNativeCargoToml = await readFile(nativeCargoTomlPath, "utf8");
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1944,11 +1937,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        `Package Link Intent from native package ${nativePackagePath} is unsupported in V1 TypeScript-only Project Linking`,
-      ),
-    });
+      `Package Link Intent from native package ${nativePackagePath} is unsupported in V1 TypeScript-only Project Linking`,
+    );
 
     await expectPathMissing(path.join(projectDir, "packages/shared"));
     expect(await readFile(blueprintPath, "utf8")).toBe(beforeBlueprint);
@@ -2017,7 +2007,7 @@ describe("template add package", () => {
     await mkdir(path.dirname(userFile), { recursive: true });
     await writeFile(userFile, "user-owned content\n", "utf8");
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -2033,11 +2023,8 @@ describe("template add package", () => {
         ],
         { cwd: projectDir },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Package Path packages/shared conflicts with existing filesystem path",
-      ),
-    });
+      "Package Path packages/shared conflicts with existing filesystem path",
+    );
 
     expect(await readFile(userFile, "utf8")).toBe("user-owned content\n");
   });
@@ -2055,7 +2042,7 @@ describe("template add package", () => {
       "utf8",
     );
 
-    await expect(
+    await expectCommandFailure(
       execa(
         tsxBin,
         [cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
@@ -2063,11 +2050,8 @@ describe("template add package", () => {
           cwd: projectDir,
         },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Cannot update pnpm workspace membership",
-      ),
-    });
+      "Cannot update pnpm workspace membership",
+    );
 
     await expect(
       stat(path.join(projectDir, "packages/shared")),

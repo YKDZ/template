@@ -10,9 +10,41 @@ import {
 } from "@ykdz/template-core/editor-customization";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
 import { renderProject } from "@ykdz/template-core/renderer";
+import * as v from "valibot";
 
-async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+const settingsSchema = v.record(v.string(), v.unknown());
+const devcontainerEditorCustomizationSchema = v.object({
+  customizations: v.object({
+    vscode: v.object({
+      extensions: v.array(v.string()),
+      settings: settingsSchema,
+    }),
+  }),
+});
+const workspaceExtensionsSchema = v.object({
+  recommendations: v.array(v.string()),
+});
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return v.parse(
+    schema,
+    JSON.parse(await readFile(filePath, "utf8")) as unknown,
+  );
+}
+
+async function readDevcontainerEditorCustomization(filePath: string) {
+  return readJsonWithSchema(filePath, devcontainerEditorCustomizationSchema);
+}
+
+async function readWorkspaceExtensions(filePath: string) {
+  return readJsonWithSchema(filePath, workspaceExtensionsSchema);
+}
+
+async function readWorkspaceSettings(filePath: string) {
+  return readJsonWithSchema(filePath, settingsSchema);
 }
 
 async function renderPresetProject(preset: string): Promise<string> {
@@ -185,18 +217,13 @@ describe("editor customization", () => {
       "oxc-format-lint",
       "vitest",
     ]);
-    const devcontainer = await readJson<{
-      customizations: {
-        vscode: {
-          extensions: readonly string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-    const workspaceExtensions = await readJson<{
-      recommendations: readonly string[];
-    }>(path.join(projectDir, ".vscode/extensions.json"));
-    const workspaceSettings = await readJson<Record<string, unknown>>(
+    const devcontainer = await readDevcontainerEditorCustomization(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceExtensions = await readWorkspaceExtensions(
+      path.join(projectDir, ".vscode/extensions.json"),
+    );
+    const workspaceSettings = await readWorkspaceSettings(
       path.join(projectDir, ".vscode/settings.json"),
     );
 
@@ -219,18 +246,13 @@ describe("editor customization", () => {
   it("does not recommend Vitest for generated projects without Vitest capability", async () => {
     const projectDir = await renderPresetProject("ts-lib");
     const expected = editorCustomizationForCapabilities(["oxc-format-lint"]);
-    const devcontainer = await readJson<{
-      customizations: {
-        vscode: {
-          extensions: readonly string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-    const workspaceExtensions = await readJson<{
-      recommendations: readonly string[];
-    }>(path.join(projectDir, ".vscode/extensions.json"));
-    const workspaceSettings = await readJson<Record<string, unknown>>(
+    const devcontainer = await readDevcontainerEditorCustomization(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceExtensions = await readWorkspaceExtensions(
+      path.join(projectDir, ".vscode/extensions.json"),
+    );
+    const workspaceSettings = await readWorkspaceSettings(
       path.join(projectDir, ".vscode/settings.json"),
     );
 
@@ -250,18 +272,13 @@ describe("editor customization", () => {
   it("projects Rust and TOML editor customization to generated Rust repositories", async () => {
     const projectDir = await renderPresetProject("rust-bin");
     const expected = editorCustomizationForCapabilities(["rust-tooling"]);
-    const devcontainer = await readJson<{
-      customizations: {
-        vscode: {
-          extensions: readonly string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-    const workspaceExtensions = await readJson<{
-      recommendations: readonly string[];
-    }>(path.join(projectDir, ".vscode/extensions.json"));
-    const workspaceSettings = await readJson<Record<string, unknown>>(
+    const devcontainer = await readDevcontainerEditorCustomization(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceExtensions = await readWorkspaceExtensions(
+      path.join(projectDir, ".vscode/extensions.json"),
+    );
+    const workspaceSettings = await readWorkspaceSettings(
       path.join(projectDir, ".vscode/settings.json"),
     );
 
@@ -289,18 +306,13 @@ describe("editor customization", () => {
       "tailwind",
       "vitest",
     ]);
-    const devcontainer = await readJson<{
-      customizations: {
-        vscode: {
-          extensions: readonly string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-    const workspaceExtensions = await readJson<{
-      recommendations: readonly string[];
-    }>(path.join(projectDir, ".vscode/extensions.json"));
-    const workspaceSettings = await readJson<Record<string, unknown>>(
+    const devcontainer = await readDevcontainerEditorCustomization(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+    );
+    const workspaceExtensions = await readWorkspaceExtensions(
+      path.join(projectDir, ".vscode/extensions.json"),
+    );
+    const workspaceSettings = await readWorkspaceSettings(
       path.join(projectDir, ".vscode/settings.json"),
     );
 
@@ -328,18 +340,13 @@ describe("editor customization", () => {
         editorCustomizationCapabilitiesForPreset(preset),
         editorCustomizationOptionsForPreset(preset),
       );
-      const devcontainer = await readJson<{
-        customizations: {
-          vscode: {
-            extensions: readonly string[];
-            settings: Record<string, unknown>;
-          };
-        };
-      }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-      const workspaceExtensions = await readJson<{
-        recommendations: readonly string[];
-      }>(path.join(projectDir, ".vscode/extensions.json"));
-      const workspaceSettings = await readJson<Record<string, unknown>>(
+      const devcontainer = await readDevcontainerEditorCustomization(
+        path.join(projectDir, ".devcontainer/devcontainer.json"),
+      );
+      const workspaceExtensions = await readWorkspaceExtensions(
+        path.join(projectDir, ".vscode/extensions.json"),
+      );
+      const workspaceSettings = await readWorkspaceSettings(
         path.join(projectDir, ".vscode/settings.json"),
       );
 
@@ -364,14 +371,10 @@ describe("editor customization", () => {
     "references only generated OXC config files for the %s preset",
     async (preset) => {
       const projectDir = await renderPresetProject(preset);
-      const devcontainer = await readJson<{
-        customizations: {
-          vscode: {
-            settings: Record<string, unknown>;
-          };
-        };
-      }>(path.join(projectDir, ".devcontainer/devcontainer.json"));
-      const workspaceSettings = await readJson<Record<string, unknown>>(
+      const devcontainer = await readDevcontainerEditorCustomization(
+        path.join(projectDir, ".devcontainer/devcontainer.json"),
+      );
+      const workspaceSettings = await readWorkspaceSettings(
         path.join(projectDir, ".vscode/settings.json"),
       );
 

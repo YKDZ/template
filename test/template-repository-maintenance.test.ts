@@ -5,12 +5,67 @@ import { fileURLToPath } from "node:url";
 import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import * as ts from "typescript";
+import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const stringRecordSchema = v.record(v.string(), v.string());
+const packageMetadataSchema = v.object({
+  dependencies: v.optional(stringRecordSchema),
+  devDependencies: v.optional(stringRecordSchema),
+  packageManager: v.optional(v.string()),
+  private: v.optional(v.boolean()),
+});
+const dependabotUpdateSchema = v.object({
+  "package-ecosystem": v.string(),
+  directory: v.string(),
+  schedule: v.object({ interval: v.string() }),
+  ignore: v.optional(
+    v.array(
+      v.object({
+        "dependency-name": v.string(),
+        "update-types": v.array(v.string()),
+      }),
+    ),
+  ),
+});
+const dependabotConfigSchema = v.object({
+  version: v.optional(v.number()),
+  updates: v.array(dependabotUpdateSchema),
+});
+const devcontainerSchema = v.object({
+  name: v.optional(v.string()),
+  build: v.optional(v.object({ dockerfile: v.optional(v.string()) })),
+  customizations: v.optional(
+    v.object({
+      vscode: v.optional(
+        v.object({
+          extensions: v.optional(v.array(v.string())),
+          settings: v.optional(v.record(v.string(), v.unknown())),
+        }),
+      ),
+    }),
+  ),
+  features: v.optional(v.unknown()),
+  postCreateCommand: v.optional(stringRecordSchema),
+});
+
+function parseJsonWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, JSON.parse(text) as unknown);
+}
+
+function parseYamlWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, parseYaml(text) as unknown);
+}
 
 const packageDependencyFields = new Set([
   "dependencies",
@@ -29,7 +84,7 @@ function dependencyVersionGateProjectionFiles(): string[] {
       (preset) =>
         `packages/builtin-source/templates/${preset.name}/projection.ts`,
     )
-    .sort();
+    .toSorted();
 }
 
 function propertyNameText(
@@ -193,13 +248,10 @@ describe("template Repository maintenance", () => {
   });
 
   it("keeps root package metadata private and catalog-backed", async () => {
-    const packageJson = JSON.parse(
+    const packageJson = parseJsonWithSchema(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      dependencies?: Record<string, string>;
-      devDependencies?: Record<string, string>;
-      private?: boolean;
-    };
+      packageMetadataSchema,
+    );
 
     expect(packageJson.private).toBe(true);
     expect([
@@ -212,15 +264,10 @@ describe("template Repository maintenance", () => {
     const workflowFiles = await readdir(
       path.join(repoRoot, ".github/workflows"),
     );
-    const dependabot = parseYaml(
+    const dependabot = parseYamlWithSchema(
       await readFile(path.join(repoRoot, ".github/dependabot.yml"), "utf8"),
-    ) as {
-      updates: {
-        "package-ecosystem": string;
-        directory: string;
-        schedule: { interval: string };
-      }[];
-    };
+      dependabotConfigSchema,
+    );
 
     expect(workflowFiles).toEqual(
       expect.arrayContaining([
@@ -246,23 +293,13 @@ describe("template Repository maintenance", () => {
   });
 
   it("keeps the root Development Container Dockerfile-first with intentional editor customizations", async () => {
-    const devcontainer = JSON.parse(
+    const devcontainer = parseJsonWithSchema(
       await readFile(
         path.join(repoRoot, ".devcontainer/devcontainer.json"),
         "utf8",
       ),
-    ) as {
-      name?: string;
-      build?: { dockerfile?: string };
-      customizations?: {
-        vscode?: {
-          extensions?: string[];
-          settings?: Record<string, unknown>;
-        };
-      };
-      features?: unknown;
-      postCreateCommand?: Record<string, string>;
-    };
+      devcontainerSchema,
+    );
 
     expect(Object.keys(devcontainer).slice(0, 3)).toEqual([
       "name",
@@ -300,20 +337,10 @@ describe("template Repository maintenance", () => {
   });
 
   it("uses official root Dependabot config for npm, GitHub Actions, and the Development Container Dockerfile", async () => {
-    const dependabot = parseYaml(
+    const dependabot = parseYamlWithSchema(
       await readFile(path.join(repoRoot, ".github/dependabot.yml"), "utf8"),
-    ) as {
-      version: number;
-      updates: {
-        "package-ecosystem": string;
-        directory: string;
-        schedule: { interval: string };
-        ignore?: {
-          "dependency-name": string;
-          "update-types": string[];
-        }[];
-      }[];
-    };
+      dependabotConfigSchema,
+    );
 
     expect(dependabot).toEqual({
       version: 2,
@@ -350,11 +377,10 @@ describe("template Repository maintenance", () => {
   });
 
   it("keeps the root pnpm pin on a GitHub Dependabot-supported major", async () => {
-    const packageJson = JSON.parse(
+    const packageJson = parseJsonWithSchema(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      packageManager?: string;
-    };
+      packageMetadataSchema,
+    );
     const packageManager = packageJson.packageManager ?? "";
     const match = /^pnpm@(\d+)\.\d+\.\d+$/.exec(packageManager);
 

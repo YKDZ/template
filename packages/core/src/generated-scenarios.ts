@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { execa } from "execa";
+import * as v from "valibot";
 
 import { assembleGenerationContext } from "./generation-context.js";
 import {
@@ -55,8 +56,8 @@ export type GeneratedScenarioCommandRunner = (
   args: readonly string[],
   cwd: string,
   options?: {
-    readonly env?: Record<string, string>;
-    readonly logPrefix?: string;
+    readonly env?: Record<string, string> | undefined;
+    readonly logPrefix?: string | undefined;
   },
 ) => Promise<void>;
 
@@ -75,13 +76,6 @@ export type GeneratedScenarioRunnerOptions = {
   readonly rootCheckLock?: ExclusiveLock;
 };
 
-type StoredBlueprint = {
-  readonly packages?: readonly {
-    readonly name: string;
-    readonly path: string;
-  }[];
-};
-
 export type ExclusiveLock = {
   readonly run: <T>(callback: () => Promise<T>) => Promise<T>;
 };
@@ -90,6 +84,16 @@ const defaultDeterministicToolchainEnv = {
   TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
 };
 const defaultFixtureConcurrency = 2;
+const storedBlueprintSchema = v.object({
+  packages: v.optional(
+    v.array(
+      v.object({
+        name: v.string(),
+        path: v.string(),
+      }),
+    ),
+  ),
+});
 
 function cliSourceExecutionEnv(
   options: RequiredRunnerOptions,
@@ -162,8 +166,10 @@ function createGeneratedScenario(
   return {
     set,
     basePreset: input.basePreset,
-    addedPreset: input.addedPreset,
-    linkFrom: input.linkFrom ? [...input.linkFrom] : undefined,
+    ...(input.addedPreset === undefined
+      ? {}
+      : { addedPreset: input.addedPreset }),
+    ...(input.linkFrom === undefined ? {} : { linkFrom: [...input.linkFrom] }),
     id: generatedScenarioId(input),
     label: generatedScenarioLabel(input),
   };
@@ -193,7 +199,9 @@ export function selectGeneratedScenarios(
     createGeneratedScenario(set, {
       basePreset: combination.basePreset,
       addedPreset: combination.addedPreset,
-      linkFrom: combination.linkFrom,
+      ...(combination.linkFrom === undefined
+        ? {}
+        : { linkFrom: combination.linkFrom }),
     }),
   );
   const skipped = contract.semanticSkips.map((skip) => ({
@@ -233,8 +241,8 @@ export async function defaultGeneratedScenarioCommandRunner(
   args: readonly string[],
   cwd: string,
   options: {
-    readonly env?: Record<string, string>;
-    readonly logPrefix?: string;
+    readonly env?: Record<string, string> | undefined;
+    readonly logPrefix?: string | undefined;
   } = {},
 ): Promise<void> {
   const prefix = options.logPrefix ? `[${options.logPrefix}] ` : "";
@@ -242,7 +250,7 @@ export async function defaultGeneratedScenarioCommandRunner(
   console.log(`${prefix}$ ${[command, ...args].join(" ")}`);
   await execa(command, [...args], {
     cwd,
-    env: options.env,
+    ...(options.env === undefined ? {} : { env: options.env }),
     stdio: "inherit",
   });
 }
@@ -346,7 +354,7 @@ async function sourceFileSnapshot(
   const snapshot: Record<string, string> = {};
   const entries = await readdir(currentDir, { withFileTypes: true });
 
-  for (const entry of entries.sort((left, right) =>
+  for (const entry of entries.toSorted((left, right) =>
     left.name.localeCompare(right.name),
   )) {
     const entryPath = path.join(currentDir, entry.name);
@@ -387,13 +395,22 @@ async function readAddedPackagePath(
   projectDir: string,
   packageLeafName: string,
 ): Promise<string> {
-  const blueprint = JSON.parse(
+  const input = JSON.parse(
     await readFile(
       path.join(projectDir, ".template", "blueprint.json"),
       "utf8",
     ),
-  ) as StoredBlueprint;
-  const packageDefinition = blueprint.packages?.find(
+  ) as unknown;
+  const result = v.safeParse(storedBlueprintSchema, input);
+  if (!result.success) {
+    throw new Error(
+      `Generated Repository blueprint is invalid: ${result.issues
+        .map((issue) => issue.message)
+        .join("; ")}`,
+    );
+  }
+
+  const packageDefinition = result.output.packages?.find(
     (pkg) => path.basename(pkg.path) === packageLeafName,
   );
 
@@ -423,7 +440,7 @@ function projectionPlanForPreset(
 
   const blueprint = blueprintForPresetSourcePreset(preset, {
     targetDir: projectDir,
-    scope: packageScope,
+    ...(packageScope === undefined ? {} : { scope: packageScope }),
   });
   return projectPresetSourcePreset({
     preset,
@@ -504,6 +521,9 @@ function environmentNeedStep(
 ): GeneratedScenarioCommandStep {
   const display = renderPlaywrightBrowserInstallCommand(need);
   const [command, ...args] = display.split(" ");
+  if (command === undefined) {
+    throw new Error(`Cannot parse environment setup command: ${display}`);
+  }
 
   return {
     id: `install-${need.owner.path}-playwright-browsers`,
@@ -580,7 +600,7 @@ async function runGeneratedScenarioQualityGate(
     const env = step.id === "run-root-check" ? { CI: "1" } : undefined;
     const runStep = async () => {
       await options.runCommand(step.command, [...step.args], step.cwd, {
-        env,
+        ...(env === undefined ? {} : { env }),
         logPrefix: scenario.label,
       });
     };

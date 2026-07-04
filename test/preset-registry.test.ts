@@ -16,13 +16,60 @@ import {
   blueprintForPresetSourcePreset,
   defaultPackagePathForPresetSourcePackageAddition,
 } from "@ykdz/template-core/projection-capabilities";
+import * as v from "valibot";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
 
-async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+const packageJsonSchema = v.object({
+  name: v.optional(v.string()),
+  engines: v.object({ node: v.string() }),
+  packageManager: v.string(),
+  devDependencies: v.optional(v.record(v.string(), v.string())),
+  scripts: v.record(v.string(), v.string()),
+});
+const packageJsonWithScriptsSchema = v.object({
+  name: v.string(),
+  version: v.optional(v.string()),
+  private: v.optional(v.boolean()),
+  engines: v.optional(v.object({ node: v.string() })),
+  scripts: v.record(v.string(), v.string()),
+});
+const generationRecordSchema = v.object({
+  command: v.optional(v.string()),
+  toolchain: v.object({
+    nodeLtsMajor: v.string(),
+    packageManagerPin: v.string(),
+    source: v.optional(v.string()),
+  }),
+});
+const devcontainerSchema = v.looseObject({
+  name: v.optional(v.string()),
+  build: v.optional(
+    v.object({
+      dockerfile: v.optional(v.string()),
+      args: v.optional(v.record(v.string(), v.string())),
+    }),
+  ),
+  customizations: v.object({
+    vscode: v.object({
+      extensions: v.array(v.string()),
+      settings: v.record(v.string(), v.unknown()),
+    }),
+  }),
+  features: v.optional(v.unknown()),
+  mounts: v.optional(v.array(v.string())),
+});
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return v.parse(
+    schema,
+    JSON.parse(await readFile(filePath, "utf8")) as unknown,
+  );
 }
 
 describe("Preset Registry", () => {
@@ -165,19 +212,18 @@ describe("Preset Registry", () => {
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
     );
 
-    const packageJson = await readJson<{
-      engines: { node: string };
-      packageManager: string;
-      scripts: Record<string, string>;
-    }>(path.join(targetDir, "package.json"));
-    const libraryPackageJson = await readJson<{
-      name: string;
-      scripts: Record<string, string>;
-    }>(path.join(targetDir, "packages/demo-lib/package.json"));
-    const generationRecord = await readJson<{
-      command: string;
-      toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-    }>(path.join(targetDir, ".template/generated-by.json"));
+    const packageJson = await readJsonWithSchema(
+      path.join(targetDir, "package.json"),
+      packageJsonSchema,
+    );
+    const libraryPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "packages/demo-lib/package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const generationRecord = await readJsonWithSchema(
+      path.join(targetDir, ".template/generated-by.json"),
+      generationRecordSchema,
+    );
 
     expect(packageJson.scripts).toEqual(plan.packageScripts);
     expect(packageJson.engines.node).toBe("24");
@@ -217,19 +263,10 @@ describe("Preset Registry", () => {
       path.join(targetDir, ".devcontainer/devcontainer.json"),
       "utf8",
     );
-    const devcontainer = JSON.parse(devcontainerText) as {
-      build?: {
-        dockerfile: string;
-        args?: Record<string, string>;
-      };
-      features?: unknown;
-      customizations: {
-        vscode: {
-          extensions: string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    };
+    const devcontainer = v.parse(
+      devcontainerSchema,
+      JSON.parse(devcontainerText) as unknown,
+    );
     const dockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -300,27 +337,18 @@ describe("Preset Registry", () => {
     const plan = projection!.project(context);
     await projection!.render({ targetDir, plan });
 
-    const rootPackageJson = await readJson<{
-      scripts: Record<string, string>;
-      devDependencies: Record<string, string>;
-    }>(path.join(targetDir, "package.json"));
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "package.json"),
+      packageJsonSchema,
+    );
     const devcontainerText = await readFile(
       path.join(targetDir, ".devcontainer/devcontainer.json"),
       "utf8",
     );
-    const devcontainer = JSON.parse(devcontainerText) as {
-      build?: {
-        dockerfile: string;
-        args?: Record<string, string>;
-      };
-      features?: unknown;
-      customizations: {
-        vscode: {
-          extensions: string[];
-          settings: Record<string, unknown>;
-        };
-      };
-    };
+    const devcontainer = v.parse(
+      devcontainerSchema,
+      JSON.parse(devcontainerText) as unknown,
+    );
     const dockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -366,7 +394,7 @@ describe("Preset Registry", () => {
     expect(dockerfile).not.toContain("libgbm1");
     expect(dockerfile).not.toContain("xvfb");
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
-    expect(rootPackageJson.devDependencies.turbo).toBe("catalog:");
+    expect(rootPackageJson.devDependencies?.turbo).toBe("catalog:");
     expect(rootPackageJson.scripts.check).toBe(
       "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run test:e2e --filter './apps/*' && turbo run check --filter './apps/*'",
     );
@@ -407,24 +435,22 @@ describe("Preset Registry", () => {
       const plan = projection!.project(context);
       await projection!.render({ targetDir, plan });
 
-      const packageJson = await readJson<{
-        engines: { node: string };
-        packageManager: string;
-      }>(path.join(targetDir, "package.json"));
-      const generationRecord = await readJson<{
-        toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-      }>(path.join(targetDir, ".template/generated-by.json"));
+      const packageJson = await readJsonWithSchema(
+        path.join(targetDir, "package.json"),
+        packageJsonSchema,
+      );
+      const generationRecord = await readJsonWithSchema(
+        path.join(targetDir, ".template/generated-by.json"),
+        generationRecordSchema,
+      );
       const devcontainerText = await readFile(
         path.join(targetDir, ".devcontainer/devcontainer.json"),
         "utf8",
       );
-      const devcontainer = JSON.parse(devcontainerText) as {
-        build?: {
-          dockerfile?: string;
-          args?: Record<string, string>;
-        };
-        features?: unknown;
-      };
+      const devcontainer = v.parse(
+        devcontainerSchema,
+        JSON.parse(devcontainerText) as unknown,
+      );
       const dockerfile = await readFile(
         path.join(targetDir, ".devcontainer/Dockerfile"),
         "utf8",
@@ -527,34 +553,26 @@ describe("Preset Registry", () => {
       "rust-toolchain",
     ]);
 
-    const packageJson = await readJson<{
-      name: string;
-      engines: { node: string };
-      packageManager: string;
-      devDependencies?: Record<string, string>;
-      scripts: Record<string, string>;
-    }>(path.join(targetDir, "package.json"));
-    const rustPackageJson = await readJson<{
-      name: string;
-      scripts: Record<string, string>;
-    }>(path.join(targetDir, "packages/demo-rust/package.json"));
-    const generationRecord = await readJson<{
-      command: string;
-      toolchain: { nodeLtsMajor: string; packageManagerPin: string };
-    }>(path.join(targetDir, ".template/generated-by.json"));
+    const packageJson = await readJsonWithSchema(
+      path.join(targetDir, "package.json"),
+      packageJsonSchema,
+    );
+    const rustPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "packages/demo-rust/package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const generationRecord = await readJsonWithSchema(
+      path.join(targetDir, ".template/generated-by.json"),
+      generationRecordSchema,
+    );
     const devcontainerText = await readFile(
       path.join(targetDir, ".devcontainer/devcontainer.json"),
       "utf8",
     );
-    const devcontainer = JSON.parse(devcontainerText) as {
-      name: string;
-      build?: {
-        dockerfile: string;
-        args?: Record<string, string>;
-      };
-      features?: unknown;
-      mounts?: string[];
-    };
+    const devcontainer = v.parse(
+      devcontainerSchema,
+      JSON.parse(devcontainerText) as unknown,
+    );
     const dockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",

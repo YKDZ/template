@@ -65,7 +65,7 @@ describe("Next Step Instructions", () => {
         projectionPlan: projectPresetPlan(preset),
       });
 
-      expect(plan.steps).toEqual([
+      expect(plan.steps.slice(0, 2)).toEqual([
         {
           id: "enter-project",
           label: "Enter Generated Repository",
@@ -86,23 +86,41 @@ describe("Next Step Instructions", () => {
           display: "pnpm install",
           machineVerifiable: true,
         },
-        ...commandDisplays.map((display) =>
-          expect.objectContaining({
-            kind: "command",
-            cwd: targetDir,
-            display,
-            machineVerifiable: true,
-          }),
-        ),
-        ...optionalGitDisplays.map((display) =>
-          expect.objectContaining({
-            kind: "command",
-            cwd: targetDir,
-            display,
-            machineVerifiable: false,
-          }),
-        ),
       ]);
+      expect(
+        plan.steps
+          .slice(2, 2 + commandDisplays.length)
+          .map(({ kind, cwd, display, machineVerifiable }) => ({
+            kind,
+            cwd,
+            display,
+            machineVerifiable,
+          })),
+      ).toEqual(
+        commandDisplays.map((display) => ({
+          kind: "command",
+          cwd: targetDir,
+          display,
+          machineVerifiable: true,
+        })),
+      );
+      expect(
+        plan.steps
+          .slice(2 + commandDisplays.length)
+          .map(({ kind, cwd, display, machineVerifiable }) => ({
+            kind,
+            cwd,
+            display,
+            machineVerifiable,
+          })),
+      ).toEqual(
+        optionalGitDisplays.map((display) => ({
+          kind: "command",
+          cwd: targetDir,
+          display,
+          machineVerifiable: false,
+        })),
+      );
       expect(plan.steps.map((step) => step.command)).not.toContain("corepack");
     },
   );

@@ -39,7 +39,7 @@ async function listGithubYamlTemplates(
     templateFiles.push(...(await listYamlFiles(githubRoot)));
   }
 
-  return templateFiles.sort((left, right) => left.localeCompare(right));
+  return templateFiles.toSorted((left, right) => left.localeCompare(right));
 }
 
 async function listYamlFiles(directory: string): Promise<string[]> {
@@ -365,7 +365,7 @@ function checkDependabotTemplate(
     return problems;
   }
 
-  const updateMaps = updates.items.filter(isMap) as YAMLMap[];
+  const updateMaps = updates.items.filter(isMap);
   const ecosystems = updateMaps
     .map((update) => getMapValue(update, "package-ecosystem"))
     .filter((ecosystem): ecosystem is string => typeof ecosystem === "string");

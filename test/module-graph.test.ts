@@ -169,9 +169,9 @@ describe("module graph plans", () => {
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
       "format:write":
         "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
       "lint:fix":
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(projectTsLibPackageScripts()).toEqual({
@@ -179,9 +179,8 @@ describe("module graph plans", () => {
       fix: "pnpm run format:write && pnpm run lint:fix",
       "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
       "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-      "lint:fix":
-        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+      lint: "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
       typecheck: "tsc -p tsconfig.json --noEmit",
     });
   });
@@ -194,9 +193,8 @@ describe("module graph plans", () => {
       fix: "pnpm run format:write && pnpm run lint:fix",
       "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
       "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-      "lint:fix":
-        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+      lint: "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
       start: "node dist/server.js",
       test: "vitest run",
       typecheck: "tsc -p tsconfig.json --noEmit",
@@ -226,9 +224,8 @@ describe("module graph plans", () => {
       fix: "pnpm run format:write && pnpm run lint:fix",
       "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
       "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-      "lint:fix":
-        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+      lint: "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
       preview: "vite preview",
       test: "vitest run",
       "test:e2e": "pnpm run build && playwright test",
@@ -242,7 +239,9 @@ describe("module graph plans", () => {
       },
     ]);
     expect(
-      renderPlaywrightBrowserInstallCommand(plan.checkPlan.environmentNeeds[0]),
+      renderPlaywrightBrowserInstallCommand(
+        plan.checkPlan.environmentNeeds[0]!,
+      ),
     ).toBe("pnpm --filter ./apps/web exec playwright install chromium");
   });
 
@@ -289,9 +288,9 @@ describe("module graph plans", () => {
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
       "format:write":
         "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
       "lint:fix":
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(projectVueHonoApiPackageScripts().check).toBe(
@@ -308,7 +307,7 @@ describe("module graph plans", () => {
       },
     ]);
     expect(
-      renderPlaywrightBrowserInstallCommand(rootCheckPlan.environmentNeeds[0]),
+      renderPlaywrightBrowserInstallCommand(rootCheckPlan.environmentNeeds[0]!),
     ).toBe("pnpm --filter ./apps/web exec playwright install chromium");
   });
 

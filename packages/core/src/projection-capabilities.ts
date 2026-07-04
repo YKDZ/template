@@ -64,10 +64,11 @@ export type WorkspaceLibraryPackageCapabilityDeclaration = {
 };
 
 export type WorkspaceNodePackageKind = "hono-api" | "vue-app";
+type WorkspaceNodePackagePath = "apps/api" | "apps/web";
 
 export type WorkspaceNodePackageDeclaration = {
   readonly kind: WorkspaceNodePackageKind;
-  readonly path: "apps/api" | "apps/web";
+  readonly path: WorkspaceNodePackagePath;
   readonly sourceFiles: readonly string[];
 };
 
@@ -148,6 +149,8 @@ type ProjectionOperationFactory = (options: {
   readonly packageScriptsByPath: ReadonlyMap<string, Record<string, string>>;
 }) => readonly RenderOperation[];
 
+type WriteJsonRenderOperation = Extract<RenderOperation, { kind: "writeJson" }>;
+
 type ProjectionCompositionState = {
   projectionSourceRoots: PresetProjectionSourceRoots;
   sourceRoot?: string;
@@ -182,6 +185,8 @@ const projectionCapabilityKinds = [
 ] satisfies readonly ProjectionCapabilityKind[];
 
 const projectionCapabilityKindSet = new Set<string>(projectionCapabilityKinds);
+const workspaceNodePackageKindSet = new Set<string>(["hono-api", "vue-app"]);
+const workspaceNodePackagePathSet = new Set<string>(["apps/api", "apps/web"]);
 
 const strictTypescriptRootBoundary: ComponentOwner = {
   kind: "workspace-orchestration",
@@ -249,6 +254,27 @@ const exactCapabilityKeys: Record<ProjectionCapabilityKind, readonly string[]> =
 
 const dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"] =
   ["npm", "github-actions", "docker"];
+
+function strictTypeScriptCompilerOptions(
+  options: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    ...options,
+    erasableSyntaxOnly: true,
+    exactOptionalPropertyTypes: true,
+    forceConsistentCasingInFileNames: true,
+    isolatedModules: true,
+    noEmitOnError: true,
+    noFallthroughCasesInSwitch: true,
+    noImplicitOverride: true,
+    noImplicitReturns: true,
+    noUncheckedIndexedAccess: true,
+    skipLibCheck: false,
+    strict: true,
+    target: "es2023",
+    verbatimModuleSyntax: true,
+  };
+}
 
 const capabilityInterpreters = {
   "workspace-library-package": {
@@ -413,21 +439,23 @@ const capabilityInterpreters = {
       state.rootScriptFragments["format:write"] =
         "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments.lint =
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings";
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments["lint:fix"] =
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings";
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix";
       state.packageScriptFragments["format:check"] =
         "oxfmt --check --config ../../oxfmt.config.ts .";
       state.packageScriptFragments["format:write"] =
         "oxfmt --write --config ../../oxfmt.config.ts .";
       state.packageScriptFragments.lint =
-        "oxlint --config ../../oxlint.config.ts . --deny-warnings";
+        "oxlint --config ../../oxlint.config.ts .";
       state.packageScriptFragments["lint:fix"] =
-        "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings";
+        "oxlint --config ../../oxlint.config.ts . --fix";
       state.rootDevDependencies.add("oxfmt");
       state.rootDevDependencies.add("oxlint");
+      state.rootDevDependencies.add("oxlint-tsgolint");
       state.packageDevDependencies.add("oxfmt");
       state.packageDevDependencies.add("oxlint");
+      state.packageDevDependencies.add("oxlint-tsgolint");
       state.editorCustomizationCapabilities.push("oxc-format-lint");
       state.flags.fixCommand = true;
       state.operationFactories.push(oxcFormatLintOperations);
@@ -458,6 +486,56 @@ const capabilityInterpreters = {
     Extract<ProjectionCapabilityDeclaration, { kind: Kind }>
   >;
 };
+
+function contributeProjectionCapability(
+  capability: ProjectionCapabilityDeclaration,
+  state: ProjectionCompositionState,
+): void {
+  switch (capability.kind) {
+    case "workspace-library-package":
+      capabilityInterpreters["workspace-library-package"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "workspace-node-packages":
+      capabilityInterpreters["workspace-node-packages"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "rust-binary-workspace":
+      capabilityInterpreters["rust-binary-workspace"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "strict-typescript-root":
+      capabilityInterpreters["strict-typescript-root"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "oxc-format-lint":
+      capabilityInterpreters["oxc-format-lint"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "node-pnpm-devcontainer":
+      capabilityInterpreters["node-pnpm-devcontainer"].contribute({
+        capability,
+        state,
+      });
+      return;
+    case "github-maintenance":
+      capabilityInterpreters["github-maintenance"].contribute({
+        capability,
+        state,
+      });
+      return;
+  }
+}
 
 export function validateProjectionCapabilities(
   input: unknown,
@@ -496,7 +574,7 @@ export function validateProjectionCapabilities(
       return;
     }
 
-    if (!projectionCapabilityKindSet.has(capability.kind)) {
+    if (!isProjectionCapabilityKind(capability.kind)) {
       issues.push({
         path: `${pathPrefix}.kind`,
         message: `Unknown Projection Capability kind: ${capability.kind}`,
@@ -504,8 +582,10 @@ export function validateProjectionCapabilities(
       return;
     }
 
-    const kind = capability.kind as ProjectionCapabilityKind;
-    issues.push(...unknownCapabilityPropertyIssues(capability, pathPrefix));
+    const kind = capability.kind;
+    issues.push(
+      ...unknownCapabilityPropertyIssues(kind, capability, pathPrefix),
+    );
 
     if (kind === "workspace-library-package") {
       const workspaceCapability = parseWorkspaceLibraryPackageCapability(
@@ -546,7 +626,7 @@ export function validateProjectionCapabilities(
       return;
     }
 
-    capabilities.push({ kind } as ProjectionCapabilityDeclaration);
+    capabilities.push({ kind });
   });
 
   if (issues.length === 0) {
@@ -567,7 +647,7 @@ export function validateProjectionCapabilities(
 }
 
 export function projectionCapabilityIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly { readonly projection?: unknown }[],
 ): ValidationIssue[] {
   return presets.flatMap((preset, presetIndex) => {
     if (preset.projection === undefined) {
@@ -586,7 +666,7 @@ export function projectionCapabilityIssues(
 }
 
 export function normalizePresetProjectionDeclaration(
-  declaration: PresetProjectionDeclaration,
+  declaration: unknown,
 ): PresetProjectionDeclaration {
   const result = validateProjectionCapabilities(declaration);
 
@@ -618,10 +698,7 @@ export function interpretPresetProjectionDeclaration(options: {
 
   const state = createProjectionCompositionState(options.sourceRoots);
   for (const capability of validation.value.capabilities) {
-    capabilityInterpreters[capability.kind].contribute({
-      capability: capability as never,
-      state,
-    });
+    contributeProjectionCapability(capability, state);
   }
 
   const checkPlan: CheckPlan = {
@@ -680,10 +757,11 @@ export function blueprintForPresetSourcePreset(
 ): ProjectBlueprint {
   const packageScope = options.scope ?? projectNameFromDir(options.targetDir);
   const projectName = projectNameFromDir(options.targetDir);
+  const packageManager = preset.supportedPackageManagers[0];
   const blueprint: ProjectBlueprint = {
     schemaVersion: 1,
     preset: preset.name,
-    packageManager: preset.supportedPackageManagers[0],
+    ...(packageManager === undefined ? {} : { packageManager }),
     projectKind: preset.supportedProjectKinds[0] ?? "multi-package",
     features: [...preset.features],
   };
@@ -837,15 +915,47 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isProjectionCapabilityKind(
+  value: string,
+): value is ProjectionCapabilityKind {
+  return projectionCapabilityKindSet.has(value);
+}
+
+function isWorkspaceNodePackageKind(
+  value: unknown,
+): value is WorkspaceNodePackageKind {
+  return typeof value === "string" && workspaceNodePackageKindSet.has(value);
+}
+
+function isWorkspaceNodePackagePath(
+  value: unknown,
+): value is WorkspaceNodePackagePath {
+  return typeof value === "string" && workspaceNodePackagePathSet.has(value);
+}
+
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function nonEmptyStringArray(value: unknown[]): string[] | undefined {
+  const strings: string[] = [];
+
+  for (const entry of value) {
+    if (!isNonEmptyString(entry)) {
+      return undefined;
+    }
+
+    strings.push(entry);
+  }
+
+  return strings.length === 0 ? undefined : strings;
+}
+
 function unknownCapabilityPropertyIssues(
+  kind: ProjectionCapabilityKind,
   capability: Record<string, unknown>,
   pathPrefix: string,
 ): ValidationIssue[] {
-  const kind = capability.kind as ProjectionCapabilityKind;
   const allowedKeys = new Set(exactCapabilityKeys[kind]);
 
   return Object.keys(capability)
@@ -861,6 +971,7 @@ function parseWorkspaceLibraryPackageCapability(
   pathPrefix: string,
 ): WorkspaceLibraryPackageCapabilityDeclaration | ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  let sourceFiles: string[] = [];
 
   if (capability.workspacePackageGlob !== "packages/*") {
     issues.push({
@@ -892,15 +1003,17 @@ function parseWorkspaceLibraryPackageCapability(
       message:
         "workspace-library-package sourceFiles must be a non-empty array",
     });
-  } else if (
-    capability.sourceFiles.length === 0 ||
-    !capability.sourceFiles.every(isNonEmptyString)
-  ) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message:
-        "workspace-library-package sourceFiles must be a non-empty array of paths",
-    });
+  } else {
+    const parsedSourceFiles = nonEmptyStringArray(capability.sourceFiles);
+    if (parsedSourceFiles === undefined) {
+      issues.push({
+        path: `${pathPrefix}.sourceFiles`,
+        message:
+          "workspace-library-package sourceFiles must be a non-empty array of paths",
+      });
+    } else {
+      sourceFiles = parsedSourceFiles;
+    }
   }
 
   if (issues.length > 0) {
@@ -912,7 +1025,7 @@ function parseWorkspaceLibraryPackageCapability(
     workspacePackageGlob: "packages/*",
     packageRole: "shared-library",
     packageSourcePreset: "ts-lib",
-    sourceFiles: capability.sourceFiles as string[],
+    sourceFiles,
   };
 }
 
@@ -986,7 +1099,13 @@ function parseWorkspaceNodePackage(
     ];
   }
 
-  if (value.kind !== "hono-api" && value.kind !== "vue-app") {
+  const kind = isWorkspaceNodePackageKind(value.kind) ? value.kind : undefined;
+  const packagePath = isWorkspaceNodePackagePath(value.path)
+    ? value.path
+    : undefined;
+  let sourceFiles: string[] = [];
+
+  if (kind === undefined) {
     issues.push({
       path: `${pathPrefix}.kind`,
       message:
@@ -994,7 +1113,7 @@ function parseWorkspaceNodePackage(
     });
   }
 
-  if (value.path !== "apps/api" && value.path !== "apps/web") {
+  if (packagePath === undefined) {
     issues.push({
       path: `${pathPrefix}.path`,
       message:
@@ -1008,15 +1127,17 @@ function parseWorkspaceNodePackage(
       message:
         "workspace-node-packages package sourceFiles must be a non-empty array",
     });
-  } else if (
-    value.sourceFiles.length === 0 ||
-    !value.sourceFiles.every(isNonEmptyString)
-  ) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message:
-        "workspace-node-packages package sourceFiles must be a non-empty array of paths",
-    });
+  } else {
+    const parsedSourceFiles = nonEmptyStringArray(value.sourceFiles);
+    if (parsedSourceFiles === undefined) {
+      issues.push({
+        path: `${pathPrefix}.sourceFiles`,
+        message:
+          "workspace-node-packages package sourceFiles must be a non-empty array of paths",
+      });
+    } else {
+      sourceFiles = parsedSourceFiles;
+    }
   }
 
   const allowedKeys = new Set(["kind", "path", "sourceFiles"]);
@@ -1033,10 +1154,16 @@ function parseWorkspaceNodePackage(
     return issues;
   }
 
+  if (kind === undefined || packagePath === undefined) {
+    throw new Error(
+      `workspace-node-packages package validation failed without diagnostics at ${pathPrefix}`,
+    );
+  }
+
   return {
-    kind: value.kind as WorkspaceNodePackageKind,
-    path: value.path as "apps/api" | "apps/web",
-    sourceFiles: value.sourceFiles as string[],
+    kind,
+    path: packagePath,
+    sourceFiles,
   };
 }
 
@@ -1122,6 +1249,7 @@ function parseRustBinaryWorkspaceCapability(
   pathPrefix: string,
 ): RustBinaryWorkspaceCapabilityDeclaration | ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  let sourceFiles: string[] = [];
 
   if (capability.workspacePackageGlob !== "packages/*") {
     issues.push({
@@ -1136,15 +1264,17 @@ function parseRustBinaryWorkspaceCapability(
       path: `${pathPrefix}.sourceFiles`,
       message: "rust-binary-workspace sourceFiles must be a non-empty array",
     });
-  } else if (
-    capability.sourceFiles.length === 0 ||
-    !capability.sourceFiles.every(isNonEmptyString)
-  ) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message:
-        "rust-binary-workspace sourceFiles must be a non-empty array of paths",
-    });
+  } else {
+    const parsedSourceFiles = nonEmptyStringArray(capability.sourceFiles);
+    if (parsedSourceFiles === undefined) {
+      issues.push({
+        path: `${pathPrefix}.sourceFiles`,
+        message:
+          "rust-binary-workspace sourceFiles must be a non-empty array of paths",
+      });
+    } else {
+      sourceFiles = parsedSourceFiles;
+    }
   }
 
   if (issues.length > 0) {
@@ -1154,7 +1284,7 @@ function parseRustBinaryWorkspaceCapability(
   return {
     kind: "rust-binary-workspace",
     workspacePackageGlob: "packages/*",
-    sourceFiles: capability.sourceFiles as string[],
+    sourceFiles,
   };
 }
 
@@ -1307,10 +1437,7 @@ function stateForProjectionDeclaration(
 
   const state = createProjectionCompositionState(sourceRoots);
   for (const capability of validation.value.capabilities) {
-    capabilityInterpreters[capability.kind].contribute({
-      capability: capability as never,
-      state,
-    });
+    contributeProjectionCapability(capability, state);
   }
 
   return state;
@@ -1358,7 +1485,13 @@ function packageAdditionCapabilityForState(
       );
     }
 
-    const nodePackage = state.nodeWorkspace.packages[0]!;
+    const nodePackage = state.nodeWorkspace.packages[0];
+    if (nodePackage === undefined) {
+      throw new Error(
+        `Preset ${presetName} must declare one package for Package Addition`,
+      );
+    }
+
     return {
       sourcePreset: nodePackage.kind,
       workspacePackageGlob: state.nodeWorkspace.workspacePackageGlob,
@@ -1496,19 +1629,15 @@ function libraryPackageAdditionOperations(options: {
 
 function libraryTsconfigJson(): Record<string, unknown> {
   return {
-    compilerOptions: {
+    compilerOptions: strictTypeScriptCompilerOptions({
       composite: true,
       declaration: true,
       declarationMap: true,
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      noEmitOnError: true,
+      module: "nodenext",
+      moduleResolution: "nodenext",
       rootDir: "src",
-      skipLibCheck: false,
-      strict: true,
-      target: "ES2022",
       types: ["node"],
-    },
+    }),
     include: ["src/**/*.ts"],
   };
 }
@@ -1740,7 +1869,12 @@ function sourceRootPreset(
   capability: WorkspaceNodePackagesCapabilityDeclaration,
 ): "hono-api" | "vue-app" | "vue-hono-app" {
   if (capability.packages.length === 1) {
-    return capability.packages[0]!.kind;
+    const nodePackage = capability.packages[0];
+    if (nodePackage === undefined) {
+      throw new Error("Node package workspace must contain one package");
+    }
+
+    return nodePackage.kind;
   }
 
   return "vue-hono-app";
@@ -1828,8 +1962,8 @@ function packageLinkPlanFor(
     {
       name: workspacePackageName(context, capability),
       path: workspacePackagePath(context, capability),
-      role: capability.packageRole as PackageRole,
-      sourcePreset: capability.packageSourcePreset as PackageSourcePreset,
+      role: capability.packageRole,
+      sourcePreset: capability.packageSourcePreset,
     },
   ]);
 }
@@ -1973,6 +2107,7 @@ function honoApiPackageJson(
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       "tsc-alias": "catalog:",
       ...(scripts.dev === undefined ? {} : { tsx: "catalog:" }),
       typescript: "catalog:",
@@ -2020,6 +2155,7 @@ function vuePackageJson(
       "@vue/tsconfig": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       tailwindcss: "catalog:",
       typescript: "catalog:",
       vite: "catalog:",
@@ -2036,7 +2172,7 @@ function catalogDependencies(
   dependencies: ReadonlySet<string>,
 ): Record<string, string> {
   return Object.fromEntries(
-    [...dependencies].sort().map((dependency) => [dependency, "catalog:"]),
+    [...dependencies].toSorted().map((dependency) => [dependency, "catalog:"]),
   );
 }
 
@@ -2539,9 +2675,8 @@ function nodePackageScripts(
   const oxcScripts = {
     "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-    "lint:fix":
-      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+    lint: "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
   };
 
   if (nodePackage.kind === "hono-api") {
@@ -2613,26 +2748,22 @@ function nodePackageScripts(
 function nodePackageTsconfigOperations(
   nodePackage: WorkspaceNodePackageDeclaration,
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
-): RenderOperation[] {
+): WriteJsonRenderOperation[] {
   if (nodePackage.kind === "hono-api") {
     return [
       {
         kind: "writeJson",
         to: `${nodePackage.path}/tsconfig.json`,
         value: {
-          compilerOptions: {
+          compilerOptions: strictTypeScriptCompilerOptions({
             composite: true,
             ...(workspace.packages.length > 1
               ? { declaration: true, declarationMap: true }
               : {}),
-            module: "NodeNext",
-            moduleResolution: "NodeNext",
-            noEmitOnError: true,
-            skipLibCheck: false,
-            strict: true,
-            target: "ES2022",
+            module: "nodenext",
+            moduleResolution: "nodenext",
             types: ["node", "vitest/globals"],
-          },
+          }),
           include: ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
         },
       },
@@ -2670,17 +2801,13 @@ function nodePackageTsconfigOperations(
       to: `${nodePackage.path}/tsconfig.app.json`,
       value: {
         extends: "@vue/tsconfig/tsconfig.dom.json",
-        compilerOptions: {
+        compilerOptions: strictTypeScriptCompilerOptions({
           composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",
-          noEmitOnError: true,
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
           types: ["web-bluetooth"],
-        },
+        }),
         include: ["env.d.ts", "src/**/*.ts", "src/**/*.vue"],
       },
     },
@@ -2701,21 +2828,17 @@ function nodePackageTsconfigOperations(
       kind: "writeJson",
       to: `${nodePackage.path}/tsconfig.node.json`,
       value: {
-        compilerOptions: {
+        compilerOptions: strictTypeScriptCompilerOptions({
           composite: true,
           module: "ESNext",
           moduleResolution: "Bundler",
-          noEmitOnError: true,
           lib: ["ESNext", "DOM", "DOM.Iterable"],
           ...(workspace.packages.length > 1
             ? { outDir: "./node_modules/.tmp/tsconfig.node" }
             : {}),
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
           types: ["node"],
-        },
+        }),
         include: ["playwright.config.ts", "vite.config.ts", "vitest.config.ts"],
       },
     },
@@ -2740,7 +2863,7 @@ function honoApiTsconfigOperations(packagePath: string): RenderOperation[] {
         },
       ],
     },
-  ) as Extract<RenderOperation, { kind: "writeJson" }>[];
+  );
 
   return operations.map((operation) => ({
     ...operation,
@@ -2766,7 +2889,7 @@ function vueAppTsconfigOperations(packagePath: string): RenderOperation[] {
         },
       ],
     },
-  ) as Extract<RenderOperation, { kind: "writeJson" }>[];
+  );
 
   return operations.map((operation) => ({
     ...operation,
@@ -2840,6 +2963,21 @@ function strictTypescriptOperations({
     );
   }
 
+  const rootConfigTsconfigOperation = (): RenderOperation => {
+    if (state.sourceRoots.sharedOxc === undefined) {
+      throw new Error(
+        "strict-typescript-root requires shared OXC source when rendering tsconfig.config.json",
+      );
+    }
+
+    return {
+      kind: "copyFile",
+      from: "tsconfig.config.json",
+      to: "tsconfig.config.json",
+      sourceRoot: "sharedOxc",
+    };
+  };
+
   if (state.nodeWorkspace !== undefined) {
     return [
       {
@@ -2850,21 +2988,7 @@ function strictTypescriptOperations({
           references: rootTsconfigReferences(state.nodeWorkspace),
         },
       },
-      {
-        kind: "writeJson",
-        to: "tsconfig.config.json",
-        value: {
-          compilerOptions: {
-            module: "NodeNext",
-            moduleResolution: "NodeNext",
-            noEmitOnError: true,
-            skipLibCheck: false,
-            strict: true,
-            target: "ES2022",
-          },
-          include: ["oxlint.config.ts", "oxfmt.config.ts"],
-        },
-      },
+      rootConfigTsconfigOperation(),
     ];
   }
 
@@ -2878,40 +3002,11 @@ function strictTypescriptOperations({
         files: [],
       },
     },
-    {
-      kind: "writeJson",
-      to: "tsconfig.config.json",
-      value: {
-        compilerOptions: {
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          noEmitOnError: true,
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
-        },
-        include: ["oxlint.config.ts", "oxfmt.config.ts"],
-      },
-    },
+    rootConfigTsconfigOperation(),
     {
       kind: "writeJson",
       to: `${workspacePackagePath(context, libraryPackage)}/tsconfig.json`,
-      value: {
-        compilerOptions: {
-          composite: true,
-          declaration: true,
-          declarationMap: true,
-          module: "NodeNext",
-          moduleResolution: "NodeNext",
-          noEmitOnError: true,
-          rootDir: "src",
-          skipLibCheck: false,
-          strict: true,
-          target: "ES2022",
-          types: ["node"],
-        },
-        include: ["src/**/*.ts"],
-      },
+      value: libraryTsconfigJson(),
     },
   ];
 }

@@ -19,6 +19,10 @@
       "path": "shared/oxc/oxfmt.config.ts"
     },
     {
+      "id": "shared-oxc-root-tsconfig",
+      "path": "shared/oxc/tsconfig.config.json"
+    },
+    {
       "id": "shared-oxc-vue",
       "path": "shared/oxc/vue"
     }
@@ -145,6 +149,7 @@
         "@types/node",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "turbo",
         "typescript",
         "valibot"
@@ -170,7 +175,8 @@
           "shared-devcontainer",
           "shared-editor-customization",
           "shared-oxc-node",
-          "shared-oxc-format"
+          "shared-oxc-format",
+          "shared-oxc-root-tsconfig"
         ]
       }
     },
@@ -198,6 +204,7 @@
         "hono",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "tsc-alias",
         "turbo",
         "typescript",
@@ -234,7 +241,8 @@
           "shared-devcontainer",
           "shared-editor-customization",
           "shared-oxc-node",
-          "shared-oxc-format"
+          "shared-oxc-format",
+          "shared-oxc-root-tsconfig"
         ]
       }
     },
@@ -266,6 +274,7 @@
         "@vueuse/core",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "pinia",
         "tailwindcss",
         "turbo",
@@ -320,6 +329,7 @@
           "shared-devcontainer",
           "shared-editor-customization",
           "shared-oxc-format",
+          "shared-oxc-root-tsconfig",
           "shared-oxc-vue"
         ]
       }
@@ -354,6 +364,7 @@
         "hono",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "pinia",
         "tailwindcss",
         "tsc-alias",
@@ -435,6 +446,7 @@
           "shared-editor-customization",
           "shared-oxc-node",
           "shared-oxc-format",
+          "shared-oxc-root-tsconfig",
           "shared-oxc-vue"
         ]
       }

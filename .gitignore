@@ -9,3 +9,5 @@ CONTEXT.md
 .template/
 .project-kit/
 .pnpm-store/
+.turbo/
+packages/**/.turbo/

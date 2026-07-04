@@ -1,6 +1,6 @@
 {
   "name": "@ykdz/template-core",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": true,
   "files": [
     "dist"
@@ -14,6 +14,10 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../pnpm-workspace.yaml dist/pnpm-workspace.yaml",
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
+    "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -22,6 +26,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "execa": "catalog:"
+    "execa": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   }
 }

@@ -36,9 +36,14 @@ export function assembleGenerationContext(
       value: path.basename(path.resolve(options.targetDir)),
     },
     preset: options.blueprint.preset,
-    packageManager: options.blueprint.packageManager
-      ? { kind: "PackageManager", value: options.blueprint.packageManager }
-      : undefined,
+    ...(options.blueprint.packageManager
+      ? {
+          packageManager: {
+            kind: "PackageManager" as const,
+            value: options.blueprint.packageManager,
+          },
+        }
+      : {}),
     blueprint: options.blueprint,
     toolchain: options.toolchain,
   };

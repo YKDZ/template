@@ -1,10 +1,6 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "declaration": true,
-    "declarationMap": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "noEmitOnError": true,
     "outDir": "dist",
     "paths": {
       "@ykdz/template-builtin-source": [
@@ -21,12 +17,11 @@
       "@ykdz/template-checks/*": ["./packages/checks/src/*.ts"],
       "@ykdz/template-core/*": ["./packages/core/src/*.ts"]
     },
-    "skipLibCheck": false,
-    "strict": true,
-    "target": "ES2022",
     "types": ["node", "vitest/globals"]
   },
   "include": [
+    "oxfmt.config.ts",
+    "oxlint.config.ts",
     "packages/*/src/**/*.ts",
     "packages/builtin-source/templates/*/projection.ts",
     "packages/builtin-source/templates/projection-plans.ts",

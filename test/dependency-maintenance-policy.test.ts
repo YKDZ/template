@@ -1,5 +1,6 @@
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { projectDependabotConfig } from "@ykdz/template-core/project-github";
+import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
 type DependabotConfig = {
@@ -11,10 +12,12 @@ type DependabotUpdate = {
   "package-ecosystem": string;
   directory: string;
   schedule: { interval: string };
-  ignore?: {
-    "dependency-name": string;
-    "update-types": string[];
-  }[];
+  ignore?:
+    | {
+        "dependency-name": string;
+        "update-types": string[];
+      }[]
+    | undefined;
 };
 
 const generatedRepositoryPresetNames = [
@@ -24,6 +27,24 @@ const generatedRepositoryPresetNames = [
   "vue-app",
   "vue-hono-app",
 ];
+const dependabotConfigSchema = v.object({
+  version: v.number(),
+  updates: v.array(
+    v.object({
+      "package-ecosystem": v.string(),
+      directory: v.string(),
+      schedule: v.object({ interval: v.string() }),
+      ignore: v.optional(
+        v.array(
+          v.object({
+            "dependency-name": v.string(),
+            "update-types": v.array(v.string()),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
 
 function projectedDependabotConfig(
   presetName: string,
@@ -46,9 +67,12 @@ function projectedDependabotConfig(
     throw new Error(`${presetName} did not project .github/dependabot.yml`);
   }
 
-  return parseYaml(
-    projectDependabotConfig(plan.dependencyMaintenancePolicy),
-  ) as DependabotConfig;
+  return v.parse(
+    dependabotConfigSchema,
+    parseYaml(
+      projectDependabotConfig(plan.dependencyMaintenancePolicy),
+    ) as unknown,
+  );
 }
 
 function ecosystems(config: DependabotConfig): string[] {
@@ -97,16 +121,19 @@ describe("Generated Repository dependency maintenance policy", () => {
           operation.to.startsWith(".github/workflows/"),
       );
 
-      expect(hasWorkflow, presetName).toBe(true);
-      expect(
-        ecosystems(projectedDependabotConfig(presetName)),
+      expect({ hasWorkflow, presetName }).toMatchObject({
+        hasWorkflow: true,
+      });
+      expect(ecosystems(projectedDependabotConfig(presetName))).toContain(
+        "github-actions",
+      );
+      expect({
+        directory: updateFor(
+          projectedDependabotConfig(presetName),
+          "github-actions",
+        ).directory,
         presetName,
-      ).toContain("github-actions");
-      expect(
-        updateFor(projectedDependabotConfig(presetName), "github-actions")
-          .directory,
-        presetName,
-      ).toBe("/");
+      }).toMatchObject({ directory: "/" });
     }
   });
 
@@ -157,11 +184,12 @@ describe("Generated Repository dependency maintenance policy", () => {
     for (const presetName of generatedRepositoryPresetNames) {
       const dependabot = projectedDependabotConfig(presetName);
 
-      expect(ecosystems(dependabot), presetName).toContain("docker");
-      expect(ecosystems(dependabot), presetName).not.toContain("devcontainers");
-      expect(updateFor(dependabot, "docker").directory, presetName).toBe(
-        "/.devcontainer",
-      );
+      expect(ecosystems(dependabot)).toContain("docker");
+      expect(ecosystems(dependabot)).not.toContain("devcontainers");
+      expect({
+        directory: updateFor(dependabot, "docker").directory,
+        presetName,
+      }).toMatchObject({ directory: "/.devcontainer" });
     }
   });
 });

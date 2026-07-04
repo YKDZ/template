@@ -14,10 +14,32 @@ import {
   rustToolLayer,
 } from "@ykdz/template-core/devcontainer";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import * as v from "valibot";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
+
+const devcontainerBuildSchema = v.object({
+  args: v.optional(v.record(v.string(), v.string())),
+});
+const devcontainerSchema = v.looseObject({
+  build: v.optional(devcontainerBuildSchema),
+  mounts: v.optional(v.array(v.string())),
+});
+const packageJsonWithScriptsSchema = v.object({
+  scripts: v.optional(v.record(v.string(), v.string())),
+});
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return v.parse(
+    schema,
+    JSON.parse(await readFile(filePath, "utf8")) as unknown,
+  );
+}
 
 describe("Development Container planning", () => {
   it("validates that exactly one Dockerfile base layer supplies the base image", () => {
@@ -270,30 +292,24 @@ describe("Development Container planning", () => {
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
-    const devcontainer = JSON.parse(
-      await readFile(
-        path.join(targetDir, ".devcontainer/devcontainer.json"),
-        "utf8",
-      ),
-    ) as {
-      build?: { args?: Record<string, string> };
-      mounts?: string[];
-    };
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(targetDir, "package.json"), "utf8"),
-    ) as { scripts?: Record<string, string> };
+    const devcontainer = await readJsonWithSchema(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+      devcontainerSchema,
+    );
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
     const rustPackagePath = blueprint.packages?.[0]?.path;
 
     if (rustPackagePath === undefined) {
       throw new Error("rust-bin blueprint must include a workspace package.");
     }
 
-    const rustPackageJson = JSON.parse(
-      await readFile(
-        path.join(targetDir, rustPackagePath, "package.json"),
-        "utf8",
-      ),
-    ) as { scripts?: Record<string, string> };
+    const rustPackageJson = await readJsonWithSchema(
+      path.join(targetDir, rustPackagePath, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");

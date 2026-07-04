@@ -4,7 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { findBuiltInPreset } from "@ykdz/template-builtin-source";
+import type {
+  PresetSourceManifest,
+  PresetSourceManifestPreset,
+  PresetSourceManifestSharedResource,
+} from "@ykdz/template-core/preset-source";
 import { execa } from "execa";
+import * as v from "valibot";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,7 +22,112 @@ function template(args: string[]) {
   return execa("pnpm", ["exec", "tsx", cliPath, ...args], { cwd: repoRoot });
 }
 
-function validPresetSourceManifest(): any {
+async function expectTemplateFailure(
+  args: string[],
+  expectedStderr: string | readonly string[],
+): Promise<void> {
+  try {
+    await template(args);
+  } catch (error) {
+    const stderr = stderrFromError(error);
+    const expectedMessages =
+      typeof expectedStderr === "string" ? [expectedStderr] : expectedStderr;
+
+    for (const expectedMessage of expectedMessages) {
+      expect(stderr).toContain(expectedMessage);
+    }
+
+    return;
+  }
+
+  throw new Error(`Expected template command to fail: ${args.join(" ")}`);
+}
+
+function stderrFromError(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+  ) {
+    return error.stderr;
+  }
+
+  throw error;
+}
+
+const stringEnumJsonSchema = v.object({
+  enum: v.array(v.string()),
+});
+const presetJsonSchemaOutput = v.object({
+  title: v.string(),
+  type: v.string(),
+  required: v.array(v.string()),
+  properties: v.object({
+    supportedProjectKinds: v.object({
+      items: stringEnumJsonSchema,
+    }),
+  }),
+});
+const blueprintJsonSchemaOutput = v.object({
+  title: v.string(),
+  type: v.string(),
+  required: v.array(v.string()),
+  properties: v.object({
+    projectKind: stringEnumJsonSchema,
+  }),
+});
+const projectionCapabilityJsonSchema = v.looseObject({
+  properties: v.looseObject({
+    kind: v.object({
+      const: v.string(),
+    }),
+  }),
+});
+const presetSourceJsonSchemaOutput = v.object({
+  title: v.string(),
+  type: v.string(),
+  required: v.array(v.string()),
+  properties: v.object({
+    fixtureMatrix: v.object({
+      required: v.array(v.string()),
+      properties: v.object({
+        environmentPreparation: v.object({
+          items: stringEnumJsonSchema,
+        }),
+        checkRequirements: v.object({
+          items: stringEnumJsonSchema,
+        }),
+      }),
+    }),
+    presets: v.object({
+      items: v.object({
+        required: v.array(v.string()),
+        properties: v.object({
+          packageAdditionSupport: stringEnumJsonSchema,
+          projection: v.object({
+            properties: v.object({
+              capabilities: v.object({
+                items: v.object({
+                  oneOf: v.array(projectionCapabilityJsonSchema),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  }),
+});
+
+function parseJsonWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, JSON.parse(text) as unknown);
+}
+
+function validPresetSourceManifest(): PresetSourceManifest {
   return {
     schemaVersion: 1,
     name: "custom-source",
@@ -36,6 +147,28 @@ function validPresetSourceManifest(): any {
   };
 }
 
+function firstPreset(
+  manifest: PresetSourceManifest,
+): PresetSourceManifestPreset {
+  const preset = manifest.presets[0];
+  if (!preset) {
+    throw new Error("Test manifest must contain a preset");
+  }
+
+  return preset;
+}
+
+function firstSharedResource(
+  manifest: PresetSourceManifest,
+): PresetSourceManifestSharedResource {
+  const resource = manifest.sharedResources[0];
+  if (!resource) {
+    throw new Error("Test manifest must contain a shared resource");
+  }
+
+  return resource;
+}
+
 describe("declaration contracts", () => {
   it("lists the built-in preset catalog", async () => {
     const result = await template(["presets"]);
@@ -51,24 +184,14 @@ describe("declaration contracts", () => {
   });
 
   it("prints published JSON Schemas for declarations", async () => {
-    const presetSchema = JSON.parse(
+    const presetSchema = parseJsonWithSchema(
       (await template(["schema", "preset"])).stdout,
-    ) as {
-      title: string;
-      type: string;
-      required: string[];
-      properties: {
-        supportedProjectKinds: { items: { enum: string[] } };
-      };
-    };
-    const blueprintSchema = JSON.parse(
+      presetJsonSchemaOutput,
+    );
+    const blueprintSchema = parseJsonWithSchema(
       (await template(["schema", "blueprint"])).stdout,
-    ) as {
-      title: string;
-      type: string;
-      required: string[];
-      properties: { projectKind: { enum: string[] } };
-    };
+      blueprintJsonSchemaOutput,
+    );
 
     expect(presetSchema).toMatchObject({
       title: "Project Kit Preset File",
@@ -92,30 +215,10 @@ describe("declaration contracts", () => {
   });
 
   it("prints the Preset Source Manifest JSON Schema", async () => {
-    const presetSourceSchema = JSON.parse(
+    const presetSourceSchema = parseJsonWithSchema(
       (await template(["schema", "preset-source"])).stdout,
-    ) as {
-      title: string;
-      type: string;
-      required: string[];
-      properties: {
-        fixtureMatrix: {
-          required: string[];
-          properties: {
-            environmentPreparation: { items: { enum: string[] } };
-            checkRequirements: { items: { enum: string[] } };
-          };
-        };
-        presets: {
-          items: {
-            required: string[];
-            properties: {
-              packageAdditionSupport: { enum: string[] };
-            };
-          };
-        };
-      };
-    };
+      presetSourceJsonSchemaOutput,
+    );
 
     expect(presetSourceSchema).toMatchObject({
       title: "Preset Source Manifest",
@@ -155,11 +258,11 @@ describe("declaration contracts", () => {
         .packageAdditionSupport.enum,
     ).toEqual(["supported", "unsupported"]);
 
-    const capabilitySchemas = (presetSourceSchema as any).properties.presets
-      .items.properties.projection.properties.capabilities.items.oneOf;
+    const capabilitySchemas =
+      presetSourceSchema.properties.presets.items.properties.projection
+        .properties.capabilities.items.oneOf;
     const nodeWorkspaceSchema = capabilitySchemas.find(
-      (schema: any) =>
-        schema.properties.kind.const === "workspace-node-packages",
+      (schema) => schema.properties.kind.const === "workspace-node-packages",
     );
 
     expect(nodeWorkspaceSchema).toMatchObject({
@@ -197,8 +300,10 @@ describe("declaration contracts", () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-cli-"));
     const manifestPath = path.join(workspace, "preset-source.json");
     const manifest = validPresetSourceManifest();
-    manifest.presets[0].source = {
+    firstPreset(manifest).source = {
       files: ["custom-lib/src/index.ts"],
+      roots: [],
+      sharedResources: [],
     };
 
     await mkdir(path.join(workspace, "shared/oxc/node"), { recursive: true });
@@ -208,20 +313,17 @@ describe("declaration contracts", () => {
       "utf8",
     );
 
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset custom-lib source file does not exist: custom-lib/src/index.ts",
-      ),
-    });
+    await expectTemplateFailure(
+      ["preset-source", "validate", manifestPath],
+      "Preset custom-lib source file does not exist: custom-lib/src/index.ts",
+    );
   });
 
   it("rejects Preset Source Manifest path escapes through the CLI", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-cli-"));
     const manifestPath = path.join(workspace, "preset-source.json");
     const manifest = validPresetSourceManifest();
-    manifest.sharedResources[0].path = "../shared/oxc/node";
+    firstSharedResource(manifest).path = "../shared/oxc/node";
 
     await writeFile(
       manifestPath,
@@ -229,13 +331,10 @@ describe("declaration contracts", () => {
       "utf8",
     );
 
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset Source path escapes its source boundary: ../shared/oxc/node",
-      ),
-    });
+    await expectTemplateFailure(
+      ["preset-source", "validate", manifestPath],
+      "Preset Source path escapes its source boundary: ../shared/oxc/node",
+    );
   });
 
   it("advertises pnpm support for the Rust preset task layer", () => {
@@ -335,27 +434,14 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
+    await expectTemplateFailure(
+      ["preset-source", "validate", manifestPath],
+      [
         "$.presets[0].supportedPackageManagers: Duplicate value: pnpm",
-      ),
-    });
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
         "$.presets[0].supportedProjectKinds: Duplicate value: multi-package",
-      ),
-    });
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
         "$.presets[0].features: Duplicate value: strict-typescript",
-      ),
-    });
+      ],
+    );
   });
 
   it("validates the built-in Preset Source Manifest through the CLI", async () => {
@@ -401,13 +487,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset-source", "validate", manifestPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Supported Preset missing-supported must declare a Projection Declaration",
-      ),
-    });
+    await expectTemplateFailure(
+      ["preset-source", "validate", manifestPath],
+      "Supported Preset missing-supported must declare a Projection Declaration",
+    );
   });
 
   it("rejects preset files that claim single-package support in V1", async () => {
@@ -432,13 +515,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "single-package Project Shape is unsupported in V1",
-      ),
-    });
+    await expectTemplateFailure(
+      ["preset", "validate", presetPath],
+      "single-package Project Shape is unsupported in V1",
+    );
   });
 
   it("rejects future built-in preset references in preset files", async () => {
@@ -463,13 +543,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset node-cli is not supported for generation in this version",
-      ),
-    });
+    await expectTemplateFailure(
+      ["preset", "validate", presetPath],
+      "Preset node-cli is not supported for generation in this version",
+    );
   });
 
   it("rejects Post Commands in user Preset Files", async () => {
@@ -500,16 +577,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("Preset file is invalid"),
-    });
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("$.postCommands"),
-    });
+    await expectTemplateFailure(
+      ["preset", "validate", presetPath],
+      ["Preset file is invalid", "$.postCommands"],
+    );
   });
 
   it("validates a project blueprint against the built-in preset catalog", async () => {
@@ -618,17 +689,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("Preset file is invalid"),
-    });
-
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("$.schemaVersion"),
-    });
+    await expectTemplateFailure(
+      ["preset", "validate", presetPath],
+      ["Preset file is invalid", "$.schemaVersion"],
+    );
   });
 
   it("reports semantic blueprint failures before generation", async () => {
@@ -653,18 +717,13 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["blueprint", "validate", blueprintPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
+    await expectTemplateFailure(
+      ["blueprint", "validate", blueprintPath],
+      [
         "strict-typescript is not supported by preset ts-app",
-      ),
-    });
-    await expect(
-      template(["blueprint", "validate", blueprintPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("$.packages.name"),
-    });
+        "$.packages.name",
+      ],
+    );
   });
 
   it("rejects single-package blueprints because V1 only supports workspace monorepos", async () => {
@@ -688,13 +747,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["blueprint", "validate", blueprintPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "single-package Project Shape is unsupported in V1",
-      ),
-    });
+    await expectTemplateFailure(
+      ["blueprint", "validate", blueprintPath],
+      "single-package Project Shape is unsupported in V1",
+    );
   });
 
   it("rejects future built-in presets in project blueprints", async () => {
@@ -718,13 +774,10 @@ describe("declaration contracts", () => {
       )}\n`,
     );
 
-    await expect(
-      template(["blueprint", "validate", blueprintPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "Preset ts-app is not supported for generation in this version",
-      ),
-    });
+    await expectTemplateFailure(
+      ["blueprint", "validate", blueprintPath],
+      "Preset ts-app is not supported for generation in this version",
+    );
   });
 
   it("accepts only JSON declaration files", async () => {
@@ -732,10 +785,9 @@ describe("declaration contracts", () => {
     const presetPath = path.join(workspace, "preset.yaml");
     await writeFile(presetPath, "schemaVersion: 1\n");
 
-    await expect(
-      template(["preset", "validate", presetPath]),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("Declaration files must be JSON"),
-    });
+    await expectTemplateFailure(
+      ["preset", "validate", presetPath],
+      "Declaration files must be JSON",
+    );
   });
 });

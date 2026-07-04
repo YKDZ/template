@@ -16,9 +16,5 @@
     "target": "es2023",
     "verbatimModuleSyntax": true
   },
-  "include": [
-    "oxfmt.config.ts",
-    "node/oxlint.config.ts",
-    "vue/oxlint.config.ts"
-  ]
+  "include": ["oxlint.config.ts", "oxfmt.config.ts"]
 }

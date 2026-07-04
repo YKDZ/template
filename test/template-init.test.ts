@@ -21,6 +21,7 @@ import {
 } from "@ykdz/template-core/editor-customization";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
 import { execa } from "execa";
+import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
@@ -57,6 +58,127 @@ function jsonDataUrl(value: unknown): string {
   return `data:application/json,${encodeURIComponent(JSON.stringify(value))}`;
 }
 
+const workspaceCatalogSchema = v.object({
+  catalog: v.optional(v.record(v.string(), v.string())),
+});
+const workspaceCatalogRequiredSchema = v.object({
+  catalog: v.record(v.string(), v.string()),
+});
+const workspacePackagesCatalogSchema = v.object({
+  packages: v.array(v.string()),
+  catalog: v.record(v.string(), v.string()),
+});
+const initJsonOutputSchema = v.looseObject({
+  command: v.optional(v.string()),
+  dryRun: v.optional(v.boolean()),
+  targetDir: v.string(),
+  blueprint: v.looseObject({
+    preset: v.string(),
+    packageManager: v.optional(v.string()),
+    packages: v.optional(
+      v.array(v.object({ name: v.string(), path: v.string() })),
+    ),
+  }),
+  toolchain: v.looseObject({
+    nodeLtsMajor: v.string(),
+    packageManagerPin: v.string(),
+    source: v.optional(v.string()),
+    diagnostics: v.optional(v.array(v.string())),
+  }),
+  nextSteps: v.array(
+    v.looseObject({
+      id: v.string(),
+      display: v.string(),
+      command: v.optional(v.string()),
+      args: v.optional(v.array(v.string())),
+      cwd: v.optional(v.string()),
+      machineVerifiable: v.optional(v.boolean()),
+    }),
+  ),
+});
+const nodeDevcontainerSchema = v.looseObject({
+  name: v.string(),
+  build: v.object({
+    dockerfile: v.string(),
+    args: v.object({
+      NODE_VERSION: v.string(),
+      PACKAGE_MANAGER_PIN: v.string(),
+    }),
+  }),
+  features: v.optional(v.record(v.string(), v.unknown())),
+  customizations: v.object({
+    vscode: v.object({
+      extensions: v.array(v.string()),
+      settings: v.record(v.string(), v.unknown()),
+    }),
+  }),
+  postCreateCommand: v.optional(v.string()),
+});
+
+function parseJsonWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, JSON.parse(text) as unknown);
+}
+
+function parseYamlWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, parseYaml(text) as unknown);
+}
+
+async function expectCommandFailure(
+  command: Promise<unknown>,
+  expected: { readonly stderr?: string; readonly stdout?: string | RegExp },
+): Promise<void> {
+  try {
+    await command;
+  } catch (error) {
+    if (expected.stderr !== undefined) {
+      expect(commandErrorOutput(error, "stderr")).toContain(expected.stderr);
+    }
+
+    if (typeof expected.stdout === "string") {
+      expect(commandErrorOutput(error, "stdout")).toContain(expected.stdout);
+    } else if (expected.stdout !== undefined) {
+      expect(commandErrorOutput(error, "stdout")).toMatch(expected.stdout);
+    }
+
+    return;
+  }
+
+  throw new Error("Expected command to fail");
+}
+
+function commandErrorOutput(
+  error: unknown,
+  stream: "stderr" | "stdout",
+): string {
+  if (typeof error !== "object" || error === null) {
+    throw error;
+  }
+
+  if (
+    stream === "stderr" &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+  ) {
+    return error.stderr;
+  }
+
+  if (
+    stream === "stdout" &&
+    "stdout" in error &&
+    typeof error.stdout === "string"
+  ) {
+    return error.stdout;
+  }
+
+  throw error;
+}
+
 function toolchainEnvWithPnpm(version: string): Record<string, string> {
   return {
     TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
@@ -73,7 +195,9 @@ function toolchainEnvWithPnpm(version: string): Record<string, string> {
 }
 
 async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+  const parsed: unknown = JSON.parse(await readFile(filePath, "utf8"));
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Large generated-fixture tests still use typed JSON reads; schema-backed reads are being introduced around high-risk assertions.
+  return parsed as T;
 }
 
 async function writeExecutable(
@@ -103,7 +227,7 @@ async function generatedFilePaths(
     files.push(relativePath);
   }
 
-  return files.sort();
+  return files.toSorted();
 }
 
 async function generatePresetProject(preset: string): Promise<string> {
@@ -170,7 +294,7 @@ function manifestCatalogReferences(packageJson: {
   return [
     ...Object.keys(packageJson.dependencies ?? {}),
     ...Object.keys(packageJson.devDependencies ?? {}),
-  ].sort();
+  ].toSorted();
 }
 
 function expectCatalogDependencySpecifiers(packageJson: {
@@ -213,9 +337,7 @@ function editorCustomizationCapabilitiesForPreset(
 function catalogFromWorkspaceYaml(
   workspaceYaml: string,
 ): Record<string, string> {
-  const parsed = parseYaml(workspaceYaml) as {
-    catalog?: Record<string, string>;
-  };
+  const parsed = parseYamlWithSchema(workspaceYaml, workspaceCatalogSchema);
 
   return parsed.catalog ?? {};
 }
@@ -249,6 +371,7 @@ describe("template init", () => {
       hono: "^4.12.27",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
+      "oxlint-tsgolint": "^0.24.0",
       "tsc-alias": "^1.8.17",
       turbo: "^2.10.2",
       typescript: "^6.0.3",
@@ -267,6 +390,7 @@ describe("template init", () => {
       "@types/node": "^24.0.0",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
+      "oxlint-tsgolint": "^0.24.0",
       turbo: "^2.10.2",
       typescript: "^6.0.3",
       valibot: "^1.4.2",
@@ -300,10 +424,10 @@ describe("template init", () => {
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
     );
-    const workspace = parseYaml(workspaceYaml) as {
-      packages: string[];
-      catalog: Record<string, string>;
-    };
+    const workspace = parseYamlWithSchema(
+      workspaceYaml,
+      workspacePackagesCatalogSchema,
+    );
     const rootTsconfig = await readJson<{
       files: string[];
       references?: Array<{ path: string }>;
@@ -341,6 +465,7 @@ describe("template init", () => {
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
     });
@@ -352,9 +477,9 @@ describe("template init", () => {
         "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
       "format:write":
         "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
       "lint:fix":
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
@@ -395,6 +520,7 @@ describe("template init", () => {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       typescript: "catalog:",
     });
     expect(libraryPackageJson.devDependencies).not.toHaveProperty("tsc-alias");
@@ -449,9 +575,10 @@ describe("template init", () => {
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
     );
-    const workspace = parseYaml(workspaceYaml) as {
-      catalog: Record<string, string>;
-    };
+    const workspace = parseYamlWithSchema(
+      workspaceYaml,
+      workspaceCatalogRequiredSchema,
+    );
     const dependabot = await readFile(
       path.join(projectDir, ".github/dependabot.yml"),
       "utf8",
@@ -465,6 +592,7 @@ describe("template init", () => {
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
     });
@@ -478,6 +606,7 @@ describe("template init", () => {
       "@types/node": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       typescript: "catalog:",
     });
     expect(libraryPackageJson.exports).toEqual({
@@ -497,13 +626,13 @@ describe("template init", () => {
 
     expectCatalogDependencySpecifiers(rootPackageJson);
     expectCatalogDependencySpecifiers(libraryPackageJson);
-    expect(Object.keys(workspace.catalog).sort()).toEqual(
+    expect(Object.keys(workspace.catalog).toSorted()).toEqual(
       [
         ...new Set([
           ...manifestCatalogReferences(rootPackageJson),
           ...manifestCatalogReferences(libraryPackageJson),
         ]),
-      ].sort(),
+      ].toSorted(),
     );
 
     expect(rootPackageJson.engines.node).toBe("24");
@@ -537,6 +666,7 @@ describe("template init", () => {
       "@vueuse/core": "^14.3.0",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
+      "oxlint-tsgolint": "^0.24.0",
       pinia: "^3.0.4",
       tailwindcss: "^4.3.2",
       turbo: "^2.10.2",
@@ -568,6 +698,7 @@ describe("template init", () => {
       hono: "^4.12.27",
       oxfmt: "^0.57.0",
       oxlint: "^1.72.0",
+      "oxlint-tsgolint": "^0.24.0",
       pinia: "^3.0.4",
       tailwindcss: "^4.3.2",
       "tsc-alias": "^1.8.17",
@@ -933,24 +1064,10 @@ describe("template init", () => {
       path.join(projectDir, ".devcontainer/devcontainer.json"),
       "utf8",
     );
-    const devcontainer = JSON.parse(devcontainerText) as {
-      name: string;
-      build: {
-        dockerfile: string;
-        args: {
-          NODE_VERSION: string;
-          PACKAGE_MANAGER_PIN: string;
-        };
-      };
-      features?: Record<string, unknown>;
-      customizations: {
-        vscode: {
-          extensions: string[];
-          settings: Record<string, unknown>;
-        };
-      };
-      postCreateCommand?: string;
-    };
+    const devcontainer = parseJsonWithSchema(
+      devcontainerText,
+      nodeDevcontainerSchema,
+    );
     const dockerfile = await readFile(
       path.join(projectDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -1117,7 +1234,7 @@ describe("template init", () => {
           "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
         );
         expect(rootPackageJson.scripts.lint).toBe(
-          "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+          "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
         );
       }
 
@@ -1132,10 +1249,10 @@ describe("template init", () => {
           "oxfmt --write --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts.lint).toBe(
-          "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+          "oxlint --config ../../oxlint.config.ts .",
         );
         expect(packageJson.scripts["lint:fix"]).toBe(
-          "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+          "oxlint --config ../../oxlint.config.ts . --fix",
         );
         expect(files).not.toContain(`${packageDir}/oxlint.config.ts`);
         expect(files).not.toContain(`${packageDir}/oxfmt.config.ts`);
@@ -1199,12 +1316,14 @@ describe("template init", () => {
       path.join(projectDir, ".template/generated-by.json"),
     );
     const templateFiles = await readdir(path.join(projectDir, ".template"));
-    const generatedWorkspace = parseYaml(workspaceYaml) as {
-      catalog: Record<string, string>;
-    };
-    const templateWorkspace = parseYaml(rootWorkspaceYaml) as {
-      catalog: Record<string, string>;
-    };
+    const generatedWorkspace = parseYamlWithSchema(
+      workspaceYaml,
+      workspaceCatalogRequiredSchema,
+    );
+    const templateWorkspace = parseYamlWithSchema(
+      rootWorkspaceYaml,
+      workspaceCatalogRequiredSchema,
+    );
 
     const projection = findBuiltInPresetProjection("ts-lib");
     const expectedPlan = projection!.project(
@@ -1253,6 +1372,7 @@ describe("template init", () => {
       "@types/node": templateWorkspace.catalog["@types/node"],
       oxfmt: templateWorkspace.catalog.oxfmt,
       oxlint: templateWorkspace.catalog.oxlint,
+      "oxlint-tsgolint": templateWorkspace.catalog["oxlint-tsgolint"],
       turbo: templateWorkspace.catalog.turbo,
       typescript: templateWorkspace.catalog.typescript,
       valibot: templateWorkspace.catalog.valibot,
@@ -1355,52 +1475,19 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const output = JSON.parse(result.stdout) as {
-      command: string;
-      dryRun: boolean;
-      targetDir: string;
-      blueprint: {
-        preset: string;
-        packageManager: string;
-        packages: Array<{ name: string; path: string }>;
-      };
-      toolchain: {
-        nodeLtsMajor: string;
-        packageManagerPin: string;
-        source: string;
-      };
-      nextSteps: Array<{
-        id: string;
-        display: string;
-        command: string;
-        args: string[];
-        cwd: string;
-      }>;
-    };
+    const output = parseJsonWithSchema(result.stdout, initJsonOutputSchema);
 
-    expect(output).toEqual(
-      expect.objectContaining({
-        command: "init",
-        dryRun: true,
-        targetDir: projectDir,
-      }),
-    );
-    expect(output.blueprint).toEqual(
-      expect.objectContaining({
-        preset: "vue-hono-app",
-        packageManager: "pnpm",
-        packages: [
-          { name: "@custom-scope/web", path: "apps/web" },
-          { name: "@custom-scope/api", path: "apps/api" },
-        ],
-      }),
-    );
-    expect(output.toolchain).toEqual(
-      expect.objectContaining({
-        nodeLtsMajor: expect.any(String),
-        packageManagerPin: expect.stringMatching(/^pnpm@/),
-      }),
-    );
+    expect(output.command).toBe("init");
+    expect(output.dryRun).toBe(true);
+    expect(output.targetDir).toBe(projectDir);
+    expect(output.blueprint.preset).toBe("vue-hono-app");
+    expect(output.blueprint.packageManager).toBe("pnpm");
+    expect(output.blueprint.packages).toEqual([
+      { name: "@custom-scope/web", path: "apps/web" },
+      { name: "@custom-scope/api", path: "apps/api" },
+    ]);
+    expect(output.toolchain.nodeLtsMajor.length).toBeGreaterThan(0);
+    expect(output.toolchain.packageManagerPin).toMatch(/^pnpm@/);
     expect(output.nextSteps.map((step) => step.display)).toEqual([
       `cd ${projectDir}`,
       "pnpm install",
@@ -1455,33 +1542,15 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const output = JSON.parse(result.stdout) as {
-      command: string;
-      dryRun: boolean;
-      targetDir: string;
-      blueprint: { preset: string; packageManager: string };
-      toolchain: {
-        nodeLtsMajor: string;
-        packageManagerPin: string;
-      };
-      nextSteps: Array<{ id: string; display: string }>;
-    };
+    const output = parseJsonWithSchema(result.stdout, initJsonOutputSchema);
 
-    expect(output).toEqual(
-      expect.objectContaining({
-        command: "init",
-        dryRun: true,
-        targetDir: projectDir,
-        blueprint: expect.objectContaining({
-          preset: "rust-bin",
-          packageManager: "pnpm",
-        }),
-        toolchain: expect.objectContaining({
-          nodeLtsMajor: expect.any(String),
-          packageManagerPin: expect.stringMatching(/^pnpm@/),
-        }),
-      }),
-    );
+    expect(output.command).toBe("init");
+    expect(output.dryRun).toBe(true);
+    expect(output.targetDir).toBe(projectDir);
+    expect(output.blueprint.preset).toBe("rust-bin");
+    expect(output.blueprint.packageManager).toBe("pnpm");
+    expect(output.toolchain.nodeLtsMajor.length).toBeGreaterThan(0);
+    expect(output.toolchain.packageManagerPin).toMatch(/^pnpm@/);
     expect(output.nextSteps.map((step) => step.display)).toEqual([
       `cd ${projectDir}`,
       "pnpm install",
@@ -1512,90 +1581,79 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    const output = JSON.parse(result.stdout) as {
-      command: string;
-      dryRun: boolean;
-      targetDir: string;
-      blueprint: { preset: string; packageManager: string };
-      toolchain: {
-        nodeLtsMajor: string;
-        packageManagerPin: string;
-        source: string;
-        diagnostics: string[];
-      };
-      nextSteps: Array<{
-        id: string;
-        display: string;
-        command: string;
-        args: string[];
-        cwd: string;
-      }>;
-    };
+    const output = parseJsonWithSchema(result.stdout, initJsonOutputSchema);
 
-    expect(output).toEqual(
-      expect.objectContaining({
-        command: "init",
-        dryRun: false,
-        targetDir: projectDir,
-        blueprint: expect.objectContaining({
-          preset: "ts-lib",
-          packageManager: "pnpm",
-        }),
-      }),
-    );
-    expect(output.nextSteps).toEqual([
-      expect.objectContaining({
+    expect(output.command).toBe("init");
+    expect(output.dryRun).toBe(false);
+    expect(output.targetDir).toBe(projectDir);
+    expect(output.blueprint.preset).toBe("ts-lib");
+    expect(output.blueprint.packageManager).toBe("pnpm");
+    expect(
+      output.nextSteps.map((step) => ({
+        id: step.id,
+        display: step.display,
+        command: step.command,
+        args: step.args,
+        cwd: step.cwd,
+        machineVerifiable: step.machineVerifiable,
+      })),
+    ).toEqual([
+      {
         id: "enter-project",
         display: `cd ${projectDir}`,
         command: "cd",
         args: [projectDir],
         cwd: ".",
-      }),
-      expect.objectContaining({
+        machineVerifiable: false,
+      },
+      {
         id: "install-dependencies",
         display: "pnpm install",
         command: "pnpm",
         args: ["install"],
         cwd: projectDir,
-      }),
-      expect.objectContaining({
+        machineVerifiable: true,
+      },
+      {
         id: "run-fix",
         display: "pnpm run fix",
         command: "pnpm",
         args: ["run", "fix"],
         cwd: projectDir,
-      }),
-      expect.objectContaining({
+        machineVerifiable: true,
+      },
+      {
         id: "run-root-check",
         display: "pnpm run check",
         command: "pnpm",
         args: ["run", "check"],
         cwd: projectDir,
-      }),
-      expect.objectContaining({
+        machineVerifiable: true,
+      },
+      {
         id: "optional-git-init",
         display: "git init",
         command: "git",
         args: ["init"],
         cwd: projectDir,
         machineVerifiable: false,
-      }),
-      expect.objectContaining({
+      },
+      {
         id: "optional-git-add",
         display: "git add .",
         command: "git",
         args: ["add", "."],
         cwd: projectDir,
         machineVerifiable: false,
-      }),
-      expect.objectContaining({
+      },
+      {
         id: "optional-git-commit",
         display: 'git commit -m "Initial commit"',
         command: "git",
         args: ["commit", "-m", "Initial commit"],
         cwd: projectDir,
         machineVerifiable: false,
-      }),
+      },
     ]);
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
@@ -1635,25 +1693,24 @@ describe("template init", () => {
       { cwd: workspace },
     );
 
-    const output = JSON.parse(result.stdout) as {
-      targetDir: string;
-      nextSteps: Array<{
-        id: string;
-        display: string;
-        args: string[];
-        cwd: string;
-      }>;
-    };
+    const output = parseJsonWithSchema(result.stdout, initJsonOutputSchema);
 
     expect(output.targetDir).toBe("demo-lib");
-    expect(output.nextSteps[0]).toEqual(
-      expect.objectContaining({
-        id: "enter-project",
-        display: "cd demo-lib",
-        args: ["demo-lib"],
-        cwd: ".",
-      }),
-    );
+    const firstNextStep = output.nextSteps[0];
+    expect(firstNextStep).toBeDefined();
+    expect(
+      firstNextStep && {
+        id: firstNextStep.id,
+        display: firstNextStep.display,
+        args: firstNextStep.args,
+        cwd: firstNextStep.cwd,
+      },
+    ).toEqual({
+      id: "enter-project",
+      display: "cd demo-lib",
+      args: ["demo-lib"],
+      cwd: ".",
+    });
     expect(output.nextSteps.slice(1).map((step) => step.cwd)).toEqual([
       "demo-lib",
       "demo-lib",
@@ -1693,14 +1750,7 @@ describe("template init", () => {
       },
     );
 
-    const output = JSON.parse(result.stdout) as {
-      toolchain: {
-        nodeLtsMajor: string;
-        packageManagerPin: string;
-        source: string;
-        diagnostics: string[];
-      };
-    };
+    const output = parseJsonWithSchema(result.stdout, initJsonOutputSchema);
     const generationRecord = await readJson<{
       toolchain: {
         nodeLtsMajor: string;
@@ -1864,7 +1914,7 @@ describe("template init", () => {
     );
     const projectDir = path.join(workspace, "demo-lib");
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -1878,9 +1928,8 @@ describe("template init", () => {
         ],
         { cwd: repoRoot, timeout: 5_000 },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("Non-interactive init requires --yes"),
-    });
+      { stderr: "Non-interactive init requires --yes" },
+    );
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -1979,7 +2028,7 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
     const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "bash",
         [
@@ -1995,11 +2044,8 @@ describe("template init", () => {
         ],
         { cwd: repoRoot },
       ),
-    ).rejects.toMatchObject({
-      stdout: expect.stringMatching(
-        /Generate this project\? \[y\/N\][\s\S]*Init cancelled/,
-      ),
-    });
+      { stdout: /Generate this project\? \[y\/N\][\s\S]*Init cancelled/ },
+    );
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -2191,7 +2237,7 @@ describe("template init", () => {
       "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",
@@ -2201,6 +2247,7 @@ describe("template init", () => {
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
     });
@@ -2217,7 +2264,7 @@ describe("template init", () => {
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
     expect(apiPackageJson.scripts.lint).toBe(
-      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "oxlint --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.scripts.start).toBe("node dist/server.js");
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
@@ -2233,10 +2280,10 @@ describe("template init", () => {
       },
     });
 
-    const parsedWorkspace = parseYaml(workspaceYaml) as {
-      packages: string[];
-      catalog: Record<string, string>;
-    };
+    const parsedWorkspace = parseYamlWithSchema(
+      workspaceYaml,
+      workspacePackagesCatalogSchema,
+    );
     expect(parsedWorkspace.packages).toEqual(["apps/*"]);
     expect(parsedWorkspace.catalog).toHaveProperty("turbo");
     expect(workspaceYaml).toContain("hono:");
@@ -2428,9 +2475,7 @@ describe("template init", () => {
     });
     expect(rustPackageJson.scripts.fix).not.toContain("clippy");
     expect(workspaceYaml).toContain("packages:\n  - packages/*\n");
-    expect(catalogFromWorkspaceYaml(workspaceYaml)).toEqual({
-      turbo: expect.stringMatching(/^\^/),
-    });
+    expect(catalogFromWorkspaceYaml(workspaceYaml).turbo).toMatch(/^\^/);
 
     expect(cargoToml).toContain('name = "demo-rust"');
     expect(cargoToml).toContain('edition = "2024"');
@@ -2683,7 +2728,7 @@ describe("template init", () => {
       "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",
@@ -2691,6 +2736,7 @@ describe("template init", () => {
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
     });
@@ -2707,7 +2753,7 @@ describe("template init", () => {
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
     expect(webPackageJson.scripts.lint).toBe(
-      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "oxlint --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.scripts["test:e2e"]).toBe(
       "pnpm run build && playwright test",
@@ -2745,10 +2791,10 @@ describe("template init", () => {
       );
     }
 
-    const parsedWorkspace = parseYaml(workspaceYaml) as {
-      packages: string[];
-      catalog: Record<string, string>;
-    };
+    const parsedWorkspace = parseYamlWithSchema(
+      workspaceYaml,
+      workspacePackagesCatalogSchema,
+    );
     expect(parsedWorkspace.packages).toEqual(["apps/*"]);
     expect(parsedWorkspace.catalog).toHaveProperty("turbo");
     expect(workspaceYaml).toContain("vue:");
@@ -2992,7 +3038,7 @@ describe("template init", () => {
       "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",
@@ -3002,6 +3048,7 @@ describe("template init", () => {
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
       oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
     });
@@ -3026,7 +3073,7 @@ describe("template init", () => {
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
     expect(apiPackageJson.scripts.lint).toBe(
-      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "oxlint --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
     expect(apiPackageJson.dependencies).not.toHaveProperty("vue");
@@ -3043,7 +3090,7 @@ describe("template init", () => {
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
     expect(webPackageJson.scripts.lint).toBe(
-      "oxlint --config ../../oxlint.config.ts . --deny-warnings",
+      "oxlint --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe(
       "workspace:*",
@@ -3255,7 +3302,7 @@ describe("template init", () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-scope-"));
     const projectDir = path.join(workspace, "demo-fullstack");
 
-    await expect(
+    await expectCommandFailure(
       execa(
         "pnpm",
         [
@@ -3272,11 +3319,8 @@ describe("template init", () => {
         ],
         { cwd: repoRoot },
       ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining(
-        "--scope must be a valid npm scope without whitespace",
-      ),
-    });
+      { stderr: "--scope must be a valid npm scope without whitespace" },
+    );
 
     await expect(stat(projectDir)).rejects.toMatchObject({ code: "ENOENT" });
   });

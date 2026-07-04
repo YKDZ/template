@@ -598,11 +598,12 @@ describe("renderer", () => {
           {
             kind: "replaceAnchors",
             path: "src/index.ts",
+            // @ts-expect-error This test exercises the runtime guard for unsupported languages.
             language: "javascript",
             replacements: {
               exports: "export const generated = true;",
             },
-          } as never,
+          },
         ],
       }),
     ).rejects.toThrow("Checked Transform Anchor only supports TypeScript");
@@ -660,7 +661,8 @@ describe("renderer", () => {
         renderProject({
           sourceRoot,
           targetRoot,
-          operations: [operation as never],
+          // @ts-expect-error This test exercises the runtime guard for unsupported operations.
+          operations: [operation],
         }),
       ).rejects.toThrow(`Unsupported renderer operation: ${operation.kind}`);
     }

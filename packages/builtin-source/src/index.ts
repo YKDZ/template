@@ -58,24 +58,28 @@ function readPathExists(filePath: string): boolean {
     readFileSync(filePath);
     return true;
   } catch (error: unknown) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "EISDIR"
-    ) {
+    if (errorCode(error) === "EISDIR") {
       return true;
     }
 
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
+    if (errorCode(error) === "ENOENT") {
       return false;
     }
 
     return false;
   }
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+
+  return undefined;
 }
 
 export function builtInPresetProjectionSourceRoots(): PresetProjectionSourceRoots {

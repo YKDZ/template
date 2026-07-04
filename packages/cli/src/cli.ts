@@ -48,13 +48,13 @@ type InitOptions = {
   yes: boolean;
   dryRun: boolean;
   json: boolean;
-  scope?: string;
+  scope?: string | undefined;
 };
 
 type AddPackageOptions = {
   preset: string;
   name: string;
-  path?: string;
+  path?: string | undefined;
   linkFrom: readonly string[];
 };
 
@@ -421,9 +421,9 @@ function printInitComplete(
       dryRun: false,
       targetDir: options.dir,
       blueprint,
-      toolchain: generationContext
-        ? toolchainReport(generationContext.toolchain)
-        : undefined,
+      ...(generationContext
+        ? { toolchain: toolchainReport(generationContext.toolchain) }
+        : {}),
       nextSteps,
     } satisfies InitJsonOutput);
     return;
@@ -448,7 +448,7 @@ function printInitComplete(
 }
 
 function isInteractiveTerminal(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  return process.stdin.isTTY && process.stdout.isTTY;
 }
 
 async function confirmInit(
@@ -676,9 +676,9 @@ async function main(args: string[]): Promise<void> {
           dryRun: true,
           targetDir: options.dir,
           blueprint,
-          toolchain: generationContext
-            ? toolchainReport(generationContext.toolchain)
-            : undefined,
+          ...(generationContext
+            ? { toolchain: toolchainReport(generationContext.toolchain) }
+            : {}),
           nextSteps,
         } satisfies InitJsonOutput);
         return;

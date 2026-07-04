@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as v from "valibot";
+
 export type EditorCustomizationCapability =
   | "oxc-format-lint"
   | "rust-tooling"
@@ -48,6 +50,20 @@ const defaultOxcConfigPaths = {
   lint: "./oxlint.config.ts",
 };
 
+const capabilityProjectionSchema = v.object({
+  extensions: v.array(v.string()),
+  settings: v.record(v.string(), v.unknown()),
+});
+const editorCustomizationDeclarationsSchema = v.object({
+  capabilities: v.object({
+    "oxc-format-lint": capabilityProjectionSchema,
+    vue: capabilityProjectionSchema,
+    tailwind: capabilityProjectionSchema,
+    "rust-tooling": capabilityProjectionSchema,
+    vitest: capabilityProjectionSchema,
+  }),
+});
+
 const declarations = loadEditorCustomizationDeclarations();
 
 function editorCustomizationDeclarationPath(): string {
@@ -88,62 +104,21 @@ function editorCustomizationDeclarationPath(): string {
   return declarationPath;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function assertCapabilityProjection(
-  capability: EditorCustomizationCapability,
-  value: unknown,
-): asserts value is CapabilityProjection {
-  if (!isRecord(value)) {
-    throw new Error(`Editor customization ${capability} must be an object`);
-  }
-
-  const extensions = value.extensions;
-  const settings = value.settings;
-
-  if (
-    !Array.isArray(extensions) ||
-    extensions.some((extension) => typeof extension !== "string")
-  ) {
-    throw new Error(
-      `Editor customization ${capability} must declare string extensions`,
-    );
-  }
-
-  if (!isRecord(settings)) {
-    throw new Error(
-      `Editor customization ${capability} must declare object settings`,
-    );
-  }
-}
-
 function loadEditorCustomizationDeclarations(): EditorCustomizationDeclarations {
   const source = JSON.parse(
     readFileSync(editorCustomizationDeclarationPath(), "utf8"),
   ) as unknown;
+  const result = v.safeParse(editorCustomizationDeclarationsSchema, source);
 
-  if (!isRecord(source) || !isRecord(source.capabilities)) {
+  if (!result.success) {
     throw new Error(
-      "Editor customization declarations must contain capabilities",
+      `Editor customization declarations are invalid: ${result.issues
+        .map((issue) => issue.message)
+        .join("; ")}`,
     );
   }
 
-  const capabilities = source.capabilities;
-
-  for (const capability of capabilityOrder) {
-    assertCapabilityProjection(capability, capabilities[capability]);
-  }
-
-  return {
-    capabilities: Object.fromEntries(
-      capabilityOrder.map((capability) => [
-        capability,
-        capabilities[capability],
-      ]),
-    ) as Record<EditorCustomizationCapability, CapabilityProjection>,
-  };
+  return result.output;
 }
 
 function oxcConfigPathSettings(

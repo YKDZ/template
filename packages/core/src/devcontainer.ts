@@ -148,7 +148,9 @@ function checkedDockerfileFragment(name: string): string {
 
 function checkedNodePnpmDockerfile(
   options: {
-    readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
+    readonly additionalLayers?:
+      | readonly DevelopmentContainerCapabilityLayer[]
+      | undefined;
   } = {},
 ): string {
   return composeDevelopmentContainerDockerfile({
@@ -180,7 +182,9 @@ function checkedNodePnpmDockerfile(
 
 function checkedNodePnpmDockerfileFragments(
   options: {
-    readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
+    readonly additionalLayers?:
+      | readonly DevelopmentContainerCapabilityLayer[]
+      | undefined;
   } = {},
 ): WriteTextFromFragmentsOperation["fragments"] {
   return [
@@ -229,7 +233,7 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
   readonly extensions: readonly string[];
-  readonly settings?: Record<string, unknown>;
+  readonly settings?: Record<string, unknown> | undefined;
 }): DevelopmentContainerPlan {
   return {
     devcontainer: {
@@ -261,10 +265,12 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
 export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
-  readonly additionalLayers?: readonly DevelopmentContainerCapabilityLayer[];
+  readonly additionalLayers?:
+    | readonly DevelopmentContainerCapabilityLayer[]
+    | undefined;
   readonly extensions: readonly string[];
-  readonly settings?: Record<string, unknown>;
-  readonly mounts?: readonly string[];
+  readonly settings?: Record<string, unknown> | undefined;
+  readonly mounts?: readonly string[] | undefined;
 }): DevelopmentContainerPlan {
   return {
     devcontainer: {
@@ -304,7 +310,7 @@ export function dockerfileFirstRustPnpmDevcontainer(options: {
   readonly nodeLayer: DevelopmentContainerNodePnpmLayer;
   readonly rustLayer: DevelopmentContainerRustLayer;
   readonly extensions: readonly string[];
-  readonly settings?: Record<string, unknown>;
+  readonly settings?: Record<string, unknown> | undefined;
 }): DevelopmentContainerPlan {
   return checkedDockerfileFirstNodePnpmDevcontainer({
     name: options.name,

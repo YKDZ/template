@@ -18,17 +18,17 @@ export type ResolvedToolchainVersions = {
 };
 
 export type ResolveToolchainVersionsOptions = {
-  readonly source?: ToolchainResolutionSource | "auto";
-  readonly fetchJson?: (url: string) => Promise<unknown>;
-  readonly nodeReleaseIndexUrl?: string;
-  readonly pnpmRegistryUrl?: string;
+  readonly source?: ToolchainResolutionSource | "auto" | undefined;
+  readonly fetchJson?: ((url: string) => Promise<unknown>) | undefined;
+  readonly nodeReleaseIndexUrl?: string | undefined;
+  readonly pnpmRegistryUrl?: string | undefined;
 };
 
 export const nodeReleaseIndexUrl = "https://nodejs.org/dist/index.json";
 export const pnpmRegistryUrl = "https://registry.npmjs.org/pnpm";
 
 type OnlineToolchainResolutionContractOptions = {
-  readonly fetchJson?: (url: string) => Promise<unknown>;
+  readonly fetchJson?: ((url: string) => Promise<unknown>) | undefined;
 };
 
 export type OnlineToolchainResolutionContractResult = {
@@ -219,16 +219,14 @@ function parsePnpmRegistryMetadata(value: unknown): PnpmRegistryMetadata {
       continue;
     }
 
-    versions[version] = {
-      engines: isRecord(metadata.engines)
-        ? {
-            node:
-              typeof metadata.engines.node === "string"
-                ? metadata.engines.node
-                : undefined,
-          }
-        : undefined,
-    };
+    const nodeRange = isRecord(metadata.engines)
+      ? metadata.engines.node
+      : undefined;
+    versions[version] = isRecord(metadata.engines)
+      ? {
+          engines: typeof nodeRange === "string" ? { node: nodeRange } : {},
+        }
+      : {};
   }
 
   return { versions };
@@ -246,7 +244,7 @@ function latestCompatiblePnpmVersion(
       nodeSatisfiesRange(nodeMajor, packageMetadata.engines?.node),
     )
     .map(([version]) => version)
-    .sort(compareSemver);
+    .toSorted(compareSemver);
 
   const latest = candidates.at(-1);
   if (!latest) {

@@ -4,6 +4,8 @@ coverage
 .template
 .project-kit
 .pnpm-store
+.turbo
+packages/**/.turbo
 .agents
 .scratch
 templates/**/node_modules

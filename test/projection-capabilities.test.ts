@@ -16,6 +16,7 @@ import {
   validateProjectionCapabilities,
 } from "@ykdz/template-core/projection-capabilities";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import * as v from "valibot";
 
 const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
   capabilities: [
@@ -85,14 +86,38 @@ async function tsLibContext() {
   };
 }
 
-async function readJson(filePath: string): Promise<any> {
-  return JSON.parse(await readFile(filePath, "utf8")) as unknown;
+const jsonObjectSchema = v.record(v.string(), v.unknown());
+const packageJsonSchema = v.looseObject({
+  scripts: v.record(v.string(), v.string()),
+});
+
+function parseJsonWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, JSON.parse(text) as unknown);
+}
+
+async function readJson(filePath: string): Promise<Record<string, unknown>> {
+  return parseJsonWithSchema(
+    await readFile(filePath, "utf8"),
+    jsonObjectSchema,
+  );
+}
+
+async function readPackageJson(
+  filePath: string,
+): Promise<v.InferOutput<typeof packageJsonSchema>> {
+  return parseJsonWithSchema(
+    await readFile(filePath, "utf8"),
+    packageJsonSchema,
+  );
 }
 
 async function expectFile(pathName: string): Promise<void> {
-  await expect(stat(pathName)).resolves.toMatchObject({
-    size: expect.any(Number),
-  });
+  const fileStat = await stat(pathName);
+
+  expect(typeof fileStat.size).toBe("number");
 }
 
 describe("Projection Capability declarations", () => {
@@ -230,10 +255,10 @@ describe("Projection Capability declarations", () => {
       operations: [...plan.operations],
     });
 
-    const rootPackageJson = await readJson(
+    const rootPackageJson = await readPackageJson(
       path.join(targetDir, "package.json"),
     );
-    const packageJson = await readJson(
+    const packageJson = await readPackageJson(
       path.join(targetDir, "packages", "demo-lib", "package.json"),
     );
     const workspaceYaml = await readFile(
@@ -308,10 +333,10 @@ describe("Projection Capability declarations", () => {
       operations: [...plan.operations],
     });
 
-    const rootPackageJson = await readJson(
+    const rootPackageJson = await readPackageJson(
       path.join(targetDir, "package.json"),
     );
-    const packageJson = await readJson(
+    const packageJson = await readPackageJson(
       path.join(targetDir, "apps", "api", "package.json"),
     );
     const workspaceYaml = await readFile(
@@ -374,10 +399,10 @@ describe("Projection Capability declarations", () => {
       operations: [...plan.operations],
     });
 
-    const rootPackageJson = await readJson(
+    const rootPackageJson = await readPackageJson(
       path.join(targetDir, "package.json"),
     );
-    const packageJson = await readJson(
+    const packageJson = await readPackageJson(
       path.join(targetDir, "apps", "web", "package.json"),
     );
     const workspaceYaml = await readFile(
@@ -441,10 +466,10 @@ describe("Projection Capability declarations", () => {
       operations: [...plan.operations],
     });
 
-    const apiPackageJson = await readJson(
+    const apiPackageJson = await readPackageJson(
       path.join(targetDir, "apps", "api", "package.json"),
     );
-    const webPackageJson = await readJson(
+    const webPackageJson = await readPackageJson(
       path.join(targetDir, "apps", "web", "package.json"),
     );
     const turboConfig = await readJson(path.join(targetDir, "turbo.json"));
@@ -509,10 +534,10 @@ describe("Projection Capability declarations", () => {
       operations: [...plan.operations],
     });
 
-    const rootPackageJson = await readJson(
+    const rootPackageJson = await readPackageJson(
       path.join(targetDir, "package.json"),
     );
-    const packageJson = await readJson(
+    const packageJson = await readPackageJson(
       path.join(targetDir, "packages", "demo-rust-bin", "package.json"),
     );
     const cargoToml = await readFile(

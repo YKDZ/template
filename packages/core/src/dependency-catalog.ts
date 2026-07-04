@@ -29,7 +29,7 @@ function templateRepositoryRoot(): string {
   return (
     candidates.find((candidate) =>
       existsSync(path.join(candidate, "pnpm-workspace.yaml")),
-    ) ?? candidates[0]
+    ) ?? candidates[0]!
   );
 }
 
@@ -54,7 +54,13 @@ function parseTemplateDependencyCatalog(
       continue;
     }
 
-    catalog[match[1] ?? match[2]] = match[3];
+    const key = match[1] ?? match[2];
+    const version = match[3];
+    if (key === undefined || version === undefined) {
+      continue;
+    }
+
+    catalog[key] = version;
   }
 
   return catalog;
@@ -75,7 +81,7 @@ export function selectTemplateDependencyCatalogEntries(
 ): TemplateDependencyCatalog {
   const selected: TemplateDependencyCatalog = {};
 
-  for (const dependency of [...dependencies].sort()) {
+  for (const dependency of dependencies.toSorted()) {
     const version = catalog[dependency];
     if (version === undefined) {
       throw new Error(
@@ -115,7 +121,7 @@ export function collectGeneratedManifestCatalogDependencies(
     }
   }
 
-  return [...dependencies].sort();
+  return [...dependencies].toSorted();
 }
 
 export function collectGeneratedManifestCatalogReferences(
@@ -140,7 +146,7 @@ export function collectGeneratedManifestCatalogReferences(
     }
   }
 
-  return [...dependencies].sort();
+  return [...dependencies].toSorted();
 }
 
 function renderCatalogKey(key: string): string {
@@ -187,7 +193,7 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
   const catalogLines = [
     "catalog:",
     ...Object.entries(nextCatalog)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .toSorted(([left], [right]) => left.localeCompare(right))
       .map(
         ([dependency, version]) =>
           `  ${renderCatalogKey(dependency)}: ${version}`,
@@ -217,7 +223,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
     lines.push(
       "allowBuilds:",
       ...Object.entries(options.allowBuilds)
-        .sort(([left], [right]) => left.localeCompare(right))
+        .toSorted(([left], [right]) => left.localeCompare(right))
         .map(([dependency, allowed]) => `  ${dependency}: ${allowed}`),
       "",
     );

@@ -1,6 +1,5 @@
 {
   "name": "@ykdz/template-checks",
-  "version": "0.0.8",
   "private": true,
   "type": "module",
   "exports": {
@@ -13,9 +12,14 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check:fixtures": "tsx --tsconfig ../../tsconfig.json src/check-fixtures.ts",
     "check:generated": "tsx --tsconfig ../../tsconfig.json src/check-generated.ts",
+    "check:templates": "pnpm run check:templates:github-yaml && pnpm run check:templates:boundary",
     "check:templates:boundary": "tsx --tsconfig ../../tsconfig.json src/check-template-boundary.ts",
     "check:templates:github-yaml": "tsx --tsconfig ../../tsconfig.json src/check-template-github-yaml.ts",
     "check:toolchain:online": "tsx --tsconfig ../../tsconfig.json src/check-online-toolchain-resolution-contract.ts",
+    "format:check": "oxfmt --check --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts --ignore-path ../../.oxfmtignore .",
+    "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
+    "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -26,6 +30,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
     "tsx": "catalog:"
   }
 }

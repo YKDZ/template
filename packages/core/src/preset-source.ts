@@ -12,8 +12,6 @@ import * as v from "valibot";
 import type {
   BuiltInPreset,
   FeatureName,
-  PackageManager,
-  ProjectKind,
   ValidationIssue,
   ValidationResult,
 } from "./declarations.js";
@@ -510,6 +508,12 @@ const presetSourceManifestSchema = v.strictObject({
   ),
 });
 
+type ParsedPresetSourceManifest = v.InferOutput<
+  typeof presetSourceManifestSchema
+>;
+type ParsedPresetSourceManifestPreset =
+  ParsedPresetSourceManifest["presets"][number];
+
 function formatIssuePath(issue: v.BaseIssue<unknown>): string {
   if (!issue.path || issue.path.length === 0) {
     return "$";
@@ -562,7 +566,7 @@ function shapeIssues(issues: v.BaseIssue<unknown>[]): ValidationIssue[] {
 }
 
 function duplicatePresetNameIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly ParsedPresetSourceManifestPreset[],
 ): ValidationIssue[] {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -601,7 +605,7 @@ function duplicateValueIssues(
 }
 
 function duplicatePresetMetadataArrayIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly ParsedPresetSourceManifestPreset[],
 ): ValidationIssue[] {
   return presets.flatMap((preset, index) => [
     ...duplicateValueIssues(
@@ -643,7 +647,7 @@ function fixtureCombinationPairKey(
 }
 
 function fixtureMatrixContractIssues(
-  manifest: PresetSourceManifest,
+  manifest: ParsedPresetSourceManifest,
 ): ValidationIssue[] {
   if (!manifest.fixtureMatrix) {
     return [];
@@ -846,7 +850,7 @@ function fixtureMatrixContractIssues(
 }
 
 function dependencyCatalogReferenceIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly ParsedPresetSourceManifestPreset[],
   dependencyCatalog: TemplateDependencyCatalog,
 ): ValidationIssue[] {
   return presets.flatMap((preset, presetIndex) =>
@@ -860,7 +864,7 @@ function dependencyCatalogReferenceIssues(
 }
 
 function unsupportedProjectShapeIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly ParsedPresetSourceManifestPreset[],
 ): ValidationIssue[] {
   return presets.flatMap((preset, index) =>
     preset.supportedProjectKinds.includes("single-package")
@@ -914,7 +918,7 @@ function realPresetSourcePathIssue(
 }
 
 function sharedResourcePathIssues(
-  manifest: PresetSourceManifest,
+  manifest: Pick<ParsedPresetSourceManifest, "sharedResources">,
   sourceRoot: string | undefined,
 ): ValidationIssue[] {
   if (sourceRoot === undefined) {
@@ -1012,7 +1016,7 @@ function inlineDependencyCatalogSpecifierIssues(
 }
 
 function presetSourceReferenceIssues(
-  manifest: PresetSourceManifest,
+  manifest: ParsedPresetSourceManifest,
   sourceRoot: string | undefined,
 ): ValidationIssue[] {
   const sharedResourceIds = new Set(
@@ -1083,7 +1087,11 @@ function presetSourceReferenceIssues(
 }
 
 function supportedProjectionDeclarationIssues(
-  presets: readonly PresetSourceManifestPreset[],
+  presets: readonly {
+    readonly generation: "supported" | "future";
+    readonly projection?: unknown;
+    readonly name: string;
+  }[],
 ): ValidationIssue[] {
   return presets.flatMap((preset, index) =>
     preset.generation === "supported" && preset.projection === undefined
@@ -1095,6 +1103,71 @@ function supportedProjectionDeclarationIssues(
         ]
       : [],
   );
+}
+
+function normalizePresetSourceManifestOutput(
+  manifest: ParsedPresetSourceManifest,
+): PresetSourceManifest {
+  return {
+    schemaVersion: manifest.schemaVersion,
+    name: manifest.name,
+    sharedResources: manifest.sharedResources.map((resource) => ({
+      ...resource,
+    })),
+    ...(manifest.fixtureMatrix
+      ? {
+          fixtureMatrix: {
+            initSupport: manifest.fixtureMatrix.initSupport.map((support) => ({
+              ...support,
+            })),
+            packageAdditionSupport:
+              manifest.fixtureMatrix.packageAdditionSupport.map((support) => ({
+                ...support,
+              })),
+            supportedCombinations:
+              manifest.fixtureMatrix.supportedCombinations.map(
+                (combination) => ({
+                  basePreset: combination.basePreset,
+                  addedPreset: combination.addedPreset,
+                  linkFrom: [...combination.linkFrom],
+                }),
+              ),
+            semanticSkips: manifest.fixtureMatrix.semanticSkips.map((skip) => ({
+              ...skip,
+            })),
+            checkRequirements: [...manifest.fixtureMatrix.checkRequirements],
+            environmentPreparation: [
+              ...manifest.fixtureMatrix.environmentPreparation,
+            ],
+          },
+        }
+      : {}),
+    presets: manifest.presets.map((preset) => ({
+      name: preset.name,
+      title: preset.title,
+      description: preset.description,
+      generation: preset.generation,
+      packageAdditionSupport: preset.packageAdditionSupport,
+      supportedPackageManagers: [...preset.supportedPackageManagers],
+      supportedProjectKinds: [...preset.supportedProjectKinds],
+      features: [...preset.features],
+      dependencyCatalog: [...preset.dependencyCatalog],
+      ...(preset.projection
+        ? {
+            projection: normalizePresetProjectionDeclaration(preset.projection),
+          }
+        : {}),
+      ...(preset.source
+        ? {
+            source: {
+              roots: [...preset.source.roots],
+              files: [...preset.source.files],
+              sharedResources: [...preset.source.sharedResources],
+            },
+          }
+        : {}),
+    })),
+  };
 }
 
 export function validatePresetSourceManifest(
@@ -1112,7 +1185,7 @@ export function validatePresetSourceManifest(
     return { ok: false, issues: shapeIssues(result.issues) };
   }
 
-  const parsedManifest = result.output as PresetSourceManifest;
+  const parsedManifest = result.output;
   const semanticIssues = [
     ...duplicateValueIssues(
       parsedManifest.sharedResources.map((resource) => resource.id),
@@ -1137,60 +1210,7 @@ export function validatePresetSourceManifest(
 
   return {
     ok: true,
-    value: {
-      ...result.output,
-      sharedResources: result.output.sharedResources.map((resource) => ({
-        ...resource,
-      })),
-      fixtureMatrix: result.output.fixtureMatrix
-        ? {
-            initSupport: result.output.fixtureMatrix.initSupport.map(
-              (support) => ({ ...support }),
-            ),
-            packageAdditionSupport:
-              result.output.fixtureMatrix.packageAdditionSupport.map(
-                (support) => ({ ...support }),
-              ),
-            supportedCombinations:
-              result.output.fixtureMatrix.supportedCombinations.map(
-                (combination) => ({
-                  ...combination,
-                  linkFrom: [...(combination.linkFrom ?? [])],
-                }),
-              ),
-            semanticSkips: result.output.fixtureMatrix.semanticSkips.map(
-              (skip) => ({ ...skip }),
-            ),
-            checkRequirements: [
-              ...result.output.fixtureMatrix.checkRequirements,
-            ],
-            environmentPreparation: [
-              ...result.output.fixtureMatrix.environmentPreparation,
-            ],
-          }
-        : undefined,
-      presets: parsedManifest.presets.map((preset) => ({
-        ...preset,
-        supportedPackageManagers: [
-          ...preset.supportedPackageManagers,
-        ] as PackageManager[],
-        supportedProjectKinds: [
-          ...preset.supportedProjectKinds,
-        ] as ProjectKind[],
-        features: [...preset.features] as FeatureName[],
-        dependencyCatalog: [...(preset.dependencyCatalog ?? [])],
-        projection: preset.projection
-          ? normalizePresetProjectionDeclaration(preset.projection)
-          : undefined,
-        source: preset.source
-          ? {
-              roots: [...preset.source.roots],
-              files: [...preset.source.files],
-              sharedResources: [...preset.source.sharedResources],
-            }
-          : undefined,
-      })),
-    },
+    value: normalizePresetSourceManifestOutput(parsedManifest),
   };
 }
 
@@ -1258,7 +1278,7 @@ export function manifestReferencedSourceFiles(
     }
   }
 
-  return [...files].sort();
+  return [...files].toSorted();
 }
 
 export function loadPresetSourceManifestFile(

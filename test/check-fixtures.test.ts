@@ -10,6 +10,7 @@ import {
   type GeneratedScenario,
 } from "@ykdz/template-core/generated-scenarios";
 import { execa } from "execa";
+import * as v from "valibot";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -22,6 +23,13 @@ type CommandRecord = {
   cwd: string;
   ci: string | null;
 };
+
+const commandRecordSchema = v.object({
+  command: v.string(),
+  args: v.array(v.string()),
+  cwd: v.string(),
+  ci: v.nullable(v.string()),
+});
 
 const fixtureScenarios = selectGeneratedScenarios(
   loadBuiltInPresetSourceManifest(),
@@ -251,7 +259,10 @@ describe("fixture checks", () => {
     const records = (await readFile(logPath, "utf8"))
       .trim()
       .split("\n")
-      .map((line) => JSON.parse(line) as CommandRecord);
+      .map(
+        (line): CommandRecord =>
+          v.parse(commandRecordSchema, JSON.parse(line) as unknown),
+      );
     const pnpmRecords = records.filter((record) => record.command === "pnpm");
     const officialFetches = await readFile(officialFetchLogPath, "utf8").catch(
       (error: unknown) => {
@@ -299,59 +310,58 @@ describe("fixture checks", () => {
     expect(packageAdditionCommands).toHaveLength(
       packageAdditionScenarios.length,
     );
-    expect(packageAdditionCommands).toEqual(
-      expect.arrayContaining(
-        packageAdditionScenarios.map((scenario) =>
-          expect.objectContaining({
-            cwd: expect.stringContaining(
-              `fixture-${generatedScenarioId(scenario)}`,
-            ),
-            args: expect.arrayContaining(["--preset", scenario.addedPreset]),
-          }),
+    for (const scenario of packageAdditionScenarios) {
+      const addedPreset = scenario.addedPreset;
+
+      if (!addedPreset) {
+        throw new Error(`Scenario ${scenario.id} must add a package.`);
+      }
+
+      expect(
+        packageAdditionCommands.some(
+          (record) =>
+            record.cwd.includes(`fixture-${generatedScenarioId(scenario)}`) &&
+            record.args.includes("--preset") &&
+            record.args.includes(addedPreset),
         ),
+      ).toBe(true);
+    }
+    expect(
+      packageAdditionCommands.some(
+        (record) =>
+          record.cwd.includes(
+            "fixture-vue-hono-app-add-ts-lib-link-from-apps-web",
+          ) &&
+          record.args.includes("--link-from") &&
+          record.args.includes("apps/web"),
       ),
-    );
-    expect(packageAdditionCommands).toContainEqual(
-      expect.objectContaining({
-        cwd: expect.stringContaining(
-          "fixture-vue-hono-app-add-ts-lib-link-from-apps-web",
-        ),
-        args: expect.arrayContaining(["--link-from", "apps/web"]),
-      }),
-    );
+    ).toBe(true);
 
     const generatedFixes = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "fix",
     );
     expect(generatedFixes).toHaveLength(fixtureScenarios.length);
-    expect(generatedFixes).toEqual(
-      expect.arrayContaining(
-        fixtureScenarios.map((scenario) =>
-          expect.objectContaining({
-            cwd: expect.stringContaining(
-              `fixture-${generatedScenarioId(scenario)}`,
-            ),
-          }),
+    for (const scenario of fixtureScenarios) {
+      expect(
+        generatedFixes.some((record) =>
+          record.cwd.includes(`fixture-${generatedScenarioId(scenario)}`),
         ),
-      ),
-    );
+      ).toBe(true);
+    }
 
     const generatedRootChecks = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "check",
     );
     expect(generatedRootChecks).toHaveLength(fixtureScenarios.length);
-    expect(generatedRootChecks).toEqual(
-      expect.arrayContaining(
-        fixtureScenarios.map((scenario) =>
-          expect.objectContaining({
-            ci: "1",
-            cwd: expect.stringContaining(
-              `fixture-${generatedScenarioId(scenario)}`,
-            ),
-          }),
+    for (const scenario of fixtureScenarios) {
+      expect(
+        generatedRootChecks.some(
+          (record) =>
+            record.ci === "1" &&
+            record.cwd.includes(`fixture-${generatedScenarioId(scenario)}`),
         ),
-      ),
-    );
+      ).toBe(true);
+    }
 
     expect(records).not.toContainEqual(
       expect.objectContaining({ command: "sh" }),

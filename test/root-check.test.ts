@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,12 +12,53 @@ import {
 } from "@ykdz/template-core/project-github";
 import { execa } from "execa";
 import ts from "typescript";
-import { parse } from "yaml";
+import * as v from "valibot";
+import { parse as parseYaml } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+
+const packageJsonWithScriptsSchema = v.object({
+  scripts: v.record(v.string(), v.string()),
+});
+const turboConfigSchema = v.object({
+  tasks: v.record(v.string(), v.unknown()),
+});
+const workflowWithCheckStepsSchema = v.object({
+  jobs: v.object({
+    check: v.object({
+      steps: v.array(
+        v.object({
+          name: v.optional(v.string()),
+          run: v.optional(v.string()),
+        }),
+      ),
+    }),
+  }),
+});
+
+function parseJsonWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, JSON.parse(text) as unknown);
+}
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return parseJsonWithSchema(await readFile(filePath, "utf8"), schema);
+}
+
+function parseYamlWithSchema<const Schema extends v.GenericSchema>(
+  text: string,
+  schema: Schema,
+): v.InferOutput<Schema> {
+  return v.parse(schema, parseYaml(text) as unknown);
+}
 
 describe("Project Kit Root Check", () => {
   it("rejects production source imports from template modules", async () => {
@@ -70,29 +111,27 @@ describe("Project Kit Root Check", () => {
   });
 
   it("runs Single Preset Generated Check from the default Root Check", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      scripts: Record<string, string>;
-    };
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(packageJson.scripts).toHaveProperty("check:generated");
     expect(packageJson.scripts["check:generated"]).toBe(
-      "pnpm --filter @ykdz/template-checks run check:generated",
+      "turbo run check:generated",
     );
-    expect(packageJson.scripts.check).toContain("pnpm run check:generated");
+    expect(packageJson.scripts.check).toContain("check:generated");
   });
 
   it("keeps Fixture Matrix checks explicit and outside the default Root Check", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      scripts: Record<string, string>;
-    };
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(packageJson.scripts).toHaveProperty("check:fixtures");
     expect(packageJson.scripts["check:fixtures"]).toBe(
-      "pnpm --filter @ykdz/template-checks run check:fixtures",
+      "turbo run check:fixtures",
     );
     expect(packageJson.scripts.check).not.toContain("check:fixtures");
   });
@@ -114,9 +153,10 @@ describe("Project Kit Root Check", () => {
     expect(workflow.indexOf("run: pnpm run check\n")).toBeLessThan(
       workflow.indexOf("run: pnpm run check:fixtures"),
     );
-    const parsedWorkflow = parse(workflow) as {
-      jobs: Record<string, { steps: { name?: string; run?: string }[] }>;
-    };
+    const parsedWorkflow = parseYamlWithSchema(
+      workflow,
+      workflowWithCheckStepsSchema,
+    );
     const runSteps = parsedWorkflow.jobs.check.steps.filter((step) =>
       Boolean(step.run),
     );
@@ -148,11 +188,10 @@ describe("Project Kit Root Check", () => {
   });
 
   it("keeps ordinary checks separate from npm publishing", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      scripts: Record<string, string>;
-    };
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     const ordinaryCheckScripts = [
       packageJson.scripts.check,
@@ -167,15 +206,14 @@ describe("Project Kit Root Check", () => {
   });
 
   it("keeps the online toolchain contract check explicit and outside the default Root Check", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as {
-      scripts: Record<string, string>;
-    };
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(packageJson.scripts).toHaveProperty("check:toolchain:online");
     expect(packageJson.scripts["check:toolchain:online"]).toBe(
-      "pnpm --filter @ykdz/template-checks run check:toolchain:online",
+      "turbo run check:toolchain:online",
     );
     expect(packageJson.scripts.check).not.toContain("check:toolchain:online");
   });
@@ -196,29 +234,36 @@ describe("Project Kit Root Check", () => {
   });
 
   it("runs direct shared OXC template source checks from Root Check", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/builtin-source/package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts).toHaveProperty(
       "check:templates:shared-oxc",
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "pnpm run check:templates:shared-oxc",
+      "turbo run check:templates",
     );
     expect(rootPackageJson.scripts["check:templates:shared-oxc"]).toBe(
+      "turbo run check:templates:shared-oxc",
+    );
+    expect(packageJson.scripts["check:templates:shared-oxc"]).toBe(
       "pnpm run check:templates:shared-oxc:format && pnpm run check:templates:shared-oxc:lint && pnpm run check:templates:shared-oxc:typecheck",
     );
-    expect(rootPackageJson.scripts["check:templates:shared-oxc"]).not.toContain(
+    expect(packageJson.scripts["check:templates:shared-oxc"]).not.toContain(
       "pnpm --dir templates/shared/oxc",
     );
-    expect(rootPackageJson.scripts).toMatchObject({
-      "check:templates:shared-oxc:format":
-        "oxfmt --check packages/builtin-source/templates/shared/oxc",
+    expect(packageJson.scripts).toMatchObject({
+      "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
       "check:templates:shared-oxc:lint":
-        "oxlint --config packages/builtin-source/templates/shared/oxc/node/oxlint.config.ts packages/builtin-source/templates/shared/oxc --deny-warnings",
+        "oxlint --config templates/shared/oxc/node/oxlint.config.ts templates/shared/oxc",
       "check:templates:shared-oxc:typecheck":
-        "tsc -p packages/builtin-source/templates/shared/oxc/tsconfig.json --noEmit",
+        "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
     });
 
     const workspaceYaml = await readFile(
@@ -242,38 +287,147 @@ describe("Project Kit Root Check", () => {
   });
 
   it("runs direct template source checks from Root Check", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const builtinSourcePackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/builtin-source/package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const checksPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/checks/package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts).toHaveProperty("check:templates");
-    expect(rootPackageJson.scripts.check).toContain("pnpm run check:templates");
+    expect(rootPackageJson.scripts.check).toContain("check:templates");
     expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:templates"]).toContain(
+      "turbo run check:templates",
+    );
+    expect(builtinSourcePackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:shared-oxc",
     );
-    expect(rootPackageJson.scripts["check:templates"]).toContain(
+    expect(builtinSourcePackageJson.scripts["check:templates"]).toContain(
+      "pnpm run check:templates:static-source",
+    );
+    expect(checksPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:github-yaml",
     );
-    expect(rootPackageJson.scripts["check:templates"]).toContain(
+    expect(checksPackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:boundary",
-    );
-    expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "pnpm run check:templates:static-source",
     );
   });
 
   it("runs whole-repository format checks from Root Check", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts).toHaveProperty("check:format");
-    expect(rootPackageJson.scripts.check).toContain("pnpm run check:format");
+    expect(rootPackageJson.scripts.check).toContain("format:check");
     expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:format"]).toBe(
-      "oxfmt --check --config packages/builtin-source/templates/shared/oxc/oxfmt.config.ts --ignore-path .oxfmtignore .",
+      "pnpm run format:check",
     );
+    expect(rootPackageJson.scripts["format:check"]).toBe(
+      "turbo run format:check format:check:root",
+    );
+    expect(rootPackageJson.scripts["format:check:root"]).toBe(
+      "oxfmt --check --config oxfmt.config.ts --ignore-path .oxfmtignore package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
+    );
+  });
+
+  it("runs whole-repository lint checks from the root OXC config", async () => {
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+
+    const rootOxlintConfig = await readFile(
+      path.join(repoRoot, "oxlint.config.ts"),
+      "utf8",
+    );
+    expect(rootOxlintConfig).toContain("typeAware: true");
+    expect(rootOxlintConfig).toContain('correctness: "error"');
+    expect(rootOxlintConfig).toContain('suspicious: "warn"');
+    expect(rootOxlintConfig).not.toContain('"no-unused-vars"');
+    await expect(
+      readFile(path.join(repoRoot, "oxfmt.config.ts"), "utf8"),
+    ).resolves.toContain("sortImports: true");
+
+    expect(rootPackageJson.scripts).toHaveProperty("check:lint");
+    expect(rootPackageJson.scripts.check).toContain("lint");
+    expect(rootPackageJson.scripts["check:lint"]).toBe("pnpm run lint");
+    expect(rootPackageJson.scripts.lint).toBe("turbo run lint lint:root");
+    expect(rootPackageJson.scripts["lint:root"]).toBe(
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts test",
+    );
+  });
+
+  it("models repository checks as Turbo tasks", async () => {
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const turboConfig = await readJsonWithSchema(
+      path.join(repoRoot, "turbo.json"),
+      turboConfigSchema,
+    );
+
+    expect(rootPackageJson.scripts.check).toBe(
+      "turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root",
+    );
+    expect(rootPackageJson.scripts.build).toBe("turbo run build");
+    expect(turboConfig.tasks).toHaveProperty("build");
+    expect(turboConfig.tasks).toHaveProperty("format:check");
+    expect(turboConfig.tasks).toHaveProperty("lint");
+    expect(turboConfig.tasks).toHaveProperty("typecheck");
+    expect(turboConfig.tasks).toHaveProperty("//#format:check:root");
+    expect(turboConfig.tasks).toHaveProperty("//#lint:root");
+    expect(turboConfig.tasks).toHaveProperty("//#typecheck:root");
+  });
+
+  it("keeps every internal package covered by format, lint, and typecheck", async () => {
+    await expect(
+      readFile(path.join(repoRoot, "oxlint.config.ts"), "utf8"),
+    ).resolves.toContain("typeAware: true");
+
+    for (const packageName of ["builtin-source", "checks", "cli", "core"]) {
+      const packageJson = await readJsonWithSchema(
+        path.join(repoRoot, "packages", packageName, "package.json"),
+        packageJsonWithScriptsSchema,
+      );
+
+      expect(packageJson.scripts["format:check"]).toContain("oxfmt --check");
+      expect(packageJson.scripts.lint).toContain("oxlint");
+      expect(packageJson.scripts.typecheck).toBe(
+        "tsc -p tsconfig.json --noEmit",
+      );
+    }
+  });
+
+  it("typechecks CLI source without built dependency declarations", async () => {
+    await Promise.all(
+      ["core", "builtin-source", "cli", "checks"].map((packageName) =>
+        rm(path.join(repoRoot, "packages", packageName, "dist"), {
+          force: true,
+          recursive: true,
+        }),
+      ),
+    );
+
+    const result = await execa(
+      "pnpm",
+      ["--filter", "@ykdz/template", "run", "typecheck"],
+      {
+        cwd: repoRoot,
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
   });
 
   it("keeps whole-repository format ignores limited to unmaintained workspace state", async () => {
@@ -293,6 +447,8 @@ describe("Project Kit Root Check", () => {
       ".template",
       ".project-kit",
       ".pnpm-store",
+      ".turbo",
+      "packages/**/.turbo",
       ".agents",
       ".scratch",
       "templates/**/node_modules",
@@ -306,15 +462,16 @@ describe("Project Kit Root Check", () => {
   });
 
   it("runs direct Rust template source format checks from Root Check", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts).toHaveProperty(
       "check:templates:static-source",
     );
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
-      "rustfmt --check packages/builtin-source/templates/rust-bin/src/main.rs",
+      "turbo run check:templates:static-source",
     );
 
     await execa("pnpm", ["run", "check:templates:static-source"], {
@@ -323,18 +480,19 @@ describe("Project Kit Root Check", () => {
   });
 
   it("runs direct GitHub YAML template source checks from Root Check", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts).toHaveProperty(
       "check:templates:github-yaml",
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "pnpm run check:templates:github-yaml",
+      "turbo run check:templates",
     );
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "pnpm --filter @ykdz/template-checks run check:templates:github-yaml",
+      "turbo run check:templates:github-yaml",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {
@@ -343,12 +501,13 @@ describe("Project Kit Root Check", () => {
   });
 
   it("directly validates workflow and Dependabot template source contracts", async () => {
-    const rootPackageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "package.json"), "utf8"),
-    ) as { scripts: Record<string, string> };
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
 
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "pnpm --filter @ykdz/template-checks run check:templates:github-yaml",
+      "turbo run check:templates:github-yaml",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {
@@ -624,7 +783,7 @@ async function listTypeScriptSourceFiles(root: string): Promise<string[]> {
     }
   }
 
-  return files.sort();
+  return files.toSorted();
 }
 
 type TemplateModuleReference = {

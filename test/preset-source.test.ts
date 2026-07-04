@@ -9,8 +9,43 @@ import {
   loadBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
 } from "@ykdz/template-builtin-source";
+import type {
+  PresetSourceFixtureMatrixContract,
+  PresetSourceManifestPreset,
+  PresetSourceManifestSharedResource,
+} from "@ykdz/template-core/preset-source";
 
-function validManifest(): any {
+type ManifestPresetInput = Omit<
+  PresetSourceManifestPreset,
+  | "dependencyCatalog"
+  | "features"
+  | "packageAdditionSupport"
+  | "projection"
+  | "source"
+  | "supportedPackageManagers"
+  | "supportedProjectKinds"
+> & {
+  dependencyCatalog?: unknown;
+  features: unknown[];
+  packageAdditionSupport: unknown;
+  projection?: unknown;
+  source?: unknown;
+  supportedPackageManagers: unknown[];
+  supportedProjectKinds: unknown[];
+};
+
+type SharedResourceInput = PresetSourceManifestSharedResource &
+  Record<string, unknown>;
+
+type PresetSourceManifestInput = {
+  schemaVersion: 1;
+  name: string;
+  presets: ManifestPresetInput[];
+  sharedResources: SharedResourceInput[];
+  fixtureMatrix?: PresetSourceFixtureMatrixContract;
+};
+
+function validManifest(): PresetSourceManifestInput {
   return {
     schemaVersion: 1,
     name: "custom-source",
@@ -35,6 +70,26 @@ function validManifest(): any {
   };
 }
 
+function firstPreset(manifest: PresetSourceManifestInput): ManifestPresetInput {
+  const preset = manifest.presets[0];
+  if (!preset) {
+    throw new Error("Test manifest must contain a preset");
+  }
+
+  return preset;
+}
+
+function firstSharedResource(
+  manifest: PresetSourceManifestInput,
+): SharedResourceInput {
+  const resource = manifest.sharedResources[0];
+  if (!resource) {
+    throw new Error("Test manifest must contain a shared resource");
+  }
+
+  return resource;
+}
+
 describe("Preset Source Manifest validation", () => {
   it("accepts reference-only Shared Resource declarations with stable identities", () => {
     expect(validatePresetSourceManifest(validManifest())).toMatchObject({
@@ -52,7 +107,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("accepts maintained Dependency Catalog entry references", () => {
     const manifest = validManifest();
-    manifest.presets[0].dependencyCatalog = ["typescript", "valibot"];
+    firstPreset(manifest).dependencyCatalog = ["typescript", "valibot"];
 
     expect(validatePresetSourceManifest(manifest)).toMatchObject({
       ok: true,
@@ -213,9 +268,9 @@ describe("Preset Source Manifest validation", () => {
   });
 
   it("rejects Package Addition fixture leaf names outside the CLI name rule", () => {
-    const packageLeafNameSchema = (presetSourceManifestJsonSchema as any)
-      .properties.fixtureMatrix.properties.packageAdditionSupport.items
-      .properties.packageLeafName;
+    const packageLeafNameSchema =
+      presetSourceManifestJsonSchema.properties.fixtureMatrix.properties
+        .packageAdditionSupport.items.properties.packageLeafName;
     const manifest = validManifest();
     manifest.presets.push({
       name: "custom-app",
@@ -299,7 +354,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("rejects unknown Projection Capability kinds with semantic diagnostics", () => {
     const manifest = validManifest();
-    manifest.presets[0].projection = {
+    firstPreset(manifest).projection = {
       capabilities: [
         {
           kind: "write-my-private-file",
@@ -320,7 +375,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("rejects missing Projection Capabilities with semantic diagnostics", () => {
     const manifest = validManifest();
-    manifest.presets[0].projection = {
+    firstPreset(manifest).projection = {
       capabilities: [
         {
           kind: "workspace-library-package",
@@ -358,7 +413,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("reports missing Dependency Catalog entry references with semantic diagnostics", () => {
     const manifest = validManifest();
-    manifest.presets[0].dependencyCatalog = ["missing-package"];
+    firstPreset(manifest).dependencyCatalog = ["missing-package"];
 
     expect(
       validatePresetSourceManifest(manifest, { dependencyCatalog: {} }),
@@ -376,7 +431,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("rejects inline Dependency Catalog semver specifiers in manifest-shaped references", () => {
     const manifest = validManifest();
-    manifest.presets[0].dependencyCatalog = ["^6.0.3"];
+    firstPreset(manifest).dependencyCatalog = ["^6.0.3"];
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,
@@ -392,7 +447,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("rejects inline Dependency Catalog semver specifiers in object-shaped declarations", () => {
     const manifest = validManifest();
-    manifest.presets[0].dependencyCatalog = {
+    firstPreset(manifest).dependencyCatalog = {
       typescript: "^6.0.3",
     };
 
@@ -437,7 +492,7 @@ describe("Preset Source Manifest validation", () => {
     );
     const manifestPath = path.join(workspace, "preset-source.json");
     const manifest = validManifest();
-    manifest.presets[0].source = {
+    firstPreset(manifest).source = {
       roots: ["custom-lib/src"],
       files: ["custom-lib/src/index.ts"],
       sharedResources: ["shared-oxc-node"],
@@ -450,7 +505,7 @@ describe("Preset Source Manifest validation", () => {
     );
 
     expect(
-      loadPresetSourceManifestFile(manifestPath).presets[0].source,
+      loadPresetSourceManifestFile(manifestPath).presets[0]!.source,
     ).toEqual({
       roots: ["custom-lib/src"],
       files: ["custom-lib/src/index.ts"],
@@ -463,7 +518,7 @@ describe("Preset Source Manifest validation", () => {
     await mkdir(path.join(workspace, "shared/oxc/node"), { recursive: true });
     const manifestPath = path.join(workspace, "preset-source.json");
     const manifest = validManifest();
-    manifest.presets[0].source = {
+    firstPreset(manifest).source = {
       files: ["custom-lib/src/index.ts"],
       sharedResources: ["missing-resource"],
     };
@@ -487,8 +542,8 @@ describe("Preset Source Manifest validation", () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "preset-source-"));
     const manifestPath = path.join(workspace, "preset-source.json");
     const manifest = validManifest();
-    manifest.sharedResources[0].path = "../shared/oxc/node";
-    manifest.presets[0].source = {
+    firstSharedResource(manifest).path = "../shared/oxc/node";
+    firstPreset(manifest).source = {
       roots: ["../custom-lib/src"],
     };
 
@@ -538,9 +593,9 @@ describe("Preset Source Manifest validation", () => {
   it("rejects inline Generated Repository file bodies in manifest declarations", () => {
     const manifest = validManifest();
     manifest.sharedResources[0] = {
-      ...manifest.sharedResources[0],
+      ...firstSharedResource(manifest),
       body: "version: 2\nupdates: []\n",
-    } as (typeof manifest.sharedResources)[number];
+    };
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,
@@ -606,6 +661,7 @@ describe("Preset Source Manifest validation", () => {
         "hono",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "tsc-alias",
         "turbo",
         "typescript",
@@ -616,6 +672,7 @@ describe("Preset Source Manifest validation", () => {
         "@types/node",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "turbo",
         "typescript",
         "valibot",
@@ -630,6 +687,7 @@ describe("Preset Source Manifest validation", () => {
         "@vueuse/core",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "pinia",
         "tailwindcss",
         "turbo",
@@ -651,6 +709,7 @@ describe("Preset Source Manifest validation", () => {
         "hono",
         "oxfmt",
         "oxlint",
+        "oxlint-tsgolint",
         "pinia",
         "tailwindcss",
         "tsc-alias",
@@ -688,7 +747,7 @@ describe("Preset Source Manifest validation", () => {
   it("reports duplicate Preset names with an actionable diagnostic", () => {
     const manifest = validManifest();
     manifest.presets.push({
-      ...manifest.presets[0],
+      ...firstPreset(manifest),
       title: "Duplicate custom library",
     });
 
@@ -705,12 +764,12 @@ describe("Preset Source Manifest validation", () => {
 
   it("reports duplicate Preset metadata array values with actionable diagnostics", () => {
     const manifest = validManifest();
-    manifest.presets[0].supportedPackageManagers = ["pnpm", "pnpm"];
-    manifest.presets[0].supportedProjectKinds = [
+    firstPreset(manifest).supportedPackageManagers = ["pnpm", "pnpm"];
+    firstPreset(manifest).supportedProjectKinds = [
       "multi-package",
       "multi-package",
     ];
-    manifest.presets[0].features = ["root-check", "root-check"];
+    firstPreset(manifest).features = ["root-check", "root-check"];
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,
@@ -733,7 +792,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("reports unsupported Project Shape declarations with domain language", () => {
     const manifest = validManifest();
-    manifest.presets[0].supportedProjectKinds = ["single-package"];
+    firstPreset(manifest).supportedProjectKinds = ["single-package"];
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,
@@ -749,7 +808,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("reports invalid Package Addition Support values with supported values", () => {
     const manifest = validManifest();
-    manifest.presets[0].packageAdditionSupport = "maybe";
+    firstPreset(manifest).packageAdditionSupport = "maybe";
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,
@@ -765,8 +824,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("reports missing required Preset metadata with the missing field path", () => {
     const manifest = validManifest();
-    delete (manifest.presets[0] as Partial<(typeof manifest.presets)[number]>)
-      .title;
+    delete (firstPreset(manifest) as Partial<ManifestPresetInput>).title;
 
     expect(validatePresetSourceManifest(manifest)).toEqual({
       ok: false,

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "check:fixtures": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "check:generated": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "check:templates": {
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "check:templates:boundary": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "check:templates:github-yaml": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "check:templates:shared-oxc": {
+      "outputs": []
+    },
+    "check:templates:static-source": {
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "check:toolchain:online": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "format:check": {
+      "outputs": []
+    },
+    "format:write": {
+      "cache": false
+    },
+    "lint": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "lint:fix": {
+      "cache": false
+    },
+    "transit": {
+      "dependsOn": ["^transit"]
+    },
+    "typecheck": {
+      "dependsOn": ["transit"],
+      "outputs": []
+    },
+    "//#format:check:root": {
+      "outputs": []
+    },
+    "//#format:write:root": {
+      "cache": false
+    },
+    "//#lint:root": {
+      "outputs": []
+    },
+    "//#lint:fix:root": {
+      "cache": false
+    },
+    "//#test": {
+      "outputs": []
+    },
+    "//#typecheck:root": {
+      "outputs": []
+    }
+  }
+}

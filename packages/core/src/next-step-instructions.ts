@@ -102,6 +102,9 @@ function checkEnvironmentInstructions(
   return plan.checkPlan.environmentNeeds.map((need) => {
     const display = renderPlaywrightBrowserInstallCommand(need);
     const [command, ...args] = display.split(" ");
+    if (command === undefined) {
+      throw new Error(`Cannot parse environment setup command: ${display}`);
+    }
 
     return {
       id:

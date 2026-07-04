@@ -189,9 +189,9 @@ export function projectVueHonoRootPackageScripts(): Record<string, string> {
       "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
     "format:write":
       "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --deny-warnings",
+    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
     "lint:fix":
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix --deny-warnings",
+      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
     typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }
@@ -204,9 +204,8 @@ export function projectVueHonoApiPackageScripts(): Record<string, string> {
     fix: renderFixCommand(planVueHonoPackageFixes(apiPackageBoundary)),
     "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-    "lint:fix":
-      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+    lint: "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
     test: "vitest run",
     typecheck: "tsc -p tsconfig.json --noEmit",
@@ -221,9 +220,8 @@ export function projectVueHonoWebPackageScripts(): Record<string, string> {
     fix: renderFixCommand(planVueHonoPackageFixes(webPackageBoundary)),
     "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts . --deny-warnings",
-    "lint:fix":
-      "oxlint --config ../../oxlint.config.ts . --fix --deny-warnings",
+    lint: "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run",
     "test:e2e": "pnpm run build && playwright test",

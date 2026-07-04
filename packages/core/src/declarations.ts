@@ -335,6 +335,42 @@ export function findPreset(
   return presets.find((preset) => preset.name === name);
 }
 
+function normalizeProjectBlueprint(
+  blueprint: v.InferOutput<typeof projectBlueprintSchema>,
+): ProjectBlueprint {
+  return {
+    schemaVersion: blueprint.schemaVersion,
+    preset: blueprint.preset,
+    ...(blueprint.packageManager === undefined
+      ? {}
+      : { packageManager: blueprint.packageManager }),
+    projectKind: blueprint.projectKind,
+    features: [...blueprint.features],
+    ...(blueprint.packages === undefined
+      ? {}
+      : {
+          packages: blueprint.packages.map((projectPackage) => ({
+            name: projectPackage.name,
+            path: projectPackage.path,
+            ...(projectPackage.role === undefined
+              ? {}
+              : { role: projectPackage.role }),
+            ...(projectPackage.sourcePreset === undefined
+              ? {}
+              : { sourcePreset: projectPackage.sourcePreset }),
+          })),
+        }),
+    ...(blueprint.packageLinkIntents === undefined
+      ? {}
+      : {
+          packageLinkIntents: blueprint.packageLinkIntents.map((intent) => ({
+            consumerPackagePath: intent.consumerPackagePath,
+            providerPackagePath: intent.providerPackagePath,
+          })),
+        }),
+  };
+}
+
 export function validateProjectBlueprint(
   input: unknown,
   options: PresetCatalogValidationOptions = {},
@@ -345,7 +381,7 @@ export function validateProjectBlueprint(
     return { ok: false, issues: shapeIssues(result.issues) };
   }
 
-  const blueprint = result.output;
+  const blueprint = normalizeProjectBlueprint(result.output);
   const preset = findPreset(options.presets ?? [], blueprint.preset);
   const semanticIssues: ValidationIssue[] = [
     ...duplicateIssues(blueprint.features, "$.features"),

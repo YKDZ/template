@@ -36,8 +36,8 @@ export type AddPackageOptions = {
   cwd: string;
   preset: string;
   name: string;
-  path?: string;
-  linkFrom?: readonly string[];
+  path?: string | undefined;
+  linkFrom?: readonly string[] | undefined;
   presetSourceManifest: PresetSourceManifest;
   projectionSourceRoots: PresetProjectionSourceRoots;
 };
@@ -81,7 +81,7 @@ function projectNameFromBlueprint(
   const firstPackage = blueprint.packages?.[0];
   const match = firstPackage?.name.match(/^@([^/]+)\//);
 
-  if (match) {
+  if (match?.[1]) {
     return match[1];
   }
 
@@ -320,7 +320,7 @@ async function assertPackageLinkIntentConsumersAreTypeScriptBoundaries(options: 
     }
 
     try {
-      const manifest = await readJson<unknown>(
+      const manifest = await readJson(
         path.join(options.root, consumer.path, "package.json"),
       );
       const scripts = isRecord(manifest) ? manifest.scripts : undefined;
@@ -345,8 +345,8 @@ async function assertPackageLinkIntentConsumersAreTypeScriptBoundaries(options: 
   }
 }
 
-async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+async function readJson(filePath: string): Promise<unknown> {
+  return JSON.parse(await readFile(filePath, "utf8")) as unknown;
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
@@ -430,7 +430,7 @@ async function readGeneratedWorkspaceBlueprint(
   let blueprintJson: unknown;
 
   try {
-    blueprintJson = await readJson<unknown>(blueprintPath);
+    blueprintJson = await readJson(blueprintPath);
   } catch (error: unknown) {
     if (
       error instanceof SyntaxError ||
@@ -491,7 +491,7 @@ async function readGeneratedWorkspaceBlueprint(
 async function readGeneratedRepositoryPackageMetadata(
   root: string,
 ): Promise<GeneratedRepositoryPackageMetadata> {
-  const packageJson = await readJson<unknown>(path.join(root, "package.json"));
+  const packageJson = await readJson(path.join(root, "package.json"));
 
   if (!isRecord(packageJson)) {
     throw new Error(
@@ -580,7 +580,7 @@ function generatedPackageManifestFromOperations(
       );
     }
 
-    return operation.value as PackageManifestForTaskGraph;
+    return operation.value;
   }
 
   return undefined;
@@ -603,13 +603,21 @@ async function packageManifestsForTaskGraph(options: {
       packageDefinition.path,
     );
 
-    manifests.push(
-      manifestOverride ??
-        manifestFromOperations ??
-        (await readJson<PackageManifestForTaskGraph>(
-          path.join(options.root, packageDefinition.path, "package.json"),
-        )),
+    if (manifestOverride !== undefined) {
+      manifests.push(manifestOverride);
+      continue;
+    }
+
+    if (manifestFromOperations !== undefined) {
+      manifests.push(manifestFromOperations);
+      continue;
+    }
+
+    const manifest = await readJson(
+      path.join(options.root, packageDefinition.path, "package.json"),
     );
+    assertObjectManifest(manifest, packageDefinition.path);
+    manifests.push(manifest);
   }
 
   return manifests;
@@ -663,7 +671,9 @@ function assertObjectManifest(
 
 function recordSortedByKey<T>(record: Record<string, T>): Record<string, T> {
   return Object.fromEntries(
-    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
+    Object.entries(record).toSorted(([left], [right]) =>
+      left.localeCompare(right),
+    ),
   );
 }
 
@@ -680,7 +690,7 @@ async function consumerManifestUpdatesForPackageLinkIntents(options: {
     packagePath,
     packageLinkDependencies,
   ] of options.manifestDependenciesByPackagePath) {
-    const manifest = await readJson<unknown>(
+    const manifest = await readJson(
       path.join(options.root, packagePath, "package.json"),
     );
     assertObjectManifest(manifest, packagePath);
@@ -820,18 +830,25 @@ function rootPackageJsonWithPackageTaskFilters(
 
   const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
   const taskNames = turboTaskNamesForPackageManifests(packageManifests);
+  const checkScript = input.scripts.check;
+  const fixScript = input.scripts.fix;
+  if (checkScript === undefined || fixScript === undefined) {
+    throw new Error(
+      "Cannot update root Package Addition scripts: check and fix scripts are required",
+    );
+  }
 
   return {
     ...input,
     scripts: {
       ...input.scripts,
       check: rootScriptWithTurboPackageTasks({
-        script: input.scripts.check,
+        script: checkScript,
         taskNames,
         workspacePackageGlobs,
       }),
       fix: rootScriptWithTurboPackageTask(
-        input.scripts.fix,
+        fixScript,
         "fix",
         workspacePackageGlobs,
       ),
@@ -914,6 +931,8 @@ function rootPackageJsonWithSharedOxcRuntimeDependencies(
       ...input.devDependencies,
       oxfmt: input.devDependencies?.oxfmt ?? "catalog:",
       oxlint: input.devDependencies?.oxlint ?? "catalog:",
+      "oxlint-tsgolint":
+        input.devDependencies?.["oxlint-tsgolint"] ?? "catalog:",
     },
   };
 }
@@ -928,7 +947,7 @@ function catalogDependenciesWithSharedOxcRuntimeDependencies(
     return dependencies;
   }
 
-  for (const dependency of ["oxfmt", "oxlint"]) {
+  for (const dependency of ["oxfmt", "oxlint", "oxlint-tsgolint"]) {
     if (!dependencies.includes(dependency)) {
       dependencies.push(dependency);
     }
@@ -998,7 +1017,7 @@ async function planRootUpdates(
     ),
   );
   const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
-    await readJson<unknown>(path.join(root, "package.json")),
+    await readJson(path.join(root, "package.json")),
     nextBlueprint,
     packageManifests,
   );
@@ -1086,7 +1105,7 @@ async function ensureRootOxlintConfig(options: {
 
 async function ensureRootOxcConfiguration(options: {
   root: string;
-  sharedOxcRoot?: string;
+  sharedOxcRoot?: string | undefined;
   addedPreset: string;
 }): Promise<void> {
   if (!options.sharedOxcRoot) {

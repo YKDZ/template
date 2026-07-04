@@ -84,9 +84,9 @@ export type RenderOperation =
 
 export type RenderProjectOptions = {
   sourceRoot: string;
-  sourceRoots?: Record<string, string>;
+  sourceRoots?: Record<string, string> | undefined;
   targetRoot: string;
-  variables?: RenderVariables;
+  variables?: RenderVariables | undefined;
   operations: RenderOperation[];
 };
 
@@ -213,7 +213,7 @@ function serializeJsonValue(
     return JSON.stringify(value);
   }
 
-  const entries = Object.entries(value).sort(([left], [right]) =>
+  const entries = Object.entries(value).toSorted(([left], [right]) =>
     compareJsonKeys(left, right, pathSegments, rootKeyOrder),
   );
 
@@ -673,7 +673,7 @@ function replaceRanges(
 ) {
   let nextText = sourceText;
 
-  for (const range of [...ranges].sort((a, b) => b.start - a.start)) {
+  for (const range of ranges.toSorted((a, b) => b.start - a.start)) {
     const replacement = replacements[range.name];
     if (replacement === undefined) {
       continue;

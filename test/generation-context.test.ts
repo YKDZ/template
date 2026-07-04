@@ -5,9 +5,37 @@ import path from "node:path";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import type { ProjectBlueprint } from "@ykdz/template-core/declarations";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import * as v from "valibot";
 
-async function readJson<T>(filePath: string): Promise<T> {
-  return JSON.parse(await readFile(filePath, "utf8")) as T;
+const packageJsonSchema = v.object({
+  engines: v.object({ node: v.string() }),
+  packageManager: v.string(),
+});
+const devcontainerSchema = v.object({
+  build: v.object({
+    dockerfile: v.string(),
+    args: v.object({
+      NODE_VERSION: v.string(),
+      PACKAGE_MANAGER_PIN: v.string(),
+    }),
+  }),
+});
+const generationRecordSchema = v.object({
+  toolchain: v.object({
+    nodeLtsMajor: v.string(),
+    packageManagerPin: v.string(),
+    source: v.string(),
+  }),
+});
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return v.parse(
+    schema,
+    JSON.parse(await readFile(filePath, "utf8")) as unknown,
+  );
 }
 
 describe("generation context", () => {
@@ -80,30 +108,22 @@ describe("generation context", () => {
     expect(plan).toBeDefined();
     await projection!.render({ targetDir, plan: plan! });
 
-    const packageJson = await readJson<{
-      engines: { node: string };
-      packageManager: string;
-    }>(path.join(targetDir, "package.json"));
-    const devcontainer = await readJson<{
-      build: {
-        dockerfile: string;
-        args: {
-          NODE_VERSION: string;
-          PACKAGE_MANAGER_PIN: string;
-        };
-      };
-    }>(path.join(targetDir, ".devcontainer/devcontainer.json"));
+    const packageJson = await readJsonWithSchema(
+      path.join(targetDir, "package.json"),
+      packageJsonSchema,
+    );
+    const devcontainer = await readJsonWithSchema(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+      devcontainerSchema,
+    );
     const dockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
-    const generationRecord = await readJson<{
-      toolchain: {
-        nodeLtsMajor: string;
-        packageManagerPin: string;
-        source: string;
-      };
-    }>(path.join(targetDir, ".template/generated-by.json"));
+    const generationRecord = await readJsonWithSchema(
+      path.join(targetDir, ".template/generated-by.json"),
+      generationRecordSchema,
+    );
 
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");

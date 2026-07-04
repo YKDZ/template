@@ -60,7 +60,7 @@ describe("Template Dependency Catalog projection", () => {
           (preset) => preset.dependencyCatalog ?? [],
         ),
       ),
-    ].sort();
+    ].toSorted();
     const templateCatalog = loadTemplateDependencyCatalog();
     const workspaceYaml = renderGeneratedPnpmWorkspaceYaml({ dependencies });
     const selectedCatalog =

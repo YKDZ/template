@@ -229,24 +229,31 @@ describe("generated scenarios", () => {
       "package-addition-matrix",
     ).runnable.find((candidate) => candidate.addedPreset === "addon");
 
-    expect(
-      errorForFailedGeneratedScenario(scenario!, new Error("inner")),
-    ).toMatchObject({
-      message: "Fixture scenario failed: base + addon",
-      cause: expect.objectContaining({ message: "inner" }),
-    });
+    const error = errorForFailedGeneratedScenario(
+      scenario!,
+      new Error("inner"),
+    );
+
+    expect(error.message).toBe("Fixture scenario failed: base + addon");
+    expect(error.cause).toBeInstanceOf(Error);
+    if (!(error.cause instanceof Error)) {
+      throw new Error("Expected generated scenario error cause.");
+    }
+    expect(error.cause.message).toBe("inner");
   });
 
   it("wraps init runner failures with the initialization preset label", () => {
     const scenario = selectGeneratedScenarios(minimalManifest(), "init")
-      .runnable[0];
+      .runnable[0]!;
 
-    expect(
-      errorForFailedGeneratedScenario(scenario, new Error("inner")),
-    ).toMatchObject({
-      message: "Fixture scenario failed: base",
-      cause: expect.objectContaining({ message: "inner" }),
-    });
+    const error = errorForFailedGeneratedScenario(scenario, new Error("inner"));
+
+    expect(error.message).toBe("Fixture scenario failed: base");
+    expect(error.cause).toBeInstanceOf(Error);
+    if (!(error.cause instanceof Error)) {
+      throw new Error("Expected generated scenario error cause.");
+    }
+    expect(error.cause.message).toBe("inner");
   });
 
   it("runs selected scenarios through the shared runner", async () => {

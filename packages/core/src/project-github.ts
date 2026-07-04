@@ -35,9 +35,11 @@ export type DependencyMaintenancePolicy = {
 
 type ProjectCheckWorkflowOptions = {
   readonly checkPlan: CheckPlan;
-  readonly capability?: CiCapability;
-  readonly environmentPreparation?: Partial<CiEnvironmentPreparation>;
-  readonly taskLayer?: PnpmTaskLayer;
+  readonly capability?: CiCapability | undefined;
+  readonly environmentPreparation?:
+    | Partial<CiEnvironmentPreparation>
+    | undefined;
+  readonly taskLayer?: PnpmTaskLayer | undefined;
 };
 
 const defaultCiCapability: CiCapability = {

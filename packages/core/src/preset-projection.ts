@@ -25,7 +25,7 @@ export type PresetPackageAdditionPlan = {
   readonly packageRole: PackageRole;
   readonly packageSourcePreset: PackageSourcePreset;
   readonly sourceRoot: string;
-  readonly sourceRoots?: Record<string, string>;
+  readonly sourceRoots?: Record<string, string> | undefined;
   readonly operations: readonly RenderOperation[];
   readonly textFiles?: readonly {
     readonly path: string;
@@ -41,7 +41,7 @@ export type PresetPackageAdditionCapability = {
 
 export type PresetProjectionPlan = {
   readonly sourceRoot: string;
-  readonly sourceRoots?: Record<string, string>;
+  readonly sourceRoots?: Record<string, string> | undefined;
   readonly operations: readonly RenderOperation[];
   readonly checkPlan: CheckPlan;
   readonly fixPlan: FixPlan;
@@ -58,7 +58,7 @@ export type PresetProjectionPlan = {
 
 export type PresetBlueprintOptions = {
   readonly targetDir: string;
-  readonly scope?: string;
+  readonly scope?: string | undefined;
 };
 
 export type RenderPresetProjectionOptions = {

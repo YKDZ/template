@@ -26,7 +26,7 @@ export type TemplateBoundaryCheckProjection = {
   readonly sourceFilePath: string;
   readonly plan: {
     readonly sourceRoot: string;
-    readonly sourceRoots?: Record<string, string>;
+    readonly sourceRoots?: Record<string, string> | undefined;
     readonly operations: readonly RenderOperation[];
   };
 };
@@ -403,16 +403,16 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
   }
 
   const leftEntries = Object.entries(left);
-  const rightRecord = right as Record<string, unknown>;
-  const rightKeys = new Set(Object.keys(rightRecord));
+  const rightEntries = Object.entries(right);
+  const rightValues = new Map(rightEntries);
 
   return (
-    leftEntries.length === rightKeys.size &&
+    leftEntries.length === rightEntries.length &&
     leftEntries.every(([key, value]) => {
-      rightKeys.delete(key);
-      return jsonValuesEqual(value, rightRecord[key]);
-    }) &&
-    rightKeys.size === 0
+      return (
+        rightValues.has(key) && jsonValuesEqual(value, rightValues.get(key))
+      );
+    })
   );
 }
 
@@ -652,12 +652,12 @@ function isStructuralTurboValue(value: unknown): boolean {
 }
 
 const rootTsconfigConfigCompilerOptions = {
-  module: "NodeNext",
-  moduleResolution: "NodeNext",
+  module: "nodenext",
+  moduleResolution: "nodenext",
   noEmitOnError: true,
   skipLibCheck: false,
   strict: true,
-  target: "ES2022",
+  target: "es2023",
 } as const;
 
 const rootTsconfigConfigIncludes = new Set([

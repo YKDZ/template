@@ -22,6 +22,7 @@ import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection
 import { blueprintForPresetSourcePreset } from "@ykdz/template-core/projection-capabilities";
 import type { CopyFileOperation } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import * as v from "valibot";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,6 +34,30 @@ const templatesRoot = path.join(
   "builtin-source",
   "templates",
 );
+const packageJsonBinSchema = v.object({
+  bin: v.record(v.string(), v.string()),
+});
+const cliPackageJsonSchema = v.object({
+  bin: v.record(v.string(), v.string()),
+  dependencies: v.optional(v.record(v.string(), v.string())),
+  license: v.optional(v.string()),
+  name: v.string(),
+  private: v.boolean(),
+  publishConfig: v.optional(v.object({ access: v.optional(v.string()) })),
+  repository: v.optional(
+    v.object({ type: v.optional(v.string()), url: v.optional(v.string()) }),
+  ),
+});
+
+async function readJsonWithSchema<const Schema extends v.GenericSchema>(
+  filePath: string,
+  schema: Schema,
+): Promise<v.InferOutput<Schema>> {
+  return v.parse(
+    schema,
+    JSON.parse(await readFile(filePath, "utf8")) as unknown,
+  );
+}
 
 process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
   { version: "v24.11.0", lts: "Krypton" },
@@ -53,6 +78,8 @@ const packageRootFiles = [
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
+  "turbo.json",
+  "tsconfig.base.json",
   "tsconfig.json",
   "packages/cli/package.json",
   "packages/cli/tsconfig.build.json",
@@ -140,7 +167,7 @@ function projectionTemplateSourceFiles(): string[] {
   for (const preset of supportedPresetSourcePresets) {
     const plan = projectionPlanFor(preset);
     const sourceRoots: Record<string, string> = {
-      ...(plan.sourceRoots ?? {}),
+      ...plan.sourceRoots,
       default: plan.sourceRoot,
     };
 
@@ -252,7 +279,7 @@ async function packageFiles(): Promise<string[]> {
       "packages/builtin-source/templates/shared/editor-customization/capabilities.json",
       "packages/builtin-source/templates/shared/oxc/tsconfig.json",
     ]),
-  ].sort();
+  ].toSorted();
 }
 
 function relativeRepoPath(filePath: string): string {
@@ -283,7 +310,7 @@ async function checkedTemplatePackagePaths(): Promise<string[]> {
         "package/node_modules/@ykdz/template-builtin-source/",
       ),
     )
-    .sort();
+    .toSorted();
 }
 
 function firstCopyOperation(
@@ -304,17 +331,10 @@ function firstCopyOperation(
 
 describe("package publishing", () => {
   it("declares public npm metadata for the template CLI", async () => {
-    const packageJson = JSON.parse(
-      await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"),
-    ) as {
-      bin: Record<string, string>;
-      dependencies?: Record<string, string>;
-      license?: string;
-      name: string;
-      private: boolean;
-      publishConfig?: { access?: string };
-      repository?: { type?: string; url?: string };
-    };
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/cli/package.json"),
+      cliPackageJsonSchema,
+    );
 
     expect(packageJson.name).toBe("@ykdz/template");
     expect(packageJson.private).toBe(false);
@@ -499,9 +519,10 @@ describe("package publishing", () => {
       consumerDir,
       "node_modules/@ykdz/template/package.json",
     );
-    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
-      bin: Record<string, string>;
-    };
+    const packageJson = await readJsonWithSchema(
+      packageJsonPath,
+      packageJsonBinSchema,
+    );
     expect(packageJson.bin.template).toBe("dist/cli.js");
   });
 });
