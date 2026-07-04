@@ -58,7 +58,12 @@ type AddPackageOptions = {
 
 function usage(): string {
   return [
+    "Project Kit template CLI",
+    "",
     "Usage:",
+    "  template <command> [options]",
+    "",
+    "Commands:",
     "  template init <dir> --preset <name> --yes",
     "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]...",
     "  template presets",
@@ -70,14 +75,14 @@ function usage(): string {
     "  template blueprint validate <path>",
     "",
     "Options:",
-    "  --preset <name>  Project preset to generate",
-    "  --name <name>    Package name to add",
-    "  --path <path>    Two-segment Package Path to add",
+    "  --preset <name>     Project preset to generate",
+    "  --name <name>       Package name to add",
+    "  --path <path>       Two-segment Package Path to add",
     "  --link-from <path>  Existing consumer Package Path to link from; repeatable",
-    "  --scope <name>   Package scope for workspace package names",
-    "  --yes            Accept defaults for non-interactive generation",
-    "  --dry-run        Print the planned generation without writing files",
-    "  --json           Print machine-readable output",
+    "  --scope <name>      Package scope for workspace package names",
+    "  --yes               Accept defaults for non-interactive generation",
+    "  --dry-run           Print the planned generation without writing files",
+    "  --json              Print machine-readable output",
   ].join("\n");
 }
 
@@ -106,12 +111,25 @@ function formatValidationIssues(issues: ValidationIssue[]): string {
     .join("\n");
 }
 
+function formatFieldRows(
+  rows: readonly (readonly [label: string, value: string])[],
+): string[] {
+  const width = Math.max(...rows.map(([label]) => `${label}:`.length));
+
+  return rows.map(
+    ([label, value]) => `  ${`${label}:`.padEnd(width)} ${value}`,
+  );
+}
+
 function formatPresetCatalog(): string {
   return [
     "Built-in presets",
-    ...builtInPresets.map(
-      (preset) =>
-        `  ${preset.name.padEnd(8)} ${preset.title} (${preset.generation}) - ${preset.description}`,
+    "",
+    ...formatFieldRows(
+      builtInPresets.map((preset) => [
+        preset.name,
+        `${preset.title} (${preset.generation}) - ${preset.description}`,
+      ]),
     ),
   ].join("\n");
 }
@@ -226,26 +244,31 @@ function formatBlueprintSummary(
   targetDir: string,
   blueprint: ProjectBlueprint,
 ): string {
-  const lines = [
-    "Project Blueprint",
-    `  Target: ${targetDir}`,
-    `  Preset: ${blueprint.preset}`,
-    `  Project kind: ${blueprint.projectKind}`,
+  const rows: Array<readonly [string, string]> = [
+    ["Target", targetDir],
+    ["Preset", blueprint.preset],
+    ["Project kind", blueprint.projectKind],
   ];
 
   if (blueprint.packageManager) {
-    lines.push(`  Package manager: ${blueprint.packageManager}`);
+    rows.push(["Package manager", blueprint.packageManager]);
   }
 
-  if (blueprint.packages) {
-    lines.push("  Packages:");
-    for (const pkg of blueprint.packages) {
-      lines.push(`    - ${pkg.name} (${pkg.path})`);
-    }
-  }
-
-  lines.push(`  Features: ${blueprint.features.join(", ")}`);
-  return lines.join("\n");
+  return [
+    "Project Blueprint",
+    "",
+    ...formatFieldRows(rows),
+    ...(blueprint.packages
+      ? [
+          "",
+          "  Packages:",
+          ...blueprint.packages.map((pkg) => `    - ${pkg.name} (${pkg.path})`),
+        ]
+      : []),
+    "",
+    "  Features:",
+    ...blueprint.features.map((feature) => `    - ${feature}`),
+  ].join("\n");
 }
 
 type InitJsonOutput = {
@@ -275,7 +298,11 @@ function formatProjectionNextSteps(
 
   return [
     "Next Step Instructions:",
-    ...steps.map((step) => `  ${step.label}: ${step.display}`),
+    "",
+    ...steps.flatMap((step, index) => [
+      `  ${index + 1}. ${step.label}`,
+      `     ${step.display}`,
+    ]),
   ].join("\n");
 }
 
@@ -293,9 +320,12 @@ function toolchainReport(
 function formatToolchainReport(toolchain: ResolvedToolchainVersions): string {
   return [
     "Toolchain Resolution:",
-    `  Source: ${toolchain.source}`,
-    `  Node LTS major: ${toolchain.nodeLtsMajor.value}`,
-    `  Package Manager Pin: ${toolchain.packageManagerPin.value}`,
+    "",
+    ...formatFieldRows([
+      ["Source", toolchain.source],
+      ["Node LTS major", toolchain.nodeLtsMajor.value],
+      ["Package Manager Pin", toolchain.packageManagerPin.value],
+    ]),
     ...toolchain.diagnostics.map((diagnostic) => `  ${diagnostic}`),
   ].join("\n");
 }
@@ -395,10 +425,21 @@ function printInitComplete(
     return;
   }
 
-  console.log(`Initialized ${options.preset} project in ${options.dir}`);
+  console.log(
+    [
+      "Initialized project",
+      "",
+      ...formatFieldRows([
+        ["Preset", options.preset],
+        ["Target", options.dir],
+      ]),
+    ].join("\n"),
+  );
   if (generationContext) {
+    console.log("");
     console.log(formatToolchainReport(generationContext.toolchain));
   }
+  console.log("");
   console.log(formatProjectionNextSteps(options.dir, projectionPlan));
 }
 
@@ -633,8 +674,10 @@ async function main(args: string[]): Promise<void> {
 
       console.log(formatBlueprintSummary(options.dir, blueprint));
       if (generationContext) {
+        console.log("");
         console.log(formatToolchainReport(generationContext.toolchain));
       }
+      console.log("");
       console.log(formatProjectionNextSteps(options.dir, projectionPlan));
       return;
     }
@@ -665,7 +708,17 @@ async function main(args: string[]): Promise<void> {
       path: options.path,
       linkFrom: options.linkFrom,
     });
-    console.log(`Added ${options.preset} package ${options.name}`);
+    console.log(
+      [
+        "Added package",
+        "",
+        ...formatFieldRows([
+          ["Preset", options.preset],
+          ["Name", options.name],
+          ...(options.path ? ([["Path", options.path]] as const) : []),
+        ]),
+      ].join("\n"),
+    );
     return;
   }
 
@@ -679,8 +732,8 @@ async function main(args: string[]): Promise<void> {
 
 main(process.argv.slice(2)).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  console.error(`Error: ${message}`);
   console.error("");
-  console.error(usage());
+  console.error("Run `template --help` for usage.");
   process.exitCode = 1;
 });

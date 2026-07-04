@@ -1318,16 +1318,16 @@ describe("template init", () => {
     );
 
     expect(result.stdout).toContain("Project Blueprint");
-    expect(result.stdout).toContain("Preset: ts-lib");
+    expect(result.stdout).toMatch(/Preset:\s+ts-lib/);
     expect(result.stdout).toContain("Target:");
     expect(result.stdout).toContain(projectDir);
     expect(result.stdout).toContain("Toolchain Resolution:");
     expect(result.stdout).toContain("Node LTS major:");
     expect(result.stdout).toContain("Package Manager Pin:");
     expect(result.stdout).toContain("Next Step Instructions:");
-    expect(result.stdout).toContain("Install dependencies: pnpm install");
-    expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
-    expect(result.stdout).toContain("Run Root Check: pnpm run check");
+    expect(result.stdout).toMatch(/Install dependencies\s+pnpm install/);
+    expect(result.stdout).toMatch(/Run Fix Command\s+pnpm run fix/);
+    expect(result.stdout).toMatch(/Run Root Check\s+pnpm run check/);
     expect(result.stdout).not.toContain("Post Commands:");
     expect(result.stdout).not.toContain("corepack");
 
@@ -1752,9 +1752,9 @@ describe("template init", () => {
     );
 
     expect(result.stdout).toContain("Toolchain Resolution:");
-    expect(result.stdout).toContain("Source: bundled-fallback");
-    expect(result.stdout).toContain("Node LTS major: 24");
-    expect(result.stdout).toContain("Package Manager Pin: pnpm@10.0.0");
+    expect(result.stdout).toMatch(/Source:\s+bundled-fallback/);
+    expect(result.stdout).toMatch(/Node LTS major:\s+24/);
+    expect(result.stdout).toMatch(/Package Manager Pin:\s+pnpm@10\.0\.0/);
     expect(result.stdout).toContain(
       "Using bundled fallback toolchain metadata",
     );
@@ -1824,7 +1824,9 @@ describe("template init", () => {
     );
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Unknown option: --ready");
+    expect(result.stderr).toContain("Error: Unknown option: --ready");
+    expect(result.stderr).toContain("Run `template --help` for usage.");
+    expect(result.stderr).not.toContain("Usage:");
     expect(result.stderr).not.toContain(
       "Run template-maintained Post Commands",
     );
@@ -1908,24 +1910,25 @@ describe("template init", () => {
 
     await stat(path.join(emptyDir, "package.json"));
 
-    await expect(
-      execa(
-        "pnpm",
-        [
-          "exec",
-          "tsx",
-          path.join(repoRoot, "src/cli.ts"),
-          "init",
-          nonEmptyDir,
-          "--preset",
-          "ts-lib",
-          "--yes",
-        ],
-        { cwd: repoRoot },
-      ),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("Target directory is not empty"),
-    });
+    const nonEmptyResult = await execa(
+      "pnpm",
+      [
+        "exec",
+        "tsx",
+        path.join(repoRoot, "src/cli.ts"),
+        "init",
+        nonEmptyDir,
+        "--preset",
+        "ts-lib",
+        "--yes",
+      ],
+      { cwd: repoRoot, reject: false },
+    );
+
+    expect(nonEmptyResult.exitCode).toBe(1);
+    expect(nonEmptyResult.stderr).toContain("Target directory is not empty");
+    expect(nonEmptyResult.stderr).toContain("Run `template --help` for usage.");
+    expect(nonEmptyResult.stderr).not.toContain("Usage:");
     expect(await readFile(path.join(nonEmptyDir, "README.md"), "utf8")).toBe(
       "# existing\n",
     );
@@ -1955,11 +1958,11 @@ describe("template init", () => {
     );
 
     expect(result.stdout).toContain("Project Blueprint");
-    expect(result.stdout).toContain("Preset: ts-lib");
+    expect(result.stdout).toMatch(/Preset:\s+ts-lib/);
     expect(result.stdout).toContain("Generate this project? [y/N]");
-    expect(result.stdout).toContain(
-      `Initialized ts-lib project in ${projectDir}`,
-    );
+    expect(result.stdout).toContain("Initialized project");
+    expect(result.stdout).toMatch(/Preset:\s+ts-lib/);
+    expect(result.stdout).toContain(projectDir);
     await stat(path.join(projectDir, "package.json"));
   });
 
@@ -2016,9 +2019,9 @@ describe("template init", () => {
       { cwd: repoRoot },
     );
 
-    expect(result.stdout).toContain(
-      `Initialized ts-lib project in ${projectDir}`,
-    );
+    expect(result.stdout).toContain("Initialized project");
+    expect(result.stdout).toMatch(/Preset:\s+ts-lib/);
+    expect(result.stdout).toContain(projectDir);
     expect(result.stdout).toContain("Next Step Instructions:");
     expect(result.stdout).toContain(`cd ${projectDir}`);
     expect(result.stdout).toContain("pnpm install");
@@ -2078,7 +2081,7 @@ describe("template init", () => {
       },
     );
 
-    expect(result.stdout).toContain("Run Fix Command: pnpm run fix");
+    expect(result.stdout).toMatch(/Run Fix Command\s+pnpm run fix/);
     await expect(readFile(commandLog, "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
