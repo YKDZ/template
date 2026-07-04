@@ -194,7 +194,7 @@ export function packageTurboTasks({
     "test:e2e": {
       dependsOn: dependencyBuildsRequired ? ["build", "^build"] : ["build"],
     },
-    check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+    check: { dependsOn: ["typecheck", "build", "test"] },
     fix: { cache: false },
   };
 }

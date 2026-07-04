@@ -491,7 +491,7 @@ describe("template init", () => {
       dependsOn: ["^typecheck"],
     });
     expect(turboConfig.tasks.check).toEqual({
-      dependsOn: ["typecheck", "build", "test", "test:e2e"],
+      dependsOn: ["typecheck", "build", "test"],
     });
 
     expect(libraryPackageJson).toMatchObject({
@@ -2306,7 +2306,6 @@ describe("template init", () => {
       "typecheck",
       "build",
       "test",
-      "test:e2e",
     ]);
 
     expect(blueprint).toMatchObject({
@@ -2854,7 +2853,6 @@ describe("template init", () => {
       "typecheck",
       "build",
       "test",
-      "test:e2e",
     ]);
 
     expect(blueprint).toMatchObject({
@@ -3143,7 +3141,6 @@ describe("template init", () => {
       "typecheck",
       "build",
       "test",
-      "test:e2e",
     ]);
     expect(devcontainer.name).toBe("demo-fullstack");
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");

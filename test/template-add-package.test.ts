@@ -349,7 +349,6 @@ describe("template add package", () => {
       "typecheck",
       "build",
       "test",
-      "test:e2e",
     ]);
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*' --filter './packages/*'",

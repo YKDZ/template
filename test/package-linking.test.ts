@@ -212,7 +212,7 @@ describe("Package Link Planning", () => {
       build: { outputs: ["dist/**"] },
       test: { dependsOn: ["^typecheck"] },
       "test:e2e": { dependsOn: ["build"] },
-      check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+      check: { dependsOn: ["typecheck", "build", "test"] },
       fix: { cache: false },
     });
 
@@ -239,7 +239,7 @@ describe("Package Link Planning", () => {
       build: { dependsOn: ["^build"], outputs: ["dist/**"] },
       test: { dependsOn: ["^typecheck"] },
       "test:e2e": { dependsOn: ["build", "^build"] },
-      check: { dependsOn: ["typecheck", "build", "test", "test:e2e"] },
+      check: { dependsOn: ["typecheck", "build", "test"] },
       fix: { cache: false },
     });
   });
