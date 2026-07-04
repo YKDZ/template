@@ -96,6 +96,7 @@ const supportedPresetSourcePresets =
     (preset) =>
       preset.generation === "supported" && preset.projection !== undefined,
   );
+const packagePublishIntegrationTimeoutMs = 180_000;
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
@@ -347,181 +348,190 @@ describe("package publishing", () => {
     expect(packageJson.publishConfig?.access).toBe("public");
   });
 
-  it("packs a tarball with the advertised CLI from a clean unbuilt checkout", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "template-pack-"));
-    const packageDir = path.join(workspace, "package");
-    const packDir = path.join(workspace, "pack");
-    const consumerDir = path.join(workspace, "consumer");
+  it(
+    "packs a tarball with the advertised CLI from a clean unbuilt checkout",
+    async () => {
+      const workspace = await mkdtemp(path.join(tmpdir(), "template-pack-"));
+      const packageDir = path.join(workspace, "package");
+      const packDir = path.join(workspace, "pack");
+      const consumerDir = path.join(workspace, "consumer");
 
-    await copyCleanPackage(packageDir);
-    await mkdir(packDir);
-    await mkdir(consumerDir);
+      await copyCleanPackage(packageDir);
+      await mkdir(packDir);
+      await mkdir(consumerDir);
 
-    await execa("pnpm", ["install", "--frozen-lockfile"], { cwd: packageDir });
-    await execa("pnpm", ["pack", "--pack-destination", packDir], {
-      cwd: path.join(packageDir, "packages/cli"),
-    });
+      await execa("pnpm", ["install", "--frozen-lockfile"], {
+        cwd: packageDir,
+      });
+      await execa("pnpm", ["pack", "--pack-destination", packDir], {
+        cwd: path.join(packageDir, "packages/cli"),
+      });
 
-    const packedFiles = await readdir(packDir);
-    const tarball = packedFiles.find((file) => file.endsWith(".tgz"));
-    expect(tarball).toBeDefined();
+      const packedFiles = await readdir(packDir);
+      const tarball = packedFiles.find((file) => file.endsWith(".tgz"));
+      expect(tarball).toBeDefined();
 
-    const tarballPath = path.join(packDir, tarball!);
-    const tarballContents = await execa("tar", ["-tf", tarballPath]);
-    const packedPaths = tarballContents.stdout.split("\n");
-    expect(packedPaths).toContain("package/dist/cli.js");
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-core/dist/devcontainer.js",
-    );
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-core/dist/generation-context.js",
-    );
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-core/dist/module-graph.js",
-    );
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-core/dist/next-step-instructions.js",
-    );
-    expect(packedPaths).not.toContain("package/dist/post-commands.js");
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/preset-source.json",
-    );
-    expect(packedPaths).not.toContain("package/templates/preset-source.json");
-    expect(packedPaths).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/^package\/templates\/.+/),
-      ]),
-    );
-    expect(packedPaths).toContain(
-      "package/node_modules/@ykdz/template-core/dist/toolchain-resolution.js",
-    );
-    expect(
-      packedPaths.filter((packedPath) => packedPath.endsWith(".map")),
-    ).toEqual([]);
-    expect(packedPaths).not.toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/registry.ts",
-    );
-    expect(packedPaths).not.toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/projection-plans.ts",
-    );
-    expect(packedPaths).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(
-          /^package\/node_modules\/@ykdz\/template-builtin-source\/templates\/[^/]+\/projection\.ts$/,
-        ),
-      ]),
-    );
-    const localTemplateArtifact = path.join(
-      templatesRoot,
-      `.package-publish-artifact-${process.pid}.tmp`,
-    );
-    await writeFile(localTemplateArtifact, "not checked template source\n");
-    try {
-      expect(packedPaths).toEqual(
-        expect.arrayContaining(await checkedTemplatePackagePaths()),
+      const tarballPath = path.join(packDir, tarball!);
+      const tarballContents = await execa("tar", ["-tf", tarballPath]);
+      const packedPaths = tarballContents.stdout.split("\n");
+      expect(packedPaths).toContain("package/dist/cli.js");
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/devcontainer.js",
       );
-      expect(packedPaths).toEqual(
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/generation-context.js",
+      );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/module-graph.js",
+      );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/next-step-instructions.js",
+      );
+      expect(packedPaths).not.toContain("package/dist/post-commands.js");
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/preset-source.json",
+      );
+      expect(packedPaths).not.toContain("package/templates/preset-source.json");
+      expect(packedPaths).not.toEqual(
         expect.arrayContaining([
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/browser-test.Dockerfile",
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/node-pnpm.Dockerfile",
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/rust.Dockerfile",
-          "package/node_modules/@ykdz/template-builtin-source/templates/rust-bin/src/main.rs",
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/node/oxlint.config.ts",
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/vue/oxlint.config.ts",
-          "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxfmt.config.ts",
+          expect.stringMatching(/^package\/templates\/.+/),
         ]),
       );
-      expect(packedPaths).not.toContain(
-        `package/node_modules/@ykdz/template-builtin-source/templates/${path.basename(
-          localTemplateArtifact,
-        )}`,
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/toolchain-resolution.js",
       );
-    } finally {
-      await rm(localTemplateArtifact, { force: true });
-    }
-    expect(packedPaths).not.toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxc-config-modules.d.ts",
-    );
-    expect(packedPaths).not.toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/package.json",
-    );
-    expect(packedPaths).not.toContain(
-      "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/tsconfig.json",
-    );
+      expect(
+        packedPaths.filter((packedPath) => packedPath.endsWith(".map")),
+      ).toEqual([]);
+      expect(packedPaths).not.toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/registry.ts",
+      );
+      expect(packedPaths).not.toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/projection-plans.ts",
+      );
+      expect(packedPaths).not.toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(
+            /^package\/node_modules\/@ykdz\/template-builtin-source\/templates\/[^/]+\/projection\.ts$/,
+          ),
+        ]),
+      );
+      const localTemplateArtifact = path.join(
+        templatesRoot,
+        `.package-publish-artifact-${process.pid}.tmp`,
+      );
+      await writeFile(localTemplateArtifact, "not checked template source\n");
+      try {
+        expect(packedPaths).toEqual(
+          expect.arrayContaining(await checkedTemplatePackagePaths()),
+        );
+        expect(packedPaths).toEqual(
+          expect.arrayContaining([
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/browser-test.Dockerfile",
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/node-pnpm.Dockerfile",
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/devcontainer/rust.Dockerfile",
+            "package/node_modules/@ykdz/template-builtin-source/templates/rust-bin/src/main.rs",
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/node/oxlint.config.ts",
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/vue/oxlint.config.ts",
+            "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxfmt.config.ts",
+          ]),
+        );
+        expect(packedPaths).not.toContain(
+          `package/node_modules/@ykdz/template-builtin-source/templates/${path.basename(
+            localTemplateArtifact,
+          )}`,
+        );
+      } finally {
+        await rm(localTemplateArtifact, { force: true });
+      }
+      expect(packedPaths).not.toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/oxc-config-modules.d.ts",
+      );
+      expect(packedPaths).not.toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/package.json",
+      );
+      expect(packedPaths).not.toContain(
+        "package/node_modules/@ykdz/template-builtin-source/templates/shared/oxc/tsconfig.json",
+      );
 
-    await writeFile(
-      path.join(consumerDir, "package.json"),
-      `${JSON.stringify({ type: "module" }, null, 2)}\n`,
-    );
-    await execa("pnpm", ["add", tarballPath], { cwd: consumerDir });
+      await writeFile(
+        path.join(consumerDir, "package.json"),
+        `${JSON.stringify({ type: "module" }, null, 2)}\n`,
+      );
+      await execa("pnpm", ["add", tarballPath], { cwd: consumerDir });
 
-    const result = await execa("pnpm", ["exec", "template", "--help"], {
-      cwd: consumerDir,
-    });
-    expect(result.stdout).toContain("Usage:");
+      const result = await execa("pnpm", ["exec", "template", "--help"], {
+        cwd: consumerDir,
+      });
+      expect(result.stdout).toContain("Usage:");
 
-    for (const preset of supportedPresetSourcePresets) {
-      const presetName = preset.name;
-      const generatedDir = path.join(consumerDir, `generated-${presetName}`);
-      const copyOperation = firstCopyOperation(preset);
+      for (const preset of supportedPresetSourcePresets) {
+        const presetName = preset.name;
+        const generatedDir = path.join(consumerDir, `generated-${presetName}`);
+        const copyOperation = firstCopyOperation(preset);
 
+        await execa(
+          "pnpm",
+          [
+            "exec",
+            "template",
+            "init",
+            generatedDir,
+            "--preset",
+            presetName,
+            "--yes",
+          ],
+          { cwd: consumerDir },
+        );
+        const copiedTemplateSource = await readFile(
+          path.join(generatedDir, copyOperation.to),
+          "utf8",
+        );
+        expect(copiedTemplateSource.length).toBeGreaterThan(0);
+      }
+
+      const templateBin = path.join(consumerDir, "node_modules/.bin/template");
+      const generatedWorkspaceDir = path.join(
+        consumerDir,
+        "generated-workspace",
+      );
       await execa(
         "pnpm",
         [
           "exec",
           "template",
           "init",
-          generatedDir,
+          generatedWorkspaceDir,
           "--preset",
-          presetName,
+          "vue-hono-app",
           "--yes",
         ],
         { cwd: consumerDir },
       );
-      const copiedTemplateSource = await readFile(
-        path.join(generatedDir, copyOperation.to),
-        "utf8",
+      await execa(
+        templateBin,
+        ["add", "package", "--preset", "ts-lib", "--name", "shared"],
+        {
+          cwd: generatedWorkspaceDir,
+        },
       );
-      expect(copiedTemplateSource.length).toBeGreaterThan(0);
-    }
+      await expect(
+        readFile(
+          path.join(generatedWorkspaceDir, "packages/shared/src/index.ts"),
+          "utf8",
+        ),
+      ).resolves.toContain("export function greet");
 
-    const templateBin = path.join(consumerDir, "node_modules/.bin/template");
-    const generatedWorkspaceDir = path.join(consumerDir, "generated-workspace");
-    await execa(
-      "pnpm",
-      [
-        "exec",
-        "template",
-        "init",
-        generatedWorkspaceDir,
-        "--preset",
-        "vue-hono-app",
-        "--yes",
-      ],
-      { cwd: consumerDir },
-    );
-    await execa(
-      templateBin,
-      ["add", "package", "--preset", "ts-lib", "--name", "shared"],
-      {
-        cwd: generatedWorkspaceDir,
-      },
-    );
-    await expect(
-      readFile(
-        path.join(generatedWorkspaceDir, "packages/shared/src/index.ts"),
-        "utf8",
-      ),
-    ).resolves.toContain("export function greet");
-
-    const packageJsonPath = path.join(
-      consumerDir,
-      "node_modules/@ykdz/template/package.json",
-    );
-    const packageJson = await readJsonWithSchema(
-      packageJsonPath,
-      packageJsonBinSchema,
-    );
-    expect(packageJson.bin.template).toBe("dist/cli.js");
-  });
+      const packageJsonPath = path.join(
+        consumerDir,
+        "node_modules/@ykdz/template/package.json",
+      );
+      const packageJson = await readJsonWithSchema(
+        packageJsonPath,
+        packageJsonBinSchema,
+      );
+      expect(packageJson.bin.template).toBe("dist/cli.js");
+    },
+    packagePublishIntegrationTimeoutMs,
+  );
 });
