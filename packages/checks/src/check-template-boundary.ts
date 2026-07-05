@@ -13,7 +13,6 @@ import {
   projectBuiltInPresetSourcePreset,
 } from "@ykdz/template-builtin-source";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
-import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
 import {
   blueprintForPresetSourcePreset,
   defaultPackagePathForPresetSourcePackageAddition,
@@ -26,6 +25,7 @@ import {
   type TemplateBoundaryDebt,
   type TemplateBoundaryViolation,
 } from "@ykdz/template-core/template-boundary-check";
+import { PackageAdditionSupport } from "@ykdz/template-shared";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),

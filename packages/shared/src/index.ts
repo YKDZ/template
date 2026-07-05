@@ -8,6 +8,11 @@ export const PackageAdditionSupport = {
 export type PackageAdditionSupport =
   (typeof PackageAdditionSupport)[keyof typeof PackageAdditionSupport];
 
+export const packageAdditionSupportValues = [
+  PackageAdditionSupport.Supported,
+  PackageAdditionSupport.Unsupported,
+] as const satisfies readonly PackageAdditionSupport[];
+
 export type PackageRole = "runtime-service" | "shared-library";
 
 export type PackageSourcePreset = "hono-api" | "ts-lib" | "vue-app";
@@ -34,11 +39,13 @@ export type FeatureName =
   | "cargo-test"
   | "native-binary-release";
 
+export type PresetGeneration = "supported" | "future";
+
 export type BuiltInPreset = {
   name: string;
   title: string;
   description: string;
-  generation: "supported" | "future";
+  generation: PresetGeneration;
   supportedPackageManagers: readonly PackageManager[];
   supportedProjectKinds: readonly ProjectKind[];
   packageAdditionSupport: PackageAdditionSupport;
@@ -86,7 +93,25 @@ export type PresetCatalogValidationOptions = {
   readonly presetLabel?: string;
 };
 
-const featureNames: FeatureName[] = [
+export const packageManagerValues = [
+  "pnpm",
+] as const satisfies readonly PackageManager[];
+
+export const presetGenerationValues = [
+  "supported",
+  "future",
+] as const satisfies readonly PresetGeneration[];
+
+export const projectKindValues = [
+  "single-package",
+  "multi-package",
+] as const satisfies readonly ProjectKind[];
+
+export const projectKindJsonSchemaEnum = [
+  "multi-package",
+] as const satisfies readonly ProjectKind[];
+
+export const featureNameValues = [
   "pnpm-catalog",
   "oxc-format-lint",
   "strict-typescript",
@@ -98,15 +123,19 @@ const featureNames: FeatureName[] = [
   "rustfmt-clippy",
   "cargo-test",
   "native-binary-release",
-];
+] as const satisfies readonly FeatureName[];
+
+export const packageManagerJsonSchemaEnum = packageManagerValues;
+
+export const presetGenerationJsonSchemaEnum = presetGenerationValues;
+
+export const featureNameJsonSchemaEnum = featureNameValues;
 
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
-const packageManagerSchema = v.picklist(["pnpm"] as const);
-const projectKindSchema = v.picklist([
-  "single-package",
-  "multi-package",
-] as const);
-const featureNameSchema = v.picklist(featureNames);
+export const presetGenerationSchema = v.picklist(presetGenerationValues);
+export const packageManagerSchema = v.picklist(packageManagerValues);
+export const projectKindSchema = v.picklist(projectKindValues);
+export const featureNameSchema = v.picklist(featureNameValues);
 const packageRoleSchema = v.picklist([
   "runtime-service",
   "shared-library",
@@ -139,18 +168,18 @@ export const presetFileJsonSchema = {
     description: { type: "string", minLength: 1 },
     supportedPackageManagers: {
       type: "array",
-      items: { enum: ["pnpm"] },
+      items: { enum: packageManagerJsonSchemaEnum },
       uniqueItems: true,
     },
     supportedProjectKinds: {
       type: "array",
       minItems: 1,
-      items: { enum: ["multi-package"] },
+      items: { enum: projectKindJsonSchemaEnum },
       uniqueItems: true,
     },
     features: {
       type: "array",
-      items: { enum: featureNames },
+      items: { enum: featureNameJsonSchemaEnum },
       uniqueItems: true,
     },
   },
@@ -166,11 +195,11 @@ export const blueprintJsonSchema = {
   properties: {
     schemaVersion: { const: 1 },
     preset: { type: "string", minLength: 1 },
-    packageManager: { enum: ["pnpm"] },
-    projectKind: { enum: ["multi-package"] },
+    packageManager: { enum: packageManagerJsonSchemaEnum },
+    projectKind: { enum: projectKindJsonSchemaEnum },
     features: {
       type: "array",
-      items: { enum: featureNames },
+      items: { enum: featureNameJsonSchemaEnum },
       uniqueItems: true,
     },
     packages: {

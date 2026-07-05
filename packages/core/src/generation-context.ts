@@ -1,6 +1,7 @@
 import path from "node:path";
 
-import type { PackageManager, ProjectBlueprint } from "./declarations.js";
+import type { PackageManager, ProjectBlueprint } from "@ykdz/template-shared";
+
 import type { ResolvedToolchainVersions } from "./toolchain-resolution.js";
 
 export type ProjectName = {

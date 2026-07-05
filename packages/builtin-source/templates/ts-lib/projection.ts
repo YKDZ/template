@@ -6,10 +6,6 @@ import {
   builtInPresetProjectionSourceRoots,
   loadBuiltInPresetProjectionDeclaration,
 } from "@ykdz/template-builtin-source";
-import type {
-  BuiltInPreset,
-  ProjectBlueprint,
-} from "@ykdz/template-core/declarations";
 import type { GenerationContext } from "@ykdz/template-core/generation-context";
 import {
   type CheckPlan,
@@ -18,7 +14,6 @@ import {
   renderFixCommand,
   renderRootCheckCommand,
 } from "@ykdz/template-core/module-graph";
-import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
 import {
   packageManifestExposureFields,
   planPackageLinks,
@@ -35,6 +30,11 @@ import {
   renderNewProject,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
+import {
+  PackageAdditionSupport,
+  type BuiltInPreset,
+  type ProjectBlueprint,
+} from "@ykdz/template-shared";
 
 export const tsLibPresetMetadata: BuiltInPreset = {
   name: "ts-lib",

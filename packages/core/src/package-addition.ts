@@ -4,20 +4,23 @@ import path from "node:path";
 import {
   validateProjectBlueprint,
   type ProjectBlueprint,
-} from "./declarations.js";
+} from "@ykdz/template-shared";
+import {
+  PackageAdditionSupport,
+  type PackageLinkIntent,
+  type PackageRole,
+  type PackageSourcePreset,
+} from "@ykdz/template-shared";
+
 import {
   collectGeneratedManifestCatalogReferences,
   pnpmWorkspaceYamlWithCatalogDependencies,
   type GeneratedPackageManifestDependencies,
 } from "./dependency-catalog.js";
-import { PackageAdditionSupport } from "./package-addition-support.js";
 import {
   assertTypeScriptPackageBoundaryForLinkIntent,
   packageTurboTasks,
   planPackageLinks,
-  type PackageLinkIntent,
-  type PackageRole,
-  type PackageSourcePreset,
   type TurboTaskGraph,
 } from "./package-linking.js";
 import {

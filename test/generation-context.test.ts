@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
-import type { ProjectBlueprint } from "@ykdz/template-core/declarations";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import type { ProjectBlueprint } from "@ykdz/template-shared";
 import * as v from "valibot";
 
 const packageJsonSchema = v.object({

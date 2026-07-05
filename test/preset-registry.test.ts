@@ -8,14 +8,16 @@ import {
   loadBuiltInPresetSourceManifest,
 } from "@ykdz/template-builtin-source";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
-import { validateProjectBlueprint } from "@ykdz/template-core/declarations";
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
-import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
 import {
   blueprintForPresetSourcePreset,
   defaultPackagePathForPresetSourcePackageAddition,
 } from "@ykdz/template-core/projection-capabilities";
+import {
+  PackageAdditionSupport,
+  validateProjectBlueprint,
+} from "@ykdz/template-shared";
 import * as v from "valibot";
 
 const playwrightCliPackage = `@playwright/test@${

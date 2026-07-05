@@ -5,7 +5,9 @@ import type {
   ProjectBlueprint,
   ValidationIssue,
   ValidationResult,
-} from "./declarations.js";
+} from "@ykdz/template-shared";
+import type { PackageRole, PackageSourcePreset } from "@ykdz/template-shared";
+
 import {
   collectGeneratedManifestCatalogDependencies,
   collectGeneratedManifestCatalogReferences,
@@ -32,8 +34,6 @@ import {
 } from "./module-graph.js";
 import {
   packageManifestExposureFields,
-  type PackageRole,
-  type PackageSourcePreset,
   planPackageLinks,
 } from "./package-linking.js";
 import type {

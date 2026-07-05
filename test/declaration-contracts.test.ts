@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,70 @@ const repoRoot = path.resolve(
   "..",
 );
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
+const declarationConsumerRoots = [
+  "packages/builtin-source/src",
+  "packages/builtin-source/templates",
+  "packages/checks/src",
+  "packages/cli/src",
+  "packages/core/src",
+] as const;
+const ignoredDeclarationConsumerDirectories = new Set([
+  ".cache",
+  ".local",
+  ".turbo",
+  "dist",
+  "generated",
+  "local",
+  "node_modules",
+]);
+
+function repoPath(filePath: string): string {
+  return filePath.split(path.sep).join(path.posix.sep);
+}
+
+function isMaintainedTypeScriptFile(filePath: string): boolean {
+  const normalizedPath = repoPath(filePath);
+  const fileName = path.posix.basename(normalizedPath);
+
+  return (
+    normalizedPath.endsWith(".ts") &&
+    !fileName.startsWith("generated-") &&
+    !fileName.endsWith(".generated.ts")
+  );
+}
+
+async function discoverDeclarationConsumerFiles(): Promise<string[]> {
+  const files: string[] = [];
+
+  async function visit(relativeDirectory: string): Promise<void> {
+    const entries = await readdir(path.join(repoRoot, relativeDirectory), {
+      withFileTypes: true,
+    });
+
+    for (const entry of entries.toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    )) {
+      const relativePath = path.join(relativeDirectory, entry.name);
+
+      if (entry.isDirectory()) {
+        if (!ignoredDeclarationConsumerDirectories.has(entry.name)) {
+          await visit(relativePath);
+        }
+        continue;
+      }
+
+      if (entry.isFile() && isMaintainedTypeScriptFile(relativePath)) {
+        files.push(repoPath(relativePath));
+      }
+    }
+  }
+
+  for (const root of declarationConsumerRoots) {
+    await visit(root);
+  }
+
+  return files.toSorted();
+}
 
 function template(args: string[]) {
   return execa("pnpm", ["exec", "tsx", cliPath, ...args], { cwd: repoRoot });
@@ -171,6 +235,30 @@ function firstSharedResource(
 }
 
 describe("declaration contracts", () => {
+  it("keeps stable declaration vocabulary imported from the Template Contract Library", async () => {
+    const declarationConsumerFiles = await discoverDeclarationConsumerFiles();
+    const forbiddenImports = [
+      "@ykdz/template-core/declarations",
+      "@ykdz/template-core/package-addition-support",
+      "./declarations.js",
+      "./package-addition-support.js",
+    ];
+    const offenders: string[] = [];
+
+    for (const file of declarationConsumerFiles) {
+      const source = await readFile(path.join(repoRoot, file), "utf8");
+
+      for (const forbiddenImport of forbiddenImports) {
+        if (source.includes(forbiddenImport)) {
+          offenders.push(`${file} imports ${forbiddenImport}`);
+        }
+      }
+    }
+
+    expect(declarationConsumerFiles).toContain("packages/cli/src/cli.ts");
+    expect(offenders).toEqual([]);
+  });
+
   it("accepts a Project Blueprint through the Template Contract Library", () => {
     expect(
       validateSharedProjectBlueprint({

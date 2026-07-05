@@ -7,19 +7,29 @@ import {
 } from "node:fs";
 import path from "node:path";
 
-import * as v from "valibot";
-
 import type {
   BuiltInPreset,
-  FeatureName,
   ValidationIssue,
   ValidationResult,
-} from "./declarations.js";
+} from "@ykdz/template-shared";
+import {
+  featureNameJsonSchemaEnum,
+  featureNameSchema,
+  PackageAdditionSupport,
+  packageAdditionSupportValues,
+  packageManagerJsonSchemaEnum,
+  packageManagerSchema,
+  presetGenerationJsonSchemaEnum,
+  presetGenerationSchema,
+  projectKindJsonSchemaEnum,
+  projectKindSchema,
+} from "@ykdz/template-shared";
+import * as v from "valibot";
+
 import {
   loadTemplateDependencyCatalog,
   type TemplateDependencyCatalog,
 } from "./dependency-catalog.js";
-import { PackageAdditionSupport } from "./package-addition-support.js";
 import {
   normalizePresetProjectionDeclaration,
   projectionCapabilityIssues,
@@ -85,20 +95,6 @@ export type PresetSourceManifestValidationOptions = {
   readonly sourceRoot?: string;
   readonly dependencyCatalog?: TemplateDependencyCatalog;
 };
-
-const featureNames = [
-  "pnpm-catalog",
-  "oxc-format-lint",
-  "strict-typescript",
-  "root-check",
-  "fix-command",
-  "devcontainer",
-  "github-actions",
-  "dependabot",
-  "rustfmt-clippy",
-  "cargo-test",
-  "native-binary-release",
-] satisfies FeatureName[];
 
 const packageLeafNamePattern = "^[a-z0-9][a-z0-9-]*$";
 const packageLeafNameRegExp = new RegExp(packageLeafNamePattern);
@@ -236,27 +232,24 @@ export const presetSourceManifestJsonSchema = {
           name: { type: "string", minLength: 1 },
           title: { type: "string", minLength: 1 },
           description: { type: "string", minLength: 1 },
-          generation: { enum: ["supported", "future"] },
+          generation: { enum: presetGenerationJsonSchemaEnum },
           supportedPackageManagers: {
             type: "array",
-            items: { enum: ["pnpm"] },
+            items: { enum: packageManagerJsonSchemaEnum },
             uniqueItems: true,
           },
           supportedProjectKinds: {
             type: "array",
             minItems: 1,
-            items: { enum: ["multi-package"] },
+            items: { enum: projectKindJsonSchemaEnum },
             uniqueItems: true,
           },
           packageAdditionSupport: {
-            enum: [
-              PackageAdditionSupport.Supported,
-              PackageAdditionSupport.Unsupported,
-            ],
+            enum: packageAdditionSupportValues,
           },
           features: {
             type: "array",
-            items: { enum: featureNames },
+            items: { enum: featureNameJsonSchemaEnum },
             uniqueItems: true,
           },
           dependencyCatalog: {
@@ -413,16 +406,6 @@ export const presetSourceManifestJsonSchema = {
 } as const;
 
 const nonEmptyString = v.pipe(v.string(), v.minLength(1));
-const packageManagerSchema = v.picklist(["pnpm"] as const);
-const projectKindSchema = v.picklist([
-  "single-package",
-  "multi-package",
-] as const);
-const packageAdditionSupportSchema = v.picklist([
-  PackageAdditionSupport.Supported,
-  PackageAdditionSupport.Unsupported,
-] as const);
-const featureNameSchema = v.picklist(featureNames);
 const presetSourceManifestPresetSourceSchema = v.strictObject({
   roots: v.optional(v.array(nonEmptyString), []),
   files: v.optional(v.array(nonEmptyString), []),
@@ -491,13 +474,13 @@ const presetSourceManifestSchema = v.strictObject({
         name: nonEmptyString,
         title: nonEmptyString,
         description: nonEmptyString,
-        generation: v.picklist(["supported", "future"] as const),
+        generation: presetGenerationSchema,
         supportedPackageManagers: v.array(packageManagerSchema),
         supportedProjectKinds: v.pipe(
           v.array(projectKindSchema),
           v.minLength(1),
         ),
-        packageAdditionSupport: packageAdditionSupportSchema,
+        packageAdditionSupport: v.picklist(packageAdditionSupportValues),
         features: v.array(featureNameSchema),
         dependencyCatalog: v.optional(v.array(nonEmptyString), []),
         projection: v.optional(presetProjectionDeclarationSchema),

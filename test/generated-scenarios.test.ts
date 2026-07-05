@@ -16,7 +16,7 @@ import {
   runGeneratedScenariosConcurrently,
   selectGeneratedScenarios,
 } from "@ykdz/template-core/generated-scenarios";
-import { PackageAdditionSupport } from "@ykdz/template-core/package-addition-support";
+import { PackageAdditionSupport } from "@ykdz/template-shared";
 
 function matrixPairKey(input: {
   readonly basePreset: string;

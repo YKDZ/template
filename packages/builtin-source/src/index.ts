@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { BuiltInPreset } from "@ykdz/template-core/declarations";
 import type { GenerationContext } from "@ykdz/template-core/generation-context";
 import type { PresetPackageAdditionOptions } from "@ykdz/template-core/preset-projection";
 import {
@@ -20,6 +19,7 @@ import {
   type PresetProjectionDeclaration,
   type ProjectionSourcePreset,
 } from "@ykdz/template-core/projection-capabilities";
+import type { BuiltInPreset } from "@ykdz/template-shared";
 
 export {
   findPresetSourceManifestPreset,
