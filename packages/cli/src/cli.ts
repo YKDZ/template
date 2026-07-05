@@ -21,7 +21,6 @@ import {
   type PresetProjectionPlan,
 } from "@ykdz/template-core/preset-projection";
 import {
-  presetSourceManifestJsonSchema,
   validateBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
 } from "@ykdz/template-core/preset-source";
@@ -34,6 +33,7 @@ import {
 } from "@ykdz/template-core/toolchain-resolution";
 import {
   blueprintJsonSchema,
+  presetSourceManifestJsonSchema,
   presetFileJsonSchema,
   validatePresetFile,
   validateProjectBlueprint,

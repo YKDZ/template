@@ -6,31 +6,35 @@ import type { GenerationContext } from "@ykdz/template-core/generation-context";
 import type { PresetPackageAdditionOptions } from "@ykdz/template-core/preset-projection";
 import {
   findPresetSourceManifestPreset,
-  type PresetSourceManifest,
-  type PresetSourceManifestPreset,
   validateBuiltInPresetSourceManifest,
 } from "@ykdz/template-core/preset-source";
 import {
   defaultPackagePathForPresetSourcePackageAddition,
   planPresetSourcePackageAddition,
   projectPresetSourcePreset,
-  validateProjectionCapabilities,
   type PresetProjectionSourceRoots,
-  type PresetProjectionDeclaration,
   type ProjectionSourcePreset,
 } from "@ykdz/template-core/projection-capabilities";
-import type { BuiltInPreset } from "@ykdz/template-shared";
+import {
+  validatePresetProjectionDeclaration,
+  type BuiltInPreset,
+  type PresetProjectionDeclaration,
+  type PresetSourceManifest,
+  type PresetSourceManifestPreset,
+} from "@ykdz/template-shared";
 
 export {
   findPresetSourceManifestPreset,
   loadPresetSourceManifestFile,
   manifestReferencedSourceFiles,
-  presetSourceManifestJsonSchema,
   validateBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
+} from "@ykdz/template-core/preset-source";
+export {
+  presetSourceManifestJsonSchema,
   type PresetSourceManifest,
   type PresetSourceManifestPreset,
-} from "@ykdz/template-core/preset-source";
+} from "@ykdz/template-shared";
 
 export function builtInPresetSourceRoot(...segments: string[]): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -141,7 +145,7 @@ export function loadBuiltInPresetProjectionDeclaration(
     );
   }
 
-  const result = validateProjectionCapabilities(preset.projection);
+  const result = validatePresetProjectionDeclaration(preset.projection);
   if (!result.ok) {
     throw new Error(
       `Built-in Preset ${presetName} Projection Declaration is invalid:\n${result.issues

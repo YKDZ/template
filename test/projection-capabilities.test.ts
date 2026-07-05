@@ -12,10 +12,10 @@ import {
   defaultPackagePathForPresetSourcePackageAddition,
   interpretPresetProjectionDeclaration,
   planPresetSourcePackageAddition,
-  type PresetProjectionDeclaration,
   validateProjectionCapabilities,
 } from "@ykdz/template-core/projection-capabilities";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import type { PresetProjectionDeclaration } from "@ykdz/template-shared";
 import * as v from "valibot";
 
 const syntheticTsLibDeclaration: PresetProjectionDeclaration = {

@@ -8,9 +8,15 @@ import type {
   PresetSourceManifest,
   PresetSourceManifestPreset,
   PresetSourceManifestSharedResource,
-} from "@ykdz/template-core/preset-source";
-import { validateProjectBlueprint as validateSharedProjectBlueprint } from "@ykdz/template-shared";
+} from "@ykdz/template-shared";
+import {
+  normalizePresetProjectionDeclaration,
+  validatePresetSourceManifestDeclaration,
+  validatePresetProjectionDeclaration,
+  validateProjectBlueprint as validateSharedProjectBlueprint,
+} from "@ykdz/template-shared";
 import { execa } from "execa";
+import * as ts from "typescript";
 import * as v from "valibot";
 
 const repoRoot = path.resolve(
@@ -81,6 +87,53 @@ async function discoverDeclarationConsumerFiles(): Promise<string[]> {
   }
 
   return files.toSorted();
+}
+
+function importedDeclarationNames(
+  source: string,
+  moduleName: string,
+): string[] {
+  const names: string[] = [];
+  const sourceFile = ts.createSourceFile(
+    "declaration-consumer.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isImportDeclaration(statement) &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === moduleName &&
+      statement.importClause?.namedBindings &&
+      ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      names.push(
+        ...statement.importClause.namedBindings.elements.map(
+          (element) => element.propertyName?.text ?? element.name.text,
+        ),
+      );
+    }
+
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.moduleSpecifier &&
+      ts.isStringLiteral(statement.moduleSpecifier) &&
+      statement.moduleSpecifier.text === moduleName &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      names.push(
+        ...statement.exportClause.elements.map(
+          (element) => element.propertyName?.text ?? element.name.text,
+        ),
+      );
+    }
+  }
+
+  return names;
 }
 
 function template(args: string[]) {
@@ -253,6 +306,42 @@ describe("declaration contracts", () => {
           offenders.push(`${file} imports ${forbiddenImport}`);
         }
       }
+
+      const presetSourceCoreNames = importedDeclarationNames(
+        source,
+        "@ykdz/template-core/preset-source",
+      );
+      const importsPresetSourceContractFromCore = presetSourceCoreNames.some(
+        (name) =>
+          [
+            "PresetSourceManifest",
+            "PresetSourceManifestPreset",
+            "PresetSourceManifestSharedResource",
+            "presetSourceManifestJsonSchema",
+          ].includes(name),
+      );
+      if (importsPresetSourceContractFromCore) {
+        offenders.push(`${file} imports Preset Source contracts from core`);
+      }
+
+      const projectionCoreNames = importedDeclarationNames(
+        source,
+        "@ykdz/template-core/projection-capabilities",
+      );
+      const importsProjectionContractFromCore = projectionCoreNames.some(
+        (name) =>
+          [
+            "PresetProjectionDeclaration",
+            "ProjectionCapabilityDeclaration",
+            "validateProjectionCapabilities",
+            "normalizePresetProjectionDeclaration",
+          ].includes(name),
+      );
+      if (importsProjectionContractFromCore) {
+        offenders.push(
+          `${file} imports Projection Declaration contracts from core`,
+        );
+      }
     }
 
     expect(declarationConsumerFiles).toContain("packages/cli/src/cli.ts");
@@ -277,6 +366,75 @@ describe("declaration contracts", () => {
         projectKind: "multi-package",
         features: ["pnpm-catalog"],
       },
+    });
+  });
+
+  it("validates Preset Source Manifest declarations through the Template Contract Library", () => {
+    expect(
+      validatePresetSourceManifestDeclaration(validPresetSourceManifest()),
+    ).toEqual({
+      ok: true,
+      value: {
+        ...validPresetSourceManifest(),
+        presets: [
+          {
+            ...firstPreset(validPresetSourceManifest()),
+            dependencyCatalog: [],
+          },
+        ],
+      },
+    });
+
+    const duplicateManifest = validPresetSourceManifest();
+    duplicateManifest.presets = [
+      ...duplicateManifest.presets,
+      { ...duplicateManifest.presets[0]! },
+    ];
+
+    expect(validatePresetSourceManifestDeclaration(duplicateManifest)).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets.name",
+          message: "Duplicate Preset name: custom-lib",
+        },
+      ],
+    });
+  });
+
+  it("validates Projection Declarations through the Template Contract Library", () => {
+    const declaration = normalizePresetProjectionDeclaration({
+      capabilities: [
+        {
+          kind: "workspace-library-package",
+          workspacePackageGlob: "packages/*",
+          packageRole: "shared-library",
+          packageSourcePreset: "ts-lib",
+          sourceFiles: ["src/index.ts"],
+        },
+        { kind: "strict-typescript-root" },
+        { kind: "oxc-format-lint" },
+        { kind: "node-pnpm-devcontainer" },
+        { kind: "github-maintenance" },
+      ],
+    });
+
+    expect(validatePresetProjectionDeclaration(declaration)).toEqual({
+      ok: true,
+      value: declaration,
+    });
+    expect(
+      validatePresetProjectionDeclaration({
+        capabilities: [{ kind: "unknown-capability" }],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].kind",
+          message: "Unknown Projection Capability kind: unknown-capability",
+        },
+      ],
     });
   });
 

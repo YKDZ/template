@@ -13,7 +13,7 @@ import type {
   PresetSourceFixtureMatrixContract,
   PresetSourceManifestPreset,
   PresetSourceManifestSharedResource,
-} from "@ykdz/template-core/preset-source";
+} from "@ykdz/template-shared";
 
 type ManifestPresetInput = Omit<
   PresetSourceManifestPreset,
@@ -368,6 +368,35 @@ describe("Preset Source Manifest validation", () => {
         {
           path: "$.presets[0].projection.capabilities[0].kind",
           message: "Unknown Projection Capability kind: write-my-private-file",
+        },
+      ],
+    });
+  });
+
+  it("reports shared declaration and core-owned semantic diagnostics together", () => {
+    const manifest = validManifest();
+    firstPreset(manifest).dependencyCatalog = ["missing-package"];
+    firstPreset(manifest).projection = {
+      capabilities: [
+        {
+          kind: "write-my-private-file",
+        },
+      ],
+    };
+
+    expect(
+      validatePresetSourceManifest(manifest, { dependencyCatalog: {} }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].projection.capabilities[0].kind",
+          message: "Unknown Projection Capability kind: write-my-private-file",
+        },
+        {
+          path: "$.presets[0].dependencyCatalog",
+          message:
+            "Preset custom-lib references missing Template Dependency Catalog entry: missing-package",
         },
       ],
     });

@@ -2,11 +2,27 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
+  GithubMaintenanceCapabilityDeclaration,
+  NodePnpmDevcontainerCapabilityDeclaration,
   ProjectBlueprint,
-  ValidationIssue,
-  ValidationResult,
+  ProjectionCapabilityDeclaration,
+  ProjectionCapabilityKind,
+  OxcFormatLintCapabilityDeclaration,
+  PresetProjectionDeclaration,
+  RustBinaryWorkspaceCapabilityDeclaration,
+  StrictTypescriptRootCapabilityDeclaration,
+  WorkspaceLibraryPackageCapabilityDeclaration,
+  WorkspaceNodePackageDeclaration,
+  WorkspaceNodePackageKind,
+  WorkspaceNodePackagesCapabilityDeclaration,
+  WorkspaceNodePackagePath,
 } from "@ykdz/template-shared";
 import type { PackageRole, PackageSourcePreset } from "@ykdz/template-shared";
+import {
+  normalizePresetProjectionDeclaration,
+  projectionCapabilityIssues,
+  validatePresetProjectionDeclaration as validateProjectionCapabilities,
+} from "@ykdz/template-shared";
 
 import {
   collectGeneratedManifestCatalogDependencies,
@@ -46,75 +62,25 @@ import type { PresetSourceManifestPreset } from "./preset-source.js";
 import type { DependencyMaintenancePolicy } from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
 
-export type ProjectionCapabilityKind =
-  | "workspace-library-package"
-  | "workspace-node-packages"
-  | "rust-binary-workspace"
-  | "strict-typescript-root"
-  | "oxc-format-lint"
-  | "node-pnpm-devcontainer"
-  | "github-maintenance";
-
-export type WorkspaceLibraryPackageCapabilityDeclaration = {
-  readonly kind: "workspace-library-package";
-  readonly workspacePackageGlob: "packages/*";
-  readonly packageRole: "shared-library";
-  readonly packageSourcePreset: "ts-lib";
-  readonly sourceFiles: readonly string[];
+export {
+  normalizePresetProjectionDeclaration,
+  projectionCapabilityIssues,
+  validateProjectionCapabilities,
 };
-
-export type WorkspaceNodePackageKind = "hono-api" | "vue-app";
-type WorkspaceNodePackagePath = "apps/api" | "apps/web";
-
-export type WorkspaceNodePackageDeclaration = {
-  readonly kind: WorkspaceNodePackageKind;
-  readonly path: WorkspaceNodePackagePath;
-  readonly sourceFiles: readonly string[];
-};
-
-export type WorkspaceNodePackagesCapabilityDeclaration = {
-  readonly kind: "workspace-node-packages";
-  readonly workspacePackageGlob: "apps/*";
-  readonly packages: readonly WorkspaceNodePackageDeclaration[];
-  readonly packageLinks?: readonly {
-    readonly consumerPackagePath: "apps/web";
-    readonly providerPackagePath: "apps/api";
-  }[];
-};
-
-export type RustBinaryWorkspaceCapabilityDeclaration = {
-  readonly kind: "rust-binary-workspace";
-  readonly workspacePackageGlob: "packages/*";
-  readonly sourceFiles: readonly string[];
-};
-
-export type StrictTypescriptRootCapabilityDeclaration = {
-  readonly kind: "strict-typescript-root";
-};
-
-export type OxcFormatLintCapabilityDeclaration = {
-  readonly kind: "oxc-format-lint";
-};
-
-export type NodePnpmDevcontainerCapabilityDeclaration = {
-  readonly kind: "node-pnpm-devcontainer";
-};
-
-export type GithubMaintenanceCapabilityDeclaration = {
-  readonly kind: "github-maintenance";
-};
-
-export type ProjectionCapabilityDeclaration =
-  | WorkspaceLibraryPackageCapabilityDeclaration
-  | WorkspaceNodePackagesCapabilityDeclaration
-  | RustBinaryWorkspaceCapabilityDeclaration
-  | StrictTypescriptRootCapabilityDeclaration
-  | OxcFormatLintCapabilityDeclaration
-  | NodePnpmDevcontainerCapabilityDeclaration
-  | GithubMaintenanceCapabilityDeclaration;
-
-export type PresetProjectionDeclaration = {
-  readonly capabilities: readonly ProjectionCapabilityDeclaration[];
+export type {
+  GithubMaintenanceCapabilityDeclaration,
+  NodePnpmDevcontainerCapabilityDeclaration,
+  OxcFormatLintCapabilityDeclaration,
+  PresetProjectionDeclaration,
+  ProjectionCapabilityDeclaration,
+  ProjectionCapabilityKind,
+  RustBinaryWorkspaceCapabilityDeclaration,
+  StrictTypescriptRootCapabilityDeclaration,
+  WorkspaceLibraryPackageCapabilityDeclaration,
+  WorkspaceNodePackageDeclaration,
+  WorkspaceNodePackageKind,
+  WorkspaceNodePackagesCapabilityDeclaration,
+  WorkspaceNodePackagePath,
 };
 
 export type ProjectionSourcePreset =
@@ -174,20 +140,6 @@ type ProjectionCompositionState = {
   flags: Partial<Record<ProjectionPlanCapabilityFlag, true>>;
 };
 
-const projectionCapabilityKinds = [
-  "workspace-library-package",
-  "workspace-node-packages",
-  "rust-binary-workspace",
-  "strict-typescript-root",
-  "oxc-format-lint",
-  "node-pnpm-devcontainer",
-  "github-maintenance",
-] satisfies readonly ProjectionCapabilityKind[];
-
-const projectionCapabilityKindSet = new Set<string>(projectionCapabilityKinds);
-const workspaceNodePackageKindSet = new Set<string>(["hono-api", "vue-app"]);
-const workspaceNodePackagePathSet = new Set<string>(["apps/api", "apps/web"]);
-
 const strictTypescriptRootBoundary: ComponentOwner = {
   kind: "workspace-orchestration",
   path: ".",
@@ -229,28 +181,6 @@ const requiredPlanCapabilityProviders: readonly {
     label: "development container support",
   },
 ];
-
-const exactCapabilityKeys: Record<ProjectionCapabilityKind, readonly string[]> =
-  {
-    "workspace-library-package": [
-      "kind",
-      "workspacePackageGlob",
-      "packageRole",
-      "packageSourcePreset",
-      "sourceFiles",
-    ],
-    "workspace-node-packages": [
-      "kind",
-      "workspacePackageGlob",
-      "packages",
-      "packageLinks",
-    ],
-    "rust-binary-workspace": ["kind", "workspacePackageGlob", "sourceFiles"],
-    "strict-typescript-root": ["kind"],
-    "oxc-format-lint": ["kind"],
-    "node-pnpm-devcontainer": ["kind"],
-    "github-maintenance": ["kind"],
-  };
 
 const dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"] =
   ["npm", "github-actions", "docker"];
@@ -531,150 +461,6 @@ function contributeProjectionCapability(
   }
 }
 
-export function validateProjectionCapabilities(
-  input: unknown,
-): ValidationResult<PresetProjectionDeclaration> {
-  if (!isRecord(input) || !Array.isArray(input.capabilities)) {
-    return {
-      ok: false,
-      issues: [
-        {
-          path: "$.capabilities",
-          message: "Projection Declaration must select Projection Capabilities",
-        },
-      ],
-    };
-  }
-
-  const issues: ValidationIssue[] = [];
-  const capabilities: ProjectionCapabilityDeclaration[] = [];
-
-  input.capabilities.forEach((capability, index) => {
-    const pathPrefix = `$.capabilities[${index}]`;
-
-    if (!isRecord(capability)) {
-      issues.push({
-        path: pathPrefix,
-        message: "Projection Capability must be an object",
-      });
-      return;
-    }
-
-    if (typeof capability.kind !== "string") {
-      issues.push({
-        path: `${pathPrefix}.kind`,
-        message: "Projection Capability kind is required",
-      });
-      return;
-    }
-
-    if (!isProjectionCapabilityKind(capability.kind)) {
-      issues.push({
-        path: `${pathPrefix}.kind`,
-        message: `Unknown Projection Capability kind: ${capability.kind}`,
-      });
-      return;
-    }
-
-    const kind = capability.kind;
-    issues.push(
-      ...unknownCapabilityPropertyIssues(kind, capability, pathPrefix),
-    );
-
-    if (kind === "workspace-library-package") {
-      const workspaceCapability = parseWorkspaceLibraryPackageCapability(
-        capability,
-        pathPrefix,
-      );
-      if (Array.isArray(workspaceCapability)) {
-        issues.push(...workspaceCapability);
-        return;
-      }
-      capabilities.push(workspaceCapability);
-      return;
-    }
-
-    if (kind === "workspace-node-packages") {
-      const workspaceCapability = parseWorkspaceNodePackagesCapability(
-        capability,
-        pathPrefix,
-      );
-      if (Array.isArray(workspaceCapability)) {
-        issues.push(...workspaceCapability);
-        return;
-      }
-      capabilities.push(workspaceCapability);
-      return;
-    }
-
-    if (kind === "rust-binary-workspace") {
-      const workspaceCapability = parseRustBinaryWorkspaceCapability(
-        capability,
-        pathPrefix,
-      );
-      if (Array.isArray(workspaceCapability)) {
-        issues.push(...workspaceCapability);
-        return;
-      }
-      capabilities.push(workspaceCapability);
-      return;
-    }
-
-    capabilities.push({ kind });
-  });
-
-  if (issues.length === 0) {
-    issues.push(...duplicateCapabilityIssues(capabilities));
-    issues.push(...capabilityCompositionIssues(capabilities));
-  }
-
-  if (issues.length > 0) {
-    return { ok: false, issues };
-  }
-
-  return {
-    ok: true,
-    value: {
-      capabilities,
-    },
-  };
-}
-
-export function projectionCapabilityIssues(
-  presets: readonly { readonly projection?: unknown }[],
-): ValidationIssue[] {
-  return presets.flatMap((preset, presetIndex) => {
-    if (preset.projection === undefined) {
-      return [];
-    }
-
-    const result = validateProjectionCapabilities(preset.projection);
-
-    return result.ok
-      ? []
-      : result.issues.map((issue) => ({
-          path: `$.presets[${presetIndex}].projection${issue.path.slice(1)}`,
-          message: issue.message,
-        }));
-  });
-}
-
-export function normalizePresetProjectionDeclaration(
-  declaration: unknown,
-): PresetProjectionDeclaration {
-  const result = validateProjectionCapabilities(declaration);
-
-  if (!result.ok) {
-    throw new Error(
-      `Projection Declaration is invalid:\n${result.issues
-        .map((issue) => `  - ${issue.path}: ${issue.message}`)
-        .join("\n")}`,
-    );
-  }
-
-  return result.value;
-}
-
 export function interpretPresetProjectionDeclaration(options: {
   readonly preset: PresetSourceManifestPreset;
   readonly declaration: PresetProjectionDeclaration;
@@ -903,470 +689,6 @@ function createProjectionCompositionState(
     operationFactories: [],
     flags: {},
   };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isProjectionCapabilityKind(
-  value: string,
-): value is ProjectionCapabilityKind {
-  return projectionCapabilityKindSet.has(value);
-}
-
-function isWorkspaceNodePackageKind(
-  value: unknown,
-): value is WorkspaceNodePackageKind {
-  return typeof value === "string" && workspaceNodePackageKindSet.has(value);
-}
-
-function isWorkspaceNodePackagePath(
-  value: unknown,
-): value is WorkspaceNodePackagePath {
-  return typeof value === "string" && workspaceNodePackagePathSet.has(value);
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
-}
-
-function nonEmptyStringArray(value: unknown[]): string[] | undefined {
-  const strings: string[] = [];
-
-  for (const entry of value) {
-    if (!isNonEmptyString(entry)) {
-      return undefined;
-    }
-
-    strings.push(entry);
-  }
-
-  return strings.length === 0 ? undefined : strings;
-}
-
-function unknownCapabilityPropertyIssues(
-  kind: ProjectionCapabilityKind,
-  capability: Record<string, unknown>,
-  pathPrefix: string,
-): ValidationIssue[] {
-  const allowedKeys = new Set(exactCapabilityKeys[kind]);
-
-  return Object.keys(capability)
-    .filter((key) => !allowedKeys.has(key))
-    .map((key) => ({
-      path: `${pathPrefix}.${key}`,
-      message: `Projection Capability ${kind} does not support property: ${key}`,
-    }));
-}
-
-function parseWorkspaceLibraryPackageCapability(
-  capability: Record<string, unknown>,
-  pathPrefix: string,
-): WorkspaceLibraryPackageCapabilityDeclaration | ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  let sourceFiles: string[] = [];
-
-  if (capability.workspacePackageGlob !== "packages/*") {
-    issues.push({
-      path: `${pathPrefix}.workspacePackageGlob`,
-      message:
-        "workspace-library-package currently supports workspacePackageGlob: packages/*",
-    });
-  }
-
-  if (capability.packageRole !== "shared-library") {
-    issues.push({
-      path: `${pathPrefix}.packageRole`,
-      message:
-        "workspace-library-package currently supports packageRole: shared-library",
-    });
-  }
-
-  if (capability.packageSourcePreset !== "ts-lib") {
-    issues.push({
-      path: `${pathPrefix}.packageSourcePreset`,
-      message:
-        "workspace-library-package currently supports packageSourcePreset: ts-lib",
-    });
-  }
-
-  if (!Array.isArray(capability.sourceFiles)) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message:
-        "workspace-library-package sourceFiles must be a non-empty array",
-    });
-  } else {
-    const parsedSourceFiles = nonEmptyStringArray(capability.sourceFiles);
-    if (parsedSourceFiles === undefined) {
-      issues.push({
-        path: `${pathPrefix}.sourceFiles`,
-        message:
-          "workspace-library-package sourceFiles must be a non-empty array of paths",
-      });
-    } else {
-      sourceFiles = parsedSourceFiles;
-    }
-  }
-
-  if (issues.length > 0) {
-    return issues;
-  }
-
-  return {
-    kind: "workspace-library-package",
-    workspacePackageGlob: "packages/*",
-    packageRole: "shared-library",
-    packageSourcePreset: "ts-lib",
-    sourceFiles,
-  };
-}
-
-function parseWorkspaceNodePackagesCapability(
-  capability: Record<string, unknown>,
-  pathPrefix: string,
-): WorkspaceNodePackagesCapabilityDeclaration | ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  if (capability.workspacePackageGlob !== "apps/*") {
-    issues.push({
-      path: `${pathPrefix}.workspacePackageGlob`,
-      message:
-        "workspace-node-packages currently supports workspacePackageGlob: apps/*",
-    });
-  }
-
-  if (!Array.isArray(capability.packages) || capability.packages.length === 0) {
-    issues.push({
-      path: `${pathPrefix}.packages`,
-      message: "workspace-node-packages packages must be a non-empty array",
-    });
-  }
-
-  const packages = Array.isArray(capability.packages)
-    ? capability.packages.flatMap((nodePackage, packageIndex) => {
-        const packagePath = `${pathPrefix}.packages[${packageIndex}]`;
-        const parsed = parseWorkspaceNodePackage(nodePackage, packagePath);
-        if (Array.isArray(parsed)) {
-          issues.push(...parsed);
-          return [];
-        }
-        return [parsed];
-      })
-    : [];
-
-  const packageLinks =
-    capability.packageLinks === undefined
-      ? undefined
-      : parseWorkspaceNodePackageLinks(
-          capability.packageLinks,
-          `${pathPrefix}.packageLinks`,
-          new Set(packages.map((nodePackage) => nodePackage.path)),
-          issues,
-        );
-
-  if (issues.length > 0) {
-    return issues;
-  }
-
-  return {
-    kind: "workspace-node-packages",
-    workspacePackageGlob: "apps/*",
-    packages,
-    ...(packageLinks === undefined ? {} : { packageLinks }),
-  };
-}
-
-function parseWorkspaceNodePackage(
-  value: unknown,
-  pathPrefix: string,
-): WorkspaceNodePackageDeclaration | ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-
-  if (!isRecord(value)) {
-    return [
-      {
-        path: pathPrefix,
-        message: "workspace-node-packages package must be an object",
-      },
-    ];
-  }
-
-  const kind = isWorkspaceNodePackageKind(value.kind) ? value.kind : undefined;
-  const packagePath = isWorkspaceNodePackagePath(value.path)
-    ? value.path
-    : undefined;
-  let sourceFiles: string[] = [];
-
-  if (kind === undefined) {
-    issues.push({
-      path: `${pathPrefix}.kind`,
-      message:
-        "workspace-node-packages package kind must be hono-api or vue-app",
-    });
-  }
-
-  if (packagePath === undefined) {
-    issues.push({
-      path: `${pathPrefix}.path`,
-      message:
-        "workspace-node-packages package path must be apps/api or apps/web",
-    });
-  }
-
-  if (!Array.isArray(value.sourceFiles)) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message:
-        "workspace-node-packages package sourceFiles must be a non-empty array",
-    });
-  } else {
-    const parsedSourceFiles = nonEmptyStringArray(value.sourceFiles);
-    if (parsedSourceFiles === undefined) {
-      issues.push({
-        path: `${pathPrefix}.sourceFiles`,
-        message:
-          "workspace-node-packages package sourceFiles must be a non-empty array of paths",
-      });
-    } else {
-      sourceFiles = parsedSourceFiles;
-    }
-  }
-
-  const allowedKeys = new Set(["kind", "path", "sourceFiles"]);
-  for (const key of Object.keys(value)) {
-    if (!allowedKeys.has(key)) {
-      issues.push({
-        path: `${pathPrefix}.${key}`,
-        message: `workspace-node-packages package does not support property: ${key}`,
-      });
-    }
-  }
-
-  if (issues.length > 0) {
-    return issues;
-  }
-
-  if (kind === undefined || packagePath === undefined) {
-    throw new Error(
-      `workspace-node-packages package validation failed without diagnostics at ${pathPrefix}`,
-    );
-  }
-
-  return {
-    kind,
-    path: packagePath,
-    sourceFiles,
-  };
-}
-
-function parseWorkspaceNodePackageLinks(
-  value: unknown,
-  pathPrefix: string,
-  declaredPackagePaths: ReadonlySet<string>,
-  issues: ValidationIssue[],
-): WorkspaceNodePackagesCapabilityDeclaration["packageLinks"] | undefined {
-  if (!Array.isArray(value)) {
-    issues.push({
-      path: pathPrefix,
-      message: "workspace-node-packages packageLinks must be an array",
-    });
-    return undefined;
-  }
-
-  return value.flatMap((link, linkIndex) => {
-    const linkPath = `${pathPrefix}[${linkIndex}]`;
-    const linkIssues: ValidationIssue[] = [];
-
-    if (!isRecord(link)) {
-      issues.push({
-        path: linkPath,
-        message: "workspace-node-packages packageLink must be an object",
-      });
-      return [];
-    }
-
-    const allowedKeys = new Set(["consumerPackagePath", "providerPackagePath"]);
-    for (const key of Object.keys(link)) {
-      if (!allowedKeys.has(key)) {
-        linkIssues.push({
-          path: `${linkPath}.${key}`,
-          message: `workspace-node-packages packageLink does not support property: ${key}`,
-        });
-      }
-    }
-
-    if (
-      link.consumerPackagePath !== "apps/web" ||
-      link.providerPackagePath !== "apps/api"
-    ) {
-      linkIssues.push({
-        path: linkPath,
-        message:
-          "workspace-node-packages currently supports links from apps/web to apps/api",
-      });
-    } else {
-      if (!declaredPackagePaths.has(link.consumerPackagePath)) {
-        linkIssues.push({
-          path: `${linkPath}.consumerPackagePath`,
-          message:
-            "workspace-node-packages packageLink consumerPackagePath must reference a package declared in the same packages array: apps/web",
-        });
-      }
-
-      if (!declaredPackagePaths.has(link.providerPackagePath)) {
-        linkIssues.push({
-          path: `${linkPath}.providerPackagePath`,
-          message:
-            "workspace-node-packages packageLink providerPackagePath must reference a package declared in the same packages array: apps/api",
-        });
-      }
-    }
-
-    if (linkIssues.length > 0) {
-      issues.push(...linkIssues);
-      return [];
-    }
-
-    return [
-      {
-        consumerPackagePath: "apps/web" as const,
-        providerPackagePath: "apps/api" as const,
-      },
-    ];
-  });
-}
-
-function parseRustBinaryWorkspaceCapability(
-  capability: Record<string, unknown>,
-  pathPrefix: string,
-): RustBinaryWorkspaceCapabilityDeclaration | ValidationIssue[] {
-  const issues: ValidationIssue[] = [];
-  let sourceFiles: string[] = [];
-
-  if (capability.workspacePackageGlob !== "packages/*") {
-    issues.push({
-      path: `${pathPrefix}.workspacePackageGlob`,
-      message:
-        "rust-binary-workspace currently supports workspacePackageGlob: packages/*",
-    });
-  }
-
-  if (!Array.isArray(capability.sourceFiles)) {
-    issues.push({
-      path: `${pathPrefix}.sourceFiles`,
-      message: "rust-binary-workspace sourceFiles must be a non-empty array",
-    });
-  } else {
-    const parsedSourceFiles = nonEmptyStringArray(capability.sourceFiles);
-    if (parsedSourceFiles === undefined) {
-      issues.push({
-        path: `${pathPrefix}.sourceFiles`,
-        message:
-          "rust-binary-workspace sourceFiles must be a non-empty array of paths",
-      });
-    } else {
-      sourceFiles = parsedSourceFiles;
-    }
-  }
-
-  if (issues.length > 0) {
-    return issues;
-  }
-
-  return {
-    kind: "rust-binary-workspace",
-    workspacePackageGlob: "packages/*",
-    sourceFiles,
-  };
-}
-
-function duplicateCapabilityIssues(
-  capabilities: readonly ProjectionCapabilityDeclaration[],
-): ValidationIssue[] {
-  const firstSeen = new Map<ProjectionCapabilityKind, number>();
-  const issues: ValidationIssue[] = [];
-
-  capabilities.forEach((capability, index) => {
-    const firstIndex = firstSeen.get(capability.kind);
-    if (firstIndex === undefined) {
-      firstSeen.set(capability.kind, index);
-      return;
-    }
-
-    issues.push({
-      path: `$.capabilities[${index}].kind`,
-      message: `Duplicate Projection Capability kind: ${capability.kind}`,
-    });
-  });
-
-  return issues;
-}
-
-function capabilityCompositionIssues(
-  capabilities: readonly ProjectionCapabilityDeclaration[],
-): ValidationIssue[] {
-  const kinds = new Set(capabilities.map((capability) => capability.kind));
-  const issues: ValidationIssue[] = [];
-  const companionKinds = uniqueValues(
-    capabilities
-      .map((capability) => capability.kind)
-      .filter((kind) => kind !== "rust-binary-workspace"),
-  );
-
-  if (kinds.has("rust-binary-workspace") && companionKinds.length > 0) {
-    issues.push({
-      path: "$.capabilities",
-      message:
-        "rust-binary-workspace is a complete domain capability and must be selected by itself; remove companion Projection Capabilities: " +
-        companionKinds.join(", "),
-    });
-    return issues;
-  }
-
-  if (
-    !kinds.has("workspace-library-package") &&
-    !kinds.has("workspace-node-packages") &&
-    !kinds.has("rust-binary-workspace")
-  ) {
-    issues.push({
-      path: "$.capabilities",
-      message:
-        "Projection Capability composition must include a workspace package layout capability",
-    });
-  }
-
-  if (
-    kinds.has("strict-typescript-root") &&
-    !kinds.has("workspace-library-package") &&
-    !kinds.has("workspace-node-packages")
-  ) {
-    issues.push({
-      path: "$.capabilities",
-      message:
-        "strict-typescript-root requires a workspace package layout so package typecheck tasks have a workspace target",
-    });
-  }
-
-  if (kinds.has("node-pnpm-devcontainer") && !kinds.has("oxc-format-lint")) {
-    issues.push({
-      path: "$.capabilities",
-      message:
-        "node-pnpm-devcontainer requires oxc-format-lint so editor customization is derived from declared tooling",
-    });
-  }
-
-  for (const requirement of requiredPlanCapabilityProviders) {
-    if (!kinds.has(requirement.kind) && !kinds.has("rust-binary-workspace")) {
-      issues.push({
-        path: "$.capabilities",
-        message: `Projection Capability composition must include ${requirement.kind} to provide ${requirement.label}`,
-      });
-    }
-  }
-
-  return issues;
 }
 
 function uniqueValues<T>(values: readonly T[]): T[] {
