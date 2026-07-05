@@ -1,10 +1,12 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { builtInPresetProjectionSourceRoots } from "@ykdz/template-builtin-source";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import {
   editorCustomizationForCapabilities,
+  loadEditorCustomizationDeclarations,
   type EditorCustomizationCapability,
   type EditorCustomizationOptions,
 } from "@ykdz/template-core/editor-customization";
@@ -122,6 +124,32 @@ const forbiddenOptionalExtensions = [
   "selemondev.shadcn-vue",
 ] as const;
 
+function builtInEditorCustomizationResourcePath(): string {
+  const resourcePath = builtInPresetProjectionSourceRoots().sharedResource(
+    "shared-editor-customization",
+  );
+
+  if (resourcePath === undefined) {
+    throw new Error("Missing built-in Editor Customization Shared Resource");
+  }
+
+  return resourcePath;
+}
+
+const builtInEditorCustomizationDeclarations =
+  loadEditorCustomizationDeclarations(builtInEditorCustomizationResourcePath());
+
+function builtInEditorCustomizationForCapabilities(
+  capabilities: readonly EditorCustomizationCapability[],
+  options?: EditorCustomizationOptions,
+) {
+  return editorCustomizationForCapabilities(
+    capabilities,
+    builtInEditorCustomizationDeclarations,
+    options,
+  );
+}
+
 function expectForbiddenOptionalExtensionsAbsent(
   extensions: readonly string[],
 ): void {
@@ -131,6 +159,28 @@ function expectForbiddenOptionalExtensionsAbsent(
 }
 
 describe("editor customization", () => {
+  it("reports invalid JSON in Editor Customization Shared Resource declarations", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "editor-customization-invalid-json-"),
+    );
+    const resourcePath = path.join(workspace, "capabilities.json");
+    await writeFile(resourcePath, "{");
+
+    expect(() => loadEditorCustomizationDeclarations(resourcePath)).toThrow(
+      `Editor Customization Shared Resource ${resourcePath} is invalid: invalid JSON:`,
+    );
+  });
+
+  it("reports unreadable Editor Customization Shared Resource declarations", async () => {
+    const resourcePath = await mkdtemp(
+      path.join(tmpdir(), "editor-customization-directory-resource-"),
+    );
+
+    expect(() => loadEditorCustomizationDeclarations(resourcePath)).toThrow(
+      `Editor Customization Shared Resource ${resourcePath} is unreadable:`,
+    );
+  });
+
   it("composes OXC and Vitest VS Code configuration once in stable order", () => {
     const capabilities: EditorCustomizationCapability[] = [
       "vitest",
@@ -139,7 +189,8 @@ describe("editor customization", () => {
       "oxc-format-lint",
     ];
 
-    const customization = editorCustomizationForCapabilities(capabilities);
+    const customization =
+      builtInEditorCustomizationForCapabilities(capabilities);
 
     expect(customization.extensions).toEqual([
       "oxc.oxc-vscode",
@@ -176,7 +227,9 @@ describe("editor customization", () => {
   });
 
   it("composes Rust and TOML VS Code configuration from Rust capabilities", () => {
-    const customization = editorCustomizationForCapabilities(["rust-tooling"]);
+    const customization = builtInEditorCustomizationForCapabilities([
+      "rust-tooling",
+    ]);
 
     expect(customization.extensions).toEqual([
       "rust-lang.rust-analyzer",
@@ -197,7 +250,7 @@ describe("editor customization", () => {
   });
 
   it("composes Vue and Tailwind VS Code recommendations from web capabilities", () => {
-    const customization = editorCustomizationForCapabilities([
+    const customization = builtInEditorCustomizationForCapabilities([
       "tailwind",
       "vue",
       "tailwind",
@@ -213,7 +266,7 @@ describe("editor customization", () => {
 
   it("projects the same OXC and Vitest customization to devcontainer and workspace files", async () => {
     const projectDir = await renderPresetProject("hono-api");
-    const expected = editorCustomizationForCapabilities([
+    const expected = builtInEditorCustomizationForCapabilities([
       "oxc-format-lint",
       "vitest",
     ]);
@@ -245,7 +298,9 @@ describe("editor customization", () => {
 
   it("does not recommend Vitest for generated projects without Vitest capability", async () => {
     const projectDir = await renderPresetProject("ts-lib");
-    const expected = editorCustomizationForCapabilities(["oxc-format-lint"]);
+    const expected = builtInEditorCustomizationForCapabilities([
+      "oxc-format-lint",
+    ]);
     const devcontainer = await readDevcontainerEditorCustomization(
       path.join(projectDir, ".devcontainer/devcontainer.json"),
     );
@@ -271,7 +326,9 @@ describe("editor customization", () => {
 
   it("projects Rust and TOML editor customization to generated Rust repositories", async () => {
     const projectDir = await renderPresetProject("rust-bin");
-    const expected = editorCustomizationForCapabilities(["rust-tooling"]);
+    const expected = builtInEditorCustomizationForCapabilities([
+      "rust-tooling",
+    ]);
     const devcontainer = await readDevcontainerEditorCustomization(
       path.join(projectDir, ".devcontainer/devcontainer.json"),
     );
@@ -300,7 +357,7 @@ describe("editor customization", () => {
 
   it("projects Vue and Tailwind recommendations to generated Vue app repositories", async () => {
     const projectDir = await renderPresetProject("vue-app");
-    const expected = editorCustomizationForCapabilities([
+    const expected = builtInEditorCustomizationForCapabilities([
       "oxc-format-lint",
       "vue",
       "tailwind",
@@ -336,7 +393,7 @@ describe("editor customization", () => {
     "generates capability-derived editor customization for the %s preset",
     async (preset) => {
       const projectDir = await renderPresetProject(preset);
-      const expected = editorCustomizationForCapabilities(
+      const expected = builtInEditorCustomizationForCapabilities(
         editorCustomizationCapabilitiesForPreset(preset),
         editorCustomizationOptionsForPreset(preset),
       );

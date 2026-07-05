@@ -1,6 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 
 import * as v from "valibot";
 
@@ -30,7 +28,7 @@ type CapabilityProjection = {
   readonly settings: Record<string, unknown>;
 };
 
-type EditorCustomizationDeclarations = {
+export type EditorCustomizationDeclarations = {
   readonly capabilities: Record<
     EditorCustomizationCapability,
     CapabilityProjection
@@ -64,56 +62,60 @@ const editorCustomizationDeclarationsSchema = v.object({
   }),
 });
 
-const declarations = loadEditorCustomizationDeclarations();
+function editorCustomizationDeclarationIssuePath(
+  issue: v.InferIssue<typeof editorCustomizationDeclarationsSchema>,
+): string {
+  const segments =
+    issue.path?.flatMap((item) =>
+      typeof item.key === "string" || typeof item.key === "number"
+        ? [String(item.key)]
+        : [],
+    ) ?? [];
 
-function editorCustomizationDeclarationPath(): string {
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const relativeDeclarationPath =
-    "builtin-source/templates/shared/editor-customization/capabilities.json";
-  const candidates = [
-    path.resolve(moduleDirectory, "..", relativeDeclarationPath),
-    path.resolve(moduleDirectory, "..", "..", relativeDeclarationPath),
-    path.resolve(
-      moduleDirectory,
-      "..",
-      "..",
-      "template-builtin-source",
-      "templates",
-      "shared",
-      "editor-customization",
-      "capabilities.json",
-    ),
-    path.resolve(
-      moduleDirectory,
-      "..",
-      "..",
-      "..",
-      "packages",
-      relativeDeclarationPath,
-    ),
-  ];
+  return segments.length === 0 ? "$" : `$.${segments.join(".")}`;
+}
 
-  const declarationPath = candidates.find((candidate) => existsSync(candidate));
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-  if (!declarationPath) {
+function editorCustomizationSharedResourceLabel(resourcePath: string): string {
+  return `Editor Customization Shared Resource ${resourcePath}`;
+}
+
+export function loadEditorCustomizationDeclarations(
+  resourcePath: string,
+): EditorCustomizationDeclarations {
+  const resourceLabel = editorCustomizationSharedResourceLabel(resourcePath);
+  let resourceText: string;
+
+  try {
+    resourceText = readFileSync(resourcePath, "utf8");
+  } catch (error) {
+    throw new Error(`${resourceLabel} is unreadable: ${errorMessage(error)}`, {
+      cause: error,
+    });
+  }
+
+  let source: unknown;
+  try {
+    source = JSON.parse(resourceText) as unknown;
+  } catch (error) {
     throw new Error(
-      `Unable to find editor customization declarations at ${relativeDeclarationPath}`,
+      `${resourceLabel} is invalid: invalid JSON: ${errorMessage(error)}`,
+      { cause: error },
     );
   }
 
-  return declarationPath;
-}
-
-function loadEditorCustomizationDeclarations(): EditorCustomizationDeclarations {
-  const source = JSON.parse(
-    readFileSync(editorCustomizationDeclarationPath(), "utf8"),
-  ) as unknown;
   const result = v.safeParse(editorCustomizationDeclarationsSchema, source);
 
   if (!result.success) {
     throw new Error(
-      `Editor customization declarations are invalid: ${result.issues
-        .map((issue) => issue.message)
+      `${resourceLabel} is invalid: ${result.issues
+        .map(
+          (issue) =>
+            `${editorCustomizationDeclarationIssuePath(issue)}: ${issue.message}`,
+        )
         .join("; ")}`,
     );
   }
@@ -139,16 +141,17 @@ function oxcConfigPathSettings(
   };
 }
 
-function oxcProjection(
-  options?: EditorCustomizationOptions,
-): CapabilityProjection {
-  const baseProjection = declarations.capabilities["oxc-format-lint"];
+function oxcProjection(options: {
+  readonly declarations: EditorCustomizationDeclarations;
+  readonly editorOptions: EditorCustomizationOptions | undefined;
+}): CapabilityProjection {
+  const baseProjection = options.declarations.capabilities["oxc-format-lint"];
 
   return {
     extensions: baseProjection.extensions,
     settings: {
       ...baseProjection.settings,
-      ...oxcConfigPathSettings(options?.oxcConfigPaths),
+      ...oxcConfigPathSettings(options.editorOptions?.oxcConfigPaths),
     },
   };
 }
@@ -162,6 +165,7 @@ function mergeSettings(
 
 export function editorCustomizationForCapabilities(
   capabilities: readonly EditorCustomizationCapability[],
+  declarations: EditorCustomizationDeclarations,
   options?: EditorCustomizationOptions,
 ): EditorCustomization {
   const selected = new Set(capabilities);
@@ -175,7 +179,7 @@ export function editorCustomizationForCapabilities(
 
     const projection =
       capability === "oxc-format-lint"
-        ? oxcProjection(options)
+        ? oxcProjection({ declarations, editorOptions: options })
         : declarations.capabilities[capability];
     for (const extension of projection.extensions) {
       extensions.add(extension);

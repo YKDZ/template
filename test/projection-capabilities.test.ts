@@ -325,6 +325,7 @@ describe("Projection Capability declarations", () => {
     );
     expect(preset?.projection).toBeDefined();
     const { context, targetDir } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
     const resourceRoot = await mkdtemp(
       path.join(tmpdir(), "template-devcontainer-resource-"),
     );
@@ -356,11 +357,11 @@ describe("Projection Capability declarations", () => {
       },
       context,
       sourceRoots: {
-        ...builtInPresetProjectionSourceRoots(),
+        ...builtInSourceRoots,
         sharedResource(resourceId) {
           return resourceId === "local-devcontainer-fragments"
             ? resourceRoot
-            : undefined;
+            : builtInSourceRoots.sharedResource(resourceId);
         },
       },
     });
@@ -434,7 +435,9 @@ describe("Projection Capability declarations", () => {
       sourceRoots: {
         ...builtInSourceRoots,
         sharedResource(resourceId) {
-          return resourceId === "sharedOxc" ? resourceRoot : undefined;
+          return resourceId === "sharedOxc"
+            ? resourceRoot
+            : builtInSourceRoots.sharedResource(resourceId);
         },
       },
     });
@@ -463,6 +466,148 @@ describe("Projection Capability declarations", () => {
     );
   });
 
+  it("resolves Editor Customization declarations by explicit Shared Resource id", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-editor-customization-resource-"),
+    );
+    const resourcePath = path.join(workspace, "editor-capabilities.json");
+
+    await writeFile(
+      resourcePath,
+      JSON.stringify({
+        capabilities: {
+          "oxc-format-lint": {
+            extensions: ["custom.oxc-extension"],
+            settings: {
+              "custom.editorResource": true,
+              "editor.defaultFormatter": "custom.oxc-extension",
+            },
+          },
+          vue: { extensions: [], settings: {} },
+          tailwind: { extensions: [], settings: {} },
+          "rust-tooling": { extensions: [], settings: {} },
+          vitest: { extensions: [], settings: {} },
+        },
+      }),
+    );
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: {
+        capabilities: preset!.projection!.capabilities.map((capability) =>
+          capability.kind === "oxc-format-lint"
+            ? {
+                ...capability,
+                editorCustomizationResourceId: "custom-editor-declarations",
+              }
+            : capability,
+        ),
+      },
+      context,
+      sourceRoots: {
+        ...builtInSourceRoots,
+        sharedResource(resourceId) {
+          return resourceId === "custom-editor-declarations"
+            ? resourcePath
+            : builtInSourceRoots.sharedResource(resourceId);
+        },
+      },
+    });
+
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const workspaceExtensions = await readJson(
+      path.join(targetDir, ".vscode/extensions.json"),
+    );
+    const workspaceSettings = await readJson(
+      path.join(targetDir, ".vscode/settings.json"),
+    );
+    const devcontainer = await readJson(
+      path.join(targetDir, ".devcontainer/devcontainer.json"),
+    );
+
+    expect(workspaceExtensions.recommendations).toEqual([
+      "custom.oxc-extension",
+    ]);
+    expect(workspaceSettings).toMatchObject({
+      "custom.editorResource": true,
+      "editor.defaultFormatter": "custom.oxc-extension",
+      "oxc.configPath": "./oxlint.config.ts",
+      "oxc.fmt.configPath": "./oxfmt.config.ts",
+    });
+    expect(devcontainer.customizations).toMatchObject({
+      vscode: {
+        extensions: ["custom.oxc-extension"],
+        settings: workspaceSettings,
+      },
+    });
+  });
+
+  it("reports malformed Editor Customization Shared Resource declarations", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-editor-customization-resource-"),
+    );
+    const resourcePath = path.join(workspace, "editor-capabilities.json");
+
+    await writeFile(
+      resourcePath,
+      JSON.stringify({
+        capabilities: {
+          "oxc-format-lint": {
+            extensions: [true],
+            settings: {},
+          },
+        },
+      }),
+    );
+
+    expect(() =>
+      interpretPresetProjectionDeclaration({
+        preset: preset!,
+        declaration: {
+          capabilities: preset!.projection!.capabilities.map((capability) =>
+            capability.kind === "oxc-format-lint"
+              ? {
+                  ...capability,
+                  editorCustomizationResourceId: "bad-editor-declarations",
+                }
+              : capability,
+          ),
+        },
+        context,
+        sourceRoots: {
+          ...builtInSourceRoots,
+          sharedResource(resourceId) {
+            return resourceId === "bad-editor-declarations"
+              ? resourcePath
+              : builtInSourceRoots.sharedResource(resourceId);
+          },
+        },
+      }),
+    ).toThrow(
+      `Editor Customization Shared Resource ${resourcePath} is invalid: $.capabilities.oxc-format-lint.extensions.0: Invalid type: Expected string but received true`,
+    );
+  });
+
   it("reports a missing Development Container Shared Resource fragment", async () => {
     const manifest = loadBuiltInPresetSourceManifest();
     const preset = manifest.presets.find(
@@ -470,6 +615,7 @@ describe("Projection Capability declarations", () => {
     );
     expect(preset?.projection).toBeDefined();
     const { context } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
     const resourceRoot = await mkdtemp(
       path.join(tmpdir(), "template-devcontainer-resource-"),
     );
@@ -489,11 +635,11 @@ describe("Projection Capability declarations", () => {
         },
         context,
         sourceRoots: {
-          ...builtInPresetProjectionSourceRoots(),
+          ...builtInSourceRoots,
           sharedResource(resourceId) {
             return resourceId === "empty-devcontainer-fragments"
               ? resourceRoot
-              : undefined;
+              : builtInSourceRoots.sharedResource(resourceId);
           },
         },
       }),
@@ -509,6 +655,7 @@ describe("Projection Capability declarations", () => {
     );
     expect(preset?.projection).toBeDefined();
     const { context } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-devcontainer-resource-"),
     );
@@ -531,11 +678,11 @@ describe("Projection Capability declarations", () => {
         },
         context,
         sourceRoots: {
-          ...builtInPresetProjectionSourceRoots(),
+          ...builtInSourceRoots,
           sharedResource(resourceId) {
             return resourceId === "file-devcontainer-fragments"
               ? resourceFile
-              : undefined;
+              : builtInSourceRoots.sharedResource(resourceId);
           },
         },
       }),

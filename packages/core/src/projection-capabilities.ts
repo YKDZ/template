@@ -40,7 +40,9 @@ import {
 } from "./devcontainer.js";
 import {
   editorCustomizationForCapabilities,
+  loadEditorCustomizationDeclarations,
   type EditorCustomizationCapability,
+  type EditorCustomizationDeclarations,
 } from "./editor-customization.js";
 import type { GenerationContext } from "./generation-context.js";
 import {
@@ -141,6 +143,11 @@ type ProjectionCompositionState = {
     readonly id: string;
     readonly root: string;
     readonly sourceRootKey: string;
+  };
+  editorCustomizationResource?: {
+    readonly id: string;
+    readonly root: string;
+    readonly declarations: EditorCustomizationDeclarations;
   };
   editorCustomizationCapabilities: EditorCustomizationCapability[];
   operationFactories: ProjectionOperationFactory[];
@@ -259,6 +266,11 @@ const capabilityInterpreters = {
         capability.devcontainerResourceId,
         "rust-binary-workspace",
       );
+      setEditorCustomizationResource(
+        state,
+        capability.editorCustomizationResourceId,
+        "rust-binary-workspace",
+      );
       state.rootCheckComponents.push({
         kind: "turbo-package-check",
         owner: workspaceGlobBoundary(capability.workspacePackageGlob),
@@ -334,8 +346,13 @@ const capabilityInterpreters = {
   },
   "oxc-format-lint": {
     kind: "oxc-format-lint",
-    contribute({ state }) {
+    contribute({ capability, state }) {
       state.sourceRoots.sharedOxc = state.projectionSourceRoots.sharedOxc();
+      setEditorCustomizationResource(
+        state,
+        capability.editorCustomizationResourceId,
+        "oxc-format-lint",
+      );
       state.rootCheckComponents.unshift(
         {
           kind: "oxc-format-check",
@@ -727,8 +744,40 @@ function setDevelopmentContainerResource(
   state.sourceRoots[sourceRootKey] = root;
 }
 
+function setEditorCustomizationResource(
+  state: ProjectionCompositionState,
+  resourceId: string,
+  capabilityKind: "oxc-format-lint" | "rust-binary-workspace",
+): void {
+  const root = state.projectionSourceRoots.sharedResource(resourceId);
+
+  if (root === undefined) {
+    throw new Error(
+      `Projection Capability ${capabilityKind} references unresolved Editor Customization Shared Resource: ${resourceId}`,
+    );
+  }
+
+  state.editorCustomizationResource = {
+    id: resourceId,
+    root,
+    declarations: loadEditorCustomizationDeclarations(root),
+  };
+}
+
 function developmentContainerResourceSourceRootKey(resourceId: string): string {
   return `devcontainer:${resourceId}`;
+}
+
+function editorCustomizationDeclarationsForState(
+  state: ProjectionCompositionState,
+): EditorCustomizationDeclarations {
+  if (state.editorCustomizationResource === undefined) {
+    throw new Error(
+      "Projection Capability composition did not provide Editor Customization Shared Resource",
+    );
+  }
+
+  return state.editorCustomizationResource.declarations;
 }
 
 function projectNameFromDir(targetDir: string): string {
@@ -1762,6 +1811,7 @@ function rustBinaryWorkspaceOperations({
   );
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
+    editorCustomizationDeclarationsForState(state),
   );
   const developmentContainer = dockerfileFirstRustPnpmDevcontainer({
     name: context.projectName.value,
@@ -2399,6 +2449,7 @@ function oxcFormatLintOperations({
 }): RenderOperation[] {
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
+    editorCustomizationDeclarationsForState(state),
   );
 
   return [
@@ -2450,6 +2501,7 @@ function nodePnpmDevcontainerOperations({
   );
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
+    editorCustomizationDeclarationsForState(state),
   );
   const developmentContainer = checkedDockerfileFirstNodePnpmDevcontainer({
     name: context.projectName.value,

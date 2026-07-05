@@ -11,11 +11,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { builtInPresets } from "@ykdz/template-builtin-source";
+import {
+  builtInPresetProjectionSourceRoots,
+  builtInPresets,
+} from "@ykdz/template-builtin-source";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import {
   editorCustomizationForCapabilities,
+  loadEditorCustomizationDeclarations,
   type EditorCustomizationCapability,
   type EditorCustomizationOptions,
 } from "@ykdz/template-core/editor-customization";
@@ -36,6 +40,32 @@ const optionalGitDisplays = [
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
+
+function builtInEditorCustomizationResourcePath(): string {
+  const resourcePath = builtInPresetProjectionSourceRoots().sharedResource(
+    "shared-editor-customization",
+  );
+
+  if (resourcePath === undefined) {
+    throw new Error("Missing built-in Editor Customization Shared Resource");
+  }
+
+  return resourcePath;
+}
+
+const builtInEditorCustomizationDeclarations =
+  loadEditorCustomizationDeclarations(builtInEditorCustomizationResourcePath());
+
+function builtInEditorCustomizationForCapabilities(
+  capabilities: readonly EditorCustomizationCapability[],
+  options?: EditorCustomizationOptions,
+) {
+  return editorCustomizationForCapabilities(
+    capabilities,
+    builtInEditorCustomizationDeclarations,
+    options,
+  );
+}
 
 const defaultToolchainEnv = {
   TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: jsonDataUrl([
@@ -947,10 +977,11 @@ describe("template init", () => {
       expect(devcontainer).not.toHaveProperty("postCreateCommand");
 
       const extensions = devcontainer.customizations.vscode.extensions;
-      const expectedEditorCustomization = editorCustomizationForCapabilities(
-        editorCustomizationCapabilitiesForPreset(preset.name),
-        editorCustomizationOptionsForPreset(preset.name),
-      );
+      const expectedEditorCustomization =
+        builtInEditorCustomizationForCapabilities(
+          editorCustomizationCapabilitiesForPreset(preset.name),
+          editorCustomizationOptionsForPreset(preset.name),
+        );
       const workspaceExtensions = await readJson<{
         recommendations: string[];
       }>(path.join(projectDir, ".vscode/extensions.json"));
@@ -2514,9 +2545,8 @@ describe("template init", () => {
         expect.stringContaining("target=${containerWorkspaceFolder}/target"),
       ]),
     );
-    const expectedEditorCustomization = editorCustomizationForCapabilities([
-      "rust-tooling",
-    ]);
+    const expectedEditorCustomization =
+      builtInEditorCustomizationForCapabilities(["rust-tooling"]);
     expect(devcontainer.customizations.vscode.extensions).toEqual(
       expectedEditorCustomization.extensions,
     );
