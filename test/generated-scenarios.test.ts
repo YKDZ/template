@@ -10,12 +10,15 @@ import {
 import {
   errorForFailedGeneratedScenario,
   generatedScenarioChildProcessEnv,
+  generatedScenarioEnvironmentNeedSteps,
   generatedScenarioId,
+  generatedScenarioRequiresSerializedRootCheck,
   packageLeafNameForAddedPreset,
   runGeneratedScenarioSet,
   runGeneratedScenariosConcurrently,
   selectGeneratedScenarios,
 } from "@ykdz/template-core/generated-scenarios";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
 import { PackageAdditionSupport } from "@ykdz/template-shared";
 
 function matrixPairKey(input: {
@@ -165,6 +168,73 @@ describe("generated scenarios", () => {
     expect(packageLeafNameForAddedPreset(minimalManifest(), "addon")).toBe(
       "fixture-addon",
     );
+  });
+
+  it("keeps generated scenario serialization on environment need kind metadata", () => {
+    expect(
+      generatedScenarioRequiresSerializedRootCheck([
+        {
+          id: "prepare-browser-assets",
+          command: "pnpm",
+          args: ["exec", "playwright", "install", "chromium"],
+          cwd: "/project",
+          display: "pnpm exec playwright install chromium",
+          environmentNeedKind: "playwright-browser-assets",
+        },
+      ]),
+    ).toBe(true);
+
+    expect(
+      generatedScenarioRequiresSerializedRootCheck([
+        {
+          id: "install-apps-web-playwright-browsers",
+          command: "pnpm",
+          args: ["run", "check"],
+          cwd: "/project",
+          display: "pnpm run check",
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("only turns machine-verifiable environment needs into generated scenario steps", () => {
+    const steps = generatedScenarioEnvironmentNeedSteps(
+      [
+        playwrightBrowserAssetsEnvironmentNeed({
+          browser: "chromium",
+          owner: { kind: "package-boundary", path: "apps/web" },
+          id: "prepare-browser-assets",
+          label: "Prepare browser assets",
+          machineVerifiable: true,
+        }),
+        playwrightBrowserAssetsEnvironmentNeed({
+          browser: "chromium",
+          owner: { kind: "package-boundary", path: "apps/admin" },
+          id: "manual-browser-assets",
+          label: "Manually prepare browser assets",
+          machineVerifiable: false,
+        }),
+      ],
+      "/project",
+    );
+
+    expect(steps).toEqual([
+      {
+        id: "prepare-browser-assets",
+        command: "pnpm",
+        args: [
+          "--filter",
+          "./apps/web",
+          "exec",
+          "playwright",
+          "install",
+          "chromium",
+        ],
+        cwd: "/project",
+        display: "pnpm --filter ./apps/web exec playwright install chromium",
+        environmentNeedKind: "playwright-browser-assets",
+      },
+    ]);
   });
 
   it("keeps built-in scenario selection on the manifest contract", () => {

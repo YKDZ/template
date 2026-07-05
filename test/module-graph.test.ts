@@ -237,6 +237,21 @@ describe("module graph plans", () => {
         kind: "playwright-browser-assets",
         browser: "chromium",
         owner: { kind: "package-boundary", path: "apps/web" },
+        nextStep: {
+          id: "install-apps-web-playwright-browsers",
+          label: "Install Playwright browser assets for apps/web package",
+          command: "pnpm",
+          args: [
+            "--filter",
+            "./apps/web",
+            "exec",
+            "playwright",
+            "install",
+            "chromium",
+          ],
+          display: "pnpm --filter ./apps/web exec playwright install chromium",
+          machineVerifiable: true,
+        },
       },
     ]);
     expect(
@@ -305,6 +320,21 @@ describe("module graph plans", () => {
         kind: "playwright-browser-assets",
         browser: "chromium",
         owner: { kind: "package-boundary", path: "apps/web" },
+        nextStep: {
+          id: "install-apps-web-playwright-browsers",
+          label: "Install Playwright browser assets for apps/web package",
+          command: "pnpm",
+          args: [
+            "--filter",
+            "./apps/web",
+            "exec",
+            "playwright",
+            "install",
+            "chromium",
+          ],
+          display: "pnpm --filter ./apps/web exec playwright install chromium",
+          machineVerifiable: true,
+        },
       },
     ]);
     expect(

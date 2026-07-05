@@ -49,6 +49,7 @@ import {
   type CheckPlan,
   type ComponentOwner,
   type FixPlan,
+  playwrightBrowserAssetsEnvironmentNeed,
   renderFixCommand,
   renderRootCheckCommand,
 } from "./module-graph.js";
@@ -245,12 +246,14 @@ const capabilityInterpreters = {
       if (capability.packages.length > 1) {
         state.rootScriptFragments.dev = "turbo run dev --parallel";
       }
-      if (hasVuePackage(capability)) {
-        state.rootCheckEnvironmentNeeds.push({
-          kind: "playwright-browser-assets",
-          browser: "chromium",
-          owner: { kind: "package-boundary", path: "apps/web" },
-        });
+      const vuePackage = findVuePackage(capability);
+      if (vuePackage !== undefined) {
+        state.rootCheckEnvironmentNeeds.push(
+          playwrightBrowserAssetsEnvironmentNeed({
+            browser: "chromium",
+            owner: { kind: "package-boundary", path: vuePackage.path },
+          }),
+        );
         state.editorCustomizationCapabilities.push("vue", "tailwind");
       }
       state.editorCustomizationCapabilities.push("vitest");
@@ -1261,7 +1264,13 @@ function workspaceGlobBoundary(
 function hasVuePackage(
   capability: WorkspaceNodePackagesCapabilityDeclaration,
 ): boolean {
-  return capability.packages.some(
+  return findVuePackage(capability) !== undefined;
+}
+
+function findVuePackage(
+  capability: WorkspaceNodePackagesCapabilityDeclaration,
+): WorkspaceNodePackageDeclaration | undefined {
+  return capability.packages.find(
     (nodePackage) => nodePackage.kind === "vue-app",
   );
 }

@@ -824,6 +824,91 @@ describe("Projection Capability declarations", () => {
     await expectFile(path.join(targetDir, "apps/web/test/e2e/app.spec.ts"));
   });
 
+  it("derives Vue browser environment setup from the declared package path", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "vue-app",
+    );
+    expect(preset).toBeDefined();
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vue-package-path-"),
+    );
+    const targetDir = path.join(workspace, "demo-vue");
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: {
+        capabilities: [
+          {
+            kind: "workspace-node-packages",
+            workspacePackageGlob: "apps/*",
+            packages: [
+              {
+                kind: "vue-app",
+                path: "apps/api",
+                sourceFiles: ["src/main.ts"],
+              },
+            ],
+          },
+          { kind: "strict-typescript-root" },
+          {
+            kind: "oxc-format-lint",
+            editorCustomizationResourceId: "shared-editor-customization",
+          },
+          {
+            kind: "node-pnpm-devcontainer",
+            devcontainerResourceId: "shared-devcontainer",
+          },
+          { kind: "github-maintenance" },
+        ],
+      },
+      context: assembleGenerationContext({
+        targetDir,
+        blueprint: {
+          schemaVersion: 1,
+          preset: "vue-app",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: [],
+          packages: [{ name: "@demo/api", path: "apps/api" }],
+        },
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@11.2.3",
+          },
+          source: "online",
+          diagnostics: [],
+        },
+      }),
+      sourceRoots: builtInPresetProjectionSourceRoots(),
+    });
+
+    expect(plan.checkPlan.environmentNeeds).toEqual([
+      {
+        kind: "playwright-browser-assets",
+        browser: "chromium",
+        owner: { kind: "package-boundary", path: "apps/api" },
+        nextStep: {
+          id: "install-apps-api-playwright-browsers",
+          label: "Install Playwright browser assets for apps/api package",
+          command: "pnpm",
+          args: [
+            "--filter",
+            "./apps/api",
+            "exec",
+            "playwright",
+            "install",
+            "chromium",
+          ],
+          display: "pnpm --filter ./apps/api exec playwright install chromium",
+          machineVerifiable: true,
+        },
+      },
+    ]);
+  });
+
   it("renders the vue-hono-app built-in declaration with package linking", async () => {
     const manifest = loadBuiltInPresetSourceManifest();
     const preset = manifest.presets.find(

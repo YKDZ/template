@@ -6,8 +6,8 @@ import * as v from "valibot";
 
 import { assembleGenerationContext } from "./generation-context.js";
 import {
-  renderPlaywrightBrowserInstallCommand,
   type CheckEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
 } from "./module-graph.js";
 import { planNextStepInstructions } from "./next-step-instructions.js";
 import type { PresetSourceManifest } from "./preset-source.js";
@@ -49,6 +49,7 @@ export type GeneratedScenarioCommandStep = {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly display: string;
+  readonly environmentNeedKind?: CheckEnvironmentNeed["kind"];
 };
 
 export type GeneratedScenarioCommandRunner = (
@@ -490,13 +491,18 @@ function machineVerifiableNextStepsForPreset(
 
   return plan.steps
     .filter((step) => step.machineVerifiable && step.kind === "command")
-    .map((step) => ({
-      id: step.id,
-      command: step.command,
-      args: step.args,
-      cwd: step.cwd,
-      display: step.display,
-    }));
+    .map((step) => {
+      return {
+        id: step.id,
+        command: step.command,
+        args: step.args,
+        cwd: step.cwd,
+        display: step.display,
+        ...(step.environmentNeedKind === undefined
+          ? {}
+          : { environmentNeedKind: step.environmentNeedKind }),
+      };
+    });
 }
 
 function addedPresetEnvironmentNeeds(
@@ -521,10 +527,11 @@ function addedPresetEnvironmentNeeds(
       return need;
     }
 
-    return {
-      ...need,
+    return playwrightBrowserAssetsEnvironmentNeed({
+      browser: need.browser,
       owner: { kind: "package-boundary", path: addedPackagePath },
-    };
+      machineVerifiable: need.nextStep.machineVerifiable,
+    });
   });
 }
 
@@ -532,19 +539,31 @@ function environmentNeedStep(
   need: CheckEnvironmentNeed,
   projectDir: string,
 ): GeneratedScenarioCommandStep {
-  const display = renderPlaywrightBrowserInstallCommand(need);
-  const [command, ...args] = display.split(" ");
-  if (command === undefined) {
-    throw new Error(`Cannot parse environment setup command: ${display}`);
-  }
-
   return {
-    id: `install-${need.owner.path}-playwright-browsers`,
-    command,
-    args,
+    id: need.nextStep.id,
+    command: need.nextStep.command,
+    args: [...need.nextStep.args],
     cwd: projectDir,
-    display,
+    display: need.nextStep.display,
+    environmentNeedKind: need.kind,
   };
+}
+
+export function generatedScenarioEnvironmentNeedSteps(
+  needs: readonly CheckEnvironmentNeed[],
+  projectDir: string,
+): GeneratedScenarioCommandStep[] {
+  return needs
+    .filter((need) => need.nextStep.machineVerifiable)
+    .map((need) => environmentNeedStep(need, projectDir));
+}
+
+export function generatedScenarioRequiresSerializedRootCheck(
+  steps: readonly GeneratedScenarioCommandStep[],
+): boolean {
+  return steps.some(
+    (step) => step.environmentNeedKind === "playwright-browser-assets",
+  );
 }
 
 export function generatedScenarioQualityGateSteps(
@@ -561,13 +580,16 @@ export function generatedScenarioQualityGateSteps(
     manifest,
     normalizedOptions,
   );
-  const addedEnvironmentSteps = addedPresetEnvironmentNeeds(
-    manifest,
-    scenario,
+  const addedEnvironmentSteps = generatedScenarioEnvironmentNeedSteps(
+    addedPresetEnvironmentNeeds(
+      manifest,
+      scenario,
+      projectDir,
+      addedPackagePath,
+      normalizedOptions,
+    ),
     projectDir,
-    addedPackagePath,
-    normalizedOptions,
-  ).map((need) => environmentNeedStep(need, projectDir));
+  );
   const existingDisplays = new Set(steps.map((step) => step.display));
   const extraEnvironmentSteps = addedEnvironmentSteps.filter(
     (step) => !existingDisplays.has(step.display),
@@ -605,9 +627,8 @@ async function runGeneratedScenarioQualityGate(
     addedPackagePath,
     options,
   );
-  const requiresSerializedPlaywrightRootCheck = steps.some((step) =>
-    step.id.endsWith("-playwright-browsers"),
-  );
+  const requiresSerializedPlaywrightRootCheck =
+    generatedScenarioRequiresSerializedRootCheck(steps);
 
   for (const step of steps) {
     const env = step.id === "run-root-check" ? { CI: "1" } : undefined;

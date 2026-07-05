@@ -219,6 +219,22 @@ describe("Next Step Instructions", () => {
               kind: "playwright-browser-assets",
               browser: "chromium",
               owner: { kind: "package-boundary", path: "apps/web" },
+              nextStep: {
+                id: "install-apps-web-playwright-browsers",
+                label: "Install Playwright browser assets for apps/web package",
+                command: "pnpm",
+                args: [
+                  "--filter",
+                  "./apps/web",
+                  "exec",
+                  "playwright",
+                  "install",
+                  "chromium",
+                ],
+                display:
+                  "pnpm --filter ./apps/web exec playwright install chromium",
+                machineVerifiable: true,
+              },
             },
           ],
         },
@@ -241,5 +257,120 @@ describe("Next Step Instructions", () => {
     expect(plan.steps.map((step) => step.display)).toContain(
       "pnpm --filter ./apps/web exec playwright install chromium",
     );
+  });
+
+  it("uses explicit Check Plan metadata for package browser environment preparation", () => {
+    const targetDir = path.join("/", "tmp", "custom-browser-repository");
+
+    const plan = planNextStepInstructions({
+      targetDir,
+      projectionPlan: {
+        sourceRoot: targetDir,
+        operations: [],
+        checkPlan: {
+          components: [],
+          environmentNeeds: [
+            {
+              kind: "playwright-browser-assets",
+              browser: "chromium",
+              owner: { kind: "package-boundary", path: "packages/client" },
+              nextStep: {
+                id: "install-client-playwright-browsers",
+                label: "Install Playwright browser assets for client package",
+                command: "pnpm",
+                args: [
+                  "--filter",
+                  "./packages/client",
+                  "exec",
+                  "playwright",
+                  "install",
+                  "chromium",
+                ],
+                display:
+                  "pnpm --filter ./packages/client exec playwright install chromium",
+                machineVerifiable: true,
+              },
+            },
+          ],
+        },
+        fixPlan: { components: [] },
+        dependencyMaintenancePolicy: {
+          ecosystems: ["npm", "github-actions"],
+          interval: "weekly",
+        },
+        packageScripts: {},
+        capabilities: {
+          rootCheck: true,
+          fixCommand: true,
+          githubActions: true,
+          dependabot: true,
+          devcontainer: true,
+        },
+      },
+    });
+
+    expect(
+      plan.steps.map(({ id, label, display, machineVerifiable }) => ({
+        id,
+        label,
+        display,
+        machineVerifiable,
+      })),
+    ).toEqual([
+      {
+        id: "enter-project",
+        label: "Enter Generated Repository",
+        display: `cd ${targetDir}`,
+        machineVerifiable: false,
+      },
+      {
+        id: "install-dependencies",
+        label: "Install dependencies",
+        display: "pnpm install",
+        machineVerifiable: true,
+      },
+      {
+        id: "run-fix",
+        label: "Run Fix Command",
+        display: "pnpm run fix",
+        machineVerifiable: true,
+      },
+      {
+        id: "install-client-playwright-browsers",
+        label: "Install Playwright browser assets for client package",
+        display:
+          "pnpm --filter ./packages/client exec playwright install chromium",
+        machineVerifiable: true,
+      },
+      {
+        id: "run-root-check",
+        label: "Run Root Check",
+        display: "pnpm run check",
+        machineVerifiable: true,
+      },
+      ...optionalGitDisplays.map((display) => ({
+        id:
+          display === "git init"
+            ? "optional-git-init"
+            : display === "git add ."
+              ? "optional-git-add"
+              : "optional-git-commit",
+        label:
+          display === "git init"
+            ? "Optional: initialize git"
+            : display === "git add ."
+              ? "Optional: stage files"
+              : "Optional: create your first commit",
+        display,
+        machineVerifiable: false,
+      })),
+    ]);
+    expect(
+      plan.steps.find(
+        (step) => step.id === "install-client-playwright-browsers",
+      ),
+    ).toMatchObject({
+      environmentNeedKind: "playwright-browser-assets",
+    });
   });
 });

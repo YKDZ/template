@@ -1,4 +1,8 @@
-import { type CheckEnvironmentNeed, type CheckPlan } from "./module-graph.js";
+import {
+  type CheckEnvironmentNeed,
+  type CheckPlan,
+  renderPlaywrightBrowserInstallCommand,
+} from "./module-graph.js";
 
 export type CiCapability = {
   readonly workflowName: "Check";
@@ -174,12 +178,5 @@ function defaultDependabotDirectory(
 }
 
 function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
-  if (
-    need.kind === "playwright-browser-assets" &&
-    need.owner.path === "apps/web"
-  ) {
-    return `pnpm --filter ./apps/web exec playwright install --with-deps ${need.browser}`;
-  }
-
-  return `pnpm exec playwright install --with-deps ${need.browser}`;
+  return renderPlaywrightBrowserInstallCommand(need, { withDeps: true });
 }

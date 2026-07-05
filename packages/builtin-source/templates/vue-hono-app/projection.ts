@@ -9,6 +9,7 @@ import {
   type CheckPlan,
   type ComponentOwner,
   type FixPlan,
+  playwrightBrowserAssetsEnvironmentNeed,
   renderFixCommand,
   renderRootCheckCommand,
 } from "@ykdz/template-core/module-graph";
@@ -110,11 +111,12 @@ function planVueHonoRootChecks(): CheckPlan {
       { kind: "turbo-package-check", owner: workspacePackageBoundary },
     ],
     environmentNeeds: [
-      {
-        kind: "playwright-browser-assets",
+      playwrightBrowserAssetsEnvironmentNeed({
         browser: "chromium",
         owner: webWorkspaceBoundary,
-      },
+        id: "install-web-playwright-browsers",
+        label: "Install Playwright browser assets for web workspace",
+      }),
     ],
   };
 }

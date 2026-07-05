@@ -1,4 +1,4 @@
-import { renderPlaywrightBrowserInstallCommand } from "./module-graph.js";
+import type { CheckEnvironmentNeed } from "./module-graph.js";
 import type { PresetProjectionPlan } from "./preset-projection.js";
 
 export type NextStepInstruction = {
@@ -10,6 +10,7 @@ export type NextStepInstruction = {
   readonly cwd: string;
   readonly display: string;
   readonly machineVerifiable: boolean;
+  readonly environmentNeedKind?: CheckEnvironmentNeed["kind"];
 };
 
 export type NextStepInstructionPlan = {
@@ -99,30 +100,17 @@ function fixInstruction(): NextStepInstruction {
 function checkEnvironmentInstructions(
   plan: PresetProjectionPlan,
 ): NextStepInstruction[] {
-  return plan.checkPlan.environmentNeeds.map((need) => {
-    const display = renderPlaywrightBrowserInstallCommand(need);
-    const [command, ...args] = display.split(" ");
-    if (command === undefined) {
-      throw new Error(`Cannot parse environment setup command: ${display}`);
-    }
-
-    return {
-      id:
-        need.owner.path === "apps/web"
-          ? "install-web-playwright-browsers"
-          : "install-playwright-browsers",
-      label:
-        need.owner.path === "apps/web"
-          ? "Install Playwright browser assets for web workspace"
-          : "Install Playwright browser assets",
-      kind: "command",
-      command,
-      args,
-      cwd: "",
-      display,
-      machineVerifiable: true,
-    };
-  });
+  return plan.checkPlan.environmentNeeds.map((need) => ({
+    id: need.nextStep.id,
+    label: need.nextStep.label,
+    kind: "command",
+    command: need.nextStep.command,
+    args: need.nextStep.args,
+    cwd: "",
+    display: need.nextStep.display,
+    machineVerifiable: need.nextStep.machineVerifiable,
+    environmentNeedKind: need.kind,
+  }));
 }
 
 function projectionInstructions(

@@ -6,6 +6,7 @@ import type {
   FixComponent,
   FixPlan,
 } from "@ykdz/template-core/module-graph";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
 
 const rootPackageBoundary: ComponentOwner = {
   kind: "package-boundary",
@@ -102,21 +103,23 @@ function checkEnvironmentNeeds(
 ): CheckEnvironmentNeed[] {
   if (target === "vue-app") {
     return [
-      {
-        kind: "playwright-browser-assets",
+      playwrightBrowserAssetsEnvironmentNeed({
         browser: "chromium",
         owner: rootPackageBoundary,
-      },
+        id: "install-playwright-browsers",
+        label: "Install Playwright browser assets",
+      }),
     ];
   }
 
   if (target === "vue-hono-root" || target === "vue-hono-web") {
     return [
-      {
-        kind: "playwright-browser-assets",
+      playwrightBrowserAssetsEnvironmentNeed({
         browser: "chromium",
         owner: webPackageBoundary,
-      },
+        id: "install-web-playwright-browsers",
+        label: "Install Playwright browser assets for web workspace",
+      }),
     ];
   }
 

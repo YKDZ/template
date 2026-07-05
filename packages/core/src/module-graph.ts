@@ -38,6 +38,14 @@ export type CheckEnvironmentNeed = {
   readonly kind: "playwright-browser-assets";
   readonly browser: "chromium";
   readonly owner: ComponentOwner;
+  readonly nextStep: {
+    readonly id: string;
+    readonly label: string;
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly display: string;
+    readonly machineVerifiable: boolean;
+  };
 };
 
 export type CheckComponent = {
@@ -125,12 +133,69 @@ export function renderFixCommand(plan: FixPlan): string {
   return plan.components.map(renderFixComponentCommand).join(" && ");
 }
 
-export function renderPlaywrightBrowserInstallCommand(
-  need: CheckEnvironmentNeed,
-): string {
+function playwrightBrowserInstallArgs(
+  need: Pick<CheckEnvironmentNeed, "browser" | "owner">,
+  options: { readonly withDeps?: boolean } = {},
+): string[] {
+  const installArgs = [
+    "exec",
+    "playwright",
+    "install",
+    ...(options.withDeps ? ["--with-deps"] : []),
+    need.browser,
+  ];
+
   if (need.owner.kind === "package-boundary" && need.owner.path !== ".") {
-    return `pnpm --filter ./${need.owner.path} exec playwright install ${need.browser}`;
+    return ["--filter", `./${need.owner.path}`, ...installArgs];
   }
 
-  return `pnpm exec playwright install ${need.browser}`;
+  return installArgs;
+}
+
+export function renderPlaywrightBrowserInstallCommand(
+  need: CheckEnvironmentNeed,
+  options: { readonly withDeps?: boolean } = {},
+): string {
+  return ["pnpm", ...playwrightBrowserInstallArgs(need, options)].join(" ");
+}
+
+export function playwrightBrowserAssetsNextStepDescriptor(
+  owner: ComponentOwner,
+): Pick<CheckEnvironmentNeed["nextStep"], "id" | "label"> {
+  if (owner.kind === "package-boundary" && owner.path !== ".") {
+    return {
+      id: `install-${owner.path.replaceAll("/", "-")}-playwright-browsers`,
+      label: `Install Playwright browser assets for ${owner.path} package`,
+    };
+  }
+
+  return {
+    id: "install-workspace-playwright-browsers",
+    label: "Install Playwright browser assets for workspace",
+  };
+}
+
+export function playwrightBrowserAssetsEnvironmentNeed(options: {
+  readonly browser: "chromium";
+  readonly owner: ComponentOwner;
+  readonly id?: string;
+  readonly label?: string;
+  readonly machineVerifiable?: boolean;
+}): CheckEnvironmentNeed {
+  const args = playwrightBrowserInstallArgs(options);
+  const descriptor = playwrightBrowserAssetsNextStepDescriptor(options.owner);
+
+  return {
+    kind: "playwright-browser-assets",
+    browser: options.browser,
+    owner: options.owner,
+    nextStep: {
+      id: options.id ?? descriptor.id,
+      label: options.label ?? descriptor.label,
+      command: "pnpm",
+      args,
+      display: ["pnpm", ...args].join(" "),
+      machineVerifiable: options.machineVerifiable ?? true,
+    },
+  };
 }

@@ -1535,7 +1535,7 @@ describe("template init", () => {
     );
     expect(output.nextSteps[3]).toEqual(
       expect.objectContaining({
-        id: "install-web-playwright-browsers",
+        id: "install-apps-web-playwright-browsers",
         command: "pnpm",
         args: [
           "--filter",
