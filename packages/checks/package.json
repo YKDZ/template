@@ -25,6 +25,7 @@
   "dependencies": {
     "@ykdz/template-builtin-source": "workspace:*",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-shared": "workspace:*",
     "execa": "catalog:",
     "yaml": "catalog:"
   },

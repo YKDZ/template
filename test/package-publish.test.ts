@@ -48,6 +48,11 @@ const cliPackageJsonSchema = v.object({
     v.object({ type: v.optional(v.string()), url: v.optional(v.string()) }),
   ),
 });
+const runtimePackageJsonSchema = v.object({
+  files: v.array(v.string()),
+  name: v.string(),
+  private: v.boolean(),
+});
 
 async function readJsonWithSchema<const Schema extends v.GenericSchema>(
   filePath: string,
@@ -86,6 +91,9 @@ const packageRootFiles = [
   "packages/core/package.json",
   "packages/core/tsconfig.build.json",
   "packages/core/tsconfig.json",
+  "packages/shared/package.json",
+  "packages/shared/tsconfig.build.json",
+  "packages/shared/tsconfig.json",
   "packages/builtin-source/package.json",
   "packages/builtin-source/tsconfig.build.json",
   "packages/builtin-source/tsconfig.json",
@@ -123,6 +131,7 @@ async function runtimeSourceFiles(): Promise<string[]> {
     await Promise.all([
       listFiles(path.join(repoRoot, "packages/cli/src")),
       listFiles(path.join(repoRoot, "packages/core/src")),
+      listFiles(path.join(repoRoot, "packages/shared/src")),
       listFiles(path.join(repoRoot, "packages/builtin-source/src")),
       listFiles(path.join(repoRoot, "packages/builtin-source/templates")),
     ])
@@ -348,6 +357,17 @@ describe("package publishing", () => {
     expect(packageJson.publishConfig?.access).toBe("public");
   });
 
+  it("declares a narrow package surface for bundled runtime packages", async () => {
+    const sharedPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/shared/package.json"),
+      runtimePackageJsonSchema,
+    );
+
+    expect(sharedPackageJson.name).toBe("@ykdz/template-shared");
+    expect(sharedPackageJson.private).toBe(true);
+    expect(sharedPackageJson.files).toEqual(["dist"]);
+  });
+
   it(
     "packs a tarball with the advertised CLI from a clean unbuilt checkout",
     async () => {
@@ -359,6 +379,13 @@ describe("package publishing", () => {
       await copyCleanPackage(packageDir);
       await mkdir(packDir);
       await mkdir(consumerDir);
+      await mkdir(path.join(packageDir, "packages/shared/.turbo/logs"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(packageDir, "packages/shared/.turbo/logs/build.log"),
+        "local turbo log\n",
+      );
 
       await execa("pnpm", ["install", "--frozen-lockfile"], {
         cwd: packageDir,
@@ -377,6 +404,20 @@ describe("package publishing", () => {
       expect(packedPaths).toContain("package/dist/cli.js");
       expect(packedPaths).toContain(
         "package/node_modules/@ykdz/template-core/dist/devcontainer.js",
+      );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-shared/dist/index.js",
+      );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-shared/dist/index.d.ts",
+      );
+      expect(packedPaths).not.toEqual(
+        expect.arrayContaining([
+          "package/node_modules/@ykdz/template-shared/src/index.ts",
+          "package/node_modules/@ykdz/template-shared/tsconfig.build.json",
+          "package/node_modules/@ykdz/template-shared/tsconfig.json",
+          "package/node_modules/@ykdz/template-shared/.turbo/logs/build.log",
+        ]),
       );
       expect(packedPaths).toContain(
         "package/node_modules/@ykdz/template-core/dist/generation-context.js",

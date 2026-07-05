@@ -2,10 +2,8 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "paths": {
-      "@ykdz/template-shared": ["../../packages/shared/src/index.ts"]
-    },
-    "rootDir": "../..",
+    "paths": {},
+    "rootDir": "src",
     "types": ["node"]
   },
   "include": ["src/**/*.ts"]

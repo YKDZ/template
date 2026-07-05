@@ -1,17 +1,20 @@
-export type PackageRole = "runtime-service" | "shared-library";
+import type {
+  PackageLinkIntent,
+  PackageRole,
+  PackageSourcePreset,
+} from "@ykdz/template-shared";
 
-export type PackageSourcePreset = "hono-api" | "ts-lib" | "vue-app";
+export type {
+  PackageLinkIntent,
+  PackageRole,
+  PackageSourcePreset,
+} from "@ykdz/template-shared";
 
 export type PackageDefinition = {
   readonly name: string;
   readonly path: string;
   readonly role?: PackageRole;
   readonly sourcePreset?: PackageSourcePreset;
-};
-
-export type PackageLinkIntent = {
-  readonly consumerPackagePath: string;
-  readonly providerPackagePath: string;
 };
 
 export type JitSourcePackageExposure = {

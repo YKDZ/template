@@ -1,7 +1,5 @@
-export const PackageAdditionSupport = {
-  Supported: "supported",
-  Unsupported: "unsupported",
-} as const;
+import { PackageAdditionSupport as SharedPackageAdditionSupport } from "@ykdz/template-shared";
+import type { PackageAdditionSupport as SharedPackageAdditionSupportType } from "@ykdz/template-shared";
 
-export type PackageAdditionSupport =
-  (typeof PackageAdditionSupport)[keyof typeof PackageAdditionSupport];
+export const PackageAdditionSupport = SharedPackageAdditionSupport;
+export type PackageAdditionSupport = SharedPackageAdditionSupportType;

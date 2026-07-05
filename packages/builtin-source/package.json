@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-shared": "workspace:*",
     "typescript": "catalog:",
     "valibot": "catalog:"
   },

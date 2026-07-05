@@ -44,6 +44,10 @@ export default defineConfig({
         find: /^@ykdz\/template-checks\/(.+)$/,
         replacement: path.join(repoRoot, "packages/checks/src/$1.ts"),
       },
+      {
+        find: "@ykdz/template-shared",
+        replacement: path.join(repoRoot, "packages/shared/src/index.ts"),
+      },
     ],
   },
   test: {

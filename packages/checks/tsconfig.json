@@ -14,7 +14,8 @@
         "../../packages/builtin-source/templates/*.ts",
         "../../packages/builtin-source/templates/*"
       ],
-      "@ykdz/template-core/*": ["../../packages/core/src/*.ts"]
+      "@ykdz/template-core/*": ["../../packages/core/src/*.ts"],
+      "@ykdz/template-shared": ["../../packages/shared/src/index.ts"]
     },
     "rootDir": "../..",
     "types": ["node"]

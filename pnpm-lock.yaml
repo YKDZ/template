@@ -83,6 +83,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-shared':
+        specifier: workspace:*
+        version: link:../shared
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -111,6 +114,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-shared':
+        specifier: workspace:*
+        version: link:../shared
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -142,6 +148,9 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
+      '@ykdz/template-shared':
+        specifier: workspace:*
+        version: link:../shared
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -164,6 +173,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@ykdz/template-shared':
+        specifier: workspace:*
+        version: link:../shared
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
@@ -177,6 +189,25 @@ importers:
       execa:
         specifier: 'catalog:'
         version: 9.6.1
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.57.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.72.0(oxlint-tsgolint@0.24.0)
+      oxlint-tsgolint:
+        specifier: 'catalog:'
+        version: 0.24.0
+
+  packages/shared:
+    dependencies:
+      valibot:
+        specifier: 'catalog:'
+        version: 1.4.2(typescript@6.0.3)
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.2
       oxfmt:
         specifier: 'catalog:'
         version: 0.57.0

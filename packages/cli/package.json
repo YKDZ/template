@@ -22,6 +22,7 @@
   },
   "files": [
     "dist",
+    "node_modules/@ykdz/template-shared",
     "node_modules/@ykdz/template-core",
     "node_modules/@ykdz/template-builtin-source",
     "!**/node_modules/**/node_modules"
@@ -36,12 +37,13 @@
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
     "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
-    "prepack": "pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",
+    "prepack": "pnpm --filter @ykdz/template-shared run build && pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@ykdz/template-builtin-source": "workspace:*",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-shared": "workspace:*",
     "typescript": "catalog:",
     "valibot": "catalog:"
   },
@@ -53,7 +55,8 @@
   },
   "bundleDependencies": [
     "@ykdz/template-builtin-source",
-    "@ykdz/template-core"
+    "@ykdz/template-core",
+    "@ykdz/template-shared"
   ],
   "engines": {
     "node": ">=24.0.0"

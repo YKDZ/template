@@ -11,15 +11,6 @@ import {
   projectBuiltInPresetSourcePreset,
 } from "@ykdz/template-builtin-source";
 import {
-  blueprintJsonSchema,
-  presetFileJsonSchema,
-  validatePresetFile,
-  validateProjectBlueprint,
-  type BuiltInPreset,
-  type ProjectBlueprint,
-  type ValidationIssue,
-} from "@ykdz/template-core/declarations";
-import {
   assembleGenerationContext,
   type GenerationContext,
 } from "@ykdz/template-core/generation-context";
@@ -41,6 +32,15 @@ import {
   type ResolvedToolchainVersions,
   type ToolchainResolutionSource,
 } from "@ykdz/template-core/toolchain-resolution";
+import {
+  blueprintJsonSchema,
+  presetFileJsonSchema,
+  validatePresetFile,
+  validateProjectBlueprint,
+  type BuiltInPreset,
+  type ProjectBlueprint,
+  type ValidationIssue,
+} from "@ykdz/template-shared";
 
 type InitOptions = {
   dir: string;

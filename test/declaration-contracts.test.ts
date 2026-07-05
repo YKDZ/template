@@ -9,6 +9,7 @@ import type {
   PresetSourceManifestPreset,
   PresetSourceManifestSharedResource,
 } from "@ykdz/template-core/preset-source";
+import { validateProjectBlueprint as validateSharedProjectBlueprint } from "@ykdz/template-shared";
 import { execa } from "execa";
 import * as v from "valibot";
 
@@ -170,6 +171,27 @@ function firstSharedResource(
 }
 
 describe("declaration contracts", () => {
+  it("accepts a Project Blueprint through the Template Contract Library", () => {
+    expect(
+      validateSharedProjectBlueprint({
+        schemaVersion: 1,
+        preset: "ts-lib",
+        packageManager: "pnpm",
+        projectKind: "multi-package",
+        features: ["pnpm-catalog"],
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        schemaVersion: 1,
+        preset: "ts-lib",
+        packageManager: "pnpm",
+        projectKind: "multi-package",
+        features: ["pnpm-catalog"],
+      },
+    });
+  });
+
   it("lists the built-in preset catalog", async () => {
     const result = await template(["presets"]);
 
