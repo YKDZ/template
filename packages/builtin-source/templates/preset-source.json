@@ -164,8 +164,14 @@
             "sourceFiles": ["src/index.ts", "src/name-schema.ts"]
           },
           { "kind": "strict-typescript-root" },
-          { "kind": "oxc-format-lint" },
-          { "kind": "node-pnpm-devcontainer" },
+          {
+            "kind": "oxc-format-lint",
+            "editorCustomizationResourceId": "shared-editor-customization"
+          },
+          {
+            "kind": "node-pnpm-devcontainer",
+            "devcontainerResourceId": "shared-devcontainer"
+          },
           { "kind": "github-maintenance" }
         ]
       },
@@ -229,8 +235,14 @@
             ]
           },
           { "kind": "strict-typescript-root" },
-          { "kind": "oxc-format-lint" },
-          { "kind": "node-pnpm-devcontainer" },
+          {
+            "kind": "oxc-format-lint",
+            "editorCustomizationResourceId": "shared-editor-customization"
+          },
+          {
+            "kind": "node-pnpm-devcontainer",
+            "devcontainerResourceId": "shared-devcontainer"
+          },
           { "kind": "github-maintenance" }
         ]
       },
@@ -310,8 +322,14 @@
             ]
           },
           { "kind": "strict-typescript-root" },
-          { "kind": "oxc-format-lint" },
-          { "kind": "node-pnpm-devcontainer" },
+          {
+            "kind": "oxc-format-lint",
+            "editorCustomizationResourceId": "shared-editor-customization"
+          },
+          {
+            "kind": "node-pnpm-devcontainer",
+            "devcontainerResourceId": "shared-devcontainer"
+          },
           { "kind": "github-maintenance" }
         ]
       },
@@ -421,8 +439,14 @@
             ]
           },
           { "kind": "strict-typescript-root" },
-          { "kind": "oxc-format-lint" },
-          { "kind": "node-pnpm-devcontainer" },
+          {
+            "kind": "oxc-format-lint",
+            "editorCustomizationResourceId": "shared-editor-customization"
+          },
+          {
+            "kind": "node-pnpm-devcontainer",
+            "devcontainerResourceId": "shared-devcontainer"
+          },
           { "kind": "github-maintenance" }
         ]
       },
@@ -476,7 +500,9 @@
           {
             "kind": "rust-binary-workspace",
             "workspacePackageGlob": "packages/*",
-            "sourceFiles": ["src/main.rs"]
+            "sourceFiles": ["src/main.rs"],
+            "devcontainerResourceId": "shared-devcontainer",
+            "editorCustomizationResourceId": "shared-editor-customization"
           }
         ]
       },

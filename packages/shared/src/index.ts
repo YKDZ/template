@@ -139,6 +139,8 @@ export type RustBinaryWorkspaceCapabilityDeclaration = {
   readonly kind: "rust-binary-workspace";
   readonly workspacePackageGlob: "packages/*";
   readonly sourceFiles: readonly string[];
+  readonly devcontainerResourceId: string;
+  readonly editorCustomizationResourceId: string;
 };
 
 export type StrictTypescriptRootCapabilityDeclaration = {
@@ -147,10 +149,12 @@ export type StrictTypescriptRootCapabilityDeclaration = {
 
 export type OxcFormatLintCapabilityDeclaration = {
   readonly kind: "oxc-format-lint";
+  readonly editorCustomizationResourceId: string;
 };
 
 export type NodePnpmDevcontainerCapabilityDeclaration = {
   readonly kind: "node-pnpm-devcontainer";
+  readonly devcontainerResourceId: string;
 };
 
 export type GithubMaintenanceCapabilityDeclaration = {
@@ -496,7 +500,13 @@ export const presetSourceManifestJsonSchema = {
                     {
                       type: "object",
                       additionalProperties: false,
-                      required: ["kind", "workspacePackageGlob", "sourceFiles"],
+                      required: [
+                        "kind",
+                        "workspacePackageGlob",
+                        "sourceFiles",
+                        "devcontainerResourceId",
+                        "editorCustomizationResourceId",
+                      ],
                       properties: {
                         kind: { const: "rust-binary-workspace" },
                         workspacePackageGlob: { const: "packages/*" },
@@ -504,6 +514,14 @@ export const presetSourceManifestJsonSchema = {
                           type: "array",
                           minItems: 1,
                           items: { type: "string", minLength: 1 },
+                        },
+                        devcontainerResourceId: {
+                          type: "string",
+                          minLength: 1,
+                        },
+                        editorCustomizationResourceId: {
+                          type: "string",
+                          minLength: 1,
                         },
                       },
                     },
@@ -516,14 +534,26 @@ export const presetSourceManifestJsonSchema = {
                     {
                       type: "object",
                       additionalProperties: false,
-                      required: ["kind"],
-                      properties: { kind: { const: "oxc-format-lint" } },
+                      required: ["kind", "editorCustomizationResourceId"],
+                      properties: {
+                        kind: { const: "oxc-format-lint" },
+                        editorCustomizationResourceId: {
+                          type: "string",
+                          minLength: 1,
+                        },
+                      },
                     },
                     {
                       type: "object",
                       additionalProperties: false,
-                      required: ["kind"],
-                      properties: { kind: { const: "node-pnpm-devcontainer" } },
+                      required: ["kind", "devcontainerResourceId"],
+                      properties: {
+                        kind: { const: "node-pnpm-devcontainer" },
+                        devcontainerResourceId: {
+                          type: "string",
+                          minLength: 1,
+                        },
+                      },
                     },
                     {
                       type: "object",
@@ -1248,10 +1278,16 @@ const exactCapabilityKeys: Record<ProjectionCapabilityKind, readonly string[]> =
       "packages",
       "packageLinks",
     ],
-    "rust-binary-workspace": ["kind", "workspacePackageGlob", "sourceFiles"],
+    "rust-binary-workspace": [
+      "kind",
+      "workspacePackageGlob",
+      "sourceFiles",
+      "devcontainerResourceId",
+      "editorCustomizationResourceId",
+    ],
     "strict-typescript-root": ["kind"],
-    "oxc-format-lint": ["kind"],
-    "node-pnpm-devcontainer": ["kind"],
+    "oxc-format-lint": ["kind", "editorCustomizationResourceId"],
+    "node-pnpm-devcontainer": ["kind", "devcontainerResourceId"],
     "github-maintenance": ["kind"],
   };
 
@@ -1565,6 +1601,8 @@ function parseRustBinaryWorkspaceCapability(
 ): RustBinaryWorkspaceCapabilityDeclaration | ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   let sourceFiles: string[] = [];
+  let devcontainerResourceId = "";
+  let editorCustomizationResourceId = "";
 
   if (capability.workspacePackageGlob !== "packages/*") {
     issues.push({
@@ -1592,6 +1630,32 @@ function parseRustBinaryWorkspaceCapability(
     }
   }
 
+  if (
+    typeof capability.devcontainerResourceId !== "string" ||
+    capability.devcontainerResourceId.length === 0
+  ) {
+    issues.push({
+      path: `${pathPrefix}.devcontainerResourceId`,
+      message:
+        "rust-binary-workspace must declare a devcontainerResourceId Shared Resource id",
+    });
+  } else {
+    devcontainerResourceId = capability.devcontainerResourceId;
+  }
+
+  if (
+    typeof capability.editorCustomizationResourceId !== "string" ||
+    capability.editorCustomizationResourceId.length === 0
+  ) {
+    issues.push({
+      path: `${pathPrefix}.editorCustomizationResourceId`,
+      message:
+        "rust-binary-workspace must declare an editorCustomizationResourceId Shared Resource id",
+    });
+  } else {
+    editorCustomizationResourceId = capability.editorCustomizationResourceId;
+  }
+
   if (issues.length > 0) {
     return issues;
   }
@@ -1600,6 +1664,54 @@ function parseRustBinaryWorkspaceCapability(
     kind: "rust-binary-workspace",
     workspacePackageGlob: "packages/*",
     sourceFiles,
+    devcontainerResourceId,
+    editorCustomizationResourceId,
+  };
+}
+
+function parseOxcFormatLintCapability(
+  capability: Record<string, unknown>,
+  pathPrefix: string,
+): OxcFormatLintCapabilityDeclaration | ValidationIssue[] {
+  if (
+    typeof capability.editorCustomizationResourceId !== "string" ||
+    capability.editorCustomizationResourceId.length === 0
+  ) {
+    return [
+      {
+        path: `${pathPrefix}.editorCustomizationResourceId`,
+        message:
+          "oxc-format-lint must declare an editorCustomizationResourceId Shared Resource id",
+      },
+    ];
+  }
+
+  return {
+    kind: "oxc-format-lint",
+    editorCustomizationResourceId: capability.editorCustomizationResourceId,
+  };
+}
+
+function parseNodePnpmDevcontainerCapability(
+  capability: Record<string, unknown>,
+  pathPrefix: string,
+): NodePnpmDevcontainerCapabilityDeclaration | ValidationIssue[] {
+  if (
+    typeof capability.devcontainerResourceId !== "string" ||
+    capability.devcontainerResourceId.length === 0
+  ) {
+    return [
+      {
+        path: `${pathPrefix}.devcontainerResourceId`,
+        message:
+          "node-pnpm-devcontainer must declare a devcontainerResourceId Shared Resource id",
+      },
+    ];
+  }
+
+  return {
+    kind: "node-pnpm-devcontainer",
+    devcontainerResourceId: capability.devcontainerResourceId,
   };
 }
 
@@ -1783,6 +1895,30 @@ export function validatePresetProjectionDeclaration(
       return;
     }
 
+    if (kind === "oxc-format-lint") {
+      const oxcFormatLintCapability = parseOxcFormatLintCapability(
+        capability,
+        pathPrefix,
+      );
+      if (Array.isArray(oxcFormatLintCapability)) {
+        issues.push(...oxcFormatLintCapability);
+        return;
+      }
+      capabilities.push(oxcFormatLintCapability);
+      return;
+    }
+
+    if (kind === "node-pnpm-devcontainer") {
+      const nodePnpmDevcontainerCapability =
+        parseNodePnpmDevcontainerCapability(capability, pathPrefix);
+      if (Array.isArray(nodePnpmDevcontainerCapability)) {
+        issues.push(...nodePnpmDevcontainerCapability);
+        return;
+      }
+      capabilities.push(nodePnpmDevcontainerCapability);
+      return;
+    }
+
     capabilities.push({ kind });
   });
 
@@ -1815,6 +1951,69 @@ export function projectionCapabilityIssues(
           message: issue.message,
         }));
   });
+}
+
+function projectionCapabilitySharedResourceIssues(
+  manifest: ParsedPresetSourceManifest,
+): ValidationIssue[] {
+  const sharedResourceIds = new Set(
+    manifest.sharedResources.map((resource) => resource.id),
+  );
+  const issues: ValidationIssue[] = [];
+
+  manifest.presets.forEach((preset, presetIndex) => {
+    if (preset.projection === undefined) {
+      return;
+    }
+
+    const result = validatePresetProjectionDeclaration(preset.projection);
+    if (!result.ok) {
+      return;
+    }
+
+    result.value.capabilities.forEach((capability, capabilityIndex) => {
+      if (capability.kind === "oxc-format-lint") {
+        const resourceId = capability.editorCustomizationResourceId;
+        if (!sharedResourceIds.has(resourceId)) {
+          issues.push({
+            path: `$.presets[${presetIndex}].projection.capabilities[${capabilityIndex}].editorCustomizationResourceId`,
+            message: `Projection Capability oxc-format-lint references undeclared Shared Resource: ${resourceId}`,
+          });
+        }
+      }
+
+      if (capability.kind === "node-pnpm-devcontainer") {
+        const resourceId = capability.devcontainerResourceId;
+        if (!sharedResourceIds.has(resourceId)) {
+          issues.push({
+            path: `$.presets[${presetIndex}].projection.capabilities[${capabilityIndex}].devcontainerResourceId`,
+            message: `Projection Capability node-pnpm-devcontainer references undeclared Shared Resource: ${resourceId}`,
+          });
+        }
+      }
+
+      if (capability.kind === "rust-binary-workspace") {
+        const devcontainerResourceId = capability.devcontainerResourceId;
+        if (!sharedResourceIds.has(devcontainerResourceId)) {
+          issues.push({
+            path: `$.presets[${presetIndex}].projection.capabilities[${capabilityIndex}].devcontainerResourceId`,
+            message: `Projection Capability rust-binary-workspace references undeclared Shared Resource: ${devcontainerResourceId}`,
+          });
+        }
+
+        const editorCustomizationResourceId =
+          capability.editorCustomizationResourceId;
+        if (!sharedResourceIds.has(editorCustomizationResourceId)) {
+          issues.push({
+            path: `$.presets[${presetIndex}].projection.capabilities[${capabilityIndex}].editorCustomizationResourceId`,
+            message: `Projection Capability rust-binary-workspace references undeclared Shared Resource: ${editorCustomizationResourceId}`,
+          });
+        }
+      }
+    });
+  });
+
+  return issues;
 }
 
 export function normalizePresetProjectionDeclaration(
@@ -1918,6 +2117,7 @@ export function validatePresetSourceManifestDeclaration(
     ...unsupportedProjectShapeIssues(parsedManifest.presets),
     ...fixtureMatrixContractIssues(parsedManifest),
     ...projectionCapabilityIssues(parsedManifest.presets),
+    ...projectionCapabilitySharedResourceIssues(parsedManifest),
   ];
 
   if (semanticIssues.length > 0) {

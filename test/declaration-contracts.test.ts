@@ -402,6 +402,80 @@ describe("declaration contracts", () => {
     });
   });
 
+  it("validates Projection Capability Shared Resource ids against Preset Source-local resources", () => {
+    const manifest = validPresetSourceManifest();
+    manifest.sharedResources = [
+      { id: "custom-editor-declarations", path: "shared/editor.json" },
+      { id: "custom-devcontainer-fragments", path: "shared/devcontainer" },
+    ];
+    firstPreset(manifest).projection = {
+      capabilities: [
+        {
+          kind: "workspace-library-package",
+          workspacePackageGlob: "packages/*",
+          packageRole: "shared-library",
+          packageSourcePreset: "ts-lib",
+          sourceFiles: ["src/index.ts"],
+        },
+        { kind: "strict-typescript-root" },
+        {
+          kind: "oxc-format-lint",
+          editorCustomizationResourceId: "custom-editor-declarations",
+        },
+        {
+          kind: "node-pnpm-devcontainer",
+          devcontainerResourceId: "custom-devcontainer-fragments",
+        },
+        { kind: "github-maintenance" },
+      ],
+    };
+
+    expect(validatePresetSourceManifestDeclaration(manifest)).toEqual({
+      ok: true,
+      value: {
+        ...manifest,
+        presets: [
+          {
+            ...firstPreset(manifest),
+            dependencyCatalog: [],
+          },
+        ],
+      },
+    });
+
+    const unknownResourceManifest: PresetSourceManifest = {
+      ...manifest,
+      presets: [
+        {
+          ...firstPreset(manifest),
+          projection: {
+            capabilities: [
+              ...firstPreset(manifest).projection!.capabilities.slice(0, 2),
+              {
+                kind: "oxc-format-lint",
+                editorCustomizationResourceId: "missing-editor-declarations",
+              },
+              ...firstPreset(manifest).projection!.capabilities.slice(3),
+            ],
+          },
+        },
+      ],
+    };
+
+    expect(
+      validatePresetSourceManifestDeclaration(unknownResourceManifest),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.presets[0].projection.capabilities[2].editorCustomizationResourceId",
+          message:
+            "Projection Capability oxc-format-lint references undeclared Shared Resource: missing-editor-declarations",
+        },
+      ],
+    });
+  });
+
   it("validates Projection Declarations through the Template Contract Library", () => {
     const declaration = normalizePresetProjectionDeclaration({
       capabilities: [
@@ -413,8 +487,14 @@ describe("declaration contracts", () => {
           sourceFiles: ["src/index.ts"],
         },
         { kind: "strict-typescript-root" },
-        { kind: "oxc-format-lint" },
-        { kind: "node-pnpm-devcontainer" },
+        {
+          kind: "oxc-format-lint",
+          editorCustomizationResourceId: "shared-editor-customization",
+        },
+        {
+          kind: "node-pnpm-devcontainer",
+          devcontainerResourceId: "shared-devcontainer",
+        },
         { kind: "github-maintenance" },
       ],
     });
@@ -433,6 +513,62 @@ describe("declaration contracts", () => {
         {
           path: "$.capabilities[0].kind",
           message: "Unknown Projection Capability kind: unknown-capability",
+        },
+      ],
+    });
+    expect(
+      validatePresetProjectionDeclaration({
+        capabilities: [
+          {
+            kind: "workspace-library-package",
+            workspacePackageGlob: "packages/*",
+            packageRole: "shared-library",
+            packageSourcePreset: "ts-lib",
+            sourceFiles: ["src/index.ts"],
+          },
+          { kind: "strict-typescript-root" },
+          { kind: "oxc-format-lint" },
+          { kind: "node-pnpm-devcontainer" },
+          { kind: "github-maintenance" },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[2].editorCustomizationResourceId",
+          message:
+            "oxc-format-lint must declare an editorCustomizationResourceId Shared Resource id",
+        },
+        {
+          path: "$.capabilities[3].devcontainerResourceId",
+          message:
+            "node-pnpm-devcontainer must declare a devcontainerResourceId Shared Resource id",
+        },
+      ],
+    });
+    expect(
+      validatePresetProjectionDeclaration({
+        capabilities: [
+          {
+            kind: "rust-binary-workspace",
+            workspacePackageGlob: "packages/*",
+            sourceFiles: ["src/main.rs"],
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].devcontainerResourceId",
+          message:
+            "rust-binary-workspace must declare a devcontainerResourceId Shared Resource id",
+        },
+        {
+          path: "$.capabilities[0].editorCustomizationResourceId",
+          message:
+            "rust-binary-workspace must declare an editorCustomizationResourceId Shared Resource id",
         },
       ],
     });
@@ -532,6 +668,15 @@ describe("declaration contracts", () => {
     const nodeWorkspaceSchema = capabilitySchemas.find(
       (schema) => schema.properties.kind.const === "workspace-node-packages",
     );
+    const rustBinaryWorkspaceSchema = capabilitySchemas.find(
+      (schema) => schema.properties.kind.const === "rust-binary-workspace",
+    );
+    const oxcFormatLintSchema = capabilitySchemas.find(
+      (schema) => schema.properties.kind.const === "oxc-format-lint",
+    );
+    const nodePnpmDevcontainerSchema = capabilitySchemas.find(
+      (schema) => schema.properties.kind.const === "node-pnpm-devcontainer",
+    );
 
     expect(nodeWorkspaceSchema).toMatchObject({
       additionalProperties: false,
@@ -560,6 +705,34 @@ describe("declaration contracts", () => {
             },
           },
         },
+      },
+    });
+    expect(rustBinaryWorkspaceSchema).toMatchObject({
+      additionalProperties: false,
+      required: [
+        "kind",
+        "workspacePackageGlob",
+        "sourceFiles",
+        "devcontainerResourceId",
+        "editorCustomizationResourceId",
+      ],
+      properties: {
+        devcontainerResourceId: { type: "string", minLength: 1 },
+        editorCustomizationResourceId: { type: "string", minLength: 1 },
+      },
+    });
+    expect(oxcFormatLintSchema).toMatchObject({
+      additionalProperties: false,
+      required: ["kind", "editorCustomizationResourceId"],
+      properties: {
+        editorCustomizationResourceId: { type: "string", minLength: 1 },
+      },
+    });
+    expect(nodePnpmDevcontainerSchema).toMatchObject({
+      additionalProperties: false,
+      required: ["kind", "devcontainerResourceId"],
+      properties: {
+        devcontainerResourceId: { type: "string", minLength: 1 },
       },
     });
   });

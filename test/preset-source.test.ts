@@ -414,7 +414,10 @@ describe("Preset Source Manifest validation", () => {
           sourceFiles: ["src/index.ts", "src/name-schema.ts"],
         },
         { kind: "strict-typescript-root" },
-        { kind: "oxc-format-lint" },
+        {
+          kind: "oxc-format-lint",
+          editorCustomizationResourceId: "shared-editor-customization",
+        },
       ],
     };
 

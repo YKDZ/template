@@ -28,8 +28,14 @@ const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
       sourceFiles: ["src/index.ts", "src/name-schema.ts"],
     },
     { kind: "strict-typescript-root" },
-    { kind: "oxc-format-lint" },
-    { kind: "node-pnpm-devcontainer" },
+    {
+      kind: "oxc-format-lint",
+      editorCustomizationResourceId: "shared-editor-customization",
+    },
+    {
+      kind: "node-pnpm-devcontainer",
+      devcontainerResourceId: "shared-devcontainer",
+    },
     { kind: "github-maintenance" },
   ],
 };
@@ -618,6 +624,8 @@ describe("Projection Capability declarations", () => {
             kind: "rust-binary-workspace",
             workspacePackageGlob: "packages/*",
             sourceFiles: ["src/main.rs"],
+            devcontainerResourceId: "shared-devcontainer",
+            editorCustomizationResourceId: "shared-editor-customization",
           },
           { kind: "github-maintenance" },
         ],
@@ -755,7 +763,10 @@ describe("Projection Capability declarations", () => {
             sourceFiles: ["src/index.ts", "src/name-schema.ts"],
           },
           { kind: "strict-typescript-root" },
-          { kind: "oxc-format-lint" },
+          {
+            kind: "oxc-format-lint",
+            editorCustomizationResourceId: "shared-editor-customization",
+          },
         ],
       }),
     ).toEqual({
