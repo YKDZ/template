@@ -8,10 +8,9 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "vadimcn.vscode-lldb",
-        "serayuzgur.crates",
-        "redhat.vscode-yaml",
-        "fill-labs.dependi"
+        "fill-labs.dependi",
+        "oxc.oxc-vscode",
+        "vitest.explorer"
       ],
       "settings": {
         "editor.formatOnSave": true,

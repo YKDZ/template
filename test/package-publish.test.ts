@@ -39,7 +39,9 @@ const packageJsonBinSchema = v.object({
 });
 const cliPackageJsonSchema = v.object({
   bin: v.record(v.string(), v.string()),
+  bundleDependencies: v.optional(v.array(v.string())),
   dependencies: v.optional(v.record(v.string(), v.string())),
+  files: v.array(v.string()),
   license: v.optional(v.string()),
   name: v.string(),
   private: v.boolean(),
@@ -355,6 +357,34 @@ describe("package publishing", () => {
     expect(packageJson.bin.template).toBe("dist/cli.js");
     expect(packageJson.dependencies ?? {}).not.toHaveProperty("execa");
     expect(packageJson.publishConfig?.access).toBe("public");
+  });
+
+  it("bundles private runtime workspaces required by generation", async () => {
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/cli/package.json"),
+      cliPackageJsonSchema,
+    );
+    const privateRuntimeWorkspaces = [
+      "@ykdz/template-shared",
+      "@ykdz/template-core",
+      "@ykdz/template-builtin-source",
+    ];
+
+    expect(packageJson.dependencies).toMatchObject(
+      Object.fromEntries(
+        privateRuntimeWorkspaces.map((workspace) => [workspace, "workspace:*"]),
+      ),
+    );
+    expect(packageJson.bundleDependencies).toEqual(
+      expect.arrayContaining(privateRuntimeWorkspaces),
+    );
+    expect(packageJson.files).toEqual(
+      expect.arrayContaining([
+        "node_modules/@ykdz/template-shared",
+        "node_modules/@ykdz/template-core",
+        "node_modules/@ykdz/template-builtin-source",
+      ]),
+    );
   });
 
   it("declares a narrow package surface for bundled runtime packages", async () => {

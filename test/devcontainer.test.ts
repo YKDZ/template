@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -16,6 +16,7 @@ import {
   rustToolLayer,
 } from "@ykdz/template-core/devcontainer";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { interpretPresetProjectionDeclaration } from "@ykdz/template-core/projection-capabilities";
 import * as v from "valibot";
 
 const playwrightCliPackage = `@playwright/test@${
@@ -72,6 +73,144 @@ async function readJsonWithSchema<const Schema extends v.GenericSchema>(
 }
 
 describe("Development Container planning", () => {
+  it("resolves Dockerfile fragments through a Preset Source-local Shared Resource id", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "devcontainer-resource-boundary-"),
+    );
+    const devcontainerResource = path.join(workspace, "custom-dev-resource");
+    const editorResource = path.join(workspace, "custom-editor.json");
+
+    await mkdir(devcontainerResource, { recursive: true });
+    await writeFile(
+      path.join(devcontainerResource, "node-pnpm.Dockerfile"),
+      [
+        "ARG NODE_VERSION",
+        "FROM node:${NODE_VERSION}-bookworm-slim",
+        "ARG PACKAGE_MANAGER_PIN",
+        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      editorResource,
+      `${JSON.stringify(
+        {
+          capabilities: {
+            "oxc-format-lint": {
+              extensions: ["acme.boundary-editor"],
+              settings: { "acme.boundary": true },
+            },
+            vue: { extensions: [], settings: {} },
+            tailwind: { extensions: [], settings: {} },
+            "rust-tooling": { extensions: [], settings: {} },
+            vitest: { extensions: [], settings: {} },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: {
+        name: "custom-lib",
+        title: "Custom library",
+        description: "Custom library.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: "unsupported",
+        features: ["strict-typescript", "oxc-format-lint", "devcontainer"],
+      },
+      declaration: {
+        capabilities: [
+          {
+            kind: "workspace-library-package",
+            workspacePackageGlob: "packages/*",
+            packageRole: "shared-library",
+            packageSourcePreset: "ts-lib",
+            sourceFiles: ["src/index.ts"],
+          },
+          { kind: "strict-typescript-root" },
+          {
+            kind: "oxc-format-lint",
+            editorCustomizationResourceId: "custom-editor",
+          },
+          {
+            kind: "node-pnpm-devcontainer",
+            devcontainerResourceId: "custom-devcontainer",
+          },
+          { kind: "github-maintenance" },
+        ],
+      },
+      context: assembleGenerationContext({
+        targetDir: path.join(workspace, "generated"),
+        blueprint: {
+          schemaVersion: 1,
+          preset: "custom-lib",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: [],
+        },
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@10.34.4",
+          },
+          source: "bundled-fallback",
+          diagnostics: [],
+        },
+      }),
+      sourceRoots: {
+        preset: () => workspace,
+        sharedOxc: () => workspace,
+        sharedResource: (resourceId) =>
+          resourceId === "custom-devcontainer"
+            ? devcontainerResource
+            : resourceId === "custom-editor"
+              ? editorResource
+              : undefined,
+      },
+    });
+    const dockerfileOperation = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeTextFromFragments" &&
+        operation.to === ".devcontainer/Dockerfile",
+    );
+    const devcontainerOperation = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".devcontainer/devcontainer.json",
+    );
+
+    expect(plan.sourceRoots?.["devcontainer:custom-devcontainer"]).toBe(
+      devcontainerResource,
+    );
+    expect(dockerfileOperation).toEqual({
+      kind: "writeTextFromFragments",
+      to: ".devcontainer/Dockerfile",
+      fragments: [
+        {
+          sourceRoot: "devcontainer:custom-devcontainer",
+          from: "node-pnpm.Dockerfile",
+        },
+      ],
+    });
+    expect(devcontainerOperation).toMatchObject({
+      value: {
+        customizations: {
+          vscode: {
+            extensions: ["acme.boundary-editor"],
+            settings: {
+              "acme.boundary": true,
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("validates that exactly one Dockerfile base layer supplies the base image", () => {
     expect(() =>
       composeDevelopmentContainerDockerfile({

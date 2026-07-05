@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +11,7 @@ import {
   type EditorCustomizationOptions,
 } from "@ykdz/template-core/editor-customization";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { interpretPresetProjectionDeclaration } from "@ykdz/template-core/projection-capabilities";
 import { renderProject } from "@ykdz/template-core/renderer";
 import * as v from "valibot";
 
@@ -159,6 +160,133 @@ function expectForbiddenOptionalExtensionsAbsent(
 }
 
 describe("editor customization", () => {
+  it("projects editor settings from a Preset Source-local Shared Resource id", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "editor-customization-resource-boundary-"),
+    );
+    const devcontainerResource = path.join(workspace, "local-devcontainer");
+    const editorResource = path.join(workspace, "local-capabilities.json");
+
+    await mkdir(devcontainerResource, { recursive: true });
+    await writeFile(
+      path.join(devcontainerResource, "node-pnpm.Dockerfile"),
+      [
+        "ARG NODE_VERSION",
+        "FROM node:${NODE_VERSION}-bookworm-slim",
+        "ARG PACKAGE_MANAGER_PIN",
+        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      editorResource,
+      `${JSON.stringify(
+        {
+          capabilities: {
+            "oxc-format-lint": {
+              extensions: ["acme.local-oxc"],
+              settings: { "acme.localOxc": true },
+            },
+            vue: { extensions: [], settings: {} },
+            tailwind: { extensions: [], settings: {} },
+            "rust-tooling": { extensions: [], settings: {} },
+            vitest: { extensions: [], settings: {} },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: {
+        name: "custom-lib",
+        title: "Custom library",
+        description: "Custom library.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: "unsupported",
+        features: [
+          "strict-typescript",
+          "oxc-format-lint",
+          "devcontainer",
+          "github-actions",
+          "dependabot",
+        ],
+      },
+      declaration: {
+        capabilities: [
+          {
+            kind: "workspace-library-package",
+            workspacePackageGlob: "packages/*",
+            packageRole: "shared-library",
+            packageSourcePreset: "ts-lib",
+            sourceFiles: ["src/index.ts"],
+          },
+          { kind: "strict-typescript-root" },
+          {
+            kind: "oxc-format-lint",
+            editorCustomizationResourceId: "local-editor-resource",
+          },
+          {
+            kind: "node-pnpm-devcontainer",
+            devcontainerResourceId: "local-devcontainer",
+          },
+          { kind: "github-maintenance" },
+        ],
+      },
+      context: assembleGenerationContext({
+        targetDir: path.join(workspace, "generated"),
+        blueprint: {
+          schemaVersion: 1,
+          preset: "custom-lib",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: [],
+        },
+        toolchain: {
+          nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+          packageManagerPin: {
+            kind: "PackageManagerPin",
+            value: "pnpm@10.34.4",
+          },
+          source: "bundled-fallback",
+          diagnostics: [],
+        },
+      }),
+      sourceRoots: {
+        preset: () => workspace,
+        sharedOxc: () => workspace,
+        sharedResource: (resourceId) =>
+          resourceId === "local-editor-resource"
+            ? editorResource
+            : resourceId === "local-devcontainer"
+              ? devcontainerResource
+              : undefined,
+      },
+    });
+    const extensionsOperation = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".vscode/extensions.json",
+    );
+    const settingsOperation = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" &&
+        operation.to === ".vscode/settings.json",
+    );
+
+    expect(extensionsOperation).toMatchObject({
+      value: { recommendations: ["acme.local-oxc"] },
+    });
+    expect(settingsOperation).toMatchObject({
+      value: {
+        "acme.localOxc": true,
+      },
+    });
+  });
+
   it("reports invalid JSON in Editor Customization Shared Resource declarations", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "editor-customization-invalid-json-"),

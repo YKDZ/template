@@ -2,12 +2,8 @@
   "recommendations": [
     "rust-lang.rust-analyzer",
     "tamasfe.even-better-toml",
-    "vadimcn.vscode-lldb",
-    "redhat.vscode-yaml",
     "fill-labs.dependi",
     "oxc.oxc-vscode",
-    "bradlc.vscode-tailwindcss",
-    "vitest.explorer",
-    "selemondev.shadcn-vue"
+    "vitest.explorer"
   ]
 }

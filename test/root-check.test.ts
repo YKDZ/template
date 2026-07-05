@@ -395,7 +395,13 @@ describe("Project Kit Root Check", () => {
       readFile(path.join(repoRoot, "oxlint.config.ts"), "utf8"),
     ).resolves.toContain("typeAware: true");
 
-    for (const packageName of ["builtin-source", "checks", "cli", "core"]) {
+    for (const packageName of [
+      "builtin-source",
+      "checks",
+      "cli",
+      "core",
+      "shared",
+    ]) {
       const packageJson = await readJsonWithSchema(
         path.join(repoRoot, "packages", packageName, "package.json"),
         packageJsonWithScriptsSchema,
@@ -435,6 +441,7 @@ describe("Project Kit Root Check", () => {
       "package.json",
       "packages/cli/package.json",
       "packages/core/package.json",
+      "packages/shared/package.json",
       "packages/builtin-source/package.json",
       "packages/checks/package.json",
     ];

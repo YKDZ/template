@@ -55,6 +55,9 @@ const devcontainerSchema = v.object({
   features: v.optional(v.unknown()),
   postCreateCommand: v.optional(stringRecordSchema),
 });
+const workspaceExtensionsSchema = v.object({
+  recommendations: v.array(v.string()),
+});
 
 function parseJsonWithSchema<const Schema extends v.GenericSchema>(
   text: string,
@@ -375,6 +378,17 @@ describe("template Repository maintenance", () => {
       ),
       devcontainerSchema,
     );
+    const workspaceExtensions = parseJsonWithSchema(
+      await readFile(path.join(repoRoot, ".vscode/extensions.json"), "utf8"),
+      workspaceExtensionsSchema,
+    );
+    const expectedExtensions = [
+      "rust-lang.rust-analyzer",
+      "tamasfe.even-better-toml",
+      "fill-labs.dependi",
+      "oxc.oxc-vscode",
+      "vitest.explorer",
+    ];
 
     expect(Object.keys(devcontainer).slice(0, 3)).toEqual([
       "name",
@@ -383,14 +397,10 @@ describe("template Repository maintenance", () => {
     ]);
     expect(devcontainer.build?.dockerfile).toBe("Dockerfile");
     expect(devcontainer).not.toHaveProperty("features");
-    expect(devcontainer.customizations?.vscode?.extensions).toEqual([
-      "rust-lang.rust-analyzer",
-      "tamasfe.even-better-toml",
-      "vadimcn.vscode-lldb",
-      "serayuzgur.crates",
-      "redhat.vscode-yaml",
-      "fill-labs.dependi",
-    ]);
+    expect(devcontainer.customizations?.vscode?.extensions).toEqual(
+      expectedExtensions,
+    );
+    expect(workspaceExtensions.recommendations).toEqual(expectedExtensions);
     expect(devcontainer.customizations?.vscode?.settings).toMatchObject({
       "editor.formatOnSave": true,
       "rust-analyzer.check.command": "clippy",
