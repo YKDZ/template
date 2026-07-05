@@ -26,9 +26,7 @@ Supported presets are `ts-lib`, `hono-api`, `vue-app`, `vue-hono-app`, and
 ## Publishing
 
 This package is intended to publish through npm Trusted Publishing from the
-GitHub Actions release workflow. Maintainers should complete
-[the Trusted Publishing checklist](docs/npm-trusted-publishing.md) before the
-first public release.
+GitHub Actions release workflow.
 
 ## License
 

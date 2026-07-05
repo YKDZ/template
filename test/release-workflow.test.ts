@@ -54,35 +54,4 @@ describe("npm release workflow", () => {
     expect(workflow).not.toContain("run: pnpm run check\n");
     expect(workflow).not.toContain("run: pnpm run check:fixtures");
   });
-
-  it("documents the human-owned trusted publishing setup checklist", async () => {
-    const docs = await readFile(
-      path.join(repoRoot, "public/npm-trusted-publishing.md"),
-      "utf8",
-    );
-
-    expect(docs).toContain("npm account");
-    expect(docs).toContain("Package access");
-    expect(docs).toContain("Trusted publisher");
-    expect(docs).toContain("GitHub environment");
-    expect(docs).toContain("release permission");
-    expect(docs).toContain("Security settings");
-    expect(docs).toContain("NPM_TOKEN");
-    expect(docs).toContain("Maintainer confirmation");
-  });
-
-  it("documents npm Trusted Publisher settings using npm's expected field values", async () => {
-    const docs = await readFile(
-      path.join(repoRoot, "public/npm-trusted-publishing.md"),
-      "utf8",
-    );
-    const trustedPublisherLine = docs
-      .split("\n")
-      .find((line) => line.includes("Trusted publisher:"));
-
-    expect(trustedPublisherLine).toContain("workflow filename `release.yml`");
-    expect(trustedPublisherLine).not.toContain(".github/workflows/release.yml");
-    expect(trustedPublisherLine).toContain("Allowed actions");
-    expect(trustedPublisherLine).toContain("pnpm publish");
-  });
 });
