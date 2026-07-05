@@ -1,10 +1,5 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { loadTemplateDependencyCatalog } from "./dependency-catalog.js";
 import type { WriteTextFromFragmentsOperation } from "./renderer.js";
-import { packageTemplateRoot } from "./runtime-paths.js";
 
 export type DevelopmentContainerNodePnpmLayer = {
   readonly kind: "node-pnpm";
@@ -25,6 +20,44 @@ export type DevelopmentContainerRustLayer = {
 type DevelopmentContainerCapabilityLayer =
   | DevelopmentContainerBrowserTestLayer
   | DevelopmentContainerRustLayer;
+
+export type DevelopmentContainerDockerfileFragments = {
+  readonly sourceRoot: string;
+  readonly nodePnpm: {
+    readonly from: string;
+    readonly text: string;
+  };
+  readonly browserTest?:
+    | {
+        readonly from: string;
+        readonly text: string;
+      }
+    | undefined;
+  readonly rust?:
+    | {
+        readonly from: string;
+        readonly text: string;
+      }
+    | undefined;
+};
+
+type DevelopmentContainerDockerfileFragment =
+  DevelopmentContainerDockerfileFragments["nodePnpm"];
+
+function requireDockerfileFragment(
+  fragments: DevelopmentContainerDockerfileFragments,
+  name: "browserTest" | "rust",
+): DevelopmentContainerDockerfileFragment {
+  const fragment = fragments[name];
+
+  if (fragment === undefined) {
+    throw new Error(
+      `Development Container Dockerfile fragment is missing: ${name}`,
+    );
+  }
+
+  return fragment;
+}
 
 export type DevelopmentContainerPlan = {
   readonly devcontainer: Record<string, unknown>;
@@ -134,31 +167,18 @@ export function rustToolLayer(
   return { kind: "rust", toolchain: options.toolchain ?? "stable" };
 }
 
-function sharedDevcontainerSourceRoot(): string {
-  return packageTemplateRoot(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "shared",
-    "devcontainer",
-  );
-}
-
-function checkedDockerfileFragment(name: string): string {
-  return readFileSync(path.join(sharedDevcontainerSourceRoot(), name), "utf8");
-}
-
-function checkedNodePnpmDockerfile(
-  options: {
-    readonly additionalLayers?:
-      | readonly DevelopmentContainerCapabilityLayer[]
-      | undefined;
-  } = {},
-): string {
+function checkedNodePnpmDockerfile(options: {
+  readonly dockerfileFragments: DevelopmentContainerDockerfileFragments;
+  readonly additionalLayers?:
+    | readonly DevelopmentContainerCapabilityLayer[]
+    | undefined;
+}): string {
   return composeDevelopmentContainerDockerfile({
     layers: [
       {
         kind: "base",
         name: "node-pnpm",
-        text: checkedDockerfileFragment("node-pnpm.Dockerfile"),
+        text: options.dockerfileFragments.nodePnpm.text,
       },
       ...(options.additionalLayers ?? []).map((layer) => {
         switch (layer.kind) {
@@ -166,13 +186,19 @@ function checkedNodePnpmDockerfile(
             return {
               kind: "capability" as const,
               name: "browser-test",
-              text: checkedDockerfileFragment("browser-test.Dockerfile"),
+              text: requireDockerfileFragment(
+                options.dockerfileFragments,
+                "browserTest",
+              ).text,
             };
           case "rust":
             return {
               kind: "capability" as const,
               name: "rust",
-              text: checkedDockerfileFragment("rust.Dockerfile"),
+              text: requireDockerfileFragment(
+                options.dockerfileFragments,
+                "rust",
+              ).text,
             };
         }
       }),
@@ -180,29 +206,32 @@ function checkedNodePnpmDockerfile(
   });
 }
 
-function checkedNodePnpmDockerfileFragments(
-  options: {
-    readonly additionalLayers?:
-      | readonly DevelopmentContainerCapabilityLayer[]
-      | undefined;
-  } = {},
-): WriteTextFromFragmentsOperation["fragments"] {
+function checkedNodePnpmDockerfileFragments(options: {
+  readonly dockerfileFragments: DevelopmentContainerDockerfileFragments;
+  readonly additionalLayers?:
+    | readonly DevelopmentContainerCapabilityLayer[]
+    | undefined;
+}): WriteTextFromFragmentsOperation["fragments"] {
   return [
     {
-      sourceRoot: "sharedDevcontainer",
-      from: "node-pnpm.Dockerfile",
+      sourceRoot: options.dockerfileFragments.sourceRoot,
+      from: options.dockerfileFragments.nodePnpm.from,
     },
     ...(options.additionalLayers ?? []).map((layer) => {
       switch (layer.kind) {
         case "browser-test":
           return {
-            sourceRoot: "sharedDevcontainer",
-            from: "browser-test.Dockerfile",
+            sourceRoot: options.dockerfileFragments.sourceRoot,
+            from: requireDockerfileFragment(
+              options.dockerfileFragments,
+              "browserTest",
+            ).from,
           };
         case "rust":
           return {
-            sourceRoot: "sharedDevcontainer",
-            from: "rust.Dockerfile",
+            sourceRoot: options.dockerfileFragments.sourceRoot,
+            from: requireDockerfileFragment(options.dockerfileFragments, "rust")
+              .from,
           };
       }
     }),
@@ -265,6 +294,7 @@ export function dockerfileFirstNodePnpmDevcontainer(options: {
 export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
   readonly name: string;
   readonly layer: DevelopmentContainerNodePnpmLayer;
+  readonly dockerfileFragments: DevelopmentContainerDockerfileFragments;
   readonly additionalLayers?:
     | readonly DevelopmentContainerCapabilityLayer[]
     | undefined;
@@ -293,12 +323,14 @@ export function checkedDockerfileFirstNodePnpmDevcontainer(options: {
       ...(options.mounts ? { mounts: options.mounts } : {}),
     },
     dockerfile: checkedNodePnpmDockerfile({
+      dockerfileFragments: options.dockerfileFragments,
       additionalLayers: options.additionalLayers,
     }),
     dockerfileOperation: {
       kind: "writeTextFromFragments",
       to: ".devcontainer/Dockerfile",
       fragments: checkedNodePnpmDockerfileFragments({
+        dockerfileFragments: options.dockerfileFragments,
         additionalLayers: options.additionalLayers,
       }),
     },
@@ -309,12 +341,14 @@ export function dockerfileFirstRustPnpmDevcontainer(options: {
   readonly name: string;
   readonly nodeLayer: DevelopmentContainerNodePnpmLayer;
   readonly rustLayer: DevelopmentContainerRustLayer;
+  readonly dockerfileFragments: DevelopmentContainerDockerfileFragments;
   readonly extensions: readonly string[];
   readonly settings?: Record<string, unknown> | undefined;
 }): DevelopmentContainerPlan {
   return checkedDockerfileFirstNodePnpmDevcontainer({
     name: options.name,
     layer: options.nodeLayer,
+    dockerfileFragments: options.dockerfileFragments,
     additionalLayers: [options.rustLayer],
     extensions: options.extensions,
     settings: options.settings,

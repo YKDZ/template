@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -32,6 +33,7 @@ import {
 import {
   browserTestToolLayer,
   checkedDockerfileFirstNodePnpmDevcontainer,
+  type DevelopmentContainerDockerfileFragments,
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
@@ -93,7 +95,7 @@ export type ProjectionSourcePreset =
 export type PresetProjectionSourceRoots = {
   readonly preset: (sourcePreset: ProjectionSourcePreset) => string;
   readonly sharedOxc: () => string;
-  readonly sharedDevcontainer: () => string;
+  readonly sharedResource: (resourceId: string) => string | undefined;
 };
 
 type ProjectionPlanCapabilityFlag = keyof PresetProjectionPlan["capabilities"];
@@ -135,6 +137,11 @@ type ProjectionCompositionState = {
   package?: WorkspaceLibraryPackageCapabilityDeclaration;
   nodeWorkspace?: WorkspaceNodePackagesCapabilityDeclaration;
   rustWorkspace?: RustBinaryWorkspaceCapabilityDeclaration;
+  devcontainerResource?: {
+    readonly id: string;
+    readonly root: string;
+    readonly sourceRootKey: string;
+  };
   editorCustomizationCapabilities: EditorCustomizationCapability[];
   operationFactories: ProjectionOperationFactory[];
   flags: Partial<Record<ProjectionPlanCapabilityFlag, true>>;
@@ -247,8 +254,11 @@ const capabilityInterpreters = {
     contribute({ capability, state }) {
       state.rustWorkspace = capability;
       state.sourceRoot = templateSourceRootForPreset(state, "rust-bin");
-      state.sourceRoots.sharedDevcontainer =
-        state.projectionSourceRoots.sharedDevcontainer();
+      setDevelopmentContainerResource(
+        state,
+        capability.devcontainerResourceId,
+        "rust-binary-workspace",
+      );
       state.rootCheckComponents.push({
         kind: "turbo-package-check",
         owner: workspaceGlobBoundary(capability.workspacePackageGlob),
@@ -387,9 +397,12 @@ const capabilityInterpreters = {
   },
   "node-pnpm-devcontainer": {
     kind: "node-pnpm-devcontainer",
-    contribute({ state }) {
-      state.sourceRoots.sharedDevcontainer =
-        state.projectionSourceRoots.sharedDevcontainer();
+    contribute({ capability, state }) {
+      setDevelopmentContainerResource(
+        state,
+        capability.devcontainerResourceId,
+        "node-pnpm-devcontainer",
+      );
       state.flags.devcontainer = true;
       state.operationFactories.push(nodePnpmDevcontainerOperations);
     },
@@ -693,6 +706,29 @@ function createProjectionCompositionState(
 
 function uniqueValues<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
+}
+
+function setDevelopmentContainerResource(
+  state: ProjectionCompositionState,
+  resourceId: string,
+  capabilityKind: "node-pnpm-devcontainer" | "rust-binary-workspace",
+): void {
+  const root = state.projectionSourceRoots.sharedResource(resourceId);
+
+  if (root === undefined) {
+    throw new Error(
+      `Projection Capability ${capabilityKind} references unresolved Development Container Shared Resource: ${resourceId}`,
+    );
+  }
+
+  const sourceRootKey = developmentContainerResourceSourceRootKey(resourceId);
+
+  state.devcontainerResource = { id: resourceId, root, sourceRootKey };
+  state.sourceRoots[sourceRootKey] = root;
+}
+
+function developmentContainerResourceSourceRootKey(resourceId: string): string {
+  return `devcontainer:${resourceId}`;
 }
 
 function projectNameFromDir(targetDir: string): string {
@@ -1720,6 +1756,10 @@ function rustBinaryWorkspaceOperations({
     workspacePackageScripts,
   );
   const rustLayer = rustToolLayer();
+  const dockerfileFragments = readDevelopmentContainerDockerfileFragments(
+    state,
+    ["rust"],
+  );
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
   );
@@ -1730,6 +1770,7 @@ function rustBinaryWorkspaceOperations({
       packageManagerPin: context.toolchain.packageManagerPin.value,
     }),
     rustLayer,
+    dockerfileFragments,
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
@@ -2399,6 +2440,14 @@ function nodePnpmDevcontainerOperations({
   readonly context: GenerationContext;
   readonly state: ProjectionCompositionState;
 }): RenderOperation[] {
+  const additionalLayers =
+    state.nodeWorkspace && hasVuePackage(state.nodeWorkspace)
+      ? [browserTestToolLayer()]
+      : [];
+  const dockerfileFragments = readDevelopmentContainerDockerfileFragments(
+    state,
+    additionalLayers.length === 0 ? [] : ["browserTest"],
+  );
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
   );
@@ -2408,10 +2457,8 @@ function nodePnpmDevcontainerOperations({
       nodeVersion: context.toolchain.nodeLtsMajor.value,
       packageManagerPin: context.toolchain.packageManagerPin.value,
     }),
-    additionalLayers:
-      state.nodeWorkspace && hasVuePackage(state.nodeWorkspace)
-        ? [browserTestToolLayer()]
-        : [],
+    dockerfileFragments,
+    additionalLayers,
     extensions: editorCustomization.extensions,
     settings: editorCustomization.settings,
   });
@@ -2426,6 +2473,84 @@ function nodePnpmDevcontainerOperations({
       ...developmentContainer.dockerfileOperation!,
     },
   ];
+}
+
+type DevelopmentContainerDockerfileOptionalFragmentName =
+  | "browserTest"
+  | "rust";
+
+function readDevelopmentContainerDockerfileFragments(
+  state: ProjectionCompositionState,
+  optionalFragments: readonly DevelopmentContainerDockerfileOptionalFragmentName[],
+): DevelopmentContainerDockerfileFragments {
+  if (state.devcontainerResource === undefined) {
+    throw new Error(
+      "Projection Capability composition did not provide a Development Container Shared Resource",
+    );
+  }
+
+  const fragmentNames = {
+    nodePnpm: "node-pnpm.Dockerfile",
+    browserTest: "browser-test.Dockerfile",
+    rust: "rust.Dockerfile",
+  } as const;
+
+  const selected = new Set(optionalFragments);
+
+  return {
+    sourceRoot: state.devcontainerResource.sourceRootKey,
+    nodePnpm: readDevelopmentContainerDockerfileFragment(
+      state.devcontainerResource,
+      fragmentNames.nodePnpm,
+    ),
+    ...(selected.has("browserTest")
+      ? {
+          browserTest: readDevelopmentContainerDockerfileFragment(
+            state.devcontainerResource,
+            fragmentNames.browserTest,
+          ),
+        }
+      : {}),
+    ...(selected.has("rust")
+      ? {
+          rust: readDevelopmentContainerDockerfileFragment(
+            state.devcontainerResource,
+            fragmentNames.rust,
+          ),
+        }
+      : {}),
+  };
+}
+
+function readDevelopmentContainerDockerfileFragment(
+  resource: NonNullable<ProjectionCompositionState["devcontainerResource"]>,
+  fragmentName: string,
+): { readonly from: string; readonly text: string } {
+  const filePath = path.join(resource.root, fragmentName);
+
+  try {
+    return {
+      from: fragmentName,
+      text: readFileSync(filePath, "utf8"),
+    };
+  } catch (error: unknown) {
+    if (isMissingDevelopmentContainerFragmentError(error)) {
+      throw new Error(
+        `Development Container Shared Resource ${resource.id} is missing Dockerfile fragment: ${fragmentName}`,
+        { cause: error },
+      );
+    }
+
+    throw error;
+  }
+}
+
+function isMissingDevelopmentContainerFragmentError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
 }
 
 function githubMaintenanceOperations(): RenderOperation[] {

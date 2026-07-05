@@ -1,4 +1,4 @@
-import { readFile, stat, mkdtemp } from "node:fs/promises";
+import { mkdir, readFile, stat, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -316,6 +316,232 @@ describe("Projection Capability declarations", () => {
     await expectFile(path.join(targetDir, "packages/demo-lib/src/index.ts"));
     await expectFile(path.join(targetDir, ".github/workflows/check.yml"));
     await expectFile(path.join(targetDir, ".devcontainer/Dockerfile"));
+  });
+
+  it("renders only selected Development Container fragments from the declared Shared Resource id", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await tsLibContext();
+    const resourceRoot = await mkdtemp(
+      path.join(tmpdir(), "template-devcontainer-resource-"),
+    );
+
+    await mkdir(resourceRoot, { recursive: true });
+    await writeFile(
+      path.join(resourceRoot, "node-pnpm.Dockerfile"),
+      [
+        "# custom devcontainer resource",
+        "ARG NODE_VERSION",
+        "ARG PACKAGE_MANAGER_PIN",
+        "FROM node:${NODE_VERSION}-bookworm-slim",
+        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        "",
+      ].join("\n"),
+    );
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: {
+        capabilities: preset!.projection!.capabilities.map((capability) =>
+          capability.kind === "node-pnpm-devcontainer"
+            ? {
+                ...capability,
+                devcontainerResourceId: "local-devcontainer-fragments",
+              }
+            : capability,
+        ),
+      },
+      context,
+      sourceRoots: {
+        ...builtInPresetProjectionSourceRoots(),
+        sharedResource(resourceId) {
+          return resourceId === "local-devcontainer-fragments"
+            ? resourceRoot
+            : undefined;
+        },
+      },
+    });
+    const dockerfileOperation = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeTextFromFragments" &&
+        operation.to === ".devcontainer/Dockerfile",
+    );
+
+    expect(dockerfileOperation).toMatchObject({
+      kind: "writeTextFromFragments",
+      fragments: [
+        {
+          sourceRoot: "devcontainer:local-devcontainer-fragments",
+          from: "node-pnpm.Dockerfile",
+        },
+      ],
+    });
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer", "Dockerfile"),
+      "utf8",
+    );
+
+    expect(devcontainerDockerfile).toContain("# custom devcontainer resource");
+  });
+
+  it("keeps Development Container resource ids out of internal renderer source-root keys", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context, targetDir } = await tsLibContext();
+    const builtInSourceRoots = builtInPresetProjectionSourceRoots();
+    const resourceRoot = await mkdtemp(
+      path.join(tmpdir(), "template-devcontainer-resource-"),
+    );
+
+    await writeFile(
+      path.join(resourceRoot, "node-pnpm.Dockerfile"),
+      [
+        "# resource id collides with sharedOxc",
+        "ARG NODE_VERSION",
+        "ARG PACKAGE_MANAGER_PIN",
+        "FROM node:${NODE_VERSION}-bookworm-slim",
+        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        "",
+      ].join("\n"),
+    );
+
+    const plan = interpretPresetProjectionDeclaration({
+      preset: preset!,
+      declaration: {
+        capabilities: preset!.projection!.capabilities.map((capability) =>
+          capability.kind === "node-pnpm-devcontainer"
+            ? {
+                ...capability,
+                devcontainerResourceId: "sharedOxc",
+              }
+            : capability,
+        ),
+      },
+      context,
+      sourceRoots: {
+        ...builtInSourceRoots,
+        sharedResource(resourceId) {
+          return resourceId === "sharedOxc" ? resourceRoot : undefined;
+        },
+      },
+    });
+    const sourceRoots = plan.sourceRoots;
+
+    expect(sourceRoots).toBeDefined();
+
+    expect(sourceRoots!.sharedOxc).toBe(builtInSourceRoots.sharedOxc());
+    expect(sourceRoots!["devcontainer:sharedOxc"]).toBe(resourceRoot);
+    expect(sourceRoots!.sharedOxc).not.toBe(resourceRoot);
+
+    await renderNewProject({
+      sourceRoot: plan.sourceRoot,
+      sourceRoots: plan.sourceRoots,
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer", "Dockerfile"),
+      "utf8",
+    );
+
+    expect(devcontainerDockerfile).toContain(
+      "# resource id collides with sharedOxc",
+    );
+  });
+
+  it("reports a missing Development Container Shared Resource fragment", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context } = await tsLibContext();
+    const resourceRoot = await mkdtemp(
+      path.join(tmpdir(), "template-devcontainer-resource-"),
+    );
+
+    expect(() =>
+      interpretPresetProjectionDeclaration({
+        preset: preset!,
+        declaration: {
+          capabilities: preset!.projection!.capabilities.map((capability) =>
+            capability.kind === "node-pnpm-devcontainer"
+              ? {
+                  ...capability,
+                  devcontainerResourceId: "empty-devcontainer-fragments",
+                }
+              : capability,
+          ),
+        },
+        context,
+        sourceRoots: {
+          ...builtInPresetProjectionSourceRoots(),
+          sharedResource(resourceId) {
+            return resourceId === "empty-devcontainer-fragments"
+              ? resourceRoot
+              : undefined;
+          },
+        },
+      }),
+    ).toThrow(
+      "Development Container Shared Resource empty-devcontainer-fragments is missing Dockerfile fragment: node-pnpm.Dockerfile",
+    );
+  });
+
+  it("reports a malformed Development Container Shared Resource root as a semantic fragment error", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const preset = manifest.presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    );
+    expect(preset?.projection).toBeDefined();
+    const { context } = await tsLibContext();
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-devcontainer-resource-"),
+    );
+    const resourceFile = path.join(workspace, "not-a-directory");
+
+    await writeFile(resourceFile, "not a directory\n");
+
+    expect(() =>
+      interpretPresetProjectionDeclaration({
+        preset: preset!,
+        declaration: {
+          capabilities: preset!.projection!.capabilities.map((capability) =>
+            capability.kind === "node-pnpm-devcontainer"
+              ? {
+                  ...capability,
+                  devcontainerResourceId: "file-devcontainer-fragments",
+                }
+              : capability,
+          ),
+        },
+        context,
+        sourceRoots: {
+          ...builtInPresetProjectionSourceRoots(),
+          sharedResource(resourceId) {
+            return resourceId === "file-devcontainer-fragments"
+              ? resourceFile
+              : undefined;
+          },
+        },
+      }),
+    ).toThrow(
+      "Development Container Shared Resource file-devcontainer-fragments is missing Dockerfile fragment: node-pnpm.Dockerfile",
+    );
   });
 
   it("renders the hono-api built-in declaration into expected public generated files", async () => {

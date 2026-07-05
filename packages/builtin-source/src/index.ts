@@ -87,6 +87,11 @@ function errorCode(error: unknown): string | undefined {
 }
 
 export function builtInPresetProjectionSourceRoots(): PresetProjectionSourceRoots {
+  const manifest = loadBuiltInPresetSourceManifest();
+  const sharedResources = new Map(
+    manifest.sharedResources.map((resource) => [resource.id, resource.path]),
+  );
+
   return {
     preset(sourcePreset: ProjectionSourcePreset): string {
       return builtInPresetSourceRoot(sourcePreset);
@@ -94,8 +99,12 @@ export function builtInPresetProjectionSourceRoots(): PresetProjectionSourceRoot
     sharedOxc(): string {
       return builtInPresetSourceRoot("shared", "oxc");
     },
-    sharedDevcontainer(): string {
-      return builtInPresetSourceRoot("shared", "devcontainer");
+    sharedResource(resourceId: string): string | undefined {
+      const resourcePath = sharedResources.get(resourceId);
+
+      return resourcePath === undefined
+        ? undefined
+        : builtInPresetSourceRoot(resourcePath);
     },
   };
 }

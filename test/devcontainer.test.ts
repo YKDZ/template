@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { builtInPresetSourceRoot } from "@ykdz/template-builtin-source";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import {
@@ -30,6 +32,34 @@ const devcontainerSchema = v.looseObject({
 const packageJsonWithScriptsSchema = v.object({
   scripts: v.optional(v.record(v.string(), v.string())),
 });
+const builtInDevcontainerFragments = {
+  sourceRoot: "devcontainer:shared-devcontainer",
+  nodePnpm: {
+    from: "node-pnpm.Dockerfile",
+    text: readFileSync(
+      builtInPresetSourceRoot("shared", "devcontainer", "node-pnpm.Dockerfile"),
+      "utf8",
+    ),
+  },
+  browserTest: {
+    from: "browser-test.Dockerfile",
+    text: readFileSync(
+      builtInPresetSourceRoot(
+        "shared",
+        "devcontainer",
+        "browser-test.Dockerfile",
+      ),
+      "utf8",
+    ),
+  },
+  rust: {
+    from: "rust.Dockerfile",
+    text: readFileSync(
+      builtInPresetSourceRoot("shared", "devcontainer", "rust.Dockerfile"),
+      "utf8",
+    ),
+  },
+};
 
 async function readJsonWithSchema<const Schema extends v.GenericSchema>(
   filePath: string,
@@ -88,6 +118,7 @@ describe("Development Container planning", () => {
         nodeVersion: "24",
         packageManagerPin: "pnpm@10.34.4",
       }),
+      dockerfileFragments: builtInDevcontainerFragments,
       extensions: ["oxc.oxc-vscode"],
       settings: { "oxc.enable": true },
     });
@@ -135,6 +166,7 @@ describe("Development Container planning", () => {
         nodeVersion: "24",
         packageManagerPin: "pnpm@10.34.4",
       }),
+      dockerfileFragments: builtInDevcontainerFragments,
       additionalLayers: [browserTestToolLayer()],
       extensions: [],
     });
@@ -163,11 +195,11 @@ describe("Development Container planning", () => {
       to: ".devcontainer/Dockerfile",
       fragments: [
         {
-          sourceRoot: "sharedDevcontainer",
+          sourceRoot: "devcontainer:shared-devcontainer",
           from: "node-pnpm.Dockerfile",
         },
         {
-          sourceRoot: "sharedDevcontainer",
+          sourceRoot: "devcontainer:shared-devcontainer",
           from: "browser-test.Dockerfile",
         },
       ],
@@ -204,6 +236,7 @@ describe("Development Container planning", () => {
         packageManagerPin: "pnpm@10.34.4",
       }),
       rustLayer: rustToolLayer({ toolchain: "stable" }),
+      dockerfileFragments: builtInDevcontainerFragments,
       extensions: ["rust-lang.rust-analyzer"],
       settings: { "rust-analyzer.check.command": "clippy" },
     });
@@ -255,11 +288,11 @@ describe("Development Container planning", () => {
       to: ".devcontainer/Dockerfile",
       fragments: [
         {
-          sourceRoot: "sharedDevcontainer",
+          sourceRoot: "devcontainer:shared-devcontainer",
           from: "node-pnpm.Dockerfile",
         },
         {
-          sourceRoot: "sharedDevcontainer",
+          sourceRoot: "devcontainer:shared-devcontainer",
           from: "rust.Dockerfile",
         },
       ],
