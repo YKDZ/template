@@ -156,16 +156,16 @@ async function initGeneratedWorkspace(
 
 function playwrightWebServerPorts(configText: string): number[] {
   const matches = [
-    ...configText.matchAll(/port:\s*(\d+)/g),
-    ...configText.matchAll(/\b\w+Port\s*=\s*(\d+)/g),
-    ...configText.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g),
+    ...configText.matchAll(/port:\s*(\d[\d_]*)/g),
+    ...configText.matchAll(/\b\w+Port\s*=\s*(\d[\d_]*)/g),
+    ...configText.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d[\d_]*)/g),
   ];
 
   if (matches.length === 0) {
     throw new Error("Playwright config does not declare a web server port");
   }
 
-  return matches.map((match) => Number(match[1]));
+  return matches.map((match) => Number(match[1]?.replaceAll("_", "")));
 }
 
 describe("template add package", () => {
