@@ -8,13 +8,6 @@ import {
 } from "@ykdz/template-builtin-source";
 import type { GenerationContext } from "@ykdz/template-core/generation-context";
 import {
-  type CheckPlan,
-  type ComponentOwner,
-  type FixPlan,
-  renderFixCommand,
-  renderRootCheckCommand,
-} from "@ykdz/template-core/module-graph";
-import {
   packageManifestExposureFields,
   planPackageLinks,
 } from "@ykdz/template-core/package-linking";
@@ -56,33 +49,6 @@ export const honoApiPresetMetadata: BuiltInPreset = {
   ],
 };
 
-const apiPackageBoundary: ComponentOwner = {
-  kind: "package-boundary",
-  path: ".",
-};
-
-function planHonoApiPackageChecks(): CheckPlan {
-  return {
-    components: [
-      { kind: "oxc-format-check", owner: apiPackageBoundary },
-      { kind: "oxc-lint", owner: apiPackageBoundary },
-      { kind: "typescript-typecheck", owner: apiPackageBoundary },
-      { kind: "build", owner: apiPackageBoundary },
-      { kind: "unit-test", owner: apiPackageBoundary },
-    ],
-    environmentNeeds: [],
-  };
-}
-
-function planHonoApiPackageFixes(): FixPlan {
-  return {
-    components: [
-      { kind: "oxc-format-write", owner: apiPackageBoundary },
-      { kind: "oxc-lint-fix", owner: apiPackageBoundary },
-    ],
-  };
-}
-
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
 }
@@ -112,16 +78,15 @@ export function honoApiBlueprint(
 
 export function projectHonoApiPackageScripts(): Record<string, string> {
   return {
-    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    check: renderRootCheckCommand(planHonoApiPackageChecks()),
-    fix: renderFixCommand(planHonoApiPackageFixes()),
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+    "build:run":
+      "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run": "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
-    test: "vitest run",
-    typecheck: "tsc -p tsconfig.json --noEmit",
+    "test:run": "vitest run",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit",
   };
 }
 

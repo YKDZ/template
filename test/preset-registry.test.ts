@@ -23,6 +23,9 @@ import * as v from "valibot";
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
+const rootCheckScript =
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
+const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
 
 const packageJsonSchema = v.object({
   name: v.optional(v.string()),
@@ -209,9 +212,7 @@ describe("Preset Registry", () => {
       "oxc-lint-fix",
       "turbo-package-fix",
     ]);
-    expect(plan.packageScripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-    );
+    expect(plan.packageScripts.check).toBe(rootCheckScript);
 
     const packageJson = await readJsonWithSchema(
       path.join(targetDir, "package.json"),
@@ -230,8 +231,8 @@ describe("Preset Registry", () => {
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
-    expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
+      "tsc -p tsconfig.json --noEmit",
     );
     expect(generationRecord).toMatchObject({
       command: "template init --preset ts-lib",
@@ -396,9 +397,7 @@ describe("Preset Registry", () => {
     expect(dockerfile).not.toContain("xvfb");
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(rootPackageJson.devDependencies?.turbo).toBe("catalog:");
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
   });
 
@@ -543,8 +542,10 @@ describe("Preset Registry", () => {
       "turbo-package-fix",
     ]);
     expect(plan.packageScripts).toEqual({
-      check: "turbo run check --filter './packages/*'",
-      fix: "turbo run fix --filter './packages/*'",
+      check: rootCheckScript,
+      "check:run": 'node -e ""',
+      fix: rootFixScript,
+      "fix:run": 'node -e ""',
     });
     expect(plan.dependencyMaintenancePolicy.ecosystems).toEqual([
       "npm",
@@ -605,9 +606,10 @@ describe("Preset Registry", () => {
       version: "0.0.0",
       private: true,
       scripts: {
-        check:
-          "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-        fix: "cargo fmt --all",
+        "format:check:run": "cargo fmt --all -- --check",
+        "format:write:run": "cargo fmt --all",
+        "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+        "test:run": "cargo test --workspace",
       },
       engines: {
         node: "24",

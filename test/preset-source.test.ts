@@ -785,13 +785,17 @@ describe("Preset Source Manifest validation", () => {
           {
             kind: "rust-binary-workspace",
             workspacePackageGlob: "packages/*",
-            sourceFiles: ["src/main.rs"],
+            sourceFiles: ["turbo.json", "src/main.rs"],
           },
         ],
       },
       source: {
         roots: ["rust-bin/.github", "rust-bin/src"],
-        files: ["rust-bin/rust-toolchain.toml", "rust-bin/rustfmt.toml"],
+        files: [
+          "rust-bin/rust-toolchain.toml",
+          "rust-bin/rustfmt.toml",
+          "rust-bin/turbo.json",
+        ],
         sharedResources: ["shared-devcontainer", "shared-editor-customization"],
       },
     });

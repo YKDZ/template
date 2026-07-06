@@ -8,13 +8,6 @@ import {
 } from "@ykdz/template-builtin-source";
 import type { GenerationContext } from "@ykdz/template-core/generation-context";
 import {
-  type CheckPlan,
-  type ComponentOwner,
-  type FixPlan,
-  renderFixCommand,
-  renderRootCheckCommand,
-} from "@ykdz/template-core/module-graph";
-import {
   packageManifestExposureFields,
   planPackageLinks,
 } from "@ykdz/template-core/package-linking";
@@ -56,31 +49,6 @@ export const tsLibPresetMetadata: BuiltInPreset = {
   ],
 };
 
-const tsLibPackageBoundary: ComponentOwner = {
-  kind: "package-boundary",
-  path: ".",
-};
-
-function planTsLibPackageChecks(): CheckPlan {
-  return {
-    components: [
-      { kind: "typescript-typecheck", owner: tsLibPackageBoundary },
-      { kind: "oxc-lint", owner: tsLibPackageBoundary },
-      { kind: "oxc-format-check", owner: tsLibPackageBoundary },
-    ],
-    environmentNeeds: [],
-  };
-}
-
-function planTsLibPackageFixes(): FixPlan {
-  return {
-    components: [
-      { kind: "oxc-format-write", owner: tsLibPackageBoundary },
-      { kind: "oxc-lint-fix", owner: tsLibPackageBoundary },
-    ],
-  };
-}
-
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
 }
@@ -118,17 +86,12 @@ export function tsLibBlueprint(
 }
 
 export function projectTsLibPackageScripts(): Record<string, string> {
-  const checkPlan = planTsLibPackageChecks();
-  const fixPlan = planTsLibPackageFixes();
-
   return {
-    check: renderRootCheckCommand(checkPlan),
-    fix: renderFixCommand(fixPlan),
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
-    typecheck: "tsc -p tsconfig.json --noEmit",
+    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run": "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit",
   };
 }
 

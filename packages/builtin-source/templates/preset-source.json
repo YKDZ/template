@@ -217,7 +217,7 @@
             "workspacePackageGlob": "packages/*",
             "packageRole": "shared-library",
             "packageSourcePreset": "ts-lib",
-            "sourceFiles": ["src/index.ts", "src/name-schema.ts"]
+            "sourceFiles": ["turbo.json", "src/index.ts", "src/name-schema.ts"]
           },
           { "kind": "strict-typescript-root" },
           {
@@ -233,6 +233,7 @@
       },
       "source": {
         "roots": ["ts-lib/.github", "ts-lib/src"],
+        "files": ["ts-lib/turbo.json"],
         "sharedResources": [
           "shared-devcontainer",
           "shared-editor-customization",
@@ -282,6 +283,7 @@
                 "kind": "hono-api",
                 "path": "apps/api",
                 "sourceFiles": [
+                  "turbo.json",
                   "src/app.ts",
                   "src/server.ts",
                   "test/app.test.ts",
@@ -304,7 +306,7 @@
       },
       "source": {
         "roots": ["hono-api/.github", "hono-api/src", "hono-api/test"],
-        "files": ["hono-api/vitest.config.ts"],
+        "files": ["hono-api/turbo.json", "hono-api/vitest.config.ts"],
         "sharedResources": [
           "shared-devcontainer",
           "shared-editor-customization",
@@ -361,6 +363,7 @@
                 "kind": "vue-app",
                 "path": "apps/web",
                 "sourceFiles": [
+                  "turbo.json",
                   "env.d.ts",
                   "index.html",
                   "playwright.config.ts",
@@ -397,6 +400,7 @@
           "vue-app/playwright.package-addition.config.ts",
           "vue-app/playwright.config.ts",
           "vue-app/scripts/run-playwright.ts",
+          "vue-app/turbo.json",
           "vue-app/vite.config.ts",
           "vue-app/vitest.config.ts"
         ],
@@ -580,6 +584,7 @@
                 "kind": "vue-app",
                 "path": "apps/web",
                 "sourceFiles": [
+                  "web/turbo.json",
                   "web/env.d.ts",
                   "web/index.html",
                   "web/playwright.config.ts",
@@ -599,6 +604,7 @@
                 "kind": "hono-api",
                 "path": "apps/api",
                 "sourceFiles": [
+                  "api/turbo.json",
                   "api/src/index.ts",
                   "api/src/runtime.ts",
                   "api/src/server.ts",
@@ -636,10 +642,12 @@
         ],
         "files": [
           "vue-hono-app/api/vitest.config.ts",
+          "vue-hono-app/api/turbo.json",
           "vue-hono-app/web/env.d.ts",
           "vue-hono-app/web/index.html",
           "vue-hono-app/web/playwright.config.ts",
           "vue-hono-app/web/scripts/run-playwright.ts",
+          "vue-hono-app/web/turbo.json",
           "vue-hono-app/web/vite.config.ts",
           "vue-hono-app/web/vitest.config.ts"
         ],
@@ -676,7 +684,7 @@
           {
             "kind": "rust-binary-workspace",
             "workspacePackageGlob": "packages/*",
-            "sourceFiles": ["src/main.rs"],
+            "sourceFiles": ["turbo.json", "src/main.rs"],
             "devcontainerResourceId": "shared-devcontainer",
             "editorCustomizationResourceId": "shared-editor-customization"
           }
@@ -684,7 +692,11 @@
       },
       "source": {
         "roots": ["rust-bin/.github", "rust-bin/src"],
-        "files": ["rust-bin/rust-toolchain.toml", "rust-bin/rustfmt.toml"],
+        "files": [
+          "rust-bin/rust-toolchain.toml",
+          "rust-bin/rustfmt.toml",
+          "rust-bin/turbo.json"
+        ],
         "sharedResources": [
           "shared-devcontainer",
           "shared-editor-customization"

@@ -40,6 +40,19 @@ const optionalGitDisplays = [
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
+const rootCheckScript =
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
+const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
+type TurboConfigForTests = {
+  readonly tasks: Record<
+    string,
+    {
+      readonly cache?: boolean;
+      readonly dependsOn?: string[];
+      readonly outputs?: string[];
+    }
+  >;
+};
 
 function builtInEditorCustomizationResourcePath(): string {
   const resourcePath = builtInPresetProjectionSourceRoots().sharedResource(
@@ -466,15 +479,9 @@ describe("template init", () => {
       files: string[];
       references?: Array<{ path: string }>;
     }>(path.join(projectDir, "tsconfig.json"));
-    const turboConfig = await readJson<{
-      tasks: {
-        check: {
-          dependsOn: string[];
-          command?: string;
-        };
-        typecheck: { dependsOn: string[] };
-      };
-    }>(path.join(projectDir, "turbo.json"));
+    const turboConfig = await readJson<TurboConfigForTests>(
+      path.join(projectDir, "turbo.json"),
+    );
     const rootConfigTsconfig = await readJson<{
       include: string[];
     }>(path.join(projectDir, "tsconfig.config.json"));
@@ -504,25 +511,24 @@ describe("template init", () => {
       typescript: "catalog:",
     });
     expect(rootPackageJson.scripts).toMatchObject({
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-      fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
-      "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-      "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint oxlint.config.ts oxfmt.config.ts",
-      "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-      typecheck: "tsc -p tsconfig.config.json --noEmit",
+      check: rootCheckScript,
+      fix: rootFixScript,
+      "format:check": "turbo run format:check:run",
+      "format:write": "turbo run format:write:run",
+      lint: "turbo run lint:run",
+      "lint:fix": "turbo run lint:fix:run",
+      typecheck: "turbo run typecheck:run",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
     });
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
     expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
-    expect(rootPackageJson.scripts.check).not.toBe("turbo run check");
-    expect(rootPackageJson.scripts.check).toContain("--filter './packages/*'");
-    expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix");
-    expect(turboConfig.tasks.typecheck).toEqual({
-      dependsOn: ["^typecheck"],
+    expect(rootPackageJson.scripts.check).not.toBe("turbo run check:run");
+    expect(rootPackageJson.scripts.fix).not.toBe("turbo run fix:run");
+    expect(turboConfig.tasks["typecheck:run"]).toEqual({
+      dependsOn: ["^typecheck:run"],
     });
-    expect(turboConfig.tasks.check).toEqual({
-      dependsOn: ["typecheck", "build", "test"],
+    expect(turboConfig.tasks["check:run"]).toEqual({
+      cache: false,
     });
 
     expect(libraryPackageJson).toMatchObject({
@@ -544,8 +550,8 @@ describe("template init", () => {
         types: "./src/*.ts",
       },
     });
-    expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
+      "tsc -p tsconfig.json --noEmit",
     );
     expect(libraryPackageJson.devDependencies).toMatchObject({
       "@types/node": "catalog:",
@@ -627,8 +633,9 @@ describe("template init", () => {
       turbo: "catalog:",
       typescript: "catalog:",
     });
-    expect(rootPackageJson.scripts.check).toContain("turbo run check");
-    expect(rootPackageJson.scripts.typecheck).toContain("tsc ");
+    expect(rootPackageJson.scripts.check).toContain("turbo run");
+    expect(rootPackageJson.scripts.check).toContain("check:run");
+    expect(rootPackageJson.scripts["typecheck:run"]).toContain("tsc ");
 
     expect(libraryPackageJson.dependencies).toEqual({
       valibot: "catalog:",
@@ -653,7 +660,7 @@ describe("template init", () => {
       },
     });
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
-    expect(libraryPackageJson.scripts.lint).toContain("oxlint");
+    expect(libraryPackageJson.scripts["lint:run"]).toContain("oxlint");
 
     expectCatalogDependencySpecifiers(rootPackageJson);
     expectCatalogDependencySpecifiers(libraryPackageJson);
@@ -1155,9 +1162,7 @@ describe("template init", () => {
     expect(dockerfile).not.toContain("eslint");
     expect(dockerfile).not.toContain("vitest");
     expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
-    expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-    );
+    expect(packageJson.scripts.check).toBe(rootCheckScript);
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
     expect(libraryPackageJson.devDependencies).not.toHaveProperty("tsc-alias");
@@ -1258,6 +1263,9 @@ describe("template init", () => {
           path.join(projectDir, "tsconfig.config.json"),
         );
         expect(rootPackageJson.scripts.typecheck).toBe(
+          "turbo run typecheck:run",
+        );
+        expect(rootPackageJson.scripts["typecheck:run"]).toBe(
           preset === "vike-app"
             ? "vue-tsc --build --noEmit"
             : "tsc -p tsconfig.config.json --noEmit",
@@ -1267,11 +1275,15 @@ describe("template init", () => {
           "oxfmt.config.ts",
         ]);
         expect(rootPackageJson.scripts["format:check"]).toBe(
+          "turbo run format:check:run",
+        );
+        expect(rootPackageJson.scripts["format:check:run"]).toBe(
           preset === "vike-app"
             ? "oxfmt --check --config oxfmt.config.ts ."
             : "oxfmt --check oxlint.config.ts oxfmt.config.ts",
         );
-        expect(rootPackageJson.scripts.lint).toBe(
+        expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
+        expect(rootPackageJson.scripts["lint:run"]).toBe(
           preset === "vike-app"
             ? "oxlint --type-aware --config oxlint.config.ts ."
             : "oxlint oxlint.config.ts oxfmt.config.ts",
@@ -1282,22 +1294,22 @@ describe("template init", () => {
         const packageJson = await readJson<{
           scripts: Record<string, string>;
         }>(path.join(projectDir, packageDir, "package.json"));
-        expect(packageJson.scripts["format:check"]).toBe(
+        expect(packageJson.scripts["format:check:run"]).toBe(
           preset === "vike-app"
             ? "oxfmt --check --config oxfmt.config.ts ."
             : "oxfmt --check --config ../../oxfmt.config.ts .",
         );
-        expect(packageJson.scripts["format:write"]).toBe(
+        expect(packageJson.scripts["format:write:run"]).toBe(
           preset === "vike-app"
             ? "oxfmt --write --config oxfmt.config.ts ."
             : "oxfmt --write --config ../../oxfmt.config.ts .",
         );
-        expect(packageJson.scripts.lint).toBe(
+        expect(packageJson.scripts["lint:run"]).toBe(
           preset === "vike-app"
             ? "oxlint --type-aware --config oxlint.config.ts ."
             : "oxlint --config ../../oxlint.config.ts .",
         );
-        expect(packageJson.scripts["lint:fix"]).toBe(
+        expect(packageJson.scripts["lint:fix:run"]).toBe(
           preset === "vike-app"
             ? "oxlint --type-aware --config oxlint.config.ts . --fix"
             : "oxlint --config ../../oxlint.config.ts . --fix",
@@ -1392,21 +1404,17 @@ describe("template init", () => {
 
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
-    expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-    );
-    expect(packageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
-    );
+    expect(packageJson.scripts.check).toBe(rootCheckScript);
+    expect(packageJson.scripts.fix).toBe(rootFixScript);
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
-    expect(libraryPackageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
+    expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
+      "tsc -p tsconfig.json --noEmit",
     );
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
-    expect(libraryPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix",
+    expect(libraryPackageJson.scripts["format:write:run"]).toBe(
+      "oxfmt --write --config ../../oxfmt.config.ts .",
     );
     expect(libraryPackageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.devDependencies.oxlint).toBe("catalog:");
@@ -2240,14 +2248,9 @@ describe("template init", () => {
     const apiTsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
     }>(path.join(projectDir, "apps/api/tsconfig.json"));
-    const turboConfig = await readJson<{
-      tasks: {
-        build: { dependsOn?: string[]; outputs: string[] };
-        check: { dependsOn: string[] };
-        typecheck: { dependsOn: string[] };
-        test: { dependsOn: string[] };
-      };
-    }>(path.join(projectDir, "turbo.json"));
+    const turboConfig = await readJson<TurboConfigForTests>(
+      path.join(projectDir, "turbo.json"),
+    );
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
@@ -2275,19 +2278,14 @@ describe("template init", () => {
     expect(rootPackageJson.name).toBe("demo-api");
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
-    expect(rootPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
+    expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "turbo run format:check:run",
     );
-    expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint oxlint.config.ts oxfmt.config.ts",
-    );
-    expect(rootPackageJson.scripts.typecheck).toBe(
+    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
+    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts["typecheck:run"]).toBe(
       "tsc -p tsconfig.config.json --noEmit",
     );
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
@@ -2302,16 +2300,12 @@ describe("template init", () => {
 
     expect(apiPackageJson.name).toBe("@demo-api/api");
     expect(apiPackageJson).not.toHaveProperty("packageManager");
-    expect(apiPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-    );
-    expect(apiPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix",
-    );
-    expect(apiPackageJson.scripts["format:check"]).toBe(
+    expect(apiPackageJson.scripts).not.toHaveProperty("check");
+    expect(apiPackageJson.scripts).not.toHaveProperty("fix");
+    expect(apiPackageJson.scripts["format:check:run"]).toBe(
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
-    expect(apiPackageJson.scripts.lint).toBe(
+    expect(apiPackageJson.scripts["lint:run"]).toBe(
       "oxlint --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.scripts.start).toBe("node dist/server.js");
@@ -2349,14 +2343,14 @@ describe("template init", () => {
     expect(apiTsconfig.compilerOptions.strict).toBe(true);
     expect(apiTsconfig.compilerOptions.skipLibCheck).toBe(false);
     expect(apiTsconfig.compilerOptions).not.toHaveProperty("paths");
-    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks.build).toEqual({ outputs: ["dist/**"] });
-    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks.check.dependsOn).toEqual([
-      "typecheck",
-      "build",
-      "test",
+    expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
     ]);
+    expect(turboConfig.tasks["build:run"]).toEqual({ outputs: ["dist/**"] });
+    expect(turboConfig.tasks["test:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
+    ]);
+    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual(["build:run"]);
 
     expect(blueprint).toMatchObject({
       preset: "hono-api",
@@ -2508,19 +2502,22 @@ describe("template init", () => {
       turbo: "catalog:",
     });
     expect(packageJson.scripts).toEqual({
-      check: "turbo run check --filter './packages/*'",
-      fix: "turbo run fix --filter './packages/*'",
+      check: rootCheckScript,
+      "check:run": 'node -e ""',
+      fix: rootFixScript,
+      "fix:run": 'node -e ""',
     });
     expect(rustPackageJson).toMatchObject({
       name: "demo-rust-native",
       private: true,
     });
     expect(rustPackageJson.scripts).toEqual({
-      check:
-        "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-      fix: "cargo fmt --all",
+      "format:check:run": "cargo fmt --all -- --check",
+      "format:write:run": "cargo fmt --all",
+      "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+      "test:run": "cargo test --workspace",
     });
-    expect(rustPackageJson.scripts.fix).not.toContain("clippy");
+    expect(rustPackageJson.scripts["format:write:run"]).not.toContain("clippy");
     expect(workspaceYaml).toContain("packages:\n  - packages/*\n");
     expect(catalogFromWorkspaceYaml(workspaceYaml).turbo).toBe("2.10.2");
 
@@ -2732,15 +2729,9 @@ describe("template init", () => {
       compilerOptions: Record<string, unknown>;
       include: string[];
     }>(path.join(projectDir, "apps/web/tsconfig.node.json"));
-    const turboConfig = await readJson<{
-      tasks: {
-        build: { dependsOn?: string[]; outputs: string[] };
-        check: { dependsOn: string[] };
-        typecheck: { dependsOn: string[] };
-        test: { dependsOn: string[] };
-        "test:e2e": { dependsOn: string[] };
-      };
-    }>(path.join(projectDir, "turbo.json"));
+    const turboConfig = await readJson<TurboConfigForTests>(
+      path.join(projectDir, "turbo.json"),
+    );
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
@@ -2764,19 +2755,14 @@ describe("template init", () => {
     expect(rootPackageJson.name).toBe("demo-vue");
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
-    expect(rootPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
+    expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "turbo run format:check:run",
     );
-    expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint oxlint.config.ts oxfmt.config.ts",
-    );
-    expect(rootPackageJson.scripts.typecheck).toBe(
+    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
+    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts["typecheck:run"]).toBe(
       "tsc -p tsconfig.config.json --noEmit",
     );
     expect(rootPackageJson.devDependencies).toEqual({
@@ -2789,22 +2775,20 @@ describe("template init", () => {
 
     expect(webPackageJson.name).toBe("@demo-vue/web");
     expect(webPackageJson).not.toHaveProperty("packageManager");
-    expect(webPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
-    );
-    expect(webPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix",
-    );
-    expect(webPackageJson.scripts["format:check"]).toBe(
+    expect(webPackageJson.scripts).not.toHaveProperty("check");
+    expect(webPackageJson.scripts).not.toHaveProperty("fix");
+    expect(webPackageJson.scripts["format:check:run"]).toBe(
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
-    expect(webPackageJson.scripts.lint).toBe(
+    expect(webPackageJson.scripts["lint:run"]).toBe(
       "oxlint --config ../../oxlint.config.ts .",
     );
-    expect(webPackageJson.scripts["test:e2e"]).toBe(
-      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
+    expect(webPackageJson.scripts["test:e2e:run"]).toBe(
+      "node --experimental-strip-types scripts/run-playwright.ts",
     );
-    expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
+    expect(webPackageJson.scripts["typecheck:run"]).toBe(
+      "vue-tsc --build --noEmit",
+    );
     expect(webPackageJson.dependencies.vue).toBe("catalog:");
     expect(webPackageJson.dependencies.pinia).toBe("catalog:");
     expect(webPackageJson.devDependencies.vite).toBe("catalog:");
@@ -2894,15 +2878,15 @@ describe("template init", () => {
       "vite.config.ts",
       "vitest.config.ts",
     ]);
-    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks.build).toEqual({ outputs: ["dist/**"] });
-    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual(["build"]);
-    expect(turboConfig.tasks.check.dependsOn).toEqual([
-      "typecheck",
-      "build",
-      "test",
+    expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
     ]);
+    expect(turboConfig.tasks["build:run"]).toEqual({ outputs: ["dist/**"] });
+    expect(turboConfig.tasks["test:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
+    ]);
+    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual(["build:run"]);
+    expect(turboConfig.tasks["check:run"]).toEqual({ cache: false });
 
     expect(blueprint).toMatchObject({
       preset: "vue-app",
@@ -3021,15 +3005,9 @@ describe("template init", () => {
     const webTestTsconfig = await readJson<{
       references: Array<{ path: string }>;
     }>(path.join(projectDir, "apps/web/tsconfig.test.json"));
-    const turboConfig = await readJson<{
-      tasks: {
-        build: { dependsOn: string[]; outputs: string[] };
-        check: { dependsOn: string[] };
-        typecheck: { dependsOn: string[] };
-        test: { dependsOn: string[] };
-        "test:e2e": { dependsOn: string[] };
-      };
-    }>(path.join(projectDir, "turbo.json"));
+    const turboConfig = await readJson<TurboConfigForTests>(
+      path.join(projectDir, "turbo.json"),
+    );
     const workspaceYaml = await readFile(
       path.join(projectDir, "pnpm-workspace.yaml"),
       "utf8",
@@ -3072,20 +3050,15 @@ describe("template init", () => {
 
     expect(rootPackageJson.name).toBe("demo-fullstack");
     expect(rootPackageJson).not.toHaveProperty("exports");
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
-    expect(rootPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
+    expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "turbo run format:check:run",
     );
-    expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint oxlint.config.ts oxfmt.config.ts",
-    );
-    expect(rootPackageJson.scripts.typecheck).toBe(
+    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
+    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts["typecheck:run"]).toBe(
       "tsc -p tsconfig.config.json --noEmit",
     );
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
@@ -3114,10 +3087,10 @@ describe("template init", () => {
         types: "./src/*.ts",
       },
     });
-    expect(apiPackageJson.scripts["format:check"]).toBe(
+    expect(apiPackageJson.scripts["format:check:run"]).toBe(
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
-    expect(apiPackageJson.scripts.lint).toBe(
+    expect(apiPackageJson.scripts["lint:run"]).toBe(
       "oxlint --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
@@ -3130,11 +3103,11 @@ describe("template init", () => {
     expect(apiIndex).not.toContain("@hono/node-server");
 
     expect(webPackageJson.name).toBe("@demo-fullstack/web");
-    expect(webPackageJson.scripts.typecheck).toBe("vue-tsc --build");
-    expect(webPackageJson.scripts["format:check"]).toBe(
+    expect(webPackageJson.scripts["typecheck:run"]).toBe("vue-tsc --build");
+    expect(webPackageJson.scripts["format:check:run"]).toBe(
       "oxfmt --check --config ../../oxfmt.config.ts .",
     );
-    expect(webPackageJson.scripts.lint).toBe(
+    expect(webPackageJson.scripts["lint:run"]).toBe(
       "oxlint --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe(
@@ -3181,18 +3154,18 @@ describe("template init", () => {
     expect(webAppTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(webAppTsconfig).not.toHaveProperty("references");
     expect(webTestTsconfig).not.toHaveProperty("references");
-    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks.build.dependsOn).toEqual(["^build"]);
-    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual([
-      "build",
-      "^build",
+    expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
     ]);
-    expect(turboConfig.tasks.check.dependsOn).toEqual([
-      "typecheck",
-      "build",
-      "test",
+    expect(turboConfig.tasks["build:run"]!.dependsOn).toEqual(["^build:run"]);
+    expect(turboConfig.tasks["test:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
     ]);
+    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual([
+      "build:run",
+      "^build:run",
+    ]);
+    expect(turboConfig.tasks["check:run"]).toEqual({ cache: false });
     expect(devcontainer.name).toBe("demo-fullstack");
     expect(workspaceSettings["oxc.configPath"]).toBe("./oxlint.config.ts");
     expect(workspaceSettings["oxc.fmt.configPath"]).toBe("./oxfmt.config.ts");

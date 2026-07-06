@@ -9,8 +9,6 @@ import {
   type CheckPlan,
   type ComponentOwner,
   type FixPlan,
-  renderFixCommand,
-  renderRootCheckCommand,
 } from "@ykdz/template-core/module-graph";
 import type {
   PresetBlueprintOptions,
@@ -112,8 +110,10 @@ export function rustBinBlueprint(
 
 export function projectRustBinPackageScripts(): Record<string, string> {
   return {
-    check: renderRootCheckCommand(planRustBinChecks()),
-    fix: renderFixCommand(planRustBinFixes()),
+    "format:check:run": "cargo fmt --all -- --check",
+    "format:write:run": "cargo fmt --all",
+    "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+    "test:run": "cargo test --workspace",
   };
 }
 

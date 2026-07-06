@@ -18,6 +18,10 @@ import { renderNewProject } from "@ykdz/template-core/renderer";
 import type { PresetProjectionDeclaration } from "@ykdz/template-shared";
 import * as v from "valibot";
 
+const rootCheckScript =
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
+const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
+
 const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
   capabilities: [
     {
@@ -227,9 +231,7 @@ describe("Projection Capability declarations", () => {
       "github-actions",
       "docker",
     ]);
-    expect(plan.packageScripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-    );
+    expect(plan.packageScripts.check).toBe(rootCheckScript);
     expect(plan.capabilities).toEqual({
       rootCheck: true,
       fixCommand: true,
@@ -279,9 +281,8 @@ describe("Projection Capability declarations", () => {
       private: true,
       type: "module",
       scripts: {
-        check:
-          "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-        fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+        check: rootCheckScript,
+        fix: rootFixScript,
       },
       devDependencies: {
         oxfmt: "catalog:",
@@ -297,8 +298,11 @@ describe("Projection Capability declarations", () => {
         valibot: "catalog:",
       },
       scripts: {
-        check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-        fix: "pnpm run format:write && pnpm run lint:fix",
+        "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+        "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+        "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+        "lint:run": "oxlint --config ../../oxlint.config.ts .",
+        "typecheck:run": "tsc -p tsconfig.json --noEmit",
       },
       devDependencies: {
         "@types/node": "catalog:",
@@ -725,9 +729,7 @@ describe("Projection Capability declarations", () => {
       path.join(targetDir, ".template/generated-by.json"),
     );
 
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
     expect(packageJson).toMatchObject({
       name: "@demo-hono-api/api",
       dependencies: {
@@ -735,9 +737,11 @@ describe("Projection Capability declarations", () => {
         hono: "catalog:",
       },
       scripts: {
-        build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+        "build:run":
+          "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
         start: "node dist/server.js",
-        test: "vitest run",
+        "test:run": "vitest run",
+        "typecheck:run": "tsc -p tsconfig.json --noEmit",
       },
       devDependencies: {
         "@types/node": "catalog:",
@@ -792,19 +796,17 @@ describe("Projection Capability declarations", () => {
       "utf8",
     );
 
-    expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
-    );
+    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
     expect(packageJson).toMatchObject({
       name: "@demo-vue-app/web",
       scripts: {
-        build: "vite build",
+        "build:run": "vite build",
         dev: "vite",
         preview: "vite preview",
-        test: "vitest run",
-        "test:e2e":
-          "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
-        typecheck: "vue-tsc --build --noEmit",
+        "test:run": "vitest run",
+        "test:e2e:run":
+          "node --experimental-strip-types scripts/run-playwright.ts",
+        "typecheck:run": "vue-tsc --build --noEmit",
       },
       dependencies: {
         pinia: "catalog:",
@@ -958,13 +960,13 @@ describe("Projection Capability declarations", () => {
         hono: "catalog:",
       },
       scripts: {
-        typecheck: "vue-tsc --build",
+        "typecheck:run": "vue-tsc --build",
       },
     });
     expect(turboConfig).toMatchObject({
       tasks: {
-        build: {
-          dependsOn: ["^build"],
+        "build:run": {
+          dependsOn: ["^build:run"],
           outputs: ["dist/**"],
         },
       },
@@ -1025,8 +1027,8 @@ describe("Projection Capability declarations", () => {
     expect(rootPackageJson).toMatchObject({
       name: "demo-rust-bin",
       scripts: {
-        check: "turbo run check --filter './packages/*'",
-        fix: "turbo run fix --filter './packages/*'",
+        check: rootCheckScript,
+        fix: rootFixScript,
       },
       devDependencies: {
         turbo: "catalog:",
@@ -1036,9 +1038,10 @@ describe("Projection Capability declarations", () => {
     expect(packageJson).toMatchObject({
       name: "demo-rust-bin-native",
       scripts: {
-        check:
-          "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-        fix: "cargo fmt --all",
+        "format:check:run": "cargo fmt --all -- --check",
+        "format:write:run": "cargo fmt --all",
+        "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+        "test:run": "cargo test --workspace",
       },
     });
     expect(cargoToml).toContain('name = "demo-rust-bin"');

@@ -50,11 +50,14 @@ import {
   type ComponentOwner,
   type FixPlan,
   playwrightBrowserAssetsEnvironmentNeed,
+  renderCheckLeafCommand,
   renderFixCommand,
+  renderFixLeafCommand,
   renderRootCheckCommand,
 } from "./module-graph.js";
 import {
   packageManifestExposureFields,
+  packageTurboTasks,
   planPackageLinks,
 } from "./package-linking.js";
 import type {
@@ -1312,10 +1315,17 @@ function projectRootPackageScripts(
   fixPlan: FixPlan,
   fragments: Record<string, string>,
 ): Record<string, string> {
+  const leafFragments = leafScriptFragments(fragments);
+  const directFragments = directScriptFragments(fragments);
+
   return {
     check: renderRootCheckCommand(checkPlan),
     fix: renderFixCommand(fixPlan),
-    ...fragments,
+    ...rootTaskEntrypoints(checkPlan, fixPlan),
+    ...directFragments,
+    ...leafFragments,
+    "check:run": noopTaskCommand(),
+    "fix:run": noopTaskCommand(),
   };
 }
 
@@ -1324,11 +1334,132 @@ function projectPackageScripts(
   fixPlan: FixPlan,
   fragments: Record<string, string>,
 ): Record<string, string> {
+  void checkPlan;
+  void fixPlan;
+
   return {
-    check: renderRootCheckCommand(checkPlan),
-    fix: renderFixCommand(fixPlan),
-    ...fragments,
+    ...directScriptFragments(fragments),
+    ...leafScriptFragments(fragments),
   };
+}
+
+const leafEntrypointNames = new Set([
+  "format:check",
+  "format:write",
+  "lint",
+  "lint:fix",
+  "typecheck",
+  "build",
+  "test",
+  "test:e2e",
+]);
+
+function leafScriptName(scriptName: string): string {
+  return leafEntrypointNames.has(scriptName) ? `${scriptName}:run` : scriptName;
+}
+
+function leafScriptFragments(
+  fragments: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fragments)
+      .filter(([scriptName]) => leafEntrypointNames.has(scriptName))
+      .map(([scriptName, command]) => [leafScriptName(scriptName), command]),
+  );
+}
+
+function directScriptFragments(
+  fragments: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(fragments).filter(
+      ([scriptName]) => !leafEntrypointNames.has(scriptName),
+    ),
+  );
+}
+
+function rootEntrypointScriptsFromRootPackageScripts(
+  scripts: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(scripts).filter(
+      ([scriptName]) =>
+        !scriptName.endsWith(":run") ||
+        scriptName === "check:run" ||
+        scriptName === "fix:run",
+    ),
+  );
+}
+
+function rootTaskEntrypoints(
+  checkPlan: CheckPlan,
+  fixPlan: FixPlan,
+): Record<string, string> {
+  const taskNames = new Set([
+    ...checkPlan.components.map((component) =>
+      renderCheckLeafCommand(component).startsWith("turbo run ")
+        ? undefined
+        : leafEntrypointFromRunTask(component.kind),
+    ),
+    ...fixPlan.components.map((component) =>
+      renderFixLeafCommand(component).startsWith("turbo run ")
+        ? undefined
+        : leafEntrypointFromRunTask(component.kind),
+    ),
+  ]);
+  const entries: [string, string][] = [];
+
+  for (const taskName of taskNames) {
+    if (taskName === undefined) {
+      continue;
+    }
+
+    entries.push([taskName, `turbo run ${taskName}:run`]);
+  }
+
+  return Object.fromEntries(entries);
+}
+
+function leafEntrypointFromRunTask(
+  kind:
+    | CheckPlan["components"][number]["kind"]
+    | FixPlan["components"][number]["kind"],
+): string | undefined {
+  switch (kind) {
+    case "oxc-format-check":
+    case "rustfmt-check":
+      return "format:check";
+    case "oxc-format-write":
+    case "rustfmt-write":
+      return "format:write";
+    case "oxc-lint":
+    case "cargo-clippy":
+      return "lint";
+    case "oxc-lint-fix":
+      return "lint:fix";
+    case "typescript-typecheck":
+      return "typecheck";
+    case "build":
+      return "build";
+    case "unit-test":
+    case "cargo-test":
+      return "test";
+    case "e2e-test":
+      return "test:e2e";
+    case "turbo-check":
+    case "turbo-package-typecheck":
+    case "turbo-package-build":
+    case "turbo-package-test":
+    case "turbo-package-e2e-test":
+    case "turbo-package-check":
+    case "turbo-fix":
+    case "turbo-package-fix":
+      return undefined;
+  }
+}
+
+function noopTaskCommand(): string {
+  return 'node -e ""';
 }
 
 function packageCollection(
@@ -1639,6 +1770,7 @@ function vikePackageJson(
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
       tailwindcss: "catalog:",
+      turbo: "catalog:",
       typescript: "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
@@ -1737,16 +1869,24 @@ function rustRootPackageJson(
 
 function rustWorkspacePackageJson(
   context: GenerationContext,
-  scripts: Record<string, string>,
 ): Record<string, unknown> {
   return {
     name: rustWorkspacePackageName(context),
     version: "0.0.0",
     private: true,
-    scripts,
+    scripts: rustWorkspacePackageScripts(),
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
+  };
+}
+
+function rustWorkspacePackageScripts(): Record<string, string> {
+  return {
+    "format:check:run": "cargo fmt --all -- --check",
+    "format:write:run": "cargo fmt --all",
+    "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+    "test:run": "cargo test --workspace",
   };
 }
 
@@ -1808,14 +1948,7 @@ function workspaceLibraryPackageOperations({
       to: "turbo.json",
       value: {
         tasks: {
-          build: packageLinkPlan.turboTasks.build,
-          check: packageLinkPlan.turboTasks.check,
-          typecheck: packageLinkPlan.turboTasks.typecheck,
-          test: packageLinkPlan.turboTasks.test,
-          "test:e2e": packageLinkPlan.turboTasks["test:e2e"],
-          fix: {
-            cache: false,
-          },
+          ...packageLinkPlan.turboTasks,
         },
       },
     },
@@ -1859,7 +1992,6 @@ function rustBinaryWorkspaceOperations({
   context,
   state,
   packageScripts,
-  packageScriptsByPath,
 }: {
   readonly context: GenerationContext;
   readonly state: ProjectionCompositionState;
@@ -1872,21 +2004,9 @@ function rustBinaryWorkspaceOperations({
 
   const capability = state.rustWorkspace;
   const packagePath = rustWorkspacePackagePath(context);
-  const workspacePackageScripts = packageScriptsByPath.get(
-    capability.workspacePackageGlob,
-  );
-
-  if (workspacePackageScripts === undefined) {
-    throw new Error(
-      `Missing package scripts for ${capability.workspacePackageGlob}`,
-    );
-  }
 
   const rootManifest = rustRootPackageJson(context, packageScripts, state);
-  const packageManifest = rustWorkspacePackageJson(
-    context,
-    workspacePackageScripts,
-  );
+  const packageManifest = rustWorkspacePackageJson(context);
   const rustLayer = rustToolLayer();
   const dockerfileFragments = readDevelopmentContainerDockerfileFragments(
     state,
@@ -1929,12 +2049,7 @@ function rustBinaryWorkspaceOperations({
       kind: "writeJson",
       to: "turbo.json",
       value: {
-        tasks: {
-          check: {},
-          fix: {
-            cache: false,
-          },
-        },
+        tasks: packageTurboTasks({ dependencyBuildsRequired: false }),
       },
     },
     {
@@ -1997,6 +2112,7 @@ function rustBinaryWorkspaceOperations({
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
       value: developmentContainer.devcontainer,
+      multilineArrays: ["customizations.vscode.extensions"],
     },
     {
       ...developmentContainer.dockerfileOperation!,
@@ -2074,7 +2190,7 @@ function workspaceNodePackagesOperations({
     );
   });
   const rootManifest = isRootNodeWorkspace(capability)
-    ? packageManifests[0]
+    ? rootNodePackageManifest(packageManifests[0], packageScripts)
     : rootPackageJson(context, packageScripts, state);
 
   if (rootManifest === undefined) {
@@ -2116,11 +2232,7 @@ function workspaceNodePackagesOperations({
       to: "turbo.json",
       value: {
         tasks: {
-          build: packageLinkPlan.turboTasks.build,
-          check: packageLinkPlan.turboTasks.check,
-          typecheck: packageLinkPlan.turboTasks.typecheck,
-          test: packageLinkPlan.turboTasks.test,
-          "test:e2e": packageLinkPlan.turboTasks["test:e2e"],
+          ...packageLinkPlan.turboTasks,
           ...(hasVuePackage(capability)
             ? {
                 dev: {
@@ -2129,9 +2241,6 @@ function workspaceNodePackagesOperations({
                 },
               }
             : {}),
-          fix: {
-            cache: false,
-          },
         },
       },
     },
@@ -2171,6 +2280,42 @@ function workspaceNodePackagesOperations({
   ];
 }
 
+function rootNodePackageManifest(
+  packageManifest: Record<string, unknown> | undefined,
+  rootPackageScripts: Record<string, string>,
+): Record<string, unknown> | undefined {
+  if (packageManifest === undefined) {
+    return undefined;
+  }
+
+  const packageScripts = packageManifest.scripts;
+  if (
+    packageScripts === undefined ||
+    typeof packageScripts !== "object" ||
+    packageScripts === null ||
+    Array.isArray(packageScripts)
+  ) {
+    throw new Error("Root node package manifest rendered invalid scripts");
+  }
+  const checkedPackageScripts: Record<string, string> = {};
+  for (const scriptName of Object.keys(packageScripts)) {
+    const command: unknown = Reflect.get(packageScripts, scriptName);
+    if (typeof command !== "string") {
+      throw new Error("Root node package manifest rendered non-string scripts");
+    }
+
+    checkedPackageScripts[scriptName] = command;
+  }
+
+  return {
+    ...packageManifest,
+    scripts: {
+      ...rootEntrypointScriptsFromRootPackageScripts(rootPackageScripts),
+      ...checkedPackageScripts,
+    },
+  };
+}
+
 function nodePackageScripts(
   nodePackage: WorkspaceNodePackageDeclaration,
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
@@ -2183,105 +2328,46 @@ function nodePackageScripts(
   };
 
   if (nodePackage.kind === "hono-api") {
-    const checks: CheckPlan = {
-      components: [
-        { kind: "oxc-format-check", owner: workspacePackageBoundary },
-        { kind: "oxc-lint", owner: workspacePackageBoundary },
-        { kind: "typescript-typecheck", owner: workspacePackageBoundary },
-        { kind: "build", owner: workspacePackageBoundary },
-        { kind: "unit-test", owner: workspacePackageBoundary },
-      ],
-      environmentNeeds: [],
-    };
-    const fixes: FixPlan = {
-      components: [
-        { kind: "oxc-format-write", owner: workspacePackageBoundary },
-        { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
-      ],
-    };
-
     return {
-      build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      check: renderRootCheckCommand(checks),
+      "build:run":
+        "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
       ...(workspace.packages.length > 1
         ? { dev: "tsx watch src/server.ts" }
         : {}),
-      fix: renderFixCommand(fixes),
-      ...oxcScripts,
+      ...leafScriptFragments(oxcScripts),
       start: "node dist/server.js",
-      test: "vitest run",
-      typecheck: "tsc -p tsconfig.json --noEmit",
+      "test:run": "vitest run",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit",
     };
   }
 
   if (nodePackage.kind === "vike-app") {
-    const checks: CheckPlan = {
-      components: [
-        { kind: "oxc-format-check", owner: workspacePackageBoundary },
-        { kind: "oxc-lint", owner: workspacePackageBoundary },
-        { kind: "typescript-typecheck", owner: workspacePackageBoundary },
-        { kind: "build", owner: workspacePackageBoundary },
-        { kind: "unit-test", owner: workspacePackageBoundary },
-        { kind: "e2e-test", owner: workspacePackageBoundary },
-      ],
-      environmentNeeds: [],
-    };
-    const fixes: FixPlan = {
-      components: [
-        { kind: "oxc-format-write", owner: workspacePackageBoundary },
-        { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
-      ],
-    };
-
     return {
-      build: "vike build",
-      check: renderRootCheckCommand(checks),
+      "build:run": "vike build",
       dev: "vike dev",
       "drizzle:generate": "drizzle-kit generate",
       "drizzle:migrate": "drizzle-kit migrate",
       "drizzle:studio": "drizzle-kit studio",
-      fix: renderFixCommand(fixes),
-      "format:check": "oxfmt --check --config oxfmt.config.ts .",
-      "format:write": "oxfmt --write --config oxfmt.config.ts .",
-      lint: "oxlint --type-aware --config oxlint.config.ts .",
-      "lint:fix": "oxlint --type-aware --config oxlint.config.ts . --fix",
+      "format:check:run": "oxfmt --check --config oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config oxfmt.config.ts .",
+      "lint:run": "oxlint --type-aware --config oxlint.config.ts .",
+      "lint:fix:run": "oxlint --type-aware --config oxlint.config.ts . --fix",
       preview: "vike preview",
       start: "node ./dist/server/index.mjs",
-      test: "vitest run",
-      "test:e2e": "playwright test --config playwright.config.ts",
-      typecheck: "vue-tsc --build --noEmit",
+      "test:run": "vitest run",
+      "test:e2e:run": "playwright test --config playwright.config.ts",
+      "typecheck:run": "vue-tsc --build --noEmit",
     };
   }
 
-  const checks: CheckPlan = {
-    components: [
-      { kind: "oxc-format-check", owner: workspacePackageBoundary },
-      { kind: "oxc-lint", owner: workspacePackageBoundary },
-      { kind: "typescript-typecheck", owner: workspacePackageBoundary },
-      { kind: "build", owner: workspacePackageBoundary },
-      { kind: "unit-test", owner: workspacePackageBoundary },
-      { kind: "e2e-test", owner: workspacePackageBoundary },
-    ],
-    environmentNeeds: [],
-  };
-  const fixes: FixPlan = {
-    components: [
-      { kind: "oxc-format-write", owner: workspacePackageBoundary },
-      { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
-    ],
-  };
-
   return {
-    build: "vite build",
-    check: renderRootCheckCommand(checks),
+    "build:run": "vite build",
     dev: "vite",
-    fix: renderFixCommand(fixes),
-    ...oxcScripts,
+    ...leafScriptFragments(oxcScripts),
     preview: "vite preview",
-    test: "vitest run",
-    "test:e2e":
-      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
-    typecheck:
+    "test:run": "vitest run",
+    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
+    "typecheck:run":
       workspace.packages.length > 1
         ? "vue-tsc --build"
         : "vue-tsc --build --noEmit",
@@ -2755,6 +2841,7 @@ function nodePnpmDevcontainerOperations({
       kind: "writeJson",
       to: ".devcontainer/devcontainer.json",
       value: developmentContainer.devcontainer,
+      multilineArrays: ["customizations.vscode.extensions"],
     },
     {
       ...developmentContainer.dockerfileOperation!,

@@ -8,13 +8,6 @@ import {
   loadBuiltInPresetProjectionDeclaration,
 } from "@ykdz/template-builtin-source";
 import type { GenerationContext } from "@ykdz/template-core/generation-context";
-import {
-  type CheckPlan,
-  type ComponentOwner,
-  type FixPlan,
-  renderFixCommand,
-  renderRootCheckCommand,
-} from "@ykdz/template-core/module-graph";
 import type {
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
@@ -54,34 +47,6 @@ export const vueAppPresetMetadata: BuiltInPreset = {
   ],
 };
 
-const webPackageBoundary: ComponentOwner = {
-  kind: "package-boundary",
-  path: ".",
-};
-
-function planVueAppPackageChecks(): CheckPlan {
-  return {
-    components: [
-      { kind: "oxc-format-check", owner: webPackageBoundary },
-      { kind: "oxc-lint", owner: webPackageBoundary },
-      { kind: "typescript-typecheck", owner: webPackageBoundary },
-      { kind: "build", owner: webPackageBoundary },
-      { kind: "unit-test", owner: webPackageBoundary },
-      { kind: "e2e-test", owner: webPackageBoundary },
-    ],
-    environmentNeeds: [],
-  };
-}
-
-function planVueAppPackageFixes(): FixPlan {
-  return {
-    components: [
-      { kind: "oxc-format-write", owner: webPackageBoundary },
-      { kind: "oxc-lint-fix", owner: webPackageBoundary },
-    ],
-  };
-}
-
 function projectNameFromDir(targetDir: string): string {
   return path.basename(path.resolve(targetDir));
 }
@@ -111,19 +76,16 @@ export function vueAppBlueprint(
 
 export function projectVueAppPackageScripts(): Record<string, string> {
   return {
-    build: "vite build",
-    check: renderRootCheckCommand(planVueAppPackageChecks()),
+    "build:run": "vite build",
     dev: "vite",
-    fix: renderFixCommand(planVueAppPackageFixes()),
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run": "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
-    test: "vitest run",
-    "test:e2e":
-      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
-    typecheck: "vue-tsc --build --noEmit",
+    "test:run": "vitest run",
+    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
+    "typecheck:run": "vue-tsc --build --noEmit",
   };
 }
 

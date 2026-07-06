@@ -208,12 +208,16 @@ describe("Package Link Planning", () => {
     );
 
     expect(jitPlan.turboTasks).toEqual({
-      typecheck: { dependsOn: ["^typecheck"] },
-      build: { outputs: ["dist/**"] },
-      test: { dependsOn: ["^typecheck"] },
-      "test:e2e": { dependsOn: ["build"] },
-      check: { dependsOn: ["typecheck", "build", "test"] },
-      fix: { cache: false },
+      "format:check:run": {},
+      "format:write:run": { cache: false },
+      "lint:run": {},
+      "lint:fix:run": { cache: false },
+      "typecheck:run": { dependsOn: ["^typecheck:run"] },
+      "build:run": { outputs: ["dist/**"] },
+      "test:run": { dependsOn: ["^typecheck:run"] },
+      "test:e2e:run": { dependsOn: ["build:run"] },
+      "check:run": { cache: false },
+      "fix:run": { cache: false },
     });
 
     const compiledPlan = planPackageLinks(
@@ -235,12 +239,16 @@ describe("Package Link Planning", () => {
     );
 
     expect(compiledPlan.turboTasks).toEqual({
-      typecheck: { dependsOn: ["^typecheck"] },
-      build: { dependsOn: ["^build"], outputs: ["dist/**"] },
-      test: { dependsOn: ["^typecheck"] },
-      "test:e2e": { dependsOn: ["build", "^build"] },
-      check: { dependsOn: ["typecheck", "build", "test"] },
-      fix: { cache: false },
+      "format:check:run": {},
+      "format:write:run": { cache: false },
+      "lint:run": {},
+      "lint:fix:run": { cache: false },
+      "typecheck:run": { dependsOn: ["^typecheck:run"] },
+      "build:run": { dependsOn: ["^build:run"], outputs: ["dist/**"] },
+      "test:run": { dependsOn: ["^typecheck:run"] },
+      "test:e2e:run": { dependsOn: ["build:run", "^build:run"] },
+      "check:run": { cache: false },
+      "fix:run": { cache: false },
     });
   });
 });

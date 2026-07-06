@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build:run": {
+      "outputs": ["dist/**"]
+    },
+    "test:e2e:run": {
+      "cache": false
+    }
+  }
+}

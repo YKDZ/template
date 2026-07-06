@@ -51,16 +51,6 @@ const rootBoundary: ComponentOwner = {
   path: ".",
 };
 
-const apiPackageBoundary: ComponentOwner = {
-  kind: "package-boundary",
-  path: ".",
-};
-
-const webPackageBoundary: ComponentOwner = {
-  kind: "package-boundary",
-  path: ".",
-};
-
 const workspacePackageBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: "apps/*",
@@ -70,34 +60,6 @@ const webWorkspaceBoundary: ComponentOwner = {
   kind: "package-boundary",
   path: "apps/web",
 };
-
-function honoApiCheckComponents(owner: ComponentOwner) {
-  return [
-    { kind: "oxc-format-check", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "typescript-typecheck", owner },
-    { kind: "build", owner },
-    { kind: "unit-test", owner },
-  ] as const;
-}
-
-function vueWebCheckComponents(owner: ComponentOwner) {
-  return [
-    { kind: "oxc-format-check", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "typescript-typecheck", owner },
-    { kind: "build", owner },
-    { kind: "unit-test", owner },
-    { kind: "e2e-test", owner },
-  ] as const;
-}
-
-function nodeFixComponents(owner: ComponentOwner) {
-  return [
-    { kind: "oxc-format-write", owner },
-    { kind: "oxc-lint-fix", owner },
-  ] as const;
-}
 
 function planVueHonoRootChecks(): CheckPlan {
   return {
@@ -125,26 +87,6 @@ function planVueHonoRootFixes(): FixPlan {
       { kind: "oxc-lint-fix", owner: rootBoundary },
       { kind: "turbo-package-fix", owner: workspacePackageBoundary },
     ],
-  };
-}
-
-function planVueHonoApiChecks(): CheckPlan {
-  return {
-    components: [...honoApiCheckComponents(apiPackageBoundary)],
-    environmentNeeds: [],
-  };
-}
-
-function planVueHonoWebChecks(): CheckPlan {
-  return {
-    components: [...vueWebCheckComponents(webPackageBoundary)],
-    environmentNeeds: [],
-  };
-}
-
-function planVueHonoPackageFixes(owner: ComponentOwner): FixPlan {
-  return {
-    components: [...nodeFixComponents(owner)],
   };
 }
 
@@ -181,47 +123,50 @@ export function vueHonoAppBlueprint(
 export function projectVueHonoRootPackageScripts(): Record<string, string> {
   return {
     check: renderRootCheckCommand(planVueHonoRootChecks()),
+    "check:run": 'node -e ""',
     dev: "turbo run dev --parallel",
     fix: renderFixCommand(planVueHonoRootFixes()),
-    "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-    "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-    lint: "oxlint oxlint.config.ts oxfmt.config.ts",
-    "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-    typecheck: "tsc -p tsconfig.config.json --noEmit",
+    "fix:run": 'node -e ""',
+    "format:check": "turbo run format:check:run",
+    "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+    "format:write": "turbo run format:write:run",
+    "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
+    lint: "turbo run lint:run",
+    "lint:fix": "turbo run lint:fix:run",
+    "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
+    "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
+    typecheck: "turbo run typecheck:run",
+    "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
   };
 }
 
 export function projectVueHonoApiPackageScripts(): Record<string, string> {
   return {
-    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    check: renderRootCheckCommand(planVueHonoApiChecks()),
+    "build:run":
+      "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     dev: "tsx watch src/server.ts",
-    fix: renderFixCommand(planVueHonoPackageFixes(apiPackageBoundary)),
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run": "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
-    test: "vitest run",
-    typecheck: "tsc -p tsconfig.json --noEmit",
+    "test:run": "vitest run",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit",
   };
 }
 
 export function projectVueHonoWebPackageScripts(): Record<string, string> {
   return {
-    build: "vite build",
-    check: renderRootCheckCommand(planVueHonoWebChecks()),
+    "build:run": "vite build",
     dev: "vite",
-    fix: renderFixCommand(planVueHonoPackageFixes(webPackageBoundary)),
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run": "oxlint --config ../../oxlint.config.ts .",
+    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
-    test: "vitest run",
-    "test:e2e":
-      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
-    typecheck: "vue-tsc --build",
+    "test:run": "vitest run",
+    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
+    "typecheck:run": "vue-tsc --build",
   };
 }
 

@@ -331,7 +331,8 @@ async function assertPackageLinkIntentConsumersAreTypeScriptBoundaries(options: 
         isRecord(manifest) &&
         manifest.type === "module" &&
         isRecord(scripts) &&
-        typeof scripts.typecheck === "string";
+        (typeof scripts.typecheck === "string" ||
+          typeof scripts["typecheck:run"] === "string");
 
       if (hasTypeScriptPackageShape) {
         continue;
@@ -721,91 +722,41 @@ async function consumerManifestUpdatesForPackageLinkIntents(options: {
   return updates;
 }
 
-function workspacePackageGlobsFromBlueprint(
-  blueprint: ProjectBlueprint,
-): string[] {
-  const globs: string[] = [];
-
-  for (const packageDefinition of blueprint.packages ?? []) {
-    const [workspaceDir] = packageDefinition.path.split("/");
-
-    if (!workspaceDir) {
-      throw new Error(
-        `Cannot update root Package Addition scripts: invalid package path ${packageDefinition.path}`,
-      );
-    }
-
-    const glob = `${workspaceDir}/*`;
-    if (!globs.includes(glob)) {
-      globs.push(glob);
-    }
-  }
-
-  return globs;
-}
-
-function turboPackageTaskCommand(
-  task: "typecheck" | "build" | "test" | "test:e2e" | "check" | "fix",
-  workspacePackageGlobs: readonly string[],
-): string {
-  const filters = workspacePackageGlobs.map((glob) => `--filter './${glob}'`);
-  const concurrency = task === "check" ? ["--concurrency=1"] : [];
-
-  return [`turbo run ${task}`, ...concurrency, ...filters].join(" ");
-}
-
-function rootScriptWithTurboPackageTask(
-  script: string,
-  task: "typecheck" | "build" | "test" | "test:e2e" | "check" | "fix",
-  workspacePackageGlobs: readonly string[],
-): string {
-  const commands = script.split(" && ");
-  const turboCommandIndex = commands.findIndex((command) =>
-    command.startsWith(`turbo run ${task}`),
-  );
-
-  if (turboCommandIndex === -1) {
-    throw new Error(
-      `Cannot update root Package Addition scripts: scripts.${task} must run Turbo package tasks`,
-    );
-  }
-
-  commands[turboCommandIndex] = turboPackageTaskCommand(
-    task,
-    workspacePackageGlobs,
-  );
-
-  return commands.join(" && ");
-}
-
 function rootScriptWithTurboPackageTasks(options: {
   readonly script: string;
   readonly taskNames: readonly (
-    | "typecheck"
-    | "build"
-    | "test"
-    | "test:e2e"
-    | "check"
+    | "format:check:run"
+    | "format:write:run"
+    | "lint:run"
+    | "lint:fix:run"
+    | "typecheck:run"
+    | "build:run"
+    | "test:run"
+    | "test:e2e:run"
+    | "check:run"
+    | "fix:run"
   )[];
-  readonly workspacePackageGlobs: readonly string[];
+  readonly concurrency?: 1;
 }): string {
   const rootCommands = options.script
     .split(" && ")
     .filter((command) => !command.startsWith("turbo run "));
-  const turboCommands = options.taskNames.map((taskName) =>
-    turboPackageTaskCommand(taskName, options.workspacePackageGlobs),
-  );
+  const turboCommand = [
+    "turbo run",
+    ...options.taskNames,
+    ...(options.concurrency === undefined ? [] : ["--concurrency=1"]),
+  ].join(" ");
 
-  return [...rootCommands, ...turboCommands].join(" && ");
+  return [...rootCommands, turboCommand].join(" && ");
 }
 
 function rootPackageJsonWithPackageTaskFilters(
   input: unknown,
   blueprint: ProjectBlueprint,
 ): RootPackageJson {
+  void blueprint;
   assertRootPackageJson(input);
 
-  const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
   const checkScript = input.scripts.check;
   const fixScript = input.scripts.fix;
   if (checkScript === undefined || fixScript === undefined) {
@@ -820,14 +771,21 @@ function rootPackageJsonWithPackageTaskFilters(
       ...input.scripts,
       check: rootScriptWithTurboPackageTasks({
         script: checkScript,
-        taskNames: ["check"],
-        workspacePackageGlobs,
+        taskNames: [
+          "format:check:run",
+          "lint:run",
+          "typecheck:run",
+          "build:run",
+          "test:run",
+          "test:e2e:run",
+          "check:run",
+        ],
+        concurrency: 1,
       }),
-      fix: rootScriptWithTurboPackageTask(
-        fixScript,
-        "fix",
-        workspacePackageGlobs,
-      ),
+      fix: rootScriptWithTurboPackageTasks({
+        script: fixScript,
+        taskNames: ["format:write:run", "lint:fix:run", "fix:run"],
+      }),
     },
   };
 }

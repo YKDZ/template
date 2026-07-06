@@ -506,7 +506,8 @@ describe("Development Container planning", () => {
         "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume",
       ]),
     );
-    expect(rootPackageJson.scripts?.check).toContain("turbo run check");
-    expect(rustPackageJson.scripts?.check).toContain("cargo clippy");
+    expect(rootPackageJson.scripts?.check).toContain("turbo run");
+    expect(rootPackageJson.scripts?.check).toContain("check:run");
+    expect(rustPackageJson.scripts?.["lint:run"]).toContain("cargo clippy");
   });
 });

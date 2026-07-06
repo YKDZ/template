@@ -189,16 +189,22 @@ export function packageTurboTasks({
   dependencyBuildsRequired,
 }: PackageTurboTaskOptions): TurboTaskGraph {
   return {
-    typecheck: { dependsOn: ["^typecheck"] },
-    build: dependencyBuildsRequired
-      ? { dependsOn: ["^build"], outputs: ["dist/**"] }
+    "format:check:run": {},
+    "format:write:run": { cache: false },
+    "lint:run": {},
+    "lint:fix:run": { cache: false },
+    "typecheck:run": { dependsOn: ["^typecheck:run"] },
+    "build:run": dependencyBuildsRequired
+      ? { dependsOn: ["^build:run"], outputs: ["dist/**"] }
       : { outputs: ["dist/**"] },
-    test: { dependsOn: ["^typecheck"] },
-    "test:e2e": {
-      dependsOn: dependencyBuildsRequired ? ["build", "^build"] : ["build"],
+    "test:run": { dependsOn: ["^typecheck:run"] },
+    "test:e2e:run": {
+      dependsOn: dependencyBuildsRequired
+        ? ["build:run", "^build:run"]
+        : ["build:run"],
     },
-    check: { dependsOn: ["typecheck", "build", "test"] },
-    fix: { cache: false },
+    "check:run": { cache: false },
+    "fix:run": { cache: false },
   };
 }
 

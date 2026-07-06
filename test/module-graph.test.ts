@@ -103,10 +103,10 @@ describe("module graph plans", () => {
     ]);
 
     expect(renderRootCheckCommand(checkPlan)).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
     );
     expect(renderFixCommand(fixPlan)).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
+      "turbo run format:write:run lint:fix:run fix:run",
     );
   });
 
@@ -126,7 +126,7 @@ describe("module graph plans", () => {
         environmentNeeds: [],
       }),
     ).toBe(
-      "turbo run typecheck --filter './apps/*' && turbo run check --filter './apps/*'",
+      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run",
     );
 
     expect(
@@ -138,7 +138,7 @@ describe("module graph plans", () => {
           },
         ],
       }),
-    ).toBe("turbo run fix --filter './apps/*'");
+    ).toBe("turbo run format:write:run lint:fix:run fix:run");
   });
 
   it("projects ts-lib root and member package scripts from Check and Fix Plans", () => {
@@ -158,38 +158,41 @@ describe("module graph plans", () => {
 
     expect(plan.packageScripts).toEqual({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
-      fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
-      "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-      "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint oxlint.config.ts oxfmt.config.ts",
-      "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-      typecheck: "tsc -p tsconfig.config.json --noEmit",
+        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
+      "check:run": 'node -e ""',
+      fix: "turbo run format:write:run lint:fix:run fix:run",
+      "fix:run": 'node -e ""',
+      "format:check": "turbo run format:check:run",
+      "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "format:write": "turbo run format:write:run",
+      "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
+      lint: "turbo run lint:run",
+      "lint:fix": "turbo run lint:fix:run",
+      "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
+      "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
+      typecheck: "turbo run typecheck:run",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
     });
     expect(projectTsLibPackageScripts()).toEqual({
-      check: "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
-      typecheck: "tsc -p tsconfig.json --noEmit",
+      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+      "lint:run": "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit",
     });
   });
 
   it("projects hono-api package scripts from Check and Fix Plans", () => {
     expect(projectHonoApiPackageScripts()).toEqual({
-      build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+      "build:run":
+        "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+      "lint:run": "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
       start: "node dist/server.js",
-      test: "vitest run",
-      typecheck: "tsc -p tsconfig.json --noEmit",
+      "test:run": "vitest run",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit",
     });
   });
 
@@ -209,20 +212,17 @@ describe("module graph plans", () => {
     });
 
     expect(projectVueAppPackageScripts()).toEqual({
-      build: "vite build",
-      check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
+      "build:run": "vite build",
       dev: "vite",
-      fix: "pnpm run format:write && pnpm run lint:fix",
-      "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
-      "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-      lint: "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+      "lint:run": "oxlint --config ../../oxlint.config.ts .",
+      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
       preview: "vite preview",
-      test: "vitest run",
-      "test:e2e":
-        "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
-      typecheck: "vue-tsc --build --noEmit",
+      "test:run": "vitest run",
+      "test:e2e:run":
+        "node --experimental-strip-types scripts/run-playwright.ts",
+      "typecheck:run": "vue-tsc --build --noEmit",
     });
     expect(plan.checkPlan.environmentNeeds).toEqual([
       {
@@ -285,25 +285,28 @@ describe("module graph plans", () => {
       },
     ]);
     expect(renderFixCommand(rootFixPlan)).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
+      "turbo run format:write:run lint:fix:run fix:run",
     );
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
+        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
+      "check:run": 'node -e ""',
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),
-      "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-      "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint oxlint.config.ts oxfmt.config.ts",
-      "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-      typecheck: "tsc -p tsconfig.config.json --noEmit",
+      "fix:run": 'node -e ""',
+      "format:check": "turbo run format:check:run",
+      "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "format:write": "turbo run format:write:run",
+      "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
+      lint: "turbo run lint:run",
+      "lint:fix": "turbo run lint:fix:run",
+      "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
+      "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
+      typecheck: "turbo run typecheck:run",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
     });
-    expect(projectVueHonoApiPackageScripts().check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test",
-    );
-    expect(projectVueHonoWebPackageScripts().check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run build && pnpm run test && pnpm run test:e2e",
-    );
+    expect(projectVueHonoApiPackageScripts()).not.toHaveProperty("check");
+    expect(projectVueHonoWebPackageScripts()).not.toHaveProperty("check");
     expect(rootCheckPlan.environmentNeeds).toEqual([
       {
         kind: "playwright-browser-assets",
@@ -344,14 +347,17 @@ describe("module graph plans", () => {
       "rustfmt-write",
     ]);
     expect(renderRootCheckCommand(checkPlan)).toBe(
-      "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
+      "turbo run format:check:run lint:run test:run check:run",
     );
-    expect(renderFixCommand(fixPlan)).toBe("cargo fmt --all");
+    expect(renderFixCommand(fixPlan)).toBe(
+      "turbo run format:write:run fix:run",
+    );
     expect(renderFixCommand(fixPlan)).not.toContain("clippy");
     expect(projectRustBinPackageScripts()).toEqual({
-      check:
-        "cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace",
-      fix: "cargo fmt --all",
+      "format:check:run": "cargo fmt --all -- --check",
+      "format:write:run": "cargo fmt --all",
+      "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
+      "test:run": "cargo test --workspace",
     });
   });
 

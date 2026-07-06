@@ -75,7 +75,66 @@ function renderTurboPackageFilter(owner: ComponentOwner): string {
   return `--filter './${owner.path}'`;
 }
 
-function renderCheckComponentCommand(component: CheckComponent): string {
+export function checkComponentTaskName(component: CheckComponent): string {
+  return checkComponentTaskNames(component)[0] ?? "check:run";
+}
+
+function checkComponentTaskNames(component: CheckComponent): readonly string[] {
+  switch (component.kind) {
+    case "typescript-typecheck":
+    case "turbo-package-typecheck":
+      return ["typecheck:run"];
+    case "oxc-lint":
+    case "cargo-clippy":
+      return ["lint:run"];
+    case "oxc-format-check":
+    case "rustfmt-check":
+      return ["format:check:run"];
+    case "build":
+    case "turbo-package-build":
+      return ["build:run"];
+    case "unit-test":
+    case "cargo-test":
+    case "turbo-package-test":
+      return ["test:run"];
+    case "e2e-test":
+    case "turbo-package-e2e-test":
+      return ["test:e2e:run"];
+    case "turbo-check":
+    case "turbo-package-check":
+      return [
+        "format:check:run",
+        "lint:run",
+        "typecheck:run",
+        "build:run",
+        "test:run",
+        "test:e2e:run",
+      ];
+  }
+}
+
+export function fixComponentTaskName(component: FixComponent): string {
+  return fixComponentTaskNames(component)[0] ?? "fix:run";
+}
+
+function fixComponentTaskNames(component: FixComponent): readonly string[] {
+  switch (component.kind) {
+    case "oxc-format-write":
+    case "rustfmt-write":
+      return ["format:write:run"];
+    case "oxc-lint-fix":
+      return ["lint:fix:run"];
+    case "turbo-fix":
+    case "turbo-package-fix":
+      return ["format:write:run", "lint:fix:run"];
+  }
+}
+
+function uniqueTaskNames(taskNames: readonly string[]): string[] {
+  return [...new Set(taskNames)];
+}
+
+export function renderCheckLeafCommand(component: CheckComponent): string {
   switch (component.kind) {
     case "typescript-typecheck":
       return "pnpm run typecheck";
@@ -110,7 +169,7 @@ function renderCheckComponentCommand(component: CheckComponent): string {
   }
 }
 
-function renderFixComponentCommand(component: FixComponent): string {
+export function renderFixLeafCommand(component: FixComponent): string {
   switch (component.kind) {
     case "oxc-format-write":
       return "pnpm run format:write";
@@ -126,11 +185,17 @@ function renderFixComponentCommand(component: FixComponent): string {
 }
 
 export function renderRootCheckCommand(plan: CheckPlan): string {
-  return plan.components.map(renderCheckComponentCommand).join(" && ");
+  return `turbo run ${uniqueTaskNames([
+    ...plan.components.flatMap(checkComponentTaskNames),
+    "check:run",
+  ]).join(" ")}`;
 }
 
 export function renderFixCommand(plan: FixPlan): string {
-  return plan.components.map(renderFixComponentCommand).join(" && ");
+  return `turbo run ${uniqueTaskNames([
+    ...plan.components.flatMap(fixComponentTaskNames),
+    "fix:run",
+  ]).join(" ")}`;
 }
 
 function playwrightBrowserInstallArgs(

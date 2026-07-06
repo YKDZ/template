@@ -93,14 +93,14 @@ async function sourceFileSnapshot(
 }
 
 function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
-  expect(scripts["format:check"]).toBe(
+  expect(scripts["format:check:run"]).toBe(
     "oxfmt --check --config ../../oxfmt.config.ts .",
   );
-  expect(scripts["format:write"]).toBe(
+  expect(scripts["format:write:run"]).toBe(
     "oxfmt --write --config ../../oxfmt.config.ts .",
   );
-  expect(scripts.lint).toBe("oxlint --config ../../oxlint.config.ts .");
-  expect(scripts["lint:fix"]).toBe(
+  expect(scripts["lint:run"]).toBe("oxlint --config ../../oxlint.config.ts .");
+  expect(scripts["lint:fix:run"]).toBe(
     "oxlint --config ../../oxlint.config.ts . --fix",
   );
 }
@@ -279,13 +279,10 @@ describe("template add package", () => {
       engines: { node: string };
     }>(path.join(projectDir, "package.json"));
     const turboConfig = await readJson<{
-      tasks: {
-        build: { dependsOn?: string[]; outputs: string[] };
-        check: { dependsOn: string[] };
-        typecheck: { dependsOn: string[] };
-        test: { dependsOn: string[] };
-        "test:e2e": { dependsOn: string[] };
-      };
+      tasks: Record<
+        string,
+        { cache?: boolean; dependsOn?: string[]; outputs?: string[] }
+      >;
     }>(path.join(projectDir, "turbo.json"));
     const rootTsconfig = await readJson<{
       references?: Array<{ path: string }>;
@@ -331,28 +328,28 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --concurrency=1 --filter './apps/*' --filter './packages/*'",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run check --concurrency=1 --filter './apps/*'",
+      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --concurrency=1",
     );
-    expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks.build).toEqual({
-      dependsOn: ["^build"],
+    expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
+    ]);
+    expect(turboConfig.tasks["build:run"]).toEqual({
+      dependsOn: ["^build:run"],
       outputs: ["dist/**"],
     });
-    expect(turboConfig.tasks.test.dependsOn).toEqual(["^typecheck"]);
-    expect(turboConfig.tasks["test:e2e"].dependsOn).toEqual([
-      "build",
-      "^build",
+    expect(turboConfig.tasks["test:run"]!.dependsOn).toEqual([
+      "^typecheck:run",
     ]);
-    expect(turboConfig.tasks.check.dependsOn).toEqual([
-      "typecheck",
-      "build",
-      "test",
+    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual([
+      "build:run",
+      "^build:run",
     ]);
+    expect(turboConfig.tasks["check:run"]!.cache).toBe(false);
     expect(rootPackageJson.scripts.fix).toBe(
-      "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*' --filter './packages/*'",
+      "turbo run format:write:run lint:fix:run fix:run",
     );
     expect(rootPackageJson.scripts.fix).not.toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -364,10 +361,8 @@ describe("template add package", () => {
     expect(rootPackageJson.engines.node).toBe("24");
     expect(packageJson.engines.node).toBe(rootPackageJson.engines.node);
     expect(packageJson).not.toHaveProperty("packageManager");
-    expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-    );
-    expect(packageJson.scripts).not.toHaveProperty("build");
+    expect(packageJson.scripts).not.toHaveProperty("check");
+    expect(packageJson.scripts).not.toHaveProperty("build:run");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     const addedPackageDependencySpecifiers = [
@@ -466,10 +461,10 @@ describe("template add package", () => {
     );
     expect(workspaceYaml).toContain("  - services/*");
     expect(rootPackageJson.scripts.check).not.toContain(
-      "turbo run typecheck --filter './apps/*' --filter './services/*'",
+      "turbo run typecheck:run --filter './apps/*' --filter './services/*'",
     );
     expect(rootPackageJson.scripts.check).toContain(
-      "turbo run check --concurrency=1 --filter './apps/*' --filter './services/*'",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1",
     );
     expect(rootTsconfig.references).not.toContainEqual({
       path: "./services/worker/tsconfig.json",
@@ -1228,10 +1223,8 @@ describe("template add package", () => {
     expect(rootTsconfig).toEqual({ files: [] });
     expect(packageJson.name).toBe("@demo-lib/shared");
     expect(packageJson).not.toHaveProperty("packageManager");
-    expect(packageJson.scripts.check).toBe(
-      "pnpm run typecheck && pnpm run lint && pnpm run format:check",
-    );
-    expect(packageJson.scripts).not.toHaveProperty("build");
+    expect(packageJson.scripts).not.toHaveProperty("check");
+    expect(packageJson.scripts).not.toHaveProperty("build:run");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
 
@@ -1621,7 +1614,7 @@ describe("template add package", () => {
         types: "./src/*.ts",
       },
     });
-    expect(packageJson.scripts.check).toContain("pnpm run test");
+    expect(packageJson.scripts["test:run"]).toBe("vitest run");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(serverSource).toContain('from "#/app"');
@@ -1765,7 +1758,9 @@ describe("template add package", () => {
         types: "./src/*.ts",
       },
     });
-    expect(packageJson.scripts.typecheck).toBe("vue-tsc --build --noEmit");
+    expect(packageJson.scripts["typecheck:run"]).toBe(
+      "vue-tsc --build --noEmit",
+    );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(appTsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(appSource).toContain('from "#/stores/counter"');
@@ -1885,7 +1880,9 @@ describe("template add package", () => {
     expect(gitignore).toContain("node_modules\n");
     expect(gitignore).toContain("dist\n");
     expect(packageJson.name).toBe("@demo-native/shared");
-    expect(packageJson.scripts.check).toContain("pnpm run typecheck");
+    expect(packageJson.scripts["typecheck:run"]).toBe(
+      "tsc -p tsconfig.json --noEmit",
+    );
     await stat(path.join(projectDir, "oxlint.config.ts"));
     await stat(path.join(projectDir, "oxfmt.config.ts"));
   });
@@ -1991,9 +1988,9 @@ describe("template add package", () => {
     const webPorts = playwrightWebServerPorts(webPlaywright);
     const [adminPort] = playwrightWebServerPorts(adminPlaywright);
     expect(webPorts).not.toContain(adminPort);
-    expect(adminPackageJson.scripts.check).toContain("pnpm run test:e2e");
-    expect(adminPackageJson.scripts["test:e2e"]).toBe(
-      "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
+    expect(adminPackageJson.scripts).not.toHaveProperty("check");
+    expect(adminPackageJson.scripts["test:e2e:run"]).toBe(
+      "node --experimental-strip-types scripts/run-playwright.ts",
     );
   });
 
