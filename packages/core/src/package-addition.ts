@@ -749,8 +749,9 @@ function turboPackageTaskCommand(
   workspacePackageGlobs: readonly string[],
 ): string {
   const filters = workspacePackageGlobs.map((glob) => `--filter './${glob}'`);
+  const concurrency = task === "check" ? ["--concurrency=1"] : [];
 
-  return [`turbo run ${task}`, ...filters].join(" ");
+  return [`turbo run ${task}`, ...concurrency, ...filters].join(" ");
 }
 
 function rootScriptWithTurboPackageTask(

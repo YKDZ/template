@@ -331,10 +331,10 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*' --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --concurrency=1 --filter './apps/*' --filter './packages/*'",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run check --concurrency=1 --filter './apps/*'",
     );
     expect(turboConfig.tasks.typecheck.dependsOn).toEqual(["^typecheck"]);
     expect(turboConfig.tasks.build).toEqual({
@@ -469,7 +469,7 @@ describe("template add package", () => {
       "turbo run typecheck --filter './apps/*' --filter './services/*'",
     );
     expect(rootPackageJson.scripts.check).toContain(
-      "turbo run check --filter './apps/*' --filter './services/*'",
+      "turbo run check --concurrency=1 --filter './apps/*' --filter './services/*'",
     );
     expect(rootTsconfig.references).not.toContainEqual({
       path: "./services/worker/tsconfig.json",
