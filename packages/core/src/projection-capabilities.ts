@@ -316,20 +316,6 @@ const capabilityInterpreters = {
       });
       const workspaceBoundary = workspaceBoundaryForState(state);
       state.rootCheckComponents.push({
-        kind: "turbo-package-typecheck",
-        owner: workspaceBoundary,
-      });
-      if (state.nodeWorkspace !== undefined) {
-        state.rootCheckComponents.push({
-          kind: "turbo-package-build",
-          owner: workspaceBoundary,
-        });
-        state.rootCheckComponents.push({
-          kind: "turbo-package-test",
-          owner: workspaceBoundary,
-        });
-      }
-      state.rootCheckComponents.push({
         kind: "turbo-package-check",
         owner: workspaceBoundary,
       });
@@ -389,13 +375,13 @@ const capabilityInterpreters = {
         { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
       );
       state.rootScriptFragments["format:check"] =
-        "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts";
+        "oxfmt --check oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments["format:write"] =
-        "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts";
+        "oxfmt --write oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments.lint =
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts";
+        "oxlint oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments["lint:fix"] =
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix";
+        "oxlint oxlint.config.ts oxfmt.config.ts --fix";
       state.packageScriptFragments["format:check"] =
         "oxfmt --check --config ../../oxfmt.config.ts .";
       state.packageScriptFragments["format:write"] =

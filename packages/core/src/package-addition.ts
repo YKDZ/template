@@ -777,32 +777,6 @@ function rootScriptWithTurboPackageTask(
   return commands.join(" && ");
 }
 
-function turboTaskNamesForPackageManifests(
-  manifests: readonly PackageManifestForTaskGraph[],
-): Array<"typecheck" | "build" | "test" | "test:e2e" | "check"> {
-  const taskNames: Array<
-    "typecheck" | "build" | "test" | "test:e2e" | "check"
-  > = [];
-
-  for (const taskName of [
-    "typecheck",
-    "build",
-    "test",
-    "test:e2e",
-    "check",
-  ] as const) {
-    if (
-      manifests.some(
-        (manifest) => typeof manifest.scripts?.[taskName] === "string",
-      )
-    ) {
-      taskNames.push(taskName);
-    }
-  }
-
-  return taskNames;
-}
-
 function rootScriptWithTurboPackageTasks(options: {
   readonly script: string;
   readonly taskNames: readonly (
@@ -827,15 +801,10 @@ function rootScriptWithTurboPackageTasks(options: {
 function rootPackageJsonWithPackageTaskFilters(
   input: unknown,
   blueprint: ProjectBlueprint,
-  packageManifests: readonly PackageManifestForTaskGraph[],
 ): RootPackageJson {
   assertRootPackageJson(input);
 
   const workspacePackageGlobs = workspacePackageGlobsFromBlueprint(blueprint);
-  const taskNames = turboTaskNamesForPackageManifests(packageManifests);
-  const rootCheckTaskNames = taskNames.filter(
-    (taskName) => taskName !== "test:e2e",
-  );
   const checkScript = input.scripts.check;
   const fixScript = input.scripts.fix;
   if (checkScript === undefined || fixScript === undefined) {
@@ -850,7 +819,7 @@ function rootPackageJsonWithPackageTaskFilters(
       ...input.scripts,
       check: rootScriptWithTurboPackageTasks({
         script: checkScript,
-        taskNames: rootCheckTaskNames,
+        taskNames: ["check"],
         workspacePackageGlobs,
       }),
       fix: rootScriptWithTurboPackageTask(
@@ -1025,7 +994,6 @@ async function planRootUpdates(
   const rootPackageJson = rootPackageJsonWithPackageTaskFilters(
     await readJson(path.join(root, "package.json")),
     nextBlueprint,
-    packageManifests,
   );
 
   return {

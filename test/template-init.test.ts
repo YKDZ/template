@@ -501,15 +501,12 @@ describe("template init", () => {
     });
     expect(rootPackageJson.scripts).toMatchObject({
       check:
-        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
+        "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
       fix: "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
-      "format:check":
-        "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      "format:write":
-        "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-      lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
-      "lint:fix":
-        "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
+      "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+      "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
+      lint: "oxlint oxlint.config.ts oxfmt.config.ts",
+      "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
       typecheck: "tsc -p tsconfig.config.json --noEmit",
     });
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
@@ -1151,7 +1148,7 @@ describe("template init", () => {
     expect(dockerfile).not.toContain("vitest");
     expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
     expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );
     expect(packageJson.devDependencies.turbo).toBe("catalog:");
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
@@ -1260,10 +1257,10 @@ describe("template init", () => {
           "oxfmt.config.ts",
         ]);
         expect(rootPackageJson.scripts["format:check"]).toBe(
-          "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+          "oxfmt --check oxlint.config.ts oxfmt.config.ts",
         );
         expect(rootPackageJson.scripts.lint).toBe(
-          "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
+          "oxlint oxlint.config.ts oxfmt.config.ts",
         );
       }
 
@@ -1374,7 +1371,7 @@ describe("template init", () => {
     expect(packageJson.name).toBe("demo-lib");
     expect(packageJson.scripts).toEqual(expectedPlan.packageScripts);
     expect(packageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );
     expect(packageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './packages/*'",
@@ -2257,16 +2254,16 @@ describe("template init", () => {
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
     );
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxlint oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",
@@ -2746,16 +2743,16 @@ describe("template init", () => {
     expect(rootPackageJson.private).toBe(true);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
     );
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxlint oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",
@@ -3054,17 +3051,17 @@ describe("template init", () => {
     expect(rootPackageJson.name).toBe("demo-fullstack");
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.fix).toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxfmt --check oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.lint).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
+      "oxlint oxlint.config.ts oxfmt.config.ts",
     );
     expect(rootPackageJson.scripts.typecheck).toBe(
       "tsc -p tsconfig.config.json --noEmit",

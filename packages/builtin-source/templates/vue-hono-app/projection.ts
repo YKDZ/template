@@ -105,9 +105,6 @@ function planVueHonoRootChecks(): CheckPlan {
       { kind: "oxc-format-check", owner: rootBoundary },
       { kind: "oxc-lint", owner: rootBoundary },
       { kind: "typescript-typecheck", owner: rootBoundary },
-      { kind: "turbo-package-typecheck", owner: workspacePackageBoundary },
-      { kind: "turbo-package-build", owner: workspacePackageBoundary },
-      { kind: "turbo-package-test", owner: workspacePackageBoundary },
       { kind: "turbo-package-check", owner: workspacePackageBoundary },
     ],
     environmentNeeds: [
@@ -186,13 +183,10 @@ export function projectVueHonoRootPackageScripts(): Record<string, string> {
     check: renderRootCheckCommand(planVueHonoRootChecks()),
     dev: "turbo run dev --parallel",
     fix: renderFixCommand(planVueHonoRootFixes()),
-    "format:check":
-      "oxfmt --check --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-    "format:write":
-      "oxfmt --write --config oxfmt.config.ts oxlint.config.ts oxfmt.config.ts",
-    lint: "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts",
-    "lint:fix":
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts --fix",
+    "format:check": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+    "format:write": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
+    lint: "oxlint oxlint.config.ts oxfmt.config.ts",
+    "lint:fix": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
     typecheck: "tsc -p tsconfig.config.json --noEmit",
   };
 }

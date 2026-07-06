@@ -202,7 +202,6 @@ describe("Preset Registry", () => {
       "oxc-format-check",
       "oxc-lint",
       "typescript-typecheck",
-      "turbo-package-typecheck",
       "turbo-package-check",
     ]);
     expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
@@ -211,7 +210,7 @@ describe("Preset Registry", () => {
       "turbo-package-fix",
     ]);
     expect(plan.packageScripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './packages/*' && turbo run check --filter './packages/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './packages/*'",
     );
 
     const packageJson = await readJsonWithSchema(
@@ -398,7 +397,7 @@ describe("Preset Registry", () => {
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(rootPackageJson.devDependencies?.turbo).toBe("catalog:");
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run typecheck --filter './apps/*' && turbo run build --filter './apps/*' && turbo run test --filter './apps/*' && turbo run check --filter './apps/*'",
+      "pnpm run format:check && pnpm run lint && pnpm run typecheck && turbo run check --filter './apps/*'",
     );
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
   });
