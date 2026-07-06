@@ -682,15 +682,15 @@ describe("declaration contracts", () => {
       additionalProperties: false,
       required: ["kind", "workspacePackageGlob", "packages"],
       properties: {
-        workspacePackageGlob: { const: "apps/*" },
+        workspacePackageGlob: { enum: [".", "apps/*"] },
         packages: {
           minItems: 1,
           items: {
             additionalProperties: false,
             required: ["kind", "path", "sourceFiles"],
             properties: {
-              kind: { enum: ["hono-api", "vue-app"] },
-              path: { enum: ["apps/api", "apps/web"] },
+              kind: { enum: ["hono-api", "vike-app", "vue-app"] },
+              path: { enum: [".", "apps/api", "apps/web"] },
               sourceFiles: { minItems: 1 },
             },
           },

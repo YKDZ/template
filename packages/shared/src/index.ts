@@ -15,7 +15,11 @@ export const packageAdditionSupportValues = [
 
 export type PackageRole = "runtime-service" | "shared-library";
 
-export type PackageSourcePreset = "hono-api" | "ts-lib" | "vue-app";
+export type PackageSourcePreset =
+  | "hono-api"
+  | "ts-lib"
+  | "vike-app"
+  | "vue-app";
 
 export type PackageLinkIntent = {
   readonly consumerPackagePath: string;
@@ -116,8 +120,8 @@ export type WorkspaceLibraryPackageCapabilityDeclaration = {
   readonly sourceFiles: readonly string[];
 };
 
-export type WorkspaceNodePackageKind = "hono-api" | "vue-app";
-export type WorkspaceNodePackagePath = "apps/api" | "apps/web";
+export type WorkspaceNodePackageKind = "hono-api" | "vike-app" | "vue-app";
+export type WorkspaceNodePackagePath = "." | "apps/api" | "apps/web";
 
 export type WorkspaceNodePackageDeclaration = {
   readonly kind: WorkspaceNodePackageKind;
@@ -127,7 +131,7 @@ export type WorkspaceNodePackageDeclaration = {
 
 export type WorkspaceNodePackagesCapabilityDeclaration = {
   readonly kind: "workspace-node-packages";
-  readonly workspacePackageGlob: "apps/*";
+  readonly workspacePackageGlob: "." | "apps/*";
   readonly packages: readonly WorkspaceNodePackageDeclaration[];
   readonly packageLinks?: readonly {
     readonly consumerPackagePath: "apps/web";
@@ -461,7 +465,7 @@ export const presetSourceManifestJsonSchema = {
                       required: ["kind", "workspacePackageGlob", "packages"],
                       properties: {
                         kind: { const: "workspace-node-packages" },
-                        workspacePackageGlob: { const: "apps/*" },
+                        workspacePackageGlob: { enum: [".", "apps/*"] },
                         packages: {
                           type: "array",
                           minItems: 1,
@@ -470,8 +474,10 @@ export const presetSourceManifestJsonSchema = {
                             additionalProperties: false,
                             required: ["kind", "path", "sourceFiles"],
                             properties: {
-                              kind: { enum: ["hono-api", "vue-app"] },
-                              path: { enum: ["apps/api", "apps/web"] },
+                              kind: {
+                                enum: ["hono-api", "vike-app", "vue-app"],
+                              },
+                              path: { enum: [".", "apps/api", "apps/web"] },
                               sourceFiles: {
                                 type: "array",
                                 minItems: 1,
@@ -602,6 +608,7 @@ const packageRoleSchema = v.picklist([
 const packageSourcePresetSchema = v.picklist([
   "hono-api",
   "ts-lib",
+  "vike-app",
   "vue-app",
 ] as const);
 const presetSourceManifestPresetSourceSchema = v.strictObject({
@@ -753,7 +760,7 @@ export const blueprintJsonSchema = {
           name: { type: "string", minLength: 1 },
           path: { type: "string", minLength: 1 },
           role: { enum: ["runtime-service", "shared-library"] },
-          sourcePreset: { enum: ["hono-api", "ts-lib", "vue-app"] },
+          sourcePreset: { enum: ["hono-api", "ts-lib", "vike-app", "vue-app"] },
         },
       },
     },
@@ -1242,8 +1249,16 @@ function nonEmptyStringArray(value: unknown[]): string[] | undefined {
 }
 
 const projectionCapabilityKindSet = new Set<string>(projectionCapabilityKinds);
-const workspaceNodePackageKindSet = new Set<string>(["hono-api", "vue-app"]);
-const workspaceNodePackagePathSet = new Set<string>(["apps/api", "apps/web"]);
+const workspaceNodePackageKindSet = new Set<string>([
+  "hono-api",
+  "vike-app",
+  "vue-app",
+]);
+const workspaceNodePackagePathSet = new Set<string>([
+  ".",
+  "apps/api",
+  "apps/web",
+]);
 
 function isProjectionCapabilityKind(
   value: string,
@@ -1405,7 +1420,7 @@ function parseWorkspaceNodePackage(
     issues.push({
       path: `${pathPrefix}.kind`,
       message:
-        "workspace-node-packages package kind must be hono-api or vue-app",
+        "workspace-node-packages package kind must be hono-api, vike-app, or vue-app",
     });
   }
 
@@ -1413,7 +1428,7 @@ function parseWorkspaceNodePackage(
     issues.push({
       path: `${pathPrefix}.path`,
       message:
-        "workspace-node-packages package path must be apps/api or apps/web",
+        "workspace-node-packages package path must be ., apps/api, or apps/web",
     });
   }
 
@@ -1545,12 +1560,17 @@ function parseWorkspaceNodePackagesCapability(
   pathPrefix: string,
 ): WorkspaceNodePackagesCapabilityDeclaration | ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const workspacePackageGlob =
+    capability.workspacePackageGlob === "." ||
+    capability.workspacePackageGlob === "apps/*"
+      ? capability.workspacePackageGlob
+      : undefined;
 
-  if (capability.workspacePackageGlob !== "apps/*") {
+  if (workspacePackageGlob === undefined) {
     issues.push({
       path: `${pathPrefix}.workspacePackageGlob`,
       message:
-        "workspace-node-packages currently supports workspacePackageGlob: apps/*",
+        "workspace-node-packages currently supports workspacePackageGlob: . or apps/*",
     });
   }
 
@@ -1587,9 +1607,15 @@ function parseWorkspaceNodePackagesCapability(
     return issues;
   }
 
+  if (workspacePackageGlob === undefined) {
+    throw new Error(
+      `workspace-node-packages validation failed without workspacePackageGlob diagnostic at ${pathPrefix}`,
+    );
+  }
+
   return {
     kind: "workspace-node-packages",
-    workspacePackageGlob: "apps/*",
+    workspacePackageGlob,
     packages,
     ...(packageLinks === undefined ? {} : { packageLinks }),
   };

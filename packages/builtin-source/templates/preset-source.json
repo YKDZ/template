@@ -32,6 +32,7 @@
       { "preset": "ts-lib" },
       { "preset": "hono-api" },
       { "preset": "vue-app" },
+      { "preset": "vike-app" },
       { "preset": "vue-hono-app" },
       { "preset": "rust-bin" }
     ],
@@ -79,6 +80,11 @@
       },
       {
         "basePreset": "ts-lib",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "ts-lib",
         "addedPreset": "rust-bin",
         "reason": "rust-bin is an initialization-only native binary preset."
       },
@@ -86,6 +92,11 @@
         "basePreset": "hono-api",
         "addedPreset": "vue-hono-app",
         "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "hono-api",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
       },
       {
         "basePreset": "hono-api",
@@ -96,6 +107,51 @@
         "basePreset": "vue-app",
         "addedPreset": "vue-hono-app",
         "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "vue-app",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "ts-lib",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "hono-api",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "vue-app",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "vue-hono-app",
+        "reason": "vue-hono-app is an initialization-only full-stack preset."
+      },
+      {
+        "basePreset": "vike-app",
+        "addedPreset": "rust-bin",
+        "reason": "rust-bin is an initialization-only native binary preset."
+      },
+      {
+        "basePreset": "vue-hono-app",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
+      },
+      {
+        "basePreset": "rust-bin",
+        "addedPreset": "vike-app",
+        "reason": "vike-app is an initialization-only root application preset."
       },
       {
         "basePreset": "vue-app",
@@ -343,6 +399,126 @@
           "vue-app/scripts/run-playwright.ts",
           "vue-app/vite.config.ts",
           "vue-app/vitest.config.ts"
+        ],
+        "sharedResources": [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-format",
+          "shared-oxc-root-tsconfig",
+          "shared-oxc-vue"
+        ]
+      }
+    },
+    {
+      "name": "vike-app",
+      "title": "Vike app",
+      "description": "Single-package Vike, Hono, Telefunc, Drizzle, and Vue application.",
+      "generation": "supported",
+      "supportedPackageManagers": ["pnpm"],
+      "supportedProjectKinds": ["multi-package"],
+      "packageAdditionSupport": "unsupported",
+      "features": [
+        "pnpm-catalog",
+        "oxc-format-lint",
+        "strict-typescript",
+        "root-check",
+        "fix-command",
+        "devcontainer",
+        "github-actions",
+        "dependabot"
+      ],
+      "dependencyCatalog": [
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@vitejs/plugin-vue",
+        "@vikejs/hono",
+        "@vue/tsconfig",
+        "drizzle-kit",
+        "drizzle-orm",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "oxlint-tsgolint",
+        "tailwindcss",
+        "telefunc",
+        "typescript",
+        "vite",
+        "vike",
+        "vike-vue",
+        "vitest",
+        "vue",
+        "vue-tsc"
+      ],
+      "projection": {
+        "capabilities": [
+          {
+            "kind": "workspace-node-packages",
+            "workspacePackageGlob": ".",
+            "packages": [
+              {
+                "kind": "vike-app",
+                "path": ".",
+                "sourceFiles": [
+                  "+server.ts",
+                  ".env.example",
+                  "assets/logo.svg",
+                  "components/CounterButton.vue",
+                  "components/PageShell.vue",
+                  "database/db.ts",
+                  "database/queries/todos.ts",
+                  "database/schema.ts",
+                  "drizzle.config.ts",
+                  "env.d.ts",
+                  "global.d.ts",
+                  "pages/+Head.vue",
+                  "pages/+Layout.vue",
+                  "pages/+config.ts",
+                  "pages/index/+Page.vue",
+                  "pages/index/+Page.telefunc.ts",
+                  "pages/tailwind.css",
+                  "playwright.config.ts",
+                  "server/api.ts",
+                  "server/app.ts",
+                  "test/e2e/app.spec.ts",
+                  "test/todos.test.ts",
+                  "vite.config.ts",
+                  "vitest.config.ts"
+                ]
+              }
+            ]
+          },
+          { "kind": "strict-typescript-root" },
+          {
+            "kind": "oxc-format-lint",
+            "editorCustomizationResourceId": "shared-editor-customization"
+          },
+          {
+            "kind": "node-pnpm-devcontainer",
+            "devcontainerResourceId": "shared-devcontainer"
+          },
+          { "kind": "github-maintenance" }
+        ]
+      },
+      "source": {
+        "roots": [
+          "vike-app/.github",
+          "vike-app/assets",
+          "vike-app/components",
+          "vike-app/database",
+          "vike-app/pages",
+          "vike-app/server",
+          "vike-app/test"
+        ],
+        "files": [
+          "vike-app/+server.ts",
+          "vike-app/.env.example",
+          "vike-app/drizzle.config.ts",
+          "vike-app/env.d.ts",
+          "vike-app/global.d.ts",
+          "vike-app/playwright.config.ts",
+          "vike-app/vite.config.ts",
+          "vike-app/vitest.config.ts"
         ],
         "sharedResources": [
           "shared-devcontainer",

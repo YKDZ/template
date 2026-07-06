@@ -1,7 +1,4 @@
-// @template-anchor api-type-import-start
-import type { AppType } from "__API_PACKAGE__";
-import { hc } from "hono/client";
-// @template-anchor api-type-import-end
+// @template-anchor api-type-imports
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/";
 

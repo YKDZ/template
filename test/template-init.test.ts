@@ -357,7 +357,11 @@ function editorCustomizationCapabilitiesForPreset(
     return ["rust-tooling"];
   }
 
-  if (preset === "vue-app" || preset === "vue-hono-app") {
+  if (
+    preset === "vue-app" ||
+    preset === "vike-app" ||
+    preset === "vue-hono-app"
+  ) {
     return ["oxc-format-lint", "vue", "tailwind", "vitest"];
   }
 
@@ -850,12 +854,15 @@ describe("template init", () => {
       if (
         preset.name === "hono-api" ||
         preset.name === "ts-lib" ||
+        preset.name === "vike-app" ||
         preset.name === "vue-app" ||
         preset.name === "vue-hono-app"
       ) {
         expect(files).toContain(".devcontainer/Dockerfile");
         const isBrowserPreset =
-          preset.name === "vue-app" || preset.name === "vue-hono-app";
+          preset.name === "vue-app" ||
+          preset.name === "vike-app" ||
+          preset.name === "vue-hono-app";
         expect(devcontainer.build).toEqual({
           dockerfile: "Dockerfile",
           args: {
@@ -885,6 +892,7 @@ describe("template init", () => {
           expect(dockerfile).not.toContain("vitest");
         } else if (
           preset.name === "hono-api" ||
+          preset.name === "vike-app" ||
           preset.name === "vue-app" ||
           preset.name === "vue-hono-app"
         ) {
@@ -1250,17 +1258,23 @@ describe("template init", () => {
           path.join(projectDir, "tsconfig.config.json"),
         );
         expect(rootPackageJson.scripts.typecheck).toBe(
-          "tsc -p tsconfig.config.json --noEmit",
+          preset === "vike-app"
+            ? "vue-tsc --build --noEmit"
+            : "tsc -p tsconfig.config.json --noEmit",
         );
         expect(rootConfigTsconfig.include).toEqual([
           "oxlint.config.ts",
           "oxfmt.config.ts",
         ]);
         expect(rootPackageJson.scripts["format:check"]).toBe(
-          "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+          preset === "vike-app"
+            ? "oxfmt --check --config oxfmt.config.ts ."
+            : "oxfmt --check oxlint.config.ts oxfmt.config.ts",
         );
         expect(rootPackageJson.scripts.lint).toBe(
-          "oxlint oxlint.config.ts oxfmt.config.ts",
+          preset === "vike-app"
+            ? "oxlint --type-aware --config oxlint.config.ts ."
+            : "oxlint oxlint.config.ts oxfmt.config.ts",
         );
       }
 
@@ -1269,16 +1283,24 @@ describe("template init", () => {
           scripts: Record<string, string>;
         }>(path.join(projectDir, packageDir, "package.json"));
         expect(packageJson.scripts["format:check"]).toBe(
-          "oxfmt --check --config ../../oxfmt.config.ts .",
+          preset === "vike-app"
+            ? "oxfmt --check --config oxfmt.config.ts ."
+            : "oxfmt --check --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts["format:write"]).toBe(
-          "oxfmt --write --config ../../oxfmt.config.ts .",
+          preset === "vike-app"
+            ? "oxfmt --write --config oxfmt.config.ts ."
+            : "oxfmt --write --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts.lint).toBe(
-          "oxlint --config ../../oxlint.config.ts .",
+          preset === "vike-app"
+            ? "oxlint --type-aware --config oxlint.config.ts ."
+            : "oxlint --config ../../oxlint.config.ts .",
         );
         expect(packageJson.scripts["lint:fix"]).toBe(
-          "oxlint --config ../../oxlint.config.ts . --fix",
+          preset === "vike-app"
+            ? "oxlint --type-aware --config oxlint.config.ts . --fix"
+            : "oxlint --config ../../oxlint.config.ts . --fix",
         );
         expect(files).not.toContain(`${packageDir}/oxlint.config.ts`);
         expect(files).not.toContain(`${packageDir}/oxfmt.config.ts`);
@@ -3131,6 +3153,8 @@ describe("template init", () => {
       /^import type \{ AppType \} from "@demo-fullstack\/api";$/m,
     );
     expect(webApiClient).toMatch(/^import \{ hc \} from "hono\/client";$/m);
+    expect(webApiClient).not.toContain("__API_PACKAGE__");
+    expect(webApiClient).not.toContain("@template-anchor");
     expect(webAppSource).toContain('from "#/api"');
     expect(webAppSource).toContain('from "#/stores/counter"');
     expect(webAppTestSource).toContain('from "#/stores/counter"');

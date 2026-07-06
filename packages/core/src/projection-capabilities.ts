@@ -92,6 +92,7 @@ export type ProjectionSourcePreset =
   | "hono-api"
   | "rust-bin"
   | "ts-lib"
+  | "vike-app"
   | "vue-app"
   | "vue-hono-app";
 
@@ -243,7 +244,14 @@ const capabilityInterpreters = {
         sourceRootPreset(capability),
       );
       state.operationFactories.push(workspaceNodePackagesOperations);
-      if (capability.packages.length > 1) {
+      if (isRootNodeWorkspace(capability)) {
+        state.rootScriptFragments.dev = "vike dev";
+        state.rootCheckComponents.push(
+          { kind: "build", owner: strictTypescriptRootBoundary },
+          { kind: "unit-test", owner: strictTypescriptRootBoundary },
+          { kind: "e2e-test", owner: strictTypescriptRootBoundary },
+        );
+      } else if (capability.packages.length > 1) {
         state.rootScriptFragments.dev = "turbo run dev --parallel";
       }
       const vuePackage = findVuePackage(capability);
@@ -314,11 +322,13 @@ const capabilityInterpreters = {
         kind: "typescript-typecheck",
         owner: strictTypescriptRootBoundary,
       });
-      const workspaceBoundary = workspaceBoundaryForState(state);
-      state.rootCheckComponents.push({
-        kind: "turbo-package-check",
-        owner: workspaceBoundary,
-      });
+      if (!isRootNodeWorkspace(state.nodeWorkspace)) {
+        const workspaceBoundary = workspaceBoundaryForState(state);
+        state.rootCheckComponents.push({
+          kind: "turbo-package-check",
+          owner: workspaceBoundary,
+        });
+      }
       state.packageCheckComponents.push({
         kind: "typescript-typecheck",
         owner: workspacePackageBoundary,
@@ -365,10 +375,14 @@ const capabilityInterpreters = {
           kind: "oxc-lint-fix",
           owner: strictTypescriptRootBoundary,
         },
-        {
-          kind: "turbo-package-fix",
-          owner: workspaceBoundaryForState(state),
-        },
+        ...(!isRootNodeWorkspace(state.nodeWorkspace)
+          ? [
+              {
+                kind: "turbo-package-fix" as const,
+                owner: workspaceBoundaryForState(state),
+              },
+            ]
+          : []),
       );
       state.packageFixComponents.push(
         { kind: "oxc-format-write", owner: workspacePackageBoundary },
@@ -790,9 +804,13 @@ function blueprintPackagesForCapabilities(
 
     if (capability.kind === "workspace-node-packages") {
       return capability.packages.map((nodePackage) => {
-        const leaf = nodePackage.path.split("/").at(-1) ?? nodePackage.path;
+        const leaf =
+          nodePackage.path === "."
+            ? projectName
+            : (nodePackage.path.split("/").at(-1) ?? nodePackage.path);
         return {
-          name: `@${packageScope}/${leaf}`,
+          name:
+            nodePackage.path === "." ? projectName : `@${packageScope}/${leaf}`,
           path: nodePackage.path,
         };
       });
@@ -834,8 +852,8 @@ function stateForProjectionDeclaration(
 }
 
 type PackageAdditionProjectionCapability = {
-  readonly sourcePreset: "hono-api" | "ts-lib" | "vue-app";
-  readonly workspacePackageGlob: "apps/*" | "packages/*";
+  readonly sourcePreset: "hono-api" | "ts-lib" | "vike-app" | "vue-app";
+  readonly workspacePackageGlob: "." | "apps/*" | "packages/*";
   readonly packageRole: PackageRole;
   readonly packageSourcePreset: PackageSourcePreset;
   readonly sourceFiles: readonly string[];
@@ -921,6 +939,8 @@ function packageAdditionOperationsForCapability(options: {
       return libraryPackageAdditionOperations(options);
     case "hono-api":
       return honoApiPackageAdditionOperations(options);
+    case "vike-app":
+      throw new Error("vike-app cannot be used for Package Addition");
     case "vue-app":
       return vueAppPackageAdditionOperations(options);
   }
@@ -1239,12 +1259,22 @@ function workspaceBoundaryForState(
 }
 
 function workspaceGlobBoundary(
-  workspacePackageGlob: "apps/*" | "packages/*",
+  workspacePackageGlob: "." | "apps/*" | "packages/*",
 ): ComponentOwner {
   return {
     kind: "package-boundary",
     path: workspacePackageGlob,
   };
+}
+
+function isRootNodeWorkspace(
+  workspace: WorkspaceNodePackagesCapabilityDeclaration | undefined,
+): boolean {
+  return (
+    workspace?.workspacePackageGlob === "." &&
+    workspace.packages.length === 1 &&
+    workspace.packages[0]?.path === "."
+  );
 }
 
 function hasVuePackage(
@@ -1257,13 +1287,14 @@ function findVuePackage(
   capability: WorkspaceNodePackagesCapabilityDeclaration,
 ): WorkspaceNodePackageDeclaration | undefined {
   return capability.packages.find(
-    (nodePackage) => nodePackage.kind === "vue-app",
+    (nodePackage) =>
+      nodePackage.kind === "vue-app" || nodePackage.kind === "vike-app",
   );
 }
 
 function sourceRootPreset(
   capability: WorkspaceNodePackagesCapabilityDeclaration,
-): "hono-api" | "vue-app" | "vue-hono-app" {
+): "hono-api" | "vike-app" | "vue-app" | "vue-hono-app" {
   if (capability.packages.length === 1) {
     const nodePackage = capability.packages[0];
     if (nodePackage === undefined) {
@@ -1301,8 +1332,12 @@ function projectPackageScripts(
 }
 
 function packageCollection(
-  workspacePackageGlob: "apps/*" | "packages/*",
+  workspacePackageGlob: "." | "apps/*" | "packages/*",
 ): string {
+  if (workspacePackageGlob === ".") {
+    return ".";
+  }
+
   return workspacePackageGlob.slice(0, -"/*".length);
 }
 
@@ -1388,6 +1423,10 @@ function nodePackageName(
 
   if (packageDefinition !== undefined) {
     return packageDefinition.name;
+  }
+
+  if (nodePackage.path === ".") {
+    return context.projectName.value;
   }
 
   const leaf = nodePackage.path.split("/").at(-1) ?? nodePackage.path;
@@ -1560,6 +1599,55 @@ function vuePackageJson(
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
+  };
+}
+
+function vikePackageJson(
+  context: GenerationContext,
+  packageName: string,
+  scripts: Record<string, string>,
+): Record<string, unknown> {
+  return {
+    name: packageName,
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    imports: {
+      "#/*": {
+        default: "./*.ts",
+        types: "./*.ts",
+      },
+    },
+    scripts,
+    dependencies: {
+      "@vikejs/hono": "catalog:",
+      "drizzle-orm": "catalog:",
+      hono: "catalog:",
+      telefunc: "catalog:",
+      vike: "catalog:",
+      "vike-vue": "catalog:",
+      vue: "catalog:",
+    },
+    devDependencies: {
+      "@playwright/test": "catalog:",
+      "@tailwindcss/vite": "catalog:",
+      "@types/node": "catalog:",
+      "@vitejs/plugin-vue": "catalog:",
+      "@vue/tsconfig": "catalog:",
+      "drizzle-kit": "catalog:",
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
+      tailwindcss: "catalog:",
+      typescript: "catalog:",
+      vite: "catalog:",
+      vitest: "catalog:",
+      "vue-tsc": "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
@@ -1974,6 +2062,10 @@ function workspaceNodePackagesOperations({
       );
     }
 
+    if (nodePackage.kind === "vike-app") {
+      return vikePackageJson(context, packageName, scripts);
+    }
+
     return vuePackageJson(
       context,
       packageName,
@@ -1981,7 +2073,13 @@ function workspaceNodePackagesOperations({
       packageLinkPlan.manifestDependenciesByPackagePath.get(nodePackage.path),
     );
   });
-  const rootManifest = rootPackageJson(context, packageScripts, state);
+  const rootManifest = isRootNodeWorkspace(capability)
+    ? packageManifests[0]
+    : rootPackageJson(context, packageScripts, state);
+
+  if (rootManifest === undefined) {
+    throw new Error("workspace-node-packages rendered no package manifests");
+  }
 
   return [
     {
@@ -2043,16 +2141,20 @@ function workspaceNodePackagesOperations({
       text: gitignoreForNodeWorkspace(capability),
     },
     ...capability.packages.flatMap((nodePackage, index) => [
-      {
-        kind: "writeJson" as const,
-        to: `${nodePackage.path}/package.json`,
-        value: packageManifests[index],
-      },
+      ...(nodePackage.path === "."
+        ? []
+        : [
+            {
+              kind: "writeJson" as const,
+              to: `${nodePackage.path}/package.json`,
+              value: packageManifests[index],
+            },
+          ]),
       ...nodePackageTsconfigOperations(nodePackage, capability),
       ...nodePackage.sourceFiles.map((sourceFile) => ({
         kind: "copyFile" as const,
         from: sourceFile,
-        to: `${nodePackage.path}/${sourcePathWithinNodePackage(sourceFile, capability)}`,
+        to: nodePackageTargetPath(nodePackage, sourceFile, capability),
       })),
     ]),
     ...fullStackApiAnchorOperations(context, capability),
@@ -2112,6 +2214,45 @@ function nodePackageScripts(
     };
   }
 
+  if (nodePackage.kind === "vike-app") {
+    const checks: CheckPlan = {
+      components: [
+        { kind: "oxc-format-check", owner: workspacePackageBoundary },
+        { kind: "oxc-lint", owner: workspacePackageBoundary },
+        { kind: "typescript-typecheck", owner: workspacePackageBoundary },
+        { kind: "build", owner: workspacePackageBoundary },
+        { kind: "unit-test", owner: workspacePackageBoundary },
+        { kind: "e2e-test", owner: workspacePackageBoundary },
+      ],
+      environmentNeeds: [],
+    };
+    const fixes: FixPlan = {
+      components: [
+        { kind: "oxc-format-write", owner: workspacePackageBoundary },
+        { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
+      ],
+    };
+
+    return {
+      build: "vike build",
+      check: renderRootCheckCommand(checks),
+      dev: "vike dev",
+      "drizzle:generate": "drizzle-kit generate",
+      "drizzle:migrate": "drizzle-kit migrate",
+      "drizzle:studio": "drizzle-kit studio",
+      fix: renderFixCommand(fixes),
+      "format:check": "oxfmt --check --config oxfmt.config.ts .",
+      "format:write": "oxfmt --write --config oxfmt.config.ts .",
+      lint: "oxlint --type-aware --config oxlint.config.ts .",
+      "lint:fix": "oxlint --type-aware --config oxlint.config.ts . --fix",
+      preview: "vike preview",
+      start: "node ./dist/server/index.mjs",
+      test: "vitest run",
+      "test:e2e": "playwright test --config playwright.config.ts",
+      typecheck: "vue-tsc --build --noEmit",
+    };
+  }
+
   const checks: CheckPlan = {
     components: [
       { kind: "oxc-format-check", owner: workspacePackageBoundary },
@@ -2151,6 +2292,81 @@ function nodePackageTsconfigOperations(
   nodePackage: WorkspaceNodePackageDeclaration,
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
 ): WriteJsonRenderOperation[] {
+  if (nodePackage.kind === "vike-app") {
+    return [
+      {
+        kind: "writeJson",
+        to: "tsconfig.app.json",
+        value: {
+          extends: "@vue/tsconfig/tsconfig.dom.json",
+          compilerOptions: {
+            ...strictTypeScriptCompilerOptions({
+              composite: true,
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              paths: { "#/*": ["./*"] },
+              tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+              types: ["node"],
+            }),
+            skipLibCheck: true,
+          },
+          include: [
+            "+server.ts",
+            "assets/**/*.svg",
+            "components/**/*.vue",
+            "database/**/*.ts",
+            "env.d.ts",
+            "global.d.ts",
+            "pages/**/*.ts",
+            "pages/**/*.vue",
+            "server/**/*.ts",
+          ],
+        },
+      },
+      {
+        kind: "writeJson",
+        to: "tsconfig.test.json",
+        value: {
+          extends: "./tsconfig.app.json",
+          compilerOptions: {
+            lib: ["ESNext", "DOM", "DOM.Iterable"],
+            paths: { "#/*": ["./*"] },
+            skipLibCheck: true,
+            tsBuildInfoFile: "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+            types: ["node", "vitest/globals"],
+          },
+          include: ["database/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+        },
+      },
+      {
+        kind: "writeJson",
+        to: "tsconfig.node.json",
+        multilineArrays: ["include"],
+        value: {
+          compilerOptions: {
+            ...strictTypeScriptCompilerOptions({
+              composite: true,
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              lib: ["ESNext", "DOM", "DOM.Iterable"],
+              paths: { "#/*": ["./*"] },
+              tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+              types: ["node"],
+            }),
+            skipLibCheck: true,
+          },
+          include: [
+            "drizzle.config.ts",
+            "playwright.config.ts",
+            "scripts/**/*.ts",
+            "vite.config.ts",
+            "vitest.config.ts",
+          ],
+        },
+      },
+    ];
+  }
+
   if (nodePackage.kind === "hono-api") {
     return [
       {
@@ -2316,6 +2532,23 @@ function sourcePathWithinNodePackage(
   return sourceFile.replace(/^(api|web)\//, "");
 }
 
+function nodePackageTargetPath(
+  nodePackage: WorkspaceNodePackageDeclaration,
+  sourceFile: string,
+  workspace: WorkspaceNodePackagesCapabilityDeclaration,
+): string {
+  const packageRelativePath = sourcePathWithinNodePackage(
+    sourceFile,
+    workspace,
+  );
+
+  if (nodePackage.path === ".") {
+    return packageRelativePath;
+  }
+
+  return `${nodePackage.path}/${packageRelativePath}`;
+}
+
 function gitignoreForNodeWorkspace(
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
 ): string {
@@ -2351,8 +2584,7 @@ function fullStackApiAnchorOperations(
       path: "apps/web/src/api.ts",
       language: "typescript",
       replacements: {
-        "api-type-import-start": `import type { AppType } from "@${packageScope}/api";\nimport { hc } from "hono/client";\n/*`,
-        "api-type-import-end": "*/",
+        "api-type-imports": `import type { AppType } from "@${packageScope}/api";\nimport { hc } from "hono/client";`,
       },
     },
   ];
@@ -2427,6 +2659,14 @@ function rootTsconfigReferences(
       return hasVuePackage(workspace)
         ? []
         : [{ path: `./${nodePackage.path}/tsconfig.json` }];
+    }
+
+    if (nodePackage.kind === "vike-app") {
+      return [
+        { path: "./tsconfig.app.json" },
+        { path: "./tsconfig.test.json" },
+        { path: "./tsconfig.node.json" },
+      ];
     }
 
     return [
@@ -2617,7 +2857,7 @@ function githubMaintenanceOperations(): RenderOperation[] {
 
 function templateSourceRoot(
   state: ProjectionCompositionState,
-  sourcePreset: "hono-api" | "ts-lib" | "vue-app" | "vue-hono-app",
+  sourcePreset: "hono-api" | "ts-lib" | "vike-app" | "vue-app" | "vue-hono-app",
 ): string {
   return templateSourceRootForPreset(state, sourcePreset);
 }

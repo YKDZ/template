@@ -269,6 +269,9 @@ describe("generated scenarios", () => {
     const packageAdditionSupportedPresets = new Set(
       contract!.packageAdditionSupport.map((support) => support.preset),
     );
+    const presetsByName = new Map(
+      manifest.presets.map((preset) => [preset.name, preset]),
+    );
     const expectedPairs = new Set(
       initSupportedPresets.flatMap((basePreset) =>
         initSupportedPresets.map((addedPreset) =>
@@ -297,9 +300,16 @@ describe("generated scenarios", () => {
       );
     }
     for (const scenario of selection.skipped) {
-      expect(packageAdditionSupportedPresets.has(scenario.addedPreset)).toBe(
-        false,
-      );
+      const basePreset = presetsByName.get(scenario.basePreset);
+      const addedPresetSupportsPackageAddition =
+        packageAdditionSupportedPresets.has(scenario.addedPreset);
+      const basePresetSupportsPackageAddition =
+        basePreset?.packageAdditionSupport === "supported";
+
+      expect(
+        !addedPresetSupportsPackageAddition ||
+          !basePresetSupportsPackageAddition,
+      ).toBe(true);
       expect(scenario.reason.length).toBeGreaterThan(0);
     }
   });

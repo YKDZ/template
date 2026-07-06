@@ -67,6 +67,7 @@ describe("Template Boundary Check", () => {
       expect.arrayContaining([
         "ts-lib",
         "hono-api",
+        "vike-app",
         "vue-app",
         "vue-hono-app",
         "rust-bin",

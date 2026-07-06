@@ -38,6 +38,7 @@ const projectionSourceFiles: Record<string, string> = {
   "hono-api": "packages/core/src/projection-capabilities.ts",
   "rust-bin": "packages/core/src/projection-capabilities.ts",
   "ts-lib": "packages/core/src/projection-capabilities.ts",
+  "vike-app": "packages/core/src/projection-capabilities.ts",
   "vue-app": "packages/core/src/projection-capabilities.ts",
   "vue-hono-app": "packages/core/src/projection-capabilities.ts",
 };

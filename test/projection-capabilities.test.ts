@@ -972,6 +972,8 @@ describe("Projection Capability declarations", () => {
     expect(webApiSource).toContain(
       'import type { AppType } from "@demo-vue-hono-app/api";',
     );
+    expect(webApiSource).not.toContain("__API_PACKAGE__");
+    expect(webApiSource).not.toContain("@template-anchor");
     await expectFile(path.join(targetDir, "apps/api/src/index.ts"));
     await expectFile(path.join(targetDir, "apps/web/src/api.ts"));
   });

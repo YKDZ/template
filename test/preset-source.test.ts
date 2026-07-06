@@ -709,6 +709,29 @@ describe("Preset Source Manifest validation", () => {
         "typescript",
         "valibot",
       ],
+      "vike-app": [
+        "@playwright/test",
+        "@tailwindcss/vite",
+        "@types/node",
+        "@vitejs/plugin-vue",
+        "@vikejs/hono",
+        "@vue/tsconfig",
+        "drizzle-kit",
+        "drizzle-orm",
+        "hono",
+        "oxfmt",
+        "oxlint",
+        "oxlint-tsgolint",
+        "tailwindcss",
+        "telefunc",
+        "typescript",
+        "vite",
+        "vike",
+        "vike-vue",
+        "vitest",
+        "vue",
+        "vue-tsc",
+      ],
       "vue-app": [
         "@playwright/test",
         "@tailwindcss/vite",
@@ -869,6 +892,7 @@ describe("Preset Source Manifest validation", () => {
 
   it("rejects supported Presets without a Projection Declaration", () => {
     const manifest = loadBuiltInPresetSourceManifest();
+    const missingPresetIndex = manifest.presets.length;
 
     expect(
       validateBuiltInPresetSourceManifest({
@@ -891,7 +915,7 @@ describe("Preset Source Manifest validation", () => {
       ok: false,
       issues: [
         {
-          path: "$.presets[7].projection",
+          path: `$.presets[${missingPresetIndex}].projection`,
           message:
             "Supported Preset missing-supported must declare a Projection Declaration",
         },
