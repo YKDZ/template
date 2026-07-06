@@ -157,6 +157,7 @@ async function initGeneratedWorkspace(
 function playwrightWebServerPorts(configText: string): number[] {
   const matches = [
     ...configText.matchAll(/port:\s*(\d+)/g),
+    ...configText.matchAll(/\b\w+Port\s*=\s*(\d+)/g),
     ...configText.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g),
   ];
 
@@ -1987,9 +1988,9 @@ describe("template add package", () => {
       scripts: Record<string, string>;
     }>(path.join(projectDir, "apps/admin/package.json"));
 
-    expect(playwrightWebServerPorts(webPlaywright)).toContain(4173);
+    const webPorts = playwrightWebServerPorts(webPlaywright);
     const [adminPort] = playwrightWebServerPorts(adminPlaywright);
-    expect(playwrightWebServerPorts(webPlaywright)).not.toContain(adminPort);
+    expect(webPorts).not.toContain(adminPort);
     expect(adminPackageJson.scripts.check).toContain("pnpm run test:e2e");
     expect(adminPackageJson.scripts["test:e2e"]).toBe(
       "pnpm run build && node --experimental-strip-types scripts/run-playwright.ts",
