@@ -1316,11 +1316,17 @@ describe("template init", () => {
         const appTsconfig = await readJson<{ include: string[] }>(
           path.join(projectDir, "apps/web/tsconfig.app.json"),
         );
+        const viteConfig = await readFile(
+          path.join(projectDir, "apps/web/vite.config.ts"),
+          "utf8",
+        );
         expect(files).not.toContain("env.d.ts");
         expect(files).not.toContain("global.d.ts");
         expect(files).toContain("apps/web/types/env.d.ts");
         expect(files).toContain("apps/web/types/global.d.ts");
         expect(appTsconfig.include).toContain("types/**/*.d.ts");
+        expect(viteConfig).toContain('alias: {\n      "#":');
+        expect(viteConfig).toContain('new URL(".", import.meta.url)');
       }
 
       expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
@@ -1966,6 +1972,10 @@ describe("template init", () => {
     expect(result.stdout).toContain("Usage:");
     expect(result.stdout).not.toContain("--ready");
     expect(result.stdout).not.toContain("Post Commands");
+    expect(result.stdout).toContain("Init options:");
+    expect(result.stdout).toContain("  --yes");
+    expect(result.stdout).toContain("Add package options:");
+    expect(result.stdout).not.toMatch(/Add package options:[\s\S]*--yes/);
     await expect(stat(workspace)).resolves.toBeDefined();
   });
 
