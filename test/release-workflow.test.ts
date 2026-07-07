@@ -30,7 +30,7 @@ describe("npm release workflow", () => {
       "utf8",
     );
 
-    expect(workflow).toContain("uses: actions/checkout@v6");
+    expect(workflow).toContain("uses: actions/checkout@v7");
     expect(workflow).toContain("uses: actions/setup-node@v6");
     expect(workflow).toContain("node-version-file: package.json");
     expect(workflow).toContain("run: corepack enable");

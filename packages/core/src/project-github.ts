@@ -80,7 +80,7 @@ export function projectCheckWorkflow(
     `  ${capability.jobName}:`,
     `    runs-on: ${capability.runner}`,
     "    steps:",
-    "      - uses: actions/checkout@v6",
+    "      - uses: actions/checkout@v7",
   ];
 
   if (environmentPreparation.nodeFromPackageMetadata) {

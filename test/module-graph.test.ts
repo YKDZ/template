@@ -395,7 +395,7 @@ describe("module graph plans", () => {
         "  check:",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - uses: actions/checkout@v6",
+        "      - uses: actions/checkout@v7",
         "      - uses: actions/setup-node@v6",
         "        with:",
         "          node-version-file: package.json",
