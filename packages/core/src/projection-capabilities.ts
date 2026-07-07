@@ -247,14 +247,7 @@ const capabilityInterpreters = {
         sourceRootPreset(capability),
       );
       state.operationFactories.push(workspaceNodePackagesOperations);
-      if (isRootNodeWorkspace(capability)) {
-        state.rootScriptFragments.dev = "vike dev";
-        state.rootCheckComponents.push(
-          { kind: "build", owner: strictTypescriptRootBoundary },
-          { kind: "unit-test", owner: strictTypescriptRootBoundary },
-          { kind: "e2e-test", owner: strictTypescriptRootBoundary },
-        );
-      } else if (capability.packages.length > 1) {
+      if (capability.packages.length > 1) {
         state.rootScriptFragments.dev = "turbo run dev --parallel";
       }
       const vuePackage = findVuePackage(capability);
@@ -325,13 +318,11 @@ const capabilityInterpreters = {
         kind: "typescript-typecheck",
         owner: strictTypescriptRootBoundary,
       });
-      if (!isRootNodeWorkspace(state.nodeWorkspace)) {
-        const workspaceBoundary = workspaceBoundaryForState(state);
-        state.rootCheckComponents.push({
-          kind: "turbo-package-check",
-          owner: workspaceBoundary,
-        });
-      }
+      const workspaceBoundary = workspaceBoundaryForState(state);
+      state.rootCheckComponents.push({
+        kind: "turbo-package-check",
+        owner: workspaceBoundary,
+      });
       state.packageCheckComponents.push({
         kind: "typescript-typecheck",
         owner: workspacePackageBoundary,
@@ -378,14 +369,10 @@ const capabilityInterpreters = {
           kind: "oxc-lint-fix",
           owner: strictTypescriptRootBoundary,
         },
-        ...(!isRootNodeWorkspace(state.nodeWorkspace)
-          ? [
-              {
-                kind: "turbo-package-fix" as const,
-                owner: workspaceBoundaryForState(state),
-              },
-            ]
-          : []),
+        {
+          kind: "turbo-package-fix",
+          owner: workspaceBoundaryForState(state),
+        },
       );
       state.packageFixComponents.push(
         { kind: "oxc-format-write", owner: workspacePackageBoundary },
@@ -807,13 +794,9 @@ function blueprintPackagesForCapabilities(
 
     if (capability.kind === "workspace-node-packages") {
       return capability.packages.map((nodePackage) => {
-        const leaf =
-          nodePackage.path === "."
-            ? projectName
-            : (nodePackage.path.split("/").at(-1) ?? nodePackage.path);
+        const leaf = nodePackage.path.split("/").at(-1) ?? nodePackage.path;
         return {
-          name:
-            nodePackage.path === "." ? projectName : `@${packageScope}/${leaf}`,
+          name: `@${packageScope}/${leaf}`,
           path: nodePackage.path,
         };
       });
@@ -856,7 +839,7 @@ function stateForProjectionDeclaration(
 
 type PackageAdditionProjectionCapability = {
   readonly sourcePreset: "hono-api" | "ts-lib" | "vike-app" | "vue-app";
-  readonly workspacePackageGlob: "." | "apps/*" | "packages/*";
+  readonly workspacePackageGlob: "apps/*" | "packages/*";
   readonly packageRole: PackageRole;
   readonly packageSourcePreset: PackageSourcePreset;
   readonly sourceFiles: readonly string[];
@@ -1262,22 +1245,12 @@ function workspaceBoundaryForState(
 }
 
 function workspaceGlobBoundary(
-  workspacePackageGlob: "." | "apps/*" | "packages/*",
+  workspacePackageGlob: "apps/*" | "packages/*",
 ): ComponentOwner {
   return {
     kind: "package-boundary",
     path: workspacePackageGlob,
   };
-}
-
-function isRootNodeWorkspace(
-  workspace: WorkspaceNodePackagesCapabilityDeclaration | undefined,
-): boolean {
-  return (
-    workspace?.workspacePackageGlob === "." &&
-    workspace.packages.length === 1 &&
-    workspace.packages[0]?.path === "."
-  );
 }
 
 function hasVuePackage(
@@ -1378,19 +1351,6 @@ function directScriptFragments(
   );
 }
 
-function rootEntrypointScriptsFromRootPackageScripts(
-  scripts: Record<string, string>,
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(scripts).filter(
-      ([scriptName]) =>
-        !scriptName.endsWith(":run") ||
-        scriptName === "check:run" ||
-        scriptName === "fix:run",
-    ),
-  );
-}
-
 function rootTaskEntrypoints(
   checkPlan: CheckPlan,
   fixPlan: FixPlan,
@@ -1463,12 +1423,8 @@ function noopTaskCommand(): string {
 }
 
 function packageCollection(
-  workspacePackageGlob: "." | "apps/*" | "packages/*",
+  workspacePackageGlob: "apps/*" | "packages/*",
 ): string {
-  if (workspacePackageGlob === ".") {
-    return ".";
-  }
-
   return workspacePackageGlob.slice(0, -"/*".length);
 }
 
@@ -1554,10 +1510,6 @@ function nodePackageName(
 
   if (packageDefinition !== undefined) {
     return packageDefinition.name;
-  }
-
-  if (nodePackage.path === ".") {
-    return context.projectName.value;
   }
 
   const leaf = nodePackage.path.split("/").at(-1) ?? nodePackage.path;
@@ -2189,9 +2141,7 @@ function workspaceNodePackagesOperations({
       packageLinkPlan.manifestDependenciesByPackagePath.get(nodePackage.path),
     );
   });
-  const rootManifest = isRootNodeWorkspace(capability)
-    ? rootNodePackageManifest(packageManifests[0], packageScripts)
-    : rootPackageJson(context, packageScripts, state);
+  const rootManifest = rootPackageJson(context, packageScripts, state);
 
   if (rootManifest === undefined) {
     throw new Error("workspace-node-packages rendered no package manifests");
@@ -2250,15 +2200,11 @@ function workspaceNodePackagesOperations({
       text: gitignoreForNodeWorkspace(capability),
     },
     ...capability.packages.flatMap((nodePackage, index) => [
-      ...(nodePackage.path === "."
-        ? []
-        : [
-            {
-              kind: "writeJson" as const,
-              to: `${nodePackage.path}/package.json`,
-              value: packageManifests[index],
-            },
-          ]),
+      {
+        kind: "writeJson" as const,
+        to: `${nodePackage.path}/package.json`,
+        value: packageManifests[index],
+      },
       ...nodePackageTsconfigOperations(nodePackage, capability),
       ...nodePackage.sourceFiles.map((sourceFile) => ({
         kind: "copyFile" as const,
@@ -2278,42 +2224,6 @@ function workspaceNodePackagesOperations({
       value: generationRecord(context),
     },
   ];
-}
-
-function rootNodePackageManifest(
-  packageManifest: Record<string, unknown> | undefined,
-  rootPackageScripts: Record<string, string>,
-): Record<string, unknown> | undefined {
-  if (packageManifest === undefined) {
-    return undefined;
-  }
-
-  const packageScripts = packageManifest.scripts;
-  if (
-    packageScripts === undefined ||
-    typeof packageScripts !== "object" ||
-    packageScripts === null ||
-    Array.isArray(packageScripts)
-  ) {
-    throw new Error("Root node package manifest rendered invalid scripts");
-  }
-  const checkedPackageScripts: Record<string, string> = {};
-  for (const scriptName of Object.keys(packageScripts)) {
-    const command: unknown = Reflect.get(packageScripts, scriptName);
-    if (typeof command !== "string") {
-      throw new Error("Root node package manifest rendered non-string scripts");
-    }
-
-    checkedPackageScripts[scriptName] = command;
-  }
-
-  return {
-    ...packageManifest,
-    scripts: {
-      ...rootEntrypointScriptsFromRootPackageScripts(rootPackageScripts),
-      ...checkedPackageScripts,
-    },
-  };
 }
 
 function nodePackageScripts(
@@ -2348,10 +2258,11 @@ function nodePackageScripts(
       "drizzle:generate": "drizzle-kit generate",
       "drizzle:migrate": "drizzle-kit migrate",
       "drizzle:studio": "drizzle-kit studio",
-      "format:check:run": "oxfmt --check --config oxfmt.config.ts .",
-      "format:write:run": "oxfmt --write --config oxfmt.config.ts .",
-      "lint:run": "oxlint --type-aware --config oxlint.config.ts .",
-      "lint:fix:run": "oxlint --type-aware --config oxlint.config.ts . --fix",
+      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+      "lint:run": "oxlint --type-aware --config ../../oxlint.config.ts .",
+      "lint:fix:run":
+        "oxlint --type-aware --config ../../oxlint.config.ts . --fix",
       preview: "vike preview",
       start: "node ./dist/server/index.mjs",
       "test:run": "vitest run",
@@ -2382,7 +2293,19 @@ function nodePackageTsconfigOperations(
     return [
       {
         kind: "writeJson",
-        to: "tsconfig.app.json",
+        to: `${nodePackage.path}/tsconfig.json`,
+        value: {
+          files: [],
+          references: [
+            { path: "./tsconfig.app.json" },
+            { path: "./tsconfig.test.json" },
+            { path: "./tsconfig.node.json" },
+          ],
+        },
+      },
+      {
+        kind: "writeJson",
+        to: `${nodePackage.path}/tsconfig.app.json`,
         value: {
           extends: "@vue/tsconfig/tsconfig.dom.json",
           compilerOptions: {
@@ -2410,7 +2333,7 @@ function nodePackageTsconfigOperations(
       },
       {
         kind: "writeJson",
-        to: "tsconfig.test.json",
+        to: `${nodePackage.path}/tsconfig.test.json`,
         value: {
           extends: "./tsconfig.app.json",
           compilerOptions: {
@@ -2425,7 +2348,7 @@ function nodePackageTsconfigOperations(
       },
       {
         kind: "writeJson",
-        to: "tsconfig.node.json",
+        to: `${nodePackage.path}/tsconfig.node.json`,
         multilineArrays: ["include"],
         value: {
           compilerOptions: {
@@ -2627,10 +2550,6 @@ function nodePackageTargetPath(
     workspace,
   );
 
-  if (nodePackage.path === ".") {
-    return packageRelativePath;
-  }
-
   return `${nodePackage.path}/${packageRelativePath}`;
 }
 
@@ -2748,9 +2667,9 @@ function rootTsconfigReferences(
 
     if (nodePackage.kind === "vike-app") {
       return [
-        { path: "./tsconfig.app.json" },
-        { path: "./tsconfig.test.json" },
-        { path: "./tsconfig.node.json" },
+        { path: `./${nodePackage.path}/tsconfig.app.json` },
+        { path: `./${nodePackage.path}/tsconfig.test.json` },
+        { path: `./${nodePackage.path}/tsconfig.node.json` },
       ];
     }
 

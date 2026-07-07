@@ -121,7 +121,7 @@ export type WorkspaceLibraryPackageCapabilityDeclaration = {
 };
 
 export type WorkspaceNodePackageKind = "hono-api" | "vike-app" | "vue-app";
-export type WorkspaceNodePackagePath = "." | "apps/api" | "apps/web";
+export type WorkspaceNodePackagePath = "apps/api" | "apps/web";
 
 export type WorkspaceNodePackageDeclaration = {
   readonly kind: WorkspaceNodePackageKind;
@@ -131,7 +131,7 @@ export type WorkspaceNodePackageDeclaration = {
 
 export type WorkspaceNodePackagesCapabilityDeclaration = {
   readonly kind: "workspace-node-packages";
-  readonly workspacePackageGlob: "." | "apps/*";
+  readonly workspacePackageGlob: "apps/*";
   readonly packages: readonly WorkspaceNodePackageDeclaration[];
   readonly packageLinks?: readonly {
     readonly consumerPackagePath: "apps/web";
@@ -465,7 +465,7 @@ export const presetSourceManifestJsonSchema = {
                       required: ["kind", "workspacePackageGlob", "packages"],
                       properties: {
                         kind: { const: "workspace-node-packages" },
-                        workspacePackageGlob: { enum: [".", "apps/*"] },
+                        workspacePackageGlob: { const: "apps/*" },
                         packages: {
                           type: "array",
                           minItems: 1,
@@ -477,7 +477,7 @@ export const presetSourceManifestJsonSchema = {
                               kind: {
                                 enum: ["hono-api", "vike-app", "vue-app"],
                               },
-                              path: { enum: [".", "apps/api", "apps/web"] },
+                              path: { enum: ["apps/api", "apps/web"] },
                               sourceFiles: {
                                 type: "array",
                                 minItems: 1,
@@ -1254,11 +1254,7 @@ const workspaceNodePackageKindSet = new Set<string>([
   "vike-app",
   "vue-app",
 ]);
-const workspaceNodePackagePathSet = new Set<string>([
-  ".",
-  "apps/api",
-  "apps/web",
-]);
+const workspaceNodePackagePathSet = new Set<string>(["apps/api", "apps/web"]);
 
 function isProjectionCapabilityKind(
   value: string,
@@ -1428,7 +1424,7 @@ function parseWorkspaceNodePackage(
     issues.push({
       path: `${pathPrefix}.path`,
       message:
-        "workspace-node-packages package path must be ., apps/api, or apps/web",
+        "workspace-node-packages package path must be apps/api or apps/web",
     });
   }
 
@@ -1561,7 +1557,6 @@ function parseWorkspaceNodePackagesCapability(
 ): WorkspaceNodePackagesCapabilityDeclaration | ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   const workspacePackageGlob =
-    capability.workspacePackageGlob === "." ||
     capability.workspacePackageGlob === "apps/*"
       ? capability.workspacePackageGlob
       : undefined;
@@ -1570,7 +1565,7 @@ function parseWorkspaceNodePackagesCapability(
     issues.push({
       path: `${pathPrefix}.workspacePackageGlob`,
       message:
-        "workspace-node-packages currently supports workspacePackageGlob: . or apps/*",
+        "workspace-node-packages currently supports workspacePackageGlob: apps/*",
     });
   }
 
@@ -2243,6 +2238,25 @@ function normalizeProjectBlueprint(
   };
 }
 
+function packagePathIssue(
+  packagePath: string,
+  path: string,
+): ValidationIssue | undefined {
+  const segments = packagePath.split("/");
+  if (
+    segments.length !== 2 ||
+    segments.some((segment) => segment.length === 0 || segment === ".")
+  ) {
+    return {
+      path,
+      message:
+        "Package Path must be exactly two non-root path segments, such as apps/web or packages/ui",
+    };
+  }
+
+  return undefined;
+}
+
 export function validateProjectBlueprint(
   input: unknown,
   options: PresetCatalogValidationOptions = {},
@@ -2325,6 +2339,13 @@ export function validateProjectBlueprint(
         blueprint.packages.map((projectPackage) => projectPackage.path),
         "$.packages.path",
       ),
+      ...blueprint.packages.flatMap((projectPackage, index) => {
+        const issue = packagePathIssue(
+          projectPackage.path,
+          `$.packages[${index}].path`,
+        );
+        return issue === undefined ? [] : [issue];
+      }),
     );
   }
 

@@ -8,9 +8,9 @@ import type {
 } from "@ykdz/template-core/module-graph";
 import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
 
-const rootPackageBoundary: ComponentOwner = {
+const appsWorkspaceBoundary: ComponentOwner = {
   kind: "package-boundary",
-  path: ".",
+  path: "apps/*",
 };
 
 const apiPackageBoundary: ComponentOwner = {
@@ -70,11 +70,11 @@ export function selectNodeCheckComponents(
 ): CheckComponent[] {
   switch (target) {
     case "hono-api":
-      return honoApiCheckComponents(rootPackageBoundary);
+      return honoApiCheckComponents(apiPackageBoundary);
     case "vue-app":
-      return vueAppCheckComponents(rootPackageBoundary);
+      return vueAppCheckComponents(webPackageBoundary);
     case "vue-hono-root":
-      return [{ kind: "turbo-check", owner: rootPackageBoundary }];
+      return [{ kind: "turbo-check", owner: appsWorkspaceBoundary }];
     case "vue-hono-api":
       return honoApiCheckComponents(apiPackageBoundary);
     case "vue-hono-web":
@@ -87,10 +87,11 @@ export function selectNodeFixComponents(
 ): FixComponent[] {
   switch (target) {
     case "hono-api":
+      return nodeFixComponents(apiPackageBoundary);
     case "vue-app":
-      return nodeFixComponents(rootPackageBoundary);
+      return nodeFixComponents(webPackageBoundary);
     case "vue-hono-root":
-      return [{ kind: "turbo-fix", owner: rootPackageBoundary }];
+      return [{ kind: "turbo-fix", owner: appsWorkspaceBoundary }];
     case "vue-hono-api":
       return nodeFixComponents(apiPackageBoundary);
     case "vue-hono-web":
@@ -105,7 +106,7 @@ function checkEnvironmentNeeds(
     return [
       playwrightBrowserAssetsEnvironmentNeed({
         browser: "chromium",
-        owner: rootPackageBoundary,
+        owner: webPackageBoundary,
         id: "install-playwright-browsers",
         label: "Install Playwright browser assets",
       }),

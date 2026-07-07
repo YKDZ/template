@@ -319,7 +319,7 @@ function oxcPackageDirectoriesForPreset(preset: string): string[] {
     return ["apps/api"];
   }
 
-  if (preset === "vue-app") {
+  if (preset === "vue-app" || preset === "vike-app") {
     return ["apps/web"];
   }
 
@@ -1266,9 +1266,7 @@ describe("template init", () => {
           "turbo run typecheck:run",
         );
         expect(rootPackageJson.scripts["typecheck:run"]).toBe(
-          preset === "vike-app"
-            ? "vue-tsc --build --noEmit"
-            : "tsc -p tsconfig.config.json --noEmit",
+          "tsc -p tsconfig.config.json --noEmit",
         );
         expect(rootConfigTsconfig.include).toEqual([
           "oxlint.config.ts",
@@ -1278,15 +1276,11 @@ describe("template init", () => {
           "turbo run format:check:run",
         );
         expect(rootPackageJson.scripts["format:check:run"]).toBe(
-          preset === "vike-app"
-            ? "oxfmt --check --config oxfmt.config.ts ."
-            : "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+          "oxfmt --check oxlint.config.ts oxfmt.config.ts",
         );
         expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
         expect(rootPackageJson.scripts["lint:run"]).toBe(
-          preset === "vike-app"
-            ? "oxlint --type-aware --config oxlint.config.ts ."
-            : "oxlint oxlint.config.ts oxfmt.config.ts",
+          "oxlint oxlint.config.ts oxfmt.config.ts",
         );
       }
 
@@ -1296,22 +1290,22 @@ describe("template init", () => {
         }>(path.join(projectDir, packageDir, "package.json"));
         expect(packageJson.scripts["format:check:run"]).toBe(
           preset === "vike-app"
-            ? "oxfmt --check --config oxfmt.config.ts ."
+            ? "oxfmt --check --config ../../oxfmt.config.ts ."
             : "oxfmt --check --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts["format:write:run"]).toBe(
           preset === "vike-app"
-            ? "oxfmt --write --config oxfmt.config.ts ."
+            ? "oxfmt --write --config ../../oxfmt.config.ts ."
             : "oxfmt --write --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts["lint:run"]).toBe(
           preset === "vike-app"
-            ? "oxlint --type-aware --config oxlint.config.ts ."
+            ? "oxlint --type-aware --config ../../oxlint.config.ts ."
             : "oxlint --config ../../oxlint.config.ts .",
         );
         expect(packageJson.scripts["lint:fix:run"]).toBe(
           preset === "vike-app"
-            ? "oxlint --type-aware --config oxlint.config.ts . --fix"
+            ? "oxlint --type-aware --config ../../oxlint.config.ts . --fix"
             : "oxlint --config ../../oxlint.config.ts . --fix",
         );
         expect(files).not.toContain(`${packageDir}/oxlint.config.ts`);
@@ -1320,12 +1314,12 @@ describe("template init", () => {
 
       if (preset === "vike-app") {
         const appTsconfig = await readJson<{ include: string[] }>(
-          path.join(projectDir, "tsconfig.app.json"),
+          path.join(projectDir, "apps/web/tsconfig.app.json"),
         );
         expect(files).not.toContain("env.d.ts");
         expect(files).not.toContain("global.d.ts");
-        expect(files).toContain("types/env.d.ts");
-        expect(files).toContain("types/global.d.ts");
+        expect(files).toContain("apps/web/types/env.d.ts");
+        expect(files).toContain("apps/web/types/global.d.ts");
         expect(appTsconfig.include).toContain("types/**/*.d.ts");
       }
 

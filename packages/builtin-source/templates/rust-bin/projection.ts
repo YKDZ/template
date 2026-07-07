@@ -45,7 +45,7 @@ export const rustBinPresetMetadata: BuiltInPreset = {
 
 const rustPackageBoundary: ComponentOwner = {
   kind: "package-boundary",
-  path: ".",
+  path: "packages/*",
 };
 
 function cargoPackageNameFromProjectName(projectName: string): string {

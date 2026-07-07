@@ -458,11 +458,11 @@
         "capabilities": [
           {
             "kind": "workspace-node-packages",
-            "workspacePackageGlob": ".",
+            "workspacePackageGlob": "apps/*",
             "packages": [
               {
                 "kind": "vike-app",
-                "path": ".",
+                "path": "apps/web",
                 "sourceFiles": [
                   "+server.ts",
                   ".env.example",

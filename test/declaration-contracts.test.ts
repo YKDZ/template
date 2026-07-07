@@ -682,7 +682,7 @@ describe("declaration contracts", () => {
       additionalProperties: false,
       required: ["kind", "workspacePackageGlob", "packages"],
       properties: {
-        workspacePackageGlob: { enum: [".", "apps/*"] },
+        workspacePackageGlob: { const: "apps/*" },
         packages: {
           minItems: 1,
           items: {
@@ -690,7 +690,7 @@ describe("declaration contracts", () => {
             required: ["kind", "path", "sourceFiles"],
             properties: {
               kind: { enum: ["hono-api", "vike-app", "vue-app"] },
-              path: { enum: [".", "apps/api", "apps/web"] },
+              path: { enum: ["apps/api", "apps/web"] },
               sourceFiles: { minItems: 1 },
             },
           },
@@ -1191,6 +1191,36 @@ describe("declaration contracts", () => {
     await expectTemplateFailure(
       ["blueprint", "validate", blueprintPath],
       "single-package Project Shape is unsupported in V1",
+    );
+  });
+
+  it("rejects root Package Boundary paths in project blueprints", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-root-package-boundary-"),
+    );
+    const blueprintPath = path.join(workspace, "blueprint.json");
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          preset: "ts-lib",
+          packageManager: "pnpm",
+          projectKind: "multi-package",
+          features: ["strict-typescript", "root-check"],
+          packages: [{ name: "app", path: "." }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await expectTemplateFailure(
+      ["blueprint", "validate", blueprintPath],
+      [
+        "$.packages[0].path",
+        "Package Path must be exactly two non-root path segments",
+      ],
     );
   });
 

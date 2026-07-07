@@ -41,6 +41,10 @@ function projectNameFromDir(targetDir: string): string {
   return targetDir.split(/[\\/]/).filter(Boolean).at(-1) ?? "vike-app";
 }
 
+function scopedPackageName(packageScope: string): string {
+  return `@${packageScope}/web`;
+}
+
 export function vikeAppBlueprint(
   options: PresetBlueprintOptions = { targetDir: process.cwd() },
 ): ProjectBlueprint {
@@ -52,7 +56,7 @@ export function vikeAppBlueprint(
     packageManager: "pnpm",
     projectKind: "multi-package",
     features: [...vikeAppPresetMetadata.features],
-    packages: [{ name: projectName, path: "." }],
+    packages: [{ name: scopedPackageName(projectName), path: "apps/web" }],
   };
 }
 

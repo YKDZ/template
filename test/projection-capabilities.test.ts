@@ -1078,6 +1078,40 @@ describe("Projection Capability declarations", () => {
     });
   });
 
+  it("rejects root Package Boundary bypasses in workspace-node-packages declarations", () => {
+    expect(
+      validateProjectionCapabilities({
+        capabilities: [
+          {
+            kind: "workspace-node-packages",
+            workspacePackageGlob: ".",
+            packages: [
+              {
+                kind: "vike-app",
+                path: ".",
+                sourceFiles: ["+server.ts"],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      issues: [
+        {
+          path: "$.capabilities[0].workspacePackageGlob",
+          message:
+            "workspace-node-packages currently supports workspacePackageGlob: apps/*",
+        },
+        {
+          path: "$.capabilities[0].packages[0].path",
+          message:
+            "workspace-node-packages package path must be apps/api or apps/web",
+        },
+      ],
+    });
+  });
+
   it("rejects rust-binary-workspace mixed with companion capabilities", () => {
     expect(
       validateProjectionCapabilities({
