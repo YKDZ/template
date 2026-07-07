@@ -6,12 +6,12 @@ import { useCounterStore } from "#/stores/counter";
 
 const counter = useCounterStore();
 const { count } = storeToRefs(counter);
-const themeLabel = ref<"dark" | "light">("light");
+const themeLabel = ref<"深色" | "浅色">("浅色");
 
 let preferredThemeQuery: MediaQueryList | undefined;
 
 function updateThemeLabel(event: MediaQueryList | MediaQueryListEvent): void {
-  themeLabel.value = event.matches ? "dark" : "light";
+  themeLabel.value = event.matches ? "深色" : "浅色";
 }
 
 onMounted(() => {
@@ -31,14 +31,12 @@ onUnmounted(() => {
       class="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16"
     >
       <p class="text-sm font-medium tracking-wide text-cyan-300 uppercase">
-        Vue app preset
+        Vue 应用预设
       </p>
-      <h1 class="mt-4 text-4xl font-semibold">
-        Vue, Vite, Tailwind, and Pinia
-      </h1>
+      <h1 class="mt-4 text-4xl font-semibold">Vue、Vite、Tailwind 和 Pinia</h1>
       <p class="mt-4 text-lg text-slate-300">
-        This generated app is ready for strict TypeScript checks, unit tests,
-        and Playwright.
+        这个生成的应用已经接入严格 TypeScript 检查、单元测试和 Playwright
+        端到端测试。
       </p>
       <div class="mt-8 flex items-center gap-4">
         <button
@@ -46,11 +44,9 @@ onUnmounted(() => {
           type="button"
           @click="counter.increment()"
         >
-          Count is {{ count }}
+          计数：{{ count }}
         </button>
-        <span class="text-sm text-slate-400"
-          >Preferred theme: {{ themeLabel }}</span
-        >
+        <span class="text-sm text-slate-400">系统主题：{{ themeLabel }}</span>
       </div>
     </section>
   </main>

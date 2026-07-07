@@ -9,7 +9,8 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "PORT=4173 node dist/server/index.mjs",
+    command:
+      "DATABASE_FILE=./node_modules/.tmp/e2e.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/e2e.sqlite PORT=4173 node dist/server/index.mjs",
     reuseExistingServer: !process.env.CI,
     url: previewUrl,
   },

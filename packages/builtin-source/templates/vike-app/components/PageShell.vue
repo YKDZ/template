@@ -7,7 +7,7 @@ import logoUrl from "#/assets/logo.svg";
     <header class="border-b border-slate-200 bg-white">
       <nav class="mx-auto flex max-w-4xl items-center gap-3 px-6 py-4">
         <img :src="logoUrl" alt="" class="size-8" />
-        <a href="/" class="font-semibold text-slate-950">Vike App</a>
+        <a href="/" class="font-semibold text-slate-950">Vike 应用</a>
       </nav>
     </header>
     <main class="mx-auto max-w-4xl px-6 py-10">

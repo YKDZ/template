@@ -1316,6 +1316,13 @@ describe("template init", () => {
         const appTsconfig = await readJson<{ include: string[] }>(
           path.join(projectDir, "apps/web/tsconfig.app.json"),
         );
+        const packageJson = await readJson<{
+          scripts: Record<string, string>;
+        }>(path.join(projectDir, "apps/web/package.json"));
+        const playwrightConfig = await readFile(
+          path.join(projectDir, "apps/web/playwright.config.ts"),
+          "utf8",
+        );
         const viteConfig = await readFile(
           path.join(projectDir, "apps/web/vite.config.ts"),
           "utf8",
@@ -1327,6 +1334,19 @@ describe("template init", () => {
         expect(appTsconfig.include).toContain("types/**/*.d.ts");
         expect(viteConfig).toContain('alias: {\n      "#":');
         expect(viteConfig).toContain('new URL(".", import.meta.url)');
+        expect(packageJson.scripts.dev).toBe("pnpm run db:push && vike dev");
+        expect(packageJson.scripts["db:push"]).toBe(
+          "mkdir -p data node_modules/.tmp && drizzle-kit push",
+        );
+        expect(packageJson.scripts.preview).toBe(
+          "pnpm run db:push && vike preview",
+        );
+        expect(packageJson.scripts["test:run"]).toBe(
+          "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run",
+        );
+        expect(playwrightConfig).toContain(
+          "DATABASE_FILE=./node_modules/.tmp/e2e.sqlite pnpm run db:push",
+        );
       }
 
       expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);

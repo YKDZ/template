@@ -2,8 +2,8 @@ import vikeVue from "vike-vue/config";
 import type { Config } from "vike/types";
 
 const config: Config = {
-  title: "Vike App",
-  description: "Vike, Hono, Telefunc, Drizzle, and Vue.",
+  title: "Vike 应用",
+  description: "使用 Vike、Hono、Telefunc、Drizzle 和 Vue 的示例应用。",
   extends: [vikeVue],
 };
 

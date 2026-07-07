@@ -2254,7 +2254,8 @@ function nodePackageScripts(
   if (nodePackage.kind === "vike-app") {
     return {
       "build:run": "vike build",
-      dev: "vike dev",
+      dev: "pnpm run db:push && vike dev",
+      "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
       "drizzle:generate": "drizzle-kit generate",
       "drizzle:migrate": "drizzle-kit migrate",
       "drizzle:studio": "drizzle-kit studio",
@@ -2263,9 +2264,10 @@ function nodePackageScripts(
       "lint:run": "oxlint --type-aware --config ../../oxlint.config.ts .",
       "lint:fix:run":
         "oxlint --type-aware --config ../../oxlint.config.ts . --fix",
-      preview: "vike preview",
+      preview: "pnpm run db:push && vike preview",
       start: "node ./dist/server/index.mjs",
-      "test:run": "vitest run",
+      "test:run":
+        "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run",
       "test:e2e:run": "playwright test --config playwright.config.ts",
       "typecheck:run": "vue-tsc --build --noEmit",
     };

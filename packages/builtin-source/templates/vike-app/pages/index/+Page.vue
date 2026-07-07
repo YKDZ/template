@@ -18,8 +18,8 @@ async function refreshTodos() {
   } catch (unknownError) {
     error.value =
       unknownError instanceof Error
-        ? unknownError.message
-        : "Unable to load todos";
+        ? `待办加载失败：${unknownError.message}`
+        : "无法加载待办事项";
   }
 }
 
@@ -41,10 +41,10 @@ async function submitTodo() {
       <p class="text-sm font-semibold tracking-wide text-rose-600 uppercase">
         Vike + Hono
       </p>
-      <h1 class="text-4xl font-bold tracking-tight">Full-stack Vike app</h1>
+      <h1 class="text-4xl font-bold tracking-tight">全栈 Vike 应用</h1>
       <p class="max-w-2xl text-lg text-slate-700">
-        Server-rendered Vue with Hono routing, Telefunc actions, and Drizzle
-        database access.
+        使用 Hono 路由、Telefunc 动作和 Drizzle 数据访问构建服务端渲染 Vue
+        应用。
       </p>
       <CounterButton />
     </div>
@@ -54,10 +54,10 @@ async function submitTodo() {
         v-model="title"
         class="min-w-0 flex-1 rounded border border-slate-300 px-3 py-2"
         name="title"
-        placeholder="Add a database-backed todo"
+        placeholder="添加一条数据库待办"
       />
       <button class="rounded bg-slate-950 px-4 py-2 text-white" type="submit">
-        Add
+        添加
       </button>
     </form>
 
@@ -66,7 +66,7 @@ async function submitTodo() {
       type="button"
       @click="refreshTodos"
     >
-      Load todos
+      加载待办事项
     </button>
 
     <p

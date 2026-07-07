@@ -5,16 +5,14 @@ import { createTodo, listTodos } from "#/database/queries/todos";
 
 describe("todo queries", () => {
   it("creates and lists todos through Drizzle SQLite", async () => {
-    const db = createDatabase(":memory:");
+    const db = createDatabase();
+    const title = `发布模板 ${Date.now()}`;
 
-    db.run(
-      "CREATE TABLE todos (id integer PRIMARY KEY AUTOINCREMENT NOT NULL, title text NOT NULL, completed integer DEFAULT false NOT NULL, created_at text DEFAULT (CURRENT_TIMESTAMP) NOT NULL)",
-    );
-
-    await expect(createTodo(db, { title: "Ship" })).resolves.toMatchObject({
-      id: 1,
-      title: "Ship",
+    await expect(createTodo(db, { title })).resolves.toMatchObject({
+      title,
     });
-    await expect(listTodos(db)).resolves.toMatchObject([{ title: "Ship" }]);
+    await expect(listTodos(db)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title })]),
+    );
   });
 });

@@ -16,6 +16,6 @@ onMounted(() => {
     :disabled="!mounted"
     @click="count += 1"
   >
-    Count {{ count }}
+    计数：{{ count }}
   </button>
 </template>

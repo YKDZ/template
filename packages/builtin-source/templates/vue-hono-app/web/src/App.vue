@@ -7,13 +7,13 @@ import { useCounterStore } from "#/stores/counter";
 
 const counter = useCounterStore();
 const { count } = storeToRefs(counter);
-const themeLabel = ref<"dark" | "light">("light");
-const apiStatus = ref("checking");
+const themeLabel = ref<"深色" | "浅色">("浅色");
+const apiStatus = ref("检查中");
 
 let preferredThemeQuery: MediaQueryList | undefined;
 
 function updateThemeLabel(event: MediaQueryList | MediaQueryListEvent): void {
-  themeLabel.value = event.matches ? "dark" : "light";
+  themeLabel.value = event.matches ? "深色" : "浅色";
 }
 
 onMounted(() => {
@@ -29,7 +29,7 @@ onUnmounted(() => {
 onMounted(async () => {
   const response = await api.api.health.$get();
   const body = await response.json();
-  apiStatus.value = body.status;
+  apiStatus.value = body.status === "ok" ? "正常" : body.status;
 });
 </script>
 
@@ -39,12 +39,11 @@ onMounted(async () => {
       class="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16"
     >
       <p class="text-sm font-medium tracking-wide text-cyan-300 uppercase">
-        Vue Hono app preset
+        Vue + Hono 应用预设
       </p>
-      <h1 class="mt-4 text-4xl font-semibold">Vue, Hono, and typed RPC</h1>
+      <h1 class="mt-4 text-4xl font-semibold">Vue、Hono 和类型化 RPC</h1>
       <p class="mt-4 text-lg text-slate-300">
-        This generated workspace typechecks the web package against the API
-        contract.
+        这个生成的工作区会让 Web 包根据 API 契约进行类型检查。
       </p>
       <div class="mt-8 flex flex-wrap items-center gap-4">
         <button
@@ -52,12 +51,10 @@ onMounted(async () => {
           type="button"
           @click="counter.increment()"
         >
-          Count is {{ count }}
+          计数：{{ count }}
         </button>
-        <span class="text-sm text-slate-400"
-          >Preferred theme: {{ themeLabel }}</span
-        >
-        <span class="text-sm text-slate-400">API status: {{ apiStatus }}</span>
+        <span class="text-sm text-slate-400">系统主题：{{ themeLabel }}</span>
+        <span class="text-sm text-slate-400">API 状态：{{ apiStatus }}</span>
       </div>
     </section>
   </main>
