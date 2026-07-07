@@ -1318,6 +1318,17 @@ describe("template init", () => {
         expect(files).not.toContain(`${packageDir}/oxfmt.config.ts`);
       }
 
+      if (preset === "vike-app") {
+        const appTsconfig = await readJson<{ include: string[] }>(
+          path.join(projectDir, "tsconfig.app.json"),
+        );
+        expect(files).not.toContain("env.d.ts");
+        expect(files).not.toContain("global.d.ts");
+        expect(files).toContain("types/env.d.ts");
+        expect(files).toContain("types/global.d.ts");
+        expect(appTsconfig.include).toContain("types/**/*.d.ts");
+      }
+
       expect(files.some((file) => file.endsWith(".oxlintrc.json"))).toBe(false);
       expect(files.some((file) => file.endsWith(".oxfmtrc.json"))).toBe(false);
     }

@@ -473,8 +473,6 @@
                   "database/queries/todos.ts",
                   "database/schema.ts",
                   "drizzle.config.ts",
-                  "env.d.ts",
-                  "global.d.ts",
                   "pages/+Head.vue",
                   "pages/+Layout.vue",
                   "pages/+config.ts",
@@ -486,6 +484,8 @@
                   "server/app.ts",
                   "test/e2e/app.spec.ts",
                   "test/todos.test.ts",
+                  "types/env.d.ts",
+                  "types/global.d.ts",
                   "vite.config.ts",
                   "vitest.config.ts"
                 ]
@@ -512,14 +512,13 @@
           "vike-app/database",
           "vike-app/pages",
           "vike-app/server",
-          "vike-app/test"
+          "vike-app/test",
+          "vike-app/types"
         ],
         "files": [
           "vike-app/+server.ts",
           "vike-app/.env.example",
           "vike-app/drizzle.config.ts",
-          "vike-app/env.d.ts",
-          "vike-app/global.d.ts",
           "vike-app/playwright.config.ts",
           "vike-app/vite.config.ts",
           "vike-app/vitest.config.ts"
