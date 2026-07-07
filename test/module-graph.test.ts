@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { projectHonoApiPackageScripts } from "@ykdz/template-builtin-source/templates/hono-api/projection";
 import {
@@ -21,6 +25,25 @@ import {
   projectCheckWorkflow,
   projectDependabotConfig,
 } from "@ykdz/template-core/project-github";
+
+const repoRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
+
+function rootCheckWorkflowCheckoutRef(): string {
+  const workflow = readFileSync(
+    path.join(repoRoot, ".github/workflows/check.yml"),
+    "utf8",
+  );
+  const match = workflow.match(/uses:\s+(actions\/checkout@v\d+)/);
+
+  if (!match?.[1]) {
+    throw new Error("Root check workflow must use actions/checkout@vN");
+  }
+
+  return match[1];
+}
 
 describe("module graph plans", () => {
   it("selects semantic Check and Fix Components for the ts-lib workspace root", () => {
@@ -376,11 +399,16 @@ describe("module graph plans", () => {
       },
     });
 
+    const workflow = projectCheckWorkflow({
+      checkPlan: tsLibPlan.checkPlan,
+      environmentPreparation: { rustToolchain: false },
+    });
+
+    expect(workflow).toContain(
+      `      - uses: ${rootCheckWorkflowCheckoutRef()}`,
+    );
     expect(
-      projectCheckWorkflow({
-        checkPlan: tsLibPlan.checkPlan,
-        environmentPreparation: { rustToolchain: false },
-      }),
+      workflow.replace(/actions\/checkout@v\d+/, "actions/checkout@vN"),
     ).toBe(
       [
         "name: Check",
@@ -395,7 +423,7 @@ describe("module graph plans", () => {
         "  check:",
         "    runs-on: ubuntu-latest",
         "    steps:",
-        "      - uses: actions/checkout@v7",
+        "      - uses: actions/checkout@vN",
         "      - uses: actions/setup-node@v6",
         "        with:",
         "          node-version-file: package.json",

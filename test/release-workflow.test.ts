@@ -7,6 +7,13 @@ const repoRoot = path.resolve(
   "..",
 );
 
+function expectWorkflowUsesVersionedAction(
+  workflow: string,
+  action: "actions/checkout" | "actions/setup-node",
+): void {
+  expect(workflow).toMatch(new RegExp(`uses: ${action}@v\\d+`));
+}
+
 describe("npm release workflow", () => {
   it("publishes through GitHub Actions OIDC without a long-lived npm token", async () => {
     const workflow = await readFile(
@@ -30,8 +37,8 @@ describe("npm release workflow", () => {
       "utf8",
     );
 
-    expect(workflow).toContain("uses: actions/checkout@v7");
-    expect(workflow).toContain("uses: actions/setup-node@v6");
+    expectWorkflowUsesVersionedAction(workflow, "actions/checkout");
+    expectWorkflowUsesVersionedAction(workflow, "actions/setup-node");
     expect(workflow).toContain("node-version-file: package.json");
     expect(workflow).toContain("run: corepack enable");
     expect(workflow).toContain("run: pnpm install --frozen-lockfile");
