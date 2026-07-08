@@ -30,7 +30,7 @@ catalog:
   vite: ^8.1.2
   vike: ^0.4.260
   vike-vue: ^0.9.12
-  vitest: ^4.1.9
+  vitest: ^4.1.10
   vue: ^3.5.39
   vue-tsc: ^3.3.6
   yaml: ^2.9.0
