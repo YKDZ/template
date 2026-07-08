@@ -20,9 +20,9 @@ import {
 import { renderTurboRunCommand } from "./module-graph.js";
 import {
   assertTypeScriptPackageBoundaryForLinkIntent,
-  packageTurboTasks,
+  packageTurboConfig,
   planPackageLinks,
-  type TurboTaskGraph,
+  type TurboConfig,
 } from "./package-linking.js";
 import {
   findPresetSourceManifestPreset,
@@ -61,7 +61,7 @@ type GeneratedRepositoryPackageMetadata = {
 type RootUpdatePlan = {
   blueprint: ProjectBlueprint;
   rootPackageJson: RootPackageJson;
-  turboConfig: { tasks: TurboTaskGraph };
+  turboConfig: TurboConfig;
   workspaceText: string;
   consumerManifestUpdates: readonly ConsumerManifestUpdate[];
 };
@@ -737,14 +737,11 @@ function rootScriptWithTurboPackageTasks(options: {
     | "check:run"
     | "fix:run"
   )[];
-  readonly concurrency?: 1;
 }): string {
   const rootCommands = options.script
     .split(" && ")
     .filter((command) => !command.startsWith("turbo run "));
-  const turboArgs =
-    options.concurrency === undefined ? [] : ["--concurrency=1"];
-  const turboCommand = renderTurboRunCommand(options.taskNames, turboArgs);
+  const turboCommand = renderTurboRunCommand(options.taskNames);
 
   return [...rootCommands, turboCommand].join(" && ");
 }
@@ -779,7 +776,6 @@ function rootPackageJsonWithPackageTaskFilters(
           "test:e2e:run",
           "check:run",
         ],
-        concurrency: 1,
       }),
       fix: rootScriptWithTurboPackageTasks({
         script: fixScript,
@@ -829,12 +825,10 @@ function packageManifestsNeedDependencyBuilds(
 
 function turboConfigForPackageManifests(
   manifests: readonly PackageManifestForTaskGraph[],
-): { tasks: TurboTaskGraph } {
-  return {
-    tasks: packageTurboTasks({
-      dependencyBuildsRequired: packageManifestsNeedDependencyBuilds(manifests),
-    }),
-  };
+): TurboConfig {
+  return packageTurboConfig({
+    dependencyBuildsRequired: packageManifestsNeedDependencyBuilds(manifests),
+  });
 }
 
 function rootPackageJsonWithSharedOxcRuntimeDependencies(

@@ -4,7 +4,7 @@ test("renders the web app and calls the API", async ({ page }) => {
   await page.goto("/");
 
   await expect(
-    page.getByRole("heading", { name: "Vue、Hono 和类型化 RPC" }),
+    page.getByRole("heading", { name: "Vue 和 Hono 工作区" }),
   ).toBeVisible();
   await expect(page.getByText("API 状态：正常")).toBeVisible();
   const counterButton = page.getByRole("button", { name: "计数：0" });

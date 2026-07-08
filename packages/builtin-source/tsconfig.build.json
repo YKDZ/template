@@ -1,8 +1,14 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
+    "customConditions": [],
     "declarationMap": false,
-    "paths": {},
     "rootDir": "."
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "templates/*/projection.ts",
+    "templates/projection-plans.ts",
+    "templates/registry.ts"
+  ]
 }

@@ -1,5 +1,47 @@
 {
   "$schema": "https://turborepo.com/schema.json",
+  "boundaries": {
+    "tags": {
+      "template-checks": {
+        "dependencies": {
+          "allow": [
+            "template-core",
+            "template-preset-source",
+            "template-shared"
+          ]
+        }
+      },
+      "template-cli": {
+        "dependencies": {
+          "allow": [
+            "template-core",
+            "template-preset-source",
+            "template-shared"
+          ]
+        }
+      },
+      "template-core": {
+        "dependencies": {
+          "allow": ["template-shared"]
+        }
+      },
+      "template-preset-source": {
+        "dependencies": {
+          "allow": ["template-core", "template-shared"]
+        }
+      },
+      "template-shared": {
+        "dependencies": {
+          "deny": [
+            "template-checks",
+            "template-cli",
+            "template-core",
+            "template-preset-source"
+          ]
+        }
+      }
+    }
+  },
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

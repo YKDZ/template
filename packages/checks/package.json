@@ -4,6 +4,10 @@
   "type": "module",
   "exports": {
     "./*": {
+      "source": {
+        "types": "./src/*.ts",
+        "default": "./src/*.ts"
+      },
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"
     }

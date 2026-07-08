@@ -156,20 +156,6 @@ async function initGeneratedWorkspace(
   );
 }
 
-function playwrightWebServerPorts(configText: string): number[] {
-  const matches = [
-    ...configText.matchAll(/port:\s*(\d[\d_]*)/g),
-    ...configText.matchAll(/\b\w+Port\s*=\s*(\d[\d_]*)/g),
-    ...configText.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d[\d_]*)/g),
-  ];
-
-  if (matches.length === 0) {
-    throw new Error("Playwright config does not declare a web server port");
-  }
-
-  return matches.map((match) => Number(match[1]?.replaceAll("_", "")));
-}
-
 describe("template add package", () => {
   it("keeps the generated Dependency Catalog complete when an added package introduces catalog dependencies", async () => {
     const workspace = await mkdtemp(
@@ -254,14 +240,6 @@ describe("template add package", () => {
         cwd: projectDir,
       },
     );
-    await execa(
-      tsxBin,
-      [cliPath, "add", "package", "--preset", "hono-api", "--name", "worker"],
-      {
-        cwd: projectDir,
-      },
-    );
-
     const blueprint = await readJson<{
       preset: string;
       projectKind: string;
@@ -296,10 +274,6 @@ describe("template add package", () => {
       engines: { node: string };
       packageManager?: string;
     }>(path.join(projectDir, "packages/shared/package.json"));
-    const workerPackageJson = await readJson<{
-      dependencies: Record<string, string>;
-      devDependencies: Record<string, string>;
-    }>(path.join(projectDir, "apps/worker/package.json"));
     const tsconfig = await readJson<{
       compilerOptions: Record<string, unknown>;
       include: string[];
@@ -320,35 +294,25 @@ describe("template add package", () => {
         role: "shared-library",
         sourcePreset: "ts-lib",
       },
-      {
-        name: "@demo-fullstack/worker",
-        path: "apps/worker",
-        role: "runtime-service",
-        sourcePreset: "hono-api",
-      },
     ]);
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
+      "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
-      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
+      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
     );
     expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
       "^typecheck:run",
     ]);
     expect(turboConfig.tasks["build:run"]).toEqual({
-      dependsOn: ["^build:run"],
       outputs: ["dist/**"],
     });
     expect(turboConfig.tasks["test:run"]!.dependsOn).toEqual([
       "^typecheck:run",
     ]);
-    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual([
-      "build:run",
-      "^build:run",
-    ]);
+    expect(turboConfig.tasks["test:e2e:run"]!.dependsOn).toEqual(["build:run"]);
     expect(turboConfig.tasks["check:run"]!.cache).toBe(false);
     expect(rootPackageJson.scripts.fix).toBe(
       "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
@@ -367,11 +331,9 @@ describe("template add package", () => {
     expect(packageJson.scripts).not.toHaveProperty("build:run");
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
-    const addedPackageDependencySpecifiers = [
-      ...Object.values(packageJson.devDependencies),
-      ...Object.values(workerPackageJson.dependencies),
-      ...Object.values(workerPackageJson.devDependencies),
-    ];
+    const addedPackageDependencySpecifiers = Object.values(
+      packageJson.devDependencies,
+    );
     expect(
       addedPackageDependencySpecifiers.every((value) => value === "catalog:"),
     ).toBe(true);
@@ -380,7 +342,6 @@ describe("template add package", () => {
     expect(tsconfig.include).toEqual(["src/**/*.ts"]);
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
-    await stat(path.join(projectDir, "apps/worker/src/app.ts"));
     await expectPathMissing(
       path.join(projectDir, "packages/shared/oxlint.config.ts"),
     );
@@ -422,7 +383,7 @@ describe("template add package", () => {
         "add",
         "package",
         "--preset",
-        "hono-api",
+        "vue-app",
         "--name",
         "worker",
         "--path",
@@ -458,7 +419,7 @@ describe("template add package", () => {
         name: "@demo-fullstack/worker",
         path: "services/worker",
         role: "runtime-service",
-        sourcePreset: "hono-api",
+        sourcePreset: "vue-app",
       }),
     );
     expect(workspaceYaml).toContain("  - services/*");
@@ -466,13 +427,13 @@ describe("template add package", () => {
       "turbo run typecheck:run --filter './apps/*' --filter './services/*'",
     );
     expect(rootPackageJson.scripts.check).toContain(
-      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
+      "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
     );
     expect(rootTsconfig.references).not.toContainEqual({
       path: "./services/worker/tsconfig.json",
     });
     expect(packageJson.name).toBe("@demo-fullstack/worker");
-    await stat(path.join(projectDir, "services/worker/src/app.ts"));
+    await stat(path.join(projectDir, "services/worker/src/App.vue"));
     await expectPathMissing(path.join(projectDir, "apps/worker/package.json"));
   }, 120_000);
 
@@ -698,7 +659,6 @@ describe("template add package", () => {
           dependencies: {
             ...webPackageJson.dependencies,
             "@demo-fullstack/shared": "^1.0.0",
-            "@demo-fullstack/api": "workspace:*",
           },
         },
         null,
@@ -728,9 +688,6 @@ describe("template add package", () => {
     }>(webPackageJsonPath);
 
     expect(updatedWebPackageJson.dependencies["@demo-fullstack/shared"]).toBe(
-      "workspace:*",
-    );
-    expect(updatedWebPackageJson.dependencies["@demo-fullstack/api"]).toBe(
       "workspace:*",
     );
     expect(
@@ -980,7 +937,7 @@ describe("template add package", () => {
           "add",
           "package",
           "--preset",
-          "hono-api",
+          "vue-app",
           "--name",
           "admin",
           "--path",
@@ -1044,7 +1001,7 @@ describe("template add package", () => {
             "add",
             "package",
             "--preset",
-            "hono-api",
+            "vue-app",
             "--name",
             "admin",
             "--path",
@@ -1139,7 +1096,7 @@ describe("template add package", () => {
           "add",
           "package",
           "--preset",
-          "hono-api",
+          "vue-app",
           "--name",
           "cache",
           "--path",
@@ -1239,10 +1196,7 @@ describe("template add package", () => {
     );
   });
 
-  it.each([
-    { projectName: "demo-api", preset: "hono-api" },
-    { projectName: "demo-vue", preset: "vue-app" },
-  ])(
+  it.each([{ projectName: "demo-vue", preset: "vue-app" }])(
     "adds a TypeScript library package to the generated $preset workspace",
     async ({ projectName, preset }) => {
       const workspace = await mkdtemp(
@@ -1354,7 +1308,7 @@ describe("template add package", () => {
 
     await expectCommandFailure(unsupportedPackageAddition, [
       "Preset rust-bin cannot be used for Package Addition.",
-      "Supported Package Addition presets: ts-lib, hono-api, vue-app",
+      "Supported Package Addition presets: ts-lib, vue-app",
     ]);
 
     await expect(
@@ -1395,7 +1349,7 @@ describe("template add package", () => {
 
     await expectCommandFailure(unsupportedPackageAddition, [
       "Preset vue-hono-app cannot be used for Package Addition.",
-      "Supported Package Addition presets: ts-lib, hono-api, vue-app",
+      "Supported Package Addition presets: ts-lib, vue-app",
     ]);
 
     await expect(
@@ -1424,7 +1378,7 @@ describe("template add package", () => {
           "add",
           "package",
           "--preset",
-          "hono-api",
+          "ts-lib",
           "--name",
           "worker",
         ],
@@ -1529,111 +1483,6 @@ describe("template add package", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
-  });
-
-  it("adds a Hono API package to a generated workspace repository", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-package-"),
-    );
-    const projectDir = path.join(workspace, "demo-fullstack");
-
-    await initGeneratedWorkspace(projectDir);
-
-    await execa(
-      "pnpm",
-      [
-        "exec",
-        "tsx",
-        cliPath,
-        "add",
-        "package",
-        "--preset",
-        "hono-api",
-        "--name",
-        "worker",
-      ],
-      { cwd: projectDir },
-    );
-
-    const blueprint = await readJson<{
-      packages: Array<{
-        name: string;
-        path: string;
-        role?: string;
-        sourcePreset?: string;
-      }>;
-    }>(path.join(projectDir, ".template/blueprint.json"));
-    const rootTsconfig = await readJson<{
-      references: Array<{ path: string }>;
-    }>(path.join(projectDir, "tsconfig.json"));
-    const packageJson = await readJson<{
-      name: string;
-      dependencies: Record<string, string>;
-      scripts: Record<string, string>;
-      engines: { node: string };
-      types: string;
-      exports: unknown;
-      imports: unknown;
-      packageManager?: string;
-    }>(path.join(projectDir, "apps/worker/package.json"));
-    const tsconfig = await readJson<{
-      compilerOptions: Record<string, unknown>;
-    }>(path.join(projectDir, "apps/worker/tsconfig.json"));
-    const serverSource = await readFile(
-      path.join(projectDir, "apps/worker/src/server.ts"),
-      "utf8",
-    );
-    const testSource = await readFile(
-      path.join(projectDir, "apps/worker/test/app.test.ts"),
-      "utf8",
-    );
-
-    expect(blueprint.packages).toContainEqual(
-      expect.objectContaining({
-        name: "@demo-fullstack/worker",
-        path: "apps/worker",
-        role: "runtime-service",
-        sourcePreset: "hono-api",
-      }),
-    );
-    expect(rootTsconfig.references).not.toContainEqual({
-      path: "./apps/worker/tsconfig.json",
-    });
-    expect(packageJson.name).toBe("@demo-fullstack/worker");
-    expect(packageJson.engines.node).toBe("24");
-    expect(packageJson).not.toHaveProperty("packageManager");
-    expect(packageJson.dependencies.hono).toBe("catalog:");
-    expect(packageJson.types).toBe("./src/index.ts");
-    expect(packageJson.exports).toEqual({
-      ".": {
-        default: "./dist/index.js",
-        types: "./src/index.ts",
-      },
-    });
-    expect(packageJson.imports).toEqual({
-      "#/*": {
-        default: "./dist/*.js",
-        types: "./src/*.ts",
-      },
-    });
-    expect(packageJson.scripts["test:run"]).toBe(
-      "vitest run --reporter=agent --silent=passed-only",
-    );
-    expectSharedRootOxcScripts(packageJson.scripts);
-    expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
-    expect(serverSource).toContain('from "#/app"');
-    expect(serverSource).not.toContain('from "#/app.js"');
-    expect(testSource).toContain('from "#/app"');
-    expect(testSource).not.toContain('from "#/app.js"');
-
-    await stat(path.join(projectDir, "apps/worker/src/app.ts"));
-    await stat(path.join(projectDir, "apps/worker/test/app.test.ts"));
-    await expectPathMissing(
-      path.join(projectDir, "apps/worker/oxlint.config.ts"),
-    );
-    await expectPathMissing(
-      path.join(projectDir, "apps/worker/oxfmt.config.ts"),
-    );
   });
 
   it("adds packages with the existing generated repository Node engine", async () => {
@@ -1786,7 +1635,7 @@ describe("template add package", () => {
     );
     const projectDir = path.join(workspace, "demo-api");
 
-    await initGeneratedWorkspace(projectDir, "hono-api");
+    await initGeneratedWorkspace(projectDir, "ts-lib");
 
     const beforeOxlintConfig = await readFile(
       path.join(projectDir, "oxlint.config.ts"),
@@ -1953,7 +1802,7 @@ describe("template add package", () => {
     );
   }, 120_000);
 
-  it("adds a Vue app package with a distinct e2e preview port from the existing web app", async () => {
+  it("adds a Vue app package with runtime-allocated e2e preview ports", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-add-package-"),
     );
@@ -1989,9 +1838,10 @@ describe("template add package", () => {
       scripts: Record<string, string>;
     }>(path.join(projectDir, "apps/admin/package.json"));
 
-    const webPorts = playwrightWebServerPorts(webPlaywright);
-    const [adminPort] = playwrightWebServerPorts(adminPlaywright);
-    expect(webPorts).not.toContain(adminPort);
+    expect(webPlaywright).toContain('requiredPort("PLAYWRIGHT_WEB_PORT")');
+    expect(adminPlaywright).toContain('requiredPort("PLAYWRIGHT_WEB_PORT")');
+    expect(webPlaywright).not.toMatch(/\b(?:--port\s+|:)(?:\d[\d_]*)/);
+    expect(adminPlaywright).not.toMatch(/\b(?:--port\s+|:)(?:\d[\d_]*)/);
     expect(adminPackageJson.scripts).not.toHaveProperty("check");
     expect(adminPackageJson.scripts["test:e2e:run"]).toBe(
       "node --experimental-strip-types scripts/run-playwright.ts",

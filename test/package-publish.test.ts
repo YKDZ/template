@@ -50,10 +50,19 @@ const cliPackageJsonSchema = v.object({
     v.object({ type: v.optional(v.string()), url: v.optional(v.string()) }),
   ),
 });
+const builtinSourcePackageJsonSchema = v.object({
+  files: v.array(v.string()),
+  name: v.string(),
+  private: v.boolean(),
+});
 const runtimePackageJsonSchema = v.object({
   files: v.array(v.string()),
   name: v.string(),
   private: v.boolean(),
+});
+const packDryRunFileSchema = v.object({ path: v.string() });
+const packDryRunSchema = v.object({
+  files: v.array(packDryRunFileSchema),
 });
 
 async function readJsonWithSchema<const Schema extends v.GenericSchema>(
@@ -81,6 +90,8 @@ function jsonDataUrl(value: unknown): string {
 }
 
 const packageRootFiles = [
+  "Cargo.lock",
+  "Cargo.toml",
   "package.json",
   "pnpm-lock.yaml",
   "pnpm-workspace.yaml",
@@ -107,6 +118,15 @@ const supportedPresetSourcePresets =
       preset.generation === "supported" && preset.projection !== undefined,
   );
 const packagePublishIntegrationTimeoutMs = 180_000;
+const presetSourceTestPattern =
+  /^packages\/builtin-source\/templates\/[^/]+\/behavior\.test\.ts$/;
+const packedPresetSourceTestPattern =
+  /^package\/node_modules\/@ykdz\/template-builtin-source\/templates\/[^/]+\/behavior\.test\.ts$/;
+const publishedPackageRuntimeEnv = {
+  NODE_OPTIONS: (process.env.NODE_OPTIONS ?? "")
+    .replaceAll(/(?:^|\s)--conditions=source(?=\s|$)/g, " ")
+    .trim(),
+};
 
 async function listFiles(root: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
@@ -143,7 +163,7 @@ async function runtimeSourceFiles(): Promise<string[]> {
     .map((file) => relativeRepoPath(file));
 
   return [
-    ...packageSourceFiles,
+    ...packageSourceFiles.filter((file) => !presetSourceTestPattern.test(file)),
     "packages/builtin-source/templates/preset-source.json",
   ];
 }
@@ -233,6 +253,52 @@ function projectionTemplateSourceFiles(): string[] {
   }
 
   return [...files];
+}
+
+function projectionOperationSourceFiles(
+  preset: PresetSourceManifestPreset,
+): string[] {
+  const files = new Set<string>();
+  const plan = projectionPlanFor(preset);
+  const sourceRoots: Record<string, string> = {
+    ...plan.sourceRoots,
+    default: plan.sourceRoot,
+  };
+
+  function sourceFileFor(from: string, sourceRootName: string | undefined) {
+    const root =
+      sourceRootName === undefined
+        ? sourceRoots.default
+        : sourceRoots[sourceRootName];
+
+    if (!root) {
+      throw new Error(
+        `Missing sourceRoot ${sourceRootName} for ${preset.name}`,
+      );
+    }
+
+    files.add(relativeRepoPath(path.join(root, from)));
+  }
+
+  for (const operation of plan.operations) {
+    if (operation.kind === "writeTextFromFragments") {
+      for (const fragment of operation.fragments) {
+        sourceFileFor(fragment.from, fragment.sourceRoot);
+      }
+      continue;
+    }
+
+    if (operation.kind === "writeTextTemplate") {
+      sourceFileFor(operation.from, operation.sourceRoot);
+      continue;
+    }
+
+    if (operation.kind === "copyFile") {
+      sourceFileFor(operation.from, operation.sourceRoot);
+    }
+  }
+
+  return [...files].toSorted();
 }
 
 function checkedGithubTemplateFiles(): string[] {
@@ -388,14 +454,65 @@ describe("package publishing", () => {
   });
 
   it("declares a narrow package surface for bundled runtime packages", async () => {
+    const builtinSourcePackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/builtin-source/package.json"),
+      builtinSourcePackageJsonSchema,
+    );
     const sharedPackageJson = await readJsonWithSchema(
       path.join(repoRoot, "packages/shared/package.json"),
       runtimePackageJsonSchema,
     );
 
+    expect(builtinSourcePackageJson.name).toBe("@ykdz/template-builtin-source");
+    expect(builtinSourcePackageJson.private).toBe(true);
+    expect(builtinSourcePackageJson.files).toEqual(
+      expect.arrayContaining(["templates", "!templates/*/behavior.test.ts"]),
+    );
     expect(sharedPackageJson.name).toBe("@ykdz/template-shared");
     expect(sharedPackageJson.private).toBe(true);
     expect(sharedPackageJson.files).toEqual(["dist"]);
+  });
+
+  it("does not treat Preset Source behavior tests as packable template source", async () => {
+    expect(await packageFiles()).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(presetSourceTestPattern)]),
+    );
+    expect(await checkedTemplatePackagePaths()).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(packedPresetSourceTestPattern),
+      ]),
+    );
+
+    const result = await execa(
+      "pnpm",
+      [
+        "--filter",
+        "@ykdz/template-builtin-source",
+        "pack",
+        "--dry-run",
+        "--json",
+      ],
+      { cwd: repoRoot },
+    );
+    const dryRun = v.parse(
+      packDryRunSchema,
+      JSON.parse(result.stdout) as unknown,
+    );
+    expect(dryRun.files.map((file) => file.path)).not.toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/^templates\/[^/]+\/behavior\.test\.ts$/),
+      ]),
+    );
+  });
+
+  it("does not copy Preset Source behavior tests into generated repositories", () => {
+    for (const preset of supportedPresetSourcePresets) {
+      expect(projectionOperationSourceFiles(preset)).not.toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(presetSourceTestPattern),
+        ]),
+      );
+    }
   });
 
   it(
@@ -471,6 +588,12 @@ describe("package publishing", () => {
       expect(packedPaths).toContain(
         "package/node_modules/@ykdz/template-core/dist/toolchain-resolution.js",
       );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/Cargo.toml",
+      );
+      expect(packedPaths).toContain(
+        "package/node_modules/@ykdz/template-core/dist/Cargo.lock",
+      );
       expect(
         packedPaths.filter((packedPath) => packedPath.endsWith(".map")),
       ).toEqual([]);
@@ -485,6 +608,11 @@ describe("package publishing", () => {
           expect.stringMatching(
             /^package\/node_modules\/@ykdz\/template-builtin-source\/templates\/[^/]+\/projection\.ts$/,
           ),
+        ]),
+      );
+      expect(packedPaths).not.toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(packedPresetSourceTestPattern),
         ]),
       );
       const localTemplateArtifact = path.join(
@@ -533,6 +661,7 @@ describe("package publishing", () => {
 
       const result = await execa("pnpm", ["exec", "template", "--help"], {
         cwd: consumerDir,
+        env: publishedPackageRuntimeEnv,
       });
       expect(result.stdout).toContain("Usage:");
 
@@ -552,7 +681,7 @@ describe("package publishing", () => {
             presetName,
             "--yes",
           ],
-          { cwd: consumerDir },
+          { cwd: consumerDir, env: publishedPackageRuntimeEnv },
         );
         const copiedTemplateSource = await readFile(
           path.join(generatedDir, copyOperation.to),
@@ -577,13 +706,14 @@ describe("package publishing", () => {
           "vue-hono-app",
           "--yes",
         ],
-        { cwd: consumerDir },
+        { cwd: consumerDir, env: publishedPackageRuntimeEnv },
       );
       await execa(
         templateBin,
         ["add", "package", "--preset", "ts-lib", "--name", "shared"],
         {
           cwd: generatedWorkspaceDir,
+          env: publishedPackageRuntimeEnv,
         },
       );
       await expect(

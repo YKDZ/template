@@ -2,8 +2,11 @@ fn greeting() -> String {
     format!("Hello from {}", env!("CARGO_PKG_NAME"))
 }
 
-fn main() {
-    println!("{}", greeting());
+fn main() -> anyhow::Result<()> {
+    use std::io::Write;
+
+    writeln!(std::io::stdout().lock(), "{}", greeting())?;
+    Ok(())
 }
 
 #[cfg(test)]

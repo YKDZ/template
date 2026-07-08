@@ -66,13 +66,11 @@ describe("Template Boundary Check", () => {
     expect(projections.map((projection) => projection.name)).toEqual(
       expect.arrayContaining([
         "ts-lib",
-        "hono-api",
         "vike-app",
         "vue-app",
         "vue-hono-app",
         "rust-bin",
         "ts-lib package addition",
-        "hono-api package addition",
         "vue-app package addition",
       ]),
     );
@@ -82,8 +80,8 @@ describe("Template Boundary Check", () => {
       )?.plan.operations,
     ).toContainEqual(
       expect.objectContaining({
-        kind: "writeTextTemplate",
-        from: "playwright.package-addition.config.ts",
+        kind: "copyFile",
+        from: "playwright.config.ts",
         to: "apps/template-boundary-check/playwright.config.ts",
       }),
     );
@@ -110,11 +108,7 @@ describe("Template Boundary Check", () => {
         builtInManifestReferencedSourceFiles().filter(
           (sourceFile) =>
             !sourceFile.endsWith(
-              path.join(
-                "templates",
-                "vue-app",
-                "playwright.package-addition.config.ts",
-              ),
+              path.join("templates", "vue-app", "playwright.config.ts"),
             ),
         ),
     });
@@ -124,8 +118,7 @@ describe("Template Boundary Check", () => {
       expect.objectContaining({
         preset: "vue-app package addition",
         generatedPath: "apps/template-boundary-check/playwright.config.ts",
-        operationKind: "writeTextTemplate",
-        owningFunction: "planPresetSourcePackageAddition",
+        operationKind: "copyFile",
       }),
     );
   });

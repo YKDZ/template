@@ -3,7 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
-import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
+import {
+  loadTemplateCargoDependencyVersions,
+  loadTemplateDependencyCatalog,
+} from "@ykdz/template-core/dependency-catalog";
+import { execa } from "execa";
 import * as ts from "typescript";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
@@ -82,6 +86,18 @@ const packageDependencyFields = new Set([
 
 const staleGeneratedCatalogLinePattern =
   /["']\s{2}(?:"@?[\w./-]+"|[\w.-]+): \^\d+\.\d+\.\d+/;
+const fixtureOnlyPresetManifestFields = new Set([
+  "fixtureMatrix",
+  "initSupport",
+  "supportedCombinations",
+  "semanticSkips",
+  "checkRequirements",
+  "environmentPreparation",
+  "linkFrom",
+]);
+const packageAdditionSupportField = "packageAdditionSupport";
+const duplicateAddabilityFieldPattern =
+  /^(?:base.*addability|base.*additionSupport|base.*packageAdditionSupport|.*baseAddability|.*baseAdditionSupport|addability)$/i;
 
 function dependencyVersionGateProjectionFiles(): string[] {
   return loadBuiltInPresetSourceManifest()
@@ -107,6 +123,78 @@ function propertyNameText(
   }
 
   return name.getText(sourceFile);
+}
+
+function relativeRepoPath(filePath: string): string {
+  return path.relative(repoRoot, filePath).split(path.sep).join("/");
+}
+
+function objectKeyIssues(
+  value: unknown,
+  pathLabel: string,
+  isIssueKey: (key: string) => boolean,
+): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      objectKeyIssues(item, `${pathLabel}[${index}]`, isIssueKey),
+    );
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => [
+    ...(isIssueKey(key) ? [`${pathLabel}.${key}`] : []),
+    ...objectKeyIssues(nestedValue, `${pathLabel}.${key}`, isIssueKey),
+  ]);
+}
+
+function duplicateAddabilityFieldIssues(
+  sourceText: string,
+  filePath: string,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const issues: string[] = [];
+
+  function visit(node: ts.Node): void {
+    let name: ts.PropertyName | undefined;
+
+    if (
+      ts.isPropertyAssignment(node) ||
+      ts.isPropertySignature(node) ||
+      ts.isMethodSignature(node)
+    ) {
+      name = node.name;
+    }
+
+    if (name) {
+      const fieldName = propertyNameText(name, sourceFile);
+
+      if (
+        fieldName !== packageAdditionSupportField &&
+        duplicateAddabilityFieldPattern.test(fieldName)
+      ) {
+        issues.push(
+          `${filePath}:${lineForPosition(
+            sourceFile,
+            name.getStart(sourceFile),
+          )}: use packageAdditionSupport as the only addability concept`,
+        );
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return issues;
 }
 
 function stringLiteralText(node: ts.Expression): string | undefined {
@@ -175,7 +263,332 @@ function expectNoStaleInlineDependencyVersions(source: string): void {
   expect(inlineDependencyVersionRanges(source)).toEqual([]);
 }
 
+async function filesUnder(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...(await filesUnder(entryPath)));
+      continue;
+    }
+
+    files.push(entryPath);
+  }
+
+  return files;
+}
+
+function isPlaywrightServerTemplate(filePath: string): boolean {
+  const normalized = filePath.replaceAll(path.sep, "/");
+
+  return (
+    normalized.endsWith("/playwright.config.ts") ||
+    normalized.endsWith("/scripts/run-playwright.ts")
+  );
+}
+
+function expectNoStaticPlaywrightServerPorts(
+  source: string,
+  filePath: string,
+): void {
+  const labelledSource = `${filePath}\n${source}`;
+
+  expect(labelledSource).not.toMatch(/\bworkspacePortOffset\b/);
+  expect(labelledSource).not.toMatch(/\bfallback\w*Port\b/);
+  expect(labelledSource).not.toMatch(/\b(?:--port\s+|PORT=|:)(?:\d[\d_]*)/);
+}
+
+const reviewedRootPresetBehaviorFiles = [
+  "test/template-init.test.ts",
+  "test/editor-customization.test.ts",
+  "test/preset-registry.test.ts",
+] as const;
+
+function lineForPosition(sourceFile: ts.SourceFile, position: number): number {
+  return sourceFile.getLineAndCharacterOfPosition(position).line + 1;
+}
+
+function presetLiteralFromExpression(
+  expression: ts.Expression,
+  supportedPresetNames: ReadonlySet<string>,
+): string | undefined {
+  return ts.isStringLiteralLike(expression) &&
+    supportedPresetNames.has(expression.text)
+    ? expression.text
+    : undefined;
+}
+
+function nodeContainsPresetEquality(
+  node: ts.Node,
+  supportedPresetNames: ReadonlySet<string>,
+): boolean {
+  let contains = false;
+
+  function visit(current: ts.Node): void {
+    if (contains) {
+      return;
+    }
+
+    if (
+      ts.isBinaryExpression(current) &&
+      (current.operatorToken.kind ===
+        ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+        current.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken) &&
+      (presetLiteralFromExpression(current.left, supportedPresetNames) !==
+        undefined ||
+        presetLiteralFromExpression(current.right, supportedPresetNames) !==
+          undefined)
+    ) {
+      contains = true;
+      return;
+    }
+
+    ts.forEachChild(current, visit);
+  }
+
+  visit(node);
+  return contains;
+}
+
+function objectLiteralHasProperty(
+  objectLiteral: ts.ObjectLiteralExpression,
+  propertyName: string,
+  sourceFile: ts.SourceFile,
+): boolean {
+  return objectLiteral.properties.some((property) => {
+    if (
+      ts.isPropertyAssignment(property) ||
+      ts.isShorthandPropertyAssignment(property) ||
+      ts.isMethodDeclaration(property)
+    ) {
+      return propertyNameText(property.name, sourceFile) === propertyName;
+    }
+
+    return false;
+  });
+}
+
+function nodeContainsPresetLiteral(
+  node: ts.Node,
+  supportedPresetNames: ReadonlySet<string>,
+): boolean {
+  let contains = false;
+
+  function visit(current: ts.Node): void {
+    if (contains) {
+      return;
+    }
+
+    if (
+      (ts.isStringLiteral(current) ||
+        ts.isNoSubstitutionTemplateLiteral(current)) &&
+      supportedPresetNames.has(current.text)
+    ) {
+      contains = true;
+      return;
+    }
+
+    ts.forEachChild(current, visit);
+  }
+
+  visit(node);
+  return contains;
+}
+
+function rootPresetBehaviorSelectorIssues(
+  sourceText: string,
+  filePath: string,
+  supportedPresetNames: ReadonlySet<string>,
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const issues: string[] = [];
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isArrayLiteralExpression(node) &&
+      node.elements.length > 1 &&
+      node.elements.every(
+        (element) =>
+          ts.isStringLiteralLike(element) &&
+          supportedPresetNames.has(element.text),
+      )
+    ) {
+      issues.push(
+        `${filePath}:${lineForPosition(
+          sourceFile,
+          node.getStart(sourceFile),
+        )}: derive preset test matrices from manifest capability facts`,
+      );
+    }
+
+    if (
+      ts.isArrayLiteralExpression(node) &&
+      node.elements.length > 1 &&
+      node.elements.every(ts.isObjectLiteralExpression) &&
+      node.elements.every((element) =>
+        ts.isObjectLiteralExpression(element)
+          ? nodeContainsPresetLiteral(element, supportedPresetNames)
+          : false,
+      ) &&
+      node.elements.some((element) =>
+        ts.isObjectLiteralExpression(element)
+          ? objectLiteralHasProperty(
+              element,
+              packageAdditionSupportField,
+              sourceFile,
+            )
+          : false,
+      )
+    ) {
+      issues.push(
+        `${filePath}:${lineForPosition(
+          sourceFile,
+          node.getStart(sourceFile),
+        )}: derive preset object matrices from manifest capability facts`,
+      );
+    }
+
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "filter" &&
+      node.arguments.some((argument) =>
+        nodeContainsPresetEquality(argument, supportedPresetNames),
+      )
+    ) {
+      issues.push(
+        `${filePath}:${lineForPosition(
+          sourceFile,
+          node.getStart(sourceFile),
+        )}: derive preset exclusions from manifest capability facts`,
+      );
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return issues;
+}
+
 describe("template Repository maintenance", () => {
+  it("discovers Preset Source Tests named behavior.test.ts by convention", async () => {
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "vitest",
+        "list",
+        "--config",
+        "vitest.config.ts",
+        "--testNamePattern",
+        "vue-app Preset Source behavior",
+        "--no-color",
+      ],
+      { cwd: repoRoot },
+    );
+
+    expect(result.stdout).toContain(
+      "packages/builtin-source/templates/vue-app/behavior.test.ts > vue-app Preset Source behavior",
+    );
+  });
+
+  it("keeps reviewed root preset behavior selectors derived from manifest facts", async () => {
+    const supportedPresetNames = new Set(
+      loadBuiltInPresetSourceManifest()
+        .presets.filter((preset) => preset.generation === "supported")
+        .map((preset) => preset.name),
+    );
+    const issues = (
+      await Promise.all(
+        reviewedRootPresetBehaviorFiles.map(async (filePath) =>
+          rootPresetBehaviorSelectorIssues(
+            await readFile(path.join(repoRoot, filePath), "utf8"),
+            filePath,
+            supportedPresetNames,
+          ),
+        ),
+      )
+    ).flat();
+
+    expect(issues).toEqual([]);
+  });
+
+  it("detects root preset object matrices that duplicate manifest capability facts", () => {
+    expect(
+      rootPresetBehaviorSelectorIssues(
+        `
+          expect(presets).toEqual([
+            { name: "ts-lib", packageAdditionSupport: "supported" },
+            { name: "vue-app", packageAdditionSupport: "supported" },
+          ]);
+        `,
+        "test/example.test.ts",
+        new Set(["ts-lib", "vue-app"]),
+      ),
+    ).toEqual([
+      "test/example.test.ts:2: derive preset object matrices from manifest capability facts",
+    ]);
+  });
+
+  it("keeps fixture-only manifest fields out of the built-in Preset Source Manifest", () => {
+    const issues = objectKeyIssues(
+      loadBuiltInPresetSourceManifest(),
+      "$",
+      (key) => fixtureOnlyPresetManifestFields.has(key),
+    );
+
+    expect(issues).toEqual([]);
+  });
+
+  it("keeps Package Addition Support as the only Preset addability field", async () => {
+    const manifestIssues = objectKeyIssues(
+      loadBuiltInPresetSourceManifest(),
+      "$",
+      (key) =>
+        key !== packageAdditionSupportField &&
+        duplicateAddabilityFieldPattern.test(key),
+    );
+    const packageSourceFiles = (
+      await filesUnder(path.join(repoRoot, "packages"))
+    )
+      .filter((file) => file.endsWith(".ts"))
+      .filter((file) => !file.endsWith(".test.ts"))
+      .filter((file) => !file.endsWith("/behavior.test.ts"));
+    const sourceIssues = (
+      await Promise.all(
+        packageSourceFiles.map(async (file) =>
+          duplicateAddabilityFieldIssues(
+            await readFile(file, "utf8"),
+            relativeRepoPath(file),
+          ),
+        ),
+      )
+    ).flat();
+
+    expect([...manifestIssues, ...sourceIssues]).toEqual([]);
+  });
+
+  it("detects duplicate base-addability fields in production source", () => {
+    expect(
+      duplicateAddabilityFieldIssues(
+        "export type Preset = { baseAddability: boolean; packageAdditionSupport: string };",
+        "packages/example/src/preset.ts",
+      ),
+    ).toEqual([
+      "packages/example/src/preset.ts:1: use packageAdditionSupport as the only addability concept",
+    ]);
+  });
+
   it("detects package metadata dependency ranges in Preset Projection source", () => {
     expect(() =>
       expectNoStaleInlineDependencyVersions(`
@@ -227,6 +640,22 @@ describe("template Repository maintenance", () => {
       );
 
       expectNoStaleInlineDependencyVersions(source);
+    }
+  });
+
+  it("keeps Playwright server ports runtime-allocated in app templates", async () => {
+    const templateRoot = path.join(
+      repoRoot,
+      "packages/builtin-source/templates",
+    );
+    const playwrightServerTemplates = (await filesUnder(templateRoot))
+      .filter(isPlaywrightServerTemplate)
+      .toSorted();
+
+    expect(playwrightServerTemplates).not.toEqual([]);
+    for (const filePath of playwrightServerTemplates) {
+      const source = await readFile(filePath, "utf8");
+      expectNoStaticPlaywrightServerPorts(source, filePath);
     }
   });
 
@@ -415,13 +844,14 @@ describe("template Repository maintenance", () => {
 
     await expect(
       readFile(path.join(repoRoot, "Cargo.toml"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    ).resolves.toContain("[dependencies]");
+    expect(loadTemplateCargoDependencyVersions()).toHaveProperty("anyhow");
     expect(Object.values(devcontainer.postCreateCommand ?? {})).not.toContain(
       "cargo fetch",
     );
   });
 
-  it("uses official root Dependabot config for npm, GitHub Actions, and the Development Container Dockerfile", async () => {
+  it("uses official root Dependabot config for npm, Cargo, GitHub Actions, and the Development Container Dockerfile", async () => {
     const dependabot = parseYamlWithSchema(
       await readFile(path.join(repoRoot, ".github/dependabot.yml"), "utf8"),
       dependabotConfigSchema,
@@ -443,6 +873,11 @@ describe("template Repository maintenance", () => {
         },
         {
           "package-ecosystem": "github-actions",
+          directory: "/",
+          schedule: { interval: "weekly" },
+        },
+        {
+          "package-ecosystem": "cargo",
           directory: "/",
           schedule: { interval: "weekly" },
         },

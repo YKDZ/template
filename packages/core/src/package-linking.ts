@@ -54,6 +54,11 @@ export type PackageManifestExposureFields = {
 
 export type PackageLinkBoundaryDirection = "consumer" | "provider";
 
+export type PackageLinkIntentCompatibility = {
+  readonly consumer: PackageDefinition;
+  readonly provider: PackageDefinition;
+};
+
 export type TurboTaskDefinition = {
   readonly dependsOn?: readonly string[];
   readonly outputs?: readonly string[];
@@ -61,6 +66,26 @@ export type TurboTaskDefinition = {
 };
 
 export type TurboTaskGraph = Readonly<Record<string, TurboTaskDefinition>>;
+
+export type TurboBoundaryRule = {
+  readonly dependencies?: {
+    readonly allow?: readonly string[];
+    readonly deny?: readonly string[];
+  };
+  readonly dependents?: {
+    readonly allow?: readonly string[];
+    readonly deny?: readonly string[];
+  };
+};
+
+export type TurboBoundaries = {
+  readonly tags: Readonly<Record<string, TurboBoundaryRule>>;
+};
+
+export type TurboConfig = {
+  readonly tasks: TurboTaskGraph;
+  readonly boundaries: TurboBoundaries;
+};
 
 export type PackageTurboTaskOptions = {
   readonly dependencyBuildsRequired: boolean;
@@ -117,6 +142,20 @@ export function assertTypeScriptPackageBoundaryForLinkIntent(
   throw new Error(
     `Package Link Intent ${relationship} ${definition.path} is unsupported in V1 TypeScript-only Project Linking`,
   );
+}
+
+export function canPlanPackageLinkIntent({
+  consumer,
+  provider,
+}: PackageLinkIntentCompatibility): boolean {
+  try {
+    assertTypeScriptPackageBoundaryForLinkIntent(consumer, "consumer");
+    assertTypeScriptPackageBoundaryForLinkIntent(provider, "provider");
+    derivePackageExposure(provider);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function planPackageLinks(
@@ -205,6 +244,34 @@ export function packageTurboTasks({
     },
     "check:run": { cache: false },
     "fix:run": { cache: false },
+  };
+}
+
+// Boundary violations are architecture problems. Do not loosen these rules to
+// make a failing dependency graph pass; fix the dependency direction instead.
+export function generatedRepositoryTurboBoundaries(): TurboBoundaries {
+  return {
+    tags: {
+      app: {
+        dependencies: {
+          deny: ["app"],
+        },
+      },
+      library: {
+        dependencies: {
+          deny: ["app"],
+        },
+      },
+    },
+  };
+}
+
+export function packageTurboConfig(
+  options: PackageTurboTaskOptions,
+): TurboConfig {
+  return {
+    tasks: packageTurboTasks(options),
+    boundaries: generatedRepositoryTurboBoundaries(),
   };
 }
 

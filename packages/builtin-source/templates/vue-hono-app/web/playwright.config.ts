@@ -1,19 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
-function workspacePortOffset(): number {
-  let hash = 0;
+function requiredPort(name: string): number {
+  const value = process.env[name];
 
-  for (const character of process.cwd()) {
-    hash = (hash * 31 + character.charCodeAt(0)) % 5_000;
+  if (!value) {
+    throw new Error(`${name} must be set by scripts/run-playwright.ts`);
   }
 
-  return hash * 2;
+  return Number(value);
 }
 
-const fallbackApiPort = 43_000 + workspacePortOffset();
-const fallbackWebPort = fallbackApiPort + 1;
-const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? fallbackApiPort);
-const webPort = Number(process.env.PLAYWRIGHT_WEB_PORT ?? fallbackWebPort);
+const apiPort = requiredPort("PLAYWRIGHT_API_PORT");
+const webPort = requiredPort("PLAYWRIGHT_WEB_PORT");
 const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
 const apiHealthUrl = `${apiBaseUrl}/api/health`;
 const webBaseUrl = `http://127.0.0.1:${webPort}`;

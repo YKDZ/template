@@ -626,28 +626,78 @@ function hasExactKeys(
 function isStructuralTurboValue(value: unknown): boolean {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["tasks"]) ||
+    !(
+      hasExactKeys(value, ["tasks"]) ||
+      hasExactKeys(value, ["tasks", "boundaries"])
+    ) ||
     !isRecord(value.tasks)
   ) {
     return false;
   }
 
-  return Object.values(value.tasks).every((task) => {
-    if (!isRecord(task)) {
+  if (!Object.values(value.tasks).every(isStructuralTurboTaskValue)) {
+    return false;
+  }
+
+  return (
+    value.boundaries === undefined ||
+    isStructuralTurboBoundariesValue(value.boundaries)
+  );
+}
+
+function isStructuralTurboTaskValue(task: unknown): boolean {
+  if (!isRecord(task)) {
+    return false;
+  }
+
+  return Object.entries(task).every(([key, entryValue]) => {
+    if (key === "dependsOn" || key === "outputs") {
+      return isStringArray(entryValue);
+    }
+
+    if (key === "cache" || key === "persistent") {
+      return typeof entryValue === "boolean";
+    }
+
+    return false;
+  });
+}
+
+function isStructuralTurboBoundariesValue(value: unknown): boolean {
+  if (!isRecord(value) || !hasExactKeys(value, ["tags"])) {
+    return false;
+  }
+
+  if (!isRecord(value.tags)) {
+    return false;
+  }
+
+  return Object.values(value.tags).every((tagRule) => {
+    if (!isRecord(tagRule)) {
       return false;
     }
 
-    return Object.entries(task).every(([key, entryValue]) => {
-      if (key === "dependsOn" || key === "outputs") {
-        return isStringArray(entryValue);
+    return Object.entries(tagRule).every(([key, entryValue]) => {
+      if (key !== "dependencies" && key !== "dependents") {
+        return false;
       }
 
-      if (key === "cache" || key === "persistent") {
-        return typeof entryValue === "boolean";
-      }
-
-      return false;
+      return isStructuralTurboBoundaryDirectionValue(entryValue);
     });
+  });
+}
+
+function isStructuralTurboBoundaryDirectionValue(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return Object.entries(value).every(([key, entryValue]) => {
+    if (key !== "allow" && key !== "deny") {
+      return false;
+    }
+
+    return isStringArray(entryValue);
   });
 }
 

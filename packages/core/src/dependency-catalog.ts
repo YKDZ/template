@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export type TemplateDependencyCatalog = Record<string, string>;
+export type TemplateCargoDependencyVersions = Record<string, string>;
 
 export type GeneratedDependencyCatalogOptions = {
   readonly dependencies: readonly string[];
@@ -33,12 +34,13 @@ function templateRepositoryRoot(): string {
   );
 }
 
-function parseTemplateDependencyCatalog(
+function parseTemplateCatalogSection(
   workspaceYaml: string,
+  sectionName: "catalog",
 ): TemplateDependencyCatalog {
   const catalog: TemplateDependencyCatalog = {};
   const lines = workspaceYaml.split(/\r?\n/);
-  const catalogStart = lines.findIndex((line) => line === "catalog:");
+  const catalogStart = lines.findIndex((line) => line === `${sectionName}:`);
 
   if (catalogStart === -1) {
     return catalog;
@@ -64,6 +66,12 @@ function parseTemplateDependencyCatalog(
   }
 
   return catalog;
+}
+
+function parseTemplateDependencyCatalog(
+  workspaceYaml: string,
+): TemplateDependencyCatalog {
+  return parseTemplateCatalogSection(workspaceYaml, "catalog");
 }
 
 export function loadTemplateDependencyCatalog(): TemplateDependencyCatalog {
@@ -93,6 +101,113 @@ export function selectTemplateDependencyCatalogEntries(
   }
 
   return selected;
+}
+
+function parseTemplateCargoDependencyVersions(
+  cargoToml: string,
+): TemplateCargoDependencyVersions {
+  const dependencies: TemplateCargoDependencyVersions = {};
+  const lines = cargoToml.split(/\r?\n/);
+  const dependenciesStart = lines.findIndex(
+    (line) => line.trim() === "[dependencies]",
+  );
+
+  if (dependenciesStart === -1) {
+    return dependencies;
+  }
+
+  for (const line of lines.slice(dependenciesStart + 1)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      break;
+    }
+
+    if (trimmed.length === 0 || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const match = /^(?:"([^"]+)"|([A-Za-z0-9_-]+))\s*=\s*"([^"]+)"\s*$/.exec(
+      trimmed,
+    );
+    if (!match) {
+      throw new Error(
+        `Unsupported Template Cargo dependency declaration: ${trimmed}`,
+      );
+    }
+
+    const dependency = match[1] ?? match[2];
+    const version = match[3];
+    if (dependency === undefined || version === undefined) {
+      continue;
+    }
+
+    dependencies[dependency] = version;
+  }
+
+  return dependencies;
+}
+
+export function loadTemplateCargoDependencyVersions(): TemplateCargoDependencyVersions {
+  return parseTemplateCargoDependencyVersions(
+    readFileSync(path.join(templateRepositoryRoot(), "Cargo.toml"), "utf8"),
+  );
+}
+
+function loadTemplateCargoLock(): string {
+  return readFileSync(
+    path.join(templateRepositoryRoot(), "Cargo.lock"),
+    "utf8",
+  );
+}
+
+export function renderCargoLockForPackage(options: {
+  readonly packageName: string;
+  readonly packageVersion: string;
+}): string {
+  return loadTemplateCargoLock()
+    .replace(
+      'name = "template-cargo-dependencies"',
+      `name = ${JSON.stringify(options.packageName)}`,
+    )
+    .replace(
+      'version = "0.0.0"',
+      `version = ${JSON.stringify(options.packageVersion)}`,
+    );
+}
+
+export function selectTemplateCargoDependencyVersions(
+  dependencies: readonly string[],
+  catalog: TemplateCargoDependencyVersions = loadTemplateCargoDependencyVersions(),
+): TemplateCargoDependencyVersions {
+  const selected: TemplateCargoDependencyVersions = {};
+
+  for (const dependency of dependencies.toSorted()) {
+    const version = catalog[dependency];
+    if (version === undefined) {
+      throw new Error(
+        `Template Cargo dependency versions are missing dependency: ${dependency}`,
+      );
+    }
+
+    selected[dependency] = version;
+  }
+
+  return selected;
+}
+
+function renderTomlKey(key: string): string {
+  return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
+}
+
+export function renderCargoDependencyTomlEntries(
+  dependencies: readonly string[],
+  catalog: TemplateCargoDependencyVersions = loadTemplateCargoDependencyVersions(),
+): string[] {
+  return Object.entries(
+    selectTemplateCargoDependencyVersions(dependencies, catalog),
+  ).map(([dependency, version]) => {
+    return `${renderTomlKey(dependency)} = ${JSON.stringify(version)}`;
+  });
 }
 
 export function collectGeneratedManifestCatalogDependencies(

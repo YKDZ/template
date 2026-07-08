@@ -1,0 +1,12 @@
+[package]
+name = "template-cargo-dependencies"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "template-cargo-dependencies"
+path = "packages/builtin-source/templates/rust-bin/src/main.rs"
+
+[dependencies]
+anyhow = "1.0.100"

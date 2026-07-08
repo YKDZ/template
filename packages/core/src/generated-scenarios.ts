@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { PackageAdditionSupport } from "@ykdz/template-shared";
 import { execa } from "execa";
 import * as v from "valibot";
 
@@ -10,7 +11,14 @@ import {
   playwrightBrowserAssetsEnvironmentNeed,
 } from "./module-graph.js";
 import { planNextStepInstructions } from "./next-step-instructions.js";
-import type { PresetSourceManifest } from "./preset-source.js";
+import {
+  canPlanPackageLinkIntent,
+  type PackageDefinition,
+} from "./package-linking.js";
+import type {
+  PresetSourceManifest,
+  PresetSourceManifestPreset,
+} from "./preset-source.js";
 import { findPresetSourceManifestPreset } from "./preset-source.js";
 import {
   blueprintForPresetSourcePreset,
@@ -18,7 +26,10 @@ import {
   type PresetProjectionSourceRoots,
 } from "./projection-capabilities.js";
 
-export type GeneratedScenarioSet = "init" | "package-addition-matrix";
+export type GeneratedScenarioSet =
+  | "init"
+  | "package-addition-matrix"
+  | "focused";
 
 export type GeneratedScenario = {
   readonly set: GeneratedScenarioSet;
@@ -192,61 +203,178 @@ export function selectGeneratedScenarios(
   manifest: PresetSourceManifest,
   set: GeneratedScenarioSet,
 ): GeneratedScenarioSelection {
-  const contract = manifest.fixtureMatrix;
-
-  if (!contract) {
-    throw new Error(
-      `Preset Source ${manifest.name} does not declare a Fixture Matrix Contract`,
-    );
-  }
-
-  const initScenarios = contract.initSupport.map((support) =>
-    createGeneratedScenario(set, { basePreset: support.preset }),
+  const supportedInitPresets = manifest.presets.filter(
+    (preset) => preset.generation === "supported",
+  );
+  const initScenarios = supportedInitPresets.map((preset) =>
+    createGeneratedScenario("init", { basePreset: preset.name }),
   );
 
   if (set === "init") {
     return { runnable: initScenarios, skipped: [] };
   }
 
-  const matrixScenarios = contract.supportedCombinations.map((combination) =>
-    createGeneratedScenario(set, {
-      basePreset: combination.basePreset,
-      addedPreset: combination.addedPreset,
-      ...(combination.linkFrom === undefined
-        ? {}
-        : { linkFrom: combination.linkFrom }),
-    }),
+  const addablePresets = manifest.presets.filter(
+    (preset) =>
+      preset.packageAdditionSupport === PackageAdditionSupport.Supported,
   );
-  const skipped = contract.semanticSkips.map((skip) => ({
-    set,
-    basePreset: skip.basePreset,
-    addedPreset: skip.addedPreset,
-    id: generatedScenarioId(skip),
-    label: generatedScenarioLabel(skip),
-    reason: skip.reason,
-  }));
+  const focusedScenarios = selectFocusedGeneratedScenarios(
+    manifest,
+    addablePresets,
+  );
+
+  if (set === "focused") {
+    return {
+      runnable: focusedScenarios,
+      skipped: [],
+    };
+  }
+
+  const matrixScenarios = supportedInitPresets.flatMap((basePreset) =>
+    addablePresets.map((addedPreset) =>
+      createGeneratedScenario("package-addition-matrix", {
+        basePreset: basePreset.name,
+        addedPreset: addedPreset.name,
+      }),
+    ),
+  );
 
   return {
-    runnable: matrixScenarios,
-    skipped,
+    runnable: [...matrixScenarios, ...focusedScenarios],
+    skipped: [],
   };
+}
+
+function selectFocusedGeneratedScenarios(
+  manifest: PresetSourceManifest,
+  addablePresets: readonly PresetSourceManifestPreset[],
+): GeneratedScenario[] {
+  return manifest.presets
+    .filter((preset) => preset.generation === "supported")
+    .flatMap((basePreset) =>
+      addablePresets.flatMap((addedPreset) => {
+        const consumerPackagePath = focusedPackageLinkConsumerPath(
+          basePreset,
+          addedPreset,
+        );
+
+        return consumerPackagePath === undefined
+          ? []
+          : [
+              createGeneratedScenario("focused", {
+                basePreset: basePreset.name,
+                addedPreset: addedPreset.name,
+                linkFrom: [consumerPackagePath],
+              }),
+            ];
+      }),
+    );
+}
+
+function focusedPackageLinkConsumerPath(
+  basePreset: PresetSourceManifestPreset,
+  addedPreset: PresetSourceManifestPreset,
+): string | undefined {
+  const providers = packageLinkProviderDefinitions(addedPreset);
+
+  return packageLinkConsumerDefinitions(basePreset).find((consumer) =>
+    providers.some((provider) =>
+      canPlanPackageLinkIntent({ consumer, provider }),
+    ),
+  )?.path;
+}
+
+function packageLinkProviderDefinitions(
+  preset: PresetSourceManifestPreset,
+): PackageDefinition[] {
+  return (
+    preset.projection?.capabilities.flatMap((capability) => {
+      if (capability.kind !== "workspace-library-package") {
+        return [];
+      }
+
+      const packageLeafName = `fixture-${preset.name}`;
+
+      return [
+        {
+          name: `@fixture/${packageLeafName}`,
+          path: `${packageCollection(capability.workspacePackageGlob)}/${packageLeafName}`,
+          role: capability.packageRole,
+          sourcePreset: capability.packageSourcePreset,
+        },
+      ];
+    }) ?? []
+  );
+}
+
+function packageLinkConsumerDefinitions(
+  preset: PresetSourceManifestPreset,
+): PackageDefinition[] {
+  return (
+    preset.projection?.capabilities.flatMap((capability) => {
+      if (capability.kind !== "workspace-node-packages") {
+        return [];
+      }
+
+      return capability.packages
+        .filter((nodePackage) =>
+          nodePackage.sourceFiles.some((sourceFile) =>
+            hasSourceDirectoryPath(sourceFile),
+          ),
+        )
+        .map((nodePackage) => ({
+          name: `@fixture/${packageLeaf(nodePackage.path)}`,
+          path: nodePackage.path,
+          role: "runtime-service" as const,
+          sourcePreset: nodePackage.kind,
+        }));
+    }) ?? []
+  );
+}
+
+function packageCollection(workspacePackageGlob: string): string {
+  const [collection, wildcard] = workspacePackageGlob.split("/");
+  if (!collection || wildcard !== "*") {
+    throw new Error(
+      `Unsupported workspace package glob: ${workspacePackageGlob}`,
+    );
+  }
+
+  return collection;
+}
+
+function packageLeaf(packagePath: string): string {
+  return packagePath.split("/").at(-1) ?? packagePath;
+}
+
+function hasSourceDirectoryPath(sourceFile: string): boolean {
+  return sourceFile.startsWith("src/") || sourceFile.includes("/src/");
 }
 
 export function packageLeafNameForAddedPreset(
   manifest: PresetSourceManifest,
   presetName: string,
 ): string {
-  const support = manifest.fixtureMatrix?.packageAdditionSupport.find(
-    (entry) => entry.preset === presetName,
-  );
+  const preset = manifest.presets.find((entry) => entry.name === presetName);
 
-  if (!support) {
+  if (!preset) {
+    throw new Error(`Unknown fixture Package Addition preset: ${presetName}`);
+  }
+
+  if (preset.packageAdditionSupport !== PackageAdditionSupport.Supported) {
     throw new Error(
-      `Missing fixture Package Addition leaf name for preset: ${presetName}`,
+      `Preset ${presetName} cannot be used for fixture Package Addition`,
     );
   }
 
-  return support.packageLeafName;
+  const packageLeafName = `fixture-${presetName}`;
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(packageLeafName)) {
+    throw new Error(
+      `Fixture Package Addition leaf name for preset ${presetName} must be a lowercase package leaf name using letters, numbers, and hyphens`,
+    );
+  }
+
+  return packageLeafName;
 }
 
 export async function defaultGeneratedScenarioCommandRunner(
@@ -631,6 +759,11 @@ async function runGeneratedScenarioQualityGate(
     generatedScenarioRequiresSerializedRootCheck(steps);
 
   for (const step of steps) {
+    if (step.id === "install-dependencies") {
+      await runGeneratedScenarioInstallStep(step, scenario, options);
+      continue;
+    }
+
     const env = step.id === "run-root-check" ? { CI: "1" } : undefined;
     const runStep = async () => {
       await options.runCommand(step.command, [...step.args], step.cwd, {
@@ -646,6 +779,28 @@ async function runGeneratedScenarioQualityGate(
 
     await runStep();
   }
+}
+
+async function runGeneratedScenarioInstallStep(
+  step: GeneratedScenarioCommandStep,
+  scenario: GeneratedScenario,
+  options: RequiredRunnerOptions,
+): Promise<void> {
+  await options.runCommand(
+    step.command,
+    ["install", "--lockfile-only", "--prefer-offline", "--no-frozen-lockfile"],
+    step.cwd,
+    { logPrefix: scenario.label },
+  );
+  await options.runCommand(step.command, ["fetch"], step.cwd, {
+    logPrefix: scenario.label,
+  });
+  await options.runCommand(
+    step.command,
+    ["install", "--offline", "--frozen-lockfile"],
+    step.cwd,
+    { logPrefix: scenario.label },
+  );
 }
 
 async function checkGeneratedScenario(

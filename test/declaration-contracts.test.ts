@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { findBuiltInPreset } from "@ykdz/template-builtin-source";
+import {
+  findBuiltInPreset,
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
 import type {
   PresetSourceManifest,
   PresetSourceManifestPreset,
@@ -207,17 +210,6 @@ const presetSourceJsonSchemaOutput = v.object({
   type: v.string(),
   required: v.array(v.string()),
   properties: v.object({
-    fixtureMatrix: v.object({
-      required: v.array(v.string()),
-      properties: v.object({
-        environmentPreparation: v.object({
-          items: stringEnumJsonSchema,
-        }),
-        checkRequirements: v.object({
-          items: stringEnumJsonSchema,
-        }),
-      }),
-    }),
     presets: v.object({
       items: v.object({
         required: v.array(v.string()),
@@ -384,6 +376,29 @@ describe("declaration contracts", () => {
         ],
       },
     });
+
+    const builtInResult = validatePresetSourceManifestDeclaration(
+      loadBuiltInPresetSourceManifest(),
+    );
+    expect(builtInResult).toMatchObject({ ok: true });
+    if (!builtInResult.ok) {
+      throw new Error("Built-in Preset Source Manifest must be valid");
+    }
+    const builtInProviderPackagePaths = [
+      ...new Set(
+        builtInResult.value.presets.flatMap((preset) =>
+          (preset.projection?.capabilities ?? []).flatMap((capability) =>
+            capability.kind === "workspace-node-packages"
+              ? (capability.packageLinks ?? []).map(
+                  (link) => link.providerPackagePath,
+                )
+              : [],
+          ),
+        ),
+      ),
+    ].toSorted();
+    expect(builtInProviderPackagePaths).toContain("packages/db");
+    expect(Object.hasOwn(builtInResult.value, "fixtureMatrix")).toBe(false);
 
     const duplicateManifest = validPresetSourceManifest();
     duplicateManifest.presets = [
@@ -629,22 +644,9 @@ describe("declaration contracts", () => {
       type: "object",
     });
     expect(presetSourceSchema.required).toContain("presets");
-    expect(presetSourceSchema.properties.fixtureMatrix.required).toEqual([
-      "initSupport",
-      "packageAdditionSupport",
-      "supportedCombinations",
-      "semanticSkips",
-      "checkRequirements",
-      "environmentPreparation",
-    ]);
-    expect(
-      presetSourceSchema.properties.fixtureMatrix.properties.checkRequirements
-        .items.enum,
-    ).toEqual(["machine-verifiable-next-steps", "root-check-ci"]);
-    expect(
-      presetSourceSchema.properties.fixtureMatrix.properties
-        .environmentPreparation.items.enum,
-    ).toEqual(["playwright-browser-assets"]);
+    expect(Object.hasOwn(presetSourceSchema.properties, "fixtureMatrix")).toBe(
+      false,
+    );
     expect(presetSourceSchema.properties.presets.items.required).toEqual(
       expect.arrayContaining([
         "name",
@@ -677,6 +679,25 @@ describe("declaration contracts", () => {
     const nodePnpmDevcontainerSchema = capabilitySchemas.find(
       (schema) => schema.properties.kind.const === "node-pnpm-devcontainer",
     );
+    const builtInProviderPackagePaths = [
+      ...new Set(
+        loadBuiltInPresetSourceManifest().presets.flatMap((preset) =>
+          (preset.projection?.capabilities ?? []).flatMap((capability) =>
+            capability.kind === "workspace-node-packages"
+              ? (capability.packageLinks ?? []).map(
+                  (link) => link.providerPackagePath,
+                )
+              : [],
+          ),
+        ),
+      ),
+    ].toSorted();
+    const supportedProviderPackagePaths = ["apps/api", "packages/db"];
+
+    expect(builtInProviderPackagePaths).toContain("packages/db");
+    expect(supportedProviderPackagePaths).toEqual(
+      expect.arrayContaining(builtInProviderPackagePaths),
+    );
 
     expect(nodeWorkspaceSchema).toMatchObject({
       additionalProperties: false,
@@ -701,7 +722,7 @@ describe("declaration contracts", () => {
             required: ["consumerPackagePath", "providerPackagePath"],
             properties: {
               consumerPackagePath: { const: "apps/web" },
-              providerPackagePath: { const: "apps/api" },
+              providerPackagePath: { enum: supportedProviderPackagePaths },
             },
           },
         },

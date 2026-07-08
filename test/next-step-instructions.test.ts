@@ -2,7 +2,11 @@ import path from "node:path";
 
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
-import { planNextStepInstructions } from "@ykdz/template-core/next-step-instructions";
+import {
+  formatGeneratedFollowUpDocument,
+  generatedFollowUpDocumentOperation,
+  planNextStepInstructions,
+} from "@ykdz/template-core/next-step-instructions";
 import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
 
 const optionalGitDisplays = [
@@ -38,7 +42,6 @@ function projectPresetPlan(preset: string): PresetProjectionPlan {
 describe("Next Step Instructions", () => {
   it.each([
     ["ts-lib", ["pnpm run fix", "pnpm run check"]],
-    ["hono-api", ["pnpm run fix", "pnpm run check"]],
     [
       "vue-app",
       [
@@ -202,6 +205,49 @@ describe("Next Step Instructions", () => {
         machineVerifiable: false,
       },
     ]);
+  });
+
+  it("renders a TODO.md follow-up document from project-local instructions", () => {
+    const targetDir = path.join("/", "tmp", "generated-repository");
+    const plan = planNextStepInstructions({
+      targetDir,
+      projectionPlan: projectPresetPlan("ts-lib"),
+    });
+
+    expect(formatGeneratedFollowUpDocument(plan)).toBe(
+      [
+        "# TODO",
+        "",
+        "Generated follow-up tasks for this repository.",
+        "",
+        "### Next Steps",
+        "- [ ] Install dependencies",
+        "  `pnpm install`",
+        "- [ ] Run Fix Command",
+        "  `pnpm run fix`",
+        "- [ ] Run Root Check",
+        "  `pnpm run check`",
+        "",
+        "### Optional Git Setup",
+        "- [ ] Initialize git",
+        "  `git init`",
+        "- [ ] Stage files",
+        "  `git add .`",
+        "- [ ] Create your first commit",
+        '  `git commit -m "Initial commit"`',
+        "",
+        "### Done ✓",
+        "",
+      ].join("\n"),
+    );
+    expect(formatGeneratedFollowUpDocument(plan)).not.toContain(
+      `cd ${targetDir}`,
+    );
+    expect(generatedFollowUpDocumentOperation(plan)).toEqual({
+      kind: "writeText",
+      to: "TODO.md",
+      text: formatGeneratedFollowUpDocument(plan),
+    });
   });
 
   it("derives Playwright setup guidance from Check Plan environment needs", () => {

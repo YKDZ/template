@@ -1,0 +1,9 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build:run": {
+      "outputs": []
+    }
+  }
+}

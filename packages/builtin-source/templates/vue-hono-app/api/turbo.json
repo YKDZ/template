@@ -1,5 +1,6 @@
 {
   "extends": ["//"],
+  "tags": ["app"],
   "tasks": {
     "build:run": {
       "outputs": ["dist/**"]

@@ -9,24 +9,41 @@
     "!templates/registry.ts",
     "!templates/projection-plans.ts",
     "!templates/*/projection.ts",
+    "!templates/*/behavior.test.ts",
     "!templates/shared/oxc/tsconfig.json",
     "!templates/**/node_modules"
   ],
   "type": "module",
   "exports": {
     ".": {
+      "source": {
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
+      },
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
     "./registry": {
+      "source": {
+        "types": "./templates/registry.ts",
+        "default": "./templates/registry.ts"
+      },
       "types": "./dist/templates/registry.d.ts",
       "default": "./dist/templates/registry.js"
     },
     "./projection-plans": {
+      "source": {
+        "types": "./templates/projection-plans.ts",
+        "default": "./templates/projection-plans.ts"
+      },
       "types": "./dist/templates/projection-plans.d.ts",
       "default": "./dist/templates/projection-plans.js"
     },
     "./templates/*": {
+      "source": {
+        "types": "./templates/*.ts",
+        "default": "./templates/*.ts"
+      },
       "types": "./dist/templates/*.d.ts",
       "default": "./dist/templates/*.js"
     }
@@ -41,8 +58,8 @@
     "check:templates:static-source": "rustup run stable rustfmt --check templates/rust-bin/src/main.rs",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts --fix",
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts templates/*/behavior.test.ts",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts templates/*/behavior.test.ts --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
@@ -52,9 +69,25 @@
     "valibot": "catalog:"
   },
   "devDependencies": {
+    "@hono/node-server": "catalog:",
+    "@playwright/test": "catalog:",
+    "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
+    "@vikejs/hono": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "drizzle-kit": "catalog:",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "pinia": "catalog:",
+    "telefunc": "catalog:",
+    "vike": "catalog:",
+    "vike-vue": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue": "catalog:",
+    "yaml": "catalog:"
   }
 }

@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,84 +89,6 @@ export function projectVueAppPackageScripts(): Record<string, string> {
     "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
     "typecheck:run": "vue-tsc --build --noEmit --pretty false",
   };
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
-
-function localPortsFromText(text: string): number[] {
-  return [
-    ...text.matchAll(/port:\s*(\d+)/g),
-    ...text.matchAll(/--port\s+(\d+)/g),
-    ...text.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g),
-  ].map((match) => Number(match[1]));
-}
-
-async function usedPlaywrightPorts(
-  root: string,
-  blueprint: ProjectBlueprint,
-): Promise<Set<number>> {
-  const ports = new Set<number>();
-
-  for (const projectPackage of blueprint.packages ?? []) {
-    try {
-      const configText = await readFile(
-        path.join(root, projectPackage.path, "playwright.config.ts"),
-        "utf8",
-      );
-
-      for (const port of localPortsFromText(configText)) {
-        ports.add(port);
-      }
-    } catch (error: unknown) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-
-  return ports;
-}
-
-async function nextVuePreviewPort(
-  root: string,
-  blueprint: ProjectBlueprint,
-): Promise<number> {
-  const usedPorts = await usedPlaywrightPorts(root, blueprint);
-  let port = 4173;
-
-  while (usedPorts.has(port)) {
-    port += 1;
-  }
-
-  return port;
-}
-
-function vueAppPlaywrightConfig(previewPort: number): string {
-  return `import { defineConfig, devices } from "@playwright/test";
-
-const previewUrl = "http://127.0.0.1:${previewPort}";
-
-export default defineConfig({
-  testDir: "./test/e2e",
-  use: {
-    baseURL: previewUrl,
-    trace: "on-first-retry"
-  },
-  webServer: {
-    command: "pnpm run preview --host 127.0.0.1 --port ${previewPort}",
-    reuseExistingServer: !process.env.CI,
-    url: previewUrl
-  },
-  projects: [
-    {
-      name: "chromium",
-      use: { ...devices["Desktop Chrome"] }
-    }
-  ]
-});
-`;
 }
 
 function packageAdditionOperations(
@@ -346,14 +267,11 @@ function packageAdditionOperations(
 }
 
 async function packageAdditionPlan({
-  root,
-  blueprint,
   packageName: packageNameValue,
   packagePath,
   nodeVersion,
 }: PresetPackageAdditionOptions): Promise<PresetPackageAdditionPlan> {
   const [workspaceCollection] = packagePath.split("/");
-  const previewPort = await nextVuePreviewPort(root, blueprint);
 
   return {
     packagePath,
@@ -367,12 +285,6 @@ async function packageAdditionPlan({
       packageNameValue,
       nodeVersion,
     ),
-    textFiles: [
-      {
-        path: `${packagePath}/playwright.config.ts`,
-        text: vueAppPlaywrightConfig(previewPort),
-      },
-    ],
   };
 }
 

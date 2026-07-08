@@ -30,7 +30,8 @@ import {
 export const vueHonoAppPresetMetadata: BuiltInPreset = {
   name: "vue-hono-app",
   title: "Vue Hono app",
-  description: "Full-stack Vue and Hono workspace with Hono RPC typing.",
+  description:
+    "Full-stack Vue and Hono workspace with separated app package boundaries.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
   supportedProjectKinds: ["multi-package"],
@@ -123,7 +124,8 @@ export function vueHonoAppBlueprint(
 
 export function projectVueHonoRootPackageScripts(): Record<string, string> {
   return {
-    check: renderRootCheckCommand(planVueHonoRootChecks()),
+    check: `pnpm run check:boundaries && ${renderRootCheckCommand(planVueHonoRootChecks())}`,
+    "check:boundaries": "turbo boundaries",
     "check:run": 'node -e ""',
     dev: "turbo run dev --parallel",
     fix: renderFixCommand(planVueHonoRootFixes()),

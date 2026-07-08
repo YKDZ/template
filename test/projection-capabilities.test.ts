@@ -19,7 +19,7 @@ import type { PresetProjectionDeclaration } from "@ykdz/template-shared";
 import * as v from "valibot";
 
 const rootCheckScript =
-  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
+  "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
 const rootFixScript =
   "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped";
 
@@ -135,9 +135,6 @@ describe("Projection Capability declarations", () => {
   it("derives Package Addition defaults and workspace glob from Projection Declarations", async () => {
     const manifest = loadBuiltInPresetSourceManifest();
     const tsLib = manifest.presets.find((preset) => preset.name === "ts-lib")!;
-    const honoApi = manifest.presets.find(
-      (preset) => preset.name === "hono-api",
-    )!;
     const vueApp = manifest.presets.find(
       (preset) => preset.name === "vue-app",
     )!;
@@ -152,13 +149,6 @@ describe("Projection Capability declarations", () => {
         builtInPresetProjectionSourceRoots(),
       ),
     ).toBe("packages/shared");
-    expect(
-      defaultPackagePathForPresetSourcePackageAddition(
-        honoApi,
-        "worker",
-        builtInPresetProjectionSourceRoots(),
-      ),
-    ).toBe("apps/worker");
     expect(
       defaultPackagePathForPresetSourcePackageAddition(
         vueApp,
@@ -190,17 +180,10 @@ describe("Projection Capability declarations", () => {
     expect(additionPlan.workspacePackageGlob).toBe("apps/*");
     expect(additionPlan.workspaceMembershipGlob).toBe("services/*");
     expect(additionPlan.textFiles).toBeUndefined();
-    expect(additionPlan.operations).not.toContainEqual(
-      expect.objectContaining({
-        kind: "copyFile",
-        to: "services/admin/playwright.config.ts",
-      }),
-    );
     expect(additionPlan.operations).toContainEqual({
-      kind: "writeTextTemplate",
-      from: "playwright.package-addition.config.ts",
+      kind: "copyFile",
+      from: "playwright.config.ts",
       to: "services/admin/playwright.config.ts",
-      replacements: { VUE_PREVIEW_PORT: "4173" },
     });
   });
 
@@ -698,72 +681,6 @@ describe("Projection Capability declarations", () => {
     );
   });
 
-  it("renders the hono-api built-in declaration into expected public generated files", async () => {
-    const manifest = loadBuiltInPresetSourceManifest();
-    const preset = manifest.presets.find(
-      (candidate) => candidate.name === "hono-api",
-    );
-    expect(preset?.projection).toBeDefined();
-    const { context, targetDir } = await presetContext("hono-api");
-
-    const plan = interpretPresetProjectionDeclaration({
-      preset: preset!,
-      declaration: preset!.projection!,
-      context,
-      sourceRoots: builtInPresetProjectionSourceRoots(),
-    });
-    await renderNewProject({
-      sourceRoot: plan.sourceRoot,
-      sourceRoots: plan.sourceRoots,
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
-
-    const rootPackageJson = await readPackageJson(
-      path.join(targetDir, "package.json"),
-    );
-    const packageJson = await readPackageJson(
-      path.join(targetDir, "apps", "api", "package.json"),
-    );
-    const workspaceYaml = await readFile(
-      path.join(targetDir, "pnpm-workspace.yaml"),
-      "utf8",
-    );
-    const generatedByJson = await readJson(
-      path.join(targetDir, ".template/generated-by.json"),
-    );
-
-    expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
-    expect(packageJson).toMatchObject({
-      name: "@demo-hono-api/api",
-      dependencies: {
-        "@hono/node-server": "catalog:",
-        hono: "catalog:",
-      },
-      scripts: {
-        "build:run":
-          "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-        start: "node dist/server.js",
-        "test:run": "vitest run --reporter=agent --silent=passed-only",
-        "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
-      },
-      devDependencies: {
-        "@types/node": "catalog:",
-        "tsc-alias": "catalog:",
-        vitest: "catalog:",
-      },
-    });
-    expect(workspaceYaml).toContain("apps/*");
-    expect(workspaceYaml).toContain('"@hono/node-server":');
-    expect(generatedByJson).toMatchObject({
-      command: "template init --preset hono-api",
-    });
-    await expectFile(path.join(targetDir, "apps/api/src/app.ts"));
-    await expectFile(path.join(targetDir, "apps/api/test/app.test.ts"));
-    await expectFile(path.join(targetDir, ".github/workflows/check.yml"));
-    await expectFile(path.join(targetDir, ".devcontainer/Dockerfile"));
-  });
-
   it("renders the vue-app built-in declaration into expected public generated files", async () => {
     const manifest = loadBuiltInPresetSourceManifest();
     const preset = manifest.presets.find(
@@ -960,8 +877,8 @@ describe("Projection Capability declarations", () => {
     expect(webPackageJson).toMatchObject({
       name: "@demo-vue-hono-app/web",
       dependencies: {
-        "@demo-vue-hono-app/api": "workspace:*",
-        hono: "catalog:",
+        pinia: "catalog:",
+        vue: "catalog:",
       },
       scripts: {
         "typecheck:run": "vue-tsc --build --pretty false",
@@ -970,14 +887,13 @@ describe("Projection Capability declarations", () => {
     expect(turboConfig).toMatchObject({
       tasks: {
         "build:run": {
-          dependsOn: ["^build:run"],
           outputs: ["dist/**"],
         },
       },
     });
-    expect(webApiSource).toContain(
-      'import type { AppType } from "@demo-vue-hono-app/api";',
-    );
+    expect(webApiSource).toContain("export async function getHealth");
+    expect(webApiSource).not.toContain("@demo-vue-hono-app/api");
+    expect(webApiSource).not.toContain("hono/client");
     expect(webApiSource).not.toContain("__API_PACKAGE__");
     expect(webApiSource).not.toContain("@template-anchor");
     await expectFile(path.join(targetDir, "apps/api/src/index.ts"));
@@ -1049,8 +965,10 @@ describe("Projection Capability declarations", () => {
       },
     });
     expect(cargoToml).toContain('name = "demo-rust-bin"');
+    expect(cargoToml).toContain('anyhow = "1.0.100"');
     expect(cargoToml).toContain("[workspace.lints.clippy]");
     expect(cargoLock).toContain('name = "demo-rust-bin"');
+    expect(cargoLock).toContain('name = "anyhow"');
     expect(dependabot).toContain('directory: "/packages/demo-rust-bin"');
     expect(devcontainerDockerfile).toContain("RUSTUP_HOME");
     await expectFile(
@@ -1245,7 +1163,7 @@ describe("Projection Capability declarations", () => {
         {
           path: "$.capabilities[0].packageLinks[0].providerPackagePath",
           message:
-            "workspace-node-packages packageLink providerPackagePath must reference a package declared in the same packages array: apps/api",
+            "workspace-node-packages packageLink providerPackagePath must reference a package declared in the same packages array or the vike db package: apps/api, packages/db",
         },
       ],
     });

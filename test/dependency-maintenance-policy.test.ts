@@ -21,7 +21,6 @@ type DependabotUpdate = {
 };
 
 const generatedRepositoryPresetNames = [
-  "hono-api",
   "rust-bin",
   "ts-lib",
   "vue-app",

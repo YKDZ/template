@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type {
@@ -28,7 +27,9 @@ import {
 import {
   collectGeneratedManifestCatalogDependencies,
   collectGeneratedManifestCatalogReferences,
+  renderCargoLockForPackage,
   renderGeneratedPnpmWorkspaceYaml,
+  renderCargoDependencyTomlEntries,
 } from "./dependency-catalog.js";
 import {
   browserTestToolLayer,
@@ -58,7 +59,7 @@ import {
 } from "./module-graph.js";
 import {
   packageManifestExposureFields,
-  packageTurboTasks,
+  packageTurboConfig,
   planPackageLinks,
 } from "./package-linking.js";
 import type {
@@ -645,31 +646,12 @@ export async function planPresetSourcePackageAddition(options: {
       additionCapability.sourcePreset,
     ),
     sourceRoots: state.sourceRoots,
-    operations: [
-      ...packageAdditionOperationsForCapability({
-        capability: additionCapability,
-        packageName: options.addition.packageName,
-        packagePath: options.addition.packagePath,
-        nodeVersion: options.addition.nodeVersion,
-      }),
-      ...(additionCapability.packageSourcePreset === "vue-app"
-        ? [
-            {
-              kind: "writeTextTemplate" as const,
-              from: "playwright.package-addition.config.ts",
-              to: `${options.addition.packagePath}/playwright.config.ts`,
-              replacements: {
-                VUE_PREVIEW_PORT: String(
-                  await nextVuePreviewPort(
-                    options.addition.root,
-                    options.addition.blueprint,
-                  ),
-                ),
-              },
-            },
-          ]
-        : []),
-    ],
+    operations: packageAdditionOperationsForCapability({
+      capability: additionCapability,
+      packageName: options.addition.packageName,
+      packagePath: options.addition.packagePath,
+      nodeVersion: options.addition.nodeVersion,
+    }),
   };
 }
 
@@ -1106,67 +1088,12 @@ function vueAppPackageAdditionOperations(options: {
       ),
     },
     ...vueAppTsconfigOperations(options.packagePath),
-    ...options.capability.sourceFiles
-      .filter(
-        (sourceFile) => path.basename(sourceFile) !== "playwright.config.ts",
-      )
-      .map((sourceFile) => ({
-        kind: "copyFile" as const,
-        from: sourceFile,
-        to: `${options.packagePath}/${sourceFile}`,
-      })),
+    ...options.capability.sourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${options.packagePath}/${sourceFile}`,
+    })),
   ];
-}
-
-function localPortsFromText(text: string): number[] {
-  return [
-    ...text.matchAll(/--port\s+(\d+)/g),
-    ...text.matchAll(/https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/g),
-  ].map((match) => Number(match[1]));
-}
-
-async function usedPlaywrightPorts(
-  root: string,
-  blueprint: ProjectBlueprint,
-): Promise<Set<number>> {
-  const ports = new Set<number>();
-
-  for (const projectPackage of blueprint.packages ?? []) {
-    try {
-      const configText = await readFile(
-        path.join(root, projectPackage.path, "playwright.config.ts"),
-        "utf8",
-      );
-
-      for (const port of localPortsFromText(configText)) {
-        ports.add(port);
-      }
-    } catch (error: unknown) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-
-  return ports;
-}
-
-async function nextVuePreviewPort(
-  root: string,
-  blueprint: ProjectBlueprint,
-): Promise<number> {
-  const usedPorts = await usedPlaywrightPorts(root, blueprint);
-  let port = 4173;
-
-  while (usedPorts.has(port)) {
-    port += 1;
-  }
-
-  return port;
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 function completePlanCapabilityFlags(
@@ -1261,6 +1188,14 @@ function hasVuePackage(
   return findVuePackage(capability) !== undefined;
 }
 
+function hasVikePackage(
+  capability: WorkspaceNodePackagesCapabilityDeclaration,
+): boolean {
+  return capability.packages.some(
+    (nodePackage) => nodePackage.kind === "vike-app",
+  );
+}
+
 function findVuePackage(
   capability: WorkspaceNodePackagesCapabilityDeclaration,
 ): WorkspaceNodePackageDeclaration | undefined {
@@ -1294,11 +1229,12 @@ function projectRootPackageScripts(
   const directFragments = directScriptFragments(fragments);
 
   return {
-    check: renderRootCheckCommand(checkPlan),
+    check: `pnpm run check:boundaries && ${renderRootCheckCommand(checkPlan)}`,
     fix: renderFixCommand(fixPlan),
     ...rootTaskEntrypoints(checkPlan, fixPlan),
     ...directFragments,
     ...leafFragments,
+    "check:boundaries": "turbo boundaries",
     "check:run": noopTaskCommand(),
     "fix:run": noopTaskCommand(),
   };
@@ -1492,7 +1428,7 @@ function nodePackageDefinitions(
   context: GenerationContext,
   capability: WorkspaceNodePackagesCapabilityDeclaration,
 ) {
-  return capability.packages
+  const nodeDefinitions = capability.packages
     .filter((nodePackage) => nodePackage.kind === "hono-api")
     .map((nodePackage) => ({
       name: nodePackageName(context, nodePackage),
@@ -1500,6 +1436,20 @@ function nodePackageDefinitions(
       role: "runtime-service" as const,
       sourcePreset: "hono-api" as const,
     }));
+
+  if (hasVikePackage(capability)) {
+    return [
+      ...nodeDefinitions,
+      {
+        name: vikeDbPackageName(context),
+        path: vikeDbPackagePath(),
+        role: "shared-library" as const,
+        sourcePreset: "ts-lib" as const,
+      },
+    ];
+  }
+
+  return nodeDefinitions;
 }
 
 function nodePackageName(
@@ -1518,18 +1468,6 @@ function nodePackageName(
   return `@${context.projectName.value}/${leaf}`;
 }
 
-function packageScopeFromNodeWorkspace(context: GenerationContext): string {
-  const apiPackage = context.blueprint.packages?.find(
-    (pkg) => pkg.path === "apps/api",
-  );
-
-  if (apiPackage?.name.startsWith("@") && apiPackage.name.endsWith("/api")) {
-    return apiPackage.name.slice(1, -"/api".length);
-  }
-
-  return context.projectName.value;
-}
-
 function nodePackageLinkPlan(
   context: GenerationContext,
   capability: WorkspaceNodePackagesCapabilityDeclaration,
@@ -1538,6 +1476,18 @@ function nodePackageLinkPlan(
     nodePackageDefinitions(context, capability),
     capability.packageLinks ?? [],
   );
+}
+
+function vikeDbPackagePath(): "packages/db" {
+  return "packages/db";
+}
+
+function vikeDbPackageName(context: GenerationContext): string {
+  const packageDefinition = context.blueprint.packages?.find(
+    (pkg) => pkg.path === vikeDbPackagePath(),
+  );
+
+  return packageDefinition?.name ?? `@${context.projectName.value}/db`;
 }
 
 function rootPackageJson(
@@ -1691,6 +1641,7 @@ function vikePackageJson(
   context: GenerationContext,
   packageName: string,
   scripts: Record<string, string>,
+  packageLinkDependencies: Readonly<Record<string, "workspace:*">> = {},
 ): Record<string, unknown> {
   return {
     name: packageName,
@@ -1705,8 +1656,8 @@ function vikePackageJson(
     },
     scripts,
     dependencies: {
+      ...packageLinkDependencies,
       "@vikejs/hono": "catalog:",
-      "drizzle-orm": "catalog:",
       hono: "catalog:",
       telefunc: "catalog:",
       vike: "catalog:",
@@ -1719,7 +1670,6 @@ function vikePackageJson(
       "@types/node": "catalog:",
       "@vitejs/plugin-vue": "catalog:",
       "@vue/tsconfig": "catalog:",
-      "drizzle-kit": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
@@ -1734,6 +1684,73 @@ function vikePackageJson(
       node: context.toolchain.nodeLtsMajor.value,
     },
     packageManager: context.toolchain.packageManagerPin.value,
+  };
+}
+
+function vikeDbPackageJson(
+  context: GenerationContext,
+): Record<string, unknown> {
+  return {
+    name: vikeDbPackageName(context),
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    imports: {
+      "#db/*": {
+        default: "./src/*.ts",
+        types: "./src/*.ts",
+      },
+    },
+    exports: {
+      ".": {
+        default: "./src/index.ts",
+        types: "./src/index.ts",
+      },
+      "./schema": {
+        default: "./src/schema.ts",
+        types: "./src/schema.ts",
+      },
+      "./queries/todos": {
+        default: "./src/queries/todos.ts",
+        types: "./src/queries/todos.ts",
+      },
+    },
+    dependencies: {
+      "drizzle-orm": "catalog:",
+    },
+    scripts: vikeDbPackageScripts(),
+    devDependencies: {
+      "@types/node": "catalog:",
+      "drizzle-kit": "catalog:",
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
+      typescript: "catalog:",
+      vitest: "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
+  };
+}
+
+function vikeDbPackageScripts(): Record<string, string> {
+  return {
+    "build:run": "tsc -p tsconfig.json --noEmit",
+    "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
+    "drizzle:generate": "drizzle-kit generate",
+    "drizzle:migrate": "drizzle-kit migrate",
+    "drizzle:studio": "drizzle-kit studio",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "test:run":
+      "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
@@ -1758,7 +1775,10 @@ function generationRecord(context: GenerationContext): Record<string, unknown> {
   };
 }
 
-function rustCargoToml(projectName: string): string {
+function rustCargoToml(
+  projectName: string,
+  dependencies: readonly string[] = [],
+): string {
   return [
     "[package]",
     `name = "${projectName}"`,
@@ -1766,6 +1786,7 @@ function rustCargoToml(projectName: string): string {
     'edition = "2024"',
     "",
     "[dependencies]",
+    ...renderCargoDependencyTomlEntries(dependencies),
     "",
     "[lints]",
     "workspace = true",
@@ -1791,16 +1812,10 @@ function rustCargoToml(projectName: string): string {
 }
 
 function rustCargoLock(projectName: string): string {
-  return [
-    "# This file is automatically @generated by Cargo.",
-    "# It is not intended for manual editing.",
-    "version = 4",
-    "",
-    "[[package]]",
-    `name = "${projectName}"`,
-    'version = "0.1.0"',
-    "",
-  ].join("\n");
+  return renderCargoLockForPackage({
+    packageName: projectName,
+    packageVersion: "0.1.0",
+  });
 }
 
 function rustRootPackageJson(
@@ -1878,7 +1893,6 @@ function workspaceLibraryPackageOperations({
     capability,
     workspacePackageScripts,
   );
-  const packageLinkPlan = packageLinkPlanFor(context, capability);
 
   return [
     {
@@ -1900,11 +1914,7 @@ function workspaceLibraryPackageOperations({
     {
       kind: "writeJson",
       to: "turbo.json",
-      value: {
-        tasks: {
-          ...packageLinkPlan.turboTasks,
-        },
-      },
+      value: packageTurboConfig({ dependencyBuildsRequired: false }),
     },
     {
       kind: "writeJson",
@@ -2002,9 +2012,7 @@ function rustBinaryWorkspaceOperations({
     {
       kind: "writeJson",
       to: "turbo.json",
-      value: {
-        tasks: packageTurboTasks({ dependencyBuildsRequired: false }),
-      },
+      value: packageTurboConfig({ dependencyBuildsRequired: false }),
     },
     {
       kind: "writeJson",
@@ -2014,7 +2022,10 @@ function rustBinaryWorkspaceOperations({
     {
       kind: "writeText",
       to: `${packagePath}/Cargo.toml`,
-      text: rustCargoToml(rustProjectName(context)),
+      text: rustCargoToml(
+        rustProjectName(context),
+        capability.cargoDependencies ?? [],
+      ),
     },
     {
       kind: "writeText",
@@ -2114,7 +2125,7 @@ function workspaceNodePackagesOperations({
 
   const capability = state.nodeWorkspace;
   const packageLinkPlan = nodePackageLinkPlan(context, capability);
-  const packageManifests = capability.packages.map((nodePackage) => {
+  const nodePackageManifests = capability.packages.map((nodePackage) => {
     const scripts = nodePackageScripts(nodePackage, capability);
     const packageName = nodePackageName(context, nodePackage);
 
@@ -2133,7 +2144,12 @@ function workspaceNodePackagesOperations({
     }
 
     if (nodePackage.kind === "vike-app") {
-      return vikePackageJson(context, packageName, scripts);
+      return vikePackageJson(
+        context,
+        packageName,
+        scripts,
+        packageLinkPlan.manifestDependenciesByPackagePath.get(nodePackage.path),
+      );
     }
 
     return vuePackageJson(
@@ -2143,6 +2159,13 @@ function workspaceNodePackagesOperations({
       packageLinkPlan.manifestDependenciesByPackagePath.get(nodePackage.path),
     );
   });
+  const vikeDbManifest = hasVikePackage(capability)
+    ? vikeDbPackageJson(context)
+    : undefined;
+  const packageManifests =
+    vikeDbManifest === undefined
+      ? nodePackageManifests
+      : [...nodePackageManifests, vikeDbManifest];
   const rootManifest = rootPackageJson(context, packageScripts, state);
 
   if (rootManifest === undefined) {
@@ -2159,7 +2182,7 @@ function workspaceNodePackagesOperations({
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
-        packages: [capability.workspacePackageGlob],
+        packages: workspacePackageGlobsForNodeWorkspace(capability),
         dependencies:
           capability.packageLinks === undefined
             ? collectGeneratedManifestCatalogDependencies([
@@ -2194,6 +2217,9 @@ function workspaceNodePackagesOperations({
               }
             : {}),
         },
+        boundaries: packageTurboConfig({
+          dependencyBuildsRequired: false,
+        }).boundaries,
       },
     },
     {
@@ -2205,16 +2231,19 @@ function workspaceNodePackagesOperations({
       {
         kind: "writeJson" as const,
         to: `${nodePackage.path}/package.json`,
-        value: packageManifests[index],
+        value: nodePackageManifests[index],
       },
       ...nodePackageTsconfigOperations(nodePackage, capability),
-      ...nodePackage.sourceFiles.map((sourceFile) => ({
-        kind: "copyFile" as const,
-        from: sourceFile,
-        to: nodePackageTargetPath(nodePackage, sourceFile, capability),
-      })),
+      ...nodePackage.sourceFiles.flatMap((sourceFile) =>
+        vikeTemplateSourceOperation({
+          context,
+          nodePackage,
+          sourceFile,
+          workspace: capability,
+        }),
+      ),
     ]),
-    ...fullStackApiAnchorOperations(context, capability),
+    ...(vikeDbManifest === undefined ? [] : vikeDbPackageOperations(context)),
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
@@ -2254,13 +2283,11 @@ function nodePackageScripts(
   }
 
   if (nodePackage.kind === "vike-app") {
+    const dbCommand =
+      "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:push";
     return {
       "build:run": "vike build",
-      dev: "pnpm run db:push && vike dev",
-      "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
-      "drizzle:generate": "drizzle-kit generate",
-      "drizzle:migrate": "drizzle-kit migrate",
-      "drizzle:studio": "drizzle-kit studio",
+      dev: `${dbCommand} && vike dev`,
       "format:check:run":
         "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -2268,11 +2295,12 @@ function nodePackageScripts(
         "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
       "lint:fix:run":
         "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
-      preview: "pnpm run db:push && vike preview",
+      preview: `${dbCommand} && vike preview`,
       start: "node ./dist/server/index.mjs",
       "test:run":
-        "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only",
-      "test:e2e:run": "playwright test --config playwright.config.ts",
+        "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
+      "test:e2e:run":
+        "node --experimental-strip-types scripts/run-playwright.ts",
       "typecheck:run": "vue-tsc --build --noEmit --pretty false",
     };
   }
@@ -2303,6 +2331,7 @@ function nodePackageTsconfigOperations(
         value: {
           files: [],
           references: [
+            { path: "../../packages/db" },
             { path: "./tsconfig.app.json" },
             { path: "./tsconfig.test.json" },
             { path: "./tsconfig.node.json" },
@@ -2329,7 +2358,6 @@ function nodePackageTsconfigOperations(
             "+server.ts",
             "assets/**/*.svg",
             "components/**/*.vue",
-            "database/**/*.ts",
             "pages/**/*.ts",
             "pages/**/*.vue",
             "server/**/*.ts",
@@ -2349,7 +2377,7 @@ function nodePackageTsconfigOperations(
             tsBuildInfoFile: "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
             types: ["node", "vitest/globals"],
           },
-          include: ["database/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+          include: ["test/**/*.ts", "vitest.config.ts"],
         },
       },
       {
@@ -2370,7 +2398,6 @@ function nodePackageTsconfigOperations(
             skipLibCheck: true,
           },
           include: [
-            "drizzle.config.ts",
             "playwright.config.ts",
             "scripts/**/*.ts",
             "vite.config.ts",
@@ -2539,7 +2566,7 @@ function sourcePathWithinNodePackage(
   sourceFile: string,
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
 ): string {
-  if (workspace.packages.length === 1) {
+  if (workspace.packages.length === 1 && !sourceFile.startsWith("web/")) {
     return sourceFile;
   }
 
@@ -2559,6 +2586,116 @@ function nodePackageTargetPath(
   return `${nodePackage.path}/${packageRelativePath}`;
 }
 
+function vikeTemplateSourceOperation(options: {
+  readonly context: GenerationContext;
+  readonly nodePackage: WorkspaceNodePackageDeclaration;
+  readonly sourceFile: string;
+  readonly workspace: WorkspaceNodePackagesCapabilityDeclaration;
+}): RenderOperation[] {
+  const to = nodePackageTargetPath(
+    options.nodePackage,
+    options.sourceFile,
+    options.workspace,
+  );
+  const copyOperation: RenderOperation = {
+    kind: "copyFile",
+    from: options.sourceFile,
+    to,
+  };
+
+  if (
+    options.nodePackage.kind === "vike-app" &&
+    [
+      "web/pages/index/+Page.telefunc.ts",
+      "web/server/app.ts",
+      "web/types/global.d.ts",
+    ].includes(options.sourceFile)
+  ) {
+    const dbPackageName = vikeDbPackageName(options.context);
+    const replacements = {
+      "web/pages/index/+Page.telefunc.ts": `import { createTodo, listTodos } from "${dbPackageName}/queries/todos";`,
+      "web/server/app.ts": `import { createDatabase } from "${dbPackageName}";`,
+      "web/types/global.d.ts": `import type { Database } from "${dbPackageName}";`,
+    } as const;
+
+    return [
+      copyOperation,
+      {
+        kind: "replaceAnchors",
+        path: to,
+        language: "typescript",
+        replacements: {
+          "db-package-import":
+            replacements[options.sourceFile as keyof typeof replacements],
+        },
+      },
+    ];
+  }
+
+  return [copyOperation];
+}
+
+const vikeDbSourceFiles = [
+  "db/turbo.json",
+  "db/drizzle.config.ts",
+  "db/src/db.ts",
+  "db/src/index.ts",
+  "db/src/queries/todos.ts",
+  "db/src/schema.ts",
+  "db/test/todos.test.ts",
+] as const;
+
+function vikeDbPackageOperations(
+  context: GenerationContext,
+): RenderOperation[] {
+  const packagePath = vikeDbPackagePath();
+
+  return [
+    {
+      kind: "writeJson",
+      to: `${packagePath}/package.json`,
+      value: vikeDbPackageJson(context),
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/tsconfig.json`,
+      value: vikeDbTsconfigJson(),
+    },
+    ...vikeDbSourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${packagePath}/${sourceFile.replace(/^db\//, "")}`,
+    })),
+  ];
+}
+
+function vikeDbTsconfigJson(): Record<string, unknown> {
+  return {
+    compilerOptions: {
+      ...strictTypeScriptCompilerOptions({
+        composite: true,
+        declaration: true,
+        declarationMap: true,
+        module: "ESNext",
+        moduleResolution: "Bundler",
+        paths: { "#db/*": ["./src/*"] },
+        rootDir: ".",
+        types: ["node"],
+      }),
+      skipLibCheck: true,
+    },
+    include: ["src/**/*.ts", "test/**/*.ts", "drizzle.config.ts"],
+  };
+}
+
+function workspacePackageGlobsForNodeWorkspace(
+  workspace: WorkspaceNodePackagesCapabilityDeclaration,
+): readonly ("apps/*" | "packages/*")[] {
+  return hasVikePackage(workspace)
+    ? [workspace.workspacePackageGlob, "packages/*"]
+    : [workspace.workspacePackageGlob];
+}
+
 function gitignoreForNodeWorkspace(
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
 ): string {
@@ -2571,33 +2708,6 @@ function gitignoreForNodeWorkspace(
     ".pnpm-store/",
     "",
   ].join("\n");
-}
-
-function fullStackApiAnchorOperations(
-  context: GenerationContext,
-  workspace: WorkspaceNodePackagesCapabilityDeclaration,
-): RenderOperation[] {
-  if (
-    workspace.packageLinks?.some(
-      (link) =>
-        link.consumerPackagePath === "apps/web" &&
-        link.providerPackagePath === "apps/api",
-    ) !== true
-  ) {
-    return [];
-  }
-
-  const packageScope = packageScopeFromNodeWorkspace(context);
-  return [
-    {
-      kind: "replaceAnchors",
-      path: "apps/web/src/api.ts",
-      language: "typescript",
-      replacements: {
-        "api-type-imports": `import type { AppType } from "@${packageScope}/api";\nimport { hc } from "hono/client";`,
-      },
-    },
-  ];
 }
 
 function strictTypescriptOperations({
@@ -2673,6 +2783,7 @@ function rootTsconfigReferences(
 
     if (nodePackage.kind === "vike-app") {
       return [
+        { path: "./packages/db" },
         { path: `./${nodePackage.path}/tsconfig.app.json` },
         { path: `./${nodePackage.path}/tsconfig.test.json` },
         { path: `./${nodePackage.path}/tsconfig.node.json` },

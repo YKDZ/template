@@ -24,7 +24,7 @@ const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
 const rootCheckScript =
-  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
+  "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
 const rootFixScript =
   "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped";
 
@@ -68,6 +68,32 @@ const devcontainerSchema = v.looseObject({
   mounts: v.optional(v.array(v.string())),
 });
 
+function isVueBrowserNodePackageKind(kind: string): boolean {
+  switch (kind) {
+    case "vue-app":
+    case "vike-app":
+      return true;
+    default:
+      return false;
+  }
+}
+
+function supportedPresetNamesWithVueBrowserPackage(): string[] {
+  return loadBuiltInPresetSourceManifest()
+    .presets.filter(
+      (preset) =>
+        preset.generation === "supported" &&
+        (preset.projection?.capabilities ?? []).some(
+          (capability) =>
+            capability.kind === "workspace-node-packages" &&
+            capability.packages.some((nodePackage) =>
+              isVueBrowserNodePackageKind(nodePackage.kind),
+            ),
+        ),
+    )
+    .map((preset) => preset.name);
+}
+
 async function readJsonWithSchema<const Schema extends v.GenericSchema>(
   filePath: string,
   schema: Schema,
@@ -88,7 +114,6 @@ describe("Preset Registry", () => {
     ).toEqual(
       expect.arrayContaining([
         { name: "ts-lib", supportedProjectKinds: ["multi-package"] },
-        { name: "hono-api", supportedProjectKinds: ["multi-package"] },
         { name: "vue-app", supportedProjectKinds: ["multi-package"] },
         { name: "vue-hono-app", supportedProjectKinds: ["multi-package"] },
         { name: "rust-bin", supportedProjectKinds: ["multi-package"] },
@@ -104,38 +129,19 @@ describe("Preset Registry", () => {
       (preset) => preset.generation === "supported",
     );
 
-    expect(
-      supportedPresets.map((preset) => ({
-        name: preset.name,
-        packageAdditionSupport: preset.packageAdditionSupport,
-      })),
-    ).toEqual(
-      expect.arrayContaining([
-        {
-          name: "ts-lib",
-          packageAdditionSupport: PackageAdditionSupport.Supported,
-        },
-        {
-          name: "hono-api",
-          packageAdditionSupport: PackageAdditionSupport.Supported,
-        },
-        {
-          name: "vue-app",
-          packageAdditionSupport: PackageAdditionSupport.Supported,
-        },
-        {
-          name: "vue-hono-app",
-          packageAdditionSupport: PackageAdditionSupport.Unsupported,
-        },
-        {
-          name: "rust-bin",
-          packageAdditionSupport: PackageAdditionSupport.Unsupported,
-        },
-      ]),
-    );
-
     for (const preset of supportedPresets) {
-      if (preset.packageAdditionSupport === PackageAdditionSupport.Supported) {
+      const projection = findBuiltInPresetProjection(preset.name);
+      const expectedPackageAdditionSupport =
+        projection?.capabilities?.packageAddition === undefined
+          ? PackageAdditionSupport.Unsupported
+          : PackageAdditionSupport.Supported;
+
+      expect(preset.packageAdditionSupport).toBe(
+        expectedPackageAdditionSupport,
+      );
+      expect(projection).toBeDefined();
+
+      if (projection?.capabilities?.packageAddition !== undefined) {
         expect(
           defaultPackagePathForPresetSourcePackageAddition(
             preset,
@@ -143,10 +149,7 @@ describe("Preset Registry", () => {
             builtInPresetProjectionSourceRoots(),
           ),
         ).toMatch(/^(apps|packages)\/example$/);
-        continue;
       }
-
-      expect(preset.projection).toBeDefined();
     }
   });
 
@@ -241,81 +244,6 @@ describe("Preset Registry", () => {
     });
   });
 
-  it("projects vue-app with a Dockerfile-first Development Container for browser checks", async () => {
-    const projection = findBuiltInPresetProjection("vue-app");
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-preset-registry-"),
-    );
-    const targetDir = path.join(workspace, "demo-vue-app");
-    const blueprint = projection!.blueprint({ targetDir });
-    const context = assembleGenerationContext({
-      targetDir,
-      blueprint,
-      toolchain: {
-        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
-        source: "online",
-        diagnostics: [],
-      },
-    });
-
-    const plan = projection!.project(context);
-    await projection!.render({ targetDir, plan });
-
-    const devcontainerText = await readFile(
-      path.join(targetDir, ".devcontainer/devcontainer.json"),
-      "utf8",
-    );
-    const devcontainer = v.parse(
-      devcontainerSchema,
-      JSON.parse(devcontainerText) as unknown,
-    );
-    const dockerfile = await readFile(
-      path.join(targetDir, ".devcontainer/Dockerfile"),
-      "utf8",
-    );
-
-    expect(Object.keys(devcontainer)).toEqual([
-      "name",
-      "build",
-      "customizations",
-    ]);
-    expect(devcontainer.build).toEqual({
-      dockerfile: "Dockerfile",
-      args: {
-        NODE_VERSION: "24",
-        PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
-        PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
-      },
-    });
-    expect(devcontainer).not.toHaveProperty("features");
-    expect(devcontainer.customizations.vscode.extensions).toContain(
-      "Vue.volar",
-    );
-    expect(devcontainer.customizations.vscode.settings).toHaveProperty(
-      "oxc.enable",
-      true,
-    );
-    expect(devcontainerText).toMatch(
-      /^\{\n  "name": "demo-vue-app",\n  "build": \{/,
-    );
-    expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
-    expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
-    expect(dockerfile).toContain(
-      'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
-    );
-    expect(dockerfile).not.toContain(
-      "npx --yes playwright install-deps chromium",
-    );
-    expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
-    );
-    expect(dockerfile).not.toContain("libnss3");
-    expect(dockerfile).not.toContain("libgbm1");
-    expect(dockerfile).not.toContain("xvfb");
-    expect(dockerfile).not.toContain("npm install -g");
-  });
-
   it("projects vue-hono-app with browser checks but no globally installed Turbo", async () => {
     const projection = findBuiltInPresetProjection("vue-hono-app");
     const workspace = await mkdtemp(
@@ -402,7 +330,7 @@ describe("Preset Registry", () => {
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
   });
 
-  it.each(["hono-api", "vue-app", "vue-hono-app"] as const)(
+  it.each(supportedPresetNamesWithVueBrowserPackage())(
     "projects %s package metadata from the Generation Context toolchain",
     async (preset) => {
       const projection = findBuiltInPresetProjection(preset);
@@ -474,38 +402,21 @@ describe("Preset Registry", () => {
         args: {
           NODE_VERSION: "24",
           PACKAGE_MANAGER_PIN: "pnpm@11.2.3",
-          ...(preset === "hono-api"
-            ? {}
-            : { PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage }),
+          PLAYWRIGHT_CLI_PACKAGE: playwrightCliPackage,
         },
       });
       expect(devcontainer).not.toHaveProperty("features");
-      if (preset === "hono-api") {
-        expect(dockerfile).toContain("ARG NODE_VERSION");
-        expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
-        expect(dockerfile).toContain(
-          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
-        );
-        expect(devcontainerText).toMatch(
-          /^\{\n  "name": "demo-hono-api",\n  "build": \{/,
-        );
-        expect(dockerfile).not.toContain("typescript-node");
-        expect(dockerfile).not.toContain("libnss3");
-        expect(dockerfile).not.toContain("xvfb");
-        expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
-      } else {
-        expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
-        expect(dockerfile).toContain(
-          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
-        );
-        expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
-        expect(dockerfile).toContain(
-          'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
-        );
-        expect(dockerfile).not.toContain(
-          "npx --yes playwright install-deps chromium",
-        );
-      }
+      expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
+      expect(dockerfile).toContain(
+        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      );
+      expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+      expect(dockerfile).toContain(
+        'npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install-deps chromium',
+      );
+      expect(dockerfile).not.toContain(
+        "npx --yes playwright install-deps chromium",
+      );
     },
   );
 
@@ -544,6 +455,7 @@ describe("Preset Registry", () => {
     ]);
     expect(plan.packageScripts).toEqual({
       check: rootCheckScript,
+      "check:boundaries": "turbo boundaries",
       "check:run": 'node -e ""',
       fix: rootFixScript,
       "fix:run": 'node -e ""',
@@ -621,6 +533,7 @@ describe("Preset Registry", () => {
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.2.3" },
     });
     expect(cargoToml).toContain('name = "demo-rust"');
+    expect(cargoToml).toContain('anyhow = "1.0.100"');
     expect(Object.keys(devcontainer)).toEqual([
       "name",
       "build",

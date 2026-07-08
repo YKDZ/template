@@ -14,12 +14,16 @@ import {
   assembleGenerationContext,
   type GenerationContext,
 } from "@ykdz/template-core/generation-context";
-import type { NextStepInstruction } from "@ykdz/template-core/next-step-instructions";
-import { addPackage } from "@ykdz/template-core/package-addition";
 import {
-  planNextStepInstructionsForProjection,
-  type PresetProjectionPlan,
-} from "@ykdz/template-core/preset-projection";
+  formatNextStepInstructionsForCli,
+  generatedFollowUpDocumentOperation,
+  planNextStepInstructions,
+  type FollowUpDocumentPlan,
+  type NextStepInstruction,
+  type NextStepInstructionPlan,
+} from "@ykdz/template-core/next-step-instructions";
+import { addPackage } from "@ykdz/template-core/package-addition";
+import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
 import {
   validateBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
@@ -48,6 +52,7 @@ type InitOptions = {
   yes: boolean;
   dryRun: boolean;
   json: boolean;
+  todo: boolean;
   scope?: string | undefined;
 };
 
@@ -82,6 +87,7 @@ function usage(): string {
     "  --yes            Accept defaults for non-interactive generation",
     "  --dry-run        Print the planned generation without writing files",
     "  --json           Print machine-readable output",
+    "  --no-todo        Do not write the generated follow-up TODO.md document",
     "",
     "Add package options:",
     "  --preset <name>     Package preset to add",
@@ -147,6 +153,7 @@ function parseInitOptions(args: string[]): InitOptions {
   let yes = false;
   let dryRun = false;
   let json = false;
+  let todo = true;
   let scope: string | undefined;
 
   for (let index = 2; index < args.length; index += 1) {
@@ -164,6 +171,11 @@ function parseInitOptions(args: string[]): InitOptions {
 
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+
+    if (arg === "--no-todo") {
+      todo = false;
       continue;
     }
 
@@ -194,7 +206,7 @@ function parseInitOptions(args: string[]): InitOptions {
     throw new Error("init requires a target directory");
   }
 
-  return { dir, preset, yes, dryRun, json, scope };
+  return { dir, preset, yes, dryRun, json, todo, scope };
 }
 
 function normalizeNpmScope(value: string): string {
@@ -285,6 +297,7 @@ type InitJsonOutput = {
   blueprint: ProjectBlueprint;
   toolchain?: ToolchainReport;
   nextSteps: readonly NextStepInstruction[];
+  followUpDocument: FollowUpDocumentPlan;
 };
 
 type ToolchainReport = {
@@ -294,23 +307,51 @@ type ToolchainReport = {
   diagnostics: string[];
 };
 
-function formatProjectionNextSteps(
+function planProjectionNextSteps(
   targetDir: string,
   projectionPlan: PresetProjectionPlan,
-): string {
-  const steps = planNextStepInstructionsForProjection({
+): NextStepInstructionPlan {
+  return planNextStepInstructions({
     targetDir,
-    plan: projectionPlan,
+    projectionPlan,
   });
+}
 
-  return [
-    "Next Step Instructions:",
-    "",
-    ...steps.flatMap((step, index) => [
-      `  ${index + 1}. ${step.label}`,
-      `     ${step.display}`,
-    ]),
-  ].join("\n");
+function followUpDocumentPlan(options: InitOptions): FollowUpDocumentPlan {
+  return options.todo ? { enabled: true, path: "TODO.md" } : { enabled: false };
+}
+
+function displayPathFromCwd(filePath: string): string {
+  const absolutePath = path.resolve(filePath);
+  const relativePath = path.relative(process.cwd(), absolutePath);
+
+  if (
+    relativePath &&
+    !relativePath.startsWith("..") &&
+    !path.isAbsolute(relativePath)
+  ) {
+    return relativePath;
+  }
+
+  return absolutePath;
+}
+
+function followUpDocumentDisplayPath(options: InitOptions): string {
+  return displayPathFromCwd(path.join(options.dir, "TODO.md"));
+}
+
+function formatFollowUpDocumentReport(options: InitOptions): string {
+  const rows: Array<readonly [string, string]> = [
+    ["Enabled", options.todo ? "yes" : "no"],
+  ];
+
+  if (options.todo) {
+    rows.push(["Path", followUpDocumentDisplayPath(options)]);
+  }
+
+  return ["Generated Follow-Up Document:", "", ...formatFieldRows(rows)].join(
+    "\n",
+  );
 }
 
 function toolchainReport(
@@ -392,11 +433,16 @@ async function generateInitProject(
     preset,
     context: generationContext,
   });
+  const nextStepPlan = planProjectionNextSteps(options.dir, plan);
+  const operations = options.todo
+    ? [...plan.operations, generatedFollowUpDocumentOperation(nextStepPlan)]
+    : [...plan.operations];
+
   await renderNewProject({
     sourceRoot: plan.sourceRoot,
     sourceRoots: plan.sourceRoots,
     targetRoot: options.dir,
-    operations: [...plan.operations],
+    operations,
   });
 }
 
@@ -413,10 +459,9 @@ function printInitComplete(
   if (!projectionPlan) {
     throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
   }
-  const nextSteps = planNextStepInstructionsForProjection({
-    targetDir: options.dir,
-    plan: projectionPlan,
-  });
+  const nextStepPlan = planProjectionNextSteps(options.dir, projectionPlan);
+  const nextSteps = nextStepPlan.steps;
+  const followUpDocument = followUpDocumentPlan(options);
 
   if (options.json) {
     printJson({
@@ -428,6 +473,7 @@ function printInitComplete(
         ? { toolchain: toolchainReport(generationContext.toolchain) }
         : {}),
       nextSteps,
+      followUpDocument,
     } satisfies InitJsonOutput);
     return;
   }
@@ -447,7 +493,13 @@ function printInitComplete(
     console.log(formatToolchainReport(generationContext.toolchain));
   }
   console.log("");
-  console.log(formatProjectionNextSteps(options.dir, projectionPlan));
+  if (options.todo) {
+    console.log(
+      `Follow-up checklist written to ${followUpDocumentDisplayPath(options)}`,
+    );
+  } else {
+    console.log(formatNextStepInstructionsForCli(nextStepPlan));
+  }
 }
 
 function isInteractiveTerminal(): boolean {
@@ -668,10 +720,9 @@ async function main(args: string[]): Promise<void> {
       if (!projectionPlan) {
         throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
       }
-      const nextSteps = planNextStepInstructionsForProjection({
-        targetDir: options.dir,
-        plan: projectionPlan,
-      });
+      const nextStepPlan = planProjectionNextSteps(options.dir, projectionPlan);
+      const nextSteps = nextStepPlan.steps;
+      const followUpDocument = followUpDocumentPlan(options);
 
       if (options.json) {
         printJson({
@@ -683,6 +734,7 @@ async function main(args: string[]): Promise<void> {
             ? { toolchain: toolchainReport(generationContext.toolchain) }
             : {}),
           nextSteps,
+          followUpDocument,
         } satisfies InitJsonOutput);
         return;
       }
@@ -693,7 +745,11 @@ async function main(args: string[]): Promise<void> {
         console.log(formatToolchainReport(generationContext.toolchain));
       }
       console.log("");
-      console.log(formatProjectionNextSteps(options.dir, projectionPlan));
+      if (options.todo) {
+        console.log(formatFollowUpDocumentReport(options));
+      } else {
+        console.log(formatNextStepInstructionsForCli(nextStepPlan));
+      }
       return;
     }
 

@@ -1,5 +1,8 @@
+import path from "node:path";
+
 import type { CheckEnvironmentNeed } from "./module-graph.js";
 import type { PresetProjectionPlan } from "./preset-projection.js";
+import type { RenderOperation } from "./renderer.js";
 
 export type NextStepInstruction = {
   readonly id: string;
@@ -21,6 +24,11 @@ export type NextStepInstructionPlan = {
 export type PlanNextStepInstructionsOptions = {
   readonly targetDir: string;
   readonly projectionPlan: PresetProjectionPlan;
+};
+
+export type FollowUpDocumentPlan = {
+  readonly enabled: boolean;
+  readonly path?: "TODO.md";
 };
 
 function rootCheckInstruction(): NextStepInstruction {
@@ -160,4 +168,97 @@ export function planNextStepInstructions(
       [navigationStep, ...commandSteps].map((step) => Object.freeze(step)),
     ),
   });
+}
+
+export function formatNextStepInstructionsForCli(
+  plan: NextStepInstructionPlan,
+): string {
+  return [
+    "Next Step Instructions:",
+    "",
+    ...plan.steps.flatMap((step, index) => [
+      `  ${index + 1}. ${step.label}`,
+      `     ${step.display}`,
+    ]),
+  ].join("\n");
+}
+
+function isOptionalGitInstruction(step: NextStepInstruction): boolean {
+  return step.id.startsWith("optional-git-");
+}
+
+function relativeCwd(
+  plan: NextStepInstructionPlan,
+  step: NextStepInstruction,
+): string | undefined {
+  const targetDir = path.resolve(plan.targetDir);
+  const cwd = path.resolve(step.cwd);
+
+  if (cwd === targetDir) {
+    return undefined;
+  }
+
+  const relative = path.relative(targetDir, cwd);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return cwd;
+  }
+
+  return relative;
+}
+
+function taskTitle(step: NextStepInstruction): string {
+  const title = step.label.replace(/^Optional:\s*/, "");
+  return `${title.slice(0, 1).toUpperCase()}${title.slice(1)}`;
+}
+
+function formatTodoTask(
+  plan: NextStepInstructionPlan,
+  step: NextStepInstruction,
+): string[] {
+  const taskLines = [`- [ ] ${taskTitle(step)}`];
+  const cwd = relativeCwd(plan, step);
+
+  if (cwd !== undefined) {
+    taskLines.push(`  From \`${cwd}\`:`);
+  }
+
+  taskLines.push(`  \`${step.display}\``);
+  return taskLines;
+}
+
+export function formatGeneratedFollowUpDocument(
+  plan: NextStepInstructionPlan,
+): string {
+  const projectLocalSteps = plan.steps.filter(
+    (step) => step.kind === "command",
+  );
+  const nextSteps = projectLocalSteps.filter(
+    (step) => !isOptionalGitInstruction(step),
+  );
+  const optionalGitSteps = projectLocalSteps.filter(isOptionalGitInstruction);
+
+  return [
+    "# TODO",
+    "",
+    "Generated follow-up tasks for this repository.",
+    "",
+    "### Next Steps",
+    ...nextSteps.flatMap((step) => formatTodoTask(plan, step)),
+    "",
+    "### Optional Git Setup",
+    ...optionalGitSteps.flatMap((step) => formatTodoTask(plan, step)),
+    "",
+    "### Done ✓",
+    "",
+  ].join("\n");
+}
+
+export function generatedFollowUpDocumentOperation(
+  plan: NextStepInstructionPlan,
+): RenderOperation {
+  return {
+    kind: "writeText",
+    to: "TODO.md",
+    text: formatGeneratedFollowUpDocument(plan),
+  };
 }

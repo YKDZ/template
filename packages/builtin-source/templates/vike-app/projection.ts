@@ -20,7 +20,7 @@ export const vikeAppPresetMetadata: BuiltInPreset = {
   name: "vike-app",
   title: "Vike app",
   description:
-    "Single-package Vike, Hono, Telefunc, Drizzle, and Vue application.",
+    "Vike, Hono, Telefunc, Drizzle, and Vue workspace with a separate database package.",
   generation: "supported",
   supportedPackageManagers: ["pnpm"],
   supportedProjectKinds: ["multi-package"],
@@ -45,6 +45,10 @@ function scopedPackageName(packageScope: string): string {
   return `@${packageScope}/web`;
 }
 
+function scopedDbPackageName(packageScope: string): string {
+  return `@${packageScope}/db`;
+}
+
 export function vikeAppBlueprint(
   options: PresetBlueprintOptions = { targetDir: process.cwd() },
 ): ProjectBlueprint {
@@ -56,7 +60,15 @@ export function vikeAppBlueprint(
     packageManager: "pnpm",
     projectKind: "multi-package",
     features: [...vikeAppPresetMetadata.features],
-    packages: [{ name: scopedPackageName(projectName), path: "apps/web" }],
+    packages: [
+      { name: scopedPackageName(projectName), path: "apps/web" },
+      {
+        name: scopedDbPackageName(projectName),
+        path: "packages/db",
+        role: "shared-library",
+        sourcePreset: "ts-lib",
+      },
+    ],
   };
 }
 

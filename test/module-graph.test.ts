@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
-import { projectHonoApiPackageScripts } from "@ykdz/template-builtin-source/templates/hono-api/projection";
 import {
   planRustBinChecks,
   planRustBinFixes,
@@ -183,7 +182,8 @@ describe("module graph plans", () => {
 
     expect(plan.packageScripts).toEqual({
       check:
-        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
+        "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
+      "check:boundaries": "turbo boundaries",
       "check:run": 'node -e ""',
       fix: "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
       "fix:run": 'node -e ""',
@@ -213,23 +213,6 @@ describe("module graph plans", () => {
         "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
       "lint:fix:run":
         "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
-    });
-  });
-
-  it("projects hono-api package scripts from Check and Fix Plans", () => {
-    expect(projectHonoApiPackageScripts()).toEqual({
-      "build:run":
-        "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      "format:check:run":
-        "oxfmt --list-different --config ../../oxfmt.config.ts .",
-      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-      "lint:run":
-        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-      "lint:fix:run":
-        "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
-      start: "node dist/server.js",
-      "test:run": "vitest run --reporter=agent --silent=passed-only",
       "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
     });
   });
@@ -330,7 +313,8 @@ describe("module graph plans", () => {
     );
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
-        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
+        "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
+      "check:boundaries": "turbo boundaries",
       "check:run": 'node -e ""',
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),

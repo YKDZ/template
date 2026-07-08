@@ -9,9 +9,11 @@ import {
 } from "@ykdz/template-builtin-source";
 import {
   errorForFailedGeneratedScenario,
+  fixtureConcurrency,
   generatedScenarioChildProcessEnv,
   generatedScenarioEnvironmentNeedSteps,
   generatedScenarioId,
+  generatedScenarioQualityGateSteps,
   generatedScenarioRequiresSerializedRootCheck,
   packageLeafNameForAddedPreset,
   runGeneratedScenarioSet,
@@ -65,29 +67,139 @@ function minimalManifest(): PresetSourceManifest {
         features: ["root-check"],
       },
     ],
-    fixtureMatrix: {
-      initSupport: [{ preset: "base" }],
-      packageAdditionSupport: [
-        { preset: "addon", packageLeafName: "fixture-addon" },
-      ],
-      supportedCombinations: [
-        { basePreset: "base", addedPreset: "addon" },
-        {
-          basePreset: "base",
-          addedPreset: "addon",
-          linkFrom: ["apps/web"],
+  };
+}
+
+function manifestWithoutFixtureMatrix(): PresetSourceManifest {
+  const manifest = minimalManifest();
+
+  return {
+    ...manifest,
+    presets: [
+      ...manifest.presets,
+      {
+        name: "future",
+        title: "Future",
+        description: "Future preset.",
+        generation: "future",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: PackageAdditionSupport.Unsupported,
+        features: ["root-check"],
+      },
+    ],
+  };
+}
+
+function manifestWithLinkableProductionFacts(): PresetSourceManifest {
+  return {
+    schemaVersion: 1,
+    name: "test-source",
+    sharedResources: [],
+    presets: [
+      {
+        name: "web-workspace",
+        title: "Web workspace",
+        description: "Workspace with a web package.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: PackageAdditionSupport.Unsupported,
+        features: ["root-check"],
+        projection: {
+          capabilities: [
+            {
+              kind: "workspace-node-packages",
+              workspacePackageGlob: "apps/*",
+              packages: [
+                {
+                  kind: "vue-app",
+                  path: "apps/web",
+                  sourceFiles: ["src/main.ts"],
+                },
+              ],
+            },
+          ],
         },
-      ],
-      semanticSkips: [
-        {
-          basePreset: "base",
-          addedPreset: "blocked",
-          reason: "blocked is init-only",
+      },
+      {
+        name: "library",
+        title: "Library",
+        description: "Addable TypeScript library.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: PackageAdditionSupport.Supported,
+        features: ["root-check"],
+        projection: {
+          capabilities: [
+            {
+              kind: "workspace-library-package",
+              workspacePackageGlob: "packages/*",
+              packageRole: "shared-library",
+              packageSourcePreset: "ts-lib",
+              sourceFiles: ["src/index.ts"],
+            },
+          ],
         },
-      ],
-      checkRequirements: ["machine-verifiable-next-steps", "root-check-ci"],
-      environmentPreparation: ["playwright-browser-assets"],
-    },
+      },
+    ],
+  };
+}
+
+function manifestWithApiConsumerProductionFacts(): PresetSourceManifest {
+  return {
+    schemaVersion: 1,
+    name: "test-source",
+    sharedResources: [],
+    presets: [
+      {
+        name: "api-workspace",
+        title: "API workspace",
+        description: "Workspace with an API package.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: PackageAdditionSupport.Unsupported,
+        features: ["root-check"],
+        projection: {
+          capabilities: [
+            {
+              kind: "workspace-node-packages",
+              workspacePackageGlob: "apps/*",
+              packages: [
+                {
+                  kind: "hono-api",
+                  path: "apps/api",
+                  sourceFiles: ["src/server.ts"],
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        name: "library",
+        title: "Library",
+        description: "Addable TypeScript library.",
+        generation: "supported",
+        supportedPackageManagers: ["pnpm"],
+        supportedProjectKinds: ["multi-package"],
+        packageAdditionSupport: PackageAdditionSupport.Supported,
+        features: ["root-check"],
+        projection: {
+          capabilities: [
+            {
+              kind: "workspace-library-package",
+              workspacePackageGlob: "packages/*",
+              packageRole: "shared-library",
+              packageSourcePreset: "ts-lib",
+              sourceFiles: ["src/index.ts"],
+            },
+          ],
+        },
+      },
+    ],
   };
 }
 
@@ -102,8 +214,10 @@ describe("generated scenarios", () => {
     expect(env.NO_COLOR).toBe("1");
   });
 
-  it("derives the init-only scenario set from the Fixture Matrix Contract", () => {
-    expect(selectGeneratedScenarios(minimalManifest(), "init")).toEqual({
+  it("derives the init-only scenario set from supported production Presets", () => {
+    expect(
+      selectGeneratedScenarios(manifestWithoutFixtureMatrix(), "init"),
+    ).toEqual({
       runnable: [
         {
           set: "init",
@@ -111,14 +225,54 @@ describe("generated scenarios", () => {
           id: "base",
           label: "base",
         },
+        {
+          set: "init",
+          basePreset: "addon",
+          id: "addon",
+          label: "addon",
+        },
+        {
+          set: "init",
+          basePreset: "blocked",
+          id: "blocked",
+          label: "blocked",
+        },
       ],
       skipped: [],
     });
   });
 
-  it("derives Package Addition matrix scenarios and semantic skips with reasons", () => {
+  it("automatically gives new supported initialization Presets init scenario coverage", () => {
+    const manifest = minimalManifest();
+    const before = selectGeneratedScenarios(manifest, "init").runnable.map(
+      (scenario) => scenario.id,
+    );
+
+    manifest.presets.push({
+      name: "new-init-preset",
+      title: "New init preset",
+      description: "A new supported initialization preset.",
+      generation: "supported",
+      supportedPackageManagers: ["pnpm"],
+      supportedProjectKinds: ["multi-package"],
+      packageAdditionSupport: PackageAdditionSupport.Unsupported,
+      features: ["root-check"],
+    });
+
+    const after = selectGeneratedScenarios(manifest, "init").runnable.map(
+      (scenario) => scenario.id,
+    );
+
+    expect(before).not.toContain("new-init-preset");
+    expect(after).toEqual([...before, "new-init-preset"]);
+  });
+
+  it("derives Package Addition matrix scenarios from supported initialization Presets crossed with addable Presets", () => {
     expect(
-      selectGeneratedScenarios(minimalManifest(), "package-addition-matrix"),
+      selectGeneratedScenarios(
+        manifestWithoutFixtureMatrix(),
+        "package-addition-matrix",
+      ),
     ).toEqual({
       runnable: [
         {
@@ -130,23 +284,153 @@ describe("generated scenarios", () => {
         },
         {
           set: "package-addition-matrix",
-          basePreset: "base",
+          basePreset: "addon",
           addedPreset: "addon",
-          linkFrom: ["apps/web"],
-          id: "base-add-addon-link-from-apps-web",
-          label: "base + addon linked from apps/web",
+          id: "addon-add-addon",
+          label: "addon + addon",
         },
-      ],
-      skipped: [
         {
           set: "package-addition-matrix",
-          basePreset: "base",
-          addedPreset: "blocked",
-          id: "base-add-blocked",
-          label: "base + blocked",
-          reason: "blocked is init-only",
+          basePreset: "blocked",
+          addedPreset: "addon",
+          id: "blocked-add-addon",
+          label: "blocked + addon",
         },
       ],
+      skipped: [],
+    });
+  });
+
+  it("automatically gives new addable Presets Package Addition matrix coverage", () => {
+    const manifest = minimalManifest();
+    const before = new Set(
+      selectGeneratedScenarios(
+        manifest,
+        "package-addition-matrix",
+      ).runnable.map((scenario) =>
+        matrixPairKey({
+          basePreset: scenario.basePreset,
+          addedPreset: scenario.addedPreset!,
+        }),
+      ),
+    );
+
+    manifest.presets.push({
+      name: "new-addable-preset",
+      title: "New addable preset",
+      description: "A new supported addable preset.",
+      generation: "supported",
+      supportedPackageManagers: ["pnpm"],
+      supportedProjectKinds: ["multi-package"],
+      packageAdditionSupport: PackageAdditionSupport.Supported,
+      features: ["root-check"],
+    });
+
+    const after = new Set(
+      selectGeneratedScenarios(
+        manifest,
+        "package-addition-matrix",
+      ).runnable.map((scenario) =>
+        matrixPairKey({
+          basePreset: scenario.basePreset,
+          addedPreset: scenario.addedPreset!,
+        }),
+      ),
+    );
+
+    expect(before).not.toContain(
+      matrixPairKey({
+        basePreset: "base",
+        addedPreset: "new-addable-preset",
+      }),
+    );
+    expect(after).toEqual(
+      new Set([
+        ...before,
+        matrixPairKey({
+          basePreset: "base",
+          addedPreset: "new-addable-preset",
+        }),
+        matrixPairKey({
+          basePreset: "addon",
+          addedPreset: "new-addable-preset",
+        }),
+        matrixPairKey({
+          basePreset: "blocked",
+          addedPreset: "new-addable-preset",
+        }),
+        matrixPairKey({
+          basePreset: "new-addable-preset",
+          addedPreset: "addon",
+        }),
+        matrixPairKey({
+          basePreset: "new-addable-preset",
+          addedPreset: "new-addable-preset",
+        }),
+      ]),
+    );
+  });
+
+  it("derives link-focused Package Addition scenarios from production package facts", () => {
+    expect(
+      selectGeneratedScenarios(
+        manifestWithLinkableProductionFacts(),
+        "package-addition-matrix",
+      ),
+    ).toEqual({
+      runnable: expect.arrayContaining([
+        {
+          set: "focused",
+          basePreset: "web-workspace",
+          addedPreset: "library",
+          linkFrom: ["apps/web"],
+          id: "web-workspace-add-library-link-from-apps-web",
+          label: "web-workspace + library linked from apps/web",
+        },
+      ]),
+      skipped: [],
+    });
+  });
+
+  it("derives focused Package Link Intent consumers through production link planning", () => {
+    expect(
+      selectGeneratedScenarios(
+        manifestWithApiConsumerProductionFacts(),
+        "package-addition-matrix",
+      ),
+    ).toEqual({
+      runnable: expect.arrayContaining([
+        {
+          set: "focused",
+          basePreset: "api-workspace",
+          addedPreset: "library",
+          linkFrom: ["apps/api"],
+          id: "api-workspace-add-library-link-from-apps-api",
+          label: "api-workspace + library linked from apps/api",
+        },
+      ]),
+      skipped: [],
+    });
+  });
+
+  it("does not need built-in Fixture Matrix link entries for Package Link Intent coverage", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+
+    expect(Object.hasOwn(manifest, "fixtureMatrix")).toBe(false);
+    expect(
+      selectGeneratedScenarios(manifest, "package-addition-matrix"),
+    ).toEqual({
+      runnable: expect.arrayContaining([
+        {
+          set: "focused",
+          basePreset: "vue-hono-app",
+          addedPreset: "ts-lib",
+          linkFrom: ["apps/web"],
+          id: "vue-hono-app-add-ts-lib-link-from-apps-web",
+          label: "vue-hono-app + ts-lib linked from apps/web",
+        },
+      ]),
+      skipped: [],
     });
   });
 
@@ -164,10 +448,29 @@ describe("generated scenarios", () => {
     );
   });
 
-  it("uses manifest-declared Package Addition leaf names", () => {
-    expect(packageLeafNameForAddedPreset(minimalManifest(), "addon")).toBe(
-      "fixture-addon",
-    );
+  it("derives deterministic Package Addition leaf names from the added Preset", () => {
+    expect(
+      packageLeafNameForAddedPreset(manifestWithoutFixtureMatrix(), "addon"),
+    ).toBe("fixture-addon");
+  });
+
+  it("runs fixture scenarios with existing bounded parallelism by default", () => {
+    const previous = process.env.TEMPLATE_FIXTURE_CONCURRENCY;
+
+    try {
+      delete process.env.TEMPLATE_FIXTURE_CONCURRENCY;
+      expect(fixtureConcurrency(20)).toBe(2);
+
+      process.env.TEMPLATE_FIXTURE_CONCURRENCY = "8";
+      expect(fixtureConcurrency(20)).toBe(8);
+      expect(fixtureConcurrency(3)).toBe(3);
+    } finally {
+      if (previous === undefined) {
+        delete process.env.TEMPLATE_FIXTURE_CONCURRENCY;
+      } else {
+        process.env.TEMPLATE_FIXTURE_CONCURRENCY = previous;
+      }
+    }
   });
 
   it("keeps generated scenario serialization on environment need kind metadata", () => {
@@ -237,44 +540,111 @@ describe("generated scenarios", () => {
     ]);
   });
 
-  it("keeps built-in scenario selection on the manifest contract", () => {
+  it("derives generated scenario browser preparation from generated Check Plans instead of fixture manifest fields", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+
+    expect(Object.hasOwn(manifest, "fixtureMatrix")).toBe(false);
+
+    const selectedScenarios = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    );
+    expect(selectedScenarios.runnable.length).toBeGreaterThan(0);
+
+    const scenario = selectedScenarios.runnable.find(
+      (candidate) =>
+        candidate.basePreset === "ts-lib" &&
+        candidate.addedPreset === "vue-app",
+    );
+
+    if (!scenario) {
+      throw new Error("Expected ts-lib + vue-app generated scenario");
+    }
+
+    const steps = generatedScenarioQualityGateSteps(
+      manifest,
+      scenario,
+      "/generated-repository",
+      "apps/fixture-vue-app",
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      },
+    );
+
+    expect(steps).toContainEqual(
+      expect.objectContaining({
+        args: [
+          "--filter",
+          "./apps/fixture-vue-app",
+          "exec",
+          "playwright",
+          "install",
+          "chromium",
+        ],
+        environmentNeedKind: "playwright-browser-assets",
+      }),
+    );
+  });
+
+  it("does not run browser preparation for scenarios whose generated Check Plans do not require it", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "ts-lib" && candidate.addedPreset === "ts-lib",
+    );
+
+    const steps = generatedScenarioQualityGateSteps(
+      manifest,
+      scenario!,
+      "/generated-repository",
+      "packages/fixture-ts-lib",
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      },
+    );
+
+    expect(
+      steps.some(
+        (step) => step.environmentNeedKind === "playwright-browser-assets",
+      ),
+    ).toBe(false);
+  });
+
+  it("derives built-in Package Addition scenarios without manifest semantic skips", () => {
     const selection = selectGeneratedScenarios(
       loadBuiltInPresetSourceManifest(),
       "package-addition-matrix",
     );
 
-    expect(selection.runnable.map((scenario) => scenario.id)).toContain(
-      "vue-hono-app-add-ts-lib-link-from-apps-web",
-    );
     expect(selection.runnable.every((scenario) => scenario.addedPreset)).toBe(
       true,
     );
-    expect(
-      selection.skipped.map((scenario) => [scenario.id, scenario.reason]),
-    ).toContainEqual([
-      "ts-lib-add-rust-bin",
-      "rust-bin is an initialization-only native binary preset.",
-    ]);
+    expect(selection.skipped).toEqual([]);
   });
 
-  it("covers the built-in Package Addition matrix from the Fixture Matrix Contract", () => {
+  it("proves built-in Package Addition Universality for supported initialization Presets and addable Presets", () => {
     const manifest = loadBuiltInPresetSourceManifest();
-    const contract = manifest.fixtureMatrix;
-
-    expect(contract).toBeDefined();
-
-    const initSupportedPresets = contract!.initSupport.map(
-      (support) => support.preset,
-    );
+    const initSupportedPresets = manifest.presets
+      .filter((preset) => preset.generation === "supported")
+      .map((preset) => preset.name);
     const packageAdditionSupportedPresets = new Set(
-      contract!.packageAdditionSupport.map((support) => support.preset),
-    );
-    const presetsByName = new Map(
-      manifest.presets.map((preset) => [preset.name, preset]),
+      manifest.presets
+        .filter(
+          (preset) =>
+            preset.packageAdditionSupport === PackageAdditionSupport.Supported,
+        )
+        .map((preset) => preset.name),
     );
     const expectedPairs = new Set(
       initSupportedPresets.flatMap((basePreset) =>
-        initSupportedPresets.map((addedPreset) =>
+        [...packageAdditionSupportedPresets].map((addedPreset) =>
           matrixPairKey({ basePreset, addedPreset }),
         ),
       ),
@@ -283,34 +653,27 @@ describe("generated scenarios", () => {
       manifest,
       "package-addition-matrix",
     );
+    const plainMatrixScenarios = selection.runnable.filter(
+      (scenario) =>
+        scenario.set === "package-addition-matrix" &&
+        scenario.linkFrom === undefined,
+    );
     const runnablePairs = new Set(
-      selection.runnable.map((scenario) =>
+      plainMatrixScenarios.map((scenario) =>
         matrixPairKey({
           basePreset: scenario.basePreset,
           addedPreset: scenario.addedPreset!,
         }),
       ),
     );
-    const skippedPairs = new Set(selection.skipped.map(matrixPairKey));
 
-    expect(new Set([...runnablePairs, ...skippedPairs])).toEqual(expectedPairs);
-    for (const scenario of selection.runnable) {
+    expect(selection.skipped).toEqual([]);
+    expect(plainMatrixScenarios).toHaveLength(expectedPairs.size);
+    expect(runnablePairs).toEqual(expectedPairs);
+    for (const scenario of plainMatrixScenarios) {
       expect(packageAdditionSupportedPresets.has(scenario.addedPreset!)).toBe(
         true,
       );
-    }
-    for (const scenario of selection.skipped) {
-      const basePreset = presetsByName.get(scenario.basePreset);
-      const addedPresetSupportsPackageAddition =
-        packageAdditionSupportedPresets.has(scenario.addedPreset);
-      const basePresetSupportsPackageAddition =
-        basePreset?.packageAdditionSupport === "supported";
-
-      expect(
-        !addedPresetSupportsPackageAddition ||
-          !basePresetSupportsPackageAddition,
-      ).toBe(true);
-      expect(scenario.reason.length).toBeGreaterThan(0);
     }
   });
 
@@ -380,7 +743,9 @@ describe("generated scenarios", () => {
           await writeFile(
             path.join(cwd, ".template", "blueprint.json"),
             JSON.stringify({
-              packages: [{ name: "fixture-lib", path: "packages/fixture-lib" }],
+              packages: [
+                { name: "fixture-ts-lib", path: "packages/fixture-ts-lib" },
+              ],
             }),
             "utf8",
           );
@@ -395,9 +760,13 @@ describe("generated scenarios", () => {
           "pnpm exec tsx /repo/packages/cli/src/cli.ts init",
         ),
         expect.stringContaining(
-          "pnpm exec tsx /repo/packages/cli/src/cli.ts add package --preset ts-lib --name fixture-lib",
+          "pnpm exec tsx /repo/packages/cli/src/cli.ts add package --preset ts-lib --name fixture-ts-lib",
         ),
-        expect.stringContaining("pnpm install"),
+        expect.stringContaining(
+          "pnpm install --lockfile-only --prefer-offline --no-frozen-lockfile",
+        ),
+        expect.stringContaining("pnpm fetch"),
+        expect.stringContaining("pnpm install --offline --frozen-lockfile"),
         expect.stringContaining("pnpm run fix"),
         expect.stringContaining("pnpm run check"),
       ]),

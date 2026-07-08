@@ -2,7 +2,10 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { builtInPresetProjectionSourceRoots } from "@ykdz/template-builtin-source";
+import {
+  builtInPresetProjectionSourceRoots,
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import {
   editorCustomizationForCapabilities,
@@ -96,27 +99,6 @@ function oxcConfigPathSettings(
     .map(([key, value]) => ({ key, value }));
 }
 
-function editorCustomizationOptionsForPreset(
-  preset: string,
-): EditorCustomizationOptions | undefined {
-  void preset;
-  return undefined;
-}
-
-function editorCustomizationCapabilitiesForPreset(
-  preset: string,
-): EditorCustomizationCapability[] {
-  if (preset === "ts-lib") {
-    return ["oxc-format-lint"];
-  }
-
-  if (preset === "vue-app" || preset === "vue-hono-app") {
-    return ["oxc-format-lint", "vue", "tailwind", "vitest"];
-  }
-
-  return ["oxc-format-lint", "vitest"];
-}
-
 const forbiddenOptionalExtensions = [
   "vadimcn.vscode-lldb",
   "serayuzgur.crates",
@@ -157,6 +139,18 @@ function expectForbiddenOptionalExtensionsAbsent(
   for (const extension of forbiddenOptionalExtensions) {
     expect(extensions).not.toContain(extension);
   }
+}
+
+function supportedPresetNamesWithOxcFormatLint(): string[] {
+  return loadBuiltInPresetSourceManifest()
+    .presets.filter(
+      (preset) =>
+        preset.generation === "supported" &&
+        (preset.projection?.capabilities ?? []).some(
+          (capability) => capability.kind === "oxc-format-lint",
+        ),
+    )
+    .map((preset) => preset.name);
 }
 
 describe("editor customization", () => {
@@ -392,38 +386,6 @@ describe("editor customization", () => {
     expectForbiddenOptionalExtensionsAbsent(customization.extensions);
   });
 
-  it("projects the same OXC and Vitest customization to devcontainer and workspace files", async () => {
-    const projectDir = await renderPresetProject("hono-api");
-    const expected = builtInEditorCustomizationForCapabilities([
-      "oxc-format-lint",
-      "vitest",
-    ]);
-    const devcontainer = await readDevcontainerEditorCustomization(
-      path.join(projectDir, ".devcontainer/devcontainer.json"),
-    );
-    const workspaceExtensions = await readWorkspaceExtensions(
-      path.join(projectDir, ".vscode/extensions.json"),
-    );
-    const workspaceSettings = await readWorkspaceSettings(
-      path.join(projectDir, ".vscode/settings.json"),
-    );
-
-    expect(devcontainer.customizations.vscode.extensions).toEqual(
-      expected.extensions,
-    );
-    expect(devcontainer.customizations.vscode.settings).toEqual(
-      expected.settings,
-    );
-    expect(workspaceExtensions.recommendations).toEqual(expected.extensions);
-    expect(workspaceSettings).toEqual(expected.settings);
-    expectForbiddenOptionalExtensionsAbsent(
-      devcontainer.customizations.vscode.extensions,
-    );
-    expectForbiddenOptionalExtensionsAbsent(
-      workspaceExtensions.recommendations,
-    );
-  });
-
   it("does not recommend Vitest for generated projects without Vitest capability", async () => {
     const projectDir = await renderPresetProject("ts-lib");
     const expected = builtInEditorCustomizationForCapabilities([
@@ -517,42 +479,7 @@ describe("editor customization", () => {
     );
   });
 
-  it.each(["hono-api", "vue-app", "vue-hono-app"])(
-    "generates capability-derived editor customization for the %s preset",
-    async (preset) => {
-      const projectDir = await renderPresetProject(preset);
-      const expected = builtInEditorCustomizationForCapabilities(
-        editorCustomizationCapabilitiesForPreset(preset),
-        editorCustomizationOptionsForPreset(preset),
-      );
-      const devcontainer = await readDevcontainerEditorCustomization(
-        path.join(projectDir, ".devcontainer/devcontainer.json"),
-      );
-      const workspaceExtensions = await readWorkspaceExtensions(
-        path.join(projectDir, ".vscode/extensions.json"),
-      );
-      const workspaceSettings = await readWorkspaceSettings(
-        path.join(projectDir, ".vscode/settings.json"),
-      );
-
-      expect(devcontainer.customizations.vscode.extensions).toEqual(
-        expected.extensions,
-      );
-      expect(devcontainer.customizations.vscode.settings).toEqual(
-        expected.settings,
-      );
-      expect(workspaceExtensions.recommendations).toEqual(expected.extensions);
-      expect(workspaceSettings).toEqual(expected.settings);
-      expectForbiddenOptionalExtensionsAbsent(
-        devcontainer.customizations.vscode.extensions,
-      );
-      expectForbiddenOptionalExtensionsAbsent(
-        workspaceExtensions.recommendations,
-      );
-    },
-  );
-
-  it.each(["hono-api", "ts-lib", "vue-app", "vue-hono-app"])(
+  it.each(supportedPresetNamesWithOxcFormatLint())(
     "references only generated OXC config files for the %s preset",
     async (preset) => {
       const projectDir = await renderPresetProject(preset);

@@ -1,6 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "customConditions": [],
     "declarationMap": false,
     "rootDir": ".",
     "types": ["node"]

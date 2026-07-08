@@ -27,161 +27,6 @@
       "path": "shared/oxc/vue"
     }
   ],
-  "fixtureMatrix": {
-    "initSupport": [
-      { "preset": "ts-lib" },
-      { "preset": "hono-api" },
-      { "preset": "vue-app" },
-      { "preset": "vike-app" },
-      { "preset": "vue-hono-app" },
-      { "preset": "rust-bin" }
-    ],
-    "packageAdditionSupport": [
-      {
-        "preset": "ts-lib",
-        "packageLeafName": "fixture-lib"
-      },
-      {
-        "preset": "hono-api",
-        "packageLeafName": "fixture-api"
-      },
-      {
-        "preset": "vue-app",
-        "packageLeafName": "fixture-web"
-      }
-    ],
-    "supportedCombinations": [
-      { "basePreset": "ts-lib", "addedPreset": "ts-lib" },
-      { "basePreset": "ts-lib", "addedPreset": "hono-api" },
-      { "basePreset": "ts-lib", "addedPreset": "vue-app" },
-      { "basePreset": "hono-api", "addedPreset": "ts-lib" },
-      { "basePreset": "hono-api", "addedPreset": "hono-api" },
-      { "basePreset": "hono-api", "addedPreset": "vue-app" },
-      { "basePreset": "vue-app", "addedPreset": "ts-lib" },
-      { "basePreset": "vue-app", "addedPreset": "hono-api" },
-      { "basePreset": "vue-app", "addedPreset": "vue-app" },
-      { "basePreset": "vue-hono-app", "addedPreset": "ts-lib" },
-      {
-        "basePreset": "vue-hono-app",
-        "addedPreset": "ts-lib",
-        "linkFrom": ["apps/web"]
-      },
-      { "basePreset": "vue-hono-app", "addedPreset": "hono-api" },
-      { "basePreset": "vue-hono-app", "addedPreset": "vue-app" },
-      { "basePreset": "rust-bin", "addedPreset": "ts-lib" },
-      { "basePreset": "rust-bin", "addedPreset": "hono-api" },
-      { "basePreset": "rust-bin", "addedPreset": "vue-app" }
-    ],
-    "semanticSkips": [
-      {
-        "basePreset": "ts-lib",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "ts-lib",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "ts-lib",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      },
-      {
-        "basePreset": "hono-api",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "hono-api",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "hono-api",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      },
-      {
-        "basePreset": "vue-app",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "vue-app",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "ts-lib",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "hono-api",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "vue-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "vike-app",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      },
-      {
-        "basePreset": "vue-hono-app",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "rust-bin",
-        "addedPreset": "vike-app",
-        "reason": "vike-app is an initialization-only root application preset."
-      },
-      {
-        "basePreset": "vue-app",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      },
-      {
-        "basePreset": "vue-hono-app",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "vue-hono-app",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      },
-      {
-        "basePreset": "rust-bin",
-        "addedPreset": "vue-hono-app",
-        "reason": "vue-hono-app is an initialization-only full-stack preset."
-      },
-      {
-        "basePreset": "rust-bin",
-        "addedPreset": "rust-bin",
-        "reason": "rust-bin is an initialization-only native binary preset."
-      }
-    ],
-    "checkRequirements": ["machine-verifiable-next-steps", "root-check-ci"],
-    "environmentPreparation": ["playwright-browser-assets"]
-  },
   "presets": [
     {
       "name": "ts-lib",
@@ -219,7 +64,9 @@
             "packageSourcePreset": "ts-lib",
             "sourceFiles": ["turbo.json", "src/index.ts", "src/name-schema.ts"]
           },
-          { "kind": "strict-typescript-root" },
+          {
+            "kind": "strict-typescript-root"
+          },
           {
             "kind": "oxc-format-lint",
             "editorCustomizationResourceId": "shared-editor-customization"
@@ -228,85 +75,14 @@
             "kind": "node-pnpm-devcontainer",
             "devcontainerResourceId": "shared-devcontainer"
           },
-          { "kind": "github-maintenance" }
+          {
+            "kind": "github-maintenance"
+          }
         ]
       },
       "source": {
         "roots": ["ts-lib/.github", "ts-lib/src"],
         "files": ["ts-lib/turbo.json"],
-        "sharedResources": [
-          "shared-devcontainer",
-          "shared-editor-customization",
-          "shared-oxc-node",
-          "shared-oxc-format",
-          "shared-oxc-root-tsconfig"
-        ]
-      }
-    },
-    {
-      "name": "hono-api",
-      "title": "Hono API",
-      "description": "Hono Node API workspace with strict TypeScript tooling.",
-      "generation": "supported",
-      "supportedPackageManagers": ["pnpm"],
-      "supportedProjectKinds": ["multi-package"],
-      "packageAdditionSupport": "supported",
-      "features": [
-        "pnpm-catalog",
-        "oxc-format-lint",
-        "strict-typescript",
-        "root-check",
-        "fix-command",
-        "devcontainer",
-        "github-actions",
-        "dependabot"
-      ],
-      "dependencyCatalog": [
-        "@hono/node-server",
-        "@types/node",
-        "hono",
-        "oxfmt",
-        "oxlint",
-        "oxlint-tsgolint",
-        "tsc-alias",
-        "turbo",
-        "typescript",
-        "vitest"
-      ],
-      "projection": {
-        "capabilities": [
-          {
-            "kind": "workspace-node-packages",
-            "workspacePackageGlob": "apps/*",
-            "packages": [
-              {
-                "kind": "hono-api",
-                "path": "apps/api",
-                "sourceFiles": [
-                  "turbo.json",
-                  "src/app.ts",
-                  "src/server.ts",
-                  "test/app.test.ts",
-                  "vitest.config.ts"
-                ]
-              }
-            ]
-          },
-          { "kind": "strict-typescript-root" },
-          {
-            "kind": "oxc-format-lint",
-            "editorCustomizationResourceId": "shared-editor-customization"
-          },
-          {
-            "kind": "node-pnpm-devcontainer",
-            "devcontainerResourceId": "shared-devcontainer"
-          },
-          { "kind": "github-maintenance" }
-        ]
-      },
-      "source": {
-        "roots": ["hono-api/.github", "hono-api/src", "hono-api/test"],
-        "files": ["hono-api/turbo.json", "hono-api/vitest.config.ts"],
         "sharedResources": [
           "shared-devcontainer",
           "shared-editor-customization",
@@ -380,7 +156,9 @@
               }
             ]
           },
-          { "kind": "strict-typescript-root" },
+          {
+            "kind": "strict-typescript-root"
+          },
           {
             "kind": "oxc-format-lint",
             "editorCustomizationResourceId": "shared-editor-customization"
@@ -389,7 +167,9 @@
             "kind": "node-pnpm-devcontainer",
             "devcontainerResourceId": "shared-devcontainer"
           },
-          { "kind": "github-maintenance" }
+          {
+            "kind": "github-maintenance"
+          }
         ]
       },
       "source": {
@@ -397,7 +177,6 @@
         "files": [
           "vue-app/env.d.ts",
           "vue-app/index.html",
-          "vue-app/playwright.package-addition.config.ts",
           "vue-app/playwright.config.ts",
           "vue-app/scripts/run-playwright.ts",
           "vue-app/turbo.json",
@@ -416,7 +195,7 @@
     {
       "name": "vike-app",
       "title": "Vike app",
-      "description": "Single-package Vike, Hono, Telefunc, Drizzle, and Vue application.",
+      "description": "Vike, Hono, Telefunc, Drizzle, and Vue workspace with a separate database package.",
       "generation": "supported",
       "supportedPackageManagers": ["pnpm"],
       "supportedProjectKinds": ["multi-package"],
@@ -459,40 +238,45 @@
           {
             "kind": "workspace-node-packages",
             "workspacePackageGlob": "apps/*",
+            "packageLinks": [
+              {
+                "consumerPackagePath": "apps/web",
+                "providerPackagePath": "packages/db"
+              }
+            ],
             "packages": [
               {
                 "kind": "vike-app",
                 "path": "apps/web",
                 "sourceFiles": [
-                  "+server.ts",
-                  ".env.example",
-                  "assets/logo.svg",
-                  "components/CounterButton.vue",
-                  "components/PageShell.vue",
-                  "database/db.ts",
-                  "database/queries/todos.ts",
-                  "database/schema.ts",
-                  "drizzle.config.ts",
-                  "pages/+Head.vue",
-                  "pages/+Layout.vue",
-                  "pages/+config.ts",
-                  "pages/index/+Page.vue",
-                  "pages/index/+Page.telefunc.ts",
-                  "pages/tailwind.css",
-                  "playwright.config.ts",
-                  "server/api.ts",
-                  "server/app.ts",
-                  "test/e2e/app.spec.ts",
-                  "test/todos.test.ts",
-                  "types/env.d.ts",
-                  "types/global.d.ts",
-                  "vite.config.ts",
-                  "vitest.config.ts"
+                  "web/+server.ts",
+                  "web/.env.example",
+                  "web/assets/logo.svg",
+                  "web/components/CounterButton.vue",
+                  "web/components/PageShell.vue",
+                  "web/pages/+Head.vue",
+                  "web/pages/+Layout.vue",
+                  "web/pages/+config.ts",
+                  "web/pages/index/+Page.vue",
+                  "web/pages/index/+Page.telefunc.ts",
+                  "web/pages/tailwind.css",
+                  "web/playwright.config.ts",
+                  "web/scripts/run-playwright.ts",
+                  "web/turbo.json",
+                  "web/server/api.ts",
+                  "web/server/app.ts",
+                  "web/test/e2e/app.spec.ts",
+                  "web/types/env.d.ts",
+                  "web/types/global.d.ts",
+                  "web/vite.config.ts",
+                  "web/vitest.config.ts"
                 ]
               }
             ]
           },
-          { "kind": "strict-typescript-root" },
+          {
+            "kind": "strict-typescript-root"
+          },
           {
             "kind": "oxc-format-lint",
             "editorCustomizationResourceId": "shared-editor-customization"
@@ -501,27 +285,31 @@
             "kind": "node-pnpm-devcontainer",
             "devcontainerResourceId": "shared-devcontainer"
           },
-          { "kind": "github-maintenance" }
+          {
+            "kind": "github-maintenance"
+          }
         ]
       },
       "source": {
         "roots": [
           "vike-app/.github",
-          "vike-app/assets",
-          "vike-app/components",
-          "vike-app/database",
-          "vike-app/pages",
-          "vike-app/server",
-          "vike-app/test",
-          "vike-app/types"
+          "vike-app/db",
+          "vike-app/web/assets",
+          "vike-app/web/components",
+          "vike-app/web/pages",
+          "vike-app/web/scripts",
+          "vike-app/web/server",
+          "vike-app/web/test",
+          "vike-app/web/types"
         ],
         "files": [
-          "vike-app/+server.ts",
-          "vike-app/.env.example",
-          "vike-app/drizzle.config.ts",
-          "vike-app/playwright.config.ts",
-          "vike-app/vite.config.ts",
-          "vike-app/vitest.config.ts"
+          "vike-app/db/turbo.json",
+          "vike-app/web/+server.ts",
+          "vike-app/web/.env.example",
+          "vike-app/web/playwright.config.ts",
+          "vike-app/web/vite.config.ts",
+          "vike-app/web/turbo.json",
+          "vike-app/web/vitest.config.ts"
         ],
         "sharedResources": [
           "shared-devcontainer",
@@ -535,7 +323,7 @@
     {
       "name": "vue-hono-app",
       "title": "Vue Hono app",
-      "description": "Full-stack Vue and Hono workspace with Hono RPC typing.",
+      "description": "Full-stack Vue and Hono workspace with separated app package boundaries.",
       "generation": "supported",
       "supportedPackageManagers": ["pnpm"],
       "supportedProjectKinds": ["multi-package"],
@@ -611,15 +399,11 @@
                   "api/vitest.config.ts"
                 ]
               }
-            ],
-            "packageLinks": [
-              {
-                "consumerPackagePath": "apps/web",
-                "providerPackagePath": "apps/api"
-              }
             ]
           },
-          { "kind": "strict-typescript-root" },
+          {
+            "kind": "strict-typescript-root"
+          },
           {
             "kind": "oxc-format-lint",
             "editorCustomizationResourceId": "shared-editor-customization"
@@ -628,7 +412,9 @@
             "kind": "node-pnpm-devcontainer",
             "devcontainerResourceId": "shared-devcontainer"
           },
-          { "kind": "github-maintenance" }
+          {
+            "kind": "github-maintenance"
+          }
         ]
       },
       "source": {
@@ -684,6 +470,7 @@
             "kind": "rust-binary-workspace",
             "workspacePackageGlob": "packages/*",
             "sourceFiles": ["turbo.json", "src/main.rs"],
+            "cargoDependencies": ["anyhow"],
             "devcontainerResourceId": "shared-devcontainer",
             "editorCustomizationResourceId": "shared-editor-customization"
           }

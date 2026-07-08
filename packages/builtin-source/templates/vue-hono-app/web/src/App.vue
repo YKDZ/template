@@ -2,7 +2,7 @@
 import { storeToRefs } from "pinia";
 import { onMounted, onUnmounted, ref } from "vue";
 
-import { api } from "#/api";
+import { getHealth } from "#/api";
 import { useCounterStore } from "#/stores/counter";
 
 const counter = useCounterStore();
@@ -27,8 +27,7 @@ onUnmounted(() => {
 });
 
 onMounted(async () => {
-  const response = await api.api.health.$get();
-  const body = await response.json();
+  const body = await getHealth();
   apiStatus.value = body.status === "ok" ? "正常" : body.status;
 });
 </script>
@@ -41,9 +40,9 @@ onMounted(async () => {
       <p class="text-sm font-medium tracking-wide text-cyan-300 uppercase">
         Vue + Hono 应用预设
       </p>
-      <h1 class="mt-4 text-4xl font-semibold">Vue、Hono 和类型化 RPC</h1>
+      <h1 class="mt-4 text-4xl font-semibold">Vue 和 Hono 工作区</h1>
       <p class="mt-4 text-lg text-slate-300">
-        这个生成的工作区会让 Web 包根据 API 契约进行类型检查。
+        Web 和 API 是独立应用包，共享代码应放入 packages/*。
       </p>
       <div class="mt-8 flex flex-wrap items-center gap-4">
         <button

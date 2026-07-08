@@ -3,9 +3,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
+import {
+  builtInPresetProjectionSourceRoots,
+  loadBuiltInPresetSourceManifest,
+} from "@ykdz/template-builtin-source";
 import {
   generatedScenarioId,
+  generatedScenarioQualityGateSteps,
   selectGeneratedScenarios,
   type GeneratedScenario,
 } from "@ykdz/template-core/generated-scenarios";
@@ -45,11 +49,19 @@ function fixtureScenarioFromCwd(cwd: string): GeneratedScenario | undefined {
 function scenarioNeedsPlaywrightEnvironment(
   scenario: GeneratedScenario,
 ): boolean {
-  return (
-    scenario.basePreset === "vue-app" ||
-    scenario.basePreset === "vue-hono-app" ||
-    scenario.addedPreset === "vue-app"
-  );
+  return generatedScenarioQualityGateSteps(
+    loadBuiltInPresetSourceManifest(),
+    scenario,
+    "/generated-repository",
+    scenario.addedPreset === undefined ? undefined : "packages/fixture-added",
+    {
+      repoRoot,
+      cliPath: path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
+      projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      reporter: {},
+      runCommand: async () => {},
+    },
+  ).some((step) => step.environmentNeedKind === "playwright-browser-assets");
 }
 
 async function writeExecutable(
@@ -68,7 +80,6 @@ describe("fixture checks", () => {
     const binDir = path.join(workspace, "bin");
     const logPath = path.join(workspace, "commands.jsonl");
     const officialFetchLogPath = path.join(workspace, "official-fetches.txt");
-    const webRootCheckLockPath = path.join(workspace, "web-root-check.lock");
     const fetchGuardPath = path.join(
       workspace,
       "guard-official-toolchain-fetches.mjs",
@@ -105,19 +116,10 @@ describe("fixture checks", () => {
       path.join(binDir, "pnpm"),
       [
         "#!/usr/bin/env node",
-        'import { appendFileSync, closeSync, openSync, rmSync } from "node:fs";',
-        'import path from "node:path";',
+        'import { appendFileSync } from "node:fs";',
         'import { spawnSync } from "node:child_process";',
         "",
         "const args = process.argv.slice(2);",
-        "const sleep = async (ms) => {",
-        "  await new Promise((resolve) => setTimeout(resolve, ms));",
-        "};",
-        "const scenarioId = path.basename(process.cwd()).replace(/^fixture-/, '');",
-        "const needsWebRootCheckLock =",
-        "  scenarioId.startsWith('vue-app') ||",
-        "  scenarioId.startsWith('vue-hono-app') ||",
-        "  scenarioId.includes('-add-vue-app');",
         "appendFileSync(",
         "  process.env.FIXTURE_COMMAND_LOG,",
         "  JSON.stringify({",
@@ -127,31 +129,6 @@ describe("fixture checks", () => {
         "    ci: process.env.CI ?? null",
         "  }) + '\\n'",
         ");",
-        "",
-        "if (",
-        "  args[0] === 'run' &&",
-        "  args[1] === 'check' &&",
-        "  needsWebRootCheckLock",
-        ") {",
-        "  let fd;",
-        "  try {",
-        "    fd = openSync(process.env.FIXTURE_WEB_ROOT_CHECK_LOCK, 'wx');",
-        "  } catch {",
-        "    appendFileSync(",
-        "      process.env.FIXTURE_COMMAND_LOG,",
-        "      JSON.stringify({",
-        "        command: 'web-root-check-concurrency-violation',",
-        "        args,",
-        "        cwd: process.cwd(),",
-        "        ci: process.env.CI ?? null",
-        "      }) + '\\n'",
-        "    );",
-        "    process.exit(1);",
-        "  }",
-        "  await sleep(20);",
-        "  closeSync(fd);",
-        "  rmSync(process.env.FIXTURE_WEB_ROOT_CHECK_LOCK, { force: true });",
-        "}",
         "",
         "if (",
         "  args[0] === 'exec' &&",
@@ -244,7 +221,6 @@ describe("fixture checks", () => {
         cwd: repoRoot,
         env: {
           FIXTURE_COMMAND_LOG: logPath,
-          FIXTURE_WEB_ROOT_CHECK_LOCK: webRootCheckLockPath,
           OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
           TEMPLATE_FIXTURE_CONCURRENCY: "4",
           NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
@@ -326,16 +302,21 @@ describe("fixture checks", () => {
         ),
       ).toBe(true);
     }
-    expect(
-      packageAdditionCommands.some(
-        (record) =>
-          record.cwd.includes(
-            "fixture-vue-hono-app-add-ts-lib-link-from-apps-web",
-          ) &&
-          record.args.includes("--link-from") &&
-          record.args.includes("apps/web"),
-      ),
-    ).toBe(true);
+    const linkedScenario = packageAdditionScenarios.find(
+      (scenario) => scenario.linkFrom && scenario.linkFrom.length > 0,
+    );
+    expect(linkedScenario).toBeDefined();
+    if (!linkedScenario) {
+      throw new Error("Expected a linked Package Addition scenario.");
+    }
+    expect(packageAdditionCommands).toContainEqual(
+      expect.objectContaining({
+        cwd: expect.stringContaining(
+          `fixture-${generatedScenarioId(linkedScenario)}`,
+        ),
+        args: expect.arrayContaining(["--link-from", "apps/web"]),
+      }),
+    );
 
     const generatedFixes = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "fix",
@@ -366,11 +347,6 @@ describe("fixture checks", () => {
     expect(records).not.toContainEqual(
       expect.objectContaining({ command: "sh" }),
     );
-    expect(records).not.toContainEqual(
-      expect.objectContaining({
-        command: "web-root-check-concurrency-violation",
-      }),
-    );
 
     for (const generatedRootCheck of generatedRootChecks) {
       const scenario = fixtureScenarioFromCwd(generatedRootCheck.cwd);
@@ -379,25 +355,28 @@ describe("fixture checks", () => {
       const projectRecords = records.filter(
         (record) => record.cwd === generatedRootCheck.cwd,
       );
-      const installIndex = projectRecords.findIndex(
+      const lockfileInstallIndex = projectRecords.findIndex(
         (record) =>
-          record.command === "pnpm" && record.args.join(" ") === "install",
+          record.command === "pnpm" &&
+          record.args.join(" ") ===
+            "install --lockfile-only --prefer-offline --no-frozen-lockfile",
       );
-      const playwrightIndex = projectRecords.findIndex((record) => {
-        if (record.command !== "pnpm") {
-          return false;
-        }
-
-        if (scenario && scenarioNeedsPlaywrightEnvironment(scenario)) {
-          return (
-            record.args.includes("playwright") &&
-            record.args.includes("install") &&
-            record.args.includes("chromium")
-          );
-        }
-
-        return false;
-      });
+      const fetchIndex = projectRecords.findIndex(
+        (record) =>
+          record.command === "pnpm" && record.args.join(" ") === "fetch",
+      );
+      const offlineInstallIndex = projectRecords.findIndex(
+        (record) =>
+          record.command === "pnpm" &&
+          record.args.join(" ") === "install --offline --frozen-lockfile",
+      );
+      const playwrightIndex = projectRecords.findIndex(
+        (record) =>
+          record.command === "pnpm" &&
+          record.args.includes("playwright") &&
+          record.args.includes("install") &&
+          record.args.includes("chromium"),
+      );
       const checkIndex = projectRecords.findIndex(
         (record) =>
           record.command === "pnpm" && record.args.join(" ") === "run check",
@@ -407,14 +386,19 @@ describe("fixture checks", () => {
           record.command === "pnpm" && record.args.join(" ") === "run fix",
       );
 
-      expect(installIndex).toBeGreaterThanOrEqual(0);
-      expect(fixIndex).toBeGreaterThan(installIndex);
-      if (scenario && scenarioNeedsPlaywrightEnvironment(scenario)) {
+      expect(lockfileInstallIndex).toBeGreaterThanOrEqual(0);
+      expect(fetchIndex).toBeGreaterThan(lockfileInstallIndex);
+      expect(offlineInstallIndex).toBeGreaterThan(fetchIndex);
+      expect(fixIndex).toBeGreaterThan(offlineInstallIndex);
+      const needsPlaywrightEnvironment =
+        scenario !== undefined && scenarioNeedsPlaywrightEnvironment(scenario);
+      if (needsPlaywrightEnvironment) {
         expect(playwrightIndex).toBeGreaterThan(fixIndex);
         expect(checkIndex).toBeGreaterThan(playwrightIndex);
         continue;
       }
 
+      expect(playwrightIndex).toBe(-1);
       expect(checkIndex).toBeGreaterThan(fixIndex);
     }
   }, 240_000);

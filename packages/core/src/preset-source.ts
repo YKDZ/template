@@ -9,7 +9,6 @@ import path from "node:path";
 
 import type {
   BuiltInPreset,
-  PresetSourceFixtureMatrixContract,
   PresetSourceManifest,
   PresetSourceManifestPreset,
   PresetSourceManifestPresetSource,
@@ -30,7 +29,6 @@ import {
 export { presetSourceManifestJsonSchema };
 export type {
   BuiltInPreset,
-  PresetSourceFixtureMatrixContract,
   PresetSourceManifest,
   PresetSourceManifestPreset,
   PresetSourceManifestPresetSource,

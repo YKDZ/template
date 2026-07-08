@@ -1,8 +1,12 @@
 import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import {
   collectGeneratedManifestCatalogDependencies,
+  loadTemplateCargoDependencyVersions,
   loadTemplateDependencyCatalog,
+  renderCargoLockForPackage,
+  renderCargoDependencyTomlEntries,
   renderGeneratedPnpmWorkspaceYaml,
+  selectTemplateCargoDependencyVersions,
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
 
@@ -18,6 +22,31 @@ describe("Template Dependency Catalog projection", () => {
       "@types/node": "^24.0.0",
       typescript: "^6.0.3",
     });
+  });
+
+  it("selects Cargo dependency versions from the template Cargo manifest", () => {
+    expect(
+      selectTemplateCargoDependencyVersions(["anyhow"], {
+        anyhow: "1.0.100",
+        serde: "1.0.228",
+      }),
+    ).toEqual({
+      anyhow: "1.0.100",
+    });
+
+    expect(
+      renderCargoDependencyTomlEntries(["anyhow"], { anyhow: "1.0.100" }),
+    ).toEqual(['anyhow = "1.0.100"']);
+    expect(loadTemplateCargoDependencyVersions()).toHaveProperty("anyhow");
+  });
+
+  it("projects the template Cargo lockfile with the generated package identity", () => {
+    expect(
+      renderCargoLockForPackage({
+        packageName: "demo-rust",
+        packageVersion: "0.1.0",
+      }),
+    ).toContain('name = "demo-rust"\nversion = "0.1.0"');
   });
 
   it("collects generated manifest catalog dependencies and rejects inline specifiers", () => {

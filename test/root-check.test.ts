@@ -24,6 +24,9 @@ const packageJsonWithScriptsSchema = v.object({
   scripts: v.record(v.string(), v.string()),
 });
 const turboConfigSchema = v.object({
+  boundaries: v.object({
+    tags: v.record(v.string(), v.unknown()),
+  }),
   tasks: v.record(v.string(), v.unknown()),
 });
 const workflowWithCheckStepsSchema = v.object({
@@ -337,7 +340,7 @@ describe("Project Kit Root Check", () => {
       "turbo run format:check format:check:root --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["format:check:root"]).toBe(
-      "oxfmt --list-different --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
+      "oxfmt --list-different --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test packages/builtin-source/templates/*/behavior.test.ts",
     );
   });
 
@@ -366,7 +369,7 @@ describe("Project Kit Root Check", () => {
       "turbo run lint lint:root --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["lint:root"]).toBe(
-      "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts test",
+      "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts test packages/builtin-source/templates/*/behavior.test.ts",
     );
   });
 
@@ -381,11 +384,42 @@ describe("Project Kit Root Check", () => {
     );
 
     expect(rootPackageJson.scripts.check).toBe(
-      "turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
+      "pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
+    );
+    expect(rootPackageJson.scripts["check:boundaries"]).toBe(
+      "turbo boundaries",
     );
     expect(rootPackageJson.scripts.build).toBe(
       "turbo run build --output-logs=errors-only --log-order=grouped",
     );
+    expect(turboConfig.boundaries.tags).toMatchObject({
+      "template-checks": {
+        dependencies: {
+          allow: ["template-core", "template-preset-source", "template-shared"],
+        },
+      },
+      "template-cli": {
+        dependencies: {
+          allow: ["template-core", "template-preset-source", "template-shared"],
+        },
+      },
+      "template-core": {
+        dependencies: { allow: ["template-shared"] },
+      },
+      "template-preset-source": {
+        dependencies: { allow: ["template-core", "template-shared"] },
+      },
+      "template-shared": {
+        dependencies: {
+          deny: [
+            "template-checks",
+            "template-cli",
+            "template-core",
+            "template-preset-source",
+          ],
+        },
+      },
+    });
     expect(turboConfig.tasks).toHaveProperty("build");
     expect(turboConfig.tasks).toHaveProperty("format:check");
     expect(turboConfig.tasks).toHaveProperty("lint");

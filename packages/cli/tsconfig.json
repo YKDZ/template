@@ -2,21 +2,6 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "outDir": "dist",
-    "paths": {
-      "@ykdz/template-builtin-source": [
-        "../../packages/builtin-source/src/index.ts"
-      ],
-      "@ykdz/template-builtin-source/templates/*": [
-        "../../packages/builtin-source/templates/*.ts"
-      ],
-      "@ykdz/template-builtin-source/*": [
-        "../../packages/builtin-source/src/*.ts",
-        "../../packages/builtin-source/templates/*.ts",
-        "../../packages/builtin-source/templates/*"
-      ],
-      "@ykdz/template-core/*": ["../../packages/core/src/*.ts"],
-      "@ykdz/template-shared": ["../../packages/shared/src/index.ts"]
-    },
     "rootDir": "../..",
     "types": ["node"]
   },

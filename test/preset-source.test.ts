@@ -3,14 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  presetSourceManifestJsonSchema,
   validateBuiltInPresetSourceManifest,
   loadPresetSourceManifestFile,
   loadBuiltInPresetSourceManifest,
   validatePresetSourceManifest,
 } from "@ykdz/template-builtin-source";
 import type {
-  PresetSourceFixtureMatrixContract,
   PresetSourceManifestPreset,
   PresetSourceManifestSharedResource,
 } from "@ykdz/template-shared";
@@ -42,7 +40,7 @@ type PresetSourceManifestInput = {
   name: string;
   presets: ManifestPresetInput[];
   sharedResources: SharedResourceInput[];
-  fixtureMatrix?: PresetSourceFixtureMatrixContract;
+  fixtureMatrix?: unknown;
 };
 
 function validManifest(): PresetSourceManifestInput {
@@ -122,95 +120,8 @@ describe("Preset Source Manifest validation", () => {
     });
   });
 
-  it("accepts Fixture Matrix Contracts with supported combinations and semantic skips", () => {
+  it("rejects fixture-only Fixture Matrix declarations", () => {
     const manifest = validManifest();
-    manifest.presets.push({
-      name: "custom-app",
-      title: "Custom app",
-      description: "A custom strict TypeScript app preset.",
-      generation: "supported",
-      supportedPackageManagers: ["pnpm"],
-      supportedProjectKinds: ["multi-package"],
-      packageAdditionSupport: "supported",
-      features: ["strict-typescript", "root-check"],
-    });
-    manifest.fixtureMatrix = {
-      initSupport: [{ preset: "custom-lib" }],
-      packageAdditionSupport: [
-        { preset: "custom-app", packageLeafName: "fixture-app" },
-      ],
-      supportedCombinations: [
-        { basePreset: "custom-lib", addedPreset: "custom-app" },
-      ],
-      semanticSkips: [
-        {
-          basePreset: "custom-lib",
-          addedPreset: "custom-lib",
-          reason: "custom-lib is init-only",
-        },
-      ],
-      checkRequirements: ["machine-verifiable-next-steps", "root-check-ci"],
-      environmentPreparation: ["playwright-browser-assets"],
-    };
-
-    expect(validatePresetSourceManifest(manifest)).toMatchObject({
-      ok: true,
-      value: {
-        fixtureMatrix: {
-          packageAdditionSupport: [
-            { preset: "custom-app", packageLeafName: "fixture-app" },
-          ],
-          semanticSkips: [
-            {
-              basePreset: "custom-lib",
-              addedPreset: "custom-lib",
-              reason: "custom-lib is init-only",
-            },
-          ],
-        },
-      },
-    });
-  });
-
-  it("rejects Fixture Matrix Package Addition support that disagrees with Preset metadata", () => {
-    const manifest = validManifest();
-    manifest.fixtureMatrix = {
-      initSupport: [{ preset: "custom-lib" }],
-      packageAdditionSupport: [
-        { preset: "custom-lib", packageLeafName: "fixture-lib" },
-      ],
-      supportedCombinations: [
-        { basePreset: "custom-lib", addedPreset: "custom-lib" },
-      ],
-      semanticSkips: [],
-      checkRequirements: ["machine-verifiable-next-steps", "root-check-ci"],
-      environmentPreparation: ["playwright-browser-assets"],
-    };
-
-    expect(validatePresetSourceManifest(manifest)).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.fixtureMatrix.packageAdditionSupport[0].preset",
-          message:
-            "Fixture Matrix Package Addition support must match Preset metadata: custom-lib is unsupported",
-        },
-      ],
-    });
-  });
-
-  it("rejects supported Package Addition Presets missing Fixture Matrix support", () => {
-    const manifest = validManifest();
-    manifest.presets.push({
-      name: "custom-app",
-      title: "Custom app",
-      description: "A custom strict TypeScript app preset.",
-      generation: "supported",
-      supportedPackageManagers: ["pnpm"],
-      supportedProjectKinds: ["multi-package"],
-      packageAdditionSupport: "supported",
-      features: ["strict-typescript", "root-check"],
-    });
     manifest.fixtureMatrix = {
       initSupport: [{ preset: "custom-lib" }],
       packageAdditionSupport: [],
@@ -224,129 +135,9 @@ describe("Preset Source Manifest validation", () => {
       ok: false,
       issues: [
         {
-          path: "$.presets[1].packageAdditionSupport",
+          path: "$.fixtureMatrix",
           message:
-            "Fixture Matrix Package Addition support must declare supported Preset: custom-app",
-        },
-      ],
-    });
-  });
-
-  it("rejects Package Addition matrix pairs missing a supported combination or semantic skip", () => {
-    const manifest = validManifest();
-    manifest.presets.push({
-      name: "custom-app",
-      title: "Custom app",
-      description: "A custom strict TypeScript app preset.",
-      generation: "supported",
-      supportedPackageManagers: ["pnpm"],
-      supportedProjectKinds: ["multi-package"],
-      packageAdditionSupport: "supported",
-      features: ["strict-typescript", "root-check"],
-    });
-    manifest.fixtureMatrix = {
-      initSupport: [{ preset: "custom-lib" }],
-      packageAdditionSupport: [
-        { preset: "custom-app", packageLeafName: "fixture-app" },
-      ],
-      supportedCombinations: [],
-      semanticSkips: [],
-      checkRequirements: ["machine-verifiable-next-steps", "root-check-ci"],
-      environmentPreparation: ["playwright-browser-assets"],
-    };
-
-    expect(validatePresetSourceManifest(manifest)).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.fixtureMatrix.supportedCombinations",
-          message:
-            "Fixture Matrix must explicitly cover supported combination or semantic skip: custom-lib + custom-app",
-        },
-      ],
-    });
-  });
-
-  it("rejects Package Addition fixture leaf names outside the CLI name rule", () => {
-    const packageLeafNameSchema =
-      presetSourceManifestJsonSchema.properties.fixtureMatrix.properties
-        .packageAdditionSupport.items.properties.packageLeafName;
-    const manifest = validManifest();
-    manifest.presets.push({
-      name: "custom-app",
-      title: "Custom app",
-      description: "A custom strict TypeScript app preset.",
-      generation: "supported",
-      supportedPackageManagers: ["pnpm"],
-      supportedProjectKinds: ["multi-package"],
-      packageAdditionSupport: "supported",
-      features: ["strict-typescript", "root-check"],
-    });
-    manifest.fixtureMatrix = {
-      initSupport: [{ preset: "custom-lib" }],
-      packageAdditionSupport: [
-        { preset: "custom-app", packageLeafName: "Fixture_App" },
-      ],
-      supportedCombinations: [
-        { basePreset: "custom-lib", addedPreset: "custom-app" },
-      ],
-      semanticSkips: [],
-      checkRequirements: ["machine-verifiable-next-steps", "root-check-ci"],
-      environmentPreparation: ["playwright-browser-assets"],
-    };
-
-    expect(packageLeafNameSchema).toMatchObject({
-      pattern: "^[a-z0-9][a-z0-9-]*$",
-    });
-    expect(validatePresetSourceManifest(manifest)).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.fixtureMatrix.packageAdditionSupport[0].packageLeafName",
-          message:
-            "Fixture Matrix Package Addition packageLeafName must be a lowercase package leaf name using letters, numbers, and hyphens",
-        },
-      ],
-    });
-  });
-
-  it("rejects Fixture Matrix contracts missing required check and environment declarations", () => {
-    const manifest = validManifest();
-    manifest.presets.push({
-      name: "custom-app",
-      title: "Custom app",
-      description: "A custom strict TypeScript app preset.",
-      generation: "supported",
-      supportedPackageManagers: ["pnpm"],
-      supportedProjectKinds: ["multi-package"],
-      packageAdditionSupport: "supported",
-      features: ["strict-typescript", "root-check"],
-    });
-    manifest.fixtureMatrix = {
-      initSupport: [{ preset: "custom-lib" }],
-      packageAdditionSupport: [
-        { preset: "custom-app", packageLeafName: "fixture-app" },
-      ],
-      supportedCombinations: [
-        { basePreset: "custom-lib", addedPreset: "custom-app" },
-      ],
-      semanticSkips: [],
-      checkRequirements: ["machine-verifiable-next-steps"],
-      environmentPreparation: [],
-    };
-
-    expect(validatePresetSourceManifest(manifest)).toEqual({
-      ok: false,
-      issues: [
-        {
-          path: "$.fixtureMatrix.checkRequirements",
-          message:
-            "Fixture Matrix check requirements must include root-check-ci",
-        },
-        {
-          path: "$.fixtureMatrix.environmentPreparation",
-          message:
-            "Fixture Matrix environment preparation must include playwright-browser-assets",
+            "Preset Source Manifests must contain production facts only; remove fixtureMatrix",
         },
       ],
     });
@@ -644,6 +435,14 @@ describe("Preset Source Manifest validation", () => {
   it("loads the built-in Preset Source Manifest metadata", () => {
     const manifest = loadBuiltInPresetSourceManifest();
 
+    expect(
+      manifest.presets.flatMap((preset) => [
+        ...(preset.source?.roots ?? []),
+        ...(preset.source?.files ?? []),
+      ]),
+    ).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/behavior\.test\.ts$/)]),
+    );
     expect(manifest.sharedResources).toEqual(
       expect.arrayContaining([
         { id: "shared-oxc-node", path: "shared/oxc/node" },
@@ -687,18 +486,6 @@ describe("Preset Source Manifest validation", () => {
           .map((preset) => [preset.name, preset.dependencyCatalog]),
       ),
     ).toEqual({
-      "hono-api": [
-        "@hono/node-server",
-        "@types/node",
-        "hono",
-        "oxfmt",
-        "oxlint",
-        "oxlint-tsgolint",
-        "tsc-alias",
-        "turbo",
-        "typescript",
-        "vitest",
-      ],
       "rust-bin": ["turbo"],
       "ts-lib": [
         "@types/node",
@@ -932,7 +719,6 @@ describe("Preset Source Manifest validation", () => {
 
     const result = validateBuiltInPresetSourceManifest({
       ...manifest,
-      fixtureMatrix: undefined,
       presets: manifest.presets.map((preset) =>
         preset.name === "ts-app"
           ? {

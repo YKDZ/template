@@ -7,56 +7,33 @@ const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   resolve: {
-    alias: [
-      {
-        find: /^@ykdz\/template-core\/(.+)$/,
-        replacement: path.join(repoRoot, "packages/core/src/$1.ts"),
-      },
-      {
-        find: /^@ykdz\/template-builtin-source\/registry$/,
-        replacement: path.join(
-          repoRoot,
-          "packages/builtin-source/templates/registry.ts",
-        ),
-      },
-      {
-        find: /^@ykdz\/template-builtin-source\/projection-plans$/,
-        replacement: path.join(
-          repoRoot,
-          "packages/builtin-source/templates/projection-plans.ts",
-        ),
-      },
-      {
-        find: /^@ykdz\/template-builtin-source\/templates\/(.+)$/,
-        replacement: path.join(
-          repoRoot,
-          "packages/builtin-source/templates/$1.ts",
-        ),
-      },
-      {
-        find: "@ykdz/template-builtin-source",
-        replacement: path.join(
-          repoRoot,
-          "packages/builtin-source/src/index.ts",
-        ),
-      },
-      {
-        find: /^@ykdz\/template-checks\/(.+)$/,
-        replacement: path.join(repoRoot, "packages/checks/src/$1.ts"),
-      },
-      {
-        find: "@ykdz/template-shared",
-        replacement: path.join(repoRoot, "packages/shared/src/index.ts"),
-      },
+    conditions: ["source"],
+  },
+  ssr: {
+    noExternal: [
+      "@ykdz/template-builtin-source",
+      "@ykdz/template-core",
+      "@ykdz/template-shared",
+      /^@ykdz\/template-builtin-source\//,
+      /^@ykdz\/template-core\//,
     ],
+    resolve: {
+      conditions: ["source"],
+    },
   },
   test: {
     env: {
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, "--conditions=source"]
+        .filter(Boolean)
+        .join(" "),
       TSX_TSCONFIG_PATH: path.join(repoRoot, "tsconfig.json"),
     },
+    include: [
+      "test/**/*.test.ts",
+      "packages/builtin-source/templates/*/behavior.test.ts",
+    ],
     exclude: [
       "**/node_modules/**",
-      "packages/builtin-source/templates/**",
       "templates/**",
       "node_modules/**",
       "dist/**",
