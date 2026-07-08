@@ -14,6 +14,7 @@
       "template-cli": {
         "dependencies": {
           "allow": [
+            "template-checks",
             "template-core",
             "template-preset-source",
             "template-shared"
@@ -22,17 +23,28 @@
       },
       "template-core": {
         "dependencies": {
-          "allow": ["template-shared"]
+          "allow": [
+            "template-checks",
+            "template-cli",
+            "template-preset-source",
+            "template-shared"
+          ]
         }
       },
       "template-preset-source": {
         "dependencies": {
-          "allow": ["template-core", "template-shared"]
+          "allow": [
+            "template-checks",
+            "template-cli",
+            "template-core",
+            "template-preset-source",
+            "template-shared"
+          ]
         }
       },
       "template-shared": {
         "dependencies": {
-          "deny": [
+          "allow": [
             "template-checks",
             "template-cli",
             "template-core",

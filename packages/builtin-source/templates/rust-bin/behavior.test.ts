@@ -144,7 +144,7 @@ describe("rust-bin Preset Source behavior", () => {
     expect(rootPackageJson.scripts).toMatchObject({
       check:
         "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
-      "check:boundaries": "turbo boundaries",
+      "check:boundaries": "turbo boundaries --no-color",
       fix: "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
     });
     expect(rustPackageJson).toEqual({

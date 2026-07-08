@@ -125,7 +125,7 @@ export function vueHonoAppBlueprint(
 export function projectVueHonoRootPackageScripts(): Record<string, string> {
   return {
     check: `pnpm run check:boundaries && ${renderRootCheckCommand(planVueHonoRootChecks())}`,
-    "check:boundaries": "turbo boundaries",
+    "check:boundaries": "turbo boundaries --no-color",
     "check:run": 'node -e ""',
     dev: "turbo run dev --parallel",
     fix: renderFixCommand(planVueHonoRootFixes()),

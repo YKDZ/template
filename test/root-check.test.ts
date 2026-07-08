@@ -387,7 +387,7 @@ describe("Project Kit Root Check", () => {
       "pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["check:boundaries"]).toBe(
-      "turbo boundaries",
+      "turbo boundaries --no-color",
     );
     expect(rootPackageJson.scripts.build).toBe(
       "turbo run build --output-logs=errors-only --log-order=grouped",
@@ -400,18 +400,38 @@ describe("Project Kit Root Check", () => {
       },
       "template-cli": {
         dependencies: {
-          allow: ["template-core", "template-preset-source", "template-shared"],
+          allow: [
+            "template-checks",
+            "template-core",
+            "template-preset-source",
+            "template-shared",
+          ],
         },
       },
       "template-core": {
-        dependencies: { allow: ["template-shared"] },
+        dependencies: {
+          allow: [
+            "template-checks",
+            "template-cli",
+            "template-preset-source",
+            "template-shared",
+          ],
+        },
       },
       "template-preset-source": {
-        dependencies: { allow: ["template-core", "template-shared"] },
+        dependencies: {
+          allow: [
+            "template-checks",
+            "template-cli",
+            "template-core",
+            "template-preset-source",
+            "template-shared",
+          ],
+        },
       },
       "template-shared": {
         dependencies: {
-          deny: [
+          allow: [
             "template-checks",
             "template-cli",
             "template-core",

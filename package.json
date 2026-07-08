@@ -6,7 +6,7 @@
   "scripts": {
     "build": "turbo run build --output-logs=errors-only --log-order=grouped",
     "check": "pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
-    "check:boundaries": "turbo boundaries",
+    "check:boundaries": "turbo boundaries --no-color",
     "check:fixtures": "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
     "check:format": "pnpm run format:check",
     "check:generated": "turbo run check:generated --output-logs=errors-only --log-order=grouped",

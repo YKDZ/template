@@ -183,7 +183,7 @@ describe("module graph plans", () => {
     expect(plan.packageScripts).toEqual({
       check:
         "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
-      "check:boundaries": "turbo boundaries",
+      "check:boundaries": "turbo boundaries --no-color",
       "check:run": 'node -e ""',
       fix: "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
       "fix:run": 'node -e ""',
@@ -314,7 +314,7 @@ describe("module graph plans", () => {
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
         "pnpm run check:boundaries && turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
-      "check:boundaries": "turbo boundaries",
+      "check:boundaries": "turbo boundaries --no-color",
       "check:run": 'node -e ""',
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),

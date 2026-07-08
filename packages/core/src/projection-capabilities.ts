@@ -1234,7 +1234,7 @@ function projectRootPackageScripts(
     ...rootTaskEntrypoints(checkPlan, fixPlan),
     ...directFragments,
     ...leafFragments,
-    "check:boundaries": "turbo boundaries",
+    "check:boundaries": "turbo boundaries --no-color",
     "check:run": noopTaskCommand(),
     "fix:run": noopTaskCommand(),
   };

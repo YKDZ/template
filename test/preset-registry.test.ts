@@ -455,7 +455,7 @@ describe("Preset Registry", () => {
     ]);
     expect(plan.packageScripts).toEqual({
       check: rootCheckScript,
-      "check:boundaries": "turbo boundaries",
+      "check:boundaries": "turbo boundaries --no-color",
       "check:run": 'node -e ""',
       fix: rootFixScript,
       "fix:run": 'node -e ""',
