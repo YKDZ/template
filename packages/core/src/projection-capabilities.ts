@@ -2346,8 +2346,8 @@ function nodePackageTsconfigOperations(
           compilerOptions: {
             ...strictTypeScriptCompilerOptions({
               composite: true,
-              module: "ESNext",
-              moduleResolution: "Bundler",
+              module: "esnext",
+              moduleResolution: "bundler",
               paths: { "#/*": ["./*"] },
               tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
               types: ["node"],
@@ -2388,8 +2388,8 @@ function nodePackageTsconfigOperations(
           compilerOptions: {
             ...strictTypeScriptCompilerOptions({
               composite: true,
-              module: "ESNext",
-              moduleResolution: "Bundler",
+              module: "esnext",
+              moduleResolution: "bundler",
               lib: ["ESNext", "DOM", "DOM.Iterable"],
               paths: { "#/*": ["./*"] },
               tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
@@ -2462,8 +2462,8 @@ function nodePackageTsconfigOperations(
         extends: "@vue/tsconfig/tsconfig.dom.json",
         compilerOptions: strictTypeScriptCompilerOptions({
           composite: true,
-          module: "ESNext",
-          moduleResolution: "Bundler",
+          module: "esnext",
+          moduleResolution: "bundler",
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
           types: ["web-bluetooth"],
         }),
@@ -2490,8 +2490,8 @@ function nodePackageTsconfigOperations(
       value: {
         compilerOptions: strictTypeScriptCompilerOptions({
           composite: true,
-          module: "ESNext",
-          moduleResolution: "Bundler",
+          module: "esnext",
+          moduleResolution: "bundler",
           lib: ["ESNext", "DOM", "DOM.Iterable"],
           ...(workspace.packages.length > 1
             ? { outDir: "./node_modules/.tmp/tsconfig.node" }
@@ -2676,8 +2676,8 @@ function vikeDbTsconfigJson(): Record<string, unknown> {
         composite: true,
         declaration: true,
         declarationMap: true,
-        module: "ESNext",
-        moduleResolution: "Bundler",
+        module: "esnext",
+        moduleResolution: "bundler",
         paths: { "#db/*": ["./src/*"] },
         rootDir: ".",
         types: ["node"],
