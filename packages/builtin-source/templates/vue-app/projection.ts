@@ -78,14 +78,17 @@ export function projectVueAppPackageScripts(): Record<string, string> {
   return {
     "build:run": "vite build",
     dev: "vite",
-    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run": "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
-    "test:run": "vitest run",
+    "test:run": "vitest run --reporter=agent --silent=passed-only",
     "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
-    "typecheck:run": "vue-tsc --build --noEmit",
+    "typecheck:run": "vue-tsc --build --noEmit --pretty false",
   };
 }
 

@@ -12,6 +12,7 @@ import {
   playwrightBrowserAssetsEnvironmentNeed,
   renderFixCommand,
   renderRootCheckCommand,
+  renderTurboRunCommand,
 } from "@ykdz/template-core/module-graph";
 import type {
   PresetBlueprintOptions,
@@ -127,16 +128,18 @@ export function projectVueHonoRootPackageScripts(): Record<string, string> {
     dev: "turbo run dev --parallel",
     fix: renderFixCommand(planVueHonoRootFixes()),
     "fix:run": 'node -e ""',
-    "format:check": "turbo run format:check:run",
-    "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-    "format:write": "turbo run format:write:run",
+    "format:check": renderTurboRunCommand(["format:check:run"]),
+    "format:check:run":
+      "oxfmt --list-different oxlint.config.ts oxfmt.config.ts",
+    "format:write": renderTurboRunCommand(["format:write:run"]),
     "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-    lint: "turbo run lint:run",
-    "lint:fix": "turbo run lint:fix:run",
-    "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-    "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
-    typecheck: "turbo run typecheck:run",
-    "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
+    lint: renderTurboRunCommand(["lint:run"]),
+    "lint:fix": renderTurboRunCommand(["lint:fix:run"]),
+    "lint:fix:run":
+      "oxlint --format=unix oxlint.config.ts oxfmt.config.ts --fix",
+    "lint:run": "oxlint --quiet --format=unix oxlint.config.ts oxfmt.config.ts",
+    typecheck: renderTurboRunCommand(["typecheck:run"]),
+    "typecheck:run": "tsc -p tsconfig.config.json --noEmit --pretty false",
   };
 }
 
@@ -145,13 +148,16 @@ export function projectVueHonoApiPackageScripts(): Record<string, string> {
     "build:run":
       "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     dev: "tsx watch src/server.ts",
-    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run": "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
-    "test:run": "vitest run",
-    "typecheck:run": "tsc -p tsconfig.json --noEmit",
+    "test:run": "vitest run --reporter=agent --silent=passed-only",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
@@ -159,14 +165,17 @@ export function projectVueHonoWebPackageScripts(): Record<string, string> {
   return {
     "build:run": "vite build",
     dev: "vite",
-    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run": "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
-    "test:run": "vitest run",
+    "test:run": "vitest run --reporter=agent --silent=passed-only",
     "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
-    "typecheck:run": "vue-tsc --build",
+    "typecheck:run": "vue-tsc --build --pretty false",
   };
 }
 

@@ -118,7 +118,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:generated");
     expect(packageJson.scripts["check:generated"]).toBe(
-      "turbo run check:generated",
+      "turbo run check:generated --output-logs=errors-only --log-order=grouped",
     );
     expect(packageJson.scripts.check).toContain("check:generated");
   });
@@ -131,7 +131,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:fixtures");
     expect(packageJson.scripts["check:fixtures"]).toBe(
-      "turbo run check:fixtures",
+      "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
     );
     expect(packageJson.scripts.check).not.toContain("check:fixtures");
   });
@@ -213,7 +213,7 @@ describe("Project Kit Root Check", () => {
 
     expect(packageJson.scripts).toHaveProperty("check:toolchain:online");
     expect(packageJson.scripts["check:toolchain:online"]).toBe(
-      "turbo run check:toolchain:online",
+      "turbo run check:toolchain:online --output-logs=errors-only --log-order=grouped",
     );
     expect(packageJson.scripts.check).not.toContain("check:toolchain:online");
   });
@@ -247,10 +247,10 @@ describe("Project Kit Root Check", () => {
       "check:templates:shared-oxc",
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "turbo run check:templates",
+      "turbo run check:templates --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["check:templates:shared-oxc"]).toBe(
-      "turbo run check:templates:shared-oxc",
+      "turbo run check:templates:shared-oxc --output-logs=errors-only --log-order=grouped",
     );
     expect(packageJson.scripts["check:templates:shared-oxc"]).toBe(
       "pnpm run check:templates:shared-oxc:format && pnpm run check:templates:shared-oxc:lint && pnpm run check:templates:shared-oxc:typecheck",
@@ -259,11 +259,12 @@ describe("Project Kit Root Check", () => {
       "pnpm --dir templates/shared/oxc",
     );
     expect(packageJson.scripts).toMatchObject({
-      "check:templates:shared-oxc:format": "oxfmt --check templates/shared/oxc",
+      "check:templates:shared-oxc:format":
+        "oxfmt --list-different templates/shared/oxc",
       "check:templates:shared-oxc:lint":
-        "oxlint --config templates/shared/oxc/node/oxlint.config.ts templates/shared/oxc",
+        "oxlint --quiet --format=unix --config templates/shared/oxc/node/oxlint.config.ts templates/shared/oxc",
       "check:templates:shared-oxc:typecheck":
-        "tsc -p templates/shared/oxc/tsconfig.json --noEmit",
+        "tsc -p templates/shared/oxc/tsconfig.json --noEmit --pretty false",
     });
 
     const workspaceYaml = await readFile(
@@ -304,7 +305,7 @@ describe("Project Kit Root Check", () => {
     expect(rootPackageJson.scripts.check).toContain("check:templates");
     expect(rootPackageJson.scripts.check).not.toContain("check:fixtures");
     expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "turbo run check:templates",
+      "turbo run check:templates --output-logs=errors-only --log-order=grouped",
     );
     expect(builtinSourcePackageJson.scripts["check:templates"]).toContain(
       "pnpm run check:templates:shared-oxc",
@@ -333,10 +334,10 @@ describe("Project Kit Root Check", () => {
       "pnpm run format:check",
     );
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "turbo run format:check format:check:root",
+      "turbo run format:check format:check:root --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["format:check:root"]).toBe(
-      "oxfmt --check --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
+      "oxfmt --list-different --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test",
     );
   });
 
@@ -361,9 +362,11 @@ describe("Project Kit Root Check", () => {
     expect(rootPackageJson.scripts).toHaveProperty("check:lint");
     expect(rootPackageJson.scripts.check).toContain("lint");
     expect(rootPackageJson.scripts["check:lint"]).toBe("pnpm run lint");
-    expect(rootPackageJson.scripts.lint).toBe("turbo run lint lint:root");
+    expect(rootPackageJson.scripts.lint).toBe(
+      "turbo run lint lint:root --output-logs=errors-only --log-order=grouped",
+    );
     expect(rootPackageJson.scripts["lint:root"]).toBe(
-      "oxlint --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts test",
+      "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts test",
     );
   });
 
@@ -378,9 +381,11 @@ describe("Project Kit Root Check", () => {
     );
 
     expect(rootPackageJson.scripts.check).toBe(
-      "turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root",
+      "turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
     );
-    expect(rootPackageJson.scripts.build).toBe("turbo run build");
+    expect(rootPackageJson.scripts.build).toBe(
+      "turbo run build --output-logs=errors-only --log-order=grouped",
+    );
     expect(turboConfig.tasks).toHaveProperty("build");
     expect(turboConfig.tasks).toHaveProperty("format:check");
     expect(turboConfig.tasks).toHaveProperty("lint");
@@ -407,10 +412,12 @@ describe("Project Kit Root Check", () => {
         packageJsonWithScriptsSchema,
       );
 
-      expect(packageJson.scripts["format:check"]).toContain("oxfmt --check");
+      expect(packageJson.scripts["format:check"]).toContain(
+        "oxfmt --list-different",
+      );
       expect(packageJson.scripts.lint).toContain("oxlint");
       expect(packageJson.scripts.typecheck).toBe(
-        "tsc -p tsconfig.json --noEmit",
+        "tsc -p tsconfig.json --noEmit --pretty false",
       );
     }
   });
@@ -473,7 +480,7 @@ describe("Project Kit Root Check", () => {
       "check:templates:static-source",
     );
     expect(rootPackageJson.scripts["check:templates:static-source"]).toBe(
-      "turbo run check:templates:static-source",
+      "turbo run check:templates:static-source --output-logs=errors-only --log-order=grouped",
     );
 
     await execa("pnpm", ["run", "check:templates:static-source"], {
@@ -491,10 +498,10 @@ describe("Project Kit Root Check", () => {
       "check:templates:github-yaml",
     );
     expect(rootPackageJson.scripts["check:templates"]).toContain(
-      "turbo run check:templates",
+      "turbo run check:templates --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "turbo run check:templates:github-yaml",
+      "turbo run check:templates:github-yaml --output-logs=errors-only --log-order=grouped",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {
@@ -509,7 +516,7 @@ describe("Project Kit Root Check", () => {
     );
 
     expect(rootPackageJson.scripts["check:templates:github-yaml"]).toBe(
-      "turbo run check:templates:github-yaml",
+      "turbo run check:templates:github-yaml --output-logs=errors-only --log-order=grouped",
     );
 
     await execa("pnpm", ["run", "check:templates:github-yaml"], {

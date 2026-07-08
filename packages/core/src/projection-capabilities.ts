@@ -54,6 +54,7 @@ import {
   renderFixCommand,
   renderFixLeafCommand,
   renderRootCheckCommand,
+  renderTurboRunCommand,
 } from "./module-graph.js";
 import {
   packageManifestExposureFields,
@@ -328,8 +329,9 @@ const capabilityInterpreters = {
         owner: workspacePackageBoundary,
       });
       state.rootScriptFragments.typecheck =
-        "tsc -p tsconfig.config.json --noEmit";
-      state.packageScriptFragments.typecheck = "tsc -p tsconfig.json --noEmit";
+        "tsc -p tsconfig.config.json --noEmit --pretty false";
+      state.packageScriptFragments.typecheck =
+        "tsc -p tsconfig.json --noEmit --pretty false";
       state.rootDevDependencies.add("typescript");
       state.packageDevDependencies.add("@types/node");
       state.packageDevDependencies.add("typescript");
@@ -379,21 +381,21 @@ const capabilityInterpreters = {
         { kind: "oxc-lint-fix", owner: workspacePackageBoundary },
       );
       state.rootScriptFragments["format:check"] =
-        "oxfmt --check oxlint.config.ts oxfmt.config.ts";
+        "oxfmt --list-different oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments["format:write"] =
         "oxfmt --write oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments.lint =
-        "oxlint oxlint.config.ts oxfmt.config.ts";
+        "oxlint --quiet --format=unix oxlint.config.ts oxfmt.config.ts";
       state.rootScriptFragments["lint:fix"] =
-        "oxlint oxlint.config.ts oxfmt.config.ts --fix";
+        "oxlint --format=unix oxlint.config.ts oxfmt.config.ts --fix";
       state.packageScriptFragments["format:check"] =
-        "oxfmt --check --config ../../oxfmt.config.ts .";
+        "oxfmt --list-different --config ../../oxfmt.config.ts .";
       state.packageScriptFragments["format:write"] =
         "oxfmt --write --config ../../oxfmt.config.ts .";
       state.packageScriptFragments.lint =
-        "oxlint --config ../../oxlint.config.ts .";
+        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .";
       state.packageScriptFragments["lint:fix"] =
-        "oxlint --config ../../oxlint.config.ts . --fix";
+        "oxlint --format=unix --config ../../oxlint.config.ts . --fix";
       state.rootDevDependencies.add("oxfmt");
       state.rootDevDependencies.add("oxlint");
       state.rootDevDependencies.add("oxlint-tsgolint");
@@ -1374,7 +1376,7 @@ function rootTaskEntrypoints(
       continue;
     }
 
-    entries.push([taskName, `turbo run ${taskName}:run`]);
+    entries.push([taskName, renderTurboRunCommand([`${taskName}:run`])]);
   }
 
   return Object.fromEntries(entries);
@@ -2231,10 +2233,10 @@ function nodePackageScripts(
   workspace: WorkspaceNodePackagesCapabilityDeclaration,
 ): Record<string, string> {
   const oxcScripts = {
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts . --fix",
+    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
   };
 
   if (nodePackage.kind === "hono-api") {
@@ -2246,8 +2248,8 @@ function nodePackageScripts(
         : {}),
       ...leafScriptFragments(oxcScripts),
       start: "node dist/server.js",
-      "test:run": "vitest run",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit",
+      "test:run": "vitest run --reporter=agent --silent=passed-only",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
     };
   }
 
@@ -2259,17 +2261,19 @@ function nodePackageScripts(
       "drizzle:generate": "drizzle-kit generate",
       "drizzle:migrate": "drizzle-kit migrate",
       "drizzle:studio": "drizzle-kit studio",
-      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:check:run":
+        "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-      "lint:run": "oxlint --type-aware --config ../../oxlint.config.ts .",
+      "lint:run":
+        "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
       "lint:fix:run":
-        "oxlint --type-aware --config ../../oxlint.config.ts . --fix",
+        "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
       preview: "pnpm run db:push && vike preview",
       start: "node ./dist/server/index.mjs",
       "test:run":
-        "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run",
+        "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only",
       "test:e2e:run": "playwright test --config playwright.config.ts",
-      "typecheck:run": "vue-tsc --build --noEmit",
+      "typecheck:run": "vue-tsc --build --noEmit --pretty false",
     };
   }
 
@@ -2278,12 +2282,12 @@ function nodePackageScripts(
     dev: "vite",
     ...leafScriptFragments(oxcScripts),
     preview: "vite preview",
-    "test:run": "vitest run",
+    "test:run": "vitest run --reporter=agent --silent=passed-only",
     "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
     "typecheck:run":
       workspace.packages.length > 1
-        ? "vue-tsc --build"
-        : "vue-tsc --build --noEmit",
+        ? "vue-tsc --build --pretty false"
+        : "vue-tsc --build --noEmit --pretty false",
   };
 }
 

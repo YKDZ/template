@@ -87,11 +87,14 @@ export function tsLibBlueprint(
 
 export function projectTsLibPackageScripts(): Record<string, string> {
   return {
-    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run": "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
-    "typecheck:run": "tsc -p tsconfig.json --noEmit",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 

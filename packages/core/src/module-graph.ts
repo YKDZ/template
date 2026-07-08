@@ -75,6 +75,20 @@ function renderTurboPackageFilter(owner: ComponentOwner): string {
   return `--filter './${owner.path}'`;
 }
 
+const turboAgentOutputArgs = [
+  "--output-logs=errors-only",
+  "--log-order=grouped",
+] as const;
+
+export function renderTurboRunCommand(
+  taskNames: readonly string[],
+  args: readonly string[] = [],
+): string {
+  return ["turbo run", ...taskNames, ...args, ...turboAgentOutputArgs].join(
+    " ",
+  );
+}
+
 export function checkComponentTaskName(component: CheckComponent): string {
   return checkComponentTaskNames(component)[0] ?? "check:run";
 }
@@ -149,17 +163,32 @@ export function renderCheckLeafCommand(component: CheckComponent): string {
     case "e2e-test":
       return "pnpm run test:e2e";
     case "turbo-check":
-      return "turbo run check";
+      return renderTurboRunCommand(["check"]);
     case "turbo-package-typecheck":
-      return `turbo run typecheck ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["typecheck"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "turbo-package-build":
-      return `turbo run build ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["build"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "turbo-package-test":
-      return `turbo run test ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["test"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "turbo-package-e2e-test":
-      return `turbo run test:e2e ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["test:e2e"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "turbo-package-check":
-      return `turbo run check ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["check"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "rustfmt-check":
       return "cargo fmt --all -- --check";
     case "cargo-clippy":
@@ -176,26 +205,33 @@ export function renderFixLeafCommand(component: FixComponent): string {
     case "oxc-lint-fix":
       return "pnpm run lint:fix";
     case "turbo-fix":
-      return "turbo run fix";
+      return renderTurboRunCommand(["fix"]);
     case "turbo-package-fix":
-      return `turbo run fix ${renderTurboPackageFilter(component.owner)}`;
+      return renderTurboRunCommand(
+        ["fix"],
+        [renderTurboPackageFilter(component.owner)],
+      );
     case "rustfmt-write":
       return "cargo fmt --all";
   }
 }
 
 export function renderRootCheckCommand(plan: CheckPlan): string {
-  return `turbo run ${uniqueTaskNames([
-    ...plan.components.flatMap(checkComponentTaskNames),
-    "check:run",
-  ]).join(" ")}`;
+  return renderTurboRunCommand(
+    uniqueTaskNames([
+      ...plan.components.flatMap(checkComponentTaskNames),
+      "check:run",
+    ]),
+  );
 }
 
 export function renderFixCommand(plan: FixPlan): string {
-  return `turbo run ${uniqueTaskNames([
-    ...plan.components.flatMap(fixComponentTaskNames),
-    "fix:run",
-  ]).join(" ")}`;
+  return renderTurboRunCommand(
+    uniqueTaskNames([
+      ...plan.components.flatMap(fixComponentTaskNames),
+      "fix:run",
+    ]),
+  );
 }
 
 function playwrightBrowserInstallArgs(

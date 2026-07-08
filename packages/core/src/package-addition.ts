@@ -17,6 +17,7 @@ import {
   pnpmWorkspaceYamlWithCatalogDependencies,
   type GeneratedPackageManifestDependencies,
 } from "./dependency-catalog.js";
+import { renderTurboRunCommand } from "./module-graph.js";
 import {
   assertTypeScriptPackageBoundaryForLinkIntent,
   packageTurboTasks,
@@ -741,11 +742,9 @@ function rootScriptWithTurboPackageTasks(options: {
   const rootCommands = options.script
     .split(" && ")
     .filter((command) => !command.startsWith("turbo run "));
-  const turboCommand = [
-    "turbo run",
-    ...options.taskNames,
-    ...(options.concurrency === undefined ? [] : ["--concurrency=1"]),
-  ].join(" ");
+  const turboArgs =
+    options.concurrency === undefined ? [] : ["--concurrency=1"];
+  const turboCommand = renderTurboRunCommand(options.taskNames, turboArgs);
 
   return [...rootCommands, turboCommand].join(" && ");
 }

@@ -94,14 +94,16 @@ async function sourceFileSnapshot(
 
 function expectSharedRootOxcScripts(scripts: Record<string, string>): void {
   expect(scripts["format:check:run"]).toBe(
-    "oxfmt --check --config ../../oxfmt.config.ts .",
+    "oxfmt --list-different --config ../../oxfmt.config.ts .",
   );
   expect(scripts["format:write:run"]).toBe(
     "oxfmt --write --config ../../oxfmt.config.ts .",
   );
-  expect(scripts["lint:run"]).toBe("oxlint --config ../../oxlint.config.ts .");
+  expect(scripts["lint:run"]).toBe(
+    "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+  );
   expect(scripts["lint:fix:run"]).toBe(
-    "oxlint --config ../../oxlint.config.ts . --fix",
+    "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
   );
 }
 
@@ -328,10 +330,10 @@ describe("template add package", () => {
     expect(workspaceYaml).toContain("  - apps/*");
     expect(workspaceYaml).toContain("  - packages/*");
     expect(rootPackageJson.scripts.check).toBe(
-      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts.check).not.toBe(
-      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --concurrency=1",
+      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
     );
     expect(turboConfig.tasks["typecheck:run"]!.dependsOn).toEqual([
       "^typecheck:run",
@@ -349,7 +351,7 @@ describe("template add package", () => {
     ]);
     expect(turboConfig.tasks["check:run"]!.cache).toBe(false);
     expect(rootPackageJson.scripts.fix).toBe(
-      "turbo run format:write:run lint:fix:run fix:run",
+      "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts.fix).not.toBe(
       "pnpm run format:write && pnpm run lint:fix && turbo run fix --filter './apps/*'",
@@ -464,7 +466,7 @@ describe("template add package", () => {
       "turbo run typecheck:run --filter './apps/*' --filter './services/*'",
     );
     expect(rootPackageJson.scripts.check).toContain(
-      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --concurrency=1 --output-logs=errors-only --log-order=grouped",
     );
     expect(rootTsconfig.references).not.toContainEqual({
       path: "./services/worker/tsconfig.json",
@@ -1614,7 +1616,9 @@ describe("template add package", () => {
         types: "./src/*.ts",
       },
     });
-    expect(packageJson.scripts["test:run"]).toBe("vitest run");
+    expect(packageJson.scripts["test:run"]).toBe(
+      "vitest run --reporter=agent --silent=passed-only",
+    );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(tsconfig.compilerOptions).not.toHaveProperty("paths");
     expect(serverSource).toContain('from "#/app"');
@@ -1759,7 +1763,7 @@ describe("template add package", () => {
       },
     });
     expect(packageJson.scripts["typecheck:run"]).toBe(
-      "vue-tsc --build --noEmit",
+      "vue-tsc --build --noEmit --pretty false",
     );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(appTsconfig.compilerOptions).not.toHaveProperty("paths");
@@ -1881,7 +1885,7 @@ describe("template add package", () => {
     expect(gitignore).toContain("dist\n");
     expect(packageJson.name).toBe("@demo-native/shared");
     expect(packageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.json --noEmit",
+      "tsc -p tsconfig.json --noEmit --pretty false",
     );
     await stat(path.join(projectDir, "oxlint.config.ts"));
     await stat(path.join(projectDir, "oxfmt.config.ts"));

@@ -24,8 +24,9 @@ const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
 const rootCheckScript =
-  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
-const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
+const rootFixScript =
+  "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped";
 
 const packageJsonSchema = v.object({
   name: v.optional(v.string()),
@@ -232,7 +233,7 @@ describe("Preset Registry", () => {
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
     expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.json --noEmit",
+      "tsc -p tsconfig.json --noEmit --pretty false",
     );
     expect(generationRecord).toMatchObject({
       command: "template init --preset ts-lib",

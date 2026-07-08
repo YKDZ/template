@@ -41,8 +41,9 @@ const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
 const rootCheckScript =
-  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
-const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
+const rootFixScript =
+  "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped";
 type TurboConfigForTests = {
   readonly tasks: Record<
     string,
@@ -513,12 +514,16 @@ describe("template init", () => {
     expect(rootPackageJson.scripts).toMatchObject({
       check: rootCheckScript,
       fix: rootFixScript,
-      "format:check": "turbo run format:check:run",
-      "format:write": "turbo run format:write:run",
-      lint: "turbo run lint:run",
-      "lint:fix": "turbo run lint:fix:run",
-      typecheck: "turbo run typecheck:run",
-      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
+      "format:check":
+        "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
+      "format:write":
+        "turbo run format:write:run --output-logs=errors-only --log-order=grouped",
+      lint: "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+      "lint:fix":
+        "turbo run lint:fix:run --output-logs=errors-only --log-order=grouped",
+      typecheck:
+        "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit --pretty false",
     });
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
     expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
@@ -551,7 +556,7 @@ describe("template init", () => {
       },
     });
     expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.json --noEmit",
+      "tsc -p tsconfig.json --noEmit --pretty false",
     );
     expect(libraryPackageJson.devDependencies).toMatchObject({
       "@types/node": "catalog:",
@@ -1263,24 +1268,26 @@ describe("template init", () => {
           path.join(projectDir, "tsconfig.config.json"),
         );
         expect(rootPackageJson.scripts.typecheck).toBe(
-          "turbo run typecheck:run",
+          "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
         );
         expect(rootPackageJson.scripts["typecheck:run"]).toBe(
-          "tsc -p tsconfig.config.json --noEmit",
+          "tsc -p tsconfig.config.json --noEmit --pretty false",
         );
         expect(rootConfigTsconfig.include).toEqual([
           "oxlint.config.ts",
           "oxfmt.config.ts",
         ]);
         expect(rootPackageJson.scripts["format:check"]).toBe(
-          "turbo run format:check:run",
+          "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
         );
         expect(rootPackageJson.scripts["format:check:run"]).toBe(
-          "oxfmt --check oxlint.config.ts oxfmt.config.ts",
+          "oxfmt --list-different oxlint.config.ts oxfmt.config.ts",
         );
-        expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
+        expect(rootPackageJson.scripts.lint).toBe(
+          "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+        );
         expect(rootPackageJson.scripts["lint:run"]).toBe(
-          "oxlint oxlint.config.ts oxfmt.config.ts",
+          "oxlint --quiet --format=unix oxlint.config.ts oxfmt.config.ts",
         );
       }
 
@@ -1290,8 +1297,8 @@ describe("template init", () => {
         }>(path.join(projectDir, packageDir, "package.json"));
         expect(packageJson.scripts["format:check:run"]).toBe(
           preset === "vike-app"
-            ? "oxfmt --check --config ../../oxfmt.config.ts ."
-            : "oxfmt --check --config ../../oxfmt.config.ts .",
+            ? "oxfmt --list-different --config ../../oxfmt.config.ts ."
+            : "oxfmt --list-different --config ../../oxfmt.config.ts .",
         );
         expect(packageJson.scripts["format:write:run"]).toBe(
           preset === "vike-app"
@@ -1300,13 +1307,13 @@ describe("template init", () => {
         );
         expect(packageJson.scripts["lint:run"]).toBe(
           preset === "vike-app"
-            ? "oxlint --type-aware --config ../../oxlint.config.ts ."
-            : "oxlint --config ../../oxlint.config.ts .",
+            ? "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts ."
+            : "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
         );
         expect(packageJson.scripts["lint:fix:run"]).toBe(
           preset === "vike-app"
-            ? "oxlint --type-aware --config ../../oxlint.config.ts . --fix"
-            : "oxlint --config ../../oxlint.config.ts . --fix",
+            ? "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix"
+            : "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
         );
         expect(files).not.toContain(`${packageDir}/oxlint.config.ts`);
         expect(files).not.toContain(`${packageDir}/oxfmt.config.ts`);
@@ -1342,7 +1349,7 @@ describe("template init", () => {
           "pnpm run db:push && vike preview",
         );
         expect(packageJson.scripts["test:run"]).toBe(
-          "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run",
+          "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only",
         );
         expect(playwrightConfig).toContain(
           "DATABASE_FILE=./node_modules/.tmp/e2e.sqlite pnpm run db:push",
@@ -1441,7 +1448,7 @@ describe("template init", () => {
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
     expect(libraryPackageJson.name).toBe("@demo-lib/demo-lib");
     expect(libraryPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.json --noEmit",
+      "tsc -p tsconfig.json --noEmit --pretty false",
     );
     expect(libraryPackageJson.scripts).not.toHaveProperty("build");
     expect(libraryPackageJson.scripts["format:write:run"]).toBe(
@@ -2316,12 +2323,16 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
     expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "turbo run format:check:run",
+      "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
     );
-    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
-    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts.lint).toBe(
+      "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+    );
     expect(rootPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.config.json --noEmit",
+      "tsc -p tsconfig.config.json --noEmit --pretty false",
     );
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
     expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
@@ -2338,10 +2349,10 @@ describe("template init", () => {
     expect(apiPackageJson.scripts).not.toHaveProperty("check");
     expect(apiPackageJson.scripts).not.toHaveProperty("fix");
     expect(apiPackageJson.scripts["format:check:run"]).toBe(
-      "oxfmt --check --config ../../oxfmt.config.ts .",
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     );
     expect(apiPackageJson.scripts["lint:run"]).toBe(
-      "oxlint --config ../../oxlint.config.ts .",
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.scripts.start).toBe("node dist/server.js");
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
@@ -2793,12 +2804,16 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.check).toBe(rootCheckScript);
     expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "turbo run format:check:run",
+      "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
     );
-    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
-    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts.lint).toBe(
+      "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+    );
     expect(rootPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.config.json --noEmit",
+      "tsc -p tsconfig.config.json --noEmit --pretty false",
     );
     expect(rootPackageJson.devDependencies).toEqual({
       oxfmt: "catalog:",
@@ -2813,16 +2828,16 @@ describe("template init", () => {
     expect(webPackageJson.scripts).not.toHaveProperty("check");
     expect(webPackageJson.scripts).not.toHaveProperty("fix");
     expect(webPackageJson.scripts["format:check:run"]).toBe(
-      "oxfmt --check --config ../../oxfmt.config.ts .",
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     );
     expect(webPackageJson.scripts["lint:run"]).toBe(
-      "oxlint --config ../../oxlint.config.ts .",
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.scripts["test:e2e:run"]).toBe(
       "node --experimental-strip-types scripts/run-playwright.ts",
     );
     expect(webPackageJson.scripts["typecheck:run"]).toBe(
-      "vue-tsc --build --noEmit",
+      "vue-tsc --build --noEmit --pretty false",
     );
     expect(webPackageJson.dependencies.vue).toBe("catalog:");
     expect(webPackageJson.dependencies.pinia).toBe("catalog:");
@@ -3089,12 +3104,16 @@ describe("template init", () => {
     expect(rootPackageJson.scripts.fix).toBe(rootFixScript);
     expect(rootPackageJson.scripts.dev).toBe("turbo run dev --parallel");
     expect(rootPackageJson.scripts["format:check"]).toBe(
-      "turbo run format:check:run",
+      "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
     );
-    expect(rootPackageJson.scripts.lint).toBe("turbo run lint:run");
-    expect(rootPackageJson.scripts.typecheck).toBe("turbo run typecheck:run");
+    expect(rootPackageJson.scripts.lint).toBe(
+      "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+    );
+    expect(rootPackageJson.scripts.typecheck).toBe(
+      "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+    );
     expect(rootPackageJson.scripts["typecheck:run"]).toBe(
-      "tsc -p tsconfig.config.json --noEmit",
+      "tsc -p tsconfig.config.json --noEmit --pretty false",
     );
     expect(rootPackageJson.scripts.check).not.toContain("oxlint .");
     expect(rootPackageJson.scripts.check).not.toContain("oxfmt --check .");
@@ -3123,10 +3142,10 @@ describe("template init", () => {
       },
     });
     expect(apiPackageJson.scripts["format:check:run"]).toBe(
-      "oxfmt --check --config ../../oxfmt.config.ts .",
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     );
     expect(apiPackageJson.scripts["lint:run"]).toBe(
-      "oxlint --config ../../oxlint.config.ts .",
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     );
     expect(apiPackageJson.dependencies.hono).toBe("catalog:");
     expect(apiPackageJson.dependencies).not.toHaveProperty("vue");
@@ -3138,12 +3157,14 @@ describe("template init", () => {
     expect(apiIndex).not.toContain("@hono/node-server");
 
     expect(webPackageJson.name).toBe("@demo-fullstack/web");
-    expect(webPackageJson.scripts["typecheck:run"]).toBe("vue-tsc --build");
+    expect(webPackageJson.scripts["typecheck:run"]).toBe(
+      "vue-tsc --build --pretty false",
+    );
     expect(webPackageJson.scripts["format:check:run"]).toBe(
-      "oxfmt --check --config ../../oxfmt.config.ts .",
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     );
     expect(webPackageJson.scripts["lint:run"]).toBe(
-      "oxlint --config ../../oxlint.config.ts .",
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.dependencies["@demo-fullstack/api"]).toBe(
       "workspace:*",

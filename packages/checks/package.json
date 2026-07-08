@@ -16,11 +16,11 @@
     "check:templates:boundary": "tsx --tsconfig ../../tsconfig.json src/check-template-boundary.ts",
     "check:templates:github-yaml": "tsx --tsconfig ../../tsconfig.json src/check-template-github-yaml.ts",
     "check:toolchain:online": "tsx --tsconfig ../../tsconfig.json src/check-online-toolchain-resolution-contract.ts",
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/template-builtin-source": "workspace:*",

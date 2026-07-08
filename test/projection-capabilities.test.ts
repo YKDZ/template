@@ -19,8 +19,9 @@ import type { PresetProjectionDeclaration } from "@ykdz/template-shared";
 import * as v from "valibot";
 
 const rootCheckScript =
-  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run";
-const rootFixScript = "turbo run format:write:run lint:fix:run fix:run";
+  "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped";
+const rootFixScript =
+  "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped";
 
 const syntheticTsLibDeclaration: PresetProjectionDeclaration = {
   capabilities: [
@@ -298,11 +299,14 @@ describe("Projection Capability declarations", () => {
         valibot: "catalog:",
       },
       scripts: {
-        "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+        "format:check:run":
+          "oxfmt --list-different --config ../../oxfmt.config.ts .",
         "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-        "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
-        "lint:run": "oxlint --config ../../oxlint.config.ts .",
-        "typecheck:run": "tsc -p tsconfig.json --noEmit",
+        "lint:fix:run":
+          "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+        "lint:run":
+          "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+        "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
       },
       devDependencies: {
         "@types/node": "catalog:",
@@ -740,8 +744,8 @@ describe("Projection Capability declarations", () => {
         "build:run":
           "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
         start: "node dist/server.js",
-        "test:run": "vitest run",
-        "typecheck:run": "tsc -p tsconfig.json --noEmit",
+        "test:run": "vitest run --reporter=agent --silent=passed-only",
+        "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
       },
       devDependencies: {
         "@types/node": "catalog:",
@@ -803,10 +807,10 @@ describe("Projection Capability declarations", () => {
         "build:run": "vite build",
         dev: "vite",
         preview: "vite preview",
-        "test:run": "vitest run",
+        "test:run": "vitest run --reporter=agent --silent=passed-only",
         "test:e2e:run":
           "node --experimental-strip-types scripts/run-playwright.ts",
-        "typecheck:run": "vue-tsc --build --noEmit",
+        "typecheck:run": "vue-tsc --build --noEmit --pretty false",
       },
       dependencies: {
         pinia: "catalog:",
@@ -960,7 +964,7 @@ describe("Projection Capability declarations", () => {
         hono: "catalog:",
       },
       scripts: {
-        "typecheck:run": "vue-tsc --build",
+        "typecheck:run": "vue-tsc --build --pretty false",
       },
     });
     expect(turboConfig).toMatchObject({

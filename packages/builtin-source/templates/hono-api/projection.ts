@@ -80,13 +80,16 @@ export function projectHonoApiPackageScripts(): Record<string, string> {
   return {
     "build:run":
       "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check:run":
+      "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run": "oxlint --config ../../oxlint.config.ts .",
-    "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+    "lint:run":
+      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix:run":
+      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
-    "test:run": "vitest run",
-    "typecheck:run": "tsc -p tsconfig.json --noEmit",
+    "test:run": "vitest run --reporter=agent --silent=passed-only",
+    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 

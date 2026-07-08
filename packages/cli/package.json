@@ -1,6 +1,6 @@
 {
   "name": "@ykdz/template",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "private": false,
   "description": "Project template generator for YKDZ starter projects.",
   "keywords": [
@@ -33,12 +33,12 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "format:check": "oxfmt --check --config ../../oxfmt.config.ts .",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist .",
-    "lint:fix": "oxlint --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "prepack": "pnpm --filter @ykdz/template-shared run build && pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/template-builtin-source": "workspace:*",

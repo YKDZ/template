@@ -126,10 +126,10 @@ describe("module graph plans", () => {
     ]);
 
     expect(renderRootCheckCommand(checkPlan)).toBe(
-      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
+      "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
     );
     expect(renderFixCommand(fixPlan)).toBe(
-      "turbo run format:write:run lint:fix:run fix:run",
+      "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
     );
   });
 
@@ -149,7 +149,7 @@ describe("module graph plans", () => {
         environmentNeeds: [],
       }),
     ).toBe(
-      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run",
+      "turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
     );
 
     expect(
@@ -161,7 +161,9 @@ describe("module graph plans", () => {
           },
         ],
       }),
-    ).toBe("turbo run format:write:run lint:fix:run fix:run");
+    ).toBe(
+      "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
+    );
   });
 
   it("projects ts-lib root and member package scripts from Check and Fix Plans", () => {
@@ -181,27 +183,37 @@ describe("module graph plans", () => {
 
     expect(plan.packageScripts).toEqual({
       check:
-        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
+        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
       "check:run": 'node -e ""',
-      fix: "turbo run format:write:run lint:fix:run fix:run",
+      fix: "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
       "fix:run": 'node -e ""',
-      "format:check": "turbo run format:check:run",
-      "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-      "format:write": "turbo run format:write:run",
+      "format:check":
+        "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
+      "format:check:run":
+        "oxfmt --list-different oxlint.config.ts oxfmt.config.ts",
+      "format:write":
+        "turbo run format:write:run --output-logs=errors-only --log-order=grouped",
       "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-      lint: "turbo run lint:run",
-      "lint:fix": "turbo run lint:fix:run",
-      "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-      "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
-      typecheck: "turbo run typecheck:run",
-      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
+      lint: "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+      "lint:fix":
+        "turbo run lint:fix:run --output-logs=errors-only --log-order=grouped",
+      "lint:fix:run":
+        "oxlint --format=unix oxlint.config.ts oxfmt.config.ts --fix",
+      "lint:run":
+        "oxlint --quiet --format=unix oxlint.config.ts oxfmt.config.ts",
+      typecheck:
+        "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit --pretty false",
     });
     expect(projectTsLibPackageScripts()).toEqual({
-      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:check:run":
+        "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-      "lint:run": "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit",
+      "lint:run":
+        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+      "lint:fix:run":
+        "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
     });
   });
 
@@ -209,13 +221,16 @@ describe("module graph plans", () => {
     expect(projectHonoApiPackageScripts()).toEqual({
       "build:run":
         "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:check:run":
+        "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-      "lint:run": "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+      "lint:run":
+        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+      "lint:fix:run":
+        "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
       start: "node dist/server.js",
-      "test:run": "vitest run",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit",
+      "test:run": "vitest run --reporter=agent --silent=passed-only",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
     });
   });
 
@@ -237,15 +252,18 @@ describe("module graph plans", () => {
     expect(projectVueAppPackageScripts()).toEqual({
       "build:run": "vite build",
       dev: "vite",
-      "format:check:run": "oxfmt --check --config ../../oxfmt.config.ts .",
+      "format:check:run":
+        "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-      "lint:run": "oxlint --config ../../oxlint.config.ts .",
-      "lint:fix:run": "oxlint --config ../../oxlint.config.ts . --fix",
+      "lint:run":
+        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+      "lint:fix:run":
+        "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
       preview: "vite preview",
-      "test:run": "vitest run",
+      "test:run": "vitest run --reporter=agent --silent=passed-only",
       "test:e2e:run":
         "node --experimental-strip-types scripts/run-playwright.ts",
-      "typecheck:run": "vue-tsc --build --noEmit",
+      "typecheck:run": "vue-tsc --build --noEmit --pretty false",
     });
     expect(plan.checkPlan.environmentNeeds).toEqual([
       {
@@ -308,25 +326,32 @@ describe("module graph plans", () => {
       },
     ]);
     expect(renderFixCommand(rootFixPlan)).toBe(
-      "turbo run format:write:run lint:fix:run fix:run",
+      "turbo run format:write:run lint:fix:run fix:run --output-logs=errors-only --log-order=grouped",
     );
     expect(projectVueHonoRootPackageScripts()).toEqual({
       check:
-        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run",
+        "turbo run format:check:run lint:run typecheck:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
       "check:run": 'node -e ""',
       dev: "turbo run dev --parallel",
       fix: renderFixCommand(rootFixPlan),
       "fix:run": 'node -e ""',
-      "format:check": "turbo run format:check:run",
-      "format:check:run": "oxfmt --check oxlint.config.ts oxfmt.config.ts",
-      "format:write": "turbo run format:write:run",
+      "format:check":
+        "turbo run format:check:run --output-logs=errors-only --log-order=grouped",
+      "format:check:run":
+        "oxfmt --list-different oxlint.config.ts oxfmt.config.ts",
+      "format:write":
+        "turbo run format:write:run --output-logs=errors-only --log-order=grouped",
       "format:write:run": "oxfmt --write oxlint.config.ts oxfmt.config.ts",
-      lint: "turbo run lint:run",
-      "lint:fix": "turbo run lint:fix:run",
-      "lint:fix:run": "oxlint oxlint.config.ts oxfmt.config.ts --fix",
-      "lint:run": "oxlint oxlint.config.ts oxfmt.config.ts",
-      typecheck: "turbo run typecheck:run",
-      "typecheck:run": "tsc -p tsconfig.config.json --noEmit",
+      lint: "turbo run lint:run --output-logs=errors-only --log-order=grouped",
+      "lint:fix":
+        "turbo run lint:fix:run --output-logs=errors-only --log-order=grouped",
+      "lint:fix:run":
+        "oxlint --format=unix oxlint.config.ts oxfmt.config.ts --fix",
+      "lint:run":
+        "oxlint --quiet --format=unix oxlint.config.ts oxfmt.config.ts",
+      typecheck:
+        "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit --pretty false",
     });
     expect(projectVueHonoApiPackageScripts()).not.toHaveProperty("check");
     expect(projectVueHonoWebPackageScripts()).not.toHaveProperty("check");
@@ -370,10 +395,10 @@ describe("module graph plans", () => {
       "rustfmt-write",
     ]);
     expect(renderRootCheckCommand(checkPlan)).toBe(
-      "turbo run format:check:run lint:run test:run check:run",
+      "turbo run format:check:run lint:run test:run check:run --output-logs=errors-only --log-order=grouped",
     );
     expect(renderFixCommand(fixPlan)).toBe(
-      "turbo run format:write:run fix:run",
+      "turbo run format:write:run fix:run --output-logs=errors-only --log-order=grouped",
     );
     expect(renderFixCommand(fixPlan)).not.toContain("clippy");
     expect(projectRustBinPackageScripts()).toEqual({
