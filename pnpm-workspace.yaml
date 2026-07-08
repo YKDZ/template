@@ -21,7 +21,7 @@ catalog:
   oxlint-tsgolint: ^0.24.0
   pinia: ^3.0.4
   tailwindcss: ^4.3.2
-  telefunc: ^0.2.21
+  telefunc: ^0.2.22
   tsc-alias: ^1.8.17
   tsx: ^4.22.4
   turbo: 2.10.2
