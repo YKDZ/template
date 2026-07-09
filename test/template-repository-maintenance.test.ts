@@ -803,6 +803,7 @@ describe("template Repository maintenance", () => {
 
     expect(gitignore).toContain(".template/\n");
     expect(gitignore).toContain(".project-kit/\n");
+    expect(gitignore).toContain(".fixture-replay-cache/\n");
     expect(gitignore).toContain(".pnpm-store/\n");
     expect(gitignore).not.toContain(".devcontainer/\n");
   });

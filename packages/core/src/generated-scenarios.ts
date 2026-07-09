@@ -1,4 +1,5 @@
-import { readdir, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { PackageAdditionSupport } from "@ykdz/template-shared";
@@ -86,16 +87,29 @@ export type GeneratedScenarioRunnerOptions = {
   readonly reporter?: GeneratedScenarioReporter;
   readonly deterministicToolchainEnv?: Record<string, string>;
   readonly rootCheckLock?: ExclusiveLock;
+  readonly replayCache?: GeneratedScenarioReplayCache | undefined;
 };
 
 export type ExclusiveLock = {
   readonly run: <T>(callback: () => Promise<T>) => Promise<T>;
 };
 
+export type GeneratedScenarioReplayCache = {
+  readonly directory: string;
+  readonly read: boolean;
+  readonly write: boolean;
+};
+
+type GeneratedScenarioInstallResult = {
+  readonly fingerprint?: string | undefined;
+  readonly replayed: boolean;
+};
+
 const defaultDeterministicToolchainEnv = {
   TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
 };
 const defaultFixtureConcurrency = 2;
+const scenarioFingerprintVersion = 1;
 const storedBlueprintSchema = v.object({
   packages: v.optional(
     v.array(
@@ -349,6 +363,102 @@ function packageLeaf(packagePath: string): string {
 
 function hasSourceDirectoryPath(sourceFile: string): boolean {
   return sourceFile.startsWith("src/") || sourceFile.includes("/src/");
+}
+
+function scenarioFingerprintPrefix(scenario: GeneratedScenario): string {
+  return JSON.stringify({
+    version: scenarioFingerprintVersion,
+    scenario,
+    platform: process.platform,
+    arch: process.arch,
+    nodeMajor: process.versions.node.split(".")[0],
+    qualityGateProtocol: "lockfile-only-snapshot-then-fix-check",
+  });
+}
+
+async function hashGeneratedScenarioDirectory(
+  scenario: GeneratedScenario,
+  projectDir: string,
+): Promise<string> {
+  const hash = createHash("sha256");
+
+  hash.update(scenarioFingerprintPrefix(scenario));
+  await hashDirectoryEntries(projectDir, projectDir, hash);
+
+  return hash.digest("hex");
+}
+
+async function hashDirectoryEntries(
+  rootDir: string,
+  currentDir: string,
+  hash: ReturnType<typeof createHash>,
+): Promise<void> {
+  const entries = await readdir(currentDir, { withFileTypes: true });
+
+  for (const entry of entries.toSorted((left, right) =>
+    left.name.localeCompare(right.name),
+  )) {
+    if (entry.name === "node_modules" || entry.name === ".git") {
+      continue;
+    }
+
+    const entryPath = path.join(currentDir, entry.name);
+    const relativePath = path
+      .relative(rootDir, entryPath)
+      .split(path.sep)
+      .join("/");
+
+    if (entry.isDirectory()) {
+      hash.update(`dir\0${relativePath}\0`);
+      await hashDirectoryEntries(rootDir, entryPath, hash);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      const fileStat = await stat(entryPath);
+      hash.update(`special\0${relativePath}\0${fileStat.mode.toString(8)}\0`);
+      continue;
+    }
+
+    const fileStat = await stat(entryPath);
+    hash.update(`file\0${relativePath}\0${fileStat.mode.toString(8)}\0`);
+    hash.update(await readFile(entryPath));
+    hash.update("\0");
+  }
+}
+
+async function scenarioReplayMarkerExists(
+  cache: GeneratedScenarioReplayCache,
+  fingerprint: string,
+): Promise<boolean> {
+  try {
+    await readFile(path.join(cache.directory, `${fingerprint}.passed`), "utf8");
+    return true;
+  } catch (error: unknown) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function writeScenarioReplayMarker(
+  cache: GeneratedScenarioReplayCache,
+  fingerprint: string,
+  scenario: GeneratedScenario,
+): Promise<void> {
+  await mkdir(cache.directory, { recursive: true });
+  await writeFile(
+    path.join(cache.directory, `${fingerprint}.passed`),
+    `${JSON.stringify({ scenario, fingerprint })}\n`,
+    "utf8",
+  );
 }
 
 export function packageLeafNameForAddedPreset(
@@ -757,10 +867,19 @@ async function runGeneratedScenarioQualityGate(
   );
   const requiresSerializedPlaywrightRootCheck =
     generatedScenarioRequiresSerializedRootCheck(steps);
+  let replayFingerprint: string | undefined;
 
   for (const step of steps) {
     if (step.id === "install-dependencies") {
-      await runGeneratedScenarioInstallStep(step, scenario, options);
+      const installResult = await runGeneratedScenarioInstallStep(
+        step,
+        scenario,
+        options,
+      );
+      replayFingerprint = installResult.fingerprint;
+      if (installResult.replayed) {
+        return;
+      }
       continue;
     }
 
@@ -779,19 +898,49 @@ async function runGeneratedScenarioQualityGate(
 
     await runStep();
   }
+
+  if (options.replayCache?.write && replayFingerprint !== undefined) {
+    await writeScenarioReplayMarker(
+      options.replayCache,
+      replayFingerprint,
+      scenario,
+    );
+    options.reporter.info?.(
+      `-- Stored passed fixture replay marker for ${scenario.label}: ${replayFingerprint}`,
+    );
+  }
 }
 
 async function runGeneratedScenarioInstallStep(
   step: GeneratedScenarioCommandStep,
   scenario: GeneratedScenario,
   options: RequiredRunnerOptions,
-): Promise<void> {
+): Promise<GeneratedScenarioInstallResult> {
   await options.runCommand(
     step.command,
     ["install", "--lockfile-only", "--prefer-offline", "--no-frozen-lockfile"],
     step.cwd,
     { logPrefix: scenario.label },
   );
+  let replayFingerprint: string | undefined;
+
+  if (options.replayCache) {
+    replayFingerprint = await hashGeneratedScenarioDirectory(
+      scenario,
+      step.cwd,
+    );
+
+    if (
+      options.replayCache.read &&
+      (await scenarioReplayMarkerExists(options.replayCache, replayFingerprint))
+    ) {
+      options.reporter.info?.(
+        `-- Replayed passed fixture ${scenario.label}: ${replayFingerprint}`,
+      );
+      return { fingerprint: replayFingerprint, replayed: true };
+    }
+  }
+
   await options.runCommand(step.command, ["fetch"], step.cwd, {
     logPrefix: scenario.label,
   });
@@ -801,6 +950,8 @@ async function runGeneratedScenarioInstallStep(
     step.cwd,
     { logPrefix: scenario.label },
   );
+
+  return { fingerprint: replayFingerprint, replayed: false };
 }
 
 async function checkGeneratedScenario(
@@ -867,6 +1018,7 @@ type RequiredRunnerOptions = Required<
     | "reporter"
     | "deterministicToolchainEnv"
     | "rootCheckLock"
+    | "replayCache"
   >
 >;
 
@@ -885,6 +1037,7 @@ function normalizeRunnerOptions(
     deterministicToolchainEnv:
       options.deterministicToolchainEnv ?? defaultDeterministicToolchainEnv,
     rootCheckLock: options.rootCheckLock ?? createExclusiveLock(),
+    replayCache: options.replayCache,
   };
 }
 

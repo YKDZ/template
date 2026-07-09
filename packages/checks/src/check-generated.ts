@@ -10,6 +10,8 @@ import {
 } from "@ykdz/template-builtin-source";
 import { runGeneratedScenarioSet } from "@ykdz/template-core/generated-scenarios";
 
+import { fixtureReplayCacheFromEnv } from "./fixture-replay-cache.js";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -31,6 +33,7 @@ async function main(): Promise<void> {
         repoRoot,
         cliPath,
         projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+        replayCache: fixtureReplayCacheFromEnv(),
       },
     );
 

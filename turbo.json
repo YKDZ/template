@@ -61,11 +61,23 @@
     },
     "check:fixtures": {
       "dependsOn": ["transit"],
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_DIR",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
+      ]
     },
     "check:generated": {
       "dependsOn": ["transit"],
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_DIR",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
+        "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
+      ]
     },
     "check:templates": {
       "outputs": [],

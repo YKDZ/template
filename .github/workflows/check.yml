@@ -26,11 +26,34 @@ jobs:
           node-version-file: package.json
           cache: pnpm
 
+      - name: Restore fixture replay cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .fixture-replay-cache
+          key: fixture-replay-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            fixture-replay-${{ runner.os }}-
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Check package
         run: pnpm run check
+        env:
+          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: ${{ github.workspace }}/.fixture-replay-cache
+          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
+          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
 
       - name: Check fixture matrix
         run: pnpm run check:fixtures
+        env:
+          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: ${{ github.workspace }}/.fixture-replay-cache
+          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
+          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
+
+      - name: Save fixture replay cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: .fixture-replay-cache
+          key: fixture-replay-${{ runner.os }}-${{ github.sha }}

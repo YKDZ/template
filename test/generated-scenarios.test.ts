@@ -773,6 +773,102 @@ describe("generated scenarios", () => {
     );
   });
 
+  it("replays a passed scenario from a generated repository fingerprint", async () => {
+    const cacheDir = await mkdtemp(
+      path.join(tmpdir(), "fixture-replay-cache-"),
+    );
+    const scenario = selectGeneratedScenarios(
+      loadBuiltInPresetSourceManifest(),
+      "init",
+    ).runnable.find((candidate) => candidate.basePreset === "ts-lib");
+
+    if (!scenario) {
+      throw new Error("Expected ts-lib init scenario.");
+    }
+    const selectedScenario = scenario;
+
+    async function runWithCache(
+      read: boolean,
+      write: boolean,
+    ): Promise<string[]> {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "fixture-replay-workspace-"),
+      );
+      const commands: string[] = [];
+
+      await runGeneratedScenariosConcurrently(
+        loadBuiltInPresetSourceManifest(),
+        [selectedScenario],
+        workspace,
+        1,
+        {
+          repoRoot: "/repo",
+          cliPath: "/repo/packages/cli/src/cli.ts",
+          projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+          replayCache: { directory: cacheDir, read, write },
+          runCommand: async (command, args, cwd) => {
+            commands.push(`${cwd}: ${command} ${args.join(" ")}`);
+
+            if (args[3] === "init") {
+              const projectDir = args[4];
+              if (!projectDir) {
+                throw new Error("Missing generated project directory.");
+              }
+              await mkdir(projectDir, { recursive: true });
+              await writeFile(
+                path.join(projectDir, "package.json"),
+                `${JSON.stringify({ name: "fixture-ts-lib" })}\n`,
+                "utf8",
+              );
+            }
+
+            if (
+              command === "pnpm" &&
+              args[0] === "install" &&
+              args.includes("--lockfile-only")
+            ) {
+              await writeFile(
+                path.join(cwd, "pnpm-lock.yaml"),
+                "lockfileVersion: '9.0'\n",
+                "utf8",
+              );
+            }
+          },
+          reporter: {},
+        },
+      );
+
+      return commands;
+    }
+
+    const missCommands = await runWithCache(false, true);
+    const hitCommands = await runWithCache(true, false);
+
+    expect(missCommands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("pnpm fetch"),
+        expect.stringContaining("pnpm run fix"),
+        expect.stringContaining("pnpm run check"),
+      ]),
+    );
+    expect(hitCommands).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "pnpm install --lockfile-only --prefer-offline --no-frozen-lockfile",
+        ),
+      ]),
+    );
+    expect(hitCommands).not.toContainEqual(
+      expect.stringContaining("pnpm fetch"),
+    );
+    expect(hitCommands).not.toContainEqual(
+      expect.stringContaining("pnpm run fix"),
+    );
+    expect(hitCommands).not.toContainEqual(
+      expect.stringContaining("pnpm run check"),
+    );
+  });
+
   it("runs initialization presets through production generation and generated Root Check", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "generated-init-scenario-runner-"),
