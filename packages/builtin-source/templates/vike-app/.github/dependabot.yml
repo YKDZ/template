@@ -26,3 +26,7 @@ updates:
       - dependency-name: mcr.microsoft.com/devcontainers/typescript-node
         update-types:
           - version-update:semver-major
+  - package-ecosystem: docker
+    directory: /apps/web
+    schedule:
+      interval: weekly

@@ -247,6 +247,7 @@ function projectGithubCheckWorkflow(presetName: string): string {
   return projectionPlan
     ? projectCheckWorkflow({
         checkPlan: projectionPlan.checkPlan,
+        dockerImageBuild: projectionPlan.ciDockerImageBuild,
         environmentPreparation:
           presetName === "rust-bin" ? { rustToolchain: true } : undefined,
       })

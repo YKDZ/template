@@ -7,19 +7,30 @@ import { api } from "#/server/api";
 
 const telefunc = new Telefunc();
 
-export const app = new Hono();
+export function createApp() {
+  try {
+    assertDatabaseReady(createDatabase());
+  } catch (error) {
+    console.error(error);
+    process.exit(1);
+  }
 
-app.route("/api", api);
+  const app = new Hono();
 
-app.all("/_telefunc", async (c) => {
-  const response = await telefunc.serve({
-    request: c.req.raw,
-    context: {
-      db: createDatabase(),
-    },
+  app.route("/api", api);
+
+  app.all("/_telefunc", async (c) => {
+    const response = await telefunc.serve({
+      request: c.req.raw,
+      context: {
+        db: createDatabase(),
+      },
+    });
+
+    return response ?? c.notFound();
   });
 
-  return response ?? c.notFound();
-});
+  vike(app);
 
-vike(app);
+  return app;
+}

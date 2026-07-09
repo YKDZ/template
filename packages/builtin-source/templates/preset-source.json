@@ -251,6 +251,8 @@
                 "sourceFiles": [
                   "web/+server.ts",
                   "web/.env.example",
+                  "web/Dockerfile",
+                  "web/Dockerfile.dockerignore",
                   "web/assets/logo.svg",
                   "web/components/CounterButton.vue",
                   "web/components/PageShell.vue",
@@ -306,6 +308,8 @@
           "vike-app/db/turbo.json",
           "vike-app/web/+server.ts",
           "vike-app/web/.env.example",
+          "vike-app/web/Dockerfile",
+          "vike-app/web/Dockerfile.dockerignore",
           "vike-app/web/playwright.config.ts",
           "vike-app/web/vite.config.ts",
           "vike-app/web/turbo.json",

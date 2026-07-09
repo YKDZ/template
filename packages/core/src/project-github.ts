@@ -20,6 +20,14 @@ export type PnpmTaskLayer = {
   readonly checkCommand: "pnpm run check";
 };
 
+export type CiDockerImageBuild = {
+  readonly dockerfile: string;
+  readonly targets: readonly {
+    readonly name: string;
+    readonly tag: string;
+  }[];
+};
+
 export type DependencyEcosystem =
   | "npm"
   | "cargo"
@@ -34,6 +42,9 @@ export type DependencyMaintenancePolicy = {
   readonly directories?: Partial<
     Record<DependencyEcosystem, DependabotDirectory>
   >;
+  readonly extraDirectories?: Partial<
+    Record<DependencyEcosystem, readonly DependabotDirectory[]>
+  >;
   readonly interval: "weekly";
 };
 
@@ -44,6 +55,7 @@ type ProjectCheckWorkflowOptions = {
     | Partial<CiEnvironmentPreparation>
     | undefined;
   readonly taskLayer?: PnpmTaskLayer | undefined;
+  readonly dockerImageBuild?: CiDockerImageBuild | undefined;
 };
 
 const defaultCiCapability: CiCapability = {
@@ -109,6 +121,21 @@ export function projectCheckWorkflow(
   );
   lines.push(`      - run: ${taskLayer.checkCommand}`, "");
 
+  if (options.dockerImageBuild !== undefined) {
+    lines.push(
+      "  docker-image:",
+      `    runs-on: ${capability.runner}`,
+      "    steps:",
+      "      - uses: actions/checkout@v7",
+      "      - uses: docker/setup-buildx-action@v3",
+      ...options.dockerImageBuild.targets.map(
+        (target) =>
+          `      - run: docker buildx build --load --file ${options.dockerImageBuild!.dockerfile} --target ${target.name} --tag ${target.tag} .`,
+      ),
+      "",
+    );
+  }
+
   return lines.join("\n");
 }
 
@@ -120,11 +147,12 @@ export function projectDependabotConfig(
     "",
     "updates:",
     ...policy.ecosystems.flatMap((ecosystem) =>
-      renderDependabotUpdate(
-        ecosystem,
+      [
         policy.directories?.[ecosystem] ??
           defaultDependabotDirectory(ecosystem),
-        policy.interval,
+        ...(policy.extraDirectories?.[ecosystem] ?? []),
+      ].flatMap((directory) =>
+        renderDependabotUpdate(ecosystem, directory, policy.interval),
       ),
     ),
     "",
@@ -157,7 +185,7 @@ function renderDependabotUpdate(
     );
   }
 
-  if (ecosystem === "docker") {
+  if (ecosystem === "docker" && directory === "/.devcontainer") {
     lines.push(
       "    ignore:",
       "      - dependency-name: mcr.microsoft.com/devcontainers/typescript-node",

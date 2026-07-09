@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 
 import CounterButton from "#/components/CounterButton.vue";
 
@@ -32,6 +32,10 @@ async function submitTodo() {
   title.value = "";
   await refreshTodos();
 }
+
+onMounted(() => {
+  void refreshTodos();
+});
 </script>
 
 <template>
@@ -65,7 +69,7 @@ async function submitTodo() {
       type="button"
       @click="refreshTodos"
     >
-      加载待办事项
+      刷新待办事项
     </button>
 
     <p

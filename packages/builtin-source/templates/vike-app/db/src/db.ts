@@ -7,11 +7,12 @@ import { defineRelations } from "drizzle-orm/relations";
 import * as schema from "#db/schema";
 
 const relations = defineRelations(schema);
+const defaultDatabaseFile = "./data/app.sqlite";
 
 export type Database = ReturnType<typeof createDatabase>;
 
 export function createDatabase(databaseFile = process.env.DATABASE_FILE) {
-  const file = databaseFile ?? "./data/app.sqlite";
+  const file = databaseFile ?? defaultDatabaseFile;
   mkdirSync(path.dirname(file), { recursive: true });
   return drizzle(file, { relations });
 }

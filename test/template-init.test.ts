@@ -254,7 +254,7 @@ describe("template init", () => {
       (preset) => preset.generation === "supported",
     );
     const outOfScopePathPatterns = [
-      /^(?!\.devcontainer\/Dockerfile$)(?:.*\/)?Dockerfile$/,
+      /^(?!\.devcontainer\/Dockerfile$)(?!apps\/web\/Dockerfile$)(?:.*\/)?Dockerfile$/,
       /(^|\/)\.dockerignore$/,
       /(^|\/)docker-compose\.ya?ml$/,
       /(^|\/)compose\.ya?ml$/,

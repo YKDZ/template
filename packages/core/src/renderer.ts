@@ -465,6 +465,10 @@ function assertTextTemplatePath(relativePath: string): void {
     return;
   }
 
+  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/Dockerfile$/.test(normalizedPath)) {
+    return;
+  }
+
   assertFoundationTextPath(relativePath);
 }
 

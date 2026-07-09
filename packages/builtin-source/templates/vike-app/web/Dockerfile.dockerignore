@@ -1,0 +1,14 @@
+.git
+.template
+node_modules
+**/node_modules
+**/.turbo
+**/dist
+**/playwright-report
+**/test-results
+apps/web/data
+apps/web/node_modules/.tmp
+packages/db/data
+packages/db/node_modules/.tmp
+*.sqlite
+*.sqlite-*

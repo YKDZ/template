@@ -3,7 +3,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const todos = sqliteTable("todos", {
   id: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
-  title: text().notNull(),
+  title: text().notNull().unique(),
   completed: integer({ mode: "boolean" }).default(false).notNull(),
   createdAt: text("created_at")
     .default(sql`(CURRENT_TIMESTAMP)`)

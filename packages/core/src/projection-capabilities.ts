@@ -69,7 +69,12 @@ import type {
   PresetProjectionPlan,
 } from "./preset-projection.js";
 import type { PresetSourceManifestPreset } from "./preset-source.js";
-import type { DependencyMaintenancePolicy } from "./project-github.js";
+import type {
+  CiDockerImageBuild,
+  DependencyEcosystem,
+  DependencyMaintenancePolicy,
+  DependabotDirectory,
+} from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
 
 export {
@@ -143,6 +148,10 @@ type ProjectionCompositionState = {
   packageDependencies: Set<string>;
   packageDevDependencies: Set<string>;
   dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"];
+  dependencyMaintenanceExtraDirectories: Partial<
+    Record<DependencyEcosystem, DependabotDirectory[]>
+  >;
+  ciDockerImageBuild?: CiDockerImageBuild | undefined;
   package?: WorkspaceLibraryPackageCapabilityDeclaration;
   nodeWorkspace?: WorkspaceNodePackagesCapabilityDeclaration;
   rustWorkspace?: RustBinaryWorkspaceCapabilityDeclaration;
@@ -249,6 +258,19 @@ const capabilityInterpreters = {
         sourceRootPreset(capability),
       );
       state.operationFactories.push(workspaceNodePackagesOperations);
+      if (hasVikePackage(capability)) {
+        state.dependencyMaintenanceExtraDirectories.docker = ["/apps/web"];
+        state.ciDockerImageBuild = {
+          dockerfile: "apps/web/Dockerfile",
+          targets: [
+            { name: "runtime", tag: "vike-app:check" },
+            {
+              name: "database-preparation",
+              tag: "vike-app-db-prepare:check",
+            },
+          ],
+        };
+      }
       if (capability.packages.length > 1) {
         state.rootScriptFragments.dev = "turbo run dev --parallel";
       }
@@ -522,6 +544,7 @@ export function interpretPresetProjectionDeclaration(options: {
   const packageScriptsByPath = packageScriptsByWorkspacePath(state);
   const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
     ecosystems: uniqueValues(state.dependencyMaintenanceEcosystems),
+    extraDirectories: state.dependencyMaintenanceExtraDirectories,
     ...(state.rustWorkspace === undefined
       ? {}
       : {
@@ -551,6 +574,7 @@ export function interpretPresetProjectionDeclaration(options: {
     ),
     checkPlan,
     fixPlan,
+    ciDockerImageBuild: state.ciDockerImageBuild,
     dependencyMaintenancePolicy,
     packageScripts,
     capabilities: completePlanCapabilityFlags(state.flags),
@@ -692,6 +716,8 @@ function createProjectionCompositionState(
     packageDependencies: new Set(),
     packageDevDependencies: new Set(),
     dependencyMaintenanceEcosystems: [],
+    dependencyMaintenanceExtraDirectories: {},
+    ciDockerImageBuild: undefined,
     editorCustomizationCapabilities: [],
     operationFactories: [],
     flags: {},
@@ -1714,6 +1740,10 @@ function vikeDbPackageJson(
         default: "./src/queries/todos.ts",
         types: "./src/queries/todos.ts",
       },
+      "./readiness": {
+        default: "./src/readiness.ts",
+        types: "./src/readiness.ts",
+      },
     },
     dependencies: {
       "drizzle-orm": "catalog:",
@@ -1737,10 +1767,16 @@ function vikeDbPackageJson(
 function vikeDbPackageScripts(): Record<string, string> {
   return {
     "build:run": "tsc -p tsconfig.json --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:prepare:deploy": "pnpm run db:migrate",
+    "db:prepare:dev": "pnpm run db:push && pnpm run db:seed:example",
+    "db:prepare:test":
+      'rm -f "${DATABASE_FILE:-./node_modules/.tmp/test.sqlite}" && pnpm run db:push && pnpm run db:seed:example',
     "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
-    "drizzle:generate": "drizzle-kit generate",
-    "drizzle:migrate": "drizzle-kit migrate",
-    "drizzle:studio": "drizzle-kit studio",
+    "db:seed:example":
+      "node --experimental-strip-types scripts/seed-example.ts",
+    "db:studio": "drizzle-kit studio",
     "format:check:run":
       "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -1749,7 +1785,7 @@ function vikeDbPackageScripts(): Record<string, string> {
     "lint:fix:run":
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     "test:run":
-      "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:push && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only",
+      "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:prepare:test && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status",
     "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -2284,7 +2320,7 @@ function nodePackageScripts(
 
   if (nodePackage.kind === "vike-app") {
     const dbCommand =
-      "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:push";
+      "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:prepare:dev";
     return {
       "build:run": "vike build",
       dev: `${dbCommand} && vike dev`,
@@ -2605,6 +2641,28 @@ function vikeTemplateSourceOperation(options: {
 
   if (
     options.nodePackage.kind === "vike-app" &&
+    options.sourceFile === "web/Dockerfile"
+  ) {
+    return [
+      {
+        kind: "writeTextTemplate",
+        from: options.sourceFile,
+        to,
+        replacements: {
+          NODE_VERSION: options.context.toolchain.nodeLtsMajor.value,
+          PACKAGE_MANAGER_PIN:
+            options.context.toolchain.packageManagerPin.value,
+          WEB_PACKAGE_NAME: nodePackageName(
+            options.context,
+            options.nodePackage,
+          ),
+        },
+      },
+    ];
+  }
+
+  if (
+    options.nodePackage.kind === "vike-app" &&
     [
       "web/pages/index/+Page.telefunc.ts",
       "web/server/app.ts",
@@ -2614,7 +2672,10 @@ function vikeTemplateSourceOperation(options: {
     const dbPackageName = vikeDbPackageName(options.context);
     const replacements = {
       "web/pages/index/+Page.telefunc.ts": `import { createTodo, listTodos } from "${dbPackageName}/queries/todos";`,
-      "web/server/app.ts": `import { createDatabase } from "${dbPackageName}";`,
+      "web/server/app.ts": [
+        `import { createDatabase } from "${dbPackageName}";`,
+        `import { assertDatabaseReady } from "${dbPackageName}/readiness";`,
+      ].join("\n"),
       "web/types/global.d.ts": `import type { Database } from "${dbPackageName}";`,
     } as const;
 
@@ -2638,9 +2699,14 @@ function vikeTemplateSourceOperation(options: {
 const vikeDbSourceFiles = [
   "db/turbo.json",
   "db/drizzle.config.ts",
+  "db/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
+  "db/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
+  "db/scripts/seed-example.ts",
   "db/src/db.ts",
   "db/src/index.ts",
   "db/src/queries/todos.ts",
+  "db/src/readiness.ts",
+  "db/src/seed/example.ts",
   "db/src/schema.ts",
   "db/test/todos.test.ts",
 ] as const;

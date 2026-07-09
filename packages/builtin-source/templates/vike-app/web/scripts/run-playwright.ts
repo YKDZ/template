@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
+import { fileURLToPath } from "node:url";
+
+const databaseFile = fileURLToPath(
+  new URL("../node_modules/.tmp/e2e.sqlite", import.meta.url),
+);
 
 async function availablePort(): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -32,6 +38,7 @@ async function availablePort(): Promise<string> {
 async function playwrightEnv(): Promise<NodeJS.ProcessEnv> {
   return {
     ...process.env,
+    DATABASE_FILE: process.env.DATABASE_FILE ?? databaseFile,
     PLAYWRIGHT_WEB_PORT:
       process.env.PLAYWRIGHT_WEB_PORT ?? (await availablePort()),
   };
@@ -39,6 +46,7 @@ async function playwrightEnv(): Promise<NodeJS.ProcessEnv> {
 
 const env = await playwrightEnv();
 delete env.NO_COLOR;
+await rm(env.DATABASE_FILE!, { force: true });
 
 const command = process.platform === "win32" ? "playwright.cmd" : "playwright";
 const child = spawn(command, ["test", ...process.argv.slice(2)], {
@@ -52,11 +60,22 @@ child.once("error", (error: Error) => {
 });
 
 child.once("exit", (code: number | null, signal: NodeJS.Signals | null) => {
-  if (signal) {
-    console.error(`Playwright exited with signal ${signal}`);
-    process.exitCode = 1;
-    return;
-  }
+  void rm(env.DATABASE_FILE!, { force: true }).finally(() => {
+    if (signal) {
+      console.error(`Playwright exited with signal ${signal}`);
+      process.exitCode = 1;
+      return;
+    }
 
-  process.exitCode = code ?? 1;
+    process.exitCode = code ?? 1;
+  });
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    child.kill(signal);
+    void rm(env.DATABASE_FILE!, { force: true }).finally(() => {
+      process.exitCode = 1;
+    });
+  });
+}
