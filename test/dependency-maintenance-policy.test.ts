@@ -12,6 +12,14 @@ type DependabotUpdate = {
   "package-ecosystem": string;
   directory: string;
   schedule: { interval: string };
+  groups?:
+    | Record<
+        string,
+        {
+          patterns: string[];
+        }
+      >
+    | undefined;
   ignore?:
     | {
         "dependency-name": string;
@@ -33,6 +41,14 @@ const dependabotConfigSchema = v.object({
       "package-ecosystem": v.string(),
       directory: v.string(),
       schedule: v.object({ interval: v.string() }),
+      groups: v.optional(
+        v.record(
+          v.string(),
+          v.object({
+            patterns: v.array(v.string()),
+          }),
+        ),
+      ),
       ignore: v.optional(
         v.array(
           v.object({
@@ -142,6 +158,11 @@ describe("Generated Repository dependency maintenance policy", () => {
     expect(ecosystems(dependabot)).toEqual(["npm", "github-actions", "docker"]);
     expect(ecosystems(dependabot)).not.toContain("devcontainers");
     expect(updateFor(dependabot, "docker").directory).toBe("/.devcontainer");
+    expect(updateFor(dependabot, "npm").groups).toMatchObject({
+      drizzle: {
+        patterns: ["drizzle-*", "drizzle-orm"],
+      },
+    });
     expect(updateFor(dependabot, "npm").ignore).toContainEqual({
       "dependency-name": "@types/node",
       "update-types": ["version-update:semver-major"],

@@ -145,6 +145,11 @@ function renderDependabotUpdate(
 
   if (ecosystem === "npm") {
     lines.push(
+      "    groups:",
+      "      drizzle:",
+      "        patterns:",
+      '          - "drizzle-*"',
+      '          - "drizzle-orm"',
       "    ignore:",
       '      - dependency-name: "@types/node"',
       "        update-types:",

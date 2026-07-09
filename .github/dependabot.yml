@@ -4,6 +4,11 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      drizzle:
+        patterns:
+          - "drizzle-*"
+          - "drizzle-orm"
     ignore:
       - dependency-name: "@types/node"
         update-types:

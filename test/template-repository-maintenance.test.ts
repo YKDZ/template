@@ -30,6 +30,14 @@ const dependabotUpdateSchema = v.object({
   "package-ecosystem": v.string(),
   directory: v.string(),
   schedule: v.object({ interval: v.string() }),
+  groups: v.optional(
+    v.record(
+      v.string(),
+      v.object({
+        patterns: v.array(v.string()),
+      }),
+    ),
+  ),
   ignore: v.optional(
     v.array(
       v.object({
@@ -864,6 +872,11 @@ describe("template Repository maintenance", () => {
           "package-ecosystem": "npm",
           directory: "/",
           schedule: { interval: "weekly" },
+          groups: {
+            drizzle: {
+              patterns: ["drizzle-*", "drizzle-orm"],
+            },
+          },
           ignore: [
             {
               "dependency-name": "@types/node",
