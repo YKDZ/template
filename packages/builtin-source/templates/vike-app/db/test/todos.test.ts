@@ -14,5 +14,8 @@ describe("todo queries", () => {
     await expect(listTodos(db)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ title })]),
     );
+    await expect(db.query.todos.findMany()).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ title })]),
+    );
   });
 });
