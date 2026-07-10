@@ -1,8 +1,8 @@
 import path from "node:path";
 
-import type { CheckEnvironmentNeed } from "./module-graph.js";
-import type { PresetProjectionPlan } from "./preset-projection.js";
-import type { RenderOperation } from "./renderer.js";
+import type { CheckEnvironmentNeed } from "./module-graph.ts";
+import type { PresetProjectionPlan } from "./preset-projection.ts";
+import type { RenderOperation } from "./renderer.ts";
 
 export type NextStepInstruction = {
   readonly id: string;

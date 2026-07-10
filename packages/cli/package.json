@@ -43,18 +43,18 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@typescript/typescript6": "catalog:",
     "@ykdz/template-builtin-source": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-shared": "workspace:*",
+    "typescript": "catalog:template-typescript",
     "valibot": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@typescript/native": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:template-typescript"
   },
   "bundleDependencies": [
     "@ykdz/template-builtin-source",

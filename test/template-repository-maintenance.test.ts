@@ -2,7 +2,6 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as ts from "@typescript/typescript6";
 import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import {
   loadTemplateCargoDependencyVersions,
@@ -10,6 +9,7 @@ import {
 } from "@ykdz/template-core/dependency-catalog";
 import { resolveToolchainVersions } from "@ykdz/template-core/toolchain-resolution";
 import { execa } from "execa";
+import * as ts from "typescript";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
@@ -75,6 +75,9 @@ const devcontainerSchema = v.object({
 });
 const workspaceExtensionsSchema = v.object({
   recommendations: v.array(v.string()),
+});
+const turboPackageConfigSchema = v.object({
+  tags: v.array(v.string()),
 });
 
 function parseJsonWithSchema<const Schema extends v.GenericSchema>(
@@ -495,6 +498,69 @@ function rootPresetBehaviorSelectorIssues(
 }
 
 describe("template Repository maintenance", () => {
+  it("keeps internal Package Boundary edges on the workspace graph", async () => {
+    const expectedEdges = {
+      ".": [
+        "@ykdz/template-builtin-source",
+        "@ykdz/template-checks",
+        "@ykdz/template-core",
+        "@ykdz/template-shared",
+      ],
+      "packages/builtin-source": [
+        "@ykdz/template-core",
+        "@ykdz/template-shared",
+      ],
+      "packages/checks": [
+        "@ykdz/template-builtin-source",
+        "@ykdz/template-core",
+        "@ykdz/template-shared",
+      ],
+      "packages/cli": [
+        "@ykdz/template-builtin-source",
+        "@ykdz/template-core",
+        "@ykdz/template-shared",
+      ],
+      "packages/core": ["@ykdz/template-shared"],
+    } as const;
+
+    for (const [packagePath, dependencies] of Object.entries(expectedEdges)) {
+      const packageJson = parseJsonWithSchema(
+        await readFile(
+          path.join(repoRoot, packagePath, "package.json"),
+          "utf8",
+        ),
+        packageMetadataSchema,
+      );
+      const declaredDependencies = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      for (const dependency of dependencies) {
+        expect(declaredDependencies[dependency]).toBe("workspace:*");
+      }
+    }
+  });
+
+  it("keeps every internal Package Boundary attached to its Turbo tag", async () => {
+    const expectedTags = {
+      "packages/builtin-source": "template-preset-source",
+      "packages/checks": "template-checks",
+      "packages/cli": "template-cli",
+      "packages/core": "template-core",
+      "packages/shared": "template-shared",
+    } as const;
+
+    for (const [packagePath, expectedTag] of Object.entries(expectedTags)) {
+      const turboConfig = parseJsonWithSchema(
+        await readFile(path.join(repoRoot, packagePath, "turbo.json"), "utf8"),
+        turboPackageConfigSchema,
+      );
+
+      expect(turboConfig.tags).toEqual([expectedTag]);
+    }
+  });
+
   it("keeps the root and bundled fallback on the same explicit pnpm 11 workspace policy", async () => {
     const packageJson = parseJsonWithSchema(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
@@ -513,7 +579,7 @@ describe("template Repository maintenance", () => {
       nodeLinker: "isolated",
       injectWorkspacePackages: true,
       dedupeInjectedDeps: false,
-      syncInjectedDepsAfterScripts: ["build:run"],
+      syncInjectedDepsAfterScripts: ["build", "build:run"],
       minimumReleaseAge: 1440,
       minimumReleaseAgeStrict: true,
     });

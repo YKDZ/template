@@ -5,13 +5,17 @@ nodeLinker: isolated
 injectWorkspacePackages: true
 dedupeInjectedDeps: false
 syncInjectedDepsAfterScripts:
+  - build
   - build:run
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 
+catalogs:
+  template-typescript:
+    typescript: npm:@typescript/typescript6@^6.0.2
+    typescript-7: npm:typescript@^7.0.2
+
 catalog:
-  "@typescript/native": npm:typescript@^7.0.2
-  "@typescript/typescript6": ^6.0.2
   "@hono/node-server": ^2.0.6
   "@playwright/test": ^1.61.1
   "@tailwindcss/vite": ^4.3.2

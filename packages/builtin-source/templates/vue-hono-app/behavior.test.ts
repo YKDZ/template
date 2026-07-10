@@ -7,7 +7,7 @@ import { assembleGenerationContext } from "@ykdz/template-core/generation-contex
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
-import { vueHonoAppPresetProjection } from "./projection.js";
+import { vueHonoAppPresetProjection } from "./projection.ts";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]

@@ -1,5 +1,5 @@
-import { loadTemplateDependencyCatalog } from "./dependency-catalog.js";
-import type { WriteTextFromFragmentsOperation } from "./renderer.js";
+import { loadTemplateDependencyCatalog } from "./dependency-catalog.ts";
+import type { WriteTextFromFragmentsOperation } from "./renderer.ts";
 
 export type DevelopmentContainerNodePnpmLayer = {
   readonly kind: "node-pnpm";

@@ -24,7 +24,7 @@ import {
 import {
   loadTemplateDependencyCatalog,
   type TemplateDependencyCatalog,
-} from "./dependency-catalog.js";
+} from "./dependency-catalog.ts";
 
 export { presetSourceManifestJsonSchema };
 export type {

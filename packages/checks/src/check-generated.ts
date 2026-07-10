@@ -10,14 +10,11 @@ import {
 } from "@ykdz/template-builtin-source";
 import { runGeneratedScenarioSet } from "@ykdz/template-core/generated-scenarios";
 
-import { fixtureReplayCacheFromEnv } from "./fixture-replay-cache.js";
+import { fixtureReplayCacheFromEnv } from "./fixture-replay-cache.ts";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-);
+const repoRoot =
+  process.env.TEMPLATE_REPOSITORY_ROOT ??
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
 
 async function main(): Promise<void> {

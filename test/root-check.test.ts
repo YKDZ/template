@@ -1,10 +1,9 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import ts from "@typescript/typescript6";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { checkTemplateGithubYaml } from "@ykdz/template-checks/check-template-github-yaml";
 import {
@@ -12,6 +11,7 @@ import {
   projectDependabotConfig,
 } from "@ykdz/template-core/project-github";
 import { execa } from "execa";
+import ts from "typescript";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
@@ -394,7 +394,7 @@ describe("Project Kit Root Check", () => {
     );
 
     expect(rootPackageJson.scripts.check).toBe(
-      "pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
+      "pnpm run build && pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
     );
     expect(rootPackageJson.scripts["check:boundaries"]).toBe(
       "turbo boundaries --no-color",
@@ -484,7 +484,7 @@ describe("Project Kit Root Check", () => {
         "tsc -p tsconfig.json --noEmit --pretty false",
       );
       expect(packageJson.devDependencies).toMatchObject({
-        "@typescript/native": "catalog:",
+        "typescript-7": "catalog:template-typescript",
       });
     }
   });
@@ -499,7 +499,7 @@ describe("Project Kit Root Check", () => {
       "tsc -p tsconfig.json --noEmit --pretty false",
     );
     expect(packageJson.devDependencies).toMatchObject({
-      "@typescript/native": "catalog:",
+      "typescript-7": "catalog:template-typescript",
     });
   });
 
@@ -523,14 +523,16 @@ describe("Project Kit Root Check", () => {
         ...packageJson.devDependencies,
       };
 
-      expect(allDependencies).not.toHaveProperty("typescript");
       if (
         packageJsonFile !== "package.json" &&
         packageJsonFile !== "packages/cli/package.json" &&
         packageJsonFile !== "packages/core/package.json"
       ) {
-        expect(allDependencies).not.toHaveProperty("@typescript/typescript6");
+        expect(allDependencies).not.toHaveProperty("typescript");
       }
+
+      expect(allDependencies).not.toHaveProperty("@typescript/native");
+      expect(allDependencies).not.toHaveProperty("@typescript/typescript6");
     }
   });
 
@@ -559,25 +561,27 @@ describe("Project Kit Root Check", () => {
     }
   });
 
-  it("typechecks CLI source without built dependency declarations", async () => {
-    await Promise.all(
-      ["core", "builtin-source", "cli", "checks"].map((packageName) =>
-        rm(path.join(repoRoot, "packages", packageName, "dist"), {
-          force: true,
-          recursive: true,
-        }),
-      ),
+  it("builds compiled Package Exposures before repository checks", async () => {
+    const rootPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+    const turboConfig = await readJsonWithSchema(
+      path.join(repoRoot, "turbo.json"),
+      turboConfigSchema,
     );
 
-    const result = await execa(
-      "pnpm",
-      ["--filter", "@ykdz/template", "run", "typecheck"],
-      {
-        cwd: repoRoot,
-      },
-    );
+    expect(rootPackageJson.scripts.check).toMatch(/^pnpm run build && /);
+    expect(turboConfig.tasks.build).toMatchObject({ dependsOn: ["^build"] });
 
-    expect(result.exitCode).toBe(0);
+    for (const packageName of ["shared", "core", "builtin-source", "checks"]) {
+      const packageJsonSource = await readFile(
+        path.join(repoRoot, "packages", packageName, "package.json"),
+        "utf8",
+      );
+
+      expect(packageJsonSource).not.toContain('"source":');
+    }
   });
 
   it("keeps repository format scripts free of non-standard oxfmt ignore files", async () => {

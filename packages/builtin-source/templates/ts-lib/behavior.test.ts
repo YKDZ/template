@@ -7,7 +7,7 @@ import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 
-import { tsLibPresetProjection } from "./projection.js";
+import { tsLibPresetProjection } from "./projection.ts";
 
 const packageJsonSchema = v.looseObject({
   name: v.string(),

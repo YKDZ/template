@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "turbo run build --output-logs=errors-only --log-order=grouped",
-    "check": "pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
+    "check": "pnpm run build && pnpm run check:boundaries && turbo run format:check lint typecheck test check:generated check:templates format:check:root lint:root typecheck:root --output-logs=errors-only --log-order=grouped",
     "check:boundaries": "turbo boundaries --no-color",
     "check:fixtures": "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
     "check:format": "pnpm run format:check",
@@ -32,8 +32,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@typescript/native": "catalog:",
-    "@typescript/typescript6": "catalog:",
     "@ykdz/template-builtin-source": "workspace:*",
     "@ykdz/template-checks": "workspace:*",
     "@ykdz/template-core": "workspace:*",
@@ -42,8 +40,9 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "tsx": "catalog:",
     "turbo": "catalog:",
+    "typescript": "catalog:template-typescript",
+    "typescript-7": "catalog:template-typescript",
     "valibot": "catalog:",
     "vitest": "catalog:",
     "yaml": "catalog:"

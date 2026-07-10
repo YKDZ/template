@@ -5,14 +5,14 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-shared";
 
-import type { GenerationContext } from "./generation-context.js";
-import { type CheckPlan, type FixPlan } from "./module-graph.js";
+import type { GenerationContext } from "./generation-context.ts";
+import { type CheckPlan, type FixPlan } from "./module-graph.ts";
 import {
   planNextStepInstructions,
   type NextStepInstruction,
-} from "./next-step-instructions.js";
-import type { DependencyMaintenancePolicy } from "./project-github.js";
-import type { RenderOperation } from "./renderer.js";
+} from "./next-step-instructions.ts";
+import type { DependencyMaintenancePolicy } from "./project-github.ts";
+import type { RenderOperation } from "./renderer.ts";
 
 export type PresetPackageAdditionOptions = {
   readonly root: string;

@@ -20,7 +20,7 @@ const repoRoot = path.resolve(
   "..",
 );
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "cli.ts");
-const tsxBin = path.join(repoRoot, "node_modules/.bin/tsx");
+const nodeBin = process.execPath;
 const workspaceCatalogSchema = v.object({
   catalog: v.optional(v.record(v.string(), v.string())),
 });
@@ -150,8 +150,16 @@ async function initGeneratedWorkspace(
   preset = "vue-hono-app",
 ): Promise<void> {
   await execa(
-    "pnpm",
-    ["exec", "tsx", cliPath, "init", projectDir, "--preset", preset, "--yes"],
+    "node",
+    [
+      "--conditions=source",
+      cliPath,
+      "init",
+      projectDir,
+      "--preset",
+      preset,
+      "--yes",
+    ],
     { cwd: repoRoot },
   );
 }
@@ -174,10 +182,9 @@ describe("template add package", () => {
     );
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -219,10 +226,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -234,8 +240,14 @@ describe("template add package", () => {
       { cwd: projectDir },
     );
     await execa(
-      tsxBin,
-      [cliPath, "blueprint", "validate", ".template/blueprint.json"],
+      nodeBin,
+      [
+        "--conditions=source",
+        cliPath,
+        "blueprint",
+        "validate",
+        ".template/blueprint.json",
+      ],
       {
         cwd: projectDir,
       },
@@ -375,10 +387,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -448,10 +459,9 @@ describe("template add package", () => {
     const beforeWebSource = await sourceFileSnapshot(webSourceDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -466,8 +476,14 @@ describe("template add package", () => {
     );
 
     await execa(
-      tsxBin,
-      [cliPath, "blueprint", "validate", ".template/blueprint.json"],
+      nodeBin,
+      [
+        "--conditions=source",
+        cliPath,
+        "blueprint",
+        "validate",
+        ".template/blueprint.json",
+      ],
       {
         cwd: projectDir,
       },
@@ -520,10 +536,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -595,10 +610,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -668,8 +682,9 @@ describe("template add package", () => {
     );
 
     await execa(
-      tsxBin,
+      nodeBin,
       [
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -706,10 +721,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     const unknownConsumerPackagePath = execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -740,10 +754,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -794,10 +807,9 @@ describe("template add package", () => {
       await initGeneratedWorkspace(projectDir);
 
       await execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -852,10 +864,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir, "ts-lib");
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -889,10 +900,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -929,10 +939,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -993,10 +1002,9 @@ describe("template add package", () => {
 
       await expectCommandFailure(
         execa(
-          "pnpm",
+          "node",
           [
-            "exec",
-            "tsx",
+            "--conditions=source",
             cliPath,
             "add",
             "package",
@@ -1025,10 +1033,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1057,10 +1064,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1088,10 +1094,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1115,10 +1120,9 @@ describe("template add package", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "init",
         projectDir,
@@ -1130,10 +1134,9 @@ describe("template add package", () => {
     );
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1207,10 +1210,9 @@ describe("template add package", () => {
       await initGeneratedWorkspace(projectDir, preset);
 
       await execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1222,8 +1224,14 @@ describe("template add package", () => {
         { cwd: projectDir },
       );
       await execa(
-        tsxBin,
-        [cliPath, "blueprint", "validate", ".template/blueprint.json"],
+        nodeBin,
+        [
+          "--conditions=source",
+          cliPath,
+          "blueprint",
+          "validate",
+          ".template/blueprint.json",
+        ],
         {
           cwd: projectDir,
         },
@@ -1291,10 +1299,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     const unsupportedPackageAddition = execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1332,10 +1339,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     const unsupportedPackageAddition = execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1370,10 +1376,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1409,10 +1414,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1461,10 +1465,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1513,10 +1516,9 @@ describe("template add package", () => {
     );
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1544,10 +1546,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1646,10 +1647,9 @@ describe("template add package", () => {
     expect(beforeOxlintConfig).not.toContain('"vue"');
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1677,10 +1677,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir, "rust-bin");
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1772,10 +1771,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1811,10 +1809,9 @@ describe("template add package", () => {
     await initGeneratedWorkspace(projectDir);
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",
@@ -1861,10 +1858,9 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           cliPath,
           "add",
           "package",
@@ -1896,8 +1892,17 @@ describe("template add package", () => {
 
     await expectCommandFailure(
       execa(
-        tsxBin,
-        [cliPath, "add", "package", "--preset", "ts-lib", "--name", "shared"],
+        nodeBin,
+        [
+          "--conditions=source",
+          cliPath,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "shared",
+        ],
         {
           cwd: projectDir,
         },
@@ -1927,10 +1932,9 @@ describe("template add package", () => {
     );
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         cliPath,
         "add",
         "package",

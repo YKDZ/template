@@ -6,7 +6,7 @@ import { assembleGenerationContext } from "@ykdz/template-core/generation-contex
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
-import { rustBinPresetProjection } from "./projection.js";
+import { rustBinPresetProjection } from "./projection.ts";
 
 const packageJsonSchema = v.looseObject({
   name: v.string(),

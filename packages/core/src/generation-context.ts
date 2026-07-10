@@ -2,7 +2,7 @@ import path from "node:path";
 
 import type { PackageManager, ProjectBlueprint } from "@ykdz/template-shared";
 
-import type { ResolvedToolchainVersions } from "./toolchain-resolution.js";
+import type { ResolvedToolchainVersions } from "./toolchain-resolution.ts";
 
 export type ProjectName = {
   readonly kind: "ProjectName";

@@ -13,6 +13,7 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
+    "rewriteRelativeImportExtensions": true,
     "skipLibCheck": false,
     "strict": true,
     "target": "es2023",

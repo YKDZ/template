@@ -4,7 +4,7 @@ import {
   deploymentCheckEnvironmentNeeds,
   deploymentCheckTaskName,
   renderPlaywrightBrowserInstallCommand,
-} from "./module-graph.js";
+} from "./module-graph.ts";
 
 export type CiCapability = {
   readonly workflowName: "Check";

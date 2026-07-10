@@ -194,10 +194,9 @@ async function generatePresetProject(preset: string): Promise<string> {
   const projectDir = path.join(workspace, `demo-${preset}`);
 
   await execa(
-    "pnpm",
+    "node",
     [
-      "exec",
-      "tsx",
+      "--conditions=source",
       path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
       "init",
       projectDir,
@@ -510,10 +509,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -566,8 +564,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      path.join(repoRoot, "node_modules/.bin/tsx"),
+      process.execPath,
       [
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -601,8 +600,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-fullstack");
 
     const result = await execa(
-      path.join(repoRoot, "node_modules/.bin/tsx"),
+      process.execPath,
       [
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -674,8 +674,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-rust");
 
     const result = await execa(
-      path.join(repoRoot, "node_modules/.bin/tsx"),
+      process.execPath,
       [
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -711,10 +712,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -832,8 +832,9 @@ describe("template init", () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-json-"));
 
     const result = await execa(
-      path.join(repoRoot, "node_modules/.bin/tsx"),
+      process.execPath,
       [
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         "demo-lib",
@@ -880,10 +881,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -933,10 +933,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1005,8 +1004,7 @@ describe("template init", () => {
     const result = await execa(
       process.execPath,
       [
-        "--import",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1042,10 +1040,9 @@ describe("template init", () => {
     );
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "--help",
       ],
@@ -1072,10 +1069,9 @@ describe("template init", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
           "init",
           projectDir,
@@ -1105,10 +1101,9 @@ describe("template init", () => {
     );
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         emptyDir,
@@ -1122,10 +1117,9 @@ describe("template init", () => {
     await stat(path.join(emptyDir, "package.json"));
 
     const nonEmptyResult = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         nonEmptyDir,
@@ -1160,7 +1154,7 @@ describe("template init", () => {
           "printf 'y\\n' |",
           "script -qfec",
           shellQuote(
-            `pnpm exec tsx ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`,
+            `node --conditions=source ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`,
           ),
           "/dev/null",
         ].join(" "),
@@ -1193,7 +1187,7 @@ describe("template init", () => {
             "printf 'n\\n' |",
             "script -qfec",
             shellQuote(
-              `pnpm exec tsx ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`,
+              `node --conditions=source ${shellQuote(cliPath)} init ${shellQuote(projectDir)} --preset ts-lib`,
             ),
             "/dev/null",
           ].join(" "),
@@ -1213,10 +1207,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1277,10 +1270,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-lib");
 
     const result = await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1331,8 +1323,7 @@ describe("template init", () => {
     const result = await execa(
       process.execPath,
       [
-        "--import",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1370,10 +1361,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1425,10 +1415,9 @@ describe("template init", () => {
     const projectDir = path.join(workspace, "demo-fullstack");
 
     await execa(
-      "pnpm",
+      "node",
       [
-        "exec",
-        "tsx",
+        "--conditions=source",
         path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
         "init",
         projectDir,
@@ -1467,10 +1456,9 @@ describe("template init", () => {
 
     await expectCommandFailure(
       execa(
-        "pnpm",
+        "node",
         [
-          "exec",
-          "tsx",
+          "--conditions=source",
           path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
           "init",
           projectDir,

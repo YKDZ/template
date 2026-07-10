@@ -39,6 +39,17 @@ export {
 export function builtInPresetSourceRoot(...segments: string[]): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    ...(process.env.TEMPLATE_REPOSITORY_ROOT
+      ? [
+          path.join(
+            process.env.TEMPLATE_REPOSITORY_ROOT,
+            "packages",
+            "builtin-source",
+            "templates",
+            ...segments,
+          ),
+        ]
+      : []),
     path.join(moduleDir, "..", "..", "templates", ...segments),
     path.join(moduleDir, "..", "templates", ...segments),
     path.join(

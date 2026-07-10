@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as ts from "@typescript/typescript6";
 import {
   findBuiltInPreset,
   loadBuiltInPresetSourceManifest,
@@ -20,6 +19,7 @@ import {
   validateProjectBlueprint as validateSharedProjectBlueprint,
 } from "@ykdz/template-shared";
 import { execa } from "execa";
+import * as ts from "typescript";
 import * as v from "valibot";
 
 const repoRoot = path.resolve(
@@ -140,7 +140,9 @@ function importedDeclarationNames(
 }
 
 function template(args: string[]) {
-  return execa("pnpm", ["exec", "tsx", cliPath, ...args], { cwd: repoRoot });
+  return execa("node", ["--conditions=source", cliPath, ...args], {
+    cwd: repoRoot,
+  });
 }
 
 async function expectTemplateFailure(

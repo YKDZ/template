@@ -842,7 +842,7 @@ describe("generated scenarios", () => {
         runCommand: async (command, args, cwd) => {
           commands.push(`${cwd}: ${command} ${args.join(" ")}`);
 
-          if (args[3] !== "add") {
+          if (args[2] !== "add") {
             return;
           }
 
@@ -864,10 +864,10 @@ describe("generated scenarios", () => {
     expect(commands).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          "pnpm exec tsx /repo/packages/cli/src/cli.ts init",
+          "node --conditions=source /repo/packages/cli/src/cli.ts init",
         ),
         expect.stringContaining(
-          "pnpm exec tsx /repo/packages/cli/src/cli.ts add package --preset ts-lib --name fixture-ts-lib",
+          "node --conditions=source /repo/packages/cli/src/cli.ts add package --preset ts-lib --name fixture-ts-lib",
         ),
         expect.stringContaining(
           "pnpm install --lockfile-only --prefer-offline --no-frozen-lockfile",
@@ -908,7 +908,7 @@ describe("generated scenarios", () => {
         runCommand: async (command, args, cwd) => {
           commands.push(`${command} ${args.join(" ")}`);
 
-          if (args[3] !== "add") {
+          if (args[2] !== "add") {
             return;
           }
 
@@ -978,7 +978,7 @@ describe("generated scenarios", () => {
             throw new Error("Docker daemon is unavailable");
           }
 
-          if (args[3] !== "add") {
+          if (args[2] !== "add") {
             return;
           }
 
@@ -1047,7 +1047,7 @@ describe("generated scenarios", () => {
             if (command === "docker" && !dockerAvailable) {
               throw new Error("Docker daemon is unavailable");
             }
-            if (args[3] === "add") {
+            if (args[2] === "add") {
               await mkdir(path.join(cwd, ".template"), { recursive: true });
               await writeFile(
                 path.join(cwd, ".template", "blueprint.json"),
@@ -1131,7 +1131,7 @@ describe("generated scenarios", () => {
               throw new Error("standalone container logs:\nstartup failed");
             }
 
-            if (args[3] !== "add") {
+            if (args[2] !== "add") {
               return;
             }
 
@@ -1207,8 +1207,8 @@ describe("generated scenarios", () => {
           runCommand: async (command, args, cwd) => {
             commands.push(`${cwd}: ${command} ${args.join(" ")}`);
 
-            if (args[3] === "init") {
-              const projectDir = args[4];
+            if (args[2] === "init") {
+              const projectDir = args[3];
               if (!projectDir) {
                 throw new Error("Missing generated project directory.");
               }
@@ -1300,7 +1300,7 @@ describe("generated scenarios", () => {
     for (const presetName of initPresetNames) {
       expect(commands).toContainEqual(
         expect.stringContaining(
-          `/repo: pnpm exec tsx /repo/packages/cli/src/cli.ts init ${path.join(workspace, `fixture-${presetName}`)} --preset ${presetName} --yes`,
+          `/repo: node --conditions=source /repo/packages/cli/src/cli.ts init ${path.join(workspace, `fixture-${presetName}`)} --preset ${presetName} --yes`,
         ),
       );
       expect(commands).toContainEqual(

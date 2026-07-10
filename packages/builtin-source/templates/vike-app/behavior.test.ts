@@ -23,7 +23,7 @@ import { assembleGenerationContext } from "@ykdz/template-core/generation-contex
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
-import { vikeAppPresetProjection } from "./projection.js";
+import { vikeAppPresetProjection } from "./projection.ts";
 
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]

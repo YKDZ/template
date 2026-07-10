@@ -3,7 +3,6 @@ import {
   collectGeneratedManifestCatalogDependencies,
   loadTemplateCargoDependencyVersions,
   loadTemplateDependencyCatalog,
-  pnpmWorkspaceYamlWithCatalogDependencies,
   renderCargoLockForPackage,
   renderCargoDependencyTomlEntries,
   renderGeneratedPnpmWorkspaceYaml,
@@ -159,9 +158,6 @@ describe("Template Dependency Catalog projection", () => {
       selectTemplateDependencyCatalogEntries(dependencies);
 
     expect(selectedCatalog.typescript).toBe("^6.0.3");
-    expect(workspaceYaml).not.toContain("@typescript/native");
-    expect(workspaceYaml).not.toContain("@typescript/typescript6");
-
     expect(selectedCatalog).toEqual(
       Object.fromEntries(
         dependencies.map((dependency) => [
@@ -179,29 +175,4 @@ describe("Template Dependency Catalog projection", () => {
       expect(workspaceYaml).toContain(`${key}: ${version}`);
     }
   });
-
-  it.each(["@typescript/native", "@typescript/typescript6"])(
-    "rejects template-internal dependency %s at the initial Generated Repository catalog boundary",
-    (dependency) => {
-      expect(() =>
-        renderGeneratedPnpmWorkspaceYaml({ dependencies: [dependency] }),
-      ).toThrow(
-        `Generated Repository Dependency Catalog cannot include template-internal dependency: ${dependency}`,
-      );
-    },
-  );
-
-  it.each(["@typescript/native", "@typescript/typescript6"])(
-    "rejects template-internal dependency %s at the Generated Repository catalog update boundary",
-    (dependency) => {
-      expect(() =>
-        pnpmWorkspaceYamlWithCatalogDependencies(
-          `packages:\n  - .\n\ncatalog:\n  ${JSON.stringify(dependency)}: ^0.0.0\n`,
-          [dependency],
-        ),
-      ).toThrow(
-        `Generated Repository Dependency Catalog cannot include template-internal dependency: ${dependency}`,
-      );
-    },
-  );
 });

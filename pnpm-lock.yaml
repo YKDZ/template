@@ -19,12 +19,6 @@ catalogs:
     '@types/node':
       specifier: ^24.13.3
       version: 24.13.3
-    '@typescript/native':
-      specifier: npm:typescript@^7.0.2
-      version: 7.0.2
-    '@typescript/typescript6':
-      specifier: ^6.0.2
-      version: 6.0.2
     '@vikejs/hono':
       specifier: ^0.2.1
       version: 0.2.1
@@ -55,15 +49,9 @@ catalogs:
     pinia:
       specifier: ^3.0.4
       version: 3.0.4
-    srvx:
-      specifier: ^0.11.21
-      version: 0.11.21
     telefunc:
       specifier: ^0.2.22
       version: 0.2.22
-    tsx:
-      specifier: ^4.23.0
-      version: 4.23.0
     turbo:
       specifier: 2.10.2
       version: 2.10.2
@@ -88,6 +76,13 @@ catalogs:
     yaml:
       specifier: ^2.9.0
       version: 2.9.0
+  template-typescript:
+    typescript:
+      specifier: npm:@typescript/typescript6@^6.0.2
+      version: 6.0.2
+    typescript-7:
+      specifier: npm:typescript@^7.0.2
+      version: 7.0.2
 
 importers:
 
@@ -96,24 +91,18 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-      '@typescript/typescript6':
-        specifier: 'catalog:'
-        version: 6.0.2
       '@ykdz/template-builtin-source':
         specifier: workspace:*
-        version: link:packages/builtin-source
+        version: file:packages/builtin-source(@typescript/typescript6@6.0.2)
       '@ykdz/template-checks':
         specifier: workspace:*
-        version: link:packages/checks
+        version: file:packages/checks(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
-        version: link:packages/core
+        version: file:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: link:packages/shared
+        version: file:packages/shared(@typescript/typescript6@6.0.2)
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -126,15 +115,18 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
-      tsx:
-        specifier: 'catalog:'
-        version: 4.23.0
       turbo:
         specifier: 'catalog:'
         version: 2.10.2
+      typescript:
+        specifier: catalog:template-typescript
+        version: '@typescript/typescript6@6.0.2'
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2(typescript@7.0.2)
+        version: 1.4.2(@typescript/typescript6@6.0.2)
       vitest:
         specifier: 'catalog:'
         version: 4.1.10(@types/node@24.13.3)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
@@ -146,10 +138,10 @@ importers:
     dependencies:
       '@ykdz/template-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: link:../shared
+        version: file:packages/shared(typescript@7.0.2)
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(typescript@7.0.2)
@@ -166,9 +158,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
       '@vikejs/hono':
         specifier: 'catalog:'
         version: 0.2.1(hono@4.12.28)(srvx@0.11.21)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)))
@@ -199,6 +188,9 @@ importers:
       telefunc:
         specifier: 'catalog:'
         version: 0.2.22(@babel/core@7.29.7)(@babel/parser@7.29.7)(@babel/types@7.29.7)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
       vike:
         specifier: 'catalog:'
         version: 0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
@@ -222,13 +214,13 @@ importers:
     dependencies:
       '@ykdz/template-builtin-source':
         specifier: workspace:*
-        version: link:../builtin-source
+        version: file:packages/builtin-source(typescript@7.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: link:../shared
+        version: file:packages/shared(typescript@7.0.2)
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -239,9 +231,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -251,34 +240,31 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
-      tsx:
-        specifier: 'catalog:'
-        version: 4.23.0
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
 
   packages/cli:
     dependencies:
-      '@typescript/typescript6':
-        specifier: 'catalog:'
-        version: 6.0.2
       '@ykdz/template-builtin-source':
         specifier: workspace:*
-        version: link:../builtin-source
+        version: file:packages/builtin-source(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
-        version: link:../core
+        version: file:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: link:../shared
+        version: file:packages/shared(@typescript/typescript6@6.0.2)
+      typescript:
+        specifier: catalog:template-typescript
+        version: '@typescript/typescript6@6.0.2'
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2(typescript@7.0.2)
+        version: 1.4.2(@typescript/typescript6@6.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -288,25 +274,25 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
 
   packages/core:
     dependencies:
-      '@typescript/typescript6':
-        specifier: 'catalog:'
-        version: 6.0.2
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: link:../shared
+        version: file:packages/shared(@typescript/typescript6@6.0.2)
+      typescript:
+        specifier: catalog:template-typescript
+        version: '@typescript/typescript6@6.0.2'
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2(typescript@7.0.2)
+        version: 1.4.2(@typescript/typescript6@6.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -319,6 +305,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
 
   packages/shared:
     dependencies:
@@ -329,9 +318,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@typescript/native':
-        specifier: 'catalog:'
-        version: typescript@7.0.2
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -341,6 +327,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
+      typescript-7:
+        specifier: catalog:template-typescript
+        version: typescript@7.0.2
 
 packages:
 
@@ -1700,6 +1689,18 @@ packages:
 
   '@vue/shared@3.5.39':
     resolution: {integrity: sha512-l1rrBtBfTnmxvtsvdQDXltUUy8S1Y+ZaqdfUzmAnJkTd8Z8rv5v/ytW+TKiqEOWyHPoqtPlNFSs0lhRmYVSHVA==}
+
+  '@ykdz/template-builtin-source@file:packages/builtin-source':
+    resolution: {directory: packages/builtin-source, type: directory}
+
+  '@ykdz/template-checks@file:packages/checks':
+    resolution: {directory: packages/checks, type: directory}
+
+  '@ykdz/template-core@file:packages/core':
+    resolution: {directory: packages/core, type: directory}
+
+  '@ykdz/template-shared@file:packages/shared':
+    resolution: {directory: packages/shared, type: directory}
 
   acorn@8.17.0:
     resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
@@ -3684,6 +3685,50 @@ snapshots:
 
   '@vue/shared@3.5.39': {}
 
+  '@ykdz/template-builtin-source@file:packages/builtin-source(@typescript/typescript6@6.0.2)':
+    dependencies:
+      '@ykdz/template-core': file:packages/core
+      '@ykdz/template-shared': file:packages/shared(@typescript/typescript6@6.0.2)
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-builtin-source@file:packages/builtin-source(typescript@7.0.2)':
+    dependencies:
+      '@ykdz/template-core': file:packages/core
+      '@ykdz/template-shared': file:packages/shared(typescript@7.0.2)
+      valibot: 1.4.2(typescript@7.0.2)
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-checks@file:packages/checks(@typescript/typescript6@6.0.2)':
+    dependencies:
+      '@ykdz/template-builtin-source': file:packages/builtin-source(@typescript/typescript6@6.0.2)
+      '@ykdz/template-core': file:packages/core
+      '@ykdz/template-shared': file:packages/shared(@typescript/typescript6@6.0.2)
+      execa: 9.6.1
+      yaml: 2.9.0
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-core@file:packages/core':
+    dependencies:
+      '@ykdz/template-shared': file:packages/shared(@typescript/typescript6@6.0.2)
+      typescript: '@typescript/typescript6@6.0.2'
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+
+  '@ykdz/template-shared@file:packages/shared(@typescript/typescript6@6.0.2)':
+    dependencies:
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-shared@file:packages/shared(typescript@7.0.2)':
+    dependencies:
+      valibot: 1.4.2(typescript@7.0.2)
+    transitivePeerDependencies:
+      - typescript
+
   acorn@8.17.0: {}
 
   assertion-error@2.0.1: {}
@@ -3868,9 +3913,9 @@ snapshots:
     dependencies:
       reusify: 1.1.0
 
-  fdir@6.5.0(picomatch@4.0.4):
+  fdir@6.5.0(picomatch@4.0.5):
     optionalDependencies:
-      picomatch: 4.0.4
+      picomatch: 4.0.5
 
   figures@6.1.0:
     dependencies:
@@ -4290,8 +4335,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.5)
+      picomatch: 4.0.5
 
   tinypool@2.1.0: {}
 
@@ -4326,6 +4371,7 @@ snapshots:
       esbuild: 0.28.1
     optionalDependencies:
       fsevents: 2.3.3
+    optional: true
 
   turbo@2.10.2:
     optionalDependencies:
@@ -4381,6 +4427,10 @@ snapshots:
       browserslist: 4.28.5
       escalade: 3.2.0
       picocolors: 1.1.1
+
+  valibot@1.4.2(@typescript/typescript6@6.0.2):
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
 
   valibot@1.4.2(typescript@7.0.2):
     optionalDependencies:

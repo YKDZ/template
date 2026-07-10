@@ -104,6 +104,32 @@ describe("fixture checks", () => {
     const realPnpm = (await execa("which", ["pnpm"])).stdout;
 
     await mkdir(binDir, { recursive: true });
+    await writeExecutable(
+      path.join(binDir, "node"),
+      [
+        `#!${process.execPath}`,
+        'import { appendFileSync } from "node:fs";',
+        'import { spawnSync } from "node:child_process";',
+        "",
+        "const args = process.argv.slice(2);",
+        "appendFileSync(",
+        "  process.env.FIXTURE_COMMAND_LOG,",
+        "  JSON.stringify({",
+        "    command: 'node',",
+        "    args,",
+        "    cwd: process.cwd(),",
+        "    ci: process.env.CI ?? null",
+        "  }) + '\\n'",
+        ");",
+        `const result = spawnSync(${JSON.stringify(process.execPath)}, args, {`,
+        "  cwd: process.cwd(),",
+        "  env: process.env,",
+        "  stdio: 'inherit'",
+        "});",
+        "process.exit(result.status ?? 1);",
+        "",
+      ].join("\n"),
+    );
     await writeFile(
       fetchGuardPath,
       [
@@ -244,14 +270,8 @@ describe("fixture checks", () => {
     );
 
     const dockerAvailableRun = await execa(
-      realPnpm,
-      [
-        "exec",
-        "tsx",
-        "--tsconfig",
-        "tsconfig.json",
-        "packages/checks/src/check-fixtures.ts",
-      ],
+      process.execPath,
+      ["--conditions=source", "packages/checks/src/check-fixtures.ts"],
       {
         cwd: repoRoot,
         env: {
@@ -314,12 +334,12 @@ describe("fixture checks", () => {
       }),
     );
 
-    const packageAdditionCommands = pnpmRecords.filter(
+    const packageAdditionCommands = records.filter(
       (record) =>
-        record.args[0] === "exec" &&
-        record.args[1] === "tsx" &&
-        record.args[3] === "add" &&
-        record.args[4] === "package",
+        record.command === "node" &&
+        record.args[0] === "--conditions=source" &&
+        record.args[2] === "add" &&
+        record.args[3] === "package",
     );
     const packageAdditionScenarios = fixtureScenarios.filter(
       (scenario) => scenario.addedPreset,
@@ -473,14 +493,8 @@ describe("fixture checks", () => {
 
     await writeFile(logPath, "", "utf8");
     const dockerUnavailableRun = await execa(
-      realPnpm,
-      [
-        "exec",
-        "tsx",
-        "--tsconfig",
-        "tsconfig.json",
-        "packages/checks/src/check-fixtures.ts",
-      ],
+      process.execPath,
+      ["--conditions=source", "packages/checks/src/check-fixtures.ts"],
       {
         cwd: repoRoot,
         env: {
@@ -539,14 +553,8 @@ describe("fixture checks", () => {
     ) => {
       await writeFile(logPath, "", "utf8");
       const result = await execa(
-        realPnpm,
-        [
-          "exec",
-          "tsx",
-          "--tsconfig",
-          "tsconfig.json",
-          "packages/checks/src/check-fixtures.ts",
-        ],
+        process.execPath,
+        ["--conditions=source", "packages/checks/src/check-fixtures.ts"],
         {
           cwd: repoRoot,
           env: {

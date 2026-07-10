@@ -37,10 +37,9 @@ async function generateTsLibProject(prefix: string): Promise<string> {
   };
 
   await execa(
-    "pnpm",
+    "node",
     [
-      "exec",
-      "tsx",
+      "--conditions=source",
       path.join(repoRoot, "packages/cli/src/cli.ts"),
       "init",
       projectDir,

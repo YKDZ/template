@@ -16,34 +16,18 @@
   "type": "module",
   "exports": {
     ".": {
-      "source": {
-        "types": "./src/index.ts",
-        "default": "./src/index.ts"
-      },
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
     "./registry": {
-      "source": {
-        "types": "./templates/registry.ts",
-        "default": "./templates/registry.ts"
-      },
       "types": "./dist/templates/registry.d.ts",
       "default": "./dist/templates/registry.js"
     },
     "./projection-plans": {
-      "source": {
-        "types": "./templates/projection-plans.ts",
-        "default": "./templates/projection-plans.ts"
-      },
       "types": "./dist/templates/projection-plans.d.ts",
       "default": "./dist/templates/projection-plans.js"
     },
     "./templates/*": {
-      "source": {
-        "types": "./templates/*.ts",
-        "default": "./templates/*.ts"
-      },
       "types": "./dist/templates/*.d.ts",
       "default": "./dist/templates/*.js"
     }
@@ -72,7 +56,6 @@
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
-    "@typescript/native": "catalog:",
     "@vikejs/hono": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "drizzle-kit": "catalog:",
@@ -83,6 +66,7 @@
     "oxlint-tsgolint": "catalog:",
     "pinia": "catalog:",
     "telefunc": "catalog:",
+    "typescript-7": "catalog:template-typescript",
     "vike": "catalog:",
     "vike-vue": "catalog:",
     "vite": "catalog:",

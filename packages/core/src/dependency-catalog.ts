@@ -48,26 +48,10 @@ function assertMinimumReleaseAgeExclusions(
   }
 }
 
-const templateInternalDependencyIdentities = new Set([
-  "@typescript/native",
-  "@typescript/typescript6",
-]);
-
-function assertGeneratedDependencyCatalogBoundary(
-  dependencies: readonly string[],
-): void {
-  for (const dependency of dependencies) {
-    if (templateInternalDependencyIdentities.has(dependency)) {
-      throw new Error(
-        `Generated Repository Dependency Catalog cannot include template-internal dependency: ${dependency}`,
-      );
-    }
-  }
-}
-
 function templateRepositoryRoot(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
+    process.env.TEMPLATE_REPOSITORY_ROOT,
     moduleDir,
     path.resolve(moduleDir, ".."),
     path.resolve(moduleDir, "..", ".."),
@@ -75,9 +59,11 @@ function templateRepositoryRoot(): string {
   ];
 
   return (
-    candidates.find((candidate) =>
-      existsSync(path.join(candidate, "pnpm-workspace.yaml")),
-    ) ?? candidates[0]!
+    candidates.find(
+      (candidate) =>
+        candidate !== undefined &&
+        existsSync(path.join(candidate, "pnpm-workspace.yaml")),
+    ) ?? moduleDir
   );
 }
 
@@ -320,7 +306,6 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
   dependencies: readonly string[],
   templateCatalog: TemplateDependencyCatalog = loadTemplateDependencyCatalog(),
 ): string {
-  assertGeneratedDependencyCatalogBoundary(dependencies);
   const catalogStart = workspaceYaml
     .split(/\r?\n/)
     .findIndex((line) => line === "catalog:");
@@ -374,7 +359,6 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
 export function renderGeneratedPnpmWorkspaceYaml(
   options: GeneratedDependencyCatalogOptions,
 ): string {
-  assertGeneratedDependencyCatalogBoundary(options.dependencies);
   assertMinimumReleaseAgeExclusions(options.minimumReleaseAgeExclude ?? []);
   if (
     options.dependencyLinker?.kind === "hoisted" &&

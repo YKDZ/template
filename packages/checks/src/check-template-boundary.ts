@@ -27,12 +27,9 @@ import {
 } from "@ykdz/template-core/template-boundary-check";
 import { PackageAdditionSupport } from "@ykdz/template-shared";
 
-const repoRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-);
+const repoRoot =
+  process.env.TEMPLATE_REPOSITORY_ROOT ??
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const projectionSourceFiles: Record<string, string> = {
   "hono-api": "packages/core/src/projection-capabilities.ts",

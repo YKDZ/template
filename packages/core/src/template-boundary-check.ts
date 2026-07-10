@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import ts from "@typescript/typescript6";
+import ts from "typescript";
 
-import type { RenderOperation } from "./renderer.js";
+import type { RenderOperation } from "./renderer.ts";
 
 export type TemplateBoundaryDebt = {
   readonly preset: string;

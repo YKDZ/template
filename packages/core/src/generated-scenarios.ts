@@ -6,28 +6,28 @@ import { PackageAdditionSupport } from "@ykdz/template-shared";
 import { execa } from "execa";
 import * as v from "valibot";
 
-import { assembleGenerationContext } from "./generation-context.js";
+import { assembleGenerationContext } from "./generation-context.ts";
 import {
   type CheckEnvironmentNeed,
   deploymentCheckEnvironmentNeeds,
   type DeploymentCheckEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
-} from "./module-graph.js";
-import { planNextStepInstructions } from "./next-step-instructions.js";
+} from "./module-graph.ts";
+import { planNextStepInstructions } from "./next-step-instructions.ts";
 import {
   canPlanPackageLinkIntent,
   type PackageDefinition,
-} from "./package-linking.js";
+} from "./package-linking.ts";
 import type {
   PresetSourceManifest,
   PresetSourceManifestPreset,
-} from "./preset-source.js";
-import { findPresetSourceManifestPreset } from "./preset-source.js";
+} from "./preset-source.ts";
+import { findPresetSourceManifestPreset } from "./preset-source.ts";
 import {
   blueprintForPresetSourcePreset,
   projectPresetSourcePreset,
   type PresetProjectionSourceRoots,
-} from "./projection-capabilities.js";
+} from "./projection-capabilities.ts";
 
 export type GeneratedScenarioSet =
   | "init"
@@ -136,16 +136,6 @@ export function generatedScenarioChildProcessEnv(
   }
 
   return childEnv;
-}
-
-function cliSourceExecutionEnv(
-  options: RequiredRunnerOptions,
-  env: Record<string, string> = {},
-): Record<string, string> {
-  return {
-    ...env,
-    TSX_TSCONFIG_PATH: path.join(options.repoRoot, "tsconfig.json"),
-  };
 }
 
 export function createExclusiveLock(): ExclusiveLock {
@@ -526,10 +516,9 @@ async function generateScenario(
   const projectDir = path.join(workspace, `fixture-${scenario.id}`);
 
   await options.runCommand(
-    "pnpm",
+    "node",
     [
-      "exec",
-      "tsx",
+      "--conditions=source",
       options.cliPath,
       "init",
       projectDir,
@@ -539,7 +528,7 @@ async function generateScenario(
     ],
     options.repoRoot,
     {
-      env: cliSourceExecutionEnv(options, options.deterministicToolchainEnv),
+      env: options.deterministicToolchainEnv,
       logPrefix: scenario.label,
     },
   );
@@ -566,10 +555,9 @@ async function applyPackageAddition(
     scenario.linkFrom ?? [],
   );
   await options.runCommand(
-    "pnpm",
+    "node",
     [
-      "exec",
-      "tsx",
+      "--conditions=source",
       options.cliPath,
       "add",
       "package",
@@ -581,7 +569,6 @@ async function applyPackageAddition(
     ],
     projectDir,
     {
-      env: cliSourceExecutionEnv(options),
       logPrefix: scenario.label,
     },
   );

@@ -599,8 +599,8 @@ type AnchorRange = {
   end: number;
 };
 
-type ParsedSourceFile = import("@typescript/typescript6").SourceFile & {
-  parseDiagnostics?: readonly import("@typescript/typescript6").Diagnostic[];
+type ParsedSourceFile = import("typescript").SourceFile & {
+  parseDiagnostics?: readonly import("typescript").Diagnostic[];
 };
 
 function parseAnchorComment(commentText: string): string | undefined {
@@ -620,7 +620,7 @@ function parseAnchorComment(commentText: string): string | undefined {
 async function findTypeScriptAnchorRanges(
   sourceText: string,
 ): Promise<AnchorRange[]> {
-  const ts = await import("@typescript/typescript6");
+  const ts = await import("typescript");
   const sourceFile = ts.createSourceFile(
     "template-anchor.ts",
     sourceText,
@@ -637,9 +637,7 @@ async function findTypeScriptAnchorRanges(
     );
   }
 
-  function collectNodeAnchors(
-    node: import("@typescript/typescript6").Node,
-  ): void {
+  function collectNodeAnchors(node: import("typescript").Node): void {
     if (node.kind === ts.SyntaxKind.EndOfFileToken) {
       return;
     }

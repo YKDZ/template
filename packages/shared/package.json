@@ -8,10 +8,6 @@
   "type": "module",
   "exports": {
     ".": {
-      "source": {
-        "types": "./src/index.ts",
-        "default": "./src/index.ts"
-      },
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
@@ -29,9 +25,9 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@typescript/native": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:template-typescript"
   }
 }

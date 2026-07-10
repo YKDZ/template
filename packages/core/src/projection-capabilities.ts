@@ -30,7 +30,7 @@ import {
   renderCargoLockForPackage,
   renderGeneratedPnpmWorkspaceYaml,
   renderCargoDependencyTomlEntries,
-} from "./dependency-catalog.js";
+} from "./dependency-catalog.ts";
 import {
   browserTestToolLayer,
   checkedDockerfileFirstNodePnpmDevcontainer,
@@ -38,14 +38,14 @@ import {
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
-} from "./devcontainer.js";
+} from "./devcontainer.ts";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
   type EditorCustomizationCapability,
   type EditorCustomizationDeclarations,
-} from "./editor-customization.js";
-import type { GenerationContext } from "./generation-context.js";
+} from "./editor-customization.ts";
+import type { GenerationContext } from "./generation-context.ts";
 import {
   type CheckPlan,
   type ComponentOwner,
@@ -58,25 +58,25 @@ import {
   renderFixLeafCommand,
   renderRootCheckCommand,
   renderTurboRunCommand,
-} from "./module-graph.js";
+} from "./module-graph.ts";
 import {
   packageManifestExposureFields,
   packageTurboConfig,
   planPackageLinks,
-} from "./package-linking.js";
+} from "./package-linking.ts";
 import type {
   PresetBlueprintOptions,
   PresetPackageAdditionOptions,
   PresetPackageAdditionPlan,
   PresetProjectionPlan,
-} from "./preset-projection.js";
-import type { PresetSourceManifestPreset } from "./preset-source.js";
+} from "./preset-projection.ts";
+import type { PresetSourceManifestPreset } from "./preset-source.ts";
 import type {
   DependencyEcosystem,
   DependencyMaintenancePolicy,
   DependabotDirectory,
-} from "./project-github.js";
-import type { RenderOperation } from "./renderer.js";
+} from "./project-github.ts";
+import type { RenderOperation } from "./renderer.ts";
 
 export {
   normalizePresetProjectionDeclaration,

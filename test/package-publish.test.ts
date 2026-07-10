@@ -104,15 +104,22 @@ const packageRootFiles = [
   "packages/cli/package.json",
   "packages/cli/tsconfig.build.json",
   "packages/cli/tsconfig.json",
+  "packages/cli/turbo.json",
   "packages/core/package.json",
   "packages/core/tsconfig.build.json",
   "packages/core/tsconfig.json",
+  "packages/core/turbo.json",
   "packages/shared/package.json",
   "packages/shared/tsconfig.build.json",
   "packages/shared/tsconfig.json",
   "packages/builtin-source/package.json",
   "packages/builtin-source/tsconfig.build.json",
   "packages/builtin-source/tsconfig.json",
+  "packages/builtin-source/turbo.json",
+  "packages/checks/package.json",
+  "packages/checks/tsconfig.build.json",
+  "packages/checks/tsconfig.json",
+  "packages/checks/turbo.json",
 ];
 
 const supportedPresetSourcePresets =
@@ -155,6 +162,7 @@ async function runtimeSourceFiles(): Promise<string[]> {
   const packageSourceFiles = (
     await Promise.all([
       listFiles(path.join(repoRoot, "packages/cli/src")),
+      listFiles(path.join(repoRoot, "packages/checks/src")),
       listFiles(path.join(repoRoot, "packages/core/src")),
       listFiles(path.join(repoRoot, "packages/shared/src")),
       listFiles(path.join(repoRoot, "packages/builtin-source/src")),
@@ -491,17 +499,15 @@ describe("package publishing", () => {
     );
 
     expect(corePackageJson.dependencies).toMatchObject({
-      "@typescript/typescript6": expect.any(String),
+      typescript: expect.any(String),
     });
     expect(cliPackageJson.dependencies).toMatchObject({
-      "@typescript/typescript6": expect.any(String),
+      typescript: expect.any(String),
     });
     expect(cliPackageJson.devDependencies).toMatchObject({
-      "@typescript/native": expect.any(String),
+      "typescript-7": expect.any(String),
     });
-    expect(cliPackageJson.bundleDependencies).not.toContain(
-      "@typescript/typescript6",
-    );
+    expect(cliPackageJson.bundleDependencies).not.toContain("typescript");
   });
 
   it("does not treat Preset Source behavior tests as packable template source", async () => {
@@ -568,6 +574,22 @@ describe("package publishing", () => {
       await execa("pnpm", ["install", "--frozen-lockfile"], {
         cwd: packageDir,
       });
+      await execa("pnpm", ["run", "build"], { cwd: packageDir });
+      const sourceCli = await execa(
+        process.execPath,
+        ["packages/cli/src/cli.ts", "--help"],
+        { cwd: packageDir },
+      );
+      expect(sourceCli.stdout).toContain("Project Kit template CLI");
+      await Promise.all(
+        ["shared", "core", "builtin-source", "checks", "cli"].map(
+          (packageName) =>
+            rm(path.join(packageDir, "packages", packageName, "dist"), {
+              force: true,
+              recursive: true,
+            }),
+        ),
+      );
       await execa(
         "pnpm",
         ["run", "pack:bundled", "--pack-destination", packDir],
@@ -581,6 +603,19 @@ describe("package publishing", () => {
       const tarballPath = path.join(packDir, tarball!);
       const tarballContents = await execa("tar", ["-tf", tarballPath]);
       const packedPaths = tarballContents.stdout.split("\n");
+      const extractedTarballDir = path.join(workspace, "extracted");
+      await mkdir(extractedTarballDir);
+      await execa("tar", ["-xf", tarballPath, "-C", extractedTarballDir]);
+      const packedManifestFiles = (await listFiles(extractedTarballDir)).filter(
+        (file) => path.basename(file) === "package.json",
+      );
+      const packedManifestSources = await Promise.all(
+        packedManifestFiles.map((file) => readFile(file, "utf8")),
+      );
+
+      expect(packedManifestSources).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/"link:[^"]+"/)]),
+      );
       expect(packedPaths).toContain("package/dist/cli.js");
       expect(packedPaths).toContain(
         "package/node_modules/@ykdz/template-core/dist/devcontainer.js",

@@ -16,25 +16,25 @@ import {
   collectGeneratedManifestCatalogReferences,
   pnpmWorkspaceYamlWithCatalogDependencies,
   type GeneratedPackageManifestDependencies,
-} from "./dependency-catalog.js";
-import { renderTurboRunCommand } from "./module-graph.js";
+} from "./dependency-catalog.ts";
+import { renderTurboRunCommand } from "./module-graph.ts";
 import {
   assertTypeScriptPackageBoundaryForLinkIntent,
   packageTurboConfig,
   planPackageLinks,
   type TurboConfig,
-} from "./package-linking.js";
+} from "./package-linking.ts";
 import {
   findPresetSourceManifestPreset,
   type PresetSourceManifest,
-} from "./preset-source.js";
+} from "./preset-source.ts";
 import {
   defaultPackagePathForPresetSourcePackageAddition,
   planPresetSourcePackageAddition,
   type PresetProjectionSourceRoots,
-} from "./projection-capabilities.js";
-import { renderProject } from "./renderer.js";
-import type { RenderOperation } from "./renderer.js";
+} from "./projection-capabilities.ts";
+import { renderProject } from "./renderer.ts";
+import type { RenderOperation } from "./renderer.ts";
 
 export type AddPackageOptions = {
   cwd: string;
