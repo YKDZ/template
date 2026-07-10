@@ -504,6 +504,7 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerfile).toContain("FROM node:24-bookworm-slim AS base");
     expect(appDockerfile).toContain("FROM application-runtime AS runtime");
     expect(appDockerfile).toContain('ARG PACKAGE_MANAGER_PIN="pnpm@11.2.3"');
+    expect(appDockerfile).toContain('ENV COREPACK_HOME="/corepack"');
     expect(appDockerfile).toContain(
       'corepack enable && corepack prepare "$PACKAGE_MANAGER_PIN" --activate',
     );
