@@ -168,12 +168,20 @@ describe("Project Kit Root Check", () => {
     const packageCheckIndex = runSteps.findIndex(
       (step) => step.name === "Check package" && step.run === "pnpm run check",
     );
+    const browserPreparationIndex = runSteps.findIndex(
+      (step) =>
+        step.name === "Prepare browser checks" &&
+        step.run ===
+          "pnpm --filter @ykdz/template-builtin-source exec playwright install --with-deps chromium",
+    );
     const fixtureMatrixCheckIndex = runSteps.findIndex(
       (step) =>
         step.name === "Check fixture matrix" &&
         step.run === "pnpm run check:fixtures",
     );
 
+    expect(browserPreparationIndex).toBeGreaterThanOrEqual(0);
+    expect(packageCheckIndex).toBeGreaterThan(browserPreparationIndex);
     expect(packageCheckIndex).toBeGreaterThanOrEqual(0);
     expect(fixtureMatrixCheckIndex).toBeGreaterThan(packageCheckIndex);
     expect(workflow).not.toContain("id-token: write");
