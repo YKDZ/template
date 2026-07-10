@@ -1,6 +1,22 @@
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { execFile, spawn } from "node:child_process";
+import {
+  access,
+  chmod,
+  cp,
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  readlink,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
@@ -12,6 +28,11 @@ import { vikeAppPresetProjection } from "./projection.js";
 const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
+const execFileAsync = promisify(execFile);
+const repositoryBin = path.join(process.cwd(), "node_modules/.bin");
+const packageManagerPinSchema = v.custom<`pnpm@${string}`>(
+  (value) => typeof value === "string" && value.startsWith("pnpm@"),
+);
 const packageJsonSchema = v.looseObject({
   name: v.string(),
   engines: v.object({ node: v.string() }),
@@ -66,7 +87,9 @@ async function generatedFilePaths(
   return paths.flat().toSorted();
 }
 
-async function renderVikeProject(): Promise<string> {
+async function renderVikeProject(
+  packageManagerPin: `pnpm@${string}` = "pnpm@11.2.3",
+): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), "vike-behavior-"));
   const targetDir = path.join(workspace, "demo-vike");
   const blueprint = vikeAppPresetProjection.blueprint({ targetDir });
@@ -76,7 +99,10 @@ async function renderVikeProject(): Promise<string> {
     toolchain: {
       diagnostics: [],
       nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+      packageManagerPin: {
+        kind: "PackageManagerPin",
+        value: packageManagerPin,
+      },
       source: "online",
     },
   });
@@ -85,6 +111,151 @@ async function renderVikeProject(): Promise<string> {
   await vikeAppPresetProjection.render({ plan, targetDir });
 
   return targetDir;
+}
+
+async function linkRepositoryDependencies(targetDir: string): Promise<void> {
+  await symlink(
+    path.join(process.cwd(), "node_modules"),
+    path.join(targetDir, "node_modules"),
+    "dir",
+  );
+}
+
+async function repositoryTscIdentity(): Promise<{
+  linkTarget: string | undefined;
+  modifiedAt: number;
+  version: string;
+}> {
+  const tscPath = path.join(repositoryBin, "tsc");
+  const metadata = await lstat(tscPath);
+  const [{ stdout }, linkTarget] = await Promise.all([
+    execFileAsync(tscPath, ["--version"]),
+    metadata.isSymbolicLink() ? readlink(tscPath) : undefined,
+  ]);
+
+  return {
+    linkTarget,
+    modifiedAt: metadata.mtimeMs,
+    version: stdout.trim(),
+  };
+}
+
+async function fakeContainerCommandEnvironment(targetDir: string): Promise<{
+  databaseFile: string;
+  env: NodeJS.ProcessEnv;
+  observationFile: string;
+}> {
+  const fakeBinDir = path.join(targetDir, "fake-container-bin");
+  const observationFile = path.join(targetDir, "container-observation.txt");
+  const databaseFile = path.join(targetDir, "mounted-data", "app.sqlite");
+  await mkdir(fakeBinDir);
+  await writeFile(
+    path.join(fakeBinDir, "pnpm"),
+    `#!/bin/sh
+mkdir -p "$(dirname "$1")"
+echo prepare >> "$CONTAINER_OBSERVATION_FILE"
+exit "\${CONTAINER_PREPARE_EXIT_CODE:-0}"
+`,
+  );
+  await writeFile(
+    path.join(fakeBinDir, "node"),
+    `#!/bin/sh
+echo start >> "$CONTAINER_OBSERVATION_FILE"
+`,
+  );
+  await chmod(path.join(fakeBinDir, "pnpm"), 0o755);
+  await chmod(path.join(fakeBinDir, "node"), 0o755);
+
+  return {
+    databaseFile,
+    env: {
+      ...process.env,
+      CONTAINER_OBSERVATION_FILE: observationFile,
+      DATABASE_FILE: databaseFile,
+      PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+      PREPARE_DATABASE_COMMAND: path.join(fakeBinDir, "pnpm"),
+    },
+    observationFile,
+  };
+}
+
+async function fakeDockerEnvironment(
+  targetDir: string,
+  port: number,
+  playwrightExitCode = 0,
+  dockerBuildOutputBytes = 0,
+  dockerFailurePattern = "",
+): Promise<{
+  dockerObservationFile: string;
+  env: NodeJS.ProcessEnv;
+  playwrightObservationFile: string;
+}> {
+  const fakeBinDir = path.join(targetDir, "fake-docker-bin");
+  const dockerObservationFile = path.join(targetDir, "docker-commands.txt");
+  const playwrightObservationFile = path.join(
+    targetDir,
+    "deployment-playwright.txt",
+  );
+  await mkdir(fakeBinDir);
+  await writeFile(
+    path.join(fakeBinDir, "docker"),
+    `#!/bin/sh
+echo "$*" >> "$DOCKER_OBSERVATION_FILE"
+if [ -n "$FAKE_DOCKER_FAILURE_PATTERN" ] && echo "$*" | grep -F -- "$FAKE_DOCKER_FAILURE_PATTERN" >/dev/null; then
+  echo "fake docker stdout failure for $*"
+  echo "fake docker stderr failure for $*" >&2
+  exit 23
+fi
+case "$1" in
+  build)
+    if [ "$FAKE_DOCKER_BUILD_OUTPUT_BYTES" -gt 0 ]; then
+      head -c "$FAKE_DOCKER_BUILD_OUTPUT_BYTES" /dev/zero | tr '\\0' x
+    fi
+    ;;
+  port) echo "127.0.0.1:$FAKE_DOCKER_PORT" ;;
+  inspect) echo true ;;
+  logs)
+    echo "fake container stdout diagnostics"
+    echo "fake container stderr diagnostics" >&2
+    ;;
+  volume) [ "$2" = create ] && echo fake-volume || true ;;
+  run)
+    case "$*" in
+      *unprepared*) echo "Database is not ready." >&2; exit 17 ;;
+      *) echo fake-container ;;
+    esac
+    ;;
+esac
+`,
+  );
+  await writeFile(
+    path.join(fakeBinDir, "pnpm"),
+    `#!/bin/sh
+echo "$PLAYWRIGHT_EXTERNAL_BASE_URL" >> "$PLAYWRIGHT_OBSERVATION_FILE"
+if [ "$PLAYWRIGHT_EXIT_CODE" -ne 0 ]; then
+  echo "fake playwright stdout failure"
+  echo "fake playwright stderr failure" >&2
+fi
+exit "$PLAYWRIGHT_EXIT_CODE"
+`,
+  );
+  await chmod(path.join(fakeBinDir, "docker"), 0o755);
+  await chmod(path.join(fakeBinDir, "pnpm"), 0o755);
+
+  return {
+    dockerObservationFile,
+    env: {
+      ...process.env,
+      DOCKER_OBSERVATION_FILE: dockerObservationFile,
+      FAKE_DOCKER_BUILD_OUTPUT_BYTES: String(dockerBuildOutputBytes),
+      FAKE_DOCKER_FAILURE_PATTERN: dockerFailurePattern,
+      FAKE_DOCKER_PORT: String(port),
+      PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+      PLAYWRIGHT_EXIT_CODE: String(playwrightExitCode),
+      PLAYWRIGHT_OBSERVATION_FILE: playwrightObservationFile,
+    },
+    playwrightObservationFile,
+  };
 }
 
 describe("vike-app Preset Source behavior", () => {
@@ -162,6 +333,18 @@ describe("vike-app Preset Source behavior", () => {
       path.join(targetDir, "apps/web/scripts/run-playwright.ts"),
       "utf8",
     );
+    const containerEntrypointSource = await readFile(
+      path.join(targetDir, "apps/web/scripts/container-entrypoint.sh"),
+      "utf8",
+    );
+    const prepareDatabaseSource = await readFile(
+      path.join(targetDir, "apps/web/scripts/prepare-database.sh"),
+      "utf8",
+    );
+    const standaloneDeploymentRunnerSource = await readFile(
+      path.join(targetDir, "apps/web/scripts/check-standalone-deployment.ts"),
+      "utf8",
+    );
     const devcontainer = await readJsonWithSchema(
       path.join(targetDir, ".devcontainer/devcontainer.json"),
       devcontainerSchema,
@@ -185,6 +368,9 @@ describe("vike-app Preset Source behavior", () => {
       engines: { node: "24" },
       packageManager: "pnpm@11.2.3",
     });
+    expect(rootPackageJson.scripts["check:deployment"]).toBe(
+      "pnpm --filter './apps/web' run check:deployment",
+    );
     expect(webPackageJson).toMatchObject({
       name: "@demo-vike/web",
       engines: { node: "24" },
@@ -193,11 +379,19 @@ describe("vike-app Preset Source behavior", () => {
       "@demo-vike/db",
       "workspace:*",
     );
+    expect(webPackageJson.dependencies).toHaveProperty(
+      "drizzle-orm",
+      "catalog:",
+    );
+    expect(webPackageJson.dependencies).toHaveProperty("srvx", "catalog:");
     expect(webPackageJson.scripts["lint:run"]).toBe(
       "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.scripts["lint:fix:run"]).toBe(
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
+    );
+    expect(webPackageJson.scripts["check:deployment"]).toBe(
+      "node --experimental-strip-types scripts/check-standalone-deployment.ts",
     );
     expect(dbPackageJson).toMatchObject({
       name: "@demo-vike/db",
@@ -244,8 +438,14 @@ describe("vike-app Preset Source behavior", () => {
     expect(pageSource).toContain("onMounted(() =>");
     expect(pageSource).toContain("void refreshTodos();");
     expect(playwrightConfigSource).toContain("db:prepare:test");
+    expect(playwrightConfigSource).toContain("PLAYWRIGHT_EXTERNAL_BASE_URL");
+    expect(playwrightConfigSource).toContain("...(externalServiceUrl");
+    expect(playwrightConfigSource).toContain('trace: "retain-on-failure"');
     expect(playwrightRunnerSource).toContain("DATABASE_FILE");
-    expect(playwrightRunnerSource).toContain("rm(env.DATABASE_FILE!");
+    expect(playwrightRunnerSource).toContain("awaitExternalService");
+    expect(playwrightRunnerSource).toContain("localDatabaseFile");
+    expect(playwrightRunnerSource).toContain("PLAYWRIGHT_EXTERNAL_BASE_URL");
+    expect(playwrightRunnerSource).toContain("must be a valid HTTP(S) URL");
     expect(appTsconfig.include).toContain("types/**/*.d.ts");
     expect(webTsconfig.references).toEqual(
       expect.arrayContaining([{ path: "../../packages/db" }]),
@@ -254,6 +454,9 @@ describe("vike-app Preset Source behavior", () => {
     expect(files).toContain("apps/web/types/global.d.ts");
     expect(files).toContain("apps/web/Dockerfile");
     expect(files).toContain("apps/web/Dockerfile.dockerignore");
+    expect(files).toContain("apps/web/scripts/container-entrypoint.sh");
+    expect(files).toContain("apps/web/scripts/prepare-database.sh");
+    expect(files).toContain("apps/web/scripts/check-standalone-deployment.ts");
     expect(files).toContain(
       "packages/db/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
     );
@@ -283,17 +486,15 @@ describe("vike-app Preset Source behavior", () => {
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
-    expect(checkWorkflow).toContain("docker-image:");
     expect(checkWorkflow).toContain("docker/setup-buildx-action@v3");
-    expect(checkWorkflow).toContain(
-      "docker buildx build --load --file apps/web/Dockerfile --target runtime",
+    expect(checkWorkflow.indexOf("- run: pnpm run check\n")).toBeLessThan(
+      checkWorkflow.indexOf("- run: pnpm run check:deployment\n"),
     );
-    expect(checkWorkflow).toContain(
-      "docker buildx build --load --file apps/web/Dockerfile --target database-preparation",
-    );
+    expect(checkWorkflow).not.toContain("docker-image:");
+    expect(checkWorkflow).not.toContain("docker buildx build");
     expect(dependabotConfig).toContain("directory: /apps/web");
     expect(appDockerfile).toContain("FROM node:24-bookworm-slim AS base");
-    expect(appDockerfile).toContain("FROM node:24-bookworm-slim AS runtime");
+    expect(appDockerfile).toContain("FROM application-runtime AS runtime");
     expect(appDockerfile).toContain('ARG PACKAGE_MANAGER_PIN="pnpm@11.2.3"');
     expect(appDockerfile).toContain(
       'corepack enable && corepack prepare "$PACKAGE_MANAGER_PIN" --activate',
@@ -310,16 +511,814 @@ describe("vike-app Preset Source behavior", () => {
       "pnpm exec turbo prune @demo-vike/web --docker",
     );
     expect(appDockerfile).toContain("AS database-preparation");
+    expect(appDockerfile).toContain("AS standalone");
+    expect(appDockerfile).toContain('ENV DATABASE_FILE="/data/app.sqlite"');
     expect(appDockerfile).toContain(
-      'CMD ["pnpm", "--dir", "packages/db", "run", "db:prepare:deploy"]',
+      'ENTRYPOINT ["/usr/local/bin/container-entrypoint"]',
     );
+    expect(appDockerfile).toContain('CMD ["prepare-and-start"]');
     expect(appDockerfile).toContain("COPY --from=build --chown=app:nodejs");
     expect(appDockerfile).toContain("USER app");
-    expect(appDockerfile).toContain('CMD ["node", "dist/server/index.mjs"]');
+    expect(appDockerfile).toContain('CMD ["start-only"]');
     expect(appDockerfile).not.toContain("node:latest");
     expect(appDockerfile).not.toContain("npm install -g");
     expect(appDockerfile).not.toContain("pnpm dlx");
     expect(appDockerignore).toContain("**/node_modules");
     expect(appDockerignore).toContain("*.sqlite");
+    expect(containerEntrypointSource).toContain("prepare-and-start");
+    expect(containerEntrypointSource).toContain("prepare-only");
+    expect(prepareDatabaseSource).toContain("db:prepare:deploy");
+    expect(containerEntrypointSource).toContain(
+      "exec node /app/dist/server/index.mjs",
+    );
+    expect(standaloneDeploymentRunnerSource).toContain("--target");
+    expect(standaloneDeploymentRunnerSource).toContain("standalone");
+    expect(standaloneDeploymentRunnerSource).toContain(
+      "PLAYWRIGHT_EXTERNAL_BASE_URL",
+    );
+  });
+
+  it("targets an externally managed Playwright service without a local web server", async () => {
+    const targetDir = await renderVikeProject();
+    await linkRepositoryDependencies(targetDir);
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        "--experimental-strip-types",
+        "--input-type=module",
+        "--eval",
+        "const { default: config } = await import('./playwright.config.ts'); console.log(JSON.stringify({ baseURL: config.use?.baseURL, webServer: config.webServer }));",
+      ],
+      {
+        cwd: path.join(targetDir, "apps/web"),
+        env: {
+          ...process.env,
+          PLAYWRIGHT_EXTERNAL_BASE_URL: "http://127.0.0.1:4173",
+        },
+      },
+    );
+
+    expect(JSON.parse(stdout) as unknown).toEqual({
+      baseURL: "http://127.0.0.1:4173/",
+    });
+  });
+
+  it("starts the generated local service from a clean checkout and removes its test database", async () => {
+    const repositoryPackageJson = await readJsonWithSchema(
+      path.join(process.cwd(), "package.json"),
+      v.object({ packageManager: packageManagerPinSchema }),
+    );
+    const targetDir = await renderVikeProject(
+      repositoryPackageJson.packageManager,
+    );
+    const webDir = path.join(targetDir, "apps/web");
+    const databaseFile = path.join(webDir, "node_modules/.tmp/e2e.sqlite");
+    await linkRepositoryDependencies(targetDir);
+    await mkdir(path.join(webDir, "dist/server"), { recursive: true });
+    await writeFile(
+      path.join(webDir, "dist/server/index.mjs"),
+      `import { createServer } from "node:http";
+
+createServer((_request, response) => {
+  response.writeHead(200, { "content-type": "text/html" });
+  response.end("<h1>Local service ready</h1>");
+}).listen(Number(process.env.PORT), "127.0.0.1");
+`,
+    );
+    await writeFile(
+      path.join(webDir, "test/e2e/app.spec.ts"),
+      `import { expect, test } from "@playwright/test";
+
+test("starts the local service", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Local service ready" })).toBeVisible();
+});
+`,
+    );
+    const env = {
+      ...process.env,
+      CI: "1",
+      PATH: `${repositoryBin}${path.delimiter}${process.env.PATH}`,
+    };
+    await execFileAsync(
+      process.execPath,
+      ["--experimental-strip-types", "scripts/run-playwright.ts"],
+      {
+        cwd: webDir,
+        env,
+      },
+    );
+
+    await expect(access(databaseFile)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  }, 120_000);
+
+  it("projects source accepted by the generated formatter", async () => {
+    const targetDir = await renderVikeProject();
+    await linkRepositoryDependencies(targetDir);
+
+    await execFileAsync(
+      path.join(repositoryBin, "oxfmt"),
+      [
+        "--list-different",
+        "--config",
+        "oxfmt.config.ts",
+        "apps/web/pages/index/+Page.telefunc.ts",
+        "apps/web/scripts/check-standalone-deployment.ts",
+        "apps/web/server/app.ts",
+      ],
+      { cwd: targetDir, env: process.env },
+    );
+  });
+
+  it("projects exactly two final deployment images with a slim runtime", async () => {
+    const targetDir = await renderVikeProject();
+    const dockerfile = await readFile(
+      path.join(targetDir, "apps/web/Dockerfile"),
+      "utf8",
+    );
+    const finalTargets = [
+      ...dockerfile.matchAll(/^# Final deployment target: (\S+)$/gmu),
+    ].map((match) => match[1]);
+    const runtime = dockerfile.slice(
+      dockerfile.indexOf("FROM application-runtime AS runtime"),
+    );
+    const applicationRuntime = dockerfile.slice(
+      dockerfile.indexOf("AS application-runtime"),
+      dockerfile.indexOf("FROM base AS database-preparation"),
+    );
+
+    expect(finalTargets).toEqual(["standalone", "runtime"]);
+    expect(dockerfile).toContain(
+      "pnpm --filter ./apps/web deploy --prod --legacy",
+    );
+    expect(dockerfile).toContain("-name '*@file+packages+db'");
+    expect(applicationRuntime).toContain("./node_modules");
+    expect(applicationRuntime).not.toContain("packages/db");
+    expect(applicationRuntime).not.toContain("drizzle-kit");
+    expect(dockerfile).toContain("COPY --from=application-runtime");
+    expect(runtime).toContain("FROM application-runtime AS runtime");
+    expect(applicationRuntime).toContain(
+      "COPY --from=build --chown=app:nodejs",
+    );
+    expect(applicationRuntime).toContain("--uid 1001 --gid nodejs");
+    expect(applicationRuntime).toContain(
+      "install -d -o app -g nodejs /app /data",
+    );
+    expect(applicationRuntime).toContain(
+      'ENV DATABASE_FILE="/data/app.sqlite"',
+    );
+    expect(runtime).toContain('ENV CONTAINER_CAPABILITY="start-only"');
+    expect(runtime).toContain(
+      'ENTRYPOINT ["/usr/local/bin/container-entrypoint"]',
+    );
+    expect(runtime).toContain('CMD ["start-only"]');
+    expect(
+      dockerfile.match(/LABEL org\.opencontainers\.image\.version/gu),
+    ).toHaveLength(2);
+    expect(runtime).not.toContain("--from=pruner");
+    expect(runtime).not.toContain("--from=database-preparation");
+    expect(runtime).not.toContain("pnpm");
+    expect(runtime).not.toContain("packages/db");
+    expect(runtime).not.toContain("pnpm-workspace.yaml");
+    expect(runtime).not.toContain("drizzle");
+  });
+
+  it("starts the built server from an isolated production dependency closure", async () => {
+    const repositoryPackageJson = await readJsonWithSchema(
+      path.join(process.cwd(), "package.json"),
+      v.object({ packageManager: packageManagerPinSchema }),
+    );
+    const targetDir = await renderVikeProject(
+      repositoryPackageJson.packageManager,
+    );
+    const rootTscBefore = await repositoryTscIdentity();
+    await execFileAsync(
+      "pnpm",
+      ["install", "--ignore-scripts", "--no-frozen-lockfile"],
+      {
+        cwd: targetDir,
+        env: { ...process.env, CI: "1" },
+      },
+    );
+    expect(
+      (await lstat(path.join(targetDir, "node_modules"))).isSymbolicLink(),
+    ).toBe(false);
+    expect(await repositoryTscIdentity()).toEqual(rootTscBefore);
+    const webDir = path.join(targetDir, "apps/web");
+    await execFileAsync(
+      "pnpm",
+      ["--filter", "./apps/web", "exec", "vike", "build"],
+      {
+        cwd: targetDir,
+        env: process.env,
+      },
+    );
+    const deploymentRoot = path.join(targetDir, "production-deploy");
+    await execFileAsync(
+      "pnpm",
+      [
+        "--filter",
+        "./apps/web",
+        "deploy",
+        "--prod",
+        "--legacy",
+        deploymentRoot,
+      ],
+      { cwd: targetDir, env: process.env },
+    );
+    expect(await repositoryTscIdentity()).toEqual(rootTscBefore);
+    const deployedNodeModules = path.join(deploymentRoot, "node_modules");
+    await rm(path.join(deployedNodeModules, "@demo-vike/db"), {
+      force: true,
+      recursive: true,
+    });
+    const virtualStore = path.join(deployedNodeModules, ".pnpm");
+    const workspaceDatabaseEntries = (await readdir(virtualStore)).filter(
+      (entry) => entry.endsWith("@file+packages+db"),
+    );
+    await Promise.all(
+      workspaceDatabaseEntries.map((entry) =>
+        rm(path.join(virtualStore, entry), { force: true, recursive: true }),
+      ),
+    );
+    const productionEntries = await readdir(virtualStore);
+    await expect(
+      access(path.join(deployedNodeModules, "@demo-vike/db")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      productionEntries.some((entry) => entry.includes("file+packages+db")),
+    ).toBe(false);
+    expect(
+      productionEntries.some((entry) => entry.includes("drizzle-kit")),
+    ).toBe(false);
+
+    const isolatedRoot = await mkdtemp(
+      path.join(tmpdir(), "vike-isolated-runtime-"),
+    );
+    await cp(path.join(webDir, "dist"), path.join(isolatedRoot, "dist"), {
+      recursive: true,
+    });
+    const runtimeEnvironment = {
+      ...process.env,
+      DATABASE_FILE: path.join(isolatedRoot, "unprepared.sqlite"),
+      PORT: "0",
+    };
+
+    await expect(
+      execFileAsync(process.execPath, ["dist/server/index.mjs"], {
+        cwd: isolatedRoot,
+        env: runtimeEnvironment,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("ERR_MODULE_NOT_FOUND"),
+    });
+
+    await cp(deployedNodeModules, path.join(isolatedRoot, "node_modules"), {
+      recursive: true,
+    });
+    const isolatedFiles = await generatedFilePaths(isolatedRoot);
+    expect(isolatedFiles).not.toContain("node_modules/@demo-vike/db");
+    expect(
+      isolatedFiles.some((file) => file.includes("file+packages+db")),
+    ).toBe(false);
+    expect(isolatedFiles.some((file) => file.includes("drizzle-kit"))).toBe(
+      false,
+    );
+    expect(isolatedFiles).not.toContain("scripts/prepare-database.sh");
+    expect(isolatedFiles.some((file) => file.startsWith("packages/db/"))).toBe(
+      false,
+    );
+    await expect(
+      execFileAsync(process.execPath, ["dist/server/index.mjs"], {
+        cwd: isolatedRoot,
+        env: runtimeEnvironment,
+      }),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringContaining("Database is not ready"),
+    });
+  }, 120_000);
+
+  it.each([
+    ["", "must be a non-empty HTTP(S) URL"],
+    ["ftp://example.test", "must use HTTP or HTTPS"],
+    ["not a URL", "must be a valid HTTP(S) URL"],
+  ])(
+    "rejects invalid external Playwright service input %#",
+    async (externalBaseUrl, diagnostic) => {
+      const targetDir = await renderVikeProject();
+      await linkRepositoryDependencies(targetDir);
+
+      await expect(
+        execFileAsync(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            "--input-type=module",
+            "--eval",
+            "await import('./playwright.config.ts')",
+          ],
+          {
+            cwd: path.join(targetDir, "apps/web"),
+            env: {
+              ...process.env,
+              PLAYWRIGHT_EXTERNAL_BASE_URL: externalBaseUrl,
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ stderr: expect.stringContaining(diagnostic) });
+    },
+  );
+
+  it("does not alter an externally managed database", async () => {
+    const targetDir = await renderVikeProject();
+    const webDir = path.join(targetDir, "apps/web");
+    const fakeBinDir = path.join(targetDir, "fake-bin");
+    const databaseFile = path.join(targetDir, "external.sqlite");
+    const observationFile = path.join(targetDir, "playwright-observation.json");
+    await mkdir(fakeBinDir);
+    await writeFile(databaseFile, "externally-owned");
+    const playwrightPath = path.join(fakeBinDir, "playwright");
+    await writeFile(
+      playwrightPath,
+      `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.PLAYWRIGHT_OBSERVATION_FILE, JSON.stringify({
+  args: process.argv.slice(2),
+  baseUrl: process.env.PLAYWRIGHT_EXTERNAL_BASE_URL,
+}));
+`,
+    );
+    await chmod(playwrightPath, 0o755);
+
+    const server = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        throw new Error("Could not determine test service port");
+      }
+
+      const baseUrl = `http://127.0.0.1:${address.port}`;
+      await execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "scripts/run-playwright.ts",
+          "--project=chromium",
+        ],
+        {
+          cwd: webDir,
+          env: {
+            ...process.env,
+            DATABASE_FILE: databaseFile,
+            PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
+            PLAYWRIGHT_EXTERNAL_BASE_URL: baseUrl,
+            PLAYWRIGHT_OBSERVATION_FILE: observationFile,
+          },
+        },
+      );
+
+      expect(await readFile(databaseFile, "utf8")).toBe("externally-owned");
+      expect(
+        JSON.parse(await readFile(observationFile, "utf8")) as unknown,
+      ).toEqual({
+        args: ["test", "--project=chromium"],
+        baseUrl: `${baseUrl}`,
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("rejects a relative container database path before preparation", async () => {
+    const targetDir = await renderVikeProject();
+
+    await expect(
+      execFileAsync("sh", ["scripts/container-entrypoint.sh", "prepare-only"], {
+        cwd: path.join(targetDir, "apps/web"),
+        env: { ...process.env, DATABASE_FILE: "data/app.sqlite" },
+      }),
+    ).rejects.toMatchObject({
+      code: 64,
+      stderr: expect.stringContaining("DATABASE_FILE must be an absolute path"),
+    });
+  });
+
+  it("prepares an absolute database without starting the application", async () => {
+    const targetDir = await renderVikeProject();
+    const { databaseFile, env, observationFile } =
+      await fakeContainerCommandEnvironment(targetDir);
+
+    await execFileAsync(
+      "sh",
+      ["scripts/container-entrypoint.sh", "prepare-only"],
+      { cwd: path.join(targetDir, "apps/web"), env },
+    );
+
+    expect(await readFile(observationFile, "utf8")).toBe("prepare\n");
+    await expect(access(path.dirname(databaseFile))).resolves.toBeUndefined();
+  });
+
+  it("starts only after successful deployment preparation", async () => {
+    const targetDir = await renderVikeProject();
+    const { env, observationFile } =
+      await fakeContainerCommandEnvironment(targetDir);
+
+    await execFileAsync(
+      "sh",
+      ["scripts/container-entrypoint.sh", "prepare-and-start"],
+      { cwd: path.join(targetDir, "apps/web"), env },
+    );
+
+    expect(await readFile(observationFile, "utf8")).toBe("prepare\nstart\n");
+  });
+
+  it("does not start when deployment preparation fails", async () => {
+    const targetDir = await renderVikeProject();
+    const { env, observationFile } =
+      await fakeContainerCommandEnvironment(targetDir);
+
+    await expect(
+      execFileAsync(
+        "sh",
+        ["scripts/container-entrypoint.sh", "prepare-and-start"],
+        {
+          cwd: path.join(targetDir, "apps/web"),
+          env: { ...env, CONTAINER_PREPARE_EXIT_CODE: "23" },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 23 });
+    expect(await readFile(observationFile, "utf8")).toBe("prepare\n");
+  });
+
+  it("starts without preparation for runtime-only containers", async () => {
+    const targetDir = await renderVikeProject();
+    const { env, observationFile } =
+      await fakeContainerCommandEnvironment(targetDir);
+
+    await execFileAsync(
+      "sh",
+      ["scripts/container-entrypoint.sh", "start-only"],
+      {
+        cwd: path.join(targetDir, "apps/web"),
+        env: { ...env, CONTAINER_CAPABILITY: "start-only" },
+      },
+    );
+
+    expect(await readFile(observationFile, "utf8")).toBe("start\n");
+  });
+
+  it.each(["prepare-only", "prepare-and-start"])(
+    "rejects %s in a runtime-only container",
+    async (command) => {
+      const targetDir = await renderVikeProject();
+      const { env } = await fakeContainerCommandEnvironment(targetDir);
+
+      await expect(
+        execFileAsync("sh", ["scripts/container-entrypoint.sh", command], {
+          cwd: path.join(targetDir, "apps/web"),
+          env: { ...env, CONTAINER_CAPABILITY: "start-only" },
+        }),
+      ).rejects.toMatchObject({
+        code: 64,
+        stderr: expect.stringContaining(
+          `Container capability 'start-only' does not support '${command}'`,
+        ),
+      });
+    },
+  );
+
+  it("replaces the dispatcher so the application receives container signals", async () => {
+    const targetDir = await renderVikeProject();
+    const { env, observationFile } =
+      await fakeContainerCommandEnvironment(targetDir);
+    const fakeBinDir = env.PATH!.split(path.delimiter)[0]!;
+    await writeFile(
+      path.join(fakeBinDir, "node"),
+      `#!/bin/sh
+trap 'echo signal >> "$CONTAINER_OBSERVATION_FILE"; exit 0' TERM
+echo "pid:$$" >> "$CONTAINER_OBSERVATION_FILE"
+while :; do sleep 1; done
+`,
+    );
+    await chmod(path.join(fakeBinDir, "node"), 0o755);
+
+    const child = spawn(
+      "sh",
+      ["scripts/container-entrypoint.sh", "prepare-and-start"],
+      { cwd: path.join(targetDir, "apps/web"), env },
+    );
+    const deadline = Date.now() + 5_000;
+    let observation = "";
+    while (Date.now() < deadline && !observation.includes("pid:")) {
+      try {
+        observation = await readFile(observationFile, "utf8");
+      } catch {
+        // The application has not written its PID yet.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    expect(observation).toContain(`pid:${child.pid}`);
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", () => resolve());
+    });
+    expect(await readFile(observationFile, "utf8")).toContain("signal\n");
+  });
+
+  it("checks standalone, prepared runtime, and unprepared runtime lifecycles", async () => {
+    const targetDir = await renderVikeProject();
+    const server = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        throw new Error("Could not determine fake deployment port");
+      }
+      const { dockerObservationFile, env, playwrightObservationFile } =
+        await fakeDockerEnvironment(targetDir, address.port);
+
+      await execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "apps/web/scripts/check-standalone-deployment.ts",
+        ],
+        { cwd: targetDir, env },
+      );
+
+      const dockerCommands = await readFile(dockerObservationFile, "utf8");
+      expect(dockerCommands).toContain(
+        "build --file apps/web/Dockerfile --target standalone --build-arg DEPLOYMENT_BUILD_ID=",
+      );
+      expect(dockerCommands).toContain(
+        "build --file apps/web/Dockerfile --target runtime --build-arg DEPLOYMENT_BUILD_ID=",
+      );
+      expect(dockerCommands.match(/volume create/gu)).toHaveLength(3);
+      expect(dockerCommands).toContain("run --detach");
+      expect(dockerCommands).toContain("standalone:");
+      expect(dockerCommands).toContain("prepare-only");
+      expect(dockerCommands).toContain("runtime:");
+      expect(dockerCommands).toContain("unprepared");
+      expect(dockerCommands).toContain("exec");
+      expect(dockerCommands).toContain("const expectedIdentity = 1001");
+      expect(dockerCommands).toContain("process.getuid() !== expectedIdentity");
+      expect(dockerCommands).toContain("process.getgid() !== expectedIdentity");
+      expect(dockerCommands).toContain("statSync(process.env.DATABASE_FILE)");
+      expect(dockerCommands).toContain("select count(*) as count from todos");
+      expect(dockerCommands).toContain("rm --force");
+      expect(dockerCommands).toContain("volume rm --force");
+      expect(dockerCommands).toContain("image rm --force");
+      expect(dockerCommands.match(/^rm --force/gmu)).toHaveLength(4);
+      expect(dockerCommands.match(/^volume rm --force/gmu)).toHaveLength(3);
+      expect(dockerCommands.match(/^image rm --force/gmu)).toHaveLength(2);
+      expect(await readFile(playwrightObservationFile, "utf8")).toBe(
+        `http://127.0.0.1:${address.port}\nhttp://127.0.0.1:${address.port}\n`,
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("accepts deployment command output larger than execFile's default buffer", async () => {
+    const targetDir = await renderVikeProject();
+    const server = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        throw new Error("Could not determine fake deployment port");
+      }
+      const { env } = await fakeDockerEnvironment(
+        targetDir,
+        address.port,
+        0,
+        1_200_000,
+      );
+
+      await execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "apps/web/scripts/check-standalone-deployment.ts",
+        ],
+        { cwd: targetDir, env },
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("prints container logs and cleans resources when Playwright fails", async () => {
+    const targetDir = await renderVikeProject();
+    const server = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        throw new Error("Could not determine fake deployment port");
+      }
+      const { dockerObservationFile, env } = await fakeDockerEnvironment(
+        targetDir,
+        address.port,
+        19,
+      );
+
+      await expect(
+        execFileAsync(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            "apps/web/scripts/check-standalone-deployment.ts",
+          ],
+          { cwd: targetDir, env },
+        ),
+      ).rejects.toMatchObject({
+        code: 1,
+        stderr: expect.stringMatching(
+          /Deployment mode standalone failed during playwright[\s\S]*"pnpm" "--dir" "apps\/web" "run" "test:e2e:run"[\s\S]*fake playwright stdout failure[\s\S]*fake playwright stderr failure[\s\S]*fake container stdout diagnostics[\s\S]*fake container stderr diagnostics/u,
+        ),
+      });
+
+      const dockerCommands = await readFile(dockerObservationFile, "utf8");
+      expect(dockerCommands).toContain("logs");
+      expect(dockerCommands).toContain("rm --force");
+      expect(dockerCommands).toContain("volume rm --force");
+      expect(dockerCommands).toContain("image rm --force");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("reports the real deployment mode, phase, command, and output for Docker failures", async () => {
+    const targetDir = await renderVikeProject();
+    const { env } = await fakeDockerEnvironment(
+      targetDir,
+      1,
+      0,
+      0,
+      "--target runtime",
+    );
+
+    await expect(
+      execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "apps/web/scripts/check-standalone-deployment.ts",
+        ],
+        { cwd: targetDir, env },
+      ),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringMatching(
+        /Deployment mode runtime failed during build[\s\S]*"docker" "build" "--file" "apps\/web\/Dockerfile" "--target" "runtime"[\s\S]*fake docker stdout failure[\s\S]*fake docker stderr failure/u,
+      ),
+    });
+  });
+
+  it("prints container logs and cleans resources when readiness times out", async () => {
+    const targetDir = await renderVikeProject();
+    const { dockerObservationFile, env } = await fakeDockerEnvironment(
+      targetDir,
+      1,
+    );
+
+    await expect(
+      execFileAsync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "apps/web/scripts/check-standalone-deployment.ts",
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            ...env,
+            STANDALONE_DEPLOYMENT_READINESS_TIMEOUT_MS: "50",
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringMatching(
+        /Standalone container was not ready within 50ms[\s\S]*fake container stdout diagnostics[\s\S]*fake container stderr diagnostics/u,
+      ),
+    });
+
+    const dockerCommands = await readFile(dockerObservationFile, "utf8");
+    expect(dockerCommands).toContain("logs");
+    expect(dockerCommands).toContain("rm --force");
+    expect(dockerCommands).toContain("volume rm --force");
+    expect(dockerCommands).toContain("image rm --force");
+  });
+
+  it("cleans deployment resources when interrupted", async () => {
+    const targetDir = await renderVikeProject();
+    const server = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (typeof address !== "object" || address === null) {
+        throw new Error("Could not determine fake deployment port");
+      }
+      const { dockerObservationFile, env, playwrightObservationFile } =
+        await fakeDockerEnvironment(targetDir, address.port);
+      const fakeBinDir = env.PATH!.split(path.delimiter)[0]!;
+      await writeFile(
+        path.join(fakeBinDir, "pnpm"),
+        `#!/bin/sh
+echo "$PLAYWRIGHT_EXTERNAL_BASE_URL" > "$PLAYWRIGHT_OBSERVATION_FILE"
+trap 'exit 143' TERM
+while :; do sleep 1; done
+`,
+      );
+      await chmod(path.join(fakeBinDir, "pnpm"), 0o755);
+
+      const child = spawn(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "apps/web/scripts/check-standalone-deployment.ts",
+        ],
+        { cwd: targetDir, env },
+      );
+      let deploymentStderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk: string) => {
+        deploymentStderr += chunk;
+      });
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        try {
+          await access(playwrightObservationFile);
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+      await expect(access(playwrightObservationFile)).resolves.toBeUndefined();
+      child.kill("SIGTERM");
+      await new Promise<void>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", () => resolve());
+      });
+
+      const dockerCommands = await readFile(dockerObservationFile, "utf8");
+      expect(dockerCommands).toContain("rm --force");
+      expect(dockerCommands).toContain("volume rm --force");
+      expect(dockerCommands).toContain("image rm --force");
+      expect(deploymentStderr).toMatch(
+        /fake container stdout diagnostics[\s\S]*fake container stderr diagnostics/u,
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 });

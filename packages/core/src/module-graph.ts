@@ -53,6 +53,15 @@ export type CheckComponent = {
   readonly owner: ComponentOwner;
 };
 
+export type DeploymentCheckComponent = {
+  readonly kind: "deployment-image";
+  readonly owner: PackageBoundaryOwner;
+};
+
+export type DeploymentCheckEnvironmentNeed = {
+  readonly kind: "docker-engine";
+};
+
 export type FixComponent = {
   readonly kind: FixComponentKind;
   readonly owner: ComponentOwner;
@@ -61,6 +70,7 @@ export type FixComponent = {
 export type CheckPlan = {
   readonly components: CheckComponent[];
   readonly environmentNeeds: CheckEnvironmentNeed[];
+  readonly deploymentChecks?: DeploymentCheckComponent[] | undefined;
 };
 
 export type FixPlan = {
@@ -223,6 +233,38 @@ export function renderRootCheckCommand(plan: CheckPlan): string {
       "check:run",
     ]),
   );
+}
+
+export function deploymentCheckEnvironmentNeeds(
+  check: DeploymentCheckComponent,
+): DeploymentCheckEnvironmentNeed[] {
+  switch (check.kind) {
+    case "deployment-image":
+      return [{ kind: "docker-engine" }];
+  }
+}
+
+export function deploymentCheckTaskName(
+  check: DeploymentCheckComponent,
+): "check:deployment" {
+  switch (check.kind) {
+    case "deployment-image":
+      return "check:deployment";
+  }
+}
+
+export function renderDeploymentCheckLeafCommand(
+  check: DeploymentCheckComponent,
+): string {
+  return `pnpm --filter './${check.owner.path}' run ${deploymentCheckTaskName(check)}`;
+}
+
+export function renderDeploymentCheckCommand(
+  plan: Pick<CheckPlan, "deploymentChecks">,
+): string {
+  return uniqueTaskNames(
+    (plan.deploymentChecks ?? []).map(renderDeploymentCheckLeafCommand),
+  ).join(" && ");
 }
 
 export function renderFixCommand(plan: FixPlan): string {

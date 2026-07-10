@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 import type { RenderOperation } from "./renderer.js";
 

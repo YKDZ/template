@@ -1,8 +1,8 @@
+// @template-anchor db-package-import
 import vike from "@vikejs/hono";
 import { Hono } from "hono";
 import { Telefunc } from "telefunc/node";
 
-// @template-anchor db-package-import
 import { api } from "#/server/api";
 
 const telefunc = new Telefunc();

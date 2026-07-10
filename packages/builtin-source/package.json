@@ -65,7 +65,6 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "@ykdz/template-shared": "workspace:*",
-    "typescript": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
@@ -73,6 +72,7 @@
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "@vikejs/hono": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "drizzle-kit": "catalog:",

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as ts from "@typescript/typescript6";
 import {
   findBuiltInPreset,
   loadBuiltInPresetSourceManifest,
@@ -19,7 +20,6 @@ import {
   validateProjectBlueprint as validateSharedProjectBlueprint,
 } from "@ykdz/template-shared";
 import { execa } from "execa";
-import * as ts from "typescript";
 import * as v from "valibot";
 
 const repoRoot = path.resolve(

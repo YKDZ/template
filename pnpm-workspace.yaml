@@ -4,6 +4,8 @@ packages:
 nodeLinker: hoisted
 
 catalog:
+  "@typescript/native": npm:typescript@^7.0.2
+  "@typescript/typescript6": ^6.0.2
   "@hono/node-server": ^2.0.6
   "@playwright/test": ^1.61.1
   "@tailwindcss/vite": ^4.3.2
@@ -20,6 +22,7 @@ catalog:
   oxlint: ^1.73.0
   oxlint-tsgolint: ^0.24.0
   pinia: ^3.0.4
+  srvx: ^0.11.21
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
   tsc-alias: ^1.8.17

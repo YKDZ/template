@@ -9,6 +9,8 @@ import * as v from "valibot";
 import { assembleGenerationContext } from "./generation-context.js";
 import {
   type CheckEnvironmentNeed,
+  deploymentCheckEnvironmentNeeds,
+  type DeploymentCheckEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
 } from "./module-graph.js";
 import { planNextStepInstructions } from "./next-step-instructions.js";
@@ -61,7 +63,10 @@ export type GeneratedScenarioCommandStep = {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly display: string;
-  readonly environmentNeedKind?: CheckEnvironmentNeed["kind"];
+  readonly environmentNeedKind?:
+    | CheckEnvironmentNeed["kind"]
+    | DeploymentCheckEnvironmentNeed["kind"];
+  readonly phase?: "deployment-preparation" | "deployment";
 };
 
 export type GeneratedScenarioCommandRunner = (
@@ -102,14 +107,14 @@ export type GeneratedScenarioReplayCache = {
 
 type GeneratedScenarioInstallResult = {
   readonly fingerprint?: string | undefined;
-  readonly replayed: boolean;
+  readonly baseQualityGateReplayed: boolean;
 };
 
 const defaultDeterministicToolchainEnv = {
   TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
 };
 const defaultFixtureConcurrency = 2;
-const scenarioFingerprintVersion = 1;
+const scenarioFingerprintVersion = 2;
 const storedBlueprintSchema = v.object({
   packages: v.optional(
     v.array(
@@ -461,6 +466,12 @@ async function writeScenarioReplayMarker(
   );
 }
 
+function deploymentReplayFingerprint(fingerprint: string): string {
+  return createHash("sha256")
+    .update(`${fingerprint}\0docker-engine-available`)
+    .digest("hex");
+}
+
 export function packageLeafNameForAddedPreset(
   manifest: PresetSourceManifest,
   presetName: string,
@@ -743,6 +754,51 @@ function machineVerifiableNextStepsForPreset(
     });
 }
 
+function deploymentStepsForPreset(
+  presetName: string,
+  scenario: GeneratedScenario,
+  projectDir: string,
+  manifest: PresetSourceManifest,
+  options: RequiredRunnerOptions,
+): GeneratedScenarioCommandStep[] {
+  if (scenario.set === "init") {
+    return [];
+  }
+
+  const deploymentChecks =
+    projectionPlanForPreset(presetName, projectDir, manifest, options).checkPlan
+      .deploymentChecks ?? [];
+  const needsDocker = deploymentChecks.some((check) =>
+    deploymentCheckEnvironmentNeeds(check).some(
+      (need) => need.kind === "docker-engine",
+    ),
+  );
+
+  if (!needsDocker) {
+    return [];
+  }
+
+  return [
+    {
+      id: "check-docker-engine",
+      command: "docker",
+      args: ["info", "--format", "{{.ServerVersion}}"],
+      cwd: projectDir,
+      display: "docker info --format {{.ServerVersion}}",
+      environmentNeedKind: "docker-engine",
+      phase: "deployment-preparation",
+    },
+    {
+      id: "run-deployment-check",
+      command: "pnpm",
+      args: ["run", "check:deployment"],
+      cwd: projectDir,
+      display: "pnpm run check:deployment",
+      phase: "deployment",
+    },
+  ];
+}
+
 function addedPresetEnvironmentNeeds(
   manifest: PresetSourceManifest,
   scenario: GeneratedScenario,
@@ -832,22 +888,30 @@ export function generatedScenarioQualityGateSteps(
   const extraEnvironmentSteps = addedEnvironmentSteps.filter(
     (step) => !existingDisplays.has(step.display),
   );
+  const deploymentSteps = deploymentStepsForPreset(
+    scenario.basePreset,
+    scenario,
+    projectDir,
+    manifest,
+    normalizedOptions,
+  );
 
   if (extraEnvironmentSteps.length === 0) {
-    return steps;
+    return [...steps, ...deploymentSteps];
   }
 
   const rootCheckIndex = steps.findIndex(
     (step) => step.id === "run-root-check",
   );
   if (rootCheckIndex === -1) {
-    return [...steps, ...extraEnvironmentSteps];
+    return [...steps, ...extraEnvironmentSteps, ...deploymentSteps];
   }
 
   return [
     ...steps.slice(0, rootCheckIndex),
     ...extraEnvironmentSteps,
     ...steps.slice(rootCheckIndex),
+    ...deploymentSteps,
   ];
 }
 
@@ -868,6 +932,8 @@ async function runGeneratedScenarioQualityGate(
   const requiresSerializedPlaywrightRootCheck =
     generatedScenarioRequiresSerializedRootCheck(steps);
   let replayFingerprint: string | undefined;
+  let baseQualityGateReplayed = false;
+  let baseQualityGateMarkerWritten = false;
 
   for (const step of steps) {
     if (step.id === "install-dependencies") {
@@ -877,9 +943,15 @@ async function runGeneratedScenarioQualityGate(
         options,
       );
       replayFingerprint = installResult.fingerprint;
-      if (installResult.replayed) {
-        return;
-      }
+      baseQualityGateReplayed = installResult.baseQualityGateReplayed;
+      continue;
+    }
+
+    if (
+      baseQualityGateReplayed &&
+      step.phase !== "deployment-preparation" &&
+      step.phase !== "deployment"
+    ) {
       continue;
     }
 
@@ -891,15 +963,86 @@ async function runGeneratedScenarioQualityGate(
       });
     };
 
-    if (step.id === "run-root-check" && requiresSerializedPlaywrightRootCheck) {
-      await options.rootCheckLock.run(runStep);
+    if (step.environmentNeedKind === "docker-engine") {
+      try {
+        await runStep();
+      } catch (error: unknown) {
+        const reason = error instanceof Error ? error.message : String(error);
+        options.reporter.info?.(
+          `-- Skipping deployment check for ${scenario.label}: Docker engine is unavailable (${reason})`,
+        );
+        break;
+      }
       continue;
     }
 
-    await runStep();
+    if (step.phase === "deployment") {
+      const deploymentFingerprint =
+        replayFingerprint === undefined
+          ? undefined
+          : deploymentReplayFingerprint(replayFingerprint);
+      if (
+        deploymentFingerprint !== undefined &&
+        options.replayCache?.read &&
+        (await scenarioReplayMarkerExists(
+          options.replayCache,
+          deploymentFingerprint,
+        ))
+      ) {
+        options.reporter.info?.(
+          `-- Replayed passed deployment fixture ${scenario.label}: ${deploymentFingerprint}`,
+        );
+        continue;
+      }
+      try {
+        await runStep();
+      } catch (error: unknown) {
+        throw new Error(
+          `Generated deployment command failed for ${scenario.label}; command: ${step.display}. See the cause for the deployment mode, phase, command output, and retained container logs.`,
+          { cause: error },
+        );
+      }
+      if (deploymentFingerprint !== undefined && options.replayCache?.write) {
+        await writeScenarioReplayMarker(
+          options.replayCache,
+          deploymentFingerprint,
+          scenario,
+        );
+        options.reporter.info?.(
+          `-- Stored passed deployment fixture replay marker for ${scenario.label}: ${deploymentFingerprint}`,
+        );
+      }
+      continue;
+    }
+
+    if (step.id === "run-root-check" && requiresSerializedPlaywrightRootCheck) {
+      await options.rootCheckLock.run(runStep);
+    } else {
+      await runStep();
+    }
+    if (
+      step.id === "run-root-check" &&
+      options.replayCache?.write &&
+      replayFingerprint !== undefined
+    ) {
+      await writeScenarioReplayMarker(
+        options.replayCache,
+        replayFingerprint,
+        scenario,
+      );
+      baseQualityGateMarkerWritten = true;
+      options.reporter.info?.(
+        `-- Stored passed fixture replay marker for ${scenario.label}: ${replayFingerprint}`,
+      );
+    }
   }
 
-  if (options.replayCache?.write && replayFingerprint !== undefined) {
+  if (
+    options.replayCache?.write &&
+    replayFingerprint !== undefined &&
+    !baseQualityGateMarkerWritten &&
+    !baseQualityGateReplayed
+  ) {
     await writeScenarioReplayMarker(
       options.replayCache,
       replayFingerprint,
@@ -935,9 +1078,9 @@ async function runGeneratedScenarioInstallStep(
       (await scenarioReplayMarkerExists(options.replayCache, replayFingerprint))
     ) {
       options.reporter.info?.(
-        `-- Replayed passed fixture ${scenario.label}: ${replayFingerprint}`,
+        `-- Replayed passed base quality gate for ${scenario.label}: ${replayFingerprint}`,
       );
-      return { fingerprint: replayFingerprint, replayed: true };
+      return { fingerprint: replayFingerprint, baseQualityGateReplayed: true };
     }
   }
 
@@ -951,7 +1094,7 @@ async function runGeneratedScenarioInstallStep(
     { logPrefix: scenario.label },
   );
 
-  return { fingerprint: replayFingerprint, replayed: false };
+  return { fingerprint: replayFingerprint, baseQualityGateReplayed: false };
 }
 
 async function checkGeneratedScenario(

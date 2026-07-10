@@ -18,6 +18,23 @@ export type GeneratedPackageManifestDependencies = {
   readonly peerDependencies?: Record<string, string>;
 };
 
+const templateInternalDependencyIdentities = new Set([
+  "@typescript/native",
+  "@typescript/typescript6",
+]);
+
+function assertGeneratedDependencyCatalogBoundary(
+  dependencies: readonly string[],
+): void {
+  for (const dependency of dependencies) {
+    if (templateInternalDependencyIdentities.has(dependency)) {
+      throw new Error(
+        `Generated Repository Dependency Catalog cannot include template-internal dependency: ${dependency}`,
+      );
+    }
+  }
+}
+
 function templateRepositoryRoot(): string {
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -273,6 +290,7 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
   dependencies: readonly string[],
   templateCatalog: TemplateDependencyCatalog = loadTemplateDependencyCatalog(),
 ): string {
+  assertGeneratedDependencyCatalogBoundary(dependencies);
   const catalogStart = workspaceYaml
     .split(/\r?\n/)
     .findIndex((line) => line === "catalog:");
@@ -326,6 +344,7 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
 export function renderGeneratedPnpmWorkspaceYaml(
   options: GeneratedDependencyCatalogOptions,
 ): string {
+  assertGeneratedDependencyCatalogBoundary(options.dependencies);
   const catalog = selectTemplateDependencyCatalogEntries(options.dependencies);
   const packages = options.packages ?? ["."];
   const lines = [

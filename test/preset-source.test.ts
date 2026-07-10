@@ -509,6 +509,7 @@ describe("Preset Source Manifest validation", () => {
         "oxfmt",
         "oxlint",
         "oxlint-tsgolint",
+        "srvx",
         "tailwindcss",
         "telefunc",
         "typescript",

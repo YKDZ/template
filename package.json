@@ -32,6 +32,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "@typescript/typescript6": "catalog:",
     "@ykdz/template-builtin-source": "workspace:*",
     "@ykdz/template-checks": "workspace:*",
     "@ykdz/template-core": "workspace:*",
@@ -42,7 +44,6 @@
     "oxlint-tsgolint": "catalog:",
     "tsx": "catalog:",
     "turbo": "catalog:",
-    "typescript": "catalog:",
     "valibot": "catalog:",
     "vitest": "catalog:",
     "yaml": "catalog:"

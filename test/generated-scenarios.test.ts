@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -617,6 +617,113 @@ describe("generated scenarios", () => {
     ).toBe(false);
   });
 
+  it("derives additive deployment checks for Vike Fixture Matrix scenarios from the generated Check Plan", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "vike-app" &&
+        candidate.addedPreset === "ts-lib" &&
+        candidate.linkFrom === undefined,
+    );
+
+    if (!scenario) {
+      throw new Error("Expected vike-app + ts-lib generated scenario");
+    }
+
+    const steps = generatedScenarioQualityGateSteps(
+      manifest,
+      scenario,
+      "/generated-repository",
+      "packages/fixture-ts-lib",
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      },
+    );
+    const rootCheckIndex = steps.findIndex(
+      (step) => step.id === "run-root-check",
+    );
+    const dockerIndex = steps.findIndex(
+      (step) => step.environmentNeedKind === "docker-engine",
+    );
+    const deploymentIndex = steps.findIndex(
+      (step) => step.id === "run-deployment-check",
+    );
+
+    expect(rootCheckIndex).toBeGreaterThanOrEqual(0);
+    expect(dockerIndex).toBeGreaterThan(rootCheckIndex);
+    expect(deploymentIndex).toBeGreaterThan(dockerIndex);
+    expect(steps[deploymentIndex]).toEqual({
+      id: "run-deployment-check",
+      command: "pnpm",
+      args: ["run", "check:deployment"],
+      cwd: "/generated-repository",
+      display: "pnpm run check:deployment",
+      phase: "deployment",
+    });
+  });
+
+  it("does not add Docker work to Fixture Matrix scenarios without a deployment check", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "ts-lib" && candidate.addedPreset === "ts-lib",
+    );
+
+    const steps = generatedScenarioQualityGateSteps(
+      manifest,
+      scenario!,
+      "/generated-repository",
+      "packages/fixture-ts-lib",
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      },
+    );
+
+    expect(
+      steps.some(
+        (step) =>
+          step.environmentNeedKind === "docker-engine" ||
+          step.id === "run-deployment-check",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps Docker out of init-only generated checks for deployment-capable Presets", () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(manifest, "init").runnable.find(
+      (candidate) => candidate.basePreset === "vike-app",
+    );
+    const steps = generatedScenarioQualityGateSteps(
+      manifest,
+      scenario!,
+      "/generated-repository",
+      undefined,
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      },
+    );
+
+    expect(
+      steps.some(
+        (step) =>
+          step.environmentNeedKind === "docker-engine" ||
+          step.id === "run-deployment-check",
+      ),
+    ).toBe(false);
+  });
+
   it("derives built-in Package Addition scenarios without manifest semantic skips", () => {
     const selection = selectGeneratedScenarios(
       loadBuiltInPresetSourceManifest(),
@@ -770,6 +877,297 @@ describe("generated scenarios", () => {
         expect.stringContaining("pnpm run fix"),
         expect.stringContaining("pnpm run check"),
       ]),
+    );
+  });
+
+  it("runs a generated deployment command after the Root Check when Docker is available", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "vike-app" &&
+        candidate.addedPreset === "ts-lib" &&
+        candidate.linkFrom === undefined,
+    );
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "generated-deployment-runner-"),
+    );
+    const commands: string[] = [];
+
+    await runGeneratedScenariosConcurrently(
+      manifest,
+      [scenario!],
+      workspace,
+      1,
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+        runCommand: async (command, args, cwd) => {
+          commands.push(`${command} ${args.join(" ")}`);
+
+          if (args[3] !== "add") {
+            return;
+          }
+
+          await mkdir(path.join(cwd, ".template"), { recursive: true });
+          await writeFile(
+            path.join(cwd, ".template", "blueprint.json"),
+            JSON.stringify({
+              packages: [
+                { name: "fixture-ts-lib", path: "packages/fixture-ts-lib" },
+              ],
+            }),
+            "utf8",
+          );
+        },
+        reporter: {},
+      },
+    );
+
+    const rootCheckIndex = commands.indexOf("pnpm run check");
+    const dockerIndex = commands.indexOf(
+      "docker info --format {{.ServerVersion}}",
+    );
+    const deploymentIndex = commands.indexOf("pnpm run check:deployment");
+    expect(rootCheckIndex).toBeGreaterThanOrEqual(0);
+    expect(dockerIndex).toBeGreaterThan(rootCheckIndex);
+    expect(deploymentIndex).toBeGreaterThan(dockerIndex);
+  });
+
+  it("clearly skips only the deployment phase when Docker is unavailable", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "vike-app" &&
+        candidate.addedPreset === "ts-lib" &&
+        candidate.linkFrom === undefined,
+    );
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "generated-deployment-skip-"),
+    );
+    const commands: string[] = [];
+    const messages: string[] = [];
+    const replayCacheDirectory = await mkdtemp(
+      path.join(tmpdir(), "generated-deployment-skip-cache-"),
+    );
+
+    await runGeneratedScenariosConcurrently(
+      manifest,
+      [scenario!],
+      workspace,
+      1,
+      {
+        repoRoot: "/repo",
+        cliPath: "/repo/packages/cli/src/cli.ts",
+        projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+        replayCache: {
+          directory: replayCacheDirectory,
+          read: false,
+          write: true,
+        },
+        runCommand: async (command, args, cwd) => {
+          commands.push(`${command} ${args.join(" ")}`);
+
+          if (command === "docker" && args[0] === "info") {
+            throw new Error("Docker daemon is unavailable");
+          }
+
+          if (args[3] !== "add") {
+            return;
+          }
+
+          await mkdir(path.join(cwd, ".template"), { recursive: true });
+          await writeFile(
+            path.join(cwd, ".template", "blueprint.json"),
+            JSON.stringify({
+              packages: [
+                { name: "fixture-ts-lib", path: "packages/fixture-ts-lib" },
+              ],
+            }),
+            "utf8",
+          );
+        },
+        reporter: { info: (message) => messages.push(message) },
+      },
+    );
+
+    expect(commands).toContain("pnpm run check");
+    expect(commands).not.toContain("pnpm run check:deployment");
+    expect(messages).toContainEqual(
+      expect.stringMatching(
+        /Skipping deployment check for vike-app \+ ts-lib: Docker engine is unavailable/u,
+      ),
+    );
+    expect(await readdir(replayCacheDirectory)).toHaveLength(1);
+  });
+
+  it("partitions deployment replay from the current Docker capability", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "vike-app" &&
+        candidate.addedPreset === "ts-lib" &&
+        candidate.linkFrom === undefined,
+    );
+    const cacheDirectory = await mkdtemp(
+      path.join(tmpdir(), "generated-deployment-replay-cache-"),
+    );
+
+    async function run(
+      dockerAvailable: boolean,
+      read: boolean,
+      write: boolean,
+    ): Promise<{ commands: string[]; messages: string[] }> {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "generated-deployment-replay-workspace-"),
+      );
+      const commands: string[] = [];
+      const messages: string[] = [];
+      await runGeneratedScenariosConcurrently(
+        manifest,
+        [scenario!],
+        workspace,
+        1,
+        {
+          repoRoot: "/repo",
+          cliPath: "/repo/packages/cli/src/cli.ts",
+          projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+          replayCache: { directory: cacheDirectory, read, write },
+          runCommand: async (command, args, cwd) => {
+            commands.push(`${command} ${args.join(" ")}`);
+            if (command === "docker" && !dockerAvailable) {
+              throw new Error("Docker daemon is unavailable");
+            }
+            if (args[3] === "add") {
+              await mkdir(path.join(cwd, ".template"), { recursive: true });
+              await writeFile(
+                path.join(cwd, ".template", "blueprint.json"),
+                JSON.stringify({
+                  packages: [
+                    { name: "fixture-ts-lib", path: "packages/fixture-ts-lib" },
+                  ],
+                }),
+                "utf8",
+              );
+            }
+          },
+          reporter: { info: (message) => messages.push(message) },
+        },
+      );
+      return { commands, messages };
+    }
+
+    const unavailableMiss = await run(false, false, true);
+    expect(unavailableMiss.commands).toContain("pnpm run check");
+    expect(unavailableMiss.commands).not.toContain("pnpm run check:deployment");
+
+    const availableAfterUnavailable = await run(true, true, true);
+    expect(availableAfterUnavailable.commands).not.toContain("pnpm run check");
+    expect(availableAfterUnavailable.commands).toContain(
+      "docker info --format {{.ServerVersion}}",
+    );
+    expect(availableAfterUnavailable.commands).toContain(
+      "pnpm run check:deployment",
+    );
+
+    const availableReplay = await run(true, true, false);
+    expect(availableReplay.commands).toContain(
+      "docker info --format {{.ServerVersion}}",
+    );
+    expect(availableReplay.commands).not.toContain("pnpm run check:deployment");
+    expect(availableReplay.messages).toContainEqual(
+      expect.stringMatching(/Replayed passed deployment fixture/u),
+    );
+
+    const unavailableAfterAvailable = await run(false, true, false);
+    expect(unavailableAfterAvailable.commands).toContain(
+      "docker info --format {{.ServerVersion}}",
+    );
+    expect(unavailableAfterAvailable.commands).not.toContain(
+      "pnpm run check:deployment",
+    );
+    expect(unavailableAfterAvailable.messages).toContainEqual(
+      expect.stringMatching(/Skipping deployment check/u),
+    );
+  });
+
+  it("reports the generated scenario, deployment modes, command, and container logs on deployment failure", async () => {
+    const manifest = loadBuiltInPresetSourceManifest();
+    const scenario = selectGeneratedScenarios(
+      manifest,
+      "package-addition-matrix",
+    ).runnable.find(
+      (candidate) =>
+        candidate.basePreset === "vike-app" &&
+        candidate.addedPreset === "ts-lib" &&
+        candidate.linkFrom === undefined,
+    );
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "generated-deployment-failure-"),
+    );
+    let failure: unknown;
+
+    try {
+      await runGeneratedScenariosConcurrently(
+        manifest,
+        [scenario!],
+        workspace,
+        1,
+        {
+          repoRoot: "/repo",
+          cliPath: "/repo/packages/cli/src/cli.ts",
+          projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+          runCommand: async (command, args, cwd) => {
+            if (command === "pnpm" && args[1] === "check:deployment") {
+              throw new Error("standalone container logs:\nstartup failed");
+            }
+
+            if (args[3] !== "add") {
+              return;
+            }
+
+            await mkdir(path.join(cwd, ".template"), { recursive: true });
+            await writeFile(
+              path.join(cwd, ".template", "blueprint.json"),
+              JSON.stringify({
+                packages: [
+                  {
+                    name: "fixture-ts-lib",
+                    path: "packages/fixture-ts-lib",
+                  },
+                ],
+              }),
+              "utf8",
+            );
+          },
+          reporter: {},
+        },
+      );
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      "Fixture scenario failed: vike-app + ts-lib",
+    );
+    expect((failure as Error).cause).toBeInstanceOf(Error);
+    const deploymentFailure = (failure as Error).cause as Error;
+    expect(deploymentFailure.message).toMatch(
+      /Generated deployment command failed.*pnpm run check:deployment.*cause.*mode.*phase.*container logs/u,
+    );
+    expect(deploymentFailure.cause).toBeInstanceOf(Error);
+    expect((deploymentFailure.cause as Error).message).toContain(
+      "standalone container logs:\nstartup failed",
     );
   });
 

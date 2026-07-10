@@ -49,8 +49,10 @@ import type { GenerationContext } from "./generation-context.js";
 import {
   type CheckPlan,
   type ComponentOwner,
+  type DeploymentCheckComponent,
   type FixPlan,
   playwrightBrowserAssetsEnvironmentNeed,
+  renderDeploymentCheckCommand,
   renderCheckLeafCommand,
   renderFixCommand,
   renderFixLeafCommand,
@@ -70,7 +72,6 @@ import type {
 } from "./preset-projection.js";
 import type { PresetSourceManifestPreset } from "./preset-source.js";
 import type {
-  CiDockerImageBuild,
   DependencyEcosystem,
   DependencyMaintenancePolicy,
   DependabotDirectory,
@@ -139,6 +140,7 @@ type ProjectionCompositionState = {
   sourceRoots: Record<string, string>;
   rootCheckComponents: CheckPlan["components"];
   rootCheckEnvironmentNeeds: CheckPlan["environmentNeeds"];
+  deploymentCheckComponents: DeploymentCheckComponent[];
   packageCheckComponents: CheckPlan["components"];
   rootFixComponents: FixPlan["components"];
   packageFixComponents: FixPlan["components"];
@@ -151,7 +153,6 @@ type ProjectionCompositionState = {
   dependencyMaintenanceExtraDirectories: Partial<
     Record<DependencyEcosystem, DependabotDirectory[]>
   >;
-  ciDockerImageBuild?: CiDockerImageBuild | undefined;
   package?: WorkspaceLibraryPackageCapabilityDeclaration;
   nodeWorkspace?: WorkspaceNodePackagesCapabilityDeclaration;
   rustWorkspace?: RustBinaryWorkspaceCapabilityDeclaration;
@@ -260,16 +261,10 @@ const capabilityInterpreters = {
       state.operationFactories.push(workspaceNodePackagesOperations);
       if (hasVikePackage(capability)) {
         state.dependencyMaintenanceExtraDirectories.docker = ["/apps/web"];
-        state.ciDockerImageBuild = {
-          dockerfile: "apps/web/Dockerfile",
-          targets: [
-            { name: "runtime", tag: "vike-app:check" },
-            {
-              name: "database-preparation",
-              tag: "vike-app-db-prepare:check",
-            },
-          ],
-        };
+        state.deploymentCheckComponents.push({
+          kind: "deployment-image",
+          owner: { kind: "package-boundary", path: "apps/web" },
+        });
       }
       if (capability.packages.length > 1) {
         state.rootScriptFragments.dev = "turbo run dev --parallel";
@@ -532,6 +527,9 @@ export function interpretPresetProjectionDeclaration(options: {
   const checkPlan: CheckPlan = {
     components: state.rootCheckComponents,
     environmentNeeds: state.rootCheckEnvironmentNeeds,
+    ...(state.deploymentCheckComponents.length === 0
+      ? {}
+      : { deploymentChecks: state.deploymentCheckComponents }),
   };
   const fixPlan: FixPlan = {
     components: state.rootFixComponents,
@@ -574,7 +572,6 @@ export function interpretPresetProjectionDeclaration(options: {
     ),
     checkPlan,
     fixPlan,
-    ciDockerImageBuild: state.ciDockerImageBuild,
     dependencyMaintenancePolicy,
     packageScripts,
     capabilities: completePlanCapabilityFlags(state.flags),
@@ -707,6 +704,7 @@ function createProjectionCompositionState(
     sourceRoots: {},
     rootCheckComponents: [],
     rootCheckEnvironmentNeeds: [],
+    deploymentCheckComponents: [],
     packageCheckComponents: [],
     rootFixComponents: [],
     packageFixComponents: [],
@@ -717,7 +715,6 @@ function createProjectionCompositionState(
     packageDevDependencies: new Set(),
     dependencyMaintenanceEcosystems: [],
     dependencyMaintenanceExtraDirectories: {},
-    ciDockerImageBuild: undefined,
     editorCustomizationCapabilities: [],
     operationFactories: [],
     flags: {},
@@ -1256,6 +1253,9 @@ function projectRootPackageScripts(
 
   return {
     check: `pnpm run check:boundaries && ${renderRootCheckCommand(checkPlan)}`,
+    ...(checkPlan.deploymentChecks === undefined
+      ? {}
+      : { "check:deployment": renderDeploymentCheckCommand(checkPlan) }),
     fix: renderFixCommand(fixPlan),
     ...rootTaskEntrypoints(checkPlan, fixPlan),
     ...directFragments,
@@ -1684,7 +1684,9 @@ function vikePackageJson(
     dependencies: {
       ...packageLinkDependencies,
       "@vikejs/hono": "catalog:",
+      "drizzle-orm": "catalog:",
       hono: "catalog:",
+      srvx: "catalog:",
       telefunc: "catalog:",
       vike: "catalog:",
       "vike-vue": "catalog:",
@@ -2323,6 +2325,8 @@ function nodePackageScripts(
       "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:prepare:dev";
     return {
       "build:run": "vike build",
+      "check:deployment":
+        "node --experimental-strip-types scripts/check-standalone-deployment.ts",
       dev: `${dbCommand} && vike dev`,
       "format:check:run":
         "oxfmt --list-different --config ../../oxfmt.config.ts .",

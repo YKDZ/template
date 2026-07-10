@@ -64,6 +64,22 @@ function scenarioNeedsPlaywrightEnvironment(
   ).some((step) => step.environmentNeedKind === "playwright-browser-assets");
 }
 
+function scenarioNeedsDeployment(scenario: GeneratedScenario): boolean {
+  return generatedScenarioQualityGateSteps(
+    loadBuiltInPresetSourceManifest(),
+    scenario,
+    "/generated-repository",
+    scenario.addedPreset === undefined ? undefined : "packages/fixture-added",
+    {
+      repoRoot,
+      cliPath: path.join(repoRoot, "packages", "cli", "src", "cli.ts"),
+      projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+      reporter: {},
+      runCommand: async () => {},
+    },
+  ).some((step) => step.id === "run-deployment-check");
+}
+
 async function writeExecutable(
   filePath: string,
   content: string,
@@ -80,6 +96,7 @@ describe("fixture checks", () => {
     const binDir = path.join(workspace, "bin");
     const logPath = path.join(workspace, "commands.jsonl");
     const officialFetchLogPath = path.join(workspace, "official-fetches.txt");
+    const replayCachePath = path.join(workspace, "replay-cache");
     const fetchGuardPath = path.join(
       workspace,
       "guard-official-toolchain-fetches.mjs",
@@ -182,6 +199,24 @@ describe("fixture checks", () => {
       ].join("\n"),
     );
     await writeExecutable(
+      path.join(binDir, "docker"),
+      [
+        "#!/usr/bin/env node",
+        'import { appendFileSync } from "node:fs";',
+        "appendFileSync(",
+        "  process.env.FIXTURE_COMMAND_LOG,",
+        "  JSON.stringify({",
+        "    command: 'docker',",
+        "    args: process.argv.slice(2),",
+        "    cwd: process.cwd(),",
+        "    ci: process.env.CI ?? null",
+        "  }) + '\\n'",
+        ");",
+        "process.exit(process.env.FIXTURE_DOCKER_AVAILABLE === '1' ? 0 : 1);",
+        "",
+      ].join("\n"),
+    );
+    await writeExecutable(
       path.join(binDir, "sh"),
       [
         "#!/usr/bin/env node",
@@ -208,7 +243,7 @@ describe("fixture checks", () => {
       ].join("\n"),
     );
 
-    await execa(
+    const dockerAvailableRun = await execa(
       realPnpm,
       [
         "exec",
@@ -221,8 +256,12 @@ describe("fixture checks", () => {
         cwd: repoRoot,
         env: {
           FIXTURE_COMMAND_LOG: logPath,
+          FIXTURE_DOCKER_AVAILABLE: "1",
           OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
           TEMPLATE_FIXTURE_CONCURRENCY: "4",
+          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: replayCachePath,
+          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "0",
+          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: "1",
           NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
             .filter(Boolean)
             .join(" "),
@@ -231,6 +270,8 @@ describe("fixture checks", () => {
         },
       },
     );
+
+    expect(dockerAvailableRun.exitCode).toBe(0);
 
     const records = (await readFile(logPath, "utf8"))
       .trim()
@@ -333,6 +374,19 @@ describe("fixture checks", () => {
     const generatedRootChecks = pnpmRecords.filter(
       (record) => record.args[0] === "run" && record.args[1] === "check",
     );
+    const generatedDeploymentChecks = pnpmRecords.filter(
+      (record) =>
+        record.args[0] === "run" && record.args[1] === "check:deployment",
+    );
+    const deploymentScenarios = fixtureScenarios.filter(
+      scenarioNeedsDeployment,
+    );
+    expect(generatedDeploymentChecks).toHaveLength(deploymentScenarios.length);
+    expect(
+      records.filter(
+        (record) => record.command === "docker" && record.args[0] === "info",
+      ),
+    ).toHaveLength(deploymentScenarios.length);
     expect(generatedRootChecks).toHaveLength(fixtureScenarios.length);
     for (const scenario of fixtureScenarios) {
       expect(
@@ -385,6 +439,14 @@ describe("fixture checks", () => {
         (record) =>
           record.command === "pnpm" && record.args.join(" ") === "run fix",
       );
+      const dockerIndex = projectRecords.findIndex(
+        (record) => record.command === "docker" && record.args[0] === "info",
+      );
+      const deploymentIndex = projectRecords.findIndex(
+        (record) =>
+          record.command === "pnpm" &&
+          record.args.join(" ") === "run check:deployment",
+      );
 
       expect(lockfileInstallIndex).toBeGreaterThanOrEqual(0);
       expect(fetchIndex).toBeGreaterThan(lockfileInstallIndex);
@@ -395,11 +457,153 @@ describe("fixture checks", () => {
       if (needsPlaywrightEnvironment) {
         expect(playwrightIndex).toBeGreaterThan(fixIndex);
         expect(checkIndex).toBeGreaterThan(playwrightIndex);
-        continue;
+      } else {
+        expect(playwrightIndex).toBe(-1);
+        expect(checkIndex).toBeGreaterThan(fixIndex);
       }
 
-      expect(playwrightIndex).toBe(-1);
-      expect(checkIndex).toBeGreaterThan(fixIndex);
+      if (scenario !== undefined && scenarioNeedsDeployment(scenario)) {
+        expect(dockerIndex).toBeGreaterThan(checkIndex);
+        expect(deploymentIndex).toBeGreaterThan(dockerIndex);
+      } else {
+        expect(dockerIndex).toBe(-1);
+        expect(deploymentIndex).toBe(-1);
+      }
     }
+
+    await writeFile(logPath, "", "utf8");
+    const dockerUnavailableRun = await execa(
+      realPnpm,
+      [
+        "exec",
+        "tsx",
+        "--tsconfig",
+        "tsconfig.json",
+        "packages/checks/src/check-fixtures.ts",
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          FIXTURE_COMMAND_LOG: logPath,
+          FIXTURE_DOCKER_AVAILABLE: "0",
+          OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
+          TEMPLATE_FIXTURE_CONCURRENCY: "4",
+          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: replayCachePath,
+          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1",
+          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: "0",
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import=${fetchGuardPath}`]
+            .filter(Boolean)
+            .join(" "),
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          REAL_PNPM: realPnpm,
+        },
+      },
+    );
+    const unavailableRecords = (await readFile(logPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map(
+        (line): CommandRecord =>
+          v.parse(commandRecordSchema, JSON.parse(line) as unknown),
+      );
+
+    expect(dockerUnavailableRun.stdout).toMatch(
+      /Skipping deployment check for vike-app \+ ts-lib/u,
+    );
+    expect(dockerUnavailableRun.stdout).not.toMatch(
+      /Replayed passed deployment fixture vike-app \+ ts-lib/u,
+    );
+    expect(
+      unavailableRecords.filter(
+        (record) =>
+          record.command === "pnpm" && record.args.join(" ") === "run check",
+      ),
+    ).toHaveLength(0);
+    expect(
+      unavailableRecords.filter(
+        (record) =>
+          record.command === "pnpm" &&
+          record.args.join(" ") ===
+            "install --lockfile-only --prefer-offline --no-frozen-lockfile",
+      ),
+    ).toHaveLength(fixtureScenarios.length);
+    expect(unavailableRecords).not.toContainEqual(
+      expect.objectContaining({ args: ["run", "check:deployment"] }),
+    );
+
+    const reverseReplayCachePath = path.join(workspace, "reverse-replay-cache");
+    const runReplayTransition = async (
+      dockerAvailable: "0" | "1",
+      read: "0" | "1",
+      write: "0" | "1",
+    ) => {
+      await writeFile(logPath, "", "utf8");
+      const result = await execa(
+        realPnpm,
+        [
+          "exec",
+          "tsx",
+          "--tsconfig",
+          "tsconfig.json",
+          "packages/checks/src/check-fixtures.ts",
+        ],
+        {
+          cwd: repoRoot,
+          env: {
+            FIXTURE_COMMAND_LOG: logPath,
+            FIXTURE_DOCKER_AVAILABLE: dockerAvailable,
+            OFFICIAL_TOOLCHAIN_FETCH_LOG: officialFetchLogPath,
+            TEMPLATE_FIXTURE_CONCURRENCY: "4",
+            TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: reverseReplayCachePath,
+            TEMPLATE_FIXTURE_REPLAY_CACHE_READ: read,
+            TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: write,
+            NODE_OPTIONS: [
+              process.env.NODE_OPTIONS,
+              `--import=${fetchGuardPath}`,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+            REAL_PNPM: realPnpm,
+          },
+        },
+      );
+      const transitionRecords = (await readFile(logPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map(
+          (line): CommandRecord =>
+            v.parse(commandRecordSchema, JSON.parse(line) as unknown),
+        );
+      return { result, transitionRecords };
+    };
+
+    const unavailableMiss = await runReplayTransition("0", "0", "1");
+    expect(unavailableMiss.result.stdout).toMatch(
+      /Skipping deployment check for vike-app \+ ts-lib/u,
+    );
+    expect(unavailableMiss.transitionRecords).not.toContainEqual(
+      expect.objectContaining({ args: ["run", "check:deployment"] }),
+    );
+
+    const availableAfterUnavailable = await runReplayTransition("1", "1", "1");
+    expect(
+      availableAfterUnavailable.transitionRecords.filter(
+        (record) => record.args.join(" ") === "run check:deployment",
+      ),
+    ).toHaveLength(deploymentScenarios.length);
+
+    const availableReplay = await runReplayTransition("1", "1", "0");
+    expect(
+      availableReplay.transitionRecords.filter(
+        (record) => record.command === "docker" && record.args[0] === "info",
+      ),
+    ).toHaveLength(deploymentScenarios.length);
+    expect(availableReplay.transitionRecords).not.toContainEqual(
+      expect.objectContaining({ args: ["run", "check:deployment"] }),
+    );
+    expect(availableReplay.result.stdout).toMatch(
+      /Replayed passed deployment fixture vike-app \+ ts-lib/u,
+    );
   }, 240_000);
 });

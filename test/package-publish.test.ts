@@ -41,6 +41,7 @@ const cliPackageJsonSchema = v.object({
   bin: v.record(v.string(), v.string()),
   bundleDependencies: v.optional(v.array(v.string())),
   dependencies: v.optional(v.record(v.string(), v.string())),
+  devDependencies: v.optional(v.record(v.string(), v.string())),
   files: v.array(v.string()),
   license: v.optional(v.string()),
   name: v.string(),
@@ -56,6 +57,7 @@ const builtinSourcePackageJsonSchema = v.object({
   private: v.boolean(),
 });
 const runtimePackageJsonSchema = v.object({
+  dependencies: v.optional(v.record(v.string(), v.string())),
   files: v.array(v.string()),
   name: v.string(),
   private: v.boolean(),
@@ -473,6 +475,30 @@ describe("package publishing", () => {
     expect(sharedPackageJson.files).toEqual(["dist"]);
   });
 
+  it("carries the TypeScript 6 Compiler API across the published CLI runtime boundary", async () => {
+    const cliPackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/cli/package.json"),
+      cliPackageJsonSchema,
+    );
+    const corePackageJson = await readJsonWithSchema(
+      path.join(repoRoot, "packages/core/package.json"),
+      runtimePackageJsonSchema,
+    );
+
+    expect(corePackageJson.dependencies).toMatchObject({
+      "@typescript/typescript6": expect.any(String),
+    });
+    expect(cliPackageJson.dependencies).toMatchObject({
+      "@typescript/typescript6": expect.any(String),
+    });
+    expect(cliPackageJson.devDependencies).toMatchObject({
+      "@typescript/native": expect.any(String),
+    });
+    expect(cliPackageJson.bundleDependencies).not.toContain(
+      "@typescript/typescript6",
+    );
+  });
+
   it("does not treat Preset Source behavior tests as packable template source", async () => {
     expect(await packageFiles()).not.toEqual(
       expect.arrayContaining([expect.stringMatching(presetSourceTestPattern)]),
@@ -688,6 +714,19 @@ describe("package publishing", () => {
           "utf8",
         );
         expect(copiedTemplateSource.length).toBeGreaterThan(0);
+
+        if (presetName === "vike-app") {
+          const transformedServerSource = await readFile(
+            path.join(generatedDir, "apps/web/server/app.ts"),
+            "utf8",
+          );
+          expect(transformedServerSource).toMatch(
+            /import \{ createDatabase \} from "@[^"]+\/db";/,
+          );
+          expect(transformedServerSource).not.toContain(
+            "@template-anchor db-package-import",
+          );
+        }
       }
 
       const templateBin = path.join(consumerDir, "node_modules/.bin/template");

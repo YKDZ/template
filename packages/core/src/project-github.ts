@@ -1,6 +1,8 @@
 import {
   type CheckEnvironmentNeed,
   type CheckPlan,
+  deploymentCheckEnvironmentNeeds,
+  deploymentCheckTaskName,
   renderPlaywrightBrowserInstallCommand,
 } from "./module-graph.js";
 
@@ -18,14 +20,6 @@ export type CiEnvironmentPreparation = {
 export type PnpmTaskLayer = {
   readonly installCommand: "pnpm install";
   readonly checkCommand: "pnpm run check";
-};
-
-export type CiDockerImageBuild = {
-  readonly dockerfile: string;
-  readonly targets: readonly {
-    readonly name: string;
-    readonly tag: string;
-  }[];
 };
 
 export type DependencyEcosystem =
@@ -55,7 +49,6 @@ type ProjectCheckWorkflowOptions = {
     | Partial<CiEnvironmentPreparation>
     | undefined;
   readonly taskLayer?: PnpmTaskLayer | undefined;
-  readonly dockerImageBuild?: CiDockerImageBuild | undefined;
 };
 
 const defaultCiCapability: CiCapability = {
@@ -79,6 +72,12 @@ export function projectCheckWorkflow(
     ...options.environmentPreparation,
   };
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
+  const deploymentChecks = options.checkPlan.deploymentChecks ?? [];
+  const needsDocker = deploymentChecks.some((check) =>
+    deploymentCheckEnvironmentNeeds(check).some(
+      (need) => need.kind === "docker-engine",
+    ),
+  );
   const lines = [
     `name: ${capability.workflowName}`,
     "",
@@ -104,6 +103,10 @@ export function projectCheckWorkflow(
     );
   }
 
+  if (needsDocker) {
+    lines.push("      - uses: docker/setup-buildx-action@v3");
+  }
+
   if (environmentPreparation.rustToolchain) {
     lines.push(
       "      - uses: dtolnay/rust-toolchain@stable",
@@ -119,22 +122,14 @@ export function projectCheckWorkflow(
       (need) => `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
     ),
   );
-  lines.push(`      - run: ${taskLayer.checkCommand}`, "");
-
-  if (options.dockerImageBuild !== undefined) {
+  lines.push(`      - run: ${taskLayer.checkCommand}`);
+  const deploymentCheck = deploymentChecks[0];
+  if (deploymentCheck !== undefined) {
     lines.push(
-      "  docker-image:",
-      `    runs-on: ${capability.runner}`,
-      "    steps:",
-      "      - uses: actions/checkout@v7",
-      "      - uses: docker/setup-buildx-action@v3",
-      ...options.dockerImageBuild.targets.map(
-        (target) =>
-          `      - run: docker buildx build --load --file ${options.dockerImageBuild!.dockerfile} --target ${target.name} --tag ${target.tag} .`,
-      ),
-      "",
+      `      - run: pnpm run ${deploymentCheckTaskName(deploymentCheck)}`,
     );
   }
+  lines.push("");
 
   return lines.join("\n");
 }

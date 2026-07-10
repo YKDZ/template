@@ -16,6 +16,8 @@ import {
   projectVueHonoWebPackageScripts,
 } from "@ykdz/template-builtin-source/templates/vue-hono-app/projection";
 import {
+  deploymentCheckEnvironmentNeeds,
+  renderDeploymentCheckCommand,
   renderPlaywrightBrowserInstallCommand,
   renderRootCheckCommand,
   renderFixCommand,
@@ -482,6 +484,90 @@ describe("module graph plans", () => {
       "      - uses: dtolnay/rust-toolchain@stable\n        with:\n          components: rustfmt, clippy",
     );
     expect(rustWorkflow).toContain("      - uses: Swatinem/rust-cache@v2");
+  });
+
+  it("derives additive deployment checks and Docker preparation from Check Plan facts", () => {
+    const vikeProjection = findBuiltInPresetProjection("vike-app");
+    const vikePlan = vikeProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-vike" },
+      preset: "vike-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: vikeProjection!.blueprint({ targetDir: "/tmp/demo-vike" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+    const deploymentCheck = vikePlan.checkPlan.deploymentChecks?.[0];
+
+    expect(deploymentCheck).toEqual({
+      kind: "deployment-image",
+      owner: { kind: "package-boundary", path: "apps/web" },
+    });
+    expect(deploymentCheckEnvironmentNeeds(deploymentCheck!)).toEqual([
+      { kind: "docker-engine" },
+    ]);
+    expect(vikePlan.packageScripts.check).not.toContain("check:deployment");
+    expect(vikePlan.packageScripts["check:deployment"]).toBe(
+      "pnpm --filter './apps/web' run check:deployment",
+    );
+
+    const workflow = projectCheckWorkflow({ checkPlan: vikePlan.checkPlan });
+    expect(workflow).toContain("docker/setup-buildx-action@v3");
+    expect(workflow.indexOf("      - run: pnpm run check\n")).toBeLessThan(
+      workflow.indexOf("      - run: pnpm run check:deployment\n"),
+    );
+    expect(workflow).not.toMatch(/docker (?:build|push|login)/u);
+
+    const vueProjection = findBuiltInPresetProjection("vue-app");
+    const vuePlan = vueProjection!.project({
+      projectName: { kind: "ProjectName", value: "demo-vue" },
+      preset: "vue-app",
+      packageManager: { kind: "PackageManager", value: "pnpm" },
+      blueprint: vueProjection!.blueprint({ targetDir: "/tmp/demo-vue" }),
+      toolchain: {
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.2.3" },
+        source: "online",
+        diagnostics: [],
+      },
+    });
+    const vueWorkflow = projectCheckWorkflow({ checkPlan: vuePlan.checkPlan });
+
+    expect(vuePlan.checkPlan.deploymentChecks).toBeUndefined();
+    expect(vuePlan.packageScripts).not.toHaveProperty("check:deployment");
+    expect(vueWorkflow).not.toContain("docker/setup-buildx-action");
+    expect(vueWorkflow).not.toContain("check:deployment");
+  });
+
+  it("aggregates deployment check owners behind one CI task entrypoint", () => {
+    const deploymentChecks = [
+      {
+        kind: "deployment-image" as const,
+        owner: { kind: "package-boundary" as const, path: "apps/web" },
+      },
+      {
+        kind: "deployment-image" as const,
+        owner: { kind: "package-boundary" as const, path: "apps/admin" },
+      },
+    ];
+    const checkPlan = {
+      components: [],
+      deploymentChecks,
+      environmentNeeds: [],
+    };
+
+    expect(renderDeploymentCheckCommand(checkPlan)).toBe(
+      "pnpm --filter './apps/web' run check:deployment && pnpm --filter './apps/admin' run check:deployment",
+    );
+
+    const workflow = projectCheckWorkflow({ checkPlan });
+    expect(workflow.match(/docker\/setup-buildx-action@v3/gu)).toHaveLength(1);
+    expect(workflow.match(/- run: pnpm run check:deployment/gu)).toHaveLength(
+      1,
+    );
   });
 
   it("projects Dependabot config from Dependency Maintenance Policy separately from Check Plans", () => {

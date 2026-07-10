@@ -11,10 +11,7 @@ import {
   planNextStepInstructions,
   type NextStepInstruction,
 } from "./next-step-instructions.js";
-import type {
-  CiDockerImageBuild,
-  DependencyMaintenancePolicy,
-} from "./project-github.js";
+import type { DependencyMaintenancePolicy } from "./project-github.js";
 import type { RenderOperation } from "./renderer.js";
 
 export type PresetPackageAdditionOptions = {
@@ -53,7 +50,6 @@ export type PresetProjectionPlan = {
   readonly operations: readonly RenderOperation[];
   readonly checkPlan: CheckPlan;
   readonly fixPlan: FixPlan;
-  readonly ciDockerImageBuild?: CiDockerImageBuild | undefined;
   readonly dependencyMaintenancePolicy: DependencyMaintenancePolicy;
   readonly packageScripts: Record<string, string>;
   readonly capabilities: {

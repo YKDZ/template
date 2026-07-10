@@ -2,13 +2,13 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as ts from "@typescript/typescript6";
 import { loadBuiltInPresetSourceManifest } from "@ykdz/template-builtin-source";
 import {
   loadTemplateCargoDependencyVersions,
   loadTemplateDependencyCatalog,
 } from "@ykdz/template-core/dependency-catalog";
 import { execa } from "execa";
-import * as ts from "typescript";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 

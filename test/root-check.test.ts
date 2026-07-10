@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import ts from "@typescript/typescript6";
 import { findBuiltInPresetProjection } from "@ykdz/template-builtin-source/registry";
 import { checkTemplateGithubYaml } from "@ykdz/template-checks/check-template-github-yaml";
 import {
@@ -11,7 +12,6 @@ import {
   projectDependabotConfig,
 } from "@ykdz/template-core/project-github";
 import { execa } from "execa";
-import ts from "typescript";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
 
@@ -21,6 +21,8 @@ const repoRoot = path.resolve(
 );
 
 const packageJsonWithScriptsSchema = v.object({
+  dependencies: v.optional(v.record(v.string(), v.string())),
+  devDependencies: v.optional(v.record(v.string(), v.string())),
   scripts: v.record(v.string(), v.string()),
 });
 const turboConfigSchema = v.object({
@@ -473,6 +475,79 @@ describe("Project Kit Root Check", () => {
       expect(packageJson.scripts.typecheck).toBe(
         "tsc -p tsconfig.json --noEmit --pretty false",
       );
+      expect(packageJson.devDependencies).toMatchObject({
+        "@typescript/native": "catalog:",
+      });
+    }
+  });
+
+  it("keeps the root TypeScript command owned by the Workspace Orchestration Package", async () => {
+    const packageJson = await readJsonWithSchema(
+      path.join(repoRoot, "package.json"),
+      packageJsonWithScriptsSchema,
+    );
+
+    expect(packageJson.scripts["typecheck:root"]).toBe(
+      "tsc -p tsconfig.json --noEmit --pretty false",
+    );
+    expect(packageJson.devDependencies).toMatchObject({
+      "@typescript/native": "catalog:",
+    });
+  });
+
+  it("keeps compiler identities within their template Repository owners", async () => {
+    const packageJsonFiles = [
+      "package.json",
+      "packages/builtin-source/package.json",
+      "packages/checks/package.json",
+      "packages/cli/package.json",
+      "packages/core/package.json",
+      "packages/shared/package.json",
+    ];
+
+    for (const packageJsonFile of packageJsonFiles) {
+      const packageJson = await readJsonWithSchema(
+        path.join(repoRoot, packageJsonFile),
+        packageJsonWithScriptsSchema,
+      );
+      const allDependencies = {
+        ...packageJson.dependencies,
+        ...packageJson.devDependencies,
+      };
+
+      expect(allDependencies).not.toHaveProperty("typescript");
+      if (
+        packageJsonFile !== "package.json" &&
+        packageJsonFile !== "packages/cli/package.json" &&
+        packageJsonFile !== "packages/core/package.json"
+      ) {
+        expect(allDependencies).not.toHaveProperty("@typescript/typescript6");
+      }
+    }
+  });
+
+  it("executes TypeScript 7 through the selected native compiler", async () => {
+    const packageNames = [
+      "@ykdz/template-repository",
+      "@ykdz/template-builtin-source",
+      "@ykdz/template-checks",
+      "@ykdz/template",
+      "@ykdz/template-core",
+      "@ykdz/template-shared",
+    ];
+
+    for (const packageName of packageNames) {
+      const result = await execa(
+        "pnpm",
+        ["--filter", packageName, "exec", "tsc", "--version"],
+        { cwd: repoRoot },
+      );
+      const versionMatch = /^Version (?<major>\d+)\./.exec(result.stdout);
+
+      expect({ major: versionMatch?.groups?.major, packageName }).toEqual({
+        major: "7",
+        packageName,
+      });
     }
   });
 

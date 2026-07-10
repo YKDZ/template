@@ -25,12 +25,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "@typescript/typescript6": "catalog:",
     "@ykdz/template-shared": "workspace:*",
-    "typescript": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

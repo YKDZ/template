@@ -1,6 +1,5 @@
-import { getContext } from "telefunc";
-
 // @template-anchor db-package-import
+import { getContext } from "telefunc";
 
 export type Todo = Awaited<ReturnType<typeof onLoadTodos>>[number];
 
