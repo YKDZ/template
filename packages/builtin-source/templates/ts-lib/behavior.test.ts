@@ -226,12 +226,12 @@ describe("ts-lib Preset Source behavior", () => {
     );
     expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
     expect(dockerfile).not.toContain("typescript-node");
     expect(dockerfile).not.toMatch(
-      /npm install -g|pnpm add -g|corepack prepare (?!\$\{PACKAGE_MANAGER_PIN\})/,
+      /npm install -g|pnpm add -g|corepack prepare (?!"?\$\{PACKAGE_MANAGER_PIN\}"?)/,
     );
     expect(files).not.toContain("behavior.test.ts");
     expect(files).not.toContain("packages/demo-lib/behavior.test.ts");

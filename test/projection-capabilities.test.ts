@@ -328,7 +328,7 @@ describe("Projection Capability declarations", () => {
         "ARG NODE_VERSION",
         "ARG PACKAGE_MANAGER_PIN",
         "FROM node:${NODE_VERSION}-bookworm-slim",
-        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        'corepack enable --install-directory "$PNPM_HOME"',
         "",
       ].join("\n"),
     );
@@ -404,7 +404,7 @@ describe("Projection Capability declarations", () => {
         "ARG NODE_VERSION",
         "ARG PACKAGE_MANAGER_PIN",
         "FROM node:${NODE_VERSION}-bookworm-slim",
-        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        'corepack enable --install-directory "$PNPM_HOME"',
         "",
       ].join("\n"),
     );

@@ -1,7 +1,13 @@
 packages:
   - packages/*
 
-nodeLinker: hoisted
+nodeLinker: isolated
+injectWorkspacePackages: true
+dedupeInjectedDeps: false
+syncInjectedDepsAfterScripts:
+  - build:run
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
 
 catalog:
   "@typescript/native": npm:typescript@^7.0.2
@@ -40,6 +46,3 @@ catalog:
 
 allowBuilds:
   esbuild: true
-
-onlyBuiltDependencies:
-  - esbuild

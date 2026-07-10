@@ -50,6 +50,7 @@ const cliPackageJsonSchema = v.object({
   repository: v.optional(
     v.object({ type: v.optional(v.string()), url: v.optional(v.string()) }),
   ),
+  scripts: v.record(v.string(), v.string()),
 });
 const builtinSourcePackageJsonSchema = v.object({
   files: v.array(v.string()),
@@ -453,6 +454,10 @@ describe("package publishing", () => {
         "node_modules/@ykdz/template-builtin-source",
       ]),
     );
+    expect(packageJson.scripts).toMatchObject({
+      "pack:bundled": "pnpm --config.node-linker=hoisted pack",
+      "publish:bundled": "pnpm --config.node-linker=hoisted publish",
+    });
   });
 
   it("declares a narrow package surface for bundled runtime packages", async () => {
@@ -563,9 +568,11 @@ describe("package publishing", () => {
       await execa("pnpm", ["install", "--frozen-lockfile"], {
         cwd: packageDir,
       });
-      await execa("pnpm", ["pack", "--pack-destination", packDir], {
-        cwd: path.join(packageDir, "packages/cli"),
-      });
+      await execa(
+        "pnpm",
+        ["run", "pack:bundled", "--pack-destination", packDir],
+        { cwd: path.join(packageDir, "packages/cli") },
+      );
 
       const packedFiles = await readdir(packDir);
       const tarball = packedFiles.find((file) => file.endsWith(".tgz"));

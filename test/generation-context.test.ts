@@ -137,7 +137,7 @@ describe("generation context", () => {
     expect(dockerfile).toContain("ARG NODE_VERSION");
     expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",

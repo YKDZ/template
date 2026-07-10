@@ -962,7 +962,7 @@ function generationContextForPackageAddition(options: {
     },
     toolchain: {
       nodeLtsMajor: { kind: "NodeLtsMajor", value: options.nodeVersion },
-      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
+      packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.11.0" },
       source: "bundled-fallback",
       diagnostics: [],
     },

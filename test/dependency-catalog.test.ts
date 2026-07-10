@@ -10,8 +10,70 @@ import {
   selectTemplateCargoDependencyVersions,
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
+import { parse as parseYaml } from "yaml";
 
 describe("Template Dependency Catalog projection", () => {
+  it("renders the explicit Generated Repository pnpm workspace policy", () => {
+    const workspace = parseYaml(
+      renderGeneratedPnpmWorkspaceYaml({ dependencies: [] }),
+    ) as Record<string, unknown>;
+
+    expect(workspace).toMatchObject({
+      nodeLinker: "isolated",
+      injectWorkspacePackages: true,
+      dedupeInjectedDeps: false,
+      syncInjectedDepsAfterScripts: ["build:run"],
+      minimumReleaseAge: 1440,
+      minimumReleaseAgeStrict: true,
+    });
+  });
+
+  it("only weakens workspace policy through named, evidence-backed exceptions", () => {
+    expect(() =>
+      renderGeneratedPnpmWorkspaceYaml({
+        dependencies: [],
+        dependencyLinker: { kind: "hoisted", evidence: "" },
+      }),
+    ).toThrow("Hoisted linking requires single-line compatibility evidence");
+
+    const workspaceYaml = renderGeneratedPnpmWorkspaceYaml({
+      dependencies: [],
+      dependencyLinker: {
+        kind: "hoisted",
+        evidence: "upstream-tool#123 cannot resolve symlinked dependencies",
+      },
+      minimumReleaseAgeExclude: ["urgent-security-fix"],
+    });
+    const workspace = parseYaml(workspaceYaml) as Record<string, unknown>;
+
+    expect(workspaceYaml).toContain(
+      "# Hoisted linker compatibility evidence: upstream-tool#123 cannot resolve symlinked dependencies",
+    );
+    expect(workspace).toMatchObject({
+      nodeLinker: "hoisted",
+      minimumReleaseAgeExclude: ["urgent-security-fix"],
+    });
+  });
+
+  it.each([
+    { exclusions: [""], reason: "non-empty" },
+    { exclusions: ["react", "react"], reason: "unique" },
+    { exclusions: ["react@19.0.0"], reason: "exact npm package identities" },
+    { exclusions: ["@scope/*"], reason: "exact npm package identities" },
+    { exclusions: ["React"], reason: "exact npm package identities" },
+    { exclusions: ["@scope"], reason: "exact npm package identities" },
+  ])(
+    "rejects invalid dependency maturity exclusions: $exclusions",
+    ({ exclusions, reason }) => {
+      expect(() =>
+        renderGeneratedPnpmWorkspaceYaml({
+          dependencies: [],
+          minimumReleaseAgeExclude: exclusions,
+        }),
+      ).toThrow(reason);
+    },
+  );
+
   it("selects only requested dependency versions in stable dependency order", () => {
     expect(
       selectTemplateDependencyCatalogEntries(["typescript", "@types/node"], {

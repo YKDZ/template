@@ -8,6 +8,7 @@ import {
   loadTemplateCargoDependencyVersions,
   loadTemplateDependencyCatalog,
 } from "@ykdz/template-core/dependency-catalog";
+import { resolveToolchainVersions } from "@ykdz/template-core/toolchain-resolution";
 import { execa } from "execa";
 import * as v from "valibot";
 import { parse as parseYaml } from "yaml";
@@ -53,7 +54,12 @@ const dependabotConfigSchema = v.object({
 });
 const devcontainerSchema = v.object({
   name: v.optional(v.string()),
-  build: v.optional(v.object({ dockerfile: v.optional(v.string()) })),
+  build: v.optional(
+    v.object({
+      context: v.optional(v.string()),
+      dockerfile: v.optional(v.string()),
+    }),
+  ),
   customizations: v.optional(
     v.object({
       vscode: v.optional(
@@ -489,6 +495,29 @@ function rootPresetBehaviorSelectorIssues(
 }
 
 describe("template Repository maintenance", () => {
+  it("keeps the root and bundled fallback on the same explicit pnpm 11 workspace policy", async () => {
+    const packageJson = parseJsonWithSchema(
+      await readFile(path.join(repoRoot, "package.json"), "utf8"),
+      packageMetadataSchema,
+    );
+    const workspace = parseYaml(
+      await readFile(path.join(repoRoot, "pnpm-workspace.yaml"), "utf8"),
+    ) as Record<string, unknown>;
+    const fallback = await resolveToolchainVersions({
+      source: "bundled-fallback",
+    });
+
+    expect(packageJson.packageManager).toBe("pnpm@11.11.0");
+    expect(fallback.packageManagerPin.value).toBe(packageJson.packageManager);
+    expect(workspace).toMatchObject({
+      nodeLinker: "isolated",
+      injectWorkspacePackages: true,
+      dedupeInjectedDeps: false,
+      syncInjectedDepsAfterScripts: ["build:run"],
+      minimumReleaseAge: 1440,
+      minimumReleaseAgeStrict: true,
+    });
+  });
   it("discovers Preset Source Tests named behavior.test.ts by convention", async () => {
     const result = await execa(
       "pnpm",
@@ -820,6 +849,10 @@ describe("template Repository maintenance", () => {
       await readFile(path.join(repoRoot, ".vscode/extensions.json"), "utf8"),
       workspaceExtensionsSchema,
     );
+    const dockerfile = await readFile(
+      path.join(repoRoot, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
     const expectedExtensions = [
       "rust-lang.rust-analyzer",
       "tamasfe.even-better-toml",
@@ -834,6 +867,7 @@ describe("template Repository maintenance", () => {
       "customizations",
     ]);
     expect(devcontainer.build?.dockerfile).toBe("Dockerfile");
+    expect(devcontainer.build?.context).toBe("..");
     expect(devcontainer).not.toHaveProperty("features");
     expect(devcontainer.customizations?.vscode?.extensions).toEqual(
       expectedExtensions,
@@ -843,6 +877,14 @@ describe("template Repository maintenance", () => {
       "editor.formatOnSave": true,
       "rust-analyzer.check.command": "clippy",
     });
+    expect(dockerfile).toContain(
+      "COPY package.json /tmp/template/package.json",
+    );
+    expect(dockerfile).toContain('ENV COREPACK_HOME="/corepack"');
+    expect(dockerfile).toContain(
+      'corepack enable --install-directory "$PNPM_HOME"',
+    );
+    expect(dockerfile).not.toContain("corepack prepare pnpm --activate");
 
     await expect(
       readFile(path.join(repoRoot, "package.json"), "utf8"),
@@ -910,7 +952,7 @@ describe("template Repository maintenance", () => {
     });
   });
 
-  it("keeps the root pnpm pin on a GitHub Dependabot-supported major", async () => {
+  it("keeps the root pnpm pin on the maintained pnpm 11 baseline", async () => {
     const packageJson = parseJsonWithSchema(
       await readFile(path.join(repoRoot, "package.json"), "utf8"),
       packageMetadataSchema,
@@ -919,6 +961,6 @@ describe("template Repository maintenance", () => {
     const match = /^pnpm@(\d+)\.\d+\.\d+$/.exec(packageManager);
 
     expect(match).not.toBeNull();
-    expect([7, 8, 9, 10]).toContain(Number(match?.[1]));
+    expect(Number(match?.[1])).toBe(11);
   });
 });

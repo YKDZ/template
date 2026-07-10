@@ -168,7 +168,7 @@ describe("editor customization", () => {
         "ARG NODE_VERSION",
         "FROM node:${NODE_VERSION}-bookworm-slim",
         "ARG PACKAGE_MANAGER_PIN",
-        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        'corepack enable --install-directory "$PNPM_HOME"',
         "",
       ].join("\n"),
     );

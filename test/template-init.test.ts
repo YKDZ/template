@@ -35,7 +35,7 @@ const defaultToolchainEnv = {
   ]),
   TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
     versions: {
-      "10.34.4": { engines: { node: ">=18.12" } },
+      "11.11.0": { engines: { node: ">=24.0.0" } },
     },
   }),
 };
@@ -369,7 +369,7 @@ describe("template init", () => {
         expect(dockerfile).toContain("ARG NODE_VERSION");
         expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
         expect(dockerfile).toContain(
-          "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+          'corepack enable --install-directory "$PNPM_HOME"',
         );
         expect(dockerfile).not.toContain("typescript-node");
         expect(dockerfile).not.toMatch(
@@ -393,7 +393,7 @@ describe("template init", () => {
     }
   }, 300_000);
 
-  it("generates Node presets with Dependabot-compatible pnpm coverage", async () => {
+  it("generates Node presets with the explicit pnpm 11 workspace contract", async () => {
     const nodePresetNames = supportedPresetNamesWithCapability(
       "node-pnpm-devcontainer",
     );
@@ -408,13 +408,25 @@ describe("template init", () => {
         path.join(projectDir, ".github/workflows/check.yml"),
         "utf8",
       );
+      const workspaceYaml = await readFile(
+        path.join(projectDir, "pnpm-workspace.yaml"),
+        "utf8",
+      );
       const dependabot = await readFile(
         path.join(projectDir, ".github/dependabot.yml"),
         "utf8",
       );
 
       expect(packageJson.engines.node).toBe("24");
-      expect(packageJson.packageManager).toBe("pnpm@10.34.4");
+      expect(packageJson.packageManager).toBe("pnpm@11.11.0");
+      expect(workspaceYaml).toContain("nodeLinker: isolated");
+      expect(workspaceYaml).toContain("injectWorkspacePackages: true");
+      expect(workspaceYaml).toContain("dedupeInjectedDeps: false");
+      expect(workspaceYaml).toContain(
+        "syncInjectedDepsAfterScripts:\n  - build:run",
+      );
+      expect(workspaceYaml).toContain("minimumReleaseAge: 1440");
+      expect(workspaceYaml).toContain("minimumReleaseAgeStrict: true");
       expect(checkWorkflow).toContain("node-version-file: package.json");
       expect(checkWorkflow).toContain("run: corepack enable");
       expect(checkWorkflow).not.toContain("uses: pnpm/action-setup");
@@ -790,7 +802,7 @@ describe("template init", () => {
     ]);
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.34.4",
+      packageManagerPin: "pnpm@11.11.0",
       source: "online",
       diagnostics: [],
     });
@@ -901,7 +913,7 @@ describe("template init", () => {
 
     expect(output.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.34.4",
+      packageManagerPin: "pnpm@11.11.0",
       source: "bundled-fallback",
       diagnostics: [
         expect.stringContaining("Using bundled fallback toolchain metadata"),
@@ -909,7 +921,7 @@ describe("template init", () => {
     });
     expect(generationRecord.toolchain).toEqual({
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@10.34.4",
+      packageManagerPin: "pnpm@11.11.0",
       source: "bundled-fallback",
     });
   });
@@ -945,7 +957,7 @@ describe("template init", () => {
     expect(result.stdout).toContain("Toolchain Resolution:");
     expect(result.stdout).toMatch(/Source:\s+bundled-fallback/);
     expect(result.stdout).toMatch(/Node LTS major:\s+24/);
-    expect(result.stdout).toMatch(/Package Manager Pin:\s+pnpm@10\.34\.4/);
+    expect(result.stdout).toMatch(/Package Manager Pin:\s+pnpm@11\.11\.0/);
     expect(result.stdout).toContain(
       "Using bundled fallback toolchain metadata",
     );

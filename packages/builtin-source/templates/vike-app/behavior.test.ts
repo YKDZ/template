@@ -29,7 +29,11 @@ const playwrightCliPackage = `@playwright/test@${
   loadTemplateDependencyCatalog()["@playwright/test"]
 }`;
 const execFileAsync = promisify(execFile);
-const repositoryBin = path.join(process.cwd(), "node_modules/.bin");
+const repositoryDependencies = path.join(
+  process.cwd(),
+  "packages/builtin-source/node_modules",
+);
+const repositoryBin = path.join(repositoryDependencies, ".bin");
 const packageManagerPinSchema = v.custom<`pnpm@${string}`>(
   (value) => typeof value === "string" && value.startsWith("pnpm@"),
 );
@@ -115,7 +119,7 @@ async function renderVikeProject(
 
 async function linkRepositoryDependencies(targetDir: string): Promise<void> {
   await symlink(
-    path.join(process.cwd(), "node_modules"),
+    repositoryDependencies,
     path.join(targetDir, "node_modules"),
     "dir",
   );
@@ -506,7 +510,10 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerfile).toContain('ARG PACKAGE_MANAGER_PIN="pnpm@11.2.3"');
     expect(appDockerfile).toContain('ENV COREPACK_HOME="/corepack"');
     expect(appDockerfile).toContain(
-      'corepack enable && corepack prepare "$PACKAGE_MANAGER_PIN" --activate',
+      'corepack enable --install-directory "$PNPM_HOME"',
+    );
+    expect(appDockerfile).toContain(
+      'corepack prepare "$PACKAGE_MANAGER_PIN" --activate',
     );
     expect(appDockerfile).toContain(
       "COPY pnpm-lock.yaml pnpm-workspace.yaml ./",

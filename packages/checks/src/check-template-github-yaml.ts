@@ -287,7 +287,7 @@ function projectThroughPresetProjection(presetName: string) {
       blueprint,
       toolchain: {
         nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
-        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@10.34.4" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.11.0" },
         source: "bundled-fallback",
         diagnostics: [],
       },

@@ -8,7 +8,10 @@ ENV COREPACK_HOME="/corepack"
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 WORKDIR /repo
-RUN corepack enable && corepack prepare "$PACKAGE_MANAGER_PIN" --activate
+RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
+  && corepack enable --install-directory "$PNPM_HOME" \
+  && corepack prepare "$PACKAGE_MANAGER_PIN" --activate \
+  && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"
 
 FROM base AS pruner
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./

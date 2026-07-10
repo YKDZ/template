@@ -9,6 +9,10 @@ export type GeneratedDependencyCatalogOptions = {
   readonly dependencies: readonly string[];
   readonly packages?: readonly string[];
   readonly allowBuilds?: Record<string, boolean>;
+  readonly dependencyLinker?:
+    | { readonly kind: "isolated" }
+    | { readonly kind: "hoisted"; readonly evidence: string };
+  readonly minimumReleaseAgeExclude?: readonly string[];
 };
 
 export type GeneratedPackageManifestDependencies = {
@@ -17,6 +21,32 @@ export type GeneratedPackageManifestDependencies = {
   readonly optionalDependencies?: Record<string, string>;
   readonly peerDependencies?: Record<string, string>;
 };
+
+const exactNpmPackageIdentityPattern =
+  /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+
+function assertMinimumReleaseAgeExclusions(
+  exclusions: readonly string[],
+): void {
+  if (exclusions.some((dependency) => dependency.length === 0)) {
+    throw new Error("Dependency maturity exclusions must be non-empty");
+  }
+
+  if (new Set(exclusions).size !== exclusions.length) {
+    throw new Error("Dependency maturity exclusions must be unique");
+  }
+
+  const invalid = exclusions.find(
+    (dependency) =>
+      dependency.length > 214 ||
+      !exactNpmPackageIdentityPattern.test(dependency),
+  );
+  if (invalid !== undefined) {
+    throw new Error(
+      `Dependency maturity exclusions must be exact npm package identities: ${JSON.stringify(invalid)}`,
+    );
+  }
+}
 
 const templateInternalDependencyIdentities = new Set([
   "@typescript/native",
@@ -345,13 +375,47 @@ export function renderGeneratedPnpmWorkspaceYaml(
   options: GeneratedDependencyCatalogOptions,
 ): string {
   assertGeneratedDependencyCatalogBoundary(options.dependencies);
+  assertMinimumReleaseAgeExclusions(options.minimumReleaseAgeExclude ?? []);
+  if (
+    options.dependencyLinker?.kind === "hoisted" &&
+    (options.dependencyLinker.evidence.trim().length === 0 ||
+      options.dependencyLinker.evidence.includes("\n"))
+  ) {
+    throw new Error(
+      "Hoisted linking requires single-line compatibility evidence",
+    );
+  }
   const catalog = selectTemplateDependencyCatalogEntries(options.dependencies);
   const packages = options.packages ?? ["."];
+  const dependencyLinker = options.dependencyLinker?.kind ?? "isolated";
   const lines = [
     "packages:",
     ...packages.map((workspacePackage) => `  - ${workspacePackage}`),
     "",
+    ...(options.dependencyLinker?.kind === "hoisted"
+      ? [
+          `# Hoisted linker compatibility evidence: ${options.dependencyLinker.evidence}`,
+        ]
+      : []),
+    `nodeLinker: ${dependencyLinker}`,
+    "injectWorkspacePackages: true",
+    "dedupeInjectedDeps: false",
+    "syncInjectedDepsAfterScripts:",
+    "  - build:run",
+    "minimumReleaseAge: 1440",
+    "minimumReleaseAgeStrict: true",
+    "",
   ];
+
+  if (options.minimumReleaseAgeExclude?.length) {
+    lines.push(
+      "minimumReleaseAgeExclude:",
+      ...options.minimumReleaseAgeExclude
+        .toSorted()
+        .map((dependency) => `  - ${JSON.stringify(dependency)}`),
+      "",
+    );
+  }
 
   if (options.allowBuilds) {
     lines.push(

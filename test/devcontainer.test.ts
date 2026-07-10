@@ -283,12 +283,17 @@ describe("Development Container planning", () => {
     expect(plan.dockerfile).toContain(
       "FROM node:${NODE_VERSION}-bookworm-slim",
     );
+    expect(plan.dockerfile).toContain('ENV COREPACK_HOME="/corepack"');
+    expect(plan.dockerfile).toContain('ENV PNPM_HOME="/pnpm"');
     expect(plan.dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
+    );
+    expect(plan.dockerfile).toContain(
+      'corepack prepare "${PACKAGE_MANAGER_PIN}" --activate',
     );
     expect(plan.dockerfile).not.toContain("typescript-node");
     expect(plan.dockerfile).not.toMatch(
-      /npm install -g|pnpm add -g|corepack prepare (?!\$\{PACKAGE_MANAGER_PIN\})/,
+      /npm install -g|pnpm add -g|corepack prepare (?!"?\$\{PACKAGE_MANAGER_PIN\}"?)/,
     );
     expect(plan.dockerfile).not.toContain("turbo");
     expect(plan.dockerfile).not.toContain("typescript");
@@ -407,7 +412,7 @@ describe("Development Container planning", () => {
       "FROM node:${NODE_VERSION}-bookworm-slim",
     );
     expect(plan.dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(plan.dockerfile).toContain("ARG RUST_TOOLCHAIN");
     expect(plan.dockerfile).toContain(

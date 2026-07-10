@@ -1,12 +1,15 @@
 FROM node:24-bookworm
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+ENV COREPACK_HOME="/corepack"
 ENV SHELL=/bin/bash
 ENV PNPM_HOME="/pnpm"
 ENV CARGO_HOME="/usr/local/cargo"
 ENV RUSTUP_HOME="/usr/local/rustup"
 ENV RUST_BACKTRACE=1
 ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$CARGO_HOME/bin:$PATH"
+
+COPY package.json /tmp/template/package.json
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -22,8 +25,10 @@ RUN apt-get update \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
     && git lfs install --system \
-    && corepack enable \
-    && corepack prepare pnpm --activate \
+    && install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
+    && corepack enable --install-directory "$PNPM_HOME" \
+    && PACKAGE_MANAGER_PIN="$(node -p "require('/tmp/template/package.json').packageManager")" \
+    && corepack prepare "$PACKAGE_MANAGER_PIN" --activate \
     && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
     && rustup component add rustfmt clippy \
     && pnpm install -g --allow-build=@openai/codex @openai/codex turbo

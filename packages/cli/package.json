@@ -38,6 +38,8 @@
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
     "prepack": "pnpm --filter @ykdz/template-shared run build && pnpm --filter @ykdz/template-core run build && pnpm --filter @ykdz/template-builtin-source run build && pnpm run build",
+    "pack:bundled": "pnpm --config.node-linker=hoisted pack",
+    "publish:bundled": "pnpm --config.node-linker=hoisted publish",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {

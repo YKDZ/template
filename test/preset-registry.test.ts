@@ -408,7 +408,7 @@ describe("Preset Registry", () => {
       expect(devcontainer).not.toHaveProperty("features");
       expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
       expect(dockerfile).toContain(
-        "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+        'corepack enable --install-directory "$PNPM_HOME"',
       );
       expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
       expect(dockerfile).toContain(
@@ -560,7 +560,7 @@ describe("Preset Registry", () => {
     ]);
     expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
     expect(dockerfile).toContain("rustup toolchain install");

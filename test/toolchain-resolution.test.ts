@@ -61,7 +61,7 @@ describe("toolchain version resolution", () => {
 
     expect(result.source).toBe("bundled-fallback");
     expect(result.nodeLtsMajor.value).toBe("24");
-    expect(result.packageManagerPin.value).toBe("pnpm@10.34.4");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.11.0");
     expect(result.diagnostics).toEqual([
       expect.stringContaining("Using bundled fallback toolchain metadata"),
     ]);
@@ -78,7 +78,7 @@ describe("toolchain version resolution", () => {
 
     expect(result.source).toBe("bundled-fallback");
     expect(result.nodeLtsMajor.value).toBe("24");
-    expect(result.packageManagerPin.value).toBe("pnpm@10.34.4");
+    expect(result.packageManagerPin.value).toBe("pnpm@11.11.0");
     expect(result.diagnostics).toEqual([]);
   });
 });

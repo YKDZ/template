@@ -145,7 +145,7 @@ describe("vue-app Preset Source behavior", () => {
       "npx --yes playwright install-deps chromium",
     );
     expect(dockerfile).toContain(
-      "RUN corepack enable && corepack prepare ${PACKAGE_MANAGER_PIN} --activate",
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(dockerfile).not.toContain("libnss3");
     expect(dockerfile).not.toContain("libgbm1");
