@@ -208,6 +208,10 @@ if [ -n "$FAKE_DOCKER_FAILURE_PATTERN" ] && echo "$*" | grep -F -- "$FAKE_DOCKER
 fi
 case "$1" in
   build)
+    if [ ! -f apps/web/Dockerfile ]; then
+      echo "Docker build must run from the repository root" >&2
+      exit 24
+    fi
     if [ "$FAKE_DOCKER_BUILD_OUTPUT_BYTES" -gt 0 ]; then
       head -c "$FAKE_DOCKER_BUILD_OUTPUT_BYTES" /dev/zero | tr '\\0' x
     fi
@@ -231,6 +235,10 @@ esac
   await writeFile(
     path.join(fakeBinDir, "pnpm"),
     `#!/bin/sh
+if [ "$1" = "--dir" ] && [ ! -f "$2/package.json" ]; then
+  echo "Playwright must run from the repository root" >&2
+  exit 25
+fi
 echo "$PLAYWRIGHT_EXTERNAL_BASE_URL" >> "$PLAYWRIGHT_OBSERVATION_FILE"
 if [ "$PLAYWRIGHT_EXIT_CODE" -ne 0 ]; then
   echo "fake playwright stdout failure"
@@ -1062,9 +1070,9 @@ while :; do sleep 1; done
         process.execPath,
         [
           "--experimental-strip-types",
-          "apps/web/scripts/check-standalone-deployment.ts",
+          "scripts/check-standalone-deployment.ts",
         ],
-        { cwd: targetDir, env },
+        { cwd: path.join(targetDir, "apps/web"), env },
       );
 
       const dockerCommands = await readFile(dockerObservationFile, "utf8");

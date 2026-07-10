@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
+
+const webRoot = path.resolve(import.meta.dirname, "..");
+const repositoryRoot = path.resolve(webRoot, "../..");
 const uniqueId = `${process.pid}-${Date.now()}`;
 const standaloneImage = `vike-deployment-check-standalone:${uniqueId}`;
 const runtimeImage = `vike-deployment-check-runtime:${uniqueId}`;
@@ -24,6 +28,7 @@ interface CommandResult {
 }
 
 interface CommandOptions {
+  readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly signal?: AbortSignal;
   readonly timeout: number;
@@ -60,6 +65,7 @@ function runCommand(
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
+      cwd: options.cwd,
       env: options.env,
       signal: options.signal,
       stdio: ["ignore", "pipe", "pipe"],
@@ -132,6 +138,7 @@ async function dockerWithTimeout(
   ...args: string[]
 ): Promise<string> {
   const { stdout } = await runCommand("docker", args, {
+    cwd: repositoryRoot,
     signal: abortController.signal,
     timeout,
   });
@@ -152,7 +159,10 @@ async function cleanup(): Promise<void> {
 
   for (const args of cleanupCommands) {
     try {
-      await runCommand("docker", args, { timeout: 30_000 });
+      await runCommand("docker", args, {
+        cwd: repositoryRoot,
+        timeout: 30_000,
+      });
     } catch {
       // A resource may not have been created yet.
     }
@@ -162,6 +172,7 @@ async function cleanup(): Promise<void> {
 async function containerLogs(container: string): Promise<string> {
   try {
     const { stderr, stdout } = await runCommand("docker", ["logs", container], {
+      cwd: repositoryRoot,
       signal: AbortSignal.timeout(10_000),
       timeout: 10_000,
     });
@@ -274,6 +285,7 @@ if (row.count !== 0) throw new Error(\`Fresh deployment must contain zero TODOs,
 
 async function runPlaywright(baseUrl: string): Promise<void> {
   await runCommand("pnpm", ["--dir", "apps/web", "run", "test:e2e:run"], {
+    cwd: repositoryRoot,
     env: {
       ...process.env,
       PLAYWRIGHT_EXTERNAL_BASE_URL: baseUrl,
