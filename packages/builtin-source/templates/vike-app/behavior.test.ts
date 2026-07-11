@@ -528,8 +528,9 @@ describe("vike-app Preset Source behavior", () => {
     expect(webPackageJson.devDependencies).not.toHaveProperty("typescript");
     expect(webPackageJson.devDependencies).not.toHaveProperty("vue-tsc");
     expect(webPackageJson.devDependencies).not.toHaveProperty("@vue/tsconfig");
-    expect(webPackageJson.devDependencies).not.toHaveProperty(
+    expect(webPackageJson.devDependencies).toHaveProperty(
       "@demo-vike/vue-tooling",
+      "workspace:*",
     );
     expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-7");
     expect(vueToolingPackageJson).toMatchObject({
@@ -738,6 +739,9 @@ describe("vike-app Preset Source behavior", () => {
     );
     expect(appDockerfile).toContain("pnpm fetch");
     expect(appDockerfile).toContain("pnpm install --offline --frozen-lockfile");
+    expect(appDockerfile).toContain(
+      "COPY packages/vue-tooling/package.json packages/vue-tooling/package.json",
+    );
     expect(appDockerfile).toContain(
       "pnpm exec turbo prune @demo-vike/web @demo-vike/db-migrations --docker",
     );

@@ -1804,6 +1804,7 @@ function vikePackageJson(
     },
     devDependencies: {
       ...packageLinkDependencies,
+      [vikeVueToolingPackageName(context)]: "workspace:*",
       "@playwright/test": "catalog:",
       "@tailwindcss/vite": "catalog:",
       "@types/node": "catalog:",
