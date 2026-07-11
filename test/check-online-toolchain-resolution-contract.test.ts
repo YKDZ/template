@@ -18,7 +18,10 @@ describe("check-online-toolchain-resolution-contract script", () => {
         }
 
         if (url === pnpmRegistryUrl) {
-          return { versions: { "11.0.0": { engines: { node: ">=24.0.0" } } } };
+          return {
+            time: { "11.0.0": "2025-01-01T00:00:00.000Z" },
+            versions: { "11.0.0": { engines: { node: ">=24.0.0" } } },
+          };
         }
 
         throw new Error(`unexpected URL ${url}`);

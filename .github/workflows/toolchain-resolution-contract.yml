@@ -6,7 +6,12 @@ on:
     - cron: "17 8 * * *"
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: toolchain-baseline-update
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -30,3 +35,22 @@ jobs:
 
       - name: Check online toolchain resolution contract
         run: pnpm run check:toolchain:online
+
+      - name: Resolve updater toolchain
+        id: desired-toolchain
+        run: node packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs >> "$GITHUB_OUTPUT"
+
+      - name: Set up resolved Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.desired-toolchain.outputs.node-major }}
+
+      - name: Provision resolved pnpm
+        run: corepack install --global "${{ steps.desired-toolchain.outputs.pnpm-pin }}"
+
+      - name: Refresh Toolchain Baseline candidate
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm run update:toolchain

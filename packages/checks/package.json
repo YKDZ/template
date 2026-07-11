@@ -16,6 +16,7 @@
     "check:templates:boundary": "node src/check-template-boundary.ts",
     "check:templates:github-yaml": "node src/check-template-github-yaml.ts",
     "check:toolchain:online": "node src/check-online-toolchain-resolution-contract.ts",
+    "update:toolchain": "node src/update-toolchain-baseline.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",

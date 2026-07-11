@@ -22,6 +22,7 @@ export type ResolveToolchainVersionsOptions = {
   readonly fetchJson?: ((url: string) => Promise<unknown>) | undefined;
   readonly nodeReleaseIndexUrl?: string | undefined;
   readonly pnpmRegistryUrl?: string | undefined;
+  readonly now?: Date | string | undefined;
 };
 
 export const nodeReleaseIndexUrl = "https://nodejs.org/dist/index.json";
@@ -48,6 +49,7 @@ type NodeRelease = {
 };
 
 type PnpmRegistryMetadata = {
+  readonly time: Readonly<Record<string, string>>;
   readonly versions: Record<
     string,
     { readonly engines?: { readonly node?: string } }
@@ -72,9 +74,11 @@ export async function resolveToolchainVersions(
     const pnpmMetadata = parsePnpmRegistryMetadata(
       await fetchJson(options.pnpmRegistryUrl ?? pnpmRegistryUrl),
     );
+    const nodeVersion = latestLtsVersion(nodeReleases, nodeMajor);
     const pnpmVersion = latestCompatiblePnpmVersion(
       pnpmMetadata,
-      Number(nodeMajor.value),
+      nodeVersion,
+      instant(options.now ?? new Date()),
     );
 
     return {
@@ -95,26 +99,27 @@ export async function checkOnlineToolchainResolutionContract(
   options: OnlineToolchainResolutionContractOptions = {},
 ): Promise<OnlineToolchainResolutionContractResult> {
   const fetchJson = options.fetchJson ?? fetchOfficialJson;
-  const nodeMajor = await contractPhase("Node source parsing", async () => {
-    const nodeReleases = parseNodeReleaseIndex(
+  const nodeSource = await contractPhase("Node source parsing", async () => {
+    const releases = parseNodeReleaseIndex(
       await fetchJson(nodeReleaseIndexUrl),
     );
-    return latestLtsMajor(nodeReleases);
+    const major = latestLtsMajor(releases);
+    return { major, version: latestLtsVersion(releases, major) };
   });
   const pnpmMetadata = await contractPhase("pnpm source parsing", async () =>
     parsePnpmRegistryMetadata(await fetchJson(pnpmRegistryUrl)),
   );
   const pnpmVersion = await contractPhase("compatibility selection", async () =>
-    latestCompatiblePnpmVersion(pnpmMetadata, Number(nodeMajor.value)),
+    latestCompatiblePnpmVersion(pnpmMetadata, nodeSource.version),
   );
 
   return {
-    nodeLtsMajor: nodeMajor,
+    nodeLtsMajor: nodeSource.major,
     packageManagerPin: packageManagerPin(pnpmVersion),
     diagnostics: [
-      `Node source parsing succeeded; latest LTS major is ${nodeMajor.value}.`,
+      `Node source parsing succeeded; latest LTS major is ${nodeSource.major.value}.`,
       `pnpm source parsing succeeded; latest compatible pnpm release is ${pnpmVersion}.`,
-      `Compatibility selection succeeded for pnpm@${pnpmVersion} on Node ${nodeMajor.value}.`,
+      `Compatibility selection succeeded for pnpm@${pnpmVersion} on Node ${nodeSource.major.value}.`,
     ],
   };
 }
@@ -208,9 +213,28 @@ function latestLtsMajor(releases: readonly NodeRelease[]): NodeLtsMajor {
   return nodeLtsMajor(String(Math.max(...majors)));
 }
 
+function latestLtsVersion(
+  releases: readonly NodeRelease[],
+  major: NodeLtsMajor,
+): string {
+  const versions = releases
+    .filter((release) => release.lts !== false)
+    .map((release) => release.version.replace(/^v/, ""))
+    .filter(
+      (version) =>
+        valid(version) !== null && version.startsWith(`${major.value}.`),
+    )
+    .toSorted(compare);
+  const latest = versions.at(-1);
+  if (!latest) {
+    throw new Error(`Node release index did not contain Node ${major.value}`);
+  }
+  return latest;
+}
+
 function parsePnpmRegistryMetadata(value: unknown): PnpmRegistryMetadata {
-  if (!isRecord(value) || !isRecord(value.versions)) {
-    throw new Error("pnpm registry metadata is missing versions");
+  if (!isRecord(value) || !isRecord(value.versions) || !isRecord(value.time)) {
+    throw new Error("pnpm registry metadata is missing versions or time");
   }
 
   const versions: PnpmRegistryMetadata["versions"] = {};
@@ -229,92 +253,78 @@ function parsePnpmRegistryMetadata(value: unknown): PnpmRegistryMetadata {
       : {};
   }
 
-  return { versions };
+  const time = Object.fromEntries(
+    Object.entries(value.time).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+
+  return { time, versions };
 }
 
 function latestCompatiblePnpmVersion(
   metadata: PnpmRegistryMetadata,
-  nodeMajor: number,
+  nodeVersion: string,
+  now = Date.now(),
 ): string {
   const candidates = Object.entries(metadata.versions)
-    .filter(([version]) =>
-      /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version),
-    )
+    .filter(([version]) => /^\d+\.\d+\.\d+$/.test(version))
     .filter(([, packageMetadata]) =>
-      nodeSatisfiesRange(nodeMajor, packageMetadata.engines?.node),
+      nodeSatisfiesRange(nodeVersion, packageMetadata.engines?.node),
     )
+    .filter(([version]) => isMatureRelease(metadata.time[version], now))
     .map(([version]) => version)
-    .toSorted(compareSemver);
+    .toSorted(compare);
 
   const latest = candidates.at(-1);
   if (!latest) {
     throw new Error(
-      `pnpm registry metadata did not contain a release compatible with Node ${nodeMajor}`,
+      `pnpm registry metadata did not contain a release compatible with Node ${nodeVersion}`,
     );
   }
 
   return latest;
 }
 
+const pnpmMaturityWindowMilliseconds = 24 * 60 * 60 * 1_000;
+
+function isMatureRelease(
+  publishedAt: string | undefined,
+  now: number,
+): boolean {
+  if (publishedAt === undefined) {
+    return false;
+  }
+
+  const publishedAtMilliseconds = Date.parse(publishedAt);
+  return (
+    Number.isFinite(publishedAtMilliseconds) &&
+    now - publishedAtMilliseconds >= pnpmMaturityWindowMilliseconds
+  );
+}
+
+function instant(value: Date | string): number {
+  const milliseconds =
+    value instanceof Date ? value.getTime() : Date.parse(value);
+  if (!Number.isFinite(milliseconds)) {
+    throw new Error(`Invalid resolution time: ${String(value)}`);
+  }
+
+  return milliseconds;
+}
+
 function nodeSatisfiesRange(
-  nodeMajor: number,
+  nodeVersion: string,
   range: string | undefined,
 ): boolean {
   if (!range) {
     return true;
   }
 
-  return range
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((comparator) => nodeSatisfiesComparator(nodeMajor, comparator));
-}
-
-function nodeSatisfiesComparator(
-  nodeMajor: number,
-  comparator: string,
-): boolean {
-  const match = comparator.match(/^(>=|>|<=|<|=)?(\d+)(?:\.\d+){0,2}$/);
-  if (!match) {
-    return false;
-  }
-
-  const operator = match[1] ?? "=";
-  const major = Number(match[2]);
-
-  if (operator === ">=") {
-    return nodeMajor >= major;
-  }
-
-  if (operator === ">") {
-    return nodeMajor > major;
-  }
-
-  if (operator === "<=") {
-    return nodeMajor <= major;
-  }
-
-  if (operator === "<") {
-    return nodeMajor < major;
-  }
-
-  return nodeMajor === major;
-}
-
-function compareSemver(left: string, right: string): number {
-  const leftParts = left.split(/[.-]/).slice(0, 3).map(Number);
-  const rightParts = right.split(/[.-]/).slice(0, 3).map(Number);
-
-  for (let index = 0; index < 3; index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (difference !== 0) {
-      return difference;
-    }
-  }
-
-  return left.localeCompare(right);
+  return satisfies(nodeVersion, range, { includePrerelease: false });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+import { compare, satisfies, valid } from "semver";

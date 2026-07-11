@@ -17,6 +17,8 @@
     "check:templates:shared-oxc": "turbo run check:templates:shared-oxc --output-logs=errors-only --log-order=grouped",
     "check:templates:static-source": "turbo run check:templates:static-source --output-logs=errors-only --log-order=grouped",
     "check:toolchain:online": "turbo run check:toolchain:online --output-logs=errors-only --log-order=grouped",
+    "update:toolchain": "pnpm --filter @ykdz/template-checks update:toolchain",
+    "resolve:toolchain:update": "node packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs",
     "fix": "pnpm run build",
     "format:check": "turbo run format:check format:check:root --output-logs=errors-only --log-order=grouped",
     "format:check:root": "oxfmt --list-different --config oxfmt.config.ts package.json pnpm-workspace.yaml turbo.json tsconfig.base.json tsconfig.build.json tsconfig.json vitest.config.ts oxfmt.config.ts oxlint.config.ts test packages/builtin-source/templates/*/behavior.test.ts",

@@ -22,11 +22,13 @@
   },
   "dependencies": {
     "@ykdz/template-shared": "workspace:*",
+    "semver": "catalog:",
     "typescript": "catalog:template-typescript",
     "valibot": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@types/semver": "catalog:",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

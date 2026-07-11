@@ -19,6 +19,9 @@ catalogs:
     '@types/node':
       specifier: ^24.13.3
       version: 24.13.3
+    '@types/semver':
+      specifier: ^7.7.1
+      version: 7.7.1
     '@vikejs/hono':
       specifier: ^0.2.1
       version: 0.2.1
@@ -49,6 +52,9 @@ catalogs:
     pinia:
       specifier: ^3.0.4
       version: 3.0.4
+    semver:
+      specifier: ^7.8.5
+      version: 7.8.5
     telefunc:
       specifier: ^0.2.22
       version: 0.2.22
@@ -298,6 +304,9 @@ importers:
       '@ykdz/template-shared':
         specifier: workspace:*
         version: file:packages/shared(@typescript/typescript6@6.0.2)
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
       typescript:
         specifier: catalog:template-typescript
         version: '@typescript/typescript6@6.0.2'
@@ -308,6 +317,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.7.1
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -1430,6 +1442,9 @@ packages:
 
   '@types/node@24.13.3':
     resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -3436,6 +3451,8 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@types/semver@7.7.1': {}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -3778,6 +3795,7 @@ snapshots:
   '@ykdz/template-core@file:packages/core':
     dependencies:
       '@ykdz/template-shared': file:packages/shared(@typescript/typescript6@6.0.2)
+      semver: 7.8.5
       typescript: '@typescript/typescript6@6.0.2'
       valibot: 1.4.2(@typescript/typescript6@6.0.2)
 

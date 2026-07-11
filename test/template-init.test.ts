@@ -34,6 +34,7 @@ const defaultToolchainEnv = {
     { version: "v26.1.0", lts: false },
   ]),
   TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
+    time: { "11.11.0": "2025-01-01T00:00:00.000Z" },
     versions: {
       "11.11.0": { engines: { node: ">=24.0.0" } },
     },
@@ -145,6 +146,10 @@ function toolchainEnvWithPnpm(version: string): Record<string, string> {
       { version: "v26.1.0", lts: false },
     ]),
     TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: jsonDataUrl({
+      time: {
+        [version]: "2025-01-01T00:00:00.000Z",
+        "12.0.0": "2025-01-01T00:00:00.000Z",
+      },
       versions: {
         [version]: { engines: { node: ">=24.0.0" } },
         "12.0.0": { engines: { node: ">=26.0.0" } },

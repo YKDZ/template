@@ -29,6 +29,7 @@ async function generateTsLibProject(prefix: string): Promise<string> {
     )}`,
     TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: `data:application/json,${encodeURIComponent(
       JSON.stringify({
+        time: { "11.11.0": "2025-01-01T00:00:00.000Z" },
         versions: {
           "11.11.0": { engines: { node: ">=24.0.0" } },
         },

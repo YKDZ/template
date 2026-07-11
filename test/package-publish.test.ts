@@ -83,6 +83,7 @@ process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL ??= jsonDataUrl([
   { version: "v26.1.0", lts: false },
 ]);
 process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL ??= jsonDataUrl({
+  time: { "10.34.4": "2025-01-01T00:00:00.000Z" },
   versions: {
     "10.34.4": { engines: { node: ">=18.12" } },
   },
