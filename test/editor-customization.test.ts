@@ -257,7 +257,9 @@ describe("editor customization", () => {
             ? editorResource
             : resourceId === "local-devcontainer"
               ? devcontainerResource
-              : undefined,
+              : resourceId === "shared-toolchain-maintenance"
+                ? workspace
+                : undefined,
       },
     });
     const extensionsOperation = plan.operations.find(

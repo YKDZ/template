@@ -170,7 +170,9 @@ describe("Development Container planning", () => {
             ? devcontainerResource
             : resourceId === "custom-editor"
               ? editorResource
-              : undefined,
+              : resourceId === "shared-toolchain-maintenance"
+                ? workspace
+                : undefined,
       },
     });
     const dockerfileOperation = plan.operations.find(

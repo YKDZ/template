@@ -16,7 +16,9 @@ import { execa } from "execa";
 import { parse } from "yaml";
 
 import {
+  type GithubEffects,
   resolveToolchainBaseline,
+  runToolchainBaselineMaintenance,
   updateToolchainBaselineMaterials,
 } from "../packages/builtin-source/templates/shared/toolchain-maintenance/update-toolchain-baseline.ts";
 
@@ -216,4 +218,325 @@ describe("Generated Repository Toolchain Baseline maintenance", () => {
       }
     }
   });
+
+  it("rejects a Node projection when its required maintenance source is absent", () => {
+    const preset = loadBuiltInPresetSourceManifest().presets.find(
+      (candidate) => candidate.name === "ts-lib",
+    )!;
+    const targetDir = path.join(tmpdir(), "missing-toolchain-maintenance");
+    const blueprint = blueprintForPresetSourcePreset(preset, { targetDir });
+    const context = assembleGenerationContext({
+      blueprint,
+      targetDir,
+      toolchain: {
+        diagnostics: [],
+        nodeLtsMajor: { kind: "NodeLtsMajor", value: "24" },
+        packageManagerPin: { kind: "PackageManagerPin", value: "pnpm@11.11.0" },
+        source: "online",
+      },
+    });
+    const sourceRoots = builtInPresetProjectionSourceRoots();
+    expect(() =>
+      projectPresetSourcePreset({
+        preset,
+        context,
+        sourceRoots: {
+          ...sourceRoots,
+          sharedResource(resourceId) {
+            return resourceId === "shared-toolchain-maintenance"
+              ? undefined
+              : sourceRoots.sharedResource(resourceId);
+          },
+        },
+      }),
+    ).toThrow(
+      "Toolchain Baseline maintenance requires Shared Resource: shared-toolchain-maintenance",
+    );
+  });
+
+  it("creates a checked candidate in an isolated origin without auto-merging", async () => {
+    const fixture = await createGitFixture();
+    const github = fakeGithub();
+    const sequence: string[] = [];
+    await runToolchainBaselineMaintenance({
+      rootDirectory: fixture.checkout,
+      desired: desiredBaseline,
+      defaultBranch: "main",
+      owner: "example",
+      github: github.effects,
+      hooks: successfulHooks(fixture.checkout, sequence),
+    });
+    expect(
+      await remoteSha(fixture.origin, "automation/toolchain-baseline"),
+    ).toMatch(/^[0-9a-f]{40}$/);
+    expect(sequence).toEqual([
+      "package-manager",
+      "lockfile",
+      "prepare",
+      "check",
+    ]);
+    expect(github.events).toEqual(["create"]);
+  });
+
+  it("replaces an open candidate from an advanced default branch", async () => {
+    const fixture = await createGitFixture();
+    await pushAutomationCandidate(fixture);
+    const github = fakeGithub([7]);
+    let advanced = false;
+    const hooks = successfulHooks(fixture.checkout, []);
+    await runToolchainBaselineMaintenance({
+      rootDirectory: fixture.checkout,
+      desired: desiredBaseline,
+      defaultBranch: "main",
+      owner: "example",
+      github: github.effects,
+      hooks: {
+        ...hooks,
+        async beforePush() {
+          if (!advanced) {
+            advanced = true;
+            await advanceDefaultBranch(fixture);
+          }
+        },
+      },
+    });
+    const candidate = await remoteSha(
+      fixture.origin,
+      "automation/toolchain-baseline",
+    );
+    const parent = (
+      await execa("git", [
+        "--git-dir",
+        fixture.origin,
+        "rev-parse",
+        `${candidate}^`,
+      ])
+    ).stdout;
+    expect(parent).toBe(await remoteSha(fixture.origin, "main"));
+    expect(github.events).toEqual(["update:7"]);
+  });
+
+  it("refuses a concurrent candidate replacement instead of overwriting it", async () => {
+    const fixture = await createGitFixture();
+    await pushAutomationCandidate(fixture);
+    const github = fakeGithub([7]);
+    const hooks = successfulHooks(fixture.checkout, []);
+    await expect(
+      runToolchainBaselineMaintenance({
+        rootDirectory: fixture.checkout,
+        desired: desiredBaseline,
+        defaultBranch: "main",
+        owner: "example",
+        github: github.effects,
+        hooks: {
+          ...hooks,
+          async beforePush() {
+            await replaceAutomationCandidate(fixture);
+          },
+        },
+      }),
+    ).rejects.toThrow("candidate changed while checks ran");
+    expect(github.events).toEqual([]);
+  });
+
+  it("does not push or open a pull request when the full check fails", async () => {
+    const fixture = await createGitFixture();
+    const github = fakeGithub();
+    const hooks = successfulHooks(fixture.checkout, []);
+    await expect(
+      runToolchainBaselineMaintenance({
+        rootDirectory: fixture.checkout,
+        desired: desiredBaseline,
+        defaultBranch: "main",
+        owner: "example",
+        github: github.effects,
+        hooks: {
+          ...hooks,
+          async runChecks() {
+            throw new Error("check failed");
+          },
+        },
+      }),
+    ).rejects.toThrow("check failed");
+    expect(
+      await remoteSha(fixture.origin, "automation/toolchain-baseline"),
+    ).toBe("");
+    expect(github.events).toEqual([]);
+  });
+
+  it("closes and deletes stale single-flight state when drift disappears", async () => {
+    const fixture = await createGitFixture();
+    await pushAutomationCandidate(fixture);
+    const github = fakeGithub([7]);
+    await runToolchainBaselineMaintenance({
+      rootDirectory: fixture.checkout,
+      desired: currentBaseline,
+      defaultBranch: "main",
+      owner: "example",
+      github: github.effects,
+    });
+    expect(
+      await remoteSha(fixture.origin, "automation/toolchain-baseline"),
+    ).toBe("");
+    expect(github.events).toEqual(["close:7"]);
+  });
+
+  it("fails clearly when an owned material is present but malformed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "malformed-toolchain-"));
+    await writeFile(
+      path.join(root, "package.json"),
+      `${JSON.stringify({ engines: { node: "24" }, packageManager: "pnpm@11.11.0" })}\n`,
+    );
+    await writeFile(path.join(root, ".devcontainer.json"), "{}\n");
+    await expect(
+      updateToolchainBaselineMaterials(root, desiredBaseline),
+    ).resolves.toBeUndefined();
+    const devcontainer = path.join(root, ".devcontainer");
+    await execa("mkdir", ["-p", devcontainer]);
+    await writeFile(
+      path.join(devcontainer, "devcontainer.json"),
+      `${JSON.stringify({ build: {} })}\n`,
+    );
+    await expect(
+      updateToolchainBaselineMaterials(root, desiredBaseline),
+    ).rejects.toThrow("build.args must be an object");
+  });
 });
+
+const currentBaseline = {
+  nodeLtsMajor: "24",
+  packageManagerPin: "pnpm@11.11.0",
+} as const;
+const desiredBaseline = {
+  nodeLtsMajor: "26",
+  packageManagerPin: "pnpm@12.1.0",
+} as const;
+
+async function createGitFixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "toolchain-origin-"));
+  const origin = path.join(root, "origin.git");
+  const seed = path.join(root, "seed");
+  const checkout = path.join(root, "checkout");
+  await execa("git", ["init", "--bare", origin]);
+  await execa("git", ["init", "--initial-branch=main", seed]);
+  await execa("git", ["config", "user.name", "Fixture"], { cwd: seed });
+  await execa("git", ["config", "user.email", "fixture@example.test"], {
+    cwd: seed,
+  });
+  await writeFile(
+    path.join(seed, "package.json"),
+    `${JSON.stringify({ scripts: { check: 'node -e "process.exit(0)"' }, engines: { node: "24" }, packageManager: "pnpm@11.11.0" }, null, 2)}\n`,
+  );
+  await writeFile(
+    path.join(seed, "pnpm-lock.yaml"),
+    "lockfileVersion: '9.0'\n",
+  );
+  await execa("git", ["add", "."], { cwd: seed });
+  await execa("git", ["commit", "-m", "initial"], { cwd: seed });
+  await execa("git", ["remote", "add", "origin", origin], { cwd: seed });
+  await execa("git", ["push", "-u", "origin", "main"], { cwd: seed });
+  await execa("git", ["clone", origin, checkout]);
+  return { root, origin, seed, checkout };
+}
+
+function fakeGithub(initialPulls: number[] = []): {
+  effects: GithubEffects;
+  events: string[];
+} {
+  const pulls = [...initialPulls];
+  const events: string[] = [];
+  return {
+    events,
+    effects: {
+      async findPullRequests() {
+        return pulls;
+      },
+      async closePullRequest(number) {
+        events.push(`close:${number}`);
+        pulls.splice(0);
+      },
+      async createPullRequest() {
+        events.push("create");
+        pulls.push(1);
+      },
+      async updatePullRequest(number) {
+        events.push(`update:${number}`);
+      },
+    },
+  };
+}
+
+function successfulHooks(root: string, sequence: string[]) {
+  return {
+    async installPackageManager() {
+      sequence.push("package-manager");
+    },
+    async updateLockfile() {
+      sequence.push("lockfile");
+      await writeFile(
+        path.join(root, "pnpm-lock.yaml"),
+        "lockfileVersion: '9.0'\n# updated\n",
+      );
+    },
+    async prepareChecks() {
+      sequence.push("prepare");
+    },
+    async runChecks() {
+      sequence.push("check");
+    },
+  };
+}
+
+async function remoteSha(origin: string, branch: string): Promise<string> {
+  const result = await execa(
+    "git",
+    ["--git-dir", origin, "rev-parse", `refs/heads/${branch}`],
+    { reject: false },
+  );
+  return result.exitCode === 0 ? result.stdout : "";
+}
+
+async function pushAutomationCandidate(
+  fixture: Awaited<ReturnType<typeof createGitFixture>>,
+) {
+  await execa("git", ["checkout", "-B", "automation/toolchain-baseline"], {
+    cwd: fixture.seed,
+  });
+  await writeFile(path.join(fixture.seed, "candidate.txt"), "old\n");
+  await execa("git", ["add", "."], { cwd: fixture.seed });
+  await execa("git", ["commit", "-m", "old candidate"], { cwd: fixture.seed });
+  await execa("git", ["push", "origin", "HEAD:automation/toolchain-baseline"], {
+    cwd: fixture.seed,
+  });
+  await execa("git", ["checkout", "main"], { cwd: fixture.seed });
+}
+
+async function advanceDefaultBranch(
+  fixture: Awaited<ReturnType<typeof createGitFixture>>,
+) {
+  await writeFile(path.join(fixture.seed, "advanced.txt"), `${Date.now()}\n`);
+  await execa("git", ["add", "."], { cwd: fixture.seed });
+  await execa("git", ["commit", "-m", "advance default"], {
+    cwd: fixture.seed,
+  });
+  await execa("git", ["push", "origin", "main"], { cwd: fixture.seed });
+}
+
+async function replaceAutomationCandidate(
+  fixture: Awaited<ReturnType<typeof createGitFixture>>,
+) {
+  await execa("git", ["checkout", "automation/toolchain-baseline"], {
+    cwd: fixture.seed,
+  });
+  await writeFile(path.join(fixture.seed, "candidate.txt"), `${Date.now()}\n`);
+  await execa("git", ["add", "."], { cwd: fixture.seed });
+  await execa("git", ["commit", "-m", "replace candidate"], {
+    cwd: fixture.seed,
+  });
+  await execa(
+    "git",
+    ["push", "--force", "origin", "HEAD:automation/toolchain-baseline"],
+    { cwd: fixture.seed },
+  );
+  await execa("git", ["checkout", "main"], { cwd: fixture.seed });
+}
