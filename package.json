@@ -43,8 +43,8 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "turbo": "catalog:",
-    "typescript": "catalog:template-typescript",
-    "typescript-7": "catalog:template-typescript",
+    "typescript": "catalog:",
+    "typescript-7": "catalog:",
     "valibot": "catalog:",
     "vitest": "catalog:",
     "yaml": "catalog:"

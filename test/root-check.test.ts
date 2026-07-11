@@ -484,7 +484,7 @@ describe("Project Kit Root Check", () => {
         "tsc -p tsconfig.json --noEmit --pretty false",
       );
       expect(packageJson.devDependencies).toMatchObject({
-        "typescript-7": "catalog:template-typescript",
+        "typescript-7": "catalog:",
       });
     }
   });
@@ -499,7 +499,7 @@ describe("Project Kit Root Check", () => {
       "tsc -p tsconfig.json --noEmit --pretty false",
     );
     expect(packageJson.devDependencies).toMatchObject({
-      "typescript-7": "catalog:template-typescript",
+      "typescript-7": "catalog:",
     });
   });
 

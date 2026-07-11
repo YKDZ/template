@@ -23,7 +23,7 @@
   "dependencies": {
     "@ykdz/template-shared": "workspace:*",
     "semver": "catalog:",
-    "typescript": "catalog:template-typescript",
+    "typescript": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
@@ -33,6 +33,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript-7": "catalog:template-typescript"
+    "typescript-7": "catalog:"
   }
 }
