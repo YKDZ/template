@@ -119,7 +119,7 @@ describe("online toolchain resolution contract check", () => {
     expect(result.packageManagerPin.value).toBe("pnpm@10.3.0");
   });
 
-  it("does not select pnpm releases with unsupported engine range syntax", async () => {
+  it("uses npm semver semantics for pnpm engine ranges", async () => {
     const result = await checkOnlineToolchainResolutionContract({
       fetchJson: async (url) => {
         if (url === nodeReleaseIndexUrl) {
@@ -143,28 +143,42 @@ describe("online toolchain resolution contract check", () => {
       },
     });
 
-    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
+    expect(result.packageManagerPin.value).toBe("pnpm@12.1.0");
   });
 
   it.each([
     ["caret", "^24.0.0"],
     ["OR", ">=20.0.0 || >=24.0.0"],
-    ["unsupported", "~24.0.0"],
-  ])("treats %s pnpm engine ranges as incompatible", async (_label, range) => {
+  ])("accepts compatible %s pnpm engine ranges", async (_label, range) => {
+    const result = await checkOnlineToolchainResolutionContract({
+      fetchJson: async (url) => {
+        if (url === nodeReleaseIndexUrl) {
+          return [{ version: "v24.11.0", lts: "Krypton" }];
+        }
+
+        return {
+          time: { "11.0.0": "2025-01-01T00:00:00.000Z" },
+          versions: {
+            "11.0.0": { engines: { node: range } },
+          },
+        };
+      },
+    });
+    expect(result.packageManagerPin.value).toBe("pnpm@11.0.0");
+  });
+
+  it("rejects a valid pnpm engine range that excludes the current Node LTS", async () => {
     await expect(
       checkOnlineToolchainResolutionContract({
-        fetchJson: async (url) => {
-          if (url === nodeReleaseIndexUrl) {
-            return [{ version: "v24.11.0", lts: "Krypton" }];
-          }
-
-          return {
-            time: { "11.0.0": "2025-01-01T00:00:00.000Z" },
-            versions: {
-              "11.0.0": { engines: { node: range } },
-            },
-          };
-        },
+        fetchJson: async (url) =>
+          url === nodeReleaseIndexUrl
+            ? [{ version: "v24.11.0", lts: "Krypton" }]
+            : {
+                time: { "11.0.0": "2025-01-01T00:00:00.000Z" },
+                versions: {
+                  "11.0.0": { engines: { node: "~24.0.0" } },
+                },
+              },
       }),
     ).rejects.toThrow(
       "Online toolchain resolution contract failed during compatibility selection: pnpm registry metadata did not contain a release compatible with Node 24",

@@ -315,7 +315,10 @@ describe("template init", () => {
 
       expect(
         files.filter((file) => file.startsWith(".github/workflows/")),
-      ).toEqual([".github/workflows/check.yml"]);
+      ).toEqual([
+        ".github/workflows/check.yml",
+        ".github/workflows/toolchain-baseline-update.yml",
+      ]);
       expect(
         files.some((file) =>
           outOfScopePathPatterns.some((pattern) => pattern.test(file)),
@@ -470,6 +473,7 @@ describe("template init", () => {
       expect(rootConfigTsconfig.include).toEqual([
         "oxlint.config.ts",
         "oxfmt.config.ts",
+        "scripts/**/*.ts",
       ]);
       expect(rootPackageJson.scripts["format:check"]).toBe(
         "turbo run format:check:run --output-logs=errors-only --log-order=grouped",

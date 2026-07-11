@@ -947,7 +947,8 @@ describe("Projection Capability declarations", () => {
     expect(rootPackageJson).toMatchObject({
       name: "demo-rust-bin",
       scripts: {
-        check: rootCheckScript,
+        check:
+          "pnpm run check:boundaries && turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
         fix: rootFixScript,
       },
       devDependencies: {

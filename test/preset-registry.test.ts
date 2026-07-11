@@ -449,16 +449,20 @@ describe("Preset Registry", () => {
 
     expect(
       plan.checkPlan.components.map((component) => component.kind),
-    ).toEqual(["turbo-package-check"]);
+    ).toEqual(["typescript-typecheck", "turbo-package-check"]);
     expect(plan.fixPlan.components.map((component) => component.kind)).toEqual([
       "turbo-package-fix",
     ]);
     expect(plan.packageScripts).toEqual({
-      check: rootCheckScript,
+      check:
+        "pnpm run check:boundaries && turbo run typecheck:run format:check:run lint:run build:run test:run test:e2e:run check:run --output-logs=errors-only --log-order=grouped",
       "check:boundaries": "turbo boundaries --no-color",
       "check:run": 'node -e ""',
       fix: rootFixScript,
       "fix:run": 'node -e ""',
+      typecheck:
+        "turbo run typecheck:run --output-logs=errors-only --log-order=grouped",
+      "typecheck:run": "tsc -p tsconfig.config.json --noEmit --pretty false",
     });
     expect(plan.dependencyMaintenancePolicy.ecosystems).toEqual([
       "npm",
@@ -511,7 +515,13 @@ describe("Preset Registry", () => {
 
     expect(packageJson.name).toBe("demo-rust");
     expect(packageJson.scripts).toEqual(plan.packageScripts);
-    expect(packageJson.devDependencies).toEqual({ turbo: "catalog:" });
+    expect(packageJson.devDependencies).toEqual({
+      "@types/node": "catalog:",
+      "@types/semver": "catalog:",
+      semver: "catalog:",
+      turbo: "catalog:",
+      "typescript-7": "catalog:",
+    });
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson.packageManager).toBe("pnpm@11.2.3");
     expect(rustPackageJson).toEqual({

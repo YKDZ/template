@@ -185,9 +185,12 @@ describe("vue-app Preset Source behavior", () => {
     expect(rootPackageJson.name).toMatch(/^template-vue-app-behavior-/);
     expect(rootPackageJson).not.toHaveProperty("exports");
     expect(rootPackageJson.devDependencies).toEqual({
+      "@types/node": "catalog:",
+      "@types/semver": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
+      semver: "catalog:",
       turbo: "catalog:",
       "typescript-7": "catalog:",
     });

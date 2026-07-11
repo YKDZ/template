@@ -16,5 +16,5 @@
     "target": "es2023",
     "verbatimModuleSyntax": true
   },
-  "include": ["oxlint.config.ts", "oxfmt.config.ts"]
+  "include": ["oxlint.config.ts", "oxfmt.config.ts", "scripts/**/*.ts"]
 }

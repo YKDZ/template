@@ -146,9 +146,12 @@ describe("ts-lib Preset Source behavior", () => {
       packageManager: "pnpm@11.2.3",
     });
     expect(rootPackageJson.devDependencies).toEqual({
+      "@types/node": "catalog:",
+      "@types/semver": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
+      semver: "catalog:",
       turbo: "catalog:",
       "typescript-7": "catalog:",
     });

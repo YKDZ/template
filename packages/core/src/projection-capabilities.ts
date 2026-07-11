@@ -217,6 +217,8 @@ const dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"]
   ["npm", "github-actions", "docker"];
 const sharedTypeScriptResourceId = "shared-typescript";
 const sharedTypeScriptSourceRootKey = "sharedTypescript";
+const sharedToolchainMaintenanceResourceId = "shared-toolchain-maintenance";
+const sharedToolchainMaintenanceSourceRootKey = "sharedToolchainMaintenance";
 
 function strictTypeScriptCompilerOptions(
   options: Record<string, unknown>,
@@ -253,6 +255,23 @@ function setSharedTypeScriptResource(state: ProjectionCompositionState): void {
   }
 
   state.sourceRoots[sharedTypeScriptSourceRootKey] = root;
+}
+
+function setToolchainMaintenanceResource(
+  state: ProjectionCompositionState,
+): boolean {
+  const sourceRoot = state.projectionSourceRoots.sharedResource(
+    sharedToolchainMaintenanceResourceId,
+  );
+  if (sourceRoot === undefined) {
+    return false;
+  }
+  state.sourceRoots[sharedToolchainMaintenanceSourceRootKey] = sourceRoot;
+  state.rootDevDependencies.add("@types/node");
+  state.rootDevDependencies.add("@types/semver");
+  state.rootDevDependencies.add("semver");
+  state.rootDevDependencies.add("typescript-7");
+  return true;
 }
 
 const capabilityInterpreters = {
@@ -306,6 +325,8 @@ const capabilityInterpreters = {
     contribute({ capability, state }) {
       state.rustWorkspace = capability;
       state.sourceRoot = templateSourceRootForPreset(state, "rust-bin");
+      state.sourceRoots.sharedOxc = state.projectionSourceRoots.sharedOxc();
+      const hasToolchainMaintenance = setToolchainMaintenanceResource(state);
       setDevelopmentContainerResource(
         state,
         capability.devcontainerResourceId,
@@ -320,6 +341,14 @@ const capabilityInterpreters = {
         kind: "turbo-package-check",
         owner: workspaceGlobBoundary(capability.workspacePackageGlob),
       });
+      if (hasToolchainMaintenance) {
+        state.rootCheckComponents.unshift({
+          kind: "typescript-typecheck",
+          owner: strictTypescriptRootBoundary,
+        });
+        state.rootScriptFragments.typecheck =
+          "tsc -p tsconfig.config.json --noEmit --pretty false";
+      }
       state.rootFixComponents.push({
         kind: "turbo-package-fix",
         owner: workspaceGlobBoundary(capability.workspacePackageGlob),
@@ -347,6 +376,9 @@ const capabilityInterpreters = {
       state.flags.dependabot = true;
       state.flags.devcontainer = true;
       state.operationFactories.push(rustBinaryWorkspaceOperations);
+      if (hasToolchainMaintenance) {
+        state.operationFactories.push(rustToolchainMaintenanceOperations);
+      }
     },
   },
   "strict-typescript-root": {
@@ -459,12 +491,17 @@ const capabilityInterpreters = {
   "github-maintenance": {
     kind: "github-maintenance",
     contribute({ state }) {
+      const hasToolchainMaintenance = setToolchainMaintenanceResource(state);
       state.dependencyMaintenanceEcosystems.push(
         ...dependencyMaintenanceEcosystems,
       );
       state.flags.githubActions = true;
       state.flags.dependabot = true;
-      state.operationFactories.push(githubMaintenanceOperations);
+      state.operationFactories.push(
+        hasToolchainMaintenance
+          ? githubMaintenanceOperations
+          : legacyGithubMaintenanceOperations,
+      );
     },
   },
 } satisfies {
@@ -3074,6 +3111,13 @@ function isMissingDevelopmentContainerFragmentError(error: unknown): boolean {
 
 function githubMaintenanceOperations(): RenderOperation[] {
   return [
+    ...legacyGithubMaintenanceOperations(),
+    ...toolchainMaintenanceOperations(),
+  ];
+}
+
+function legacyGithubMaintenanceOperations(): RenderOperation[] {
+  return [
     {
       kind: "copyFile",
       from: ".github/workflows/check.yml",
@@ -3083,6 +3127,35 @@ function githubMaintenanceOperations(): RenderOperation[] {
       kind: "copyFile",
       from: ".github/dependabot.yml",
       to: ".github/dependabot.yml",
+    },
+  ];
+}
+
+function toolchainMaintenanceOperations(): RenderOperation[] {
+  return [
+    {
+      kind: "copyFile",
+      from: "toolchain-baseline-update.yml",
+      to: ".github/workflows/toolchain-baseline-update.yml",
+      sourceRoot: sharedToolchainMaintenanceSourceRootKey,
+    },
+    {
+      kind: "copyFile",
+      from: "update-toolchain-baseline.ts",
+      to: "scripts/update-toolchain-baseline.ts",
+      sourceRoot: sharedToolchainMaintenanceSourceRootKey,
+    },
+  ];
+}
+
+function rustToolchainMaintenanceOperations(): RenderOperation[] {
+  return [
+    ...toolchainMaintenanceOperations(),
+    {
+      kind: "copyFile",
+      from: "tsconfig.config.json",
+      to: "tsconfig.config.json",
+      sourceRoot: "sharedOxc",
     },
   ];
 }

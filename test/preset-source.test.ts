@@ -486,7 +486,13 @@ describe("Preset Source Manifest validation", () => {
           .map((preset) => [preset.name, preset.dependencyCatalog]),
       ),
     ).toEqual({
-      "rust-bin": ["turbo"],
+      "rust-bin": [
+        "@types/node",
+        "@types/semver",
+        "semver",
+        "turbo",
+        "typescript-7",
+      ],
       "ts-lib": [
         "@types/node",
         "oxfmt",
@@ -589,7 +595,12 @@ describe("Preset Source Manifest validation", () => {
           "rust-bin/rustfmt.toml",
           "rust-bin/turbo.json",
         ],
-        sharedResources: ["shared-devcontainer", "shared-editor-customization"],
+        sharedResources: [
+          "shared-devcontainer",
+          "shared-editor-customization",
+          "shared-oxc-root-tsconfig",
+          "shared-toolchain-maintenance",
+        ],
       },
     });
   });

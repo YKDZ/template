@@ -170,6 +170,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.7.1
       '@vikejs/hono':
         specifier: 'catalog:'
         version: 0.2.1(hono@4.12.28)(srvx@0.11.21)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0)))
@@ -197,6 +200,9 @@ importers:
       pinia:
         specifier: 'catalog:'
         version: 3.0.4(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2))
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
       telefunc:
         specifier: 'catalog:'
         version: 0.2.22(@babel/core@7.29.7)(@babel/parser@7.29.7)(@babel/types@7.29.7)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
@@ -276,6 +282,9 @@ importers:
       '@ykdz/template-shared':
         specifier: workspace:*
         version: file:packages/shared(@typescript/typescript6@6.0.2)
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
       typescript:
         specifier: catalog:template-typescript
         version: '@typescript/typescript6@6.0.2'

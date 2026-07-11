@@ -177,6 +177,11 @@ function renderDependabotUpdate(
       '      - dependency-name: "@types/node"',
       "        update-types:",
       "          - version-update:semver-major",
+      '      - dependency-name: "pnpm"',
+      "        update-types:",
+      "          - version-update:semver-major",
+      "          - version-update:semver-minor",
+      "          - version-update:semver-patch",
     );
   }
 

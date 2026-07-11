@@ -29,6 +29,10 @@
     {
       "id": "shared-typescript",
       "path": "shared/typescript"
+    },
+    {
+      "id": "shared-toolchain-maintenance",
+      "path": "shared/toolchain-maintenance"
     }
   ],
   "presets": [
@@ -92,7 +96,8 @@
           "shared-editor-customization",
           "shared-oxc-node",
           "shared-oxc-format",
-          "shared-oxc-root-tsconfig"
+          "shared-oxc-root-tsconfig",
+          "shared-toolchain-maintenance"
         ]
       }
     },
@@ -195,7 +200,8 @@
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
           "shared-oxc-vue",
-          "shared-typescript"
+          "shared-typescript",
+          "shared-toolchain-maintenance"
         ]
       }
     },
@@ -337,7 +343,8 @@
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
           "shared-oxc-vue",
-          "shared-typescript"
+          "shared-typescript",
+          "shared-toolchain-maintenance"
         ]
       }
     },
@@ -465,7 +472,8 @@
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
           "shared-oxc-vue",
-          "shared-typescript"
+          "shared-typescript",
+          "shared-toolchain-maintenance"
         ]
       }
     },
@@ -486,7 +494,13 @@
         "rustfmt-clippy",
         "cargo-test"
       ],
-      "dependencyCatalog": ["turbo"],
+      "dependencyCatalog": [
+        "@types/node",
+        "@types/semver",
+        "semver",
+        "turbo",
+        "typescript-7"
+      ],
       "projection": {
         "capabilities": [
           {
@@ -508,7 +522,9 @@
         ],
         "sharedResources": [
           "shared-devcontainer",
-          "shared-editor-customization"
+          "shared-editor-customization",
+          "shared-oxc-root-tsconfig",
+          "shared-toolchain-maintenance"
         ]
       }
     },
