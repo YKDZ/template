@@ -1157,9 +1157,9 @@ test("starts the local service", async ({ page }) => {
     const databaseFile = path.join(deploymentRoot, "prepared.sqlite");
     await execFileAsync(
       path.join(deploymentRoot, "node_modules/.bin/drizzle-kit"),
-      ["migrate"],
+      ["migrate", "--config", path.join(deploymentRoot, "drizzle.config.ts")],
       {
-        cwd: deploymentRoot,
+        cwd: tmpdir(),
         env: { ...process.env, DATABASE_FILE: databaseFile },
       },
     );
