@@ -1,0 +1,10 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build:run": {
+      "dependsOn": ["^build:run"],
+      "outputs": []
+    }
+  }
+}

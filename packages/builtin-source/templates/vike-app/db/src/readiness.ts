@@ -13,8 +13,8 @@ export function assertDatabaseReady(db: Database) {
     throw new Error(
       [
         "Database is not ready.",
-        "For local development, run `pnpm --dir packages/db run db:prepare:dev`.",
-        "For deployment, run `pnpm --dir packages/db run db:prepare:deploy` before starting the app.",
+        "For local development, run `pnpm --dir packages/db-migrations run db:prepare:dev`.",
+        "For deployment, run `pnpm --dir packages/db-migrations run db:prepare:deploy` before starting the app.",
       ].join(" "),
       { cause },
     );

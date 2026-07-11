@@ -208,7 +208,7 @@
     {
       "name": "vike-app",
       "title": "Vike app",
-      "description": "Vike, Hono, Telefunc, Drizzle, and Vue workspace with a separate database package.",
+      "description": "Vike, Hono, Telefunc, Drizzle, and Vue workspace with separate database and migration packages.",
       "generation": "supported",
       "supportedPackageManagers": ["pnpm"],
       "supportedProjectKinds": ["multi-package"],
@@ -315,6 +315,7 @@
         "roots": [
           "vike-app/.github",
           "vike-app/db",
+          "vike-app/db-migrations",
           "vike-app/web/assets",
           "vike-app/web/components",
           "vike-app/web/pages",
@@ -324,6 +325,9 @@
           "vike-app/web/types"
         ],
         "files": [
+          "vike-app/db-migrations/drizzle.config.ts",
+          "vike-app/db-migrations/scripts/prepare-database.ts",
+          "vike-app/db-migrations/turbo.json",
           "vike-app/db/turbo.json",
           "vike-app/web/+server.ts",
           "vike-app/web/.env.example",

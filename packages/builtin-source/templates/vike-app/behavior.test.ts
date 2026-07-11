@@ -125,6 +125,20 @@ async function linkRepositoryDependencies(targetDir: string): Promise<void> {
   );
 }
 
+async function databaseReadiness(databaseFile: string): Promise<string> {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(process.env.DATABASE_FILE); const table = db.prepare("select name from sqlite_master where type = \'table\' and name = \'todos\'").get()?.name; const rows = db.prepare("select count(*) as count from todos").get()?.count; console.log(`${table}:${rows}`);',
+    ],
+    { env: { ...process.env, DATABASE_FILE: databaseFile } },
+  );
+
+  return stdout.trim();
+}
+
 async function repositoryTscIdentity(): Promise<{
   linkTarget: string | undefined;
   modifiedAt: number;
@@ -285,6 +299,10 @@ describe("vike-app Preset Source behavior", () => {
       path.join(targetDir, "packages/db/package.json"),
       packageJsonSchema,
     );
+    const migrationsPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "packages/db-migrations/package.json"),
+      packageJsonSchema,
+    );
     const appTsconfig = await readJsonWithSchema(
       path.join(targetDir, "apps/web/tsconfig.app.json"),
       v.object({ include: v.array(v.string()) }),
@@ -300,6 +318,18 @@ describe("vike-app Preset Source behavior", () => {
           paths: v.record(v.string(), v.array(v.string())),
         }),
         include: v.array(v.string()),
+      }),
+    );
+    const migrationsTsconfig = await readJsonWithSchema(
+      path.join(targetDir, "packages/db-migrations/tsconfig.json"),
+      v.object({ include: v.array(v.string()) }),
+    );
+    const migrationsTurboConfig = await readJsonWithSchema(
+      path.join(targetDir, "packages/db-migrations/turbo.json"),
+      v.object({
+        tasks: v.object({
+          "build:run": v.object({ dependsOn: v.array(v.string()) }),
+        }),
       }),
     );
     const dbSource = await readFile(
@@ -442,24 +472,56 @@ describe("vike-app Preset Source behavior", () => {
     );
     expect(dbPackageJson.devDependencies).not.toHaveProperty("typescript");
     expect(dbPackageJson.scripts).toMatchObject({
+      "db:seed:example": "node scripts/seed-example.ts",
+      "test:run":
+        'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
+    });
+    expect(dbPackageJson.scripts).not.toHaveProperty("db:generate");
+    expect(dbPackageJson.scripts).not.toHaveProperty("db:migrate");
+    expect(dbPackageJson.scripts).not.toHaveProperty("db:push");
+    expect(dbPackageJson.scripts).not.toHaveProperty("db:studio");
+    expect(dbPackageJson.devDependencies).not.toHaveProperty("drizzle-kit");
+    expect(migrationsPackageJson).toMatchObject({
+      name: "@demo-vike/db-migrations",
+      private: true,
+      engines: { node: "24" },
+      dependencies: {
+        "drizzle-kit": "catalog:",
+        "drizzle-orm": "catalog:",
+      },
+      devDependencies: {
+        "@demo-vike/db": "workspace:*",
+      },
+    });
+    expect(migrationsPackageJson.scripts).toMatchObject({
       "db:generate": "drizzle-kit generate",
       "db:migrate": "drizzle-kit migrate",
       "db:prepare:deploy": "pnpm run db:migrate",
-      "db:prepare:dev": "pnpm run db:push && pnpm run db:seed:example",
-      "db:prepare:test":
-        'rm -f "${DATABASE_FILE:-./node_modules/.tmp/test.sqlite}" && pnpm run db:push && pnpm run db:seed:example',
+      "db:prepare:dev": "node scripts/prepare-database.ts dev",
+      "db:prepare:test": "node scripts/prepare-database.ts test",
       "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
-      "db:seed:example": "node scripts/seed-example.ts",
       "db:studio": "drizzle-kit studio",
     });
-    expect(dbPackageJson.scripts).not.toHaveProperty("db:seed");
-    expect(dbPackageJson.scripts).not.toHaveProperty("drizzle:generate");
-    expect(dbPackageJson.scripts).not.toHaveProperty("drizzle:migrate");
-    expect(dbPackageJson.scripts).not.toHaveProperty("drizzle:studio");
+    expect(migrationsPackageJson.scripts).not.toHaveProperty("db:seed:example");
+    expect(migrationsPackageJson.devDependencies).toHaveProperty(
+      "typescript-7",
+      "catalog:",
+    );
+    expect(migrationsPackageJson.devDependencies).not.toHaveProperty(
+      "typescript",
+    );
     expect(dbTsconfig.compilerOptions.paths).toEqual({
       "#db/*": ["./src/*"],
     });
     expect(dbTsconfig.include).toContain("scripts/**/*.ts");
+    expect(dbTsconfig.include).not.toContain("drizzle.config.ts");
+    expect(migrationsTsconfig.include).toEqual([
+      "drizzle.config.ts",
+      "scripts/**/*.ts",
+    ]);
+    expect(migrationsTurboConfig.tasks["build:run"].dependsOn).toEqual([
+      "^build:run",
+    ]);
     expect(dbSource).toContain('from "#db/schema"');
     expect(dbSource).not.toContain('from "drizzle-orm/node-sqlite/migrator"');
     expect(dbSource).not.toContain("migrate(db");
@@ -496,11 +558,16 @@ describe("vike-app Preset Source behavior", () => {
     expect(files).toContain("apps/web/scripts/prepare-database.sh");
     expect(files).toContain("apps/web/scripts/check-standalone-deployment.ts");
     expect(files).toContain(
-      "packages/db/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
+      "packages/db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
     );
     expect(files).toContain(
-      "packages/db/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
+      "packages/db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
     );
+    expect(files).toContain("packages/db-migrations/drizzle.config.ts");
+    expect(files).not.toContain("packages/db/drizzle.config.ts");
+    expect(files.filter((file) => file.endsWith("drizzle.config.ts"))).toEqual([
+      "packages/db-migrations/drizzle.config.ts",
+    ]);
     expect(files).toContain("packages/db/scripts/seed-example.ts");
     expect(files).toContain("packages/db/src/readiness.ts");
     expect(files).toContain("packages/db/src/seed/example.ts");
@@ -837,6 +904,134 @@ test("starts the local service", async ({ page }) => {
       code: 1,
       stderr: expect.stringContaining("Database is not ready"),
     });
+  }, 120_000);
+
+  it("prepares one seeded application database for default and caller-relative development paths", async () => {
+    const repositoryPackageJson = await readJsonWithSchema(
+      path.join(process.cwd(), "package.json"),
+      v.object({ packageManager: packageManagerPinSchema }),
+    );
+    const targetDir = await renderVikeProject(
+      repositoryPackageJson.packageManager,
+    );
+    await execFileAsync(
+      "pnpm",
+      ["install", "--ignore-scripts", "--no-frozen-lockfile"],
+      { cwd: targetDir, env: { ...process.env, CI: "1" } },
+    );
+
+    const preparationEnvironment = { ...process.env };
+    delete preparationEnvironment.DATABASE_FILE;
+    delete preparationEnvironment.INIT_CWD;
+    await execFileAsync(
+      "pnpm",
+      ["--dir", "packages/db-migrations", "run", "db:prepare:dev"],
+      { cwd: targetDir, env: preparationEnvironment },
+    );
+
+    const defaultDatabaseFile = path.join(
+      targetDir,
+      "apps/web/data/app.sqlite",
+    );
+    expect(await databaseReadiness(defaultDatabaseFile)).toBe("todos:2");
+
+    const relativeDatabaseFile = "caller-data/app.sqlite";
+    await execFileAsync(
+      "pnpm",
+      ["--dir", "packages/db-migrations", "run", "db:prepare:dev"],
+      {
+        cwd: targetDir,
+        env: { ...preparationEnvironment, DATABASE_FILE: relativeDatabaseFile },
+      },
+    );
+
+    const expectedRelativeDatabaseFile = path.join(
+      targetDir,
+      relativeDatabaseFile,
+    );
+    expect(await databaseReadiness(expectedRelativeDatabaseFile)).toBe(
+      "todos:2",
+    );
+    await expect(
+      access(
+        path.join(targetDir, "packages/db-migrations", relativeDatabaseFile),
+      ),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      access(path.join(targetDir, "packages/db", relativeDatabaseFile)),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  }, 120_000);
+
+  it("applies SQL from a production migration closure without the schema or TypeScript compiler", async () => {
+    const repositoryPackageJson = await readJsonWithSchema(
+      path.join(process.cwd(), "package.json"),
+      v.object({ packageManager: packageManagerPinSchema }),
+    );
+    const targetDir = await renderVikeProject(
+      repositoryPackageJson.packageManager,
+    );
+    await execFileAsync(
+      "pnpm",
+      ["install", "--ignore-scripts", "--no-frozen-lockfile"],
+      { cwd: targetDir, env: { ...process.env, CI: "1" } },
+    );
+
+    const deploymentRoot = path.join(targetDir, "migration-deploy");
+    await execFileAsync(
+      "pnpm",
+      [
+        "--filter",
+        "./packages/db-migrations",
+        "deploy",
+        "--prod",
+        deploymentRoot,
+      ],
+      { cwd: targetDir, env: process.env },
+    );
+
+    const deploymentFiles = await generatedFilePaths(deploymentRoot);
+    expect(deploymentFiles).toContain("drizzle.config.ts");
+    expect(deploymentFiles.some((file) => file.endsWith("migration.sql"))).toBe(
+      true,
+    );
+    expect(deploymentFiles.some((file) => file.includes("src/schema.ts"))).toBe(
+      false,
+    );
+    expect(
+      deploymentFiles.some((file) =>
+        file.includes("node_modules/@demo-vike/db"),
+      ),
+    ).toBe(false);
+    expect(deploymentFiles.some((file) => file.includes("seed-example"))).toBe(
+      false,
+    );
+    expect(
+      deploymentFiles.some((file) =>
+        /(^|\/)node_modules\/(\.pnpm\/[^/]*typescript|typescript)(\/|$)/u.test(
+          file,
+        ),
+      ),
+    ).toBe(false);
+
+    const databaseFile = path.join(deploymentRoot, "prepared.sqlite");
+    await execFileAsync(
+      path.join(deploymentRoot, "node_modules/.bin/drizzle-kit"),
+      ["migrate"],
+      {
+        cwd: deploymentRoot,
+        env: { ...process.env, DATABASE_FILE: databaseFile },
+      },
+    );
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(process.env.DATABASE_FILE); const table = db.prepare("select name from sqlite_master where type = \'table\' and name = \'todos\'").get()?.name; const rows = db.prepare("select count(*) as count from todos").get()?.count; console.log(`${table}:${rows}`);',
+      ],
+      { env: { ...process.env, DATABASE_FILE: databaseFile } },
+    );
+    expect(stdout.trim()).toBe("todos:0");
   }, 120_000);
 
   it.each([

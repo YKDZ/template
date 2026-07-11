@@ -64,7 +64,7 @@ export default defineConfig({
     ? {}
     : {
         webServer: {
-          command: `DATABASE_FILE=${shellValue(databaseFile!)} pnpm --dir ../../packages/db run db:prepare:test && PORT=${previewPort} node dist/server/index.mjs`,
+          command: `DATABASE_FILE=${shellValue(databaseFile!)} pnpm --dir ../../packages/db-migrations run db:prepare:test && PORT=${previewPort} node dist/server/index.mjs`,
           reuseExistingServer: !process.env.CI,
           timeout: 60_000,
           url: previewUrl,

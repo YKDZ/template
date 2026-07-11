@@ -1581,6 +1581,20 @@ function vikeDbPackageName(context: GenerationContext): string {
   return packageDefinition?.name ?? `@${context.projectName.value}/db`;
 }
 
+function vikeDbMigrationsPackagePath(): "packages/db-migrations" {
+  return "packages/db-migrations";
+}
+
+function vikeDbMigrationsPackageName(context: GenerationContext): string {
+  const packageDefinition = context.blueprint.packages?.find(
+    (pkg) => pkg.path === vikeDbMigrationsPackagePath(),
+  );
+
+  return (
+    packageDefinition?.name ?? `@${context.projectName.value}/db-migrations`
+  );
+}
+
 function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
@@ -1819,7 +1833,6 @@ function vikeDbPackageJson(
     scripts: vikeDbPackageScripts(),
     devDependencies: {
       "@types/node": "catalog:",
-      "drizzle-kit": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
@@ -1835,15 +1848,7 @@ function vikeDbPackageJson(
 function vikeDbPackageScripts(): Record<string, string> {
   return {
     "build:run": "tsc -p tsconfig.json --noEmit",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:prepare:deploy": "pnpm run db:migrate",
-    "db:prepare:dev": "pnpm run db:push && pnpm run db:seed:example",
-    "db:prepare:test":
-      'rm -f "${DATABASE_FILE:-./node_modules/.tmp/test.sqlite}" && pnpm run db:push && pnpm run db:seed:example',
-    "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
     "db:seed:example": "node scripts/seed-example.ts",
-    "db:studio": "drizzle-kit studio",
     "format:check:run":
       "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -1852,8 +1857,52 @@ function vikeDbPackageScripts(): Record<string, string> {
     "lint:fix:run":
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     "test:run":
-      "DATABASE_FILE=./node_modules/.tmp/test.sqlite pnpm run db:prepare:test && DATABASE_FILE=./node_modules/.tmp/test.sqlite vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status",
+      'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
     "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+  };
+}
+
+function vikeDbMigrationsPackageJson(
+  context: GenerationContext,
+): Record<string, unknown> {
+  return {
+    name: vikeDbMigrationsPackageName(context),
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    dependencies: {
+      "drizzle-kit": "catalog:",
+      "drizzle-orm": "catalog:",
+    },
+    scripts: {
+      "build:run": "tsc -p tsconfig.json --noEmit",
+      "db:generate": "drizzle-kit generate",
+      "db:migrate": "drizzle-kit migrate",
+      "db:prepare:deploy": "pnpm run db:migrate",
+      "db:prepare:dev": "node scripts/prepare-database.ts dev",
+      "db:prepare:test": "node scripts/prepare-database.ts test",
+      "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
+      "db:studio": "drizzle-kit studio",
+      "format:check:run":
+        "oxfmt --list-different --config ../../oxfmt.config.ts .",
+      "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+      "lint:run":
+        "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+      "lint:fix:run":
+        "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+    },
+    devDependencies: {
+      [vikeDbPackageName(context)]: "workspace:*",
+      "@types/node": "catalog:",
+      oxfmt: "catalog:",
+      oxlint: "catalog:",
+      "oxlint-tsgolint": "catalog:",
+      "typescript-7": "catalog:",
+    },
+    engines: {
+      node: context.toolchain.nodeLtsMajor.value,
+    },
   };
 }
 
@@ -2265,10 +2314,13 @@ function workspaceNodePackagesOperations({
   const vikeDbManifest = hasVikePackage(capability)
     ? vikeDbPackageJson(context)
     : undefined;
+  const vikeDbMigrationsManifest = hasVikePackage(capability)
+    ? vikeDbMigrationsPackageJson(context)
+    : undefined;
   const packageManifests =
-    vikeDbManifest === undefined
+    vikeDbManifest === undefined || vikeDbMigrationsManifest === undefined
       ? nodePackageManifests
-      : [...nodePackageManifests, vikeDbManifest];
+      : [...nodePackageManifests, vikeDbManifest, vikeDbMigrationsManifest];
   const rootManifest = rootPackageJson(context, packageScripts, state);
 
   if (rootManifest === undefined) {
@@ -2395,7 +2447,7 @@ function nodePackageScripts(
 
   if (nodePackage.kind === "vike-app") {
     const dbCommand =
-      "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:prepare:dev";
+      "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
     return {
       "build:run": "vike build",
       "check:deployment": "node scripts/check-standalone-deployment.ts",
@@ -2777,9 +2829,6 @@ function vikeTemplateSourceOperation(options: {
 
 const vikeDbSourceFiles = [
   "db/turbo.json",
-  "db/drizzle.config.ts",
-  "db/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
-  "db/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
   "db/scripts/seed-example.ts",
   "db/src/db.ts",
   "db/src/index.ts",
@@ -2811,6 +2860,39 @@ function vikeDbPackageOperations(
       from: sourceFile,
       to: `${packagePath}/${sourceFile.replace(/^db\//, "")}`,
     })),
+    ...vikeDbMigrationsPackageOperations(context),
+  ];
+}
+
+const vikeDbMigrationsSourceFiles = [
+  "db-migrations/drizzle.config.ts",
+  "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
+  "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
+  "db-migrations/scripts/prepare-database.ts",
+  "db-migrations/turbo.json",
+] as const;
+
+function vikeDbMigrationsPackageOperations(
+  context: GenerationContext,
+): RenderOperation[] {
+  const packagePath = vikeDbMigrationsPackagePath();
+
+  return [
+    {
+      kind: "writeJson",
+      to: `${packagePath}/package.json`,
+      value: vikeDbMigrationsPackageJson(context),
+    },
+    {
+      kind: "writeJson",
+      to: `${packagePath}/tsconfig.json`,
+      value: vikeDbMigrationsTsconfigJson(),
+    },
+    ...vikeDbMigrationsSourceFiles.map((sourceFile) => ({
+      kind: "copyFile" as const,
+      from: sourceFile,
+      to: `${packagePath}/${sourceFile.replace(/^db-migrations\//, "")}`,
+    })),
   ];
 }
 
@@ -2829,12 +2911,22 @@ function vikeDbTsconfigJson(): Record<string, unknown> {
       }),
       skipLibCheck: true,
     },
-    include: [
-      "src/**/*.ts",
-      "scripts/**/*.ts",
-      "test/**/*.ts",
-      "drizzle.config.ts",
-    ],
+    include: ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  };
+}
+
+function vikeDbMigrationsTsconfigJson(): Record<string, unknown> {
+  return {
+    compilerOptions: {
+      ...strictTypeScriptCompilerOptions({
+        module: "esnext",
+        moduleResolution: "bundler",
+        rootDir: ".",
+        types: ["node"],
+      }),
+      skipLibCheck: true,
+    },
+    include: ["drizzle.config.ts", "scripts/**/*.ts"],
   };
 }
 
