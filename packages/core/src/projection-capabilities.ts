@@ -221,6 +221,16 @@ const sharedTypeScriptResourceId = "shared-typescript";
 const sharedTypeScriptSourceRootKey = "sharedTypescript";
 const sharedToolchainMaintenanceResourceId = "shared-toolchain-maintenance";
 const sharedToolchainMaintenanceSourceRootKey = "sharedToolchainMaintenance";
+const sharedPnpmPeerPolicyResourceId = "shared-pnpm-peer-policy";
+const sharedPnpmPeerPolicySourceRootKey = "sharedPnpmPeerPolicy";
+
+function setPnpmPeerPolicyResource(state: ProjectionCompositionState): void {
+  const root = state.projectionSourceRoots.sharedResource(
+    sharedPnpmPeerPolicyResourceId,
+  );
+  if (root === undefined) return;
+  state.sourceRoots[sharedPnpmPeerPolicySourceRootKey] = root;
+}
 
 function strictTypeScriptCompilerOptions(
   options: Record<string, unknown>,
@@ -299,6 +309,7 @@ const capabilityInterpreters = {
   "workspace-library-package": {
     kind: "workspace-library-package",
     contribute({ capability, state }) {
+      setPnpmPeerPolicyResource(state);
       state.package = capability;
       state.sourceRoot = templateSourceRoot(
         state,
@@ -311,6 +322,7 @@ const capabilityInterpreters = {
   "workspace-node-packages": {
     kind: "workspace-node-packages",
     contribute({ capability, state }) {
+      setPnpmPeerPolicyResource(state);
       state.nodeWorkspace = capability;
       state.sourceRoot = templateSourceRootForPreset(
         state,
@@ -1751,7 +1763,6 @@ function vuePackageJson(
       "oxlint-tsgolint": "catalog:",
       tailwindcss: "catalog:",
       typescript: "catalog:",
-      "typescript-6": "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
       "vue-tsc": "catalog:",
@@ -1828,7 +1839,6 @@ function vikeVueToolingPackageJson(
       "@types/node": "catalog:",
       "@vue/tsconfig": "catalog:",
       typescript: "catalog:",
-      "typescript-6": "catalog:",
       "typescript-7": "catalog:",
       "vue-tsc": "catalog:",
     },
@@ -2096,10 +2106,23 @@ function workspaceLibraryPackageOperations({
       to: "package.json",
       value: rootManifest,
     },
+    ...(state.sourceRoots[sharedPnpmPeerPolicySourceRootKey] === undefined
+      ? []
+      : [
+          {
+            kind: "copyFile" as const,
+            from: ".pnpmfile.cts",
+            to: ".pnpmfile.cts",
+            sourceRoot: sharedPnpmPeerPolicySourceRootKey,
+          },
+        ]),
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
+        ...(state.sourceRoots[sharedPnpmPeerPolicySourceRootKey] === undefined
+          ? {}
+          : { pnpmfile: ".pnpmfile.cts" }),
         packages: [capability.workspacePackageGlob],
         dependencies: collectGeneratedManifestCatalogDependencies([
           rootManifest,
@@ -2387,11 +2410,24 @@ function workspaceNodePackagesOperations({
       to: "package.json",
       value: rootManifest,
     },
+    ...(state.sourceRoots[sharedPnpmPeerPolicySourceRootKey] === undefined
+      ? []
+      : [
+          {
+            kind: "copyFile" as const,
+            from: ".pnpmfile.cts",
+            to: ".pnpmfile.cts",
+            sourceRoot: sharedPnpmPeerPolicySourceRootKey,
+          },
+        ]),
     {
       kind: "writeText",
       to: "pnpm-workspace.yaml",
       text: renderGeneratedPnpmWorkspaceYaml({
         packages: workspacePackageGlobsForNodeWorkspace(capability),
+        ...(state.sourceRoots[sharedPnpmPeerPolicySourceRootKey] === undefined
+          ? {}
+          : { pnpmfile: ".pnpmfile.cts" }),
         dependencies:
           capability.packageLinks === undefined
             ? collectGeneratedManifestCatalogDependencies([

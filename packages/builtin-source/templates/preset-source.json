@@ -33,6 +33,10 @@
     {
       "id": "shared-toolchain-maintenance",
       "path": "shared/toolchain-maintenance"
+    },
+    {
+      "id": "shared-pnpm-peer-policy",
+      "path": "shared/pnpm-peer-policy"
     }
   ],
   "presets": [
@@ -97,6 +101,7 @@
           "shared-oxc-node",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
+          "shared-pnpm-peer-policy",
           "shared-toolchain-maintenance"
         ]
       }
@@ -133,7 +138,6 @@
         "tailwindcss",
         "turbo",
         "typescript",
-        "typescript-6",
         "typescript-7",
         "vite",
         "vitest",
@@ -199,6 +203,7 @@
           "shared-editor-customization",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
+          "shared-pnpm-peer-policy",
           "shared-oxc-vue",
           "shared-typescript",
           "shared-toolchain-maintenance"
@@ -240,7 +245,6 @@
         "tailwindcss",
         "telefunc",
         "typescript",
-        "typescript-6",
         "typescript-7",
         "vite",
         "vike",
@@ -344,6 +348,7 @@
           "shared-editor-customization",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
+          "shared-pnpm-peer-policy",
           "shared-oxc-vue",
           "shared-typescript",
           "shared-toolchain-maintenance"
@@ -385,7 +390,6 @@
         "tsc-alias",
         "turbo",
         "typescript",
-        "typescript-6",
         "typescript-7",
         "vite",
         "vitest",
@@ -473,6 +477,7 @@
           "shared-oxc-node",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
+          "shared-pnpm-peer-policy",
           "shared-oxc-vue",
           "shared-typescript",
           "shared-toolchain-maintenance"

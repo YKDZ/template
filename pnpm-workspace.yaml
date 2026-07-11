@@ -3,6 +3,10 @@ packages:
 
 nodeLinker: isolated
 
+pnpmfile: packages/builtin-source/templates/shared/pnpm-peer-policy/.pnpmfile.cts
+
+autoInstallPeers: false
+
 injectWorkspacePackages: true
 
 dedupeInjectedDeps: false
@@ -14,6 +18,11 @@ syncInjectedDepsAfterScripts:
 minimumReleaseAge: 1440
 
 minimumReleaseAgeStrict: true
+
+overrides:
+  "pinia>typescript": "-"
+  "valibot>typescript": "-"
+  "vue>typescript": "-"
 
 catalogs:
   template-typescript:
@@ -45,7 +54,6 @@ catalog:
   tsc-alias: ^1.8.17
   turbo: 2.10.2
   typescript: npm:@typescript/typescript6@^6.0.2
-  typescript-6: npm:typescript@^6.0.3
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
   vite: ^8.1.4

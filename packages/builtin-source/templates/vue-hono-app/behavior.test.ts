@@ -197,10 +197,6 @@ describe("vue-hono-app Preset Source behavior", () => {
       "typescript",
       "catalog:",
     );
-    expect(webPackageJson.devDependencies).toHaveProperty(
-      "typescript-6",
-      "catalog:",
-    );
     expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-7");
 
     expect(Object.keys(devcontainer).toSorted()).toEqual([

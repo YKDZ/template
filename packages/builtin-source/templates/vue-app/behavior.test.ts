@@ -219,7 +219,6 @@ describe("vue-app Preset Source behavior", () => {
       "@vitejs/plugin-vue": "catalog:",
       "@vue/tsconfig": "catalog:",
       typescript: "catalog:",
-      "typescript-6": "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
     });

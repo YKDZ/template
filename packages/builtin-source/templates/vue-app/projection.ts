@@ -129,7 +129,6 @@ function packageAdditionOperations(
           "oxlint-tsgolint": "catalog:",
           tailwindcss: "catalog:",
           typescript: "catalog:",
-          "typescript-6": "catalog:",
           vite: "catalog:",
           vitest: "catalog:",
           "vue-tsc": "catalog:",

@@ -1611,7 +1611,6 @@ describe("template add package", () => {
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
     expect(packageJson.devDependencies.typescript).toBe("catalog:");
-    expect(packageJson.devDependencies["typescript-6"]).toBe("catalog:");
     expect(packageJson.devDependencies).not.toHaveProperty("typescript-7");
     expect(packageJson.imports).toEqual({
       "#/*": {

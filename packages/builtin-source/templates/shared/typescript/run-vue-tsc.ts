@@ -4,4 +4,9 @@ import { run } from "vue-tsc";
 
 const require = createRequire(import.meta.url);
 
-run(require.resolve("typescript-6/lib/tsc.js"));
+const compatibilityPackage = require.resolve("typescript/package.json");
+const requireCompatibilityDependency = createRequire(compatibilityPackage);
+
+// The official compatibility package owns the real TypeScript 6 compiler as
+// @typescript/old; resolve from that package so isolated linking is respected.
+run(requireCompatibilityDependency.resolve("@typescript/old/lib/tsc.js"));

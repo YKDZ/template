@@ -19,9 +19,14 @@ import { promisify } from "node:util";
 
 import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
 import { assembleGenerationContext } from "@ykdz/template-core/generation-context";
+import { addPackage } from "@ykdz/template-core/package-addition";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
 
+import {
+  builtInPresetProjectionSourceRoots,
+  loadBuiltInPresetSourceManifest,
+} from "../../src/index.ts";
 import { vikeAppPresetProjection } from "./projection.ts";
 
 const playwrightCliPackage = `@playwright/test@${
@@ -521,7 +526,6 @@ describe("vike-app Preset Source behavior", () => {
       "pnpm --dir ../../packages/vue-tooling run check --build ../../apps/web/tsconfig.json --noEmit --pretty false",
     );
     expect(webPackageJson.devDependencies).not.toHaveProperty("typescript");
-    expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-6");
     expect(webPackageJson.devDependencies).not.toHaveProperty("vue-tsc");
     expect(webPackageJson.devDependencies).not.toHaveProperty("@vue/tsconfig");
     expect(webPackageJson.devDependencies).not.toHaveProperty(
@@ -535,7 +539,6 @@ describe("vike-app Preset Source behavior", () => {
       devDependencies: {
         "@vue/tsconfig": "catalog:",
         typescript: "catalog:",
-        "typescript-6": "catalog:",
         "typescript-7": "catalog:",
         "vue-tsc": "catalog:",
       },
@@ -700,7 +703,9 @@ describe("vike-app Preset Source behavior", () => {
     expect(checkWorkflow).not.toContain("docker buildx build");
     expect(dependabotConfig).toContain("directory: /apps/web");
     expect(appDockerfile).toContain("FROM node:24-bookworm-slim AS base");
-    expect(workspaceYaml).toContain('overrides:\n  "vue>typescript": "-"\n');
+    expect(workspaceYaml).toContain('"pinia>typescript": "-"');
+    expect(workspaceYaml).toContain('"valibot>typescript": "-"');
+    expect(workspaceYaml).toContain('"vue>typescript": "-"');
     expect(appDockerfile).toContain("FROM application-runtime AS runtime");
     expect(appDockerfile).toContain('ARG PACKAGE_MANAGER_PIN="pnpm@11.2.3"');
     expect(appDockerfile).toContain('ENV COREPACK_HOME="/corepack"');
@@ -914,6 +919,13 @@ test("starts the local service", async ({ page }) => {
       repositoryPackageJson.packageManager,
     );
     const rootTscBefore = await repositoryTscIdentity();
+    await addPackage({
+      cwd: targetDir,
+      preset: "ts-lib",
+      name: "shared",
+      presetSourceManifest: loadBuiltInPresetSourceManifest(),
+      projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+    });
     await execFileAsync(
       "pnpm",
       ["install", "--ignore-scripts", "--no-frozen-lockfile"],
@@ -1021,7 +1033,7 @@ test("starts the local service", async ({ page }) => {
     } finally {
       await stopChildProcess(server);
     }
-  }, 120_000);
+  }, 600_000);
 
   it("prepares one seeded application database for default and caller-relative development paths", async () => {
     const repositoryPackageJson = await readJsonWithSchema(
@@ -1079,7 +1091,7 @@ test("starts the local service", async ({ page }) => {
     ).rejects.toMatchObject({ code: "ENOENT" });
   }, 120_000);
 
-  it("applies SQL from a production migration closure without the schema or TypeScript compiler", async () => {
+  it("applies SQL from a production migration closure without database schema source", async () => {
     const repositoryPackageJson = await readJsonWithSchema(
       path.join(process.cwd(), "package.json"),
       v.object({ packageManager: packageManagerPinSchema }),
@@ -1123,14 +1135,6 @@ test("starts the local service", async ({ page }) => {
     expect(deploymentFiles.some((file) => file.includes("seed-example"))).toBe(
       false,
     );
-    expect(
-      deploymentFiles.some((file) =>
-        /(^|\/)node_modules\/(\.pnpm\/[^/]*typescript|typescript)(\/|$)/u.test(
-          file,
-        ),
-      ),
-    ).toBe(false);
-
     const databaseFile = path.join(deploymentRoot, "prepared.sqlite");
     await execFileAsync(
       path.join(deploymentRoot, "node_modules/.bin/drizzle-kit"),

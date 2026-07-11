@@ -366,12 +366,43 @@ async function packageManifestPaths(root: string): Promise<string[]> {
   return results;
 }
 
+export function checkEnvironmentNeedsForPackageManifests(
+  manifests: readonly unknown[],
+): readonly "shellcheck"[] {
+  const needsShellCheck = manifests.some((value) => {
+    if (!isRecord(value) || !isRecord(value.scripts)) return false;
+    return Object.values(value.scripts).some(
+      (script) =>
+        typeof script === "string" && /(^|\s|&&)shellcheck\s/u.test(script),
+    );
+  });
+
+  return needsShellCheck ? ["shellcheck"] : [];
+}
+
 async function prepareCheckEnvironment(
   rootDirectory: string,
   baseline: Baseline,
 ): Promise<void> {
-  for (const manifestPath of await packageManifestPaths(rootDirectory)) {
-    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+  const manifestPaths = await packageManifestPaths(rootDirectory);
+  const manifests = await Promise.all(
+    manifestPaths.map(async (manifestPath) =>
+      JSON.parse(await readFile(manifestPath, "utf8")),
+    ),
+  );
+  if (
+    checkEnvironmentNeedsForPackageManifests(manifests).includes("shellcheck")
+  ) {
+    await command("sudo", ["apt-get", "update"], rootDirectory);
+    await command(
+      "sudo",
+      ["apt-get", "install", "-y", "shellcheck"],
+      rootDirectory,
+    );
+  }
+
+  for (const [index, manifestPath] of manifestPaths.entries()) {
+    const manifest = manifests[index] as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
     };

@@ -153,15 +153,22 @@ describe("Template Dependency Catalog projection", () => {
       ),
     ].toSorted();
     const templateCatalog = loadTemplateDependencyCatalog();
-    const workspaceYaml = renderGeneratedPnpmWorkspaceYaml({ dependencies });
+    const workspaceYaml = renderGeneratedPnpmWorkspaceYaml({
+      dependencies,
+      pnpmfile: ".pnpmfile.cts",
+    });
     const selectedCatalog =
       selectTemplateDependencyCatalogEntries(dependencies);
 
     expect(selectedCatalog).toMatchObject({
       typescript: "npm:@typescript/typescript6@^6.0.2",
-      "typescript-6": "npm:typescript@^6.0.3",
       "typescript-7": "npm:typescript@^7.0.2",
     });
+    expect(workspaceYaml).toContain("autoInstallPeers: false");
+    expect(workspaceYaml).toContain('"pinia>typescript": "-"');
+    expect(workspaceYaml).toContain('"valibot>typescript": "-"');
+    expect(workspaceYaml).toContain('"vue>typescript": "-"');
+    expect(workspaceYaml).toContain("pnpmfile: .pnpmfile.cts");
     expect(selectedCatalog).toEqual(
       Object.fromEntries(
         dependencies.map((dependency) => [

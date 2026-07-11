@@ -16,6 +16,7 @@ import { execa } from "execa";
 import { parse } from "yaml";
 
 import {
+  checkEnvironmentNeedsForPackageManifests,
   type GithubEffects,
   resolveToolchainBaseline,
   runToolchainBaselineMaintenance,
@@ -23,6 +24,23 @@ import {
 } from "../packages/builtin-source/templates/shared/toolchain-maintenance/update-toolchain-baseline.ts";
 
 describe("Generated Repository Toolchain Baseline maintenance", () => {
+  it("derives ShellCheck preparation only from a Package Boundary that owns shell validation", () => {
+    expect(
+      checkEnvironmentNeedsForPackageManifests([
+        {
+          scripts: {
+            lint: "shellcheck scripts/container-entrypoint.sh && oxlint .",
+          },
+        },
+      ]),
+    ).toEqual(["shellcheck"]);
+    expect(
+      checkEnvironmentNeedsForPackageManifests([
+        { scripts: { lint: "oxlint ." } },
+      ]),
+    ).toEqual([]);
+  });
+
   it("selects the latest official LTS with the newest compatible pnpm older than 24 hours", async () => {
     const resolved = await resolveToolchainBaseline(
       [
