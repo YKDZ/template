@@ -138,7 +138,7 @@ function packageAdditionOperations(
           oxfmt: "catalog:",
           oxlint: "catalog:",
           "oxlint-tsgolint": "catalog:",
-          typescript: "catalog:",
+          "typescript-7": "catalog:",
         },
         engines: {
           node: nodeVersion,
@@ -165,6 +165,7 @@ function packageAdditionOperations(
           noImplicitOverride: true,
           noImplicitReturns: true,
           noUncheckedIndexedAccess: true,
+          rewriteRelativeImportExtensions: true,
           rootDir: "src",
           skipLibCheck: false,
           strict: true,

@@ -86,8 +86,9 @@ export function projectVueAppPackageScripts(): Record<string, string> {
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     "test:run": "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
-    "typecheck:run": "vue-tsc --build --noEmit --pretty false",
+    "test:e2e:run": "node scripts/run-playwright.ts",
+    "typecheck:run":
+      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 
@@ -128,6 +129,7 @@ function packageAdditionOperations(
           "oxlint-tsgolint": "catalog:",
           tailwindcss: "catalog:",
           typescript: "catalog:",
+          "typescript-6": "catalog:",
           vite: "catalog:",
           vitest: "catalog:",
           "vue-tsc": "catalog:",
@@ -167,6 +169,7 @@ function packageAdditionOperations(
           noImplicitOverride: true,
           noImplicitReturns: true,
           noUncheckedIndexedAccess: true,
+          rewriteRelativeImportExtensions: false,
           skipLibCheck: false,
           strict: true,
           target: "es2023",
@@ -209,6 +212,7 @@ function packageAdditionOperations(
           noImplicitOverride: true,
           noImplicitReturns: true,
           noUncheckedIndexedAccess: true,
+          rewriteRelativeImportExtensions: false,
           skipLibCheck: false,
           strict: true,
           target: "es2023",
@@ -240,6 +244,12 @@ function packageAdditionOperations(
       kind: "copyFile",
       from: "vitest.config.ts",
       to: `${packagePath}/vitest.config.ts`,
+    },
+    {
+      kind: "copyFile",
+      from: "run-vue-tsc.ts",
+      to: `${packagePath}/scripts/run-vue-tsc.ts`,
+      sourceRoot: "sharedTypescript",
     },
     { kind: "copyFile", from: "src/App.vue", to: `${packagePath}/src/App.vue` },
     { kind: "copyFile", from: "src/main.ts", to: `${packagePath}/src/main.ts` },
@@ -279,7 +289,10 @@ async function packageAdditionPlan({
     packageRole: "runtime-service",
     packageSourcePreset: "vue-app",
     sourceRoot: templateSourceRoot(),
-    sourceRoots: { sharedOxc: sharedOxcSourceRoot() },
+    sourceRoots: {
+      sharedOxc: sharedOxcSourceRoot(),
+      sharedTypescript: sharedTypeScriptSourceRoot(),
+    },
     operations: packageAdditionOperations(
       packagePath,
       packageNameValue,
@@ -319,6 +332,23 @@ function sharedOxcSourceRoot(): string {
   return existsSync(path.join(publishedSharedRoot, "oxfmt.config.ts"))
     ? publishedSharedRoot
     : path.join(projectionDir, "..", "shared", "oxc");
+}
+
+function sharedTypeScriptSourceRoot(): string {
+  const projectionDir = path.dirname(fileURLToPath(import.meta.url));
+  const publishedSharedRoot = path.join(
+    projectionDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "shared",
+    "typescript",
+  );
+
+  return existsSync(path.join(publishedSharedRoot, "run-vue-tsc.ts"))
+    ? publishedSharedRoot
+    : path.join(projectionDir, "..", "shared", "typescript");
 }
 
 export const vueAppPresetProjection: PresetProjection = {

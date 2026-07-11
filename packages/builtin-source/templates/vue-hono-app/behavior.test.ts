@@ -126,6 +126,17 @@ describe("vue-hono-app Preset Source behavior", () => {
       "utf8",
     );
     const files = await generatedFilePaths(targetDir);
+    const apiServerSource = await readFile(
+      path.join(targetDir, "apps/api/src/server.ts"),
+      "utf8",
+    );
+    const apiTsconfig = await readJsonWithSchema(
+      path.join(targetDir, "apps/api/tsconfig.json"),
+      v.object({
+        compilerOptions: v.record(v.string(), v.unknown()),
+        include: v.array(v.string()),
+      }),
+    );
 
     expect(rootPackageJson).toMatchObject({
       name: "demo-stack",
@@ -138,6 +149,11 @@ describe("vue-hono-app Preset Source behavior", () => {
       dev: "turbo run dev --parallel",
     });
     expect(rootPackageJson.devDependencies?.turbo).toBe("catalog:");
+    expect(rootPackageJson.devDependencies).toHaveProperty(
+      "typescript-7",
+      "catalog:",
+    );
+    expect(rootPackageJson.devDependencies).not.toHaveProperty("typescript");
     expect(workspaceYaml).toContain("packages:\n  - apps/*\n");
     expect(workspaceYaml).toContain("allowBuilds:\n  esbuild: true\n");
     expect(workspaceYaml).toContain('"@hono/node-server":');
@@ -149,6 +165,19 @@ describe("vue-hono-app Preset Source behavior", () => {
     });
     expect(apiPackageJson).not.toHaveProperty("packageManager");
     expect(apiPackageJson.scripts).not.toHaveProperty("check");
+    expect(apiPackageJson.scripts.dev).toBe("node --watch src/server.ts");
+    expect(apiPackageJson.devDependencies).toHaveProperty(
+      "typescript-7",
+      "catalog:",
+    );
+    expect(apiPackageJson.devDependencies).not.toHaveProperty("typescript");
+    expect(apiPackageJson.devDependencies).not.toHaveProperty("tsx");
+    expect(apiServerSource).toContain('from "./runtime.ts"');
+    expect(apiServerSource).not.toContain('from "./runtime.js"');
+    expect(apiTsconfig.compilerOptions).toHaveProperty(
+      "rewriteRelativeImportExtensions",
+      true,
+    );
     expect(apiPackageJson.scripts["build:run"]).toBe(
       "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     );
@@ -159,8 +188,20 @@ describe("vue-hono-app Preset Source behavior", () => {
     expect(webPackageJson).not.toHaveProperty("packageManager");
     expect(webPackageJson.scripts).not.toHaveProperty("check");
     expect(webPackageJson.scripts["test:e2e:run"]).toBe(
-      "node --experimental-strip-types scripts/run-playwright.ts",
+      "node scripts/run-playwright.ts",
     );
+    expect(webPackageJson.scripts["typecheck:run"]).toBe(
+      "node scripts/run-vue-tsc.ts --build --pretty false",
+    );
+    expect(webPackageJson.devDependencies).toHaveProperty(
+      "typescript",
+      "catalog:",
+    );
+    expect(webPackageJson.devDependencies).toHaveProperty(
+      "typescript-6",
+      "catalog:",
+    );
+    expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-7");
 
     expect(Object.keys(devcontainer).toSorted()).toEqual([
       "build",

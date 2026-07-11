@@ -215,6 +215,8 @@ const requiredPlanCapabilityProviders: readonly {
 
 const dependencyMaintenanceEcosystems: DependencyMaintenancePolicy["ecosystems"] =
   ["npm", "github-actions", "docker"];
+const sharedTypeScriptResourceId = "shared-typescript";
+const sharedTypeScriptSourceRootKey = "sharedTypescript";
 
 function strictTypeScriptCompilerOptions(
   options: Record<string, unknown>,
@@ -230,11 +232,27 @@ function strictTypeScriptCompilerOptions(
     noImplicitOverride: true,
     noImplicitReturns: true,
     noUncheckedIndexedAccess: true,
+    rewriteRelativeImportExtensions:
+      options.rewriteRelativeImportExtensions ?? true,
     skipLibCheck: false,
     strict: true,
     target: "es2023",
     verbatimModuleSyntax: true,
   };
+}
+
+function setSharedTypeScriptResource(state: ProjectionCompositionState): void {
+  const root = state.projectionSourceRoots.sharedResource(
+    sharedTypeScriptResourceId,
+  );
+
+  if (root === undefined) {
+    throw new Error(
+      `Vue TypeScript compatibility requires Shared Resource: ${sharedTypeScriptResourceId}`,
+    );
+  }
+
+  state.sourceRoots[sharedTypeScriptSourceRootKey] = root;
 }
 
 const capabilityInterpreters = {
@@ -271,6 +289,7 @@ const capabilityInterpreters = {
       }
       const vuePackage = findVuePackage(capability);
       if (vuePackage !== undefined) {
+        setSharedTypeScriptResource(state);
         state.rootCheckEnvironmentNeeds.push(
           playwrightBrowserAssetsEnvironmentNeed({
             browser: "chromium",
@@ -350,9 +369,9 @@ const capabilityInterpreters = {
         "tsc -p tsconfig.config.json --noEmit --pretty false";
       state.packageScriptFragments.typecheck =
         "tsc -p tsconfig.json --noEmit --pretty false";
-      state.rootDevDependencies.add("typescript");
+      state.rootDevDependencies.add("typescript-7");
       state.packageDevDependencies.add("@types/node");
-      state.packageDevDependencies.add("typescript");
+      state.packageDevDependencies.add("typescript-7");
       state.flags.rootCheck = true;
       state.operationFactories.push(strictTypescriptOperations);
     },
@@ -1009,7 +1028,7 @@ function libraryPackageAdditionOperations(options: {
           "@types/node": "catalog:",
           oxfmt: "catalog:",
           oxlint: "catalog:",
-          typescript: "catalog:",
+          "typescript-7": "catalog:",
         },
         engines: {
           node: options.nodeVersion,
@@ -1111,6 +1130,12 @@ function vueAppPackageAdditionOperations(options: {
       ),
     },
     ...vueAppTsconfigOperations(options.packagePath),
+    {
+      kind: "copyFile",
+      from: "run-vue-tsc.ts",
+      to: `${options.packagePath}/scripts/run-vue-tsc.ts`,
+      sourceRoot: sharedTypeScriptSourceRootKey,
+    },
     ...options.capability.sourceFiles.map((sourceFile) => ({
       kind: "copyFile" as const,
       from: sourceFile,
@@ -1605,8 +1630,7 @@ function honoApiPackageJson(
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
       "tsc-alias": "catalog:",
-      ...(scripts.dev === undefined ? {} : { tsx: "catalog:" }),
-      typescript: "catalog:",
+      "typescript-7": "catalog:",
       vitest: "catalog:",
     },
     engines: {
@@ -1653,6 +1677,7 @@ function vuePackageJson(
       "oxlint-tsgolint": "catalog:",
       tailwindcss: "catalog:",
       typescript: "catalog:",
+      "typescript-6": "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
       "vue-tsc": "catalog:",
@@ -1704,6 +1729,7 @@ function vikePackageJson(
       tailwindcss: "catalog:",
       turbo: "catalog:",
       typescript: "catalog:",
+      "typescript-6": "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
       "vue-tsc": "catalog:",
@@ -1757,7 +1783,7 @@ function vikeDbPackageJson(
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
-      typescript: "catalog:",
+      "typescript-7": "catalog:",
       vitest: "catalog:",
     },
     engines: {
@@ -1776,8 +1802,7 @@ function vikeDbPackageScripts(): Record<string, string> {
     "db:prepare:test":
       'rm -f "${DATABASE_FILE:-./node_modules/.tmp/test.sqlite}" && pnpm run db:push && pnpm run db:seed:example',
     "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
-    "db:seed:example":
-      "node --experimental-strip-types scripts/seed-example.ts",
+    "db:seed:example": "node scripts/seed-example.ts",
     "db:studio": "drizzle-kit studio",
     "format:check:run":
       "oxfmt --list-different --config ../../oxfmt.config.ts .",
@@ -2281,6 +2306,14 @@ function workspaceNodePackagesOperations({
         }),
       ),
     ]),
+    ...capability.packages
+      .filter((nodePackage) => nodePackage.kind !== "hono-api")
+      .map((nodePackage) => ({
+        kind: "copyFile" as const,
+        from: "run-vue-tsc.ts",
+        to: `${nodePackage.path}/scripts/run-vue-tsc.ts`,
+        sourceRoot: sharedTypeScriptSourceRootKey,
+      })),
     ...(vikeDbManifest === undefined ? [] : vikeDbPackageOperations(context)),
     {
       kind: "writeJson",
@@ -2311,7 +2344,7 @@ function nodePackageScripts(
       "build:run":
         "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
       ...(workspace.packages.length > 1
-        ? { dev: "tsx watch src/server.ts" }
+        ? { dev: "node --watch src/server.ts" }
         : {}),
       ...leafScriptFragments(oxcScripts),
       start: "node dist/server.js",
@@ -2325,8 +2358,7 @@ function nodePackageScripts(
       "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db run db:prepare:dev";
     return {
       "build:run": "vike build",
-      "check:deployment":
-        "node --experimental-strip-types scripts/check-standalone-deployment.ts",
+      "check:deployment": "node scripts/check-standalone-deployment.ts",
       dev: `${dbCommand} && vike dev`,
       "format:check:run":
         "oxfmt --list-different --config ../../oxfmt.config.ts .",
@@ -2339,9 +2371,9 @@ function nodePackageScripts(
       start: "node ./dist/server/index.mjs",
       "test:run":
         "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
-      "test:e2e:run":
-        "node --experimental-strip-types scripts/run-playwright.ts",
-      "typecheck:run": "vue-tsc --build --noEmit --pretty false",
+      "test:e2e:run": "node scripts/run-playwright.ts",
+      "typecheck:run":
+        "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
     };
   }
 
@@ -2351,11 +2383,10 @@ function nodePackageScripts(
     ...leafScriptFragments(oxcScripts),
     preview: "vite preview",
     "test:run": "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
-    "typecheck:run":
-      workspace.packages.length > 1
-        ? "vue-tsc --build --pretty false"
-        : "vue-tsc --build --noEmit --pretty false",
+    "test:e2e:run": "node scripts/run-playwright.ts",
+    "typecheck:run": `node scripts/run-vue-tsc.ts --build ${
+      workspace.packages.length > 1 ? "" : "--noEmit "
+    }--pretty false`,
   };
 }
 
@@ -2389,6 +2420,7 @@ function nodePackageTsconfigOperations(
               module: "esnext",
               moduleResolution: "bundler",
               paths: { "#/*": ["./*"] },
+              rewriteRelativeImportExtensions: false,
               tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
               types: ["node"],
             }),
@@ -2432,6 +2464,7 @@ function nodePackageTsconfigOperations(
               moduleResolution: "bundler",
               lib: ["ESNext", "DOM", "DOM.Iterable"],
               paths: { "#/*": ["./*"] },
+              rewriteRelativeImportExtensions: false,
               tsBuildInfoFile: "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
               types: ["node"],
             }),
@@ -2504,6 +2537,7 @@ function nodePackageTsconfigOperations(
           composite: true,
           module: "esnext",
           moduleResolution: "bundler",
+          rewriteRelativeImportExtensions: false,
           tsBuildInfoFile: "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
           types: ["web-bluetooth"],
         }),
@@ -2533,6 +2567,7 @@ function nodePackageTsconfigOperations(
           module: "esnext",
           moduleResolution: "bundler",
           lib: ["ESNext", "DOM", "DOM.Iterable"],
+          rewriteRelativeImportExtensions: false,
           ...(workspace.packages.length > 1
             ? { outDir: "./node_modules/.tmp/tsconfig.node" }
             : {}),
@@ -2754,7 +2789,12 @@ function vikeDbTsconfigJson(): Record<string, unknown> {
       }),
       skipLibCheck: true,
     },
-    include: ["src/**/*.ts", "test/**/*.ts", "drizzle.config.ts"],
+    include: [
+      "src/**/*.ts",
+      "scripts/**/*.ts",
+      "test/**/*.ts",
+      "drizzle.config.ts",
+    ],
   };
 }
 

@@ -525,6 +525,7 @@ describe("Project Kit Root Check", () => {
 
       if (
         packageJsonFile !== "package.json" &&
+        packageJsonFile !== "packages/builtin-source/package.json" &&
         packageJsonFile !== "packages/cli/package.json" &&
         packageJsonFile !== "packages/core/package.json"
       ) {

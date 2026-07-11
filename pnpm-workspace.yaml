@@ -2,12 +2,17 @@ packages:
   - packages/*
 
 nodeLinker: isolated
+
 injectWorkspacePackages: true
+
 dedupeInjectedDeps: false
+
 syncInjectedDepsAfterScripts:
   - build
   - build:run
+
 minimumReleaseAge: 1440
+
 minimumReleaseAgeStrict: true
 
 catalogs:
@@ -38,7 +43,9 @@ catalog:
   tsc-alias: ^1.8.17
   tsx: ^4.23.0
   turbo: 2.10.2
-  typescript: ^6.0.3
+  typescript: npm:@typescript/typescript6@^6.0.2
+  typescript-6: npm:typescript@^6.0.3
+  typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
   vite: ^8.1.4
   vike: ^0.4.260

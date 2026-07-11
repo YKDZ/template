@@ -150,7 +150,7 @@ describe("ts-lib Preset Source behavior", () => {
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
-      typescript: "catalog:",
+      "typescript-7": "catalog:",
     });
     expect(rootPackageJson.scripts.check).toContain("turbo run");
     expect(rootPackageJson.scripts["typecheck:run"]).toBe(
@@ -172,7 +172,7 @@ describe("ts-lib Preset Source behavior", () => {
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
-      typescript: "catalog:",
+      "typescript-7": "catalog:",
     });
     expect(libraryPackageJson.devDependencies).not.toHaveProperty("tsc-alias");
     expect(libraryPackageJson.exports).toEqual({
@@ -195,6 +195,10 @@ describe("ts-lib Preset Source behavior", () => {
     expect(tsconfig.include).toEqual(["src/**/*.ts"]);
 
     expect(workspace.packages).toEqual(["packages/*"]);
+    expect(workspace.catalog).toMatchObject({
+      "typescript-7": "npm:typescript@^7.0.2",
+    });
+    expect(workspace.catalog).not.toHaveProperty("typescript");
     expect(Object.keys(workspace.catalog).toSorted()).toEqual(
       [
         ...new Set([

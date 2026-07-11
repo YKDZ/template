@@ -149,7 +149,7 @@ export function projectVueHonoApiPackageScripts(): Record<string, string> {
   return {
     "build:run":
       "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    dev: "tsx watch src/server.ts",
+    dev: "node --watch src/server.ts",
     "format:check:run":
       "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -176,8 +176,8 @@ export function projectVueHonoWebPackageScripts(): Record<string, string> {
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     "test:run": "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e:run": "node --experimental-strip-types scripts/run-playwright.ts",
-    "typecheck:run": "vue-tsc --build --pretty false",
+    "test:e2e:run": "node scripts/run-playwright.ts",
+    "typecheck:run": "node scripts/run-vue-tsc.ts --build --pretty false",
   };
 }
 

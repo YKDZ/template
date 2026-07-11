@@ -34,11 +34,15 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:static-source",
+    "check:templates": "pnpm run check:templates:shared-oxc && pnpm run check:templates:shared-typescript && pnpm run check:templates:static-source",
     "check:templates:shared-oxc": "pnpm run check:templates:shared-oxc:format && pnpm run check:templates:shared-oxc:lint && pnpm run check:templates:shared-oxc:typecheck",
     "check:templates:shared-oxc:format": "oxfmt --list-different templates/shared/oxc",
     "check:templates:shared-oxc:lint": "oxlint --quiet --format=unix --config templates/shared/oxc/node/oxlint.config.ts templates/shared/oxc",
     "check:templates:shared-oxc:typecheck": "tsc -p templates/shared/oxc/tsconfig.json --noEmit --pretty false",
+    "check:templates:shared-typescript": "pnpm run check:templates:shared-typescript:format && pnpm run check:templates:shared-typescript:lint && pnpm run check:templates:shared-typescript:typecheck",
+    "check:templates:shared-typescript:format": "oxfmt --list-different templates/shared/typescript",
+    "check:templates:shared-typescript:lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/shared/typescript",
+    "check:templates:shared-typescript:typecheck": "tsc -p templates/shared/typescript/tsconfig.json --noEmit --pretty false",
     "check:templates:static-source": "rustup run stable rustfmt --check templates/rust-bin/src/main.rs",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -66,12 +70,15 @@
     "oxlint-tsgolint": "catalog:",
     "pinia": "catalog:",
     "telefunc": "catalog:",
+    "typescript": "catalog:template-typescript",
+    "typescript-6": "catalog:",
     "typescript-7": "catalog:template-typescript",
     "vike": "catalog:",
     "vike-vue": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
     "vue": "catalog:",
+    "vue-tsc": "catalog:",
     "yaml": "catalog:"
   }
 }

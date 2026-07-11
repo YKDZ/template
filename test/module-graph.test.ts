@@ -246,9 +246,9 @@ describe("module graph plans", () => {
         "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
       preview: "vite preview",
       "test:run": "vitest run --reporter=agent --silent=passed-only",
-      "test:e2e:run":
-        "node --experimental-strip-types scripts/run-playwright.ts",
-      "typecheck:run": "vue-tsc --build --noEmit --pretty false",
+      "test:e2e:run": "node scripts/run-playwright.ts",
+      "typecheck:run":
+        "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
     });
     expect(plan.checkPlan.environmentNeeds).toEqual([
       {

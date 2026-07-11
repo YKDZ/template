@@ -342,7 +342,8 @@ describe("template add package", () => {
     expect(packageJson.scripts).not.toHaveProperty("check");
     expect(packageJson.scripts).not.toHaveProperty("build:run");
     expectSharedRootOxcScripts(packageJson.scripts);
-    expect(packageJson.devDependencies.typescript).toBe("catalog:");
+    expect(packageJson.devDependencies["typescript-7"]).toBe("catalog:");
+    expect(packageJson.devDependencies).not.toHaveProperty("typescript");
     const addedPackageDependencySpecifiers = Object.values(
       packageJson.devDependencies,
     );
@@ -1188,7 +1189,8 @@ describe("template add package", () => {
     expect(packageJson.scripts).not.toHaveProperty("check");
     expect(packageJson.scripts).not.toHaveProperty("build:run");
     expectSharedRootOxcScripts(packageJson.scripts);
-    expect(packageJson.devDependencies.typescript).toBe("catalog:");
+    expect(packageJson.devDependencies["typescript-7"]).toBe("catalog:");
+    expect(packageJson.devDependencies).not.toHaveProperty("typescript");
 
     await stat(path.join(projectDir, "packages/shared/src/index.ts"));
     await expectPathMissing(
@@ -1277,7 +1279,8 @@ describe("template add package", () => {
       expect(packageJson.name).toBe(`@${projectName}/shared`);
       expect(packageJson.engines.node).toBe("24");
       expect(packageJson.dependencies.valibot).toBe("catalog:");
-      expect(packageJson.devDependencies.typescript).toBe("catalog:");
+      expect(packageJson.devDependencies["typescript-7"]).toBe("catalog:");
+      expect(packageJson.devDependencies).not.toHaveProperty("typescript");
       expectSharedRootOxcScripts(packageJson.scripts);
 
       await stat(path.join(projectDir, "packages/shared/src/index.ts"));
@@ -1574,6 +1577,7 @@ describe("template add package", () => {
     const packageJson = await readJson<{
       name: string;
       dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
       scripts: Record<string, string>;
       engines: { node: string };
       imports: unknown;
@@ -1606,6 +1610,9 @@ describe("template add package", () => {
     expect(packageJson.engines.node).toBe("24");
     expect(packageJson).not.toHaveProperty("packageManager");
     expect(packageJson.dependencies.vue).toBe("catalog:");
+    expect(packageJson.devDependencies.typescript).toBe("catalog:");
+    expect(packageJson.devDependencies["typescript-6"]).toBe("catalog:");
+    expect(packageJson.devDependencies).not.toHaveProperty("typescript-7");
     expect(packageJson.imports).toEqual({
       "#/*": {
         default: "./src/*.ts",
@@ -1613,7 +1620,7 @@ describe("template add package", () => {
       },
     });
     expect(packageJson.scripts["typecheck:run"]).toBe(
-      "vue-tsc --build --noEmit --pretty false",
+      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
     );
     expectSharedRootOxcScripts(packageJson.scripts);
     expect(appTsconfig.compilerOptions).not.toHaveProperty("paths");
@@ -1621,6 +1628,7 @@ describe("template add package", () => {
 
     await stat(path.join(projectDir, "apps/admin/src/App.vue"));
     await stat(path.join(projectDir, "apps/admin/scripts/run-playwright.ts"));
+    await stat(path.join(projectDir, "apps/admin/scripts/run-vue-tsc.ts"));
     await stat(path.join(projectDir, "apps/admin/test/e2e/app.spec.ts"));
     await expectPathMissing(
       path.join(projectDir, "apps/admin/oxlint.config.ts"),
@@ -1841,7 +1849,7 @@ describe("template add package", () => {
     expect(adminPlaywright).not.toMatch(/\b(?:--port\s+|:)(?:\d[\d_]*)/);
     expect(adminPackageJson.scripts).not.toHaveProperty("check");
     expect(adminPackageJson.scripts["test:e2e:run"]).toBe(
-      "node --experimental-strip-types scripts/run-playwright.ts",
+      "node scripts/run-playwright.ts",
     );
   });
 

@@ -25,6 +25,10 @@
     {
       "id": "shared-oxc-vue",
       "path": "shared/oxc/vue"
+    },
+    {
+      "id": "shared-typescript",
+      "path": "shared/typescript"
     }
   ],
   "presets": [
@@ -52,7 +56,7 @@
         "oxlint",
         "oxlint-tsgolint",
         "turbo",
-        "typescript",
+        "typescript-7",
         "valibot"
       ],
       "projection": {
@@ -124,6 +128,8 @@
         "tailwindcss",
         "turbo",
         "typescript",
+        "typescript-6",
+        "typescript-7",
         "vite",
         "vitest",
         "vue",
@@ -188,7 +194,8 @@
           "shared-editor-customization",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
-          "shared-oxc-vue"
+          "shared-oxc-vue",
+          "shared-typescript"
         ]
       }
     },
@@ -227,6 +234,8 @@
         "tailwindcss",
         "telefunc",
         "typescript",
+        "typescript-6",
+        "typescript-7",
         "vite",
         "vike",
         "vike-vue",
@@ -327,7 +336,8 @@
           "shared-editor-customization",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
-          "shared-oxc-vue"
+          "shared-oxc-vue",
+          "shared-typescript"
         ]
       }
     },
@@ -364,9 +374,10 @@
         "pinia",
         "tailwindcss",
         "tsc-alias",
-        "tsx",
         "turbo",
         "typescript",
+        "typescript-6",
+        "typescript-7",
         "vite",
         "vitest",
         "vue",
@@ -453,7 +464,8 @@
           "shared-oxc-node",
           "shared-oxc-format",
           "shared-oxc-root-tsconfig",
-          "shared-oxc-vue"
+          "shared-oxc-vue",
+          "shared-typescript"
         ]
       }
     },

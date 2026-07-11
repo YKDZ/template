@@ -272,7 +272,7 @@ describe("Projection Capability declarations", () => {
         oxfmt: "catalog:",
         oxlint: "catalog:",
         turbo: "catalog:",
-        typescript: "catalog:",
+        "typescript-7": "catalog:",
       },
       packageManager: "pnpm@11.2.3",
     });
@@ -295,7 +295,7 @@ describe("Projection Capability declarations", () => {
         "@types/node": "catalog:",
         oxfmt: "catalog:",
         oxlint: "catalog:",
-        typescript: "catalog:",
+        "typescript-7": "catalog:",
       },
     });
     expect(workspaceYaml).toContain("packages/*");
@@ -725,9 +725,9 @@ describe("Projection Capability declarations", () => {
         dev: "vite",
         preview: "vite preview",
         "test:run": "vitest run --reporter=agent --silent=passed-only",
-        "test:e2e:run":
-          "node --experimental-strip-types scripts/run-playwright.ts",
-        "typecheck:run": "vue-tsc --build --noEmit --pretty false",
+        "test:e2e:run": "node scripts/run-playwright.ts",
+        "typecheck:run":
+          "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
       },
       dependencies: {
         pinia: "catalog:",
@@ -868,10 +868,10 @@ describe("Projection Capability declarations", () => {
       name: "@demo-vue-hono-app/api",
       types: "./src/index.ts",
       scripts: {
-        dev: "tsx watch src/server.ts",
+        dev: "node --watch src/server.ts",
       },
       devDependencies: {
-        tsx: "catalog:",
+        "typescript-7": "catalog:",
       },
     });
     expect(webPackageJson).toMatchObject({
@@ -881,7 +881,7 @@ describe("Projection Capability declarations", () => {
         vue: "catalog:",
       },
       scripts: {
-        "typecheck:run": "vue-tsc --build --pretty false",
+        "typecheck:run": "node scripts/run-vue-tsc.ts --build --pretty false",
       },
     });
     expect(turboConfig).toMatchObject({

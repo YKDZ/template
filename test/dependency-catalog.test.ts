@@ -157,7 +157,11 @@ describe("Template Dependency Catalog projection", () => {
     const selectedCatalog =
       selectTemplateDependencyCatalogEntries(dependencies);
 
-    expect(selectedCatalog.typescript).toBe("^6.0.3");
+    expect(selectedCatalog).toMatchObject({
+      typescript: "npm:@typescript/typescript6@^6.0.2",
+      "typescript-6": "npm:typescript@^6.0.3",
+      "typescript-7": "npm:typescript@^7.0.2",
+    });
     expect(selectedCatalog).toEqual(
       Object.fromEntries(
         dependencies.map((dependency) => [

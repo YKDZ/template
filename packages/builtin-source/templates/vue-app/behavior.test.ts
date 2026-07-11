@@ -180,6 +180,7 @@ describe("vue-app Preset Source behavior", () => {
       path.join(targetDir, "apps/web/src/App.vue"),
       "utf8",
     );
+    const files = await generatedFilePaths(targetDir);
 
     expect(rootPackageJson.name).toMatch(/^template-vue-app-behavior-/);
     expect(rootPackageJson).not.toHaveProperty("exports");
@@ -188,7 +189,7 @@ describe("vue-app Preset Source behavior", () => {
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
       turbo: "catalog:",
-      typescript: "catalog:",
+      "typescript-7": "catalog:",
     });
     expect(rootPackageJson.scripts.check).toContain("turbo run");
     expect(rootPackageJson.scripts.fix).toContain("turbo run");
@@ -199,10 +200,10 @@ describe("vue-app Preset Source behavior", () => {
     expect(webPackageJson).not.toHaveProperty("packageManager");
     expect(webPackageJson.scripts).not.toHaveProperty("check");
     expect(webPackageJson.scripts["test:e2e:run"]).toBe(
-      "node --experimental-strip-types scripts/run-playwright.ts",
+      "node scripts/run-playwright.ts",
     );
     expect(webPackageJson.scripts["typecheck:run"]).toBe(
-      "vue-tsc --build --noEmit --pretty false",
+      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
     );
     expect(webPackageJson.dependencies).toMatchObject({
       pinia: "catalog:",
@@ -213,6 +214,8 @@ describe("vue-app Preset Source behavior", () => {
       "@types/web-bluetooth": "catalog:",
       "@vitejs/plugin-vue": "catalog:",
       "@vue/tsconfig": "catalog:",
+      typescript: "catalog:",
+      "typescript-6": "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
     });
@@ -227,6 +230,10 @@ describe("vue-app Preset Source behavior", () => {
     expect(workspaceYaml).toContain("packages:\n  - apps/*\n");
     expect(workspaceYaml).toContain("allowBuilds:\n  esbuild: true\n");
     expect(workspaceYaml).toContain('"@playwright/test":');
+    expect(workspaceYaml).toContain(
+      "typescript: npm:@typescript/typescript6@^6.0.2",
+    );
+    expect(workspaceYaml).toContain("typescript-7: npm:typescript@^7.0.2");
     expect(workspaceYaml).toContain("vue:");
     expect(rootTsconfig.files).toEqual([]);
     expect(rootTsconfig.references).toEqual([
@@ -235,5 +242,6 @@ describe("vue-app Preset Source behavior", () => {
       { path: "./apps/web/tsconfig.node.json" },
     ]);
     expect(appSource).toContain('from "#/stores/counter"');
+    expect(files).toContain("apps/web/scripts/run-vue-tsc.ts");
   });
 });

@@ -299,6 +299,7 @@ describe("vike-app Preset Source behavior", () => {
         compilerOptions: v.object({
           paths: v.record(v.string(), v.array(v.string())),
         }),
+        include: v.array(v.string()),
       }),
     );
     const dbSource = await readFile(
@@ -383,6 +384,11 @@ describe("vike-app Preset Source behavior", () => {
     expect(rootPackageJson.scripts["check:deployment"]).toBe(
       "pnpm --filter './apps/web' run check:deployment",
     );
+    expect(rootPackageJson.devDependencies).toHaveProperty(
+      "typescript-7",
+      "catalog:",
+    );
+    expect(rootPackageJson.devDependencies).not.toHaveProperty("typescript");
     expect(webPackageJson).toMatchObject({
       name: "@demo-vike/web",
       engines: { node: "24" },
@@ -403,8 +409,23 @@ describe("vike-app Preset Source behavior", () => {
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
     );
     expect(webPackageJson.scripts["check:deployment"]).toBe(
-      "node --experimental-strip-types scripts/check-standalone-deployment.ts",
+      "node scripts/check-standalone-deployment.ts",
     );
+    expect(webPackageJson.scripts["test:e2e:run"]).toBe(
+      "node scripts/run-playwright.ts",
+    );
+    expect(webPackageJson.scripts["typecheck:run"]).toBe(
+      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    );
+    expect(webPackageJson.devDependencies).toHaveProperty(
+      "typescript",
+      "catalog:",
+    );
+    expect(webPackageJson.devDependencies).toHaveProperty(
+      "typescript-6",
+      "catalog:",
+    );
+    expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-7");
     expect(dbPackageJson).toMatchObject({
       name: "@demo-vike/db",
       imports: { "#db/*": { default: "./src/*.ts", types: "./src/*.ts" } },
@@ -415,6 +436,11 @@ describe("vike-app Preset Source behavior", () => {
     expect(dbPackageJson.scripts["typecheck:run"]).toBe(
       "tsc -p tsconfig.json --noEmit --pretty false",
     );
+    expect(dbPackageJson.devDependencies).toHaveProperty(
+      "typescript-7",
+      "catalog:",
+    );
+    expect(dbPackageJson.devDependencies).not.toHaveProperty("typescript");
     expect(dbPackageJson.scripts).toMatchObject({
       "db:generate": "drizzle-kit generate",
       "db:migrate": "drizzle-kit migrate",
@@ -423,8 +449,7 @@ describe("vike-app Preset Source behavior", () => {
       "db:prepare:test":
         'rm -f "${DATABASE_FILE:-./node_modules/.tmp/test.sqlite}" && pnpm run db:push && pnpm run db:seed:example',
       "db:push": "mkdir -p data node_modules/.tmp && drizzle-kit push",
-      "db:seed:example":
-        "node --experimental-strip-types scripts/seed-example.ts",
+      "db:seed:example": "node scripts/seed-example.ts",
       "db:studio": "drizzle-kit studio",
     });
     expect(dbPackageJson.scripts).not.toHaveProperty("db:seed");
@@ -434,6 +459,7 @@ describe("vike-app Preset Source behavior", () => {
     expect(dbTsconfig.compilerOptions.paths).toEqual({
       "#db/*": ["./src/*"],
     });
+    expect(dbTsconfig.include).toContain("scripts/**/*.ts");
     expect(dbSource).toContain('from "#db/schema"');
     expect(dbSource).not.toContain('from "drizzle-orm/node-sqlite/migrator"');
     expect(dbSource).not.toContain("migrate(db");
@@ -561,7 +587,6 @@ describe("vike-app Preset Source behavior", () => {
     const { stdout } = await execFileAsync(
       process.execPath,
       [
-        "--experimental-strip-types",
         "--input-type=module",
         "--eval",
         "const { default: config } = await import('./playwright.config.ts'); console.log(JSON.stringify({ baseURL: config.use?.baseURL, webServer: config.webServer }));",
@@ -617,14 +642,10 @@ test("starts the local service", async ({ page }) => {
       CI: "1",
       PATH: `${repositoryBin}${path.delimiter}${process.env.PATH}`,
     };
-    await execFileAsync(
-      process.execPath,
-      ["--experimental-strip-types", "scripts/run-playwright.ts"],
-      {
-        cwd: webDir,
-        env,
-      },
-    );
+    await execFileAsync(process.execPath, ["scripts/run-playwright.ts"], {
+      cwd: webDir,
+      env,
+    });
 
     await expect(access(databaseFile)).rejects.toMatchObject({
       code: "ENOENT",
@@ -832,7 +853,6 @@ test("starts the local service", async ({ page }) => {
         execFileAsync(
           process.execPath,
           [
-            "--experimental-strip-types",
             "--input-type=module",
             "--eval",
             "await import('./playwright.config.ts')",
@@ -887,11 +907,7 @@ writeFileSync(process.env.PLAYWRIGHT_OBSERVATION_FILE, JSON.stringify({
       const baseUrl = `http://127.0.0.1:${address.port}`;
       await execFileAsync(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "scripts/run-playwright.ts",
-          "--project=chromium",
-        ],
+        ["scripts/run-playwright.ts", "--project=chromium"],
         {
           cwd: webDir,
           env: {
@@ -1076,10 +1092,7 @@ while :; do sleep 1; done
 
       await execFileAsync(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "scripts/check-standalone-deployment.ts",
-        ],
+        ["scripts/check-standalone-deployment.ts"],
         { cwd: path.join(targetDir, "apps/web"), env },
       );
 
@@ -1142,10 +1155,7 @@ while :; do sleep 1; done
 
       await execFileAsync(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "apps/web/scripts/check-standalone-deployment.ts",
-        ],
+        ["apps/web/scripts/check-standalone-deployment.ts"],
         { cwd: targetDir, env },
       );
     } finally {
@@ -1179,10 +1189,7 @@ while :; do sleep 1; done
       await expect(
         execFileAsync(
           process.execPath,
-          [
-            "--experimental-strip-types",
-            "apps/web/scripts/check-standalone-deployment.ts",
-          ],
+          ["apps/web/scripts/check-standalone-deployment.ts"],
           { cwd: targetDir, env },
         ),
       ).rejects.toMatchObject({
@@ -1217,10 +1224,7 @@ while :; do sleep 1; done
     await expect(
       execFileAsync(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "apps/web/scripts/check-standalone-deployment.ts",
-        ],
+        ["apps/web/scripts/check-standalone-deployment.ts"],
         { cwd: targetDir, env },
       ),
     ).rejects.toMatchObject({
@@ -1241,10 +1245,7 @@ while :; do sleep 1; done
     await expect(
       execFileAsync(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "apps/web/scripts/check-standalone-deployment.ts",
-        ],
+        ["apps/web/scripts/check-standalone-deployment.ts"],
         {
           cwd: targetDir,
           env: {
@@ -1297,10 +1298,7 @@ while :; do sleep 1; done
 
       const child = spawn(
         process.execPath,
-        [
-          "--experimental-strip-types",
-          "apps/web/scripts/check-standalone-deployment.ts",
-        ],
+        ["apps/web/scripts/check-standalone-deployment.ts"],
         { cwd: targetDir, env },
       );
       let deploymentStderr = "";

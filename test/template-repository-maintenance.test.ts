@@ -780,7 +780,7 @@ describe("template Repository maintenance", () => {
         expect(
           templateCatalog[dependency],
           `${presetName} ${dependency}`,
-        ).toMatch(/^\^?\d/);
+        ).toMatch(/^(?:npm:(?:@[^/]+\/)?[^@]+@)?\^?\d/);
       }
     }
   });
