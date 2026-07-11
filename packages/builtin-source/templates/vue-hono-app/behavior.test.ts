@@ -237,11 +237,13 @@ describe("vue-hono-app Preset Source behavior", () => {
       "npx --yes playwright install-deps chromium",
     );
     expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toContain("shellcheck");
     expect(dockerfile).not.toMatch(/\b(?:npm|pnpm|corepack)\s+.*-g\s+turbo\b/);
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
     expect(checkWorkflow).not.toMatch(/\bpnpm exec playwright install\b/);
+    expect(checkWorkflow).not.toContain("shellcheck");
     expect(files).not.toContain("behavior.test.ts");
     expect(files).not.toContain("apps/api/behavior.test.ts");
     expect(files).not.toContain("apps/web/behavior.test.ts");

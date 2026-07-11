@@ -151,6 +151,7 @@ describe("vue-app Preset Source behavior", () => {
     expect(dockerfile).not.toContain("libgbm1");
     expect(dockerfile).not.toContain("xvfb");
     expect(dockerfile).not.toContain("npm install -g");
+    expect(dockerfile).not.toContain("shellcheck");
     expect(files).not.toContain("behavior.test.ts");
     expect(files).not.toContain("apps/web/behavior.test.ts");
   });

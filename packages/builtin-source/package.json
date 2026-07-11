@@ -50,7 +50,7 @@
     "check:templates:static-source": "rustup run stable rustfmt --check templates/rust-bin/src/main.rs",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts templates/*/behavior.test.ts",
+    "lint": "shellcheck templates/vike-app/web/scripts/container-entrypoint.sh && oxlint --quiet --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts templates/*/behavior.test.ts",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts src templates/projection-plans.ts templates/registry.ts templates/*/projection.ts templates/*/behavior.test.ts --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },

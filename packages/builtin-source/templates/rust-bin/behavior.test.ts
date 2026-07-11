@@ -195,10 +195,12 @@ describe("rust-bin Preset Source behavior", () => {
     expect(dockerfile).toContain("gcc");
     expect(dockerfile).toContain("libc6-dev");
     expect(dockerfile).not.toContain("typescript-node");
+    expect(dockerfile).not.toContain("shellcheck");
     expect(dockerfile).not.toMatch(
       /\b(build-essential|pkg-config|libssl-dev)\b/,
     );
     expect(checkWorkflow).toContain("uses: dtolnay/rust-toolchain@stable");
+    expect(checkWorkflow).not.toContain("shellcheck");
     expect(dependabot).toContain("package-ecosystem: cargo");
     expect(dependabot).toContain("package-ecosystem: rust-toolchain");
   });

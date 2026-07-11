@@ -34,7 +34,7 @@ export type FixComponentKind =
   | "turbo-package-fix"
   | "rustfmt-write";
 
-export type CheckEnvironmentNeed = {
+export type PlaywrightBrowserAssetsEnvironmentNeed = {
   readonly kind: "playwright-browser-assets";
   readonly browser: "chromium";
   readonly owner: ComponentOwner;
@@ -47,6 +47,23 @@ export type CheckEnvironmentNeed = {
     readonly machineVerifiable: boolean;
   };
 };
+
+export type ShellCheckEnvironmentNeed = {
+  readonly kind: "shellcheck-command";
+  readonly owner: ComponentOwner;
+  readonly nextStep: {
+    readonly id: "install-shellcheck";
+    readonly label: "Install ShellCheck";
+    readonly command: "sudo";
+    readonly args: readonly string[];
+    readonly display: "sudo apt-get update && sudo apt-get install -y shellcheck";
+    readonly machineVerifiable: false;
+  };
+};
+
+export type CheckEnvironmentNeed =
+  | PlaywrightBrowserAssetsEnvironmentNeed
+  | ShellCheckEnvironmentNeed;
 
 export type CheckComponent = {
   readonly kind: CheckComponentKind;
@@ -277,7 +294,7 @@ export function renderFixCommand(plan: FixPlan): string {
 }
 
 function playwrightBrowserInstallArgs(
-  need: Pick<CheckEnvironmentNeed, "browser" | "owner">,
+  need: Pick<PlaywrightBrowserAssetsEnvironmentNeed, "browser" | "owner">,
   options: { readonly withDeps?: boolean } = {},
 ): string[] {
   const installArgs = [
@@ -299,6 +316,9 @@ export function renderPlaywrightBrowserInstallCommand(
   need: CheckEnvironmentNeed,
   options: { readonly withDeps?: boolean } = {},
 ): string {
+  if (need.kind !== "playwright-browser-assets") {
+    throw new Error("Playwright install requires browser assets.");
+  }
   return ["pnpm", ...playwrightBrowserInstallArgs(need, options)].join(" ");
 }
 
@@ -324,7 +344,7 @@ export function playwrightBrowserAssetsEnvironmentNeed(options: {
   readonly id?: string;
   readonly label?: string;
   readonly machineVerifiable?: boolean;
-}): CheckEnvironmentNeed {
+}): PlaywrightBrowserAssetsEnvironmentNeed {
   const args = playwrightBrowserInstallArgs(options);
   const descriptor = playwrightBrowserAssetsNextStepDescriptor(options.owner);
 
@@ -339,6 +359,23 @@ export function playwrightBrowserAssetsEnvironmentNeed(options: {
       args,
       display: ["pnpm", ...args].join(" "),
       machineVerifiable: options.machineVerifiable ?? true,
+    },
+  };
+}
+
+export function shellCheckEnvironmentNeed(
+  owner: ComponentOwner,
+): ShellCheckEnvironmentNeed {
+  return {
+    kind: "shellcheck-command",
+    owner,
+    nextStep: {
+      id: "install-shellcheck",
+      label: "Install ShellCheck",
+      command: "sudo",
+      args: ["sh", "-c", "apt-get update && apt-get install -y shellcheck"],
+      display: "sudo apt-get update && sudo apt-get install -y shellcheck",
+      machineVerifiable: false,
     },
   };
 }

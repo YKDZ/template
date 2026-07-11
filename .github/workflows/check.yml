@@ -37,6 +37,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare shell checks
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
       - name: Prepare browser checks
         run: pnpm --filter @ykdz/template-builtin-source exec playwright install --with-deps chromium
 

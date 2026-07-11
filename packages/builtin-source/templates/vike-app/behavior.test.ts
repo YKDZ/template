@@ -224,9 +224,8 @@ async function fakeContainerCommandEnvironment(targetDir: string): Promise<{
   const databaseFile = path.join(targetDir, "mounted-data", "app.sqlite");
   await mkdir(fakeBinDir);
   await writeFile(
-    path.join(fakeBinDir, "pnpm"),
+    path.join(fakeBinDir, "drizzle-kit"),
     `#!/bin/sh
-mkdir -p "$(dirname "$1")"
 echo prepare >> "$CONTAINER_OBSERVATION_FILE"
 exit "\${CONTAINER_PREPARE_EXIT_CODE:-0}"
 `,
@@ -237,7 +236,7 @@ exit "\${CONTAINER_PREPARE_EXIT_CODE:-0}"
 echo start >> "$CONTAINER_OBSERVATION_FILE"
 `,
   );
-  await chmod(path.join(fakeBinDir, "pnpm"), 0o755);
+  await chmod(path.join(fakeBinDir, "drizzle-kit"), 0o755);
   await chmod(path.join(fakeBinDir, "node"), 0o755);
 
   return {
@@ -247,7 +246,6 @@ echo start >> "$CONTAINER_OBSERVATION_FILE"
       CONTAINER_OBSERVATION_FILE: observationFile,
       DATABASE_FILE: databaseFile,
       PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
-      PREPARE_DATABASE_COMMAND: path.join(fakeBinDir, "pnpm"),
     },
     observationFile,
   };
@@ -436,10 +434,6 @@ describe("vike-app Preset Source behavior", () => {
       path.join(targetDir, "apps/web/scripts/container-entrypoint.sh"),
       "utf8",
     );
-    const prepareDatabaseSource = await readFile(
-      path.join(targetDir, "apps/web/scripts/prepare-database.sh"),
-      "utf8",
-    );
     const standaloneDeploymentRunnerSource = await readFile(
       path.join(targetDir, "apps/web/scripts/check-standalone-deployment.ts"),
       "utf8",
@@ -491,7 +485,7 @@ describe("vike-app Preset Source behavior", () => {
     );
     expect(webPackageJson.dependencies).toHaveProperty("srvx", "catalog:");
     expect(webPackageJson.scripts["lint:run"]).toBe(
-      "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
+      "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
     );
     expect(webPackageJson.scripts["lint:fix:run"]).toBe(
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
@@ -617,7 +611,7 @@ describe("vike-app Preset Source behavior", () => {
     expect(files).toContain("apps/web/Dockerfile");
     expect(files).toContain("apps/web/Dockerfile.dockerignore");
     expect(files).toContain("apps/web/scripts/container-entrypoint.sh");
-    expect(files).toContain("apps/web/scripts/prepare-database.sh");
+    expect(files).not.toContain("apps/web/scripts/prepare-database.sh");
     expect(files).toContain("apps/web/scripts/check-standalone-deployment.ts");
     expect(files).toContain(
       "packages/db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
@@ -650,8 +644,14 @@ describe("vike-app Preset Source behavior", () => {
     expect(devcontainer).not.toHaveProperty("features");
     expect(dockerfile).toContain("FROM node:${NODE_VERSION}-bookworm-slim");
     expect(dockerfile).toContain("ARG PLAYWRIGHT_CLI_PACKAGE");
+    expect(dockerfile).toContain(
+      "apt-get install -y --no-install-recommends shellcheck",
+    );
     expect(checkWorkflow).toContain(
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
+    );
+    expect(checkWorkflow).toContain(
+      "sudo apt-get update && sudo apt-get install -y shellcheck",
     );
     expect(checkWorkflow).toContain("docker/setup-buildx-action@v3");
     expect(checkWorkflow.indexOf("- run: pnpm run check\n")).toBeLessThan(
@@ -686,7 +686,6 @@ describe("vike-app Preset Source behavior", () => {
     ).toBeLessThan(
       appDockerfile.indexOf("pnpm --filter ./apps/web run build:run"),
     );
-    expect(appDockerfile).toContain("AS database-preparation");
     expect(appDockerfile).toContain("AS standalone");
     expect(appDockerfile).toContain('ENV DATABASE_FILE="/data/app.sqlite"');
     expect(appDockerfile).toContain(
@@ -695,7 +694,10 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerfile).toContain('CMD ["prepare-and-start"]');
     expect(appDockerfile).toContain("COPY --from=build --chown=app:nodejs");
     expect(appDockerfile).toContain("USER app");
-    expect(appDockerfile).toContain('CMD ["start-only"]');
+    expect(appDockerfile).toContain(
+      'CMD ["node", "/app/dist/server/index.mjs"]',
+    );
+    expect(appDockerfile).not.toContain("CONTAINER_CAPABILITY");
     expect(appDockerfile).not.toContain("node:latest");
     expect(appDockerfile).not.toContain("npm install -g");
     expect(appDockerfile).not.toContain("pnpm dlx");
@@ -703,10 +705,10 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerignore).toContain("*.sqlite");
     expect(containerEntrypointSource).toContain("prepare-and-start");
     expect(containerEntrypointSource).toContain("prepare-only");
-    expect(prepareDatabaseSource).toContain(
-      "./node_modules/.bin/drizzle-kit migrate",
+    expect(containerEntrypointSource).toContain(
+      "drizzle-kit migrate --config /migration/drizzle.config.ts",
     );
-    expect(prepareDatabaseSource).not.toContain("pnpm");
+    expect(containerEntrypointSource).not.toContain("pnpm");
     expect(containerEntrypointSource).toContain(
       "exec node /app/dist/server/index.mjs",
     );
@@ -821,7 +823,7 @@ test("starts the local service", async ({ page }) => {
     );
     const applicationRuntime = dockerfile.slice(
       dockerfile.indexOf("AS application-runtime"),
-      dockerfile.indexOf("FROM base AS database-preparation"),
+      dockerfile.indexOf("# Final deployment target: standalone"),
     );
 
     expect(finalTargets).toEqual(["standalone", "runtime"]);
@@ -837,7 +839,7 @@ test("starts the local service", async ({ page }) => {
     expect(applicationRuntime).toContain("./node_modules");
     expect(applicationRuntime).not.toContain("packages/db");
     expect(applicationRuntime).not.toContain("drizzle-kit");
-    expect(dockerfile).toContain("COPY --from=application-runtime");
+    expect(dockerfile).toContain("FROM application-runtime AS standalone");
     expect(runtime).toContain("FROM application-runtime AS runtime");
     expect(applicationRuntime).toContain(
       "COPY --from=build --chown=app:nodejs",
@@ -849,16 +851,14 @@ test("starts the local service", async ({ page }) => {
     expect(applicationRuntime).toContain(
       'ENV DATABASE_FILE="/data/app.sqlite"',
     );
-    expect(runtime).toContain('ENV CONTAINER_CAPABILITY="start-only"');
-    expect(runtime).toContain(
-      'ENTRYPOINT ["/usr/local/bin/container-entrypoint"]',
-    );
-    expect(runtime).toContain('CMD ["start-only"]');
+    expect(runtime).not.toContain("CONTAINER_CAPABILITY");
+    expect(runtime).not.toContain("ENTRYPOINT");
+    expect(runtime).toContain('CMD ["node", "/app/dist/server/index.mjs"]');
     expect(
       dockerfile.match(/LABEL org\.opencontainers\.image\.version/gu),
     ).toHaveLength(2);
     expect(runtime).not.toContain("--from=pruner");
-    expect(runtime).not.toContain("--from=database-preparation");
+    expect(runtime).not.toContain("--from=standalone");
     expect(runtime).not.toContain("pnpm");
     expect(runtime).not.toContain("packages/db");
     expect(runtime).not.toContain("pnpm-workspace.yaml");
@@ -1267,43 +1267,6 @@ writeFileSync(process.env.PLAYWRIGHT_OBSERVATION_FILE, JSON.stringify({
     ).rejects.toMatchObject({ code: 23 });
     expect(await readFile(observationFile, "utf8")).toBe("prepare\n");
   });
-
-  it("starts without preparation for runtime-only containers", async () => {
-    const targetDir = await renderVikeProject();
-    const { env, observationFile } =
-      await fakeContainerCommandEnvironment(targetDir);
-
-    await execFileAsync(
-      "sh",
-      ["scripts/container-entrypoint.sh", "start-only"],
-      {
-        cwd: path.join(targetDir, "apps/web"),
-        env: { ...env, CONTAINER_CAPABILITY: "start-only" },
-      },
-    );
-
-    expect(await readFile(observationFile, "utf8")).toBe("start\n");
-  });
-
-  it.each(["prepare-only", "prepare-and-start"])(
-    "rejects %s in a runtime-only container",
-    async (command) => {
-      const targetDir = await renderVikeProject();
-      const { env } = await fakeContainerCommandEnvironment(targetDir);
-
-      await expect(
-        execFileAsync("sh", ["scripts/container-entrypoint.sh", command], {
-          cwd: path.join(targetDir, "apps/web"),
-          env: { ...env, CONTAINER_CAPABILITY: "start-only" },
-        }),
-      ).rejects.toMatchObject({
-        code: 64,
-        stderr: expect.stringContaining(
-          `Container capability 'start-only' does not support '${command}'`,
-        ),
-      });
-    },
-  );
 
   it("replaces the dispatcher so the application receives container signals", async () => {
     const targetDir = await renderVikeProject();

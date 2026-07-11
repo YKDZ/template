@@ -236,6 +236,7 @@ describe("ts-lib Preset Source behavior", () => {
       'corepack enable --install-directory "$PNPM_HOME"',
     );
     expect(dockerfile).not.toContain("PLAYWRIGHT_CLI_PACKAGE");
+    expect(dockerfile).not.toContain("shellcheck");
     expect(dockerfile).not.toContain("typescript-node");
     expect(dockerfile).not.toMatch(
       /npm install -g|pnpm add -g|corepack prepare (?!"?\$\{PACKAGE_MANAGER_PIN\}"?)/,

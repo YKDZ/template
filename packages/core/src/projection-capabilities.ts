@@ -38,6 +38,7 @@ import {
   dockerfileFirstRustPnpmDevcontainer,
   nodePnpmToolLayer,
   rustToolLayer,
+  shellCheckToolLayer,
 } from "./devcontainer.ts";
 import {
   editorCustomizationForCapabilities,
@@ -58,6 +59,7 @@ import {
   renderFixLeafCommand,
   renderRootCheckCommand,
   renderTurboRunCommand,
+  shellCheckEnvironmentNeed,
 } from "./module-graph.ts";
 import {
   packageManifestExposureFields,
@@ -317,6 +319,12 @@ const capabilityInterpreters = {
       state.operationFactories.push(workspaceNodePackagesOperations);
       if (hasVikePackage(capability)) {
         state.dependencyMaintenanceExtraDirectories.docker = ["/apps/web"];
+        state.rootCheckEnvironmentNeeds.push(
+          shellCheckEnvironmentNeed({
+            kind: "package-boundary",
+            path: "apps/web",
+          }),
+        );
         state.deploymentCheckComponents.push({
           kind: "deployment-image",
           owner: { kind: "package-boundary", path: "apps/web" },
@@ -2458,7 +2466,7 @@ function nodePackageScripts(
         "oxfmt --list-different --config ../../oxfmt.config.ts .",
       "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
       "lint:run":
-        "oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
+        "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
       "lint:fix:run":
         "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
       preview: `${dbCommand} && vike preview`,
@@ -3094,13 +3102,24 @@ function nodePnpmDevcontainerOperations({
   readonly context: GenerationContext;
   readonly state: ProjectionCompositionState;
 }): RenderOperation[] {
-  const additionalLayers =
-    state.nodeWorkspace && hasVuePackage(state.nodeWorkspace)
+  const additionalLayers = [
+    ...(state.nodeWorkspace && hasVuePackage(state.nodeWorkspace)
       ? [browserTestToolLayer()]
-      : [];
+      : []),
+    ...(state.nodeWorkspace && hasVikePackage(state.nodeWorkspace)
+      ? [shellCheckToolLayer()]
+      : []),
+  ];
   const dockerfileFragments = readDevelopmentContainerDockerfileFragments(
     state,
-    additionalLayers.length === 0 ? [] : ["browserTest"],
+    [
+      ...(additionalLayers.some((layer) => layer.kind === "browser-test")
+        ? (["browserTest"] as const)
+        : []),
+      ...(additionalLayers.some((layer) => layer.kind === "shellcheck")
+        ? (["shellCheck"] as const)
+        : []),
+    ],
   );
   const editorCustomization = editorCustomizationForCapabilities(
     state.editorCustomizationCapabilities,
@@ -3133,6 +3152,7 @@ function nodePnpmDevcontainerOperations({
 
 type DevelopmentContainerDockerfileOptionalFragmentName =
   | "browserTest"
+  | "shellCheck"
   | "rust";
 
 function readDevelopmentContainerDockerfileFragments(
@@ -3148,6 +3168,7 @@ function readDevelopmentContainerDockerfileFragments(
   const fragmentNames = {
     nodePnpm: "node-pnpm.Dockerfile",
     browserTest: "browser-test.Dockerfile",
+    shellCheck: "shellcheck.Dockerfile",
     rust: "rust.Dockerfile",
   } as const;
 
@@ -3164,6 +3185,14 @@ function readDevelopmentContainerDockerfileFragments(
           browserTest: readDevelopmentContainerDockerfileFragment(
             state.devcontainerResource,
             fragmentNames.browserTest,
+          ),
+        }
+      : {}),
+    ...(selected.has("shellCheck")
+      ? {
+          shellCheck: readDevelopmentContainerDockerfileFragment(
+            state.devcontainerResource,
+            fragmentNames.shellCheck,
           ),
         }
       : {}),

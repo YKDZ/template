@@ -808,11 +808,19 @@ function addedPresetEnvironmentNeeds(
       return need;
     }
 
-    return playwrightBrowserAssetsEnvironmentNeed({
-      browser: need.browser,
-      owner: { kind: "package-boundary", path: addedPackagePath },
-      machineVerifiable: need.nextStep.machineVerifiable,
-    });
+    switch (need.kind) {
+      case "playwright-browser-assets":
+        return playwrightBrowserAssetsEnvironmentNeed({
+          browser: need.browser,
+          owner: { kind: "package-boundary", path: addedPackagePath },
+          machineVerifiable: need.nextStep.machineVerifiable,
+        });
+      case "shellcheck-command":
+        return {
+          ...need,
+          owner: { kind: "package-boundary" as const, path: addedPackagePath },
+        };
+    }
   });
 }
 

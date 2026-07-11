@@ -211,5 +211,10 @@ function defaultDependabotDirectory(
 }
 
 function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
-  return renderPlaywrightBrowserInstallCommand(need, { withDeps: true });
+  switch (need.kind) {
+    case "playwright-browser-assets":
+      return renderPlaywrightBrowserInstallCommand(need, { withDeps: true });
+    case "shellcheck-command":
+      return need.nextStep.display;
+  }
 }

@@ -17,8 +17,13 @@ export type DevelopmentContainerRustLayer = {
   readonly toolchain: string;
 };
 
+export type DevelopmentContainerShellCheckLayer = {
+  readonly kind: "shellcheck";
+};
+
 type DevelopmentContainerCapabilityLayer =
   | DevelopmentContainerBrowserTestLayer
+  | DevelopmentContainerShellCheckLayer
   | DevelopmentContainerRustLayer;
 
 export type DevelopmentContainerDockerfileFragments = {
@@ -28,6 +33,12 @@ export type DevelopmentContainerDockerfileFragments = {
     readonly text: string;
   };
   readonly browserTest?:
+    | {
+        readonly from: string;
+        readonly text: string;
+      }
+    | undefined;
+  readonly shellCheck?:
     | {
         readonly from: string;
         readonly text: string;
@@ -46,7 +57,7 @@ type DevelopmentContainerDockerfileFragment =
 
 function requireDockerfileFragment(
   fragments: DevelopmentContainerDockerfileFragments,
-  name: "browserTest" | "rust",
+  name: "browserTest" | "shellCheck" | "rust",
 ): DevelopmentContainerDockerfileFragment {
   const fragment = fragments[name];
 
@@ -159,6 +170,10 @@ export function browserTestToolLayer(): DevelopmentContainerBrowserTestLayer {
   };
 }
 
+export function shellCheckToolLayer(): DevelopmentContainerShellCheckLayer {
+  return { kind: "shellcheck" };
+}
+
 export function rustToolLayer(
   options: {
     readonly toolchain?: string;
@@ -189,6 +204,15 @@ function checkedNodePnpmDockerfile(options: {
               text: requireDockerfileFragment(
                 options.dockerfileFragments,
                 "browserTest",
+              ).text,
+            };
+          case "shellcheck":
+            return {
+              kind: "capability" as const,
+              name: "shellcheck",
+              text: requireDockerfileFragment(
+                options.dockerfileFragments,
+                "shellCheck",
               ).text,
             };
           case "rust":
@@ -225,6 +249,14 @@ function checkedNodePnpmDockerfileFragments(options: {
             from: requireDockerfileFragment(
               options.dockerfileFragments,
               "browserTest",
+            ).from,
+          };
+        case "shellcheck":
+          return {
+            sourceRoot: options.dockerfileFragments.sourceRoot,
+            from: requireDockerfileFragment(
+              options.dockerfileFragments,
+              "shellCheck",
             ).from,
           };
         case "rust":

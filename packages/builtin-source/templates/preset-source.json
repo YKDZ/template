@@ -281,7 +281,6 @@
                   "web/playwright.config.ts",
                   "web/scripts/check-standalone-deployment.ts",
                   "web/scripts/container-entrypoint.sh",
-                  "web/scripts/prepare-database.sh",
                   "web/scripts/run-playwright.ts",
                   "web/turbo.json",
                   "web/server/api.ts",
@@ -336,7 +335,6 @@
           "vike-app/web/playwright.config.ts",
           "vike-app/web/scripts/check-standalone-deployment.ts",
           "vike-app/web/scripts/container-entrypoint.sh",
-          "vike-app/web/scripts/prepare-database.sh",
           "vike-app/web/vite.config.ts",
           "vike-app/web/turbo.json",
           "vike-app/web/vitest.config.ts"

@@ -44,29 +44,17 @@ RUN groupadd --system --gid 1001 nodejs \
   && install -d -o app -g nodejs /app /data
 COPY --from=build --chown=app:nodejs /runtime-deploy/node_modules ./node_modules
 COPY --from=build --chown=app:nodejs /repo/apps/web/dist ./dist
-COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
-ENV DATABASE_FILE="/data/app.sqlite"
-USER app
-
-FROM node:{{NODE_VERSION}}-bookworm-slim AS database-preparation
-ENV NODE_ENV="production"
-RUN groupadd --system --gid 1001 nodejs \
-  && useradd --system --uid 1001 --gid nodejs --home-dir /app --shell /usr/sbin/nologin app \
-  && install -d -o app -g nodejs /app /data /migration
-COPY --from=build --chown=app:nodejs /migration-deploy /migration
-COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
-COPY --chmod=755 --from=build /repo/apps/web/scripts/prepare-database.sh /usr/local/bin/prepare-database
 ENV DATABASE_FILE="/data/app.sqlite"
 USER app
 
 # Final deployment target: standalone
 # One-container deployments prepare the database before startup.
-FROM database-preparation AS standalone
+FROM application-runtime AS standalone
 ARG DEPLOYMENT_BUILD_ID
 LABEL org.opencontainers.image.version="$DEPLOYMENT_BUILD_ID"
-WORKDIR /app
-COPY --from=application-runtime --chown=app:nodejs /app/node_modules ./node_modules
-COPY --from=application-runtime --chown=app:nodejs /app/dist ./dist
+ENV PATH="/migration/node_modules/.bin:$PATH"
+COPY --from=build --chown=app:nodejs /migration-deploy /migration
+COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
 EXPOSE 3000
 ENTRYPOINT ["/usr/local/bin/container-entrypoint"]
 CMD ["prepare-and-start"]
@@ -76,7 +64,5 @@ CMD ["prepare-and-start"]
 FROM application-runtime AS runtime
 ARG DEPLOYMENT_BUILD_ID
 LABEL org.opencontainers.image.version="$DEPLOYMENT_BUILD_ID"
-ENV CONTAINER_CAPABILITY="start-only"
 EXPOSE 3000
-ENTRYPOINT ["/usr/local/bin/container-entrypoint"]
-CMD ["start-only"]
+CMD ["node", "/app/dist/server/index.mjs"]
