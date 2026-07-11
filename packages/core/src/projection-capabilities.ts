@@ -1759,9 +1759,9 @@ function vikePackageJson(
         types: "./*.ts",
       },
     },
+    files: ["dist"],
     scripts,
     dependencies: {
-      ...packageLinkDependencies,
       "@vikejs/hono": "catalog:",
       "drizzle-orm": "catalog:",
       hono: "catalog:",
@@ -1772,6 +1772,7 @@ function vikePackageJson(
       vue: "catalog:",
     },
     devDependencies: {
+      ...packageLinkDependencies,
       "@playwright/test": "catalog:",
       "@tailwindcss/vite": "catalog:",
       "@types/node": "catalog:",
@@ -1870,6 +1871,7 @@ function vikeDbMigrationsPackageJson(
     version: "0.0.0",
     private: true,
     type: "module",
+    files: ["drizzle.config.ts", "drizzle/migrations"],
     dependencies: {
       "drizzle-kit": "catalog:",
       "drizzle-orm": "catalog:",
@@ -2783,6 +2785,9 @@ function vikeTemplateSourceOperation(options: {
           NODE_VERSION: options.context.toolchain.nodeLtsMajor.value,
           PACKAGE_MANAGER_PIN:
             options.context.toolchain.packageManagerPin.value,
+          DB_MIGRATIONS_PACKAGE_NAME: vikeDbMigrationsPackageName(
+            options.context,
+          ),
           WEB_PACKAGE_NAME: nodePackageName(
             options.context,
             options.nodePackage,

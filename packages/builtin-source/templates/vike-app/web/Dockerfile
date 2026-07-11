@@ -19,9 +19,10 @@ RUN pnpm fetch
 COPY package.json turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/db/package.json packages/db/package.json
+COPY packages/db-migrations/package.json packages/db-migrations/package.json
 RUN pnpm install --offline --frozen-lockfile
 COPY . .
-RUN pnpm exec turbo prune {{WEB_PACKAGE_NAME}} --docker
+RUN pnpm exec turbo prune {{WEB_PACKAGE_NAME}} {{DB_MIGRATIONS_PACKAGE_NAME}} --docker
 
 FROM base AS build
 COPY --from=pruner /repo/out/json/pnpm-lock.yaml ./pnpm-lock.yaml
@@ -30,10 +31,10 @@ RUN pnpm fetch
 COPY --from=pruner /repo/out/json/ ./
 RUN pnpm install --offline --frozen-lockfile
 COPY --from=pruner /repo/out/full/ ./
+RUN pnpm --filter ./packages/db run build:run
 RUN pnpm --filter ./apps/web run build:run
-RUN pnpm --filter ./apps/web deploy --prod --legacy /runtime-deploy \
-  && rm -rf /runtime-deploy/node_modules/@*/db \
-  && find /runtime-deploy/node_modules/.pnpm -mindepth 1 -maxdepth 1 -type d -name '*@file+packages+db' -exec rm -rf '{}' +
+RUN pnpm --filter ./apps/web deploy --prod /runtime-deploy
+RUN pnpm --filter ./packages/db-migrations deploy --prod /migration-deploy
 
 FROM node:{{NODE_VERSION}}-bookworm-slim AS application-runtime
 ENV NODE_ENV="production"
@@ -47,19 +48,14 @@ COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /us
 ENV DATABASE_FILE="/data/app.sqlite"
 USER app
 
-FROM base AS database-preparation
+FROM node:{{NODE_VERSION}}-bookworm-slim AS database-preparation
 ENV NODE_ENV="production"
-COPY --from=pruner /repo/out/json/pnpm-lock.yaml ./pnpm-lock.yaml
-COPY --from=pruner /repo/out/json/pnpm-workspace.yaml ./pnpm-workspace.yaml
-RUN pnpm fetch
-COPY --from=pruner /repo/out/json/ ./
-RUN pnpm install --offline --frozen-lockfile --prod=false
-COPY --from=pruner /repo/out/full/ ./
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs --home-dir /app --shell /usr/sbin/nologin app \
-  && install -d -o app -g nodejs /app /data
-COPY --chmod=755 --from=pruner /repo/out/full/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
-COPY --chmod=755 --from=pruner /repo/out/full/apps/web/scripts/prepare-database.sh /usr/local/bin/prepare-database
+  && install -d -o app -g nodejs /app /data /migration
+COPY --from=build --chown=app:nodejs /migration-deploy /migration
+COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
+COPY --chmod=755 --from=build /repo/apps/web/scripts/prepare-database.sh /usr/local/bin/prepare-database
 ENV DATABASE_FILE="/data/app.sqlite"
 USER app
 

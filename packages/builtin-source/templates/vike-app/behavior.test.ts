@@ -2,18 +2,17 @@ import { execFile, spawn } from "node:child_process";
 import {
   access,
   chmod,
-  cp,
   lstat,
   mkdtemp,
   mkdir,
   readFile,
   readlink,
   readdir,
-  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -43,6 +42,7 @@ const packageJsonSchema = v.looseObject({
   packageManager: v.optional(v.string()),
   dependencies: v.optional(v.record(v.string(), v.string())),
   devDependencies: v.optional(v.record(v.string(), v.string())),
+  files: v.optional(v.array(v.string())),
   imports: v.optional(v.record(v.string(), v.record(v.string(), v.string()))),
   scripts: v.record(v.string(), v.string()),
 });
@@ -137,6 +137,62 @@ async function databaseReadiness(databaseFile: string): Promise<string> {
   );
 
   return stdout.trim();
+}
+
+async function availablePort(): Promise<number> {
+  const server = createServer();
+
+  return await new Promise<number>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const port = (server.address() as AddressInfo).port;
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve(port);
+      });
+    });
+  });
+}
+
+async function waitForHttpResponse(
+  url: string,
+  server: ReturnType<typeof spawn>,
+): Promise<Response> {
+  const timeoutAt = Date.now() + 15_000;
+
+  while (Date.now() < timeoutAt) {
+    if (server.exitCode !== null) {
+      throw new Error(
+        `Server exited before becoming ready (${server.exitCode})`,
+      );
+    }
+
+    try {
+      const response = await fetch(url);
+      if (response.ok) return response;
+    } catch {
+      // The port is not accepting requests yet.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for ${url}`);
+}
+
+async function stopChildProcess(
+  child: ReturnType<typeof spawn>,
+): Promise<void> {
+  if (child.exitCode !== null) return;
+
+  await new Promise<void>((resolve) => {
+    const forceKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    child.once("exit", () => {
+      clearTimeout(forceKill);
+      resolve();
+    });
+    child.kill("SIGTERM");
+  });
 }
 
 async function repositoryTscIdentity(): Promise<{
@@ -423,10 +479,12 @@ describe("vike-app Preset Source behavior", () => {
       name: "@demo-vike/web",
       engines: { node: "24" },
     });
-    expect(webPackageJson.dependencies).toHaveProperty(
+    expect(webPackageJson.dependencies).not.toHaveProperty("@demo-vike/db");
+    expect(webPackageJson.devDependencies).toHaveProperty(
       "@demo-vike/db",
       "workspace:*",
     );
+    expect(webPackageJson.files).toEqual(["dist"]);
     expect(webPackageJson.dependencies).toHaveProperty(
       "drizzle-orm",
       "catalog:",
@@ -493,6 +551,10 @@ describe("vike-app Preset Source behavior", () => {
         "@demo-vike/db": "workspace:*",
       },
     });
+    expect(migrationsPackageJson.files).toEqual([
+      "drizzle.config.ts",
+      "drizzle/migrations",
+    ]);
     expect(migrationsPackageJson.scripts).toMatchObject({
       "db:generate": "drizzle-kit generate",
       "db:migrate": "drizzle-kit migrate",
@@ -617,7 +679,12 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerfile).toContain("pnpm fetch");
     expect(appDockerfile).toContain("pnpm install --offline --frozen-lockfile");
     expect(appDockerfile).toContain(
-      "pnpm exec turbo prune @demo-vike/web --docker",
+      "pnpm exec turbo prune @demo-vike/web @demo-vike/db-migrations --docker",
+    );
+    expect(
+      appDockerfile.indexOf("pnpm --filter ./packages/db run build:run"),
+    ).toBeLessThan(
+      appDockerfile.indexOf("pnpm --filter ./apps/web run build:run"),
     );
     expect(appDockerfile).toContain("AS database-preparation");
     expect(appDockerfile).toContain("AS standalone");
@@ -636,7 +703,10 @@ describe("vike-app Preset Source behavior", () => {
     expect(appDockerignore).toContain("*.sqlite");
     expect(containerEntrypointSource).toContain("prepare-and-start");
     expect(containerEntrypointSource).toContain("prepare-only");
-    expect(prepareDatabaseSource).toContain("db:prepare:deploy");
+    expect(prepareDatabaseSource).toContain(
+      "./node_modules/.bin/drizzle-kit migrate",
+    );
+    expect(prepareDatabaseSource).not.toContain("pnpm");
     expect(containerEntrypointSource).toContain(
       "exec node /app/dist/server/index.mjs",
     );
@@ -756,9 +826,14 @@ test("starts the local service", async ({ page }) => {
 
     expect(finalTargets).toEqual(["standalone", "runtime"]);
     expect(dockerfile).toContain(
-      "pnpm --filter ./apps/web deploy --prod --legacy",
+      "pnpm --filter ./apps/web deploy --prod /runtime-deploy",
     );
-    expect(dockerfile).toContain("-name '*@file+packages+db'");
+    expect(dockerfile).toContain(
+      "pnpm --filter ./packages/db-migrations deploy --prod /migration-deploy",
+    );
+    expect(dockerfile).not.toContain("--legacy");
+    expect(dockerfile).not.toContain("file+packages+db");
+    expect(dockerfile).not.toMatch(/\b(?:rm|find)\b/u);
     expect(applicationRuntime).toContain("./node_modules");
     expect(applicationRuntime).not.toContain("packages/db");
     expect(applicationRuntime).not.toContain("drizzle-kit");
@@ -790,7 +865,7 @@ test("starts the local service", async ({ page }) => {
     expect(runtime).not.toContain("drizzle");
   });
 
-  it("starts the built server from an isolated production dependency closure", async () => {
+  it("serves the built application after an isolated migration closure prepares its database", async () => {
     const repositoryPackageJson = await readJsonWithSchema(
       path.join(process.cwd(), "package.json"),
       v.object({ packageManager: packageManagerPinSchema }),
@@ -811,7 +886,6 @@ test("starts the local service", async ({ page }) => {
       (await lstat(path.join(targetDir, "node_modules"))).isSymbolicLink(),
     ).toBe(false);
     expect(await repositoryTscIdentity()).toEqual(rootTscBefore);
-    const webDir = path.join(targetDir, "apps/web");
     await execFileAsync(
       "pnpm",
       ["--filter", "./apps/web", "exec", "vike", "build"],
@@ -820,35 +894,21 @@ test("starts the local service", async ({ page }) => {
         env: process.env,
       },
     );
-    const deploymentRoot = path.join(targetDir, "production-deploy");
+    const deploymentRoot = await mkdtemp(
+      path.join(tmpdir(), "vike-application-closure-"),
+    );
     await execFileAsync(
       "pnpm",
-      [
-        "--filter",
-        "./apps/web",
-        "deploy",
-        "--prod",
-        "--legacy",
-        deploymentRoot,
-      ],
+      ["--filter", "./apps/web", "deploy", "--prod", deploymentRoot],
       { cwd: targetDir, env: process.env },
     );
     expect(await repositoryTscIdentity()).toEqual(rootTscBefore);
     const deployedNodeModules = path.join(deploymentRoot, "node_modules");
-    await rm(path.join(deployedNodeModules, "@demo-vike/db"), {
-      force: true,
-      recursive: true,
-    });
     const virtualStore = path.join(deployedNodeModules, ".pnpm");
-    const workspaceDatabaseEntries = (await readdir(virtualStore)).filter(
-      (entry) => entry.endsWith("@file+packages+db"),
-    );
-    await Promise.all(
-      workspaceDatabaseEntries.map((entry) =>
-        rm(path.join(virtualStore, entry), { force: true, recursive: true }),
-      ),
-    );
     const productionEntries = await readdir(virtualStore);
+    expect(await generatedFilePaths(deploymentRoot)).toContain(
+      "pnpm-lock.yaml",
+    );
     await expect(
       access(path.join(deployedNodeModules, "@demo-vike/db")),
     ).rejects.toMatchObject({ code: "ENOENT" });
@@ -859,31 +919,42 @@ test("starts the local service", async ({ page }) => {
       productionEntries.some((entry) => entry.includes("drizzle-kit")),
     ).toBe(false);
 
-    const isolatedRoot = await mkdtemp(
-      path.join(tmpdir(), "vike-isolated-runtime-"),
+    const migrationRoot = await mkdtemp(
+      path.join(tmpdir(), "vike-migration-closure-"),
     );
-    await cp(path.join(webDir, "dist"), path.join(isolatedRoot, "dist"), {
-      recursive: true,
-    });
+    await execFileAsync(
+      "pnpm",
+      [
+        "--filter",
+        "./packages/db-migrations",
+        "deploy",
+        "--prod",
+        migrationRoot,
+      ],
+      { cwd: targetDir, env: process.env },
+    );
+    expect(await generatedFilePaths(migrationRoot)).toContain("pnpm-lock.yaml");
+
+    const databaseFile = path.join(deploymentRoot, "data", "app.sqlite");
+    await mkdir(path.dirname(databaseFile), { recursive: true });
+    await execFileAsync(
+      path.join(migrationRoot, "node_modules/.bin/drizzle-kit"),
+      ["migrate"],
+      {
+        cwd: migrationRoot,
+        env: { ...process.env, DATABASE_FILE: databaseFile },
+      },
+    );
+    expect(await databaseReadiness(databaseFile)).toBe("todos:0");
+
+    const port = await availablePort();
     const runtimeEnvironment = {
       ...process.env,
-      DATABASE_FILE: path.join(isolatedRoot, "unprepared.sqlite"),
-      PORT: "0",
+      DATABASE_FILE: databaseFile,
+      HOST: "127.0.0.1",
+      PORT: String(port),
     };
-
-    await expect(
-      execFileAsync(process.execPath, ["dist/server/index.mjs"], {
-        cwd: isolatedRoot,
-        env: runtimeEnvironment,
-      }),
-    ).rejects.toMatchObject({
-      stderr: expect.stringContaining("ERR_MODULE_NOT_FOUND"),
-    });
-
-    await cp(deployedNodeModules, path.join(isolatedRoot, "node_modules"), {
-      recursive: true,
-    });
-    const isolatedFiles = await generatedFilePaths(isolatedRoot);
+    const isolatedFiles = await generatedFilePaths(deploymentRoot);
     expect(isolatedFiles).not.toContain("node_modules/@demo-vike/db");
     expect(
       isolatedFiles.some((file) => file.includes("file+packages+db")),
@@ -895,15 +966,21 @@ test("starts the local service", async ({ page }) => {
     expect(isolatedFiles.some((file) => file.startsWith("packages/db/"))).toBe(
       false,
     );
-    await expect(
-      execFileAsync(process.execPath, ["dist/server/index.mjs"], {
-        cwd: isolatedRoot,
-        env: runtimeEnvironment,
-      }),
-    ).rejects.toMatchObject({
-      code: 1,
-      stderr: expect.stringContaining("Database is not ready"),
+    const server = spawn(process.execPath, ["dist/server/index.mjs"], {
+      cwd: deploymentRoot,
+      env: runtimeEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
     });
+
+    try {
+      const response = await waitForHttpResponse(
+        `http://127.0.0.1:${port}/api/health`,
+        server,
+      );
+      expect(await response.json()).toEqual({ ok: true, service: "vike-app" });
+    } finally {
+      await stopChildProcess(server);
+    }
   }, 120_000);
 
   it("prepares one seeded application database for default and caller-relative development paths", async () => {
@@ -990,6 +1067,7 @@ test("starts the local service", async ({ page }) => {
     );
 
     const deploymentFiles = await generatedFilePaths(deploymentRoot);
+    expect(deploymentFiles).toContain("pnpm-lock.yaml");
     expect(deploymentFiles).toContain("drizzle.config.ts");
     expect(deploymentFiles.some((file) => file.endsWith("migration.sql"))).toBe(
       true,
