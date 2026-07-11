@@ -511,6 +511,7 @@ describe("fixture checks", () => {
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           REAL_PNPM: realPnpm,
         },
+        reject: false,
       },
     );
     const unavailableRecords = (await readFile(logPath, "utf8"))
@@ -521,8 +522,9 @@ describe("fixture checks", () => {
           v.parse(commandRecordSchema, JSON.parse(line) as unknown),
       );
 
-    expect(dockerUnavailableRun.stdout).toMatch(
-      /Skipping deployment check for vike-app \+ ts-lib/u,
+    expect(dockerUnavailableRun.exitCode).not.toBe(0);
+    expect(dockerUnavailableRun.stderr).toMatch(
+      /Deployment check requires the docker-engine Check Environment capability/u,
     );
     expect(dockerUnavailableRun.stdout).not.toMatch(
       /Replayed passed deployment fixture vike-app \+ ts-lib/u,
@@ -533,14 +535,16 @@ describe("fixture checks", () => {
           record.command === "pnpm" && record.args.join(" ") === "run check",
       ),
     ).toHaveLength(0);
-    expect(
-      unavailableRecords.filter(
-        (record) =>
-          record.command === "pnpm" &&
-          record.args.join(" ") ===
-            "install --lockfile-only --prefer-offline --no-frozen-lockfile",
-      ),
-    ).toHaveLength(fixtureScenarios.length);
+    const unavailableInstalls = unavailableRecords.filter(
+      (record) =>
+        record.command === "pnpm" &&
+        record.args.join(" ") ===
+          "install --lockfile-only --prefer-offline --no-frozen-lockfile",
+    );
+    expect(unavailableInstalls.length).toBeGreaterThan(0);
+    expect(unavailableInstalls.length).toBeLessThanOrEqual(
+      fixtureScenarios.length,
+    );
     expect(unavailableRecords).not.toContainEqual(
       expect.objectContaining({ args: ["run", "check:deployment"] }),
     );
@@ -574,6 +578,7 @@ describe("fixture checks", () => {
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
             REAL_PNPM: realPnpm,
           },
+          reject: false,
         },
       );
       const transitionRecords = (await readFile(logPath, "utf8"))
@@ -587,8 +592,9 @@ describe("fixture checks", () => {
     };
 
     const unavailableMiss = await runReplayTransition("0", "0", "1");
-    expect(unavailableMiss.result.stdout).toMatch(
-      /Skipping deployment check for vike-app \+ ts-lib/u,
+    expect(unavailableMiss.result.exitCode).not.toBe(0);
+    expect(unavailableMiss.result.stderr).toMatch(
+      /Deployment check requires the docker-engine Check Environment capability/u,
     );
     expect(unavailableMiss.transitionRecords).not.toContainEqual(
       expect.objectContaining({ args: ["run", "check:deployment"] }),

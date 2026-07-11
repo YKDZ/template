@@ -90,6 +90,13 @@ export function projectCheckWorkflow(
     "jobs:",
     `  ${capability.jobName}:`,
     `    runs-on: ${capability.runner}`,
+    ...(deploymentChecks.length === 0
+      ? []
+      : [
+          "    strategy:",
+          "      matrix:",
+          "        check: [root, deployment]",
+        ]),
     "    steps:",
     "      - uses: actions/checkout@v7",
   ];
@@ -104,7 +111,10 @@ export function projectCheckWorkflow(
   }
 
   if (needsDocker) {
-    lines.push("      - uses: docker/setup-buildx-action@v3");
+    lines.push(
+      "      - uses: docker/setup-buildx-action@v3",
+      "        if: matrix.check == 'deployment'",
+    );
   }
 
   if (environmentPreparation.rustToolchain) {
@@ -117,16 +127,21 @@ export function projectCheckWorkflow(
   }
 
   lines.push(`      - run: ${taskLayer.installCommand}`);
-  lines.push(
-    ...options.checkPlan.environmentNeeds.map(
-      (need) => `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
-    ),
-  );
+  for (const need of options.checkPlan.environmentNeeds) {
+    lines.push(`      - run: ${renderCiEnvironmentNeedCommand(need)}`);
+    if (deploymentChecks.length > 0 && need.kind === "shellcheck-command") {
+      lines.push("        if: matrix.check == 'root'");
+    }
+  }
   lines.push(`      - run: ${taskLayer.checkCommand}`);
+  if (deploymentChecks.length > 0) {
+    lines.push("        if: matrix.check == 'root'");
+  }
   const deploymentCheck = deploymentChecks[0];
   if (deploymentCheck !== undefined) {
     lines.push(
       `      - run: pnpm run ${deploymentCheckTaskName(deploymentCheck)}`,
+      "        if: matrix.check == 'deployment'",
     );
   }
   lines.push("");

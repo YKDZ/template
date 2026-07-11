@@ -9,6 +9,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        check: [root, deployment]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -16,8 +19,12 @@ jobs:
           node-version-file: package.json
       - run: corepack enable
       - uses: docker/setup-buildx-action@v3
+        if: matrix.check == 'deployment'
       - run: pnpm install
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
+        if: matrix.check == 'root'
       - run: pnpm --filter ./apps/web exec playwright install --with-deps chromium
       - run: pnpm run check
+        if: matrix.check == 'root'
       - run: pnpm run check:deployment
+        if: matrix.check == 'deployment'

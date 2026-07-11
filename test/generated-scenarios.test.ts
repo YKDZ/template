@@ -937,7 +937,7 @@ describe("generated scenarios", () => {
     expect(deploymentIndex).toBeGreaterThan(dockerIndex);
   });
 
-  it("clearly skips only the deployment phase when Docker is unavailable", async () => {
+  it("fails a required deployment check when Docker is unavailable", async () => {
     const manifest = loadBuiltInPresetSourceManifest();
     const scenario = selectGeneratedScenarios(
       manifest,
@@ -957,12 +957,8 @@ describe("generated scenarios", () => {
       path.join(tmpdir(), "generated-deployment-skip-cache-"),
     );
 
-    await runGeneratedScenariosConcurrently(
-      manifest,
-      [scenario!],
-      workspace,
-      1,
-      {
+    await expect(
+      runGeneratedScenariosConcurrently(manifest, [scenario!], workspace, 1, {
         repoRoot: "/repo",
         cliPath: "/repo/packages/cli/src/cli.ts",
         projectionSourceRoots: builtInPresetProjectionSourceRoots(),
@@ -994,15 +990,19 @@ describe("generated scenarios", () => {
           );
         },
         reporter: { info: (message) => messages.push(message) },
-      },
-    );
+      }),
+    ).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(
+          /Deployment check requires the docker-engine Check Environment capability/u,
+        ),
+      }),
+    });
 
     expect(commands).toContain("pnpm run check");
     expect(commands).not.toContain("pnpm run check:deployment");
-    expect(messages).toContainEqual(
-      expect.stringMatching(
-        /Skipping deployment check for vike-app \+ ts-lib: Docker engine is unavailable/u,
-      ),
+    expect(messages).not.toContainEqual(
+      expect.stringMatching(/Skipping deployment check/u),
     );
     expect(await readdir(replayCacheDirectory)).toHaveLength(1);
   });
@@ -1066,9 +1066,11 @@ describe("generated scenarios", () => {
       return { commands, messages };
     }
 
-    const unavailableMiss = await run(false, false, true);
-    expect(unavailableMiss.commands).toContain("pnpm run check");
-    expect(unavailableMiss.commands).not.toContain("pnpm run check:deployment");
+    await expect(run(false, false, true)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/requires the docker-engine/u),
+      }),
+    });
 
     const availableAfterUnavailable = await run(true, true, true);
     expect(availableAfterUnavailable.commands).not.toContain("pnpm run check");
@@ -1088,16 +1090,11 @@ describe("generated scenarios", () => {
       expect.stringMatching(/Replayed passed deployment fixture/u),
     );
 
-    const unavailableAfterAvailable = await run(false, true, false);
-    expect(unavailableAfterAvailable.commands).toContain(
-      "docker info --format {{.ServerVersion}}",
-    );
-    expect(unavailableAfterAvailable.commands).not.toContain(
-      "pnpm run check:deployment",
-    );
-    expect(unavailableAfterAvailable.messages).toContainEqual(
-      expect.stringMatching(/Skipping deployment check/u),
-    );
+    await expect(run(false, true, false)).rejects.toMatchObject({
+      cause: expect.objectContaining({
+        message: expect.stringMatching(/requires the docker-engine/u),
+      }),
+    });
   });
 
   it("reports the generated scenario, deployment modes, command, and container logs on deployment failure", async () => {

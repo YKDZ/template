@@ -6,6 +6,7 @@ const repositoryRoot = path.resolve(webRoot, "../..");
 const uniqueId = `${process.pid}-${Date.now()}`;
 const standaloneImage = `vike-deployment-check-standalone:${uniqueId}`;
 const runtimeImage = `vike-deployment-check-runtime:${uniqueId}`;
+const network = `vike-deployment-check-${uniqueId}`;
 const containers = {
   standalone: `vike-deployment-check-standalone-${uniqueId}`,
   preparation: `vike-deployment-check-preparation-${uniqueId}`,
@@ -153,6 +154,7 @@ async function cleanup(): Promise<void> {
   const cleanupCommands = [
     ...Object.values(containers).map((name) => ["rm", "--force", name]),
     ...Object.values(volumes).map((name) => ["volume", "rm", "--force", name]),
+    ["network", "rm", network],
     ["image", "rm", "--force", runtimeImage],
     ["image", "rm", "--force", standaloneImage],
   ];
@@ -308,6 +310,8 @@ async function runStartedDeployment(
       "--detach",
       "--name",
       container,
+      "--network",
+      network,
       "--publish",
       "127.0.0.1::3000",
       "--volume",
@@ -331,36 +335,78 @@ async function runStartedDeployment(
 }
 
 async function assertUnpreparedRuntimeFails(): Promise<void> {
-  try {
-    await dockerWithTimeout(
-      30_000,
-      "run",
-      "--name",
+  await dockerWithTimeout(
+    30_000,
+    "run",
+    "--detach",
+    "--name",
+    containers.unprepared,
+    "--network",
+    network,
+    "--publish",
+    "127.0.0.1::3000",
+    "--volume",
+    `${volumes.unprepared}:/data`,
+    runtimeImage,
+  );
+  const baseUrl = await publishedBaseUrl(containers.unprepared);
+  const deadline = Date.now() + 30_000;
+
+  while (Date.now() < deadline) {
+    const statePromise = dockerWithTimeout(
+      5_000,
+      "inspect",
+      "--format={{.State.Status}}:{{.State.ExitCode}}",
       containers.unprepared,
-      "--volume",
-      `${volumes.unprepared}:/data`,
-      runtimeImage,
+    ).then(
+      (state) => ({ state }),
+      (error: unknown) => ({ error }),
     );
-  } catch (error) {
-    const failure = error as {
-      code?: unknown;
-      stderr?: string;
-      stdout?: string;
-    };
-    const output = `${failure.stdout ?? ""}\n${failure.stderr ?? ""}`;
-    if (typeof failure.code === "number" && failure.code !== 0) {
-      if (!output.includes("Database is not ready")) {
+    const probe = await fetch(baseUrl, {
+      signal: AbortSignal.timeout(500),
+    }).then(
+      (response) => ({ response }),
+      () => ({ response: undefined }),
+    );
+
+    if (probe.response !== undefined) {
+      throw new Error(
+        `Unprepared runtime served HTTP ${probe.response.status} before exiting.`,
+      );
+    }
+
+    const stateResult = await statePromise;
+    if ("error" in stateResult) {
+      throw stateResult.error;
+    }
+    const match =
+      /^(created|running|paused|restarting|removing|exited|dead):(\d+)$/u.exec(
+        stateResult.state,
+      );
+    if (match?.[1] === "exited") {
+      const exitCode = Number(match[2]);
+      const logs = await containerLogs(containers.unprepared);
+      if (exitCode === 0) {
         throw new Error(
-          `Unprepared runtime did not report database readiness failure.\n${output}\n${await containerLogs(containers.unprepared)}`,
-          { cause: error },
+          `Unprepared runtime exited successfully instead of rejecting startup.\n${logs}`,
+        );
+      }
+      if (!logs.includes("Database is not ready")) {
+        throw new Error(
+          `Unprepared runtime did not report database readiness failure.\n${logs}`,
         );
       }
       return;
     }
-    throw error;
+    if (match === null || match[1] === "dead") {
+      throw new Error(
+        `Unprepared runtime entered unexpected state ${stateResult.state}.`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error("Unprepared runtime started successfully");
+  throw new Error("Unprepared runtime did not exit within 30000ms");
 }
 
 for (const signal of forwardedSignals) {
@@ -403,6 +449,7 @@ try {
   for (const volume of Object.values(volumes)) {
     await docker("volume", "create", volume);
   }
+  await docker("network", "create", network);
 
   await runStartedDeployment(
     "standalone",
@@ -417,12 +464,27 @@ try {
       "run",
       "--name",
       containers.preparation,
+      "--network",
+      network,
       "--volume",
       `${volumes.prepared}:/data`,
       standaloneImage,
       "prepare-only",
     ),
   );
+  await deploymentPhase("external-preparation", "exit", async () => {
+    const state = await dockerWithTimeout(
+      10_000,
+      "inspect",
+      "--format={{.State.Status}}:{{.State.ExitCode}}",
+      containers.preparation,
+    );
+    if (state !== "exited:0") {
+      throw new Error(
+        `Preparation-only container must exit successfully, received ${state}.\n${await containerLogs(containers.preparation)}`,
+      );
+    }
+  });
   await runStartedDeployment(
     "runtime",
     "Runtime",

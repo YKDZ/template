@@ -257,6 +257,7 @@ async function fakeDockerEnvironment(
   playwrightExitCode = 0,
   dockerBuildOutputBytes = 0,
   dockerFailurePattern = "",
+  unpreparedPort = 1,
 ): Promise<{
   dockerObservationFile: string;
   env: NodeJS.ProcessEnv;
@@ -288,18 +289,29 @@ case "$1" in
       head -c "$FAKE_DOCKER_BUILD_OUTPUT_BYTES" /dev/zero | tr '\\0' x
     fi
     ;;
-  port) echo "127.0.0.1:$FAKE_DOCKER_PORT" ;;
-  inspect) echo true ;;
+  port)
+    case "$*" in
+      *unprepared*) echo "127.0.0.1:$FAKE_UNPREPARED_DOCKER_PORT" ;;
+      *) echo "127.0.0.1:$FAKE_DOCKER_PORT" ;;
+    esac
+    ;;
+  inspect)
+    case "$*" in
+      *State.Status*unprepared*) echo "exited:17" ;;
+      *State.Status*) echo "exited:0" ;;
+      *) echo true ;;
+    esac
+    ;;
   logs)
-    echo "fake container stdout diagnostics"
+    case "$*" in
+      *unprepared*) echo "Database is not ready." ;;
+      *) echo "fake container stdout diagnostics" ;;
+    esac
     echo "fake container stderr diagnostics" >&2
     ;;
   volume) [ "$2" = create ] && echo fake-volume || true ;;
   run)
-    case "$*" in
-      *unprepared*) echo "Database is not ready." >&2; exit 17 ;;
-      *) echo fake-container ;;
-    esac
+    echo fake-container
     ;;
 esac
 `,
@@ -330,6 +342,7 @@ exit "$PLAYWRIGHT_EXIT_CODE"
       FAKE_DOCKER_BUILD_OUTPUT_BYTES: String(dockerBuildOutputBytes),
       FAKE_DOCKER_FAILURE_PATTERN: dockerFailurePattern,
       FAKE_DOCKER_PORT: String(port),
+      FAKE_UNPREPARED_DOCKER_PORT: String(unpreparedPort),
       PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}`,
       PLAYWRIGHT_EXIT_CODE: String(playwrightExitCode),
       PLAYWRIGHT_OBSERVATION_FILE: playwrightObservationFile,
@@ -651,11 +664,15 @@ describe("vike-app Preset Source behavior", () => {
       "pnpm --filter ./apps/web exec playwright install --with-deps chromium",
     );
     expect(checkWorkflow).toContain(
-      "sudo apt-get update && sudo apt-get install -y shellcheck",
+      "- run: sudo apt-get update && sudo apt-get install -y shellcheck\n        if: matrix.check == 'root'",
     );
     expect(checkWorkflow).toContain("docker/setup-buildx-action@v3");
-    expect(checkWorkflow.indexOf("- run: pnpm run check\n")).toBeLessThan(
-      checkWorkflow.indexOf("- run: pnpm run check:deployment\n"),
+    expect(checkWorkflow).toContain("check: [root, deployment]");
+    expect(checkWorkflow).toContain(
+      "- run: pnpm run check\n        if: matrix.check == 'root'",
+    );
+    expect(checkWorkflow).toContain(
+      "- run: pnpm run check:deployment\n        if: matrix.check == 'deployment'",
     );
     expect(checkWorkflow).not.toContain("docker-image:");
     expect(checkWorkflow).not.toContain("docker buildx build");
@@ -1340,11 +1357,24 @@ while :; do sleep 1; done
         "build --file apps/web/Dockerfile --target runtime --build-arg DEPLOYMENT_BUILD_ID=",
       );
       expect(dockerCommands.match(/volume create/gu)).toHaveLength(3);
+      expect(dockerCommands.match(/network create/gu)).toHaveLength(1);
       expect(dockerCommands).toContain("run --detach");
       expect(dockerCommands).toContain("standalone:");
       expect(dockerCommands).toContain("prepare-only");
+      expect(dockerCommands).toContain(
+        "inspect --format={{.State.Status}}:{{.State.ExitCode}}",
+      );
+      expect(dockerCommands).toContain(
+        "port vike-deployment-check-unprepared-",
+      );
+      expect(dockerCommands).toContain(
+        "logs vike-deployment-check-unprepared-",
+      );
       expect(dockerCommands).toContain("runtime:");
       expect(dockerCommands).toContain("unprepared");
+      expect(dockerCommands).toMatch(
+        /unprepared[^\n]*--publish|--publish[^\n]*unprepared/u,
+      );
       expect(dockerCommands).toContain("exec");
       expect(dockerCommands).toContain("const expectedIdentity = 1001");
       expect(dockerCommands).toContain("process.getuid() !== expectedIdentity");
@@ -1357,6 +1387,7 @@ while :; do sleep 1; done
       expect(dockerCommands.match(/^rm --force/gmu)).toHaveLength(4);
       expect(dockerCommands.match(/^volume rm --force/gmu)).toHaveLength(3);
       expect(dockerCommands.match(/^image rm --force/gmu)).toHaveLength(2);
+      expect(dockerCommands.match(/^network rm/gmu)).toHaveLength(1);
       expect(await readFile(playwrightObservationFile, "utf8")).toBe(
         `http://127.0.0.1:${address.port}\nhttp://127.0.0.1:${address.port}\n`,
       );
@@ -1364,6 +1395,67 @@ while :; do sleep 1; done
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
+    }
+  });
+
+  it("rejects an unprepared runtime that serves any HTTP response before exit", async () => {
+    const targetDir = await renderVikeProject();
+    const readyServer = createServer((_request, response) => {
+      response.writeHead(200).end("ready");
+    });
+    const leakedServer = createServer((_request, response) => {
+      response.writeHead(503).end("not ready");
+    });
+    await Promise.all(
+      [readyServer, leakedServer].map(
+        (server) =>
+          new Promise<void>((resolve, reject) => {
+            server.once("error", reject);
+            server.listen(0, "127.0.0.1", resolve);
+          }),
+      ),
+    );
+
+    try {
+      const readyAddress = readyServer.address();
+      const leakedAddress = leakedServer.address();
+      if (
+        typeof readyAddress !== "object" ||
+        readyAddress === null ||
+        typeof leakedAddress !== "object" ||
+        leakedAddress === null
+      ) {
+        throw new Error("Could not determine fake deployment ports");
+      }
+      const { env } = await fakeDockerEnvironment(
+        targetDir,
+        readyAddress.port,
+        0,
+        0,
+        "",
+        leakedAddress.port,
+      );
+
+      const result = await execFileAsync(
+        process.execPath,
+        ["scripts/check-standalone-deployment.ts"],
+        { cwd: path.join(targetDir, "apps/web"), env },
+      ).catch((error: unknown) => error as { stderr?: string });
+
+      expect(result).toMatchObject({
+        stderr: expect.stringMatching(
+          /Unprepared runtime served HTTP 503 before exiting/u,
+        ),
+      });
+    } finally {
+      await Promise.all(
+        [readyServer, leakedServer].map(
+          (server) =>
+            new Promise<void>((resolve, reject) => {
+              server.close((error) => (error ? reject(error) : resolve()));
+            }),
+        ),
+      );
     }
   });
 

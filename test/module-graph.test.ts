@@ -515,9 +515,16 @@ describe("module graph plans", () => {
     );
 
     const workflow = projectCheckWorkflow({ checkPlan: vikePlan.checkPlan });
+    expect(workflow).toContain("matrix:\n        check: [root, deployment]");
     expect(workflow).toContain("docker/setup-buildx-action@v3");
-    expect(workflow.indexOf("      - run: pnpm run check\n")).toBeLessThan(
-      workflow.indexOf("      - run: pnpm run check:deployment\n"),
+    expect(workflow).toContain(
+      "- run: sudo apt-get update && sudo apt-get install -y shellcheck\n        if: matrix.check == 'root'",
+    );
+    expect(workflow).toContain(
+      "      - run: pnpm run check\n        if: matrix.check == 'root'",
+    );
+    expect(workflow).toContain(
+      "      - run: pnpm run check:deployment\n        if: matrix.check == 'deployment'",
     );
     expect(workflow).not.toMatch(/docker (?:build|push|login)/u);
 
@@ -539,6 +546,7 @@ describe("module graph plans", () => {
     expect(vuePlan.checkPlan.deploymentChecks).toBeUndefined();
     expect(vuePlan.packageScripts).not.toHaveProperty("check:deployment");
     expect(vueWorkflow).not.toContain("docker/setup-buildx-action");
+    expect(vueWorkflow).not.toContain("matrix:");
     expect(vueWorkflow).not.toContain("check:deployment");
   });
 

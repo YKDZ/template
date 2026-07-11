@@ -962,11 +962,10 @@ async function runGeneratedScenarioQualityGate(
       try {
         await runStep();
       } catch (error: unknown) {
-        const reason = error instanceof Error ? error.message : String(error);
-        options.reporter.info?.(
-          `-- Skipping deployment check for ${scenario.label}: Docker engine is unavailable (${reason})`,
+        throw new Error(
+          `Deployment check requires the docker-engine Check Environment capability for ${scenario.label}; command: ${step.display}.`,
+          { cause: error },
         );
-        break;
       }
       continue;
     }
