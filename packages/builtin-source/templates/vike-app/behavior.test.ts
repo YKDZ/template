@@ -716,7 +716,22 @@ describe("vike-app Preset Source behavior", () => {
       'corepack prepare "$PACKAGE_MANAGER_PIN" --activate',
     );
     expect(appDockerfile).toContain(
-      "COPY pnpm-lock.yaml pnpm-workspace.yaml ./",
+      "COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./",
+    );
+    expect(
+      appDockerfile.indexOf(
+        "COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./",
+      ),
+    ).toBeLessThan(appDockerfile.indexOf("RUN pnpm fetch"));
+    expect(
+      appDockerfile.indexOf(
+        "COPY --from=pruner /repo/.pnpmfile.cts ./.pnpmfile.cts",
+      ),
+    ).toBeLessThan(
+      appDockerfile.indexOf(
+        "RUN pnpm fetch",
+        appDockerfile.indexOf("FROM base AS build"),
+      ),
     );
     expect(appDockerfile.indexOf("pnpm fetch")).toBeLessThan(
       appDockerfile.indexOf("COPY package.json turbo.json ./"),
