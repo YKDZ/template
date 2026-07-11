@@ -53,6 +53,10 @@ function scopedDbMigrationsPackageName(packageScope: string): string {
   return `@${packageScope}/db-migrations`;
 }
 
+function scopedVueToolingPackageName(packageScope: string): string {
+  return `@${packageScope}/vue-tooling`;
+}
+
 export function vikeAppBlueprint(
   options: PresetBlueprintOptions = { targetDir: process.cwd() },
 ): ProjectBlueprint {
@@ -77,6 +81,10 @@ export function vikeAppBlueprint(
         path: "packages/db-migrations",
         role: "shared-library",
         sourcePreset: "ts-lib",
+      },
+      {
+        name: scopedVueToolingPackageName(projectName),
+        path: "packages/vue-tooling",
       },
     ],
   };

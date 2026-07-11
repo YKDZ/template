@@ -13,6 +13,7 @@ export type GeneratedDependencyCatalogOptions = {
     | { readonly kind: "isolated" }
     | { readonly kind: "hoisted"; readonly evidence: string };
   readonly minimumReleaseAgeExclude?: readonly string[];
+  readonly overrides?: Readonly<Record<string, string>>;
 };
 
 export type GeneratedPackageManifestDependencies = {
@@ -382,6 +383,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
         ]
       : []),
     `nodeLinker: ${dependencyLinker}`,
+    "resolvePeersFromWorkspaceRoot: false",
     "injectWorkspacePackages: true",
     "dedupeInjectedDeps: false",
     "syncInjectedDepsAfterScripts:",
@@ -407,6 +409,19 @@ export function renderGeneratedPnpmWorkspaceYaml(
       ...Object.entries(options.allowBuilds)
         .toSorted(([left], [right]) => left.localeCompare(right))
         .map(([dependency, allowed]) => `  ${dependency}: ${allowed}`),
+      "",
+    );
+  }
+
+  if (options.overrides && Object.keys(options.overrides).length > 0) {
+    lines.push(
+      "overrides:",
+      ...Object.entries(options.overrides)
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(
+          ([dependency, version]) =>
+            `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
+        ),
       "",
     );
   }

@@ -43,7 +43,6 @@ catalog:
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
   tsc-alias: ^1.8.17
-  tsx: ^4.23.0
   turbo: 2.10.2
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-6: npm:typescript@^6.0.3

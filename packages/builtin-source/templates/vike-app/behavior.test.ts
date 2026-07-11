@@ -370,6 +370,10 @@ describe("vike-app Preset Source behavior", () => {
       path.join(targetDir, "packages/db-migrations/package.json"),
       packageJsonSchema,
     );
+    const vueToolingPackageJson = await readJsonWithSchema(
+      path.join(targetDir, "packages/vue-tooling/package.json"),
+      packageJsonSchema,
+    );
     const appTsconfig = await readJsonWithSchema(
       path.join(targetDir, "apps/web/tsconfig.app.json"),
       v.object({ include: v.array(v.string()) }),
@@ -433,6 +437,10 @@ describe("vike-app Preset Source behavior", () => {
     );
     const appDockerfile = await readFile(
       path.join(targetDir, "apps/web/Dockerfile"),
+      "utf8",
+    );
+    const workspaceYaml = await readFile(
+      path.join(targetDir, "pnpm-workspace.yaml"),
       "utf8",
     );
     const appDockerignore = await readFile(
@@ -510,17 +518,28 @@ describe("vike-app Preset Source behavior", () => {
       "node scripts/run-playwright.ts",
     );
     expect(webPackageJson.scripts["typecheck:run"]).toBe(
-      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+      "pnpm --dir ../../packages/vue-tooling run check --build ../../apps/web/tsconfig.json --noEmit --pretty false",
     );
-    expect(webPackageJson.devDependencies).toHaveProperty(
-      "typescript",
-      "catalog:",
-    );
-    expect(webPackageJson.devDependencies).toHaveProperty(
-      "typescript-6",
-      "catalog:",
+    expect(webPackageJson.devDependencies).not.toHaveProperty("typescript");
+    expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-6");
+    expect(webPackageJson.devDependencies).not.toHaveProperty("vue-tsc");
+    expect(webPackageJson.devDependencies).not.toHaveProperty("@vue/tsconfig");
+    expect(webPackageJson.devDependencies).not.toHaveProperty(
+      "@demo-vike/vue-tooling",
     );
     expect(webPackageJson.devDependencies).not.toHaveProperty("typescript-7");
+    expect(vueToolingPackageJson).toMatchObject({
+      name: "@demo-vike/vue-tooling",
+      private: true,
+      scripts: { check: "node run-vue-tsc.ts" },
+      devDependencies: {
+        "@vue/tsconfig": "catalog:",
+        typescript: "catalog:",
+        "typescript-6": "catalog:",
+        "typescript-7": "catalog:",
+        "vue-tsc": "catalog:",
+      },
+    });
     expect(dbPackageJson).toMatchObject({
       name: "@demo-vike/db",
       imports: { "#db/*": { default: "./src/*.ts", types: "./src/*.ts" } },
@@ -633,6 +652,9 @@ describe("vike-app Preset Source behavior", () => {
       "packages/db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
     );
     expect(files).toContain("packages/db-migrations/drizzle.config.ts");
+    expect(files).toContain("packages/vue-tooling/run-vue-tsc.ts");
+    expect(files).toContain("packages/vue-tooling/tsconfig.dom.json");
+    expect(files).not.toContain("apps/web/scripts/run-vue-tsc.ts");
     expect(files).not.toContain("packages/db/drizzle.config.ts");
     expect(files.filter((file) => file.endsWith("drizzle.config.ts"))).toEqual([
       "packages/db-migrations/drizzle.config.ts",
@@ -678,6 +700,7 @@ describe("vike-app Preset Source behavior", () => {
     expect(checkWorkflow).not.toContain("docker buildx build");
     expect(dependabotConfig).toContain("directory: /apps/web");
     expect(appDockerfile).toContain("FROM node:24-bookworm-slim AS base");
+    expect(workspaceYaml).toContain('overrides:\n  "vue>typescript": "-"\n');
     expect(appDockerfile).toContain("FROM application-runtime AS runtime");
     expect(appDockerfile).toContain('ARG PACKAGE_MANAGER_PIN="pnpm@11.2.3"');
     expect(appDockerfile).toContain('ENV COREPACK_HOME="/corepack"');
