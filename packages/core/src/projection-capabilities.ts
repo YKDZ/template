@@ -1615,18 +1615,6 @@ function vikeDbMigrationsPackageName(context: GenerationContext): string {
   );
 }
 
-function vikeVueToolingPackagePath(): "packages/vue-tooling" {
-  return "packages/vue-tooling";
-}
-
-function vikeVueToolingPackageName(context: GenerationContext): string {
-  const packageDefinition = context.blueprint.packages?.find(
-    (pkg) => pkg.path === vikeVueToolingPackagePath(),
-  );
-
-  return packageDefinition?.name ?? `@${context.projectName.value}/vue-tooling`;
-}
-
 function rootPackageJson(
   context: GenerationContext,
   packageScripts: Record<string, string>,
@@ -1804,48 +1792,25 @@ function vikePackageJson(
     },
     devDependencies: {
       ...packageLinkDependencies,
-      [vikeVueToolingPackageName(context)]: "workspace:*",
       "@playwright/test": "catalog:",
       "@tailwindcss/vite": "catalog:",
       "@types/node": "catalog:",
       "@vitejs/plugin-vue": "catalog:",
+      "@vue/tsconfig": "catalog:",
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
       tailwindcss: "catalog:",
       turbo: "catalog:",
+      typescript: "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
-    },
-    engines: {
-      node: context.toolchain.nodeLtsMajor.value,
-    },
-    packageManager: context.toolchain.packageManagerPin.value,
-  };
-}
-
-function vikeVueToolingPackageJson(
-  context: GenerationContext,
-): Record<string, unknown> {
-  return {
-    name: vikeVueToolingPackageName(context),
-    version: "0.0.0",
-    private: true,
-    type: "module",
-    scripts: {
-      check: "node run-vue-tsc.ts",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
-    },
-    devDependencies: {
-      "@types/node": "catalog:",
-      "@vue/tsconfig": "catalog:",
-      typescript: "catalog:",
-      "typescript-7": "catalog:",
       "vue-tsc": "catalog:",
     },
     engines: {
       node: context.toolchain.nodeLtsMajor.value,
     },
+    packageManager: context.toolchain.packageManagerPin.value,
   };
 }
 
@@ -2385,20 +2350,10 @@ function workspaceNodePackagesOperations({
   const vikeDbMigrationsManifest = hasVikePackage(capability)
     ? vikeDbMigrationsPackageJson(context)
     : undefined;
-  const vikeVueToolingManifest = hasVikePackage(capability)
-    ? vikeVueToolingPackageJson(context)
-    : undefined;
   const packageManifests =
-    vikeDbManifest === undefined ||
-    vikeDbMigrationsManifest === undefined ||
-    vikeVueToolingManifest === undefined
+    vikeDbManifest === undefined || vikeDbMigrationsManifest === undefined
       ? nodePackageManifests
-      : [
-          ...nodePackageManifests,
-          vikeDbManifest,
-          vikeDbMigrationsManifest,
-          vikeVueToolingManifest,
-        ];
+      : [...nodePackageManifests, vikeDbManifest, vikeDbMigrationsManifest];
   const rootManifest = rootPackageJson(context, packageScripts, state);
 
   if (rootManifest === undefined) {
@@ -2493,10 +2448,7 @@ function workspaceNodePackagesOperations({
       ),
     ]),
     ...capability.packages
-      .filter(
-        (nodePackage) =>
-          nodePackage.kind !== "hono-api" && nodePackage.kind !== "vike-app",
-      )
+      .filter((nodePackage) => nodePackage.kind !== "hono-api")
       .map((nodePackage) => ({
         kind: "copyFile" as const,
         from: "run-vue-tsc.ts",
@@ -2504,9 +2456,6 @@ function workspaceNodePackagesOperations({
         sourceRoot: sharedTypeScriptSourceRootKey,
       })),
     ...(vikeDbManifest === undefined ? [] : vikeDbPackageOperations(context)),
-    ...(vikeDbManifest === undefined
-      ? []
-      : vikeVueToolingPackageOperations(context)),
     {
       kind: "writeJson",
       to: ".template/blueprint.json",
@@ -2565,7 +2514,7 @@ function nodePackageScripts(
         "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
       "test:e2e:run": "node scripts/run-playwright.ts",
       "typecheck:run":
-        "pnpm --dir ../../packages/vue-tooling run check --build ../../apps/web/tsconfig.json --noEmit --pretty false",
+        "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
     };
   }
 
@@ -2605,7 +2554,7 @@ function nodePackageTsconfigOperations(
         kind: "writeJson",
         to: `${nodePackage.path}/tsconfig.app.json`,
         value: {
-          extends: "../../packages/vue-tooling/tsconfig.dom.json",
+          extends: "@vue/tsconfig/tsconfig.dom.json",
           compilerOptions: {
             ...strictTypeScriptCompilerOptions({
               composite: true,
@@ -2996,46 +2945,6 @@ function vikeDbMigrationsPackageOperations(
       from: sourceFile,
       to: `${packagePath}/${sourceFile.replace(/^db-migrations\//, "")}`,
     })),
-  ];
-}
-
-function vikeVueToolingPackageOperations(
-  context: GenerationContext,
-): RenderOperation[] {
-  const packagePath = vikeVueToolingPackagePath();
-
-  return [
-    {
-      kind: "writeJson",
-      to: `${packagePath}/package.json`,
-      value: vikeVueToolingPackageJson(context),
-    },
-    {
-      kind: "writeJson",
-      to: `${packagePath}/tsconfig.json`,
-      value: {
-        compilerOptions: {
-          ...strictTypeScriptCompilerOptions({
-            module: "nodenext",
-            moduleResolution: "nodenext",
-            types: ["node"],
-          }),
-          skipLibCheck: true,
-        },
-        include: ["run-vue-tsc.ts"],
-      },
-    },
-    {
-      kind: "copyFile",
-      from: "run-vue-tsc.ts",
-      to: `${packagePath}/run-vue-tsc.ts`,
-      sourceRoot: sharedTypeScriptSourceRootKey,
-    },
-    {
-      kind: "copyFile",
-      from: "vue-tooling/tsconfig.dom.json",
-      to: `${packagePath}/tsconfig.dom.json`,
-    },
   ];
 }
 

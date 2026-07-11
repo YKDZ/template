@@ -20,7 +20,6 @@ COPY package.json turbo.json ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/db/package.json packages/db/package.json
 COPY packages/db-migrations/package.json packages/db-migrations/package.json
-COPY packages/vue-tooling/package.json packages/vue-tooling/package.json
 RUN pnpm install --offline --frozen-lockfile
 COPY . .
 RUN pnpm exec turbo prune {{WEB_PACKAGE_NAME}} {{DB_MIGRATIONS_PACKAGE_NAME}} --docker
