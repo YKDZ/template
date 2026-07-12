@@ -2,25 +2,12 @@ import { readFileSync } from "node:fs";
 
 import * as v from "valibot";
 
-export type EditorCustomizationCapability =
-  | "oxc-format-lint"
-  | "rust-tooling"
-  | "tailwind"
-  | "vue"
-  | "vitest";
+/** Capability identities are supplied by the owning Built-in Presets policy. */
+export type EditorCustomizationCapability = string;
 
 export type EditorCustomization = {
   readonly extensions: readonly string[];
   readonly settings: Record<string, unknown>;
-};
-
-export type EditorCustomizationOptions = {
-  readonly oxcConfigPaths?:
-    | "nested"
-    | {
-        readonly lint?: string;
-        readonly formatter?: string;
-      };
 };
 
 type CapabilityProjection = {
@@ -29,23 +16,10 @@ type CapabilityProjection = {
 };
 
 export type EditorCustomizationDeclarations = {
-  readonly capabilities: Record<
-    EditorCustomizationCapability,
-    CapabilityProjection
+  readonly capabilityOrder: readonly EditorCustomizationCapability[];
+  readonly capabilities: Readonly<
+    Record<EditorCustomizationCapability, CapabilityProjection>
   >;
-};
-
-const capabilityOrder: readonly EditorCustomizationCapability[] = [
-  "oxc-format-lint",
-  "vue",
-  "tailwind",
-  "rust-tooling",
-  "vitest",
-];
-
-const defaultOxcConfigPaths = {
-  formatter: "./oxfmt.config.ts",
-  lint: "./oxlint.config.ts",
 };
 
 const capabilityProjectionSchema = v.object({
@@ -53,13 +27,8 @@ const capabilityProjectionSchema = v.object({
   settings: v.record(v.string(), v.unknown()),
 });
 const editorCustomizationDeclarationsSchema = v.object({
-  capabilities: v.object({
-    "oxc-format-lint": capabilityProjectionSchema,
-    vue: capabilityProjectionSchema,
-    tailwind: capabilityProjectionSchema,
-    "rust-tooling": capabilityProjectionSchema,
-    vitest: capabilityProjectionSchema,
-  }),
+  capabilityOrder: v.array(v.string()),
+  capabilities: v.record(v.string(), capabilityProjectionSchema),
 });
 
 function editorCustomizationDeclarationIssuePath(
@@ -123,39 +92,6 @@ export function loadEditorCustomizationDeclarations(
   return result.output;
 }
 
-function oxcConfigPathSettings(
-  configPaths: EditorCustomizationOptions["oxcConfigPaths"],
-): Record<string, unknown> {
-  if (configPaths === "nested") {
-    return {};
-  }
-
-  const paths = {
-    ...defaultOxcConfigPaths,
-    ...configPaths,
-  };
-
-  return {
-    "oxc.configPath": paths.lint,
-    "oxc.fmt.configPath": paths.formatter,
-  };
-}
-
-function oxcProjection(options: {
-  readonly declarations: EditorCustomizationDeclarations;
-  readonly editorOptions: EditorCustomizationOptions | undefined;
-}): CapabilityProjection {
-  const baseProjection = options.declarations.capabilities["oxc-format-lint"];
-
-  return {
-    extensions: baseProjection.extensions,
-    settings: {
-      ...baseProjection.settings,
-      ...oxcConfigPathSettings(options.editorOptions?.oxcConfigPaths),
-    },
-  };
-}
-
 function mergeSettings(
   base: Record<string, unknown>,
   patch: Record<string, unknown>,
@@ -166,21 +102,22 @@ function mergeSettings(
 export function editorCustomizationForCapabilities(
   capabilities: readonly EditorCustomizationCapability[],
   declarations: EditorCustomizationDeclarations,
-  options?: EditorCustomizationOptions,
 ): EditorCustomization {
   const selected = new Set(capabilities);
   const extensions = new Set<string>();
   let settings: Record<string, unknown> = {};
 
-  for (const capability of capabilityOrder) {
+  for (const capability of declarations.capabilityOrder) {
     if (!selected.has(capability)) {
       continue;
     }
 
-    const projection =
-      capability === "oxc-format-lint"
-        ? oxcProjection({ declarations, editorOptions: options })
-        : declarations.capabilities[capability];
+    const projection = declarations.capabilities[capability];
+    if (projection === undefined) {
+      throw new Error(
+        `Editor customization policy orders undeclared capability ${capability}`,
+      );
+    }
     for (const extension of projection.extensions) {
       extensions.add(extension);
     }

@@ -10,11 +10,12 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:fixtures": "node src/check-fixtures.ts",
-    "check:generated": "node src/check-generated.ts",
-    "check:templates": "pnpm run check:templates:github-yaml && pnpm run check:templates:boundary",
-    "check:templates:boundary": "node src/check-template-boundary.ts",
-    "check:templates:github-yaml": "node src/check-template-github-yaml.ts",
+    "check:fixtures": "node src/check-generated-registry.ts package-addition-matrix",
+    "check:generated": "node src/check-generated-registry.ts init",
+    "check:focused": "node src/check-generated-registry.ts focused",
+    "check:deployment": "node src/check-generated-registry.ts deployment",
+    "check:templates": "pnpm --filter @ykdz/template-builtin-presets run check:templates && node src/check-legacy-architecture-removal.ts --packed",
+    "check:templates:github-yaml": "node src/check-builtin-preset-github-yaml.ts",
     "check:toolchain:online": "node src/check-online-toolchain-resolution-contract.ts",
     "update:toolchain": "node src/update-toolchain-baseline.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
@@ -24,9 +25,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@ykdz/template-builtin-source": "workspace:*",
+    "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-shared": "workspace:*",
     "execa": "catalog:",
     "yaml": "catalog:"
   },
@@ -35,6 +35,12 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
     "typescript-7": "catalog:"
+  },
+  "turbo": {
+    "tags": [
+      "template-checks"
+    ]
   }
 }

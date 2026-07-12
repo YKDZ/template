@@ -3,68 +3,47 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 
 import {
-  builtInPresetProjectionSourceRoots,
-  builtInPresets,
-  findBuiltInPresetSourceManifestPreset,
-  loadBuiltInPresetSourceManifest,
-  projectBuiltInPresetSourcePreset,
-} from "@ykdz/template-builtin-source";
+  builtInPresetRegistry,
+  createGenerationContext,
+  planGeneratedRepositoryInitialization,
+  planGeneratedRepositoryPackageAddition,
+  templateSources,
+} from "@ykdz/template-builtin-presets";
 import {
-  assembleGenerationContext,
-  type GenerationContext,
-} from "@ykdz/template-core/generation-context";
+  assertProjectBlueprintV2,
+  validateProjectBlueprintV2,
+  type ProjectBlueprintV2,
+} from "@ykdz/template-core/project-blueprint-v2";
 import {
-  formatNextStepInstructionsForCli,
-  generatedFollowUpDocumentOperation,
-  planNextStepInstructions,
-  type FollowUpDocumentPlan,
-  type NextStepInstruction,
-  type NextStepInstructionPlan,
-} from "@ykdz/template-core/next-step-instructions";
-import { addPackage } from "@ykdz/template-core/package-addition";
-import type { PresetProjectionPlan } from "@ykdz/template-core/preset-projection";
-import {
-  validateBuiltInPresetSourceManifest,
-  validatePresetSourceManifest,
-} from "@ykdz/template-core/preset-source";
-import { blueprintForPresetSourcePreset } from "@ykdz/template-core/projection-capabilities";
-import { renderNewProject } from "@ykdz/template-core/renderer";
+  renderNewProject,
+  renderProjectAtomically,
+} from "@ykdz/template-core/renderer";
 import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
   type ToolchainResolutionSource,
 } from "@ykdz/template-core/toolchain-resolution";
-import {
-  blueprintJsonSchema,
-  presetSourceManifestJsonSchema,
-  presetFileJsonSchema,
-  validatePresetFile,
-  validateProjectBlueprint,
-  type BuiltInPreset,
-  type ProjectBlueprint,
-  type ValidationIssue,
-} from "@ykdz/template-shared";
 
 type InitOptions = {
-  dir: string;
-  preset: string;
-  yes: boolean;
-  dryRun: boolean;
-  json: boolean;
-  todo: boolean;
-  scope?: string | undefined;
+  readonly dir: string;
+  readonly preset: string;
+  readonly yes: boolean;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+  readonly todo: boolean;
+  readonly scope?: string;
 };
 
 type AddPackageOptions = {
-  preset: string;
-  name: string;
-  path?: string | undefined;
-  linkFrom: readonly string[];
+  readonly preset: string;
+  readonly name: string;
+  readonly path?: string;
+  readonly linkFrom: readonly string[];
 };
 
 function usage(): string {
   return [
-    "Project Kit template CLI",
+    "template CLI",
     "",
     "Usage:",
     "  template <command> [options]",
@@ -73,11 +52,6 @@ function usage(): string {
     "  template init <dir> --preset <name> --yes",
     "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]...",
     "  template presets",
-    "  template schema preset",
-    "  template schema preset-source",
-    "  template schema blueprint",
-    "  template preset validate <path>",
-    "  template preset-source validate <path>",
     "  template blueprint validate <path>",
     "",
     "Init options:",
@@ -100,405 +74,166 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-async function readJsonDeclaration(filePath: string): Promise<unknown> {
-  if (path.extname(filePath) !== ".json") {
-    throw new Error(`Declaration files must be JSON: ${filePath}`);
-  }
-
-  try {
-    return JSON.parse(await readFile(filePath, "utf8")) as unknown;
-  } catch (error: unknown) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`Invalid JSON in ${filePath}: ${error.message}`, {
-        cause: error,
-      });
-    }
-    throw error;
-  }
-}
-
-function formatValidationIssues(issues: ValidationIssue[]): string {
-  return issues
-    .map((issue) => `  - ${issue.path}: ${issue.message}`)
-    .join("\n");
-}
-
-function formatFieldRows(
-  rows: readonly (readonly [label: string, value: string])[],
-): string[] {
+function formatRows(rows: readonly (readonly [string, string])[]): string[] {
   const width = Math.max(...rows.map(([label]) => `${label}:`.length));
-
   return rows.map(
     ([label, value]) => `  ${`${label}:`.padEnd(width)} ${value}`,
   );
 }
 
-function formatPresetCatalog(): string {
+function formatCatalog(): string {
   return [
     "Built-in presets",
     "",
-    ...formatFieldRows(
-      builtInPresets.map((preset) => [
-        preset.name,
-        `${preset.title} (${preset.generation}) - ${preset.description}`,
-      ]),
+    ...formatRows(
+      builtInPresetRegistry
+        .all()
+        .map((definition) => [
+          definition.metadata.name,
+          `${definition.metadata.title} - ${definition.metadata.description}`,
+        ]),
     ),
   ].join("\n");
 }
 
-function parseInitOptions(args: string[]): InitOptions {
+function normalizeNpmScope(value: string): string {
+  const scope = value.startsWith("@") ? value.slice(1) : value;
+  if (value !== value.trim() || !/^[a-z0-9][a-z0-9._-]*$/.test(scope)) {
+    throw new Error("--scope must be a valid npm scope without whitespace");
+  }
+  return scope;
+}
+
+function parseInitOptions(args: readonly string[]): InitOptions {
   const dir = args[1];
+  if (!dir) throw new Error("init requires a target directory");
   let preset = "";
   let yes = false;
   let dryRun = false;
   let json = false;
   let todo = true;
   let scope: string | undefined;
-
   for (let index = 2; index < args.length; index += 1) {
     const arg = args[index];
-
-    if (arg === "--yes" || arg === "-y") {
-      yes = true;
-      continue;
-    }
-
-    if (arg === "--dry-run") {
-      dryRun = true;
-      continue;
-    }
-
-    if (arg === "--json") {
-      json = true;
-      continue;
-    }
-
-    if (arg === "--no-todo") {
-      todo = false;
-      continue;
-    }
-
-    if (arg === "--scope") {
+    if (arg === "--yes" || arg === "-y") yes = true;
+    else if (arg === "--dry-run") dryRun = true;
+    else if (arg === "--json") json = true;
+    else if (arg === "--no-todo") todo = false;
+    else if (arg === "--preset" || arg === "--scope") {
       const value = args[index + 1];
-      if (!value) {
-        throw new Error("--scope requires a value");
-      }
-      scope = normalizeNpmScope(value);
+      if (!value) throw new Error(`${arg} requires a value`);
+      if (arg === "--preset") preset = value;
+      else scope = normalizeNpmScope(value);
       index += 1;
-      continue;
+    } else throw new Error(`Unknown option: ${arg}`);
+  }
+  return { dir, preset, yes, dryRun, json, todo, ...(scope ? { scope } : {}) };
+}
+
+function parseAddPackageOptions(args: readonly string[]): AddPackageOptions {
+  let preset = "";
+  let name = "";
+  let packagePath: string | undefined;
+  const linkFrom: string[] = [];
+  for (let index = 2; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!["--preset", "--name", "--path", "--link-from"].includes(arg ?? "")) {
+      throw new Error(`Unknown option: ${arg}`);
     }
-
-    if (arg === "--preset") {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error("--preset requires a value");
-      }
-      preset = value;
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown option: ${arg}`);
+    const value = args[index + 1];
+    if (!value) throw new Error(`${arg} requires a value`);
+    if (arg === "--preset") preset = value;
+    if (arg === "--name") name = value;
+    if (arg === "--path") packagePath = value;
+    if (arg === "--link-from") linkFrom.push(value);
+    index += 1;
   }
-
-  if (!dir) {
-    throw new Error("init requires a target directory");
-  }
-
-  return { dir, preset, yes, dryRun, json, todo, scope };
+  if (!preset) throw new Error("add package requires --preset");
+  if (!name) throw new Error("add package requires --name");
+  return {
+    preset,
+    name,
+    ...(packagePath ? { path: packagePath } : {}),
+    linkFrom,
+  };
 }
 
-function normalizeNpmScope(value: string): string {
-  if (value !== value.trim() || /\s/.test(value)) {
-    throw new Error("--scope must be a valid npm scope without whitespace");
-  }
-
-  const scope = value.startsWith("@") ? value.slice(1) : value;
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(scope)) {
-    throw new Error("--scope must be a valid npm scope");
-  }
-
-  return scope;
+function toolchainSourceFromEnv(): ToolchainResolutionSource | undefined {
+  const source = process.env.TEMPLATE_TOOLCHAIN_RESOLUTION;
+  return source === "online" || source === "bundled-fallback"
+    ? source
+    : undefined;
 }
 
-function supportedPreset(name: string): BuiltInPreset {
-  const preset = builtInPresets.find(
-    (candidate) =>
-      candidate.name === name && candidate.generation === "supported",
-  );
-
-  if (!preset) {
-    throw new Error(formatSupportedPresetError());
-  }
-
-  return preset;
+async function resolveToolchain(): Promise<ResolvedToolchainVersions> {
+  return await resolveToolchainVersions({
+    source: toolchainSourceFromEnv(),
+    nodeReleaseIndexUrl: process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
+    pnpmRegistryUrl: process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
+  });
 }
 
-function formatSupportedPresetError(): string {
-  const supportedPresetNames = builtInPresets
-    .filter((preset) => preset.generation === "supported")
-    .map((preset) => preset.name);
-
-  return `Only the ${formatList(supportedPresetNames)} presets are supported in this version`;
-}
-
-function formatList(values: readonly string[]): string {
-  if (values.length <= 1) {
-    return values[0] ?? "";
-  }
-
-  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
-}
-
-function blueprintForInit(options: InitOptions): ProjectBlueprint {
-  const preset = supportedPreset(options.preset);
-  return blueprintForPresetSourcePreset(preset, {
+async function planInitialization(options: InitOptions) {
+  const definition = builtInPresetRegistry.require(options.preset);
+  const toolchain = await resolveToolchain();
+  const context = createGenerationContext({
     targetDir: options.dir,
-    scope: options.scope,
+    ...(options.scope ? { scope: options.scope } : {}),
+    toolchain: {
+      nodeLtsMajor: toolchain.nodeLtsMajor.value,
+      packageManagerPin: toolchain.packageManagerPin.value,
+    },
   });
+  return {
+    definition,
+    context,
+    toolchain,
+    plan: planGeneratedRepositoryInitialization({ definition, context }),
+  };
 }
 
-function formatBlueprintSummary(
-  targetDir: string,
-  blueprint: ProjectBlueprint,
-): string {
-  const rows: Array<readonly [string, string]> = [
-    ["Target", targetDir],
-    ["Preset", blueprint.preset],
-    ["Project kind", blueprint.projectKind],
-  ];
-
-  if (blueprint.packageManager) {
-    rows.push(["Package manager", blueprint.packageManager]);
-  }
-
-  return [
-    "Project Blueprint",
-    "",
-    ...formatFieldRows(rows),
-    ...(blueprint.packages
-      ? [
-          "",
-          "  Packages:",
-          ...blueprint.packages.map((pkg) => `    - ${pkg.name} (${pkg.path})`),
-        ]
-      : []),
-    "",
-    "  Features:",
-    ...blueprint.features.map((feature) => `    - ${feature}`),
-  ].join("\n");
-}
-
-type InitJsonOutput = {
-  command: "init";
-  dryRun: boolean;
-  targetDir: string;
-  blueprint: ProjectBlueprint;
-  toolchain?: ToolchainReport;
-  nextSteps: readonly NextStepInstruction[];
-  followUpDocument: FollowUpDocumentPlan;
-};
-
-type ToolchainReport = {
-  nodeLtsMajor: string;
-  packageManagerPin: string;
-  source: ToolchainResolutionSource;
-  diagnostics: string[];
-};
-
-function planProjectionNextSteps(
-  targetDir: string,
-  projectionPlan: PresetProjectionPlan,
-): NextStepInstructionPlan {
-  return planNextStepInstructions({
-    targetDir,
-    projectionPlan,
-  });
-}
-
-function followUpDocumentPlan(options: InitOptions): FollowUpDocumentPlan {
-  return options.todo ? { enabled: true, path: "TODO.md" } : { enabled: false };
-}
-
-function displayPathFromCwd(filePath: string): string {
-  const absolutePath = path.resolve(filePath);
-  const relativePath = path.relative(process.cwd(), absolutePath);
-
-  if (
-    relativePath &&
-    !relativePath.startsWith("..") &&
-    !path.isAbsolute(relativePath)
-  ) {
-    return relativePath;
-  }
-
-  return absolutePath;
-}
-
-function followUpDocumentDisplayPath(options: InitOptions): string {
-  return displayPathFromCwd(path.join(options.dir, "TODO.md"));
-}
-
-function formatFollowUpDocumentReport(options: InitOptions): string {
-  const rows: Array<readonly [string, string]> = [
-    ["Enabled", options.todo ? "yes" : "no"],
-  ];
-
-  if (options.todo) {
-    rows.push(["Path", followUpDocumentDisplayPath(options)]);
-  }
-
-  return ["Generated Follow-Up Document:", "", ...formatFieldRows(rows)].join(
-    "\n",
-  );
-}
-
-function toolchainReport(
-  toolchain: ResolvedToolchainVersions,
-): ToolchainReport {
+function toolchainReport(toolchain: ResolvedToolchainVersions) {
   return {
     nodeLtsMajor: toolchain.nodeLtsMajor.value,
     packageManagerPin: toolchain.packageManagerPin.value,
     source: toolchain.source,
-    diagnostics: [...toolchain.diagnostics],
+    diagnostics: toolchain.diagnostics,
   };
 }
 
-function formatToolchainReport(toolchain: ResolvedToolchainVersions): string {
-  return [
-    "Toolchain Resolution:",
-    "",
-    ...formatFieldRows([
-      ["Source", toolchain.source],
-      ["Node LTS major", toolchain.nodeLtsMajor.value],
-      ["Package Manager Pin", toolchain.packageManagerPin.value],
-    ]),
-    ...toolchain.diagnostics.map((diagnostic) => `  ${diagnostic}`),
-  ].join("\n");
-}
-
-function toolchainResolutionSourceFromEnv():
-  | ToolchainResolutionSource
-  | undefined {
-  if (
-    process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "online" ||
-    process.env.TEMPLATE_TOOLCHAIN_RESOLUTION === "bundled-fallback"
-  ) {
-    return process.env.TEMPLATE_TOOLCHAIN_RESOLUTION;
-  }
-
-  return undefined;
-}
-
-async function generationContextForInit(
+function initOutput(
   options: InitOptions,
-  blueprint: ProjectBlueprint,
-): Promise<GenerationContext | undefined> {
-  if (
-    findBuiltInPresetSourceManifestPreset(options.preset)?.projection ===
-    undefined
-  ) {
-    return undefined;
-  }
-
-  return assembleGenerationContext({
+  result: Awaited<ReturnType<typeof planInitialization>>,
+) {
+  return {
+    command: "init",
+    dryRun: options.dryRun,
     targetDir: options.dir,
-    blueprint,
-    toolchain: await resolveToolchainVersions({
-      source: toolchainResolutionSourceFromEnv(),
-      nodeReleaseIndexUrl:
-        process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
-      pnpmRegistryUrl: process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
-    }),
-  });
+    blueprint: result.plan.blueprint,
+    generationRecord: result.plan.generationRecord,
+    toolchain: toolchainReport(result.toolchain),
+    nextSteps: result.plan.nextStepInstructions,
+    followUpDocument: {
+      enabled: options.todo,
+      path: options.todo ? "TODO.md" : undefined,
+    },
+  };
 }
 
-async function generateInitProject(
-  options: InitOptions,
-  generationContext?: GenerationContext,
-): Promise<void> {
-  const preset = findBuiltInPresetSourceManifestPreset(options.preset);
-  if (!preset?.projection) {
-    throw new Error(formatSupportedPresetError());
-  }
-
-  if (!generationContext) {
-    throw new Error(
-      `Missing Generation Context for Preset Projection: ${options.preset}`,
-    );
-  }
-
-  const plan = projectBuiltInPresetSourcePreset({
-    preset,
-    context: generationContext,
-  });
-  const nextStepPlan = planProjectionNextSteps(options.dir, plan);
-  const operations = options.todo
-    ? [...plan.operations, generatedFollowUpDocumentOperation(nextStepPlan)]
-    : [...plan.operations];
-
-  await renderNewProject({
-    sourceRoot: plan.sourceRoot,
-    sourceRoots: plan.sourceRoots,
-    targetRoot: options.dir,
-    operations,
-  });
-}
-
-function printInitComplete(
-  options: InitOptions,
-  blueprint: ProjectBlueprint,
-  generationContext?: GenerationContext,
-): void {
-  const preset = findBuiltInPresetSourceManifestPreset(blueprint.preset);
-  const projectionPlan =
-    generationContext && preset?.projection
-      ? projectBuiltInPresetSourcePreset({ preset, context: generationContext })
-      : undefined;
-  if (!projectionPlan) {
-    throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
-  }
-  const nextStepPlan = planProjectionNextSteps(options.dir, projectionPlan);
-  const nextSteps = nextStepPlan.steps;
-  const followUpDocument = followUpDocumentPlan(options);
-
-  if (options.json) {
-    printJson({
-      command: "init",
-      dryRun: false,
-      targetDir: options.dir,
-      blueprint,
-      ...(generationContext
-        ? { toolchain: toolchainReport(generationContext.toolchain) }
-        : {}),
-      nextSteps,
-      followUpDocument,
-    } satisfies InitJsonOutput);
-    return;
-  }
-
-  console.log(
-    [
-      "Initialized project",
-      "",
-      ...formatFieldRows([
-        ["Preset", options.preset],
-        ["Target", options.dir],
-      ]),
-    ].join("\n"),
-  );
-  if (generationContext) {
-    console.log("");
-    console.log(formatToolchainReport(generationContext.toolchain));
-  }
-  console.log("");
-  if (options.todo) {
-    console.log(
-      `Follow-up checklist written to ${followUpDocumentDisplayPath(options)}`,
-    );
-  } else {
-    console.log(formatNextStepInstructionsForCli(nextStepPlan));
-  }
+function followUpDocumentOperation(
+  result: Awaited<ReturnType<typeof planInitialization>>,
+) {
+  return {
+    kind: "writeTextTemplate" as const,
+    source: templateSources.foundation,
+    from: "TODO.md.template",
+    to: "TODO.md",
+    replacements: {
+      NEXT_STEPS: result.plan.nextStepInstructions
+        .map((instruction, index) => `${index + 1}. \`${instruction.display}\``)
+        .join("\n"),
+    },
+  };
 }
 
 function isInteractiveTerminal(): boolean {
@@ -506,306 +241,211 @@ function isInteractiveTerminal(): boolean {
 }
 
 async function confirmInit(
-  targetDir: string,
-  blueprint: ProjectBlueprint,
+  options: InitOptions,
+  blueprint: ProjectBlueprintV2,
 ): Promise<boolean> {
-  console.log(formatBlueprintSummary(targetDir, blueprint));
+  console.log(
+    [
+      "Planned project",
+      "",
+      ...formatRows([
+        ["Target", options.dir],
+        ["Packages", String(blueprint.packages.length)],
+      ]),
+    ].join("\n"),
+  );
   const readline = createInterface({
     input: process.stdin,
     output: process.stdout,
   });
-
   try {
     const answer = await readline.question("Generate this project? [y/N] ");
-    return (
-      answer.trim().toLowerCase() === "y" ||
-      answer.trim().toLowerCase() === "yes"
-    );
+    return ["y", "yes"].includes(answer.trim().toLowerCase());
   } finally {
     readline.close();
   }
 }
 
-function parseAddPackageOptions(args: string[]): AddPackageOptions {
-  let preset = "";
-  let name = "";
-  let packagePath: string | undefined;
-  const linkFrom: string[] = [];
-
-  for (let index = 2; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === "--preset") {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error("--preset requires a value");
-      }
-      preset = value;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--name") {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error("--name requires a value");
-      }
-      name = value;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--path") {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error("--path requires a value");
-      }
-      packagePath = value;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--link-from") {
-      const value = args[index + 1];
-      if (!value) {
-        throw new Error("--link-from requires a value");
-      }
-      linkFrom.push(value);
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown option: ${arg}`);
+async function readBlueprint(filePath: string): Promise<ProjectBlueprintV2> {
+  const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "schemaVersion" in value &&
+    value.schemaVersion === 1
+  ) {
+    throw new Error(
+      "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
+    );
   }
-
-  if (!preset) {
-    throw new Error("add package requires --preset");
-  }
-
-  if (!name) {
-    throw new Error("add package requires --name");
-  }
-
-  return { preset, name, path: packagePath, linkFrom };
+  return assertProjectBlueprintV2(value);
 }
 
-async function main(args: string[]): Promise<void> {
-  const command = args[0];
-
-  if (command === "presets") {
-    console.log(formatPresetCatalog());
-    return;
-  }
-
-  if (command === "schema") {
-    const schemaName = args[1];
-
-    if (schemaName === "preset") {
-      printJson(presetFileJsonSchema);
-      return;
-    }
-
-    if (schemaName === "blueprint") {
-      printJson(blueprintJsonSchema);
-      return;
-    }
-
-    if (schemaName === "preset-source") {
-      printJson(presetSourceManifestJsonSchema);
-      return;
-    }
-
-    throw new Error("schema requires preset, preset-source, or blueprint");
-  }
-
-  if (command === "preset" && args[1] === "validate") {
-    const filePath = args[2];
-    if (!filePath) {
-      throw new Error("preset validate requires a path");
-    }
-
-    const result = validatePresetFile(await readJsonDeclaration(filePath), {
-      presets: builtInPresets,
-    });
-    if (!result.ok) {
+/**
+ * Package Addition has no Preset provenance to consult.  The current
+ * Blueprint topology and the real package manifests are the durable facts;
+ * their shared npm scope is the context for a newly planned package.
+ */
+async function deriveExistingPackageScope(options: {
+  readonly targetDir: string;
+  readonly blueprint: ProjectBlueprintV2;
+}): Promise<string> {
+  const scopes = new Set<string>();
+  for (const definition of options.blueprint.packages) {
+    const match = definition.name.match(/^@([^/]+)\//);
+    if (!match?.[1]) {
       throw new Error(
-        `Preset file is invalid:\n${formatValidationIssues(result.issues)}`,
+        `Package Addition requires a scoped Package Definition: ${definition.name}`,
       );
     }
-
-    console.log(`Preset file is valid: ${result.value.name}`);
-    return;
-  }
-
-  if (command === "preset-source" && args[1] === "validate") {
-    const filePath = args[2];
-    if (!filePath) {
-      throw new Error("preset-source validate requires a path");
-    }
-
-    const declaration = await readJsonDeclaration(filePath);
-    const sourceName =
-      typeof declaration === "object" &&
-      declaration !== null &&
-      !Array.isArray(declaration) &&
-      "name" in declaration &&
-      typeof declaration.name === "string"
-        ? declaration.name
-        : undefined;
-    const result =
-      sourceName === "built-in"
-        ? validateBuiltInPresetSourceManifest(declaration, {
-            sourceRoot: path.dirname(filePath),
-          })
-        : validatePresetSourceManifest(declaration, {
-            sourceRoot: path.dirname(filePath),
-          });
-    if (!result.ok) {
-      throw new Error(
-        `Preset Source Manifest is invalid:\n${formatValidationIssues(
-          result.issues,
-        )}`,
-      );
-    }
-
-    console.log(
-      `Preset Source Manifest is valid: ${
-        result.value.name
-      } (${result.value.presets.map((preset) => preset.name).join(", ")})`,
+    const manifestPath = path.join(
+      options.targetDir,
+      definition.path,
+      "package.json",
     );
+    const manifest: unknown = JSON.parse(await readFile(manifestPath, "utf8"));
+    if (
+      typeof manifest !== "object" ||
+      manifest === null ||
+      (manifest as { name?: unknown }).name !== definition.name
+    ) {
+      throw new Error(
+        `Package Addition requires manifest truth for ${definition.path}: expected name ${definition.name}`,
+      );
+    }
+    scopes.add(match[1]);
+  }
+  if (scopes.size !== 1) {
+    throw new Error(
+      `Package Addition requires exactly one existing npm scope; found ${[...scopes].join(", ") || "none"}`,
+    );
+  }
+  return [...scopes][0]!;
+}
+
+async function main(args: readonly string[]): Promise<void> {
+  const command = args[0];
+  if (command === "--help" || command === "-h") {
+    console.log(usage());
     return;
   }
-
+  if (command === "presets") {
+    console.log(formatCatalog());
+    return;
+  }
   if (command === "blueprint" && args[1] === "validate") {
     const filePath = args[2];
-    if (!filePath) {
-      throw new Error("blueprint validate requires a path");
-    }
-
-    const result = validateProjectBlueprint(
-      await readJsonDeclaration(filePath),
-      {
-        presets: builtInPresets,
-      },
-    );
-    if (!result.ok) {
+    if (!filePath) throw new Error("blueprint validate requires a path");
+    const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "schemaVersion" in value &&
+      value.schemaVersion === 1
+    ) {
       throw new Error(
-        `Blueprint is invalid:\n${formatValidationIssues(result.issues)}`,
+        "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
       );
     }
-
-    console.log(`Blueprint is valid: ${result.value.preset}`);
+    const result = validateProjectBlueprintV2(value);
+    if (!result.ok)
+      throw new Error(
+        result.issues
+          .map((issue) => `${issue.path}: ${issue.message}`)
+          .join("\n"),
+      );
+    console.log("Blueprint is valid");
     return;
   }
-
   if (command === "init") {
     const options = parseInitOptions(args);
-    const blueprint = blueprintForInit(options);
-
+    const result = await planInitialization(options);
     if (options.dryRun) {
-      const generationContext = await generationContextForInit(
-        options,
-        blueprint,
-      );
-      const preset = findBuiltInPresetSourceManifestPreset(options.preset);
-      const projectionPlan = generationContext
-        ? preset?.projection
-          ? projectBuiltInPresetSourcePreset({
-              preset,
-              context: generationContext,
-            })
-          : undefined
-        : undefined;
-      if (!projectionPlan) {
-        throw new Error(`Missing Preset Projection plan: ${blueprint.preset}`);
-      }
-      const nextStepPlan = planProjectionNextSteps(options.dir, projectionPlan);
-      const nextSteps = nextStepPlan.steps;
-      const followUpDocument = followUpDocumentPlan(options);
-
-      if (options.json) {
-        printJson({
-          command: "init",
-          dryRun: true,
-          targetDir: options.dir,
-          blueprint,
-          ...(generationContext
-            ? { toolchain: toolchainReport(generationContext.toolchain) }
-            : {}),
-          nextSteps,
-          followUpDocument,
-        } satisfies InitJsonOutput);
-        return;
-      }
-
-      console.log(formatBlueprintSummary(options.dir, blueprint));
-      if (generationContext) {
-        console.log("");
-        console.log(formatToolchainReport(generationContext.toolchain));
-      }
-      console.log("");
-      if (options.todo) {
-        console.log(formatFollowUpDocumentReport(options));
-      } else {
-        console.log(formatNextStepInstructionsForCli(nextStepPlan));
-      }
+      if (options.json) printJson(initOutput(options, result));
+      else console.log(JSON.stringify(initOutput(options, result), null, 2));
       return;
     }
-
     if (!options.yes && (options.json || !isInteractiveTerminal())) {
       throw new Error("Non-interactive init requires --yes");
     }
-
-    if (!options.yes && !(await confirmInit(options.dir, blueprint))) {
+    if (!options.yes && !(await confirmInit(options, result.plan.blueprint)))
       throw new Error("Init cancelled");
-    }
-
-    const generationContext = await generationContextForInit(
-      options,
-      blueprint,
-    );
-    await generateInitProject(options, generationContext);
-    printInitComplete(options, blueprint, generationContext);
+    await renderNewProject({
+      targetRoot: options.dir,
+      operations: [
+        ...result.plan.operations,
+        ...(options.todo ? [followUpDocumentOperation(result)] : []),
+      ],
+    });
+    if (options.json) printJson(initOutput(options, result));
+    else
+      console.log(
+        [
+          "Initialized project",
+          "",
+          ...formatRows([
+            ["Preset", result.definition.metadata.name],
+            ["Target", options.dir],
+          ]),
+          "",
+          "Next steps",
+          "",
+          ...result.plan.nextStepInstructions.map(
+            (instruction, index) => `  ${index + 1}. ${instruction.display}`,
+          ),
+        ].join("\n"),
+      );
     return;
   }
-
   if (command === "add" && args[1] === "package") {
     const options = parseAddPackageOptions(args);
-    await addPackage({
-      cwd: process.cwd(),
-      preset: options.preset,
-      name: options.name,
-      path: options.path,
-      linkFrom: options.linkFrom,
-      presetSourceManifest: loadBuiltInPresetSourceManifest(),
-      projectionSourceRoots: builtInPresetProjectionSourceRoots(),
+    const blueprint = await readBlueprint(
+      path.join(process.cwd(), ".template/blueprint.json"),
+    );
+    const toolchain = await resolveToolchain();
+    const definition = builtInPresetRegistry.require(options.preset);
+    const context = createGenerationContext({
+      targetDir: process.cwd(),
+      scope: await deriveExistingPackageScope({
+        targetDir: process.cwd(),
+        blueprint,
+      }),
+      toolchain: {
+        nodeLtsMajor: toolchain.nodeLtsMajor.value,
+        packageManagerPin: toolchain.packageManagerPin.value,
+      },
+    });
+    const plan = planGeneratedRepositoryPackageAddition({
+      definition,
+      context,
+      blueprint,
+      packageLeafName: options.name,
+      ...(options.path ? { packagePath: options.path } : {}),
+      ...(options.linkFrom.length > 0 ? { linkFrom: options.linkFrom } : {}),
+    });
+    await renderProjectAtomically({
+      targetRoot: process.cwd(),
+      operations: [...plan.operations],
     });
     console.log(
       [
         "Added package",
         "",
-        ...formatFieldRows([
-          ["Preset", options.preset],
+        ...formatRows([
+          ["Preset", definition.metadata.name],
           ["Name", options.name],
-          ...(options.path ? ([["Path", options.path]] as const) : []),
         ]),
       ].join("\n"),
     );
     return;
   }
-
-  if (command === "--help" || command === "-h") {
-    console.log(usage());
-    return;
-  }
-
   throw new Error(command ? `Unknown command: ${command}` : "Missing command");
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Error: ${message}`);
-  console.error("");
-  console.error("Run `template --help` for usage.");
+  console.error(
+    `Error: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  console.error("\nRun `template --help` for usage.");
   process.exitCode = 1;
 });

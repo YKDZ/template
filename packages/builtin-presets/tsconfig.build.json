@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "customConditions": [],
+    "declarationMap": false,
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts", "src/check-*.ts", "src/registry-checks.ts"]
+}

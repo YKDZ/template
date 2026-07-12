@@ -1,5 +1,8 @@
 import { loadTemplateDependencyCatalog } from "./dependency-catalog.ts";
-import type { WriteTextFromFragmentsOperation } from "./renderer.ts";
+import type {
+  TemplateSourceHandle,
+  WriteTextFromFragmentsOperation,
+} from "./renderer.ts";
 
 export type DevelopmentContainerNodePnpmLayer = {
   readonly kind: "node-pnpm";
@@ -27,7 +30,7 @@ type DevelopmentContainerCapabilityLayer =
   | DevelopmentContainerRustLayer;
 
 export type DevelopmentContainerDockerfileFragments = {
-  readonly sourceRoot: string;
+  readonly source: TemplateSourceHandle;
   readonly nodePnpm: {
     readonly from: string;
     readonly text: string;
@@ -238,14 +241,14 @@ function checkedNodePnpmDockerfileFragments(options: {
 }): WriteTextFromFragmentsOperation["fragments"] {
   return [
     {
-      sourceRoot: options.dockerfileFragments.sourceRoot,
+      source: options.dockerfileFragments.source,
       from: options.dockerfileFragments.nodePnpm.from,
     },
     ...(options.additionalLayers ?? []).map((layer) => {
       switch (layer.kind) {
         case "browser-test":
           return {
-            sourceRoot: options.dockerfileFragments.sourceRoot,
+            source: options.dockerfileFragments.source,
             from: requireDockerfileFragment(
               options.dockerfileFragments,
               "browserTest",
@@ -253,7 +256,7 @@ function checkedNodePnpmDockerfileFragments(options: {
           };
         case "shellcheck":
           return {
-            sourceRoot: options.dockerfileFragments.sourceRoot,
+            source: options.dockerfileFragments.source,
             from: requireDockerfileFragment(
               options.dockerfileFragments,
               "shellCheck",
@@ -261,7 +264,7 @@ function checkedNodePnpmDockerfileFragments(options: {
           };
         case "rust":
           return {
-            sourceRoot: options.dockerfileFragments.sourceRoot,
+            source: options.dockerfileFragments.source,
             from: requireDockerfileFragment(options.dockerfileFragments, "rust")
               .from,
           };

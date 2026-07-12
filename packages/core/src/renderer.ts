@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import {
   chmod,
+  cp,
   copyFile,
   mkdir,
   mkdtemp,
@@ -16,11 +17,56 @@ import path from "node:path";
 
 type RenderVariables = Record<string, string>;
 
+export type RenderOperationProvenance = {
+  readonly definitionName: string;
+  readonly plannerSourceFile: string;
+  readonly planningContribution: string;
+  readonly ownershipRule: string;
+};
+
+/**
+ * An opaque, owned Template Source reference.  A renderer operation carries
+ * this directly instead of selecting a root from a string-keyed side map.
+ */
+const templateSourceHandleBrand: unique symbol = Symbol("template-source");
+
+export type TemplateSourceHandle = {
+  readonly [templateSourceHandleBrand]: true;
+};
+
+const templateSourceRoots = new WeakMap<object, string>();
+
+export function createTemplateSourceHandle(root: string): TemplateSourceHandle {
+  const handle = Object.freeze({
+    [templateSourceHandleBrand]: true as const,
+  });
+  templateSourceRoots.set(handle, path.resolve(root));
+  return handle;
+}
+
+/** Resolves a handle-owned source path while enforcing containment. */
+export function resolveTemplateSource(
+  source: TemplateSourceHandle,
+  relativePath: string,
+): string {
+  const root =
+    typeof source === "object" && source !== null
+      ? templateSourceRoots.get(source)
+      : undefined;
+  if (root === undefined) {
+    throw new Error("Renderer received an unknown Template Source handle");
+  }
+  return resolveContainedPath(root, relativePath);
+}
+
 export type CopyFileOperation = {
   kind: "copyFile";
   from: string;
   to: string;
-  sourceRoot?: string;
+  source: TemplateSourceHandle;
+  /** Foundation refreshes coordinated outputs during Package Addition. */
+  overwrite?: boolean;
+  provenance?: RenderOperationProvenance;
 };
 
 export type WriteJsonOperation = {
@@ -28,18 +74,23 @@ export type WriteJsonOperation = {
   to: string;
   value: unknown;
   multilineArrays?: string[];
+  overwrite?: boolean;
+  provenance?: RenderOperationProvenance;
 };
 
 export type MergeJsonOperation = {
   kind: "mergeJson";
   to: string;
   value: unknown;
+  multilineArrays?: string[];
+  provenance?: RenderOperationProvenance;
 };
 
 export type WriteTextOperation = {
   kind: "writeText";
   to: string;
   text: string;
+  provenance?: RenderOperationProvenance;
 };
 
 export type WriteTextFromFragmentsOperation = {
@@ -47,22 +98,28 @@ export type WriteTextFromFragmentsOperation = {
   to: string;
   fragments: readonly {
     from: string;
-    sourceRoot?: string;
+    source: TemplateSourceHandle;
   }[];
+  overwrite?: boolean;
+  provenance?: RenderOperationProvenance;
 };
 
 export type WriteTextTemplateOperation = {
   kind: "writeTextTemplate";
   from: string;
   to: string;
-  sourceRoot?: string;
+  source: TemplateSourceHandle;
   replacements: Record<string, string>;
+  /** Follow-up plans may refresh a coordinated template-owned file. */
+  overwrite?: boolean;
+  provenance?: RenderOperationProvenance;
 };
 
 export type SetExecutableOperation = {
   kind: "setExecutable";
   path: string;
   executable: boolean;
+  provenance?: RenderOperationProvenance;
 };
 
 export type ReplaceAnchorsOperation = {
@@ -70,6 +127,7 @@ export type ReplaceAnchorsOperation = {
   path: string;
   language: "typescript";
   replacements: Record<string, string>;
+  provenance?: RenderOperationProvenance;
 };
 
 export type RenderOperation =
@@ -83,8 +141,6 @@ export type RenderOperation =
   | ReplaceAnchorsOperation;
 
 export type RenderProjectOptions = {
-  sourceRoot: string;
-  sourceRoots?: Record<string, string> | undefined;
   targetRoot: string;
   variables?: RenderVariables | undefined;
   operations: RenderOperation[];
@@ -144,17 +200,8 @@ async function renderCopyFile(
   options: RenderProjectOptions,
 ): Promise<void> {
   const variables = options.variables ?? {};
-  const sourceRoot =
-    operation.sourceRoot === undefined
-      ? options.sourceRoot
-      : options.sourceRoots?.[operation.sourceRoot];
-
-  if (sourceRoot === undefined) {
-    throw new Error(`Unknown renderer source root: ${operation.sourceRoot}`);
-  }
-
-  const from = resolveContainedPath(
-    sourceRoot,
+  const from = resolveTemplateSource(
+    operation.source,
     expandTemplatePath(operation.from, variables),
   );
   const to = resolveContainedPath(
@@ -164,7 +211,7 @@ async function renderCopyFile(
   const sourceMode = (await stat(from)).mode;
 
   await mkdir(path.dirname(to), { recursive: true });
-  await copyGeneratedFile(from, to);
+  await copyGeneratedFile(from, to, operation.overwrite ?? false);
   await chmod(to, sourceMode & 0o777);
 }
 
@@ -357,6 +404,7 @@ async function renderWriteJson(
     expandOperationPath(operation.to, options),
     operation.value,
     operation.multilineArrays,
+    operation.overwrite,
   );
 }
 
@@ -380,7 +428,7 @@ async function renderMergeJson(
     options.targetRoot,
     toPath,
     mergeJsonValue(existing, operation.value),
-    undefined,
+    operation.multilineArrays,
     true,
   );
 }
@@ -449,6 +497,10 @@ function assertFoundationTextPath(relativePath: string): void {
     return;
   }
 
+  if (normalizedPath === ".devcontainer/devcontainer.json") {
+    return;
+  }
+
   throw new Error(
     `Text output is limited to foundation files: ${relativePath}`,
   );
@@ -493,20 +545,11 @@ async function renderWriteTextFromFragments(
   const to = resolveContainedPath(options.targetRoot, toPath);
   const texts = await Promise.all(
     operation.fragments.map(async (fragment) => {
-      const sourceRoot =
-        fragment.sourceRoot === undefined
-          ? options.sourceRoot
-          : options.sourceRoots?.[fragment.sourceRoot];
-
-      if (sourceRoot === undefined) {
-        throw new Error(`Unknown renderer source root: ${fragment.sourceRoot}`);
-      }
-
       const fromPath = expandTemplatePath(
         fragment.from,
         options.variables ?? {},
       );
-      const from = resolveContainedPath(sourceRoot, fromPath);
+      const from = resolveTemplateSource(fragment.source, fromPath);
 
       return readFile(from, "utf8");
     }),
@@ -516,6 +559,7 @@ async function renderWriteTextFromFragments(
   await writeGeneratedFile(
     to,
     texts.map((text) => text.trimEnd()).join("\n\n") + "\n",
+    operation.overwrite ?? false,
   );
 }
 
@@ -551,19 +595,10 @@ async function renderWriteTextTemplate(
   operation: WriteTextTemplateOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const sourceRoot =
-    operation.sourceRoot === undefined
-      ? options.sourceRoot
-      : options.sourceRoots?.[operation.sourceRoot];
-
-  if (sourceRoot === undefined) {
-    throw new Error(`Unknown renderer source root: ${operation.sourceRoot}`);
-  }
-
   const toPath = expandOperationPath(operation.to, options);
   assertTextTemplatePath(toPath);
-  const from = resolveContainedPath(
-    sourceRoot,
+  const from = resolveTemplateSource(
+    operation.source,
     expandTemplatePath(operation.from, options.variables ?? {}),
   );
   const to = resolveContainedPath(options.targetRoot, toPath);
@@ -573,6 +608,7 @@ async function renderWriteTextTemplate(
   await writeGeneratedFile(
     to,
     replaceTextTemplateVariables(sourceText, operation.replacements),
+    operation.overwrite,
   );
 }
 
@@ -754,9 +790,13 @@ async function targetDirectoryStatus(
   return "empty";
 }
 
-async function copyGeneratedFile(from: string, to: string): Promise<void> {
+async function copyGeneratedFile(
+  from: string,
+  to: string,
+  overwrite = false,
+): Promise<void> {
   try {
-    await copyFile(from, to, constants.COPYFILE_EXCL);
+    await copyFile(from, to, overwrite ? 0 : constants.COPYFILE_EXCL);
   } catch (error: unknown) {
     if (isNodeError(error) && error.code === "EEXIST") {
       throw new Error(`Refusing to overwrite existing file: ${to}`, {
@@ -836,6 +876,92 @@ export async function renderProject(
     throw new Error(
       `Unsupported renderer operation: ${(operation as { kind: string }).kind}`,
     );
+  }
+}
+
+/**
+ * Applies a follow-up plan in a sibling staging directory.  In particular,
+ * metadata updates cannot become visible when a later source operation fails.
+ */
+export async function renderProjectAtomically(
+  options: RenderProjectOptions,
+): Promise<void> {
+  const targetRoot = path.resolve(options.targetRoot);
+  await stat(targetRoot);
+  const parent = path.dirname(targetRoot);
+  const stagingRoot = await mkdtemp(
+    path.join(parent, `.${path.basename(targetRoot)}.template-update-`),
+  );
+  const backupRoot = await mkdtemp(
+    path.join(parent, `.${path.basename(targetRoot)}.template-backup-`),
+  );
+  const changedEntries = changedRootEntries(options.operations);
+  let committed = false;
+  try {
+    await cp(targetRoot, stagingRoot, { recursive: true });
+    await renderProject({ ...options, targetRoot: stagingRoot });
+
+    // Commit only the entries changed by the staged plan.  In particular, do
+    // not rename the target directory: callers commonly run `template add`
+    // from that directory, and renaming it leaves their shell on a deleted
+    // inode.  Each entry has a rollback copy before it is made visible.
+    for (const entry of changedEntries) {
+      const current = path.join(targetRoot, entry);
+      try {
+        await cp(current, path.join(backupRoot, entry), { recursive: true });
+      } catch (error: unknown) {
+        if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+      }
+    }
+
+    try {
+      for (const entry of changedEntries) {
+        await cp(path.join(stagingRoot, entry), path.join(targetRoot, entry), {
+          recursive: true,
+          force: true,
+        });
+      }
+      committed = true;
+    } catch (error) {
+      await rollbackStagedEntries({ targetRoot, backupRoot, changedEntries });
+      throw error;
+    }
+  } finally {
+    if (!committed) await rm(stagingRoot, { recursive: true, force: true });
+    await rm(backupRoot, { recursive: true, force: true });
+    if (committed) await rm(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+function changedRootEntries(
+  operations: readonly RenderOperation[],
+): readonly string[] {
+  const entries = new Set<string>();
+  for (const operation of operations) {
+    const outputPath =
+      operation.kind === "setExecutable" || operation.kind === "replaceAnchors"
+        ? operation.path
+        : operation.to;
+    const entry = outputPath.split(/[\\/]/)[0];
+    if (entry !== undefined && entry.length > 0) entries.add(entry);
+  }
+  return [...entries];
+}
+
+async function rollbackStagedEntries(options: {
+  readonly targetRoot: string;
+  readonly backupRoot: string;
+  readonly changedEntries: readonly string[];
+}): Promise<void> {
+  for (const entry of options.changedEntries) {
+    const target = path.join(options.targetRoot, entry);
+    const backup = path.join(options.backupRoot, entry);
+    await rm(target, { recursive: true, force: true });
+    try {
+      await cp(backup, target, { recursive: true });
+    } catch (error: unknown) {
+      if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    }
   }
 }
 

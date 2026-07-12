@@ -419,9 +419,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
   }
 
   const overrides = {
-    "pinia>typescript": "-",
     "valibot>typescript": "-",
-    "vue>typescript": "-",
     ...options.overrides,
   };
   if (Object.keys(overrides).length > 0) {

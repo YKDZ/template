@@ -41,7 +41,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
       - name: Prepare browser checks
-        run: pnpm --filter @ykdz/template-builtin-source exec playwright install --with-deps chromium
+        run: pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium
 
       - name: Check package
         run: pnpm run check
@@ -56,6 +56,9 @@ jobs:
           TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: ${{ github.workspace }}/.fixture-replay-cache
           TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
           TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
+
+      - name: Check deployment artifacts
+        run: pnpm run check:deployment
 
       - name: Save fixture replay cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

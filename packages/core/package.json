@@ -21,7 +21,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@ykdz/template-shared": "workspace:*",
     "semver": "catalog:",
     "typescript": "catalog:",
     "valibot": "catalog:"
@@ -34,5 +33,10 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript-7": "catalog:"
+  },
+  "turbo": {
+    "tags": [
+      "template-core"
+    ]
   }
 }

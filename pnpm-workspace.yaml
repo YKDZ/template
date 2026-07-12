@@ -3,8 +3,6 @@ packages:
 
 nodeLinker: isolated
 
-pnpmfile: packages/builtin-source/templates/shared/pnpm-peer-policy/.pnpmfile.cts
-
 autoInstallPeers: false
 
 injectWorkspacePackages: true

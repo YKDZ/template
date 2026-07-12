@@ -1,0 +1,29 @@
+packages:
+  - packages/*
+
+nodeLinker: isolated
+autoInstallPeers: false
+injectWorkspacePackages: true
+dedupeInjectedDeps: false
+
+syncInjectedDepsAfterScripts:
+  - build
+  - build:run
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+
+overrides:
+  "valibot>typescript": "-"
+
+allowBuilds:
+  esbuild: true
+
+catalog:
+  "@types/node": ^24.13.3
+  oxfmt: ^0.58.0
+  oxlint: ^1.73.0
+  oxlint-tsgolint: ^0.24.0
+  turbo: 2.10.2
+  typescript-7: npm:typescript@^7.0.2
+  valibot: ^1.4.2

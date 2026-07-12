@@ -8,10 +8,7 @@
     "oxfmt.config.ts",
     "oxlint.config.ts",
     "packages/*/src/**/*.ts",
-    "packages/builtin-source/templates/*/behavior.test.ts",
-    "packages/builtin-source/templates/*/projection.ts",
-    "packages/builtin-source/templates/projection-plans.ts",
-    "packages/builtin-source/templates/registry.ts",
+    "packages/builtin-presets/src/*/behavior.test.ts",
     "test/**/*.ts",
     "vitest.config.ts"
   ]

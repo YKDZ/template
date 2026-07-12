@@ -6,7 +6,7 @@ publish = false
 
 [[bin]]
 name = "template-cargo-dependencies"
-path = "packages/builtin-source/templates/rust-bin/src/main.rs"
+path = "packages/builtin-presets/templates/rust-bin/src/main.rs"
 
 [dependencies]
 anyhow = "1.0.100"

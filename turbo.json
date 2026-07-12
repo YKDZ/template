@@ -5,50 +5,63 @@
       "template-checks": {
         "dependencies": {
           "allow": [
+            "template-checks",
+            "template-shared",
             "template-core",
-            "template-preset-source",
-            "template-shared"
+            "template-builtin-presets"
+          ]
+        }
+      },
+      "template-builtin-presets": {
+        "dependencies": {
+          "allow": [
+            "template-builtin-presets",
+            "template-core",
+            "template-shared",
+            "template-checks"
           ]
         }
       },
       "template-cli": {
         "dependencies": {
           "allow": [
-            "template-checks",
+            "template-cli",
+            "template-builtin-presets",
             "template-core",
-            "template-preset-source",
-            "template-shared"
+            "template-shared",
+            "template-checks"
           ]
         }
       },
       "template-core": {
         "dependencies": {
           "allow": [
-            "template-checks",
-            "template-cli",
-            "template-preset-source",
-            "template-shared"
-          ]
-        }
-      },
-      "template-preset-source": {
-        "dependencies": {
-          "allow": [
-            "template-checks",
-            "template-cli",
             "template-core",
-            "template-preset-source",
-            "template-shared"
+            "template-shared",
+            "template-builtin-presets",
+            "template-checks"
           ]
         }
       },
       "template-shared": {
         "dependencies": {
           "allow": [
+            "template-shared",
+            "template-core",
+            "template-builtin-presets",
+            "template-checks"
+          ]
+        }
+      },
+      "template-root": {
+        "dependencies": {
+          "allow": [
+            "template-root",
             "template-checks",
             "template-cli",
+            "template-builtin-presets",
             "template-core",
-            "template-preset-source"
+            "template-shared"
           ]
         }
       }
@@ -78,6 +91,10 @@
         "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
         "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
       ]
+    },
+    "check:deployment": {
+      "dependsOn": ["transit"],
+      "outputs": []
     },
     "check:templates": {
       "outputs": [],
