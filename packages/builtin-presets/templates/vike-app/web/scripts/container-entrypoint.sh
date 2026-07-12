@@ -12,7 +12,10 @@ esac
 
 prepare_database() {
   mkdir -p "$(dirname "$database_file")"
-  DATABASE_FILE="$database_file" drizzle-kit migrate --config /migration/drizzle.config.ts
+  (
+    cd /migration
+    DATABASE_FILE="$database_file" drizzle-kit migrate --config drizzle.config.ts
+  )
 }
 
 case "${1:-}" in

@@ -172,6 +172,12 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     );
     expect(dockerfile).toContain('ENV DATABASE_PACKAGE_NAME="@demo/db"');
     expect(dockerfile).toContain("for attempt in 1 2 3; do");
+    expect(
+      await readFile(
+        path.join(targetDir, "apps/web/scripts/container-entrypoint.sh"),
+        "utf8",
+      ),
+    ).toContain("cd /migration");
     await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
     await assertDockerCopyInputsExist(targetDir, dockerfile);
     expect(
