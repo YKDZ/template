@@ -54,6 +54,7 @@ FROM application-runtime AS standalone
 ARG DEPLOYMENT_BUILD_ID
 LABEL org.opencontainers.image.version="$DEPLOYMENT_BUILD_ID"
 ENV PATH="/migration/node_modules/.bin:$PATH"
+ENV DATABASE_PACKAGE_NAME="{{DB_PACKAGE_NAME}}"
 COPY --from=build --chown=app:nodejs /migration-deploy /migration
 COPY --chmod=755 --from=build /repo/apps/web/scripts/container-entrypoint.sh /usr/local/bin/container-entrypoint
 EXPOSE 3000

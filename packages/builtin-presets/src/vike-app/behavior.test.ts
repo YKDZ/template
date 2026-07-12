@@ -170,6 +170,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(dockerfile).toContain(
       "COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./",
     );
+    expect(dockerfile).toContain('ENV DATABASE_PACKAGE_NAME="@demo/db"');
     await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
     await assertDockerCopyInputsExist(targetDir, dockerfile);
     expect(

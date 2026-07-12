@@ -201,6 +201,7 @@ function webContribution(context: GenerationContext): PackageContribution {
       replacements: {
         NODE_VERSION: context.toolchain.nodeLtsMajor,
         PACKAGE_MANAGER_PIN: context.toolchain.packageManagerPin,
+        DB_PACKAGE_NAME: definitions(context).db.name,
         DB_MIGRATIONS_PACKAGE_NAME: definitions(context).migrations.name,
         WEB_PACKAGE_NAME: web.name,
       },
