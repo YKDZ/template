@@ -10,7 +10,11 @@ ENV PATH="$PNPM_HOME:$PATH"
 WORKDIR /repo
 RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
   && corepack enable --install-directory "$PNPM_HOME" \
-  && corepack prepare "$PACKAGE_MANAGER_PIN" --activate \
+  && for attempt in 1 2 3; do \
+    if corepack prepare "$PACKAGE_MANAGER_PIN" --activate; then break; fi; \
+    [ "$attempt" -lt 3 ] || exit 1; \
+    sleep 2; \
+  done \
   && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"
 
 FROM base AS pruner
