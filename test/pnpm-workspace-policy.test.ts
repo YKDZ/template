@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 
 import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
 import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-core/dependency-catalog";
+import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import { execa } from "execa";
 
 const packageManagerPin = "pnpm@11.11.0";
@@ -20,7 +21,24 @@ const repoRoot = path.resolve(
   "..",
 );
 
-async function generateTsLibProject(prefix: string): Promise<string> {
+function definitionForPnpmPolicy(context: GenerationContext) {
+  const definition = builtInPresetRegistry.all().find((candidate) => {
+    const contributions = candidate.planInitializationContributions?.(
+      context,
+    ) ?? [candidate.planInitialization(context)];
+    return contributions.every(
+      (contribution) => contribution.foundation.toolchains.rust === undefined,
+    );
+  });
+  if (definition === undefined) {
+    throw new Error(
+      "The pnpm Workspace Policy check requires a Node-only Built-in Preset Definition",
+    );
+  }
+  return definition;
+}
+
+async function generateNodeOnlyProject(prefix: string): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const projectDir = path.join(workspace, "demo-lib");
   const toolchainEnvironment = {
@@ -37,6 +55,12 @@ async function generateTsLibProject(prefix: string): Promise<string> {
       }),
     )}`,
   };
+  const context = {
+    targetDir: projectDir,
+    projectName: "demo-lib",
+    scope: "demo-lib",
+    toolchain: { nodeLtsMajor: "24", packageManagerPin },
+  } satisfies GenerationContext;
 
   await execa(
     "node",
@@ -46,7 +70,7 @@ async function generateTsLibProject(prefix: string): Promise<string> {
       "init",
       projectDir,
       "--preset",
-      builtInPresetRegistry.all()[0]!.metadata.name,
+      definitionForPnpmPolicy(context).metadata.name,
       "--yes",
     ],
     { cwd: repoRoot, env: toolchainEnvironment },
@@ -66,6 +90,25 @@ async function dockerIsAvailable(): Promise<boolean> {
 const hasDocker = await dockerIsAvailable();
 
 describe("pnpm Workspace Policy", () => {
+  it("selects a Node-only Definition by contribution semantics", () => {
+    const context = {
+      targetDir: "/tmp/pnpm-policy-definition",
+      projectName: "pnpm-policy-definition",
+      scope: "pnpm-policy-definition",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin },
+    } satisfies GenerationContext;
+    const definition = definitionForPnpmPolicy(context);
+    const contributions = definition.planInitializationContributions?.(
+      context,
+    ) ?? [definition.planInitialization(context)];
+
+    expect(
+      contributions.every(
+        (contribution) => contribution.foundation.toolchains.rust === undefined,
+      ),
+    ).toBe(true);
+  });
+
   it("installs an injected workspace dependency from a frozen lockfile and synchronizes its build output", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "pnpm-workspace-policy-"));
     const provider = path.join(root, "packages/provider");
@@ -148,7 +191,7 @@ describe("pnpm Workspace Policy", () => {
   }, 30_000);
 
   it("installs a real rendered Preset from its frozen pnpm 11 lockfile", async () => {
-    const projectDir = await generateTsLibProject("pnpm-rendered-preset-");
+    const projectDir = await generateNodeOnlyProject("pnpm-rendered-preset-");
     const environment = { ...process.env, CI: "1" };
 
     await execa(
@@ -173,7 +216,7 @@ describe("pnpm Workspace Policy", () => {
       return;
     }
 
-    const projectDir = await generateTsLibProject("pnpm-corepack-users-");
+    const projectDir = await generateNodeOnlyProject("pnpm-corepack-users-");
     const imageIdFile = path.join(projectDir, ".devcontainer-image-id");
     let imageId: string | undefined;
 
