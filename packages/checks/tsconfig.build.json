@@ -4,5 +4,6 @@
     "customConditions": [],
     "declarationMap": false,
     "rootDir": "src"
-  }
+  },
+  "exclude": ["src/check-generated-registry.ts"]
 }

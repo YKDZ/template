@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": { "#db/*": ["./src/*"] },
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2023",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
+}

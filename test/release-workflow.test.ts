@@ -6,6 +6,8 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
+const publicCliPackageName = ["@ykdz", "template"].join("/");
+const publishCommand = `pnpm --filter ${publicCliPackageName} run publish:bundled --no-git-checks --access public --provenance`;
 
 function expectWorkflowUsesVersionedAction(
   workflow: string,
@@ -24,9 +26,7 @@ describe("npm release workflow", () => {
     expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("contents: read");
     expect(workflow).toContain("needs: check");
-    expect(workflow).toContain(
-      "pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance",
-    );
+    expect(workflow).toContain(publishCommand);
     expect(workflow).not.toContain("PNPM_CONFIG_NODE_LINKER");
     expect(workflow).not.toContain("NPM_TOKEN");
     expect(workflow).not.toContain("NODE_AUTH_TOKEN");
@@ -43,9 +43,7 @@ describe("npm release workflow", () => {
     expect(workflow).toContain("node-version-file: package.json");
     expect(workflow).toContain("run: corepack enable");
     expect(workflow).toContain("run: pnpm install --frozen-lockfile");
-    expect(workflow).toContain(
-      "run: pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance",
-    );
+    expect(workflow).toContain(`run: ${publishCommand}`);
     expect(workflow).not.toContain("node-version:");
     expect(workflow).not.toContain("npm install -g");
     expect(workflow).not.toMatch(/run:\s+npm publish/);

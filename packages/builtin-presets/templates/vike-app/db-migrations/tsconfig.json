@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2023",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["drizzle.config.ts", "scripts/**/*.ts"]
+}

@@ -1,0 +1,34 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "composite": true,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "paths": { "#/*": ["./*"] },
+    "rewriteRelativeImportExtensions": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2023",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "types": ["node"],
+    "verbatimModuleSyntax": true
+  },
+  "include": [
+    "+server.ts",
+    "assets/**/*.svg",
+    "components/**/*.vue",
+    "pages/**/*.ts",
+    "pages/**/*.vue",
+    "server/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}

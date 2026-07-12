@@ -1,0 +1,19 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  check:
+    runs-on: ubuntu-latest{{DEPLOYMENT_MATRIX}}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+      - run: corepack enable{{RUST_CI_PREPARATION}}{{DEPLOYMENT_DOCKER_PREPARATION}}
+      - run: pnpm install{{CHECK_ENVIRONMENT_PREPARATION}}
+      - run: pnpm run check{{ROOT_CHECK_CONDITION}}{{DEPLOYMENT_CHECK}}

@@ -1,16 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import ts from "typescript";
 
-import type { RenderOperation } from "./renderer.ts";
-
-export type TemplateBoundaryDebt = {
-  readonly preset: string;
-  readonly generatedPath: string;
-  readonly owningFunction: string;
-  readonly reason: string;
-};
+import { resolveTemplateSource, type RenderOperation } from "./renderer.ts";
 
 export type TemplateBoundaryViolation = {
   readonly preset: string;
@@ -18,30 +11,39 @@ export type TemplateBoundaryViolation = {
   readonly owningFunction: string;
   readonly operationKind: RenderOperation["kind"];
   readonly sourceFilePath: string;
-  readonly allowlistReason?: string;
+  /** Real registry plans retain their Definition and contribution provenance. */
+  readonly definitionName?: string;
+  readonly planningContribution?: string;
+  readonly ownershipRule?: string;
 };
 
 export type TemplateBoundaryCheckProjection = {
   readonly name: string;
   readonly sourceFilePath: string;
+  readonly definitionName?: string;
+  readonly planningContribution?: string;
   readonly plan: {
-    readonly sourceRoot: string;
-    readonly sourceRoots?: Record<string, string> | undefined;
     readonly operations: readonly RenderOperation[];
   };
+};
+
+/** A Template Source root directly checked independently of any render plan. */
+export type TemplateSourceContext = {
+  readonly name: string;
+  readonly root: string;
+  /** Every readable source file discovered by a direct Template Source check. */
+  readonly checkedFiles?: readonly string[];
 };
 
 export type TemplateBoundaryCheckResult = {
   readonly ok: boolean;
   readonly violations: readonly TemplateBoundaryViolation[];
-  readonly allowlistedDebt: readonly TemplateBoundaryViolation[];
-  readonly unusedAllowlistEntries: readonly TemplateBoundaryDebt[];
 };
 
 export type CheckTemplateSourceBoundaryOptions = {
   readonly projections: readonly TemplateBoundaryCheckProjection[];
+  readonly templateSourceContexts?: readonly TemplateSourceContext[];
   readonly manifestReferencedSourceFiles?: readonly string[];
-  readonly allowlist?: readonly TemplateBoundaryDebt[];
 };
 
 type InlineProtectedOperation = Extract<
@@ -59,8 +61,49 @@ const inlineOperationKinds = new Set<RenderOperation["kind"]>([
   "mergeJson",
 ]);
 
-export const templateBoundaryDebtAllowlist: readonly TemplateBoundaryDebt[] =
-  [];
+async function listTemplateSourceFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files: string[] = [];
+
+  for (const entry of entries) {
+    const entryPath = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listTemplateSourceFiles(entryPath)));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+
+    await readFile(entryPath);
+    files.push(path.resolve(entryPath));
+  }
+
+  return files;
+}
+
+/**
+ * Reads each registered Template Source context before any plan is inspected.
+ * The resulting file sets are an independent proof consumed by the boundary check.
+ */
+export async function checkTemplateSourceContexts(
+  contexts: readonly Omit<TemplateSourceContext, "checkedFiles">[],
+): Promise<readonly TemplateSourceContext[]> {
+  return await Promise.all(
+    contexts.map(async (context) => {
+      const root = path.resolve(context.root);
+      const rootStats = await stat(root);
+      if (!rootStats.isDirectory()) {
+        throw new Error(
+          `Template Source context ${context.name} root is not a directory: ${root}`,
+        );
+      }
+      return {
+        ...context,
+        root,
+        checkedFiles: await listTemplateSourceFiles(root),
+      };
+    }),
+  );
+}
 
 function operationTarget(operation: RenderOperation): string | undefined {
   if ("to" in operation) {
@@ -770,56 +813,67 @@ function isAllowedStructuralMachineDeclaration(
   );
 }
 
-function allowlistKey(
-  preset: string,
-  generatedPath: string,
-  owningFunction: string,
-): string {
-  return `${preset}\0${owningFunction}\0${generatedPath}`;
-}
-
-function resolveOperationSourceRoot(
-  projection: TemplateBoundaryCheckProjection,
-  sourceRootName: string | undefined,
-): string | undefined {
-  if (sourceRootName === undefined) {
-    return projection.plan.sourceRoot;
-  }
-
-  return projection.plan.sourceRoots?.[sourceRootName];
-}
-
 function sourceBackedOperationSourceFiles(
   projection: TemplateBoundaryCheckProjection,
   operation: SourceBackedOperation,
 ): readonly string[] {
   if (operation.kind === "writeTextFromFragments") {
     return operation.fragments.map((fragment) => {
-      const root = resolveOperationSourceRoot(projection, fragment.sourceRoot);
-
-      return root === undefined
-        ? `missing-source-root:${fragment.sourceRoot}`
-        : path.resolve(root, fragment.from);
+      try {
+        return resolveTemplateSource(fragment.source, fragment.from);
+      } catch (error) {
+        return `invalid-source:${error instanceof Error ? error.message : String(error)}`;
+      }
     });
   }
-
-  const root = resolveOperationSourceRoot(projection, operation.sourceRoot);
-
-  return [
-    root === undefined
-      ? `missing-source-root:${operation.sourceRoot}`
-      : path.resolve(root, operation.from),
-  ];
+  try {
+    return [resolveTemplateSource(operation.source, operation.from)];
+  } catch (error) {
+    return [
+      `invalid-source:${error instanceof Error ? error.message : String(error)}`,
+    ];
+  }
 }
 
-function operationUsesManifestReferencedSource(
+async function operationUsesCheckedTemplateSource(
   projection: TemplateBoundaryCheckProjection,
   operation: SourceBackedOperation,
+  templateSourceContexts: readonly TemplateSourceContext[],
   manifestReferencedSourceFiles: ReadonlySet<string>,
-): boolean {
-  return sourceBackedOperationSourceFiles(projection, operation).every(
-    (sourceFile) => manifestReferencedSourceFiles.has(sourceFile),
+): Promise<boolean> {
+  const sourceFiles = sourceBackedOperationSourceFiles(projection, operation);
+
+  const results = await Promise.all(
+    sourceFiles.map(async (sourceFile) => {
+      const context = templateSourceContexts.find((candidate) => {
+        const root = path.resolve(candidate.root);
+        return (
+          sourceFile.startsWith(`${root}${path.sep}`) || sourceFile === root
+        );
+      });
+
+      if (context === undefined) {
+        return manifestReferencedSourceFiles.has(sourceFile);
+      }
+
+      const relativePath = path.relative(
+        path.resolve(context.root),
+        sourceFile,
+      );
+      if (
+        relativePath.length === 0 ||
+        relativePath === ".." ||
+        relativePath.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativePath)
+      ) {
+        return false;
+      }
+
+      return context.checkedFiles?.includes(sourceFile) ?? false;
+    }),
   );
+
+  return results.every(Boolean);
 }
 
 function pushSourceBackedOperationViolations(options: {
@@ -844,31 +898,36 @@ function pushSourceBackedOperationViolations(options: {
       generatedPath,
       owningFunction,
       operationKind: options.operation.kind,
-      sourceFilePath: options.projection.sourceFilePath,
+      sourceFilePath:
+        options.operation.provenance?.plannerSourceFile ??
+        options.projection.sourceFilePath,
+      ...(options.operation.provenance === undefined &&
+      options.projection.definitionName === undefined
+        ? {}
+        : {
+            definitionName:
+              options.operation.provenance?.definitionName ??
+              options.projection.definitionName,
+            planningContribution:
+              options.operation.provenance?.planningContribution ??
+              options.projection.planningContribution,
+            ownershipRule:
+              options.operation.provenance?.ownershipRule ??
+              "source-backed protected output must use declared, contained Template Source",
+          }),
     });
   }
 }
 
 export async function checkTemplateSourceBoundary({
   projections,
+  templateSourceContexts = [],
   manifestReferencedSourceFiles = [],
-  allowlist = [],
 }: CheckTemplateSourceBoundaryOptions): Promise<TemplateBoundaryCheckResult> {
   const manifestReferencedSourceFileSet = new Set(
     manifestReferencedSourceFiles.map((sourceFile) => path.resolve(sourceFile)),
   );
-  const allowed = new Map(
-    allowlist.map((entry) => [
-      allowlistKey(entry.preset, entry.generatedPath, entry.owningFunction),
-      entry.reason,
-    ]),
-  );
-  const checkedPresets = new Set(
-    projections.map((projection) => projection.name),
-  );
-  const usedAllowlistKeys = new Set<string>();
   const violations: TemplateBoundaryViolation[] = [];
-  const allowlistedDebt: TemplateBoundaryViolation[] = [];
 
   for (const projection of projections) {
     const sourceText = await readFile(projection.sourceFilePath, "utf8");
@@ -883,11 +942,12 @@ export async function checkTemplateSourceBoundary({
     for (const operation of projection.plan.operations) {
       if (isProtectedSourceBackedOperation(operation)) {
         if (
-          !operationUsesManifestReferencedSource(
+          !(await operationUsesCheckedTemplateSource(
             projection,
             operation,
+            templateSourceContexts,
             manifestReferencedSourceFileSet,
-          )
+          ))
         ) {
           pushSourceBackedOperationViolations({
             projection,
@@ -923,40 +983,32 @@ export async function checkTemplateSourceBoundary({
           generatedPath: operation.to,
           owningFunction,
           operationKind: operation.kind,
-          sourceFilePath: projection.sourceFilePath,
+          sourceFilePath:
+            operation.provenance?.plannerSourceFile ??
+            projection.sourceFilePath,
+          ...(operation.provenance === undefined &&
+          projection.definitionName === undefined
+            ? {}
+            : {
+                definitionName:
+                  operation.provenance?.definitionName ??
+                  projection.definitionName,
+                planningContribution:
+                  operation.provenance?.planningContribution ??
+                  projection.planningContribution,
+                ownershipRule:
+                  operation.provenance?.ownershipRule ??
+                  "protected generated output must be Template Source-backed",
+              }),
         };
-
-        const allowlistReason = allowed.get(
-          allowlistKey(projection.name, operation.to, owningFunction),
-        );
-
-        if (allowlistReason) {
-          usedAllowlistKeys.add(
-            allowlistKey(projection.name, operation.to, owningFunction),
-          );
-          allowlistedDebt.push({ ...diagnostic, allowlistReason });
-          continue;
-        }
 
         violations.push(diagnostic);
       }
     }
   }
 
-  const unusedAllowlistEntries = allowlist.filter((entry) => {
-    if (!checkedPresets.has(entry.preset)) {
-      return false;
-    }
-
-    return !usedAllowlistKeys.has(
-      allowlistKey(entry.preset, entry.generatedPath, entry.owningFunction),
-    );
-  });
-
   return {
-    ok: violations.length === 0 && unusedAllowlistEntries.length === 0,
+    ok: violations.length === 0,
     violations,
-    allowlistedDebt,
-    unusedAllowlistEntries,
   };
 }

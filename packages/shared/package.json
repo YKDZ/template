@@ -29,5 +29,10 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript-7": "catalog:"
+  },
+  "turbo": {
+    "tags": [
+      "template-shared"
+    ]
   }
 }

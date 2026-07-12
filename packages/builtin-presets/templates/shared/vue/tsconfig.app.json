@@ -1,0 +1,25 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "composite": true,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "rewriteRelativeImportExtensions": false,
+    "skipLibCheck": false,
+    "strict": true,
+    "target": "es2023",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "types": ["web-bluetooth"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue"]
+}

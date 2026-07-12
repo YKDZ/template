@@ -14,3 +14,5 @@ CONTEXT.md
 packages/**/.turbo/
 coverage
 target
+.template-boundary-check
+generated-repository

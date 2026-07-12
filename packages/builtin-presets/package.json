@@ -1,0 +1,67 @@
+{
+  "name": "@ykdz/template-builtin-presets",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist",
+    "templates",
+    "!dist/src/check-*.js",
+    "!dist/src/check-*.d.ts",
+    "!dist/src/registry-checks.js",
+    "!dist/src/registry-checks.d.ts"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check:templates": "pnpm run check:templates:boundary && node src/check-template-source.ts && node src/check-registry-contract.ts && node src/check-publication-source.ts",
+    "check:templates:boundary": "node src/check-template-boundary.ts",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@hono/node-server": "catalog:",
+    "@playwright/test": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@types/web-bluetooth": "catalog:",
+    "@vikejs/hono": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vue/tsconfig": "catalog:",
+    "drizzle-kit": "catalog:",
+    "drizzle-orm": "catalog:",
+    "execa": "catalog:",
+    "hono": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "pinia": "catalog:",
+    "tailwindcss": "catalog:",
+    "telefunc": "catalog:",
+    "typescript": "catalog:",
+    "typescript-7": "catalog:",
+    "vike": "catalog:",
+    "vike-vue": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vue": "catalog:",
+    "vue-tsc": "catalog:"
+  },
+  "turbo": {
+    "tags": [
+      "template-builtin-presets"
+    ]
+  }
+}

@@ -61,9 +61,52 @@ export type ShellCheckEnvironmentNeed = {
   };
 };
 
+/** Rust check components require the maintained toolchain in local and CI plans. */
+export type RustToolchainEnvironmentNeed = {
+  readonly kind: "rust-toolchain";
+  readonly owner: ComponentOwner;
+  readonly toolchain: "stable";
+  readonly nextStep: {
+    readonly id: "install-rust-toolchain";
+    readonly label: "Install Rust toolchain";
+    readonly command: "rustup";
+    readonly args: readonly string[];
+    readonly display: "rustup toolchain install stable --component rustfmt --component clippy";
+    readonly machineVerifiable: boolean;
+  };
+};
+
 export type CheckEnvironmentNeed =
   | PlaywrightBrowserAssetsEnvironmentNeed
-  | ShellCheckEnvironmentNeed;
+  | ShellCheckEnvironmentNeed
+  | RustToolchainEnvironmentNeed;
+
+export function rustToolchainEnvironmentNeed(
+  owner: ComponentOwner,
+): RustToolchainEnvironmentNeed {
+  return {
+    kind: "rust-toolchain",
+    owner,
+    toolchain: "stable",
+    nextStep: {
+      id: "install-rust-toolchain",
+      label: "Install Rust toolchain",
+      command: "rustup",
+      args: [
+        "toolchain",
+        "install",
+        "stable",
+        "--component",
+        "rustfmt",
+        "--component",
+        "clippy",
+      ],
+      display:
+        "rustup toolchain install stable --component rustfmt --component clippy",
+      machineVerifiable: false,
+    },
+  };
+}
 
 export type CheckComponent = {
   readonly kind: CheckComponentKind;

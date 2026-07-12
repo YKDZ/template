@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "erasableSyntaxOnly": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmitOnError": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noUncheckedIndexedAccess": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": false,
+    "strict": true,
+    "target": "es2023",
+    "types": ["node", "vitest/globals"],
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+}

@@ -1,0 +1,18 @@
+{
+  "boundaries": {
+    "tags": {
+      "app": { "dependencies": { "allow": ["app", "library"] } },
+      "library": { "dependencies": { "allow": ["library"] } }
+    }
+  },
+  "tasks": {
+    "format:check:run": {},
+    "lint:run": {},
+    "typecheck:run": { "dependsOn": ["^typecheck:run"] },
+    "build:run": { "dependsOn": ["^build:run"] },
+    "test:run": { "dependsOn": ["build:run"] },
+    "test:e2e:run": { "dependsOn": ["build:run"] },
+    "format:write:run": { "cache": false },
+    "lint:fix:run": { "cache": false }
+  }
+}

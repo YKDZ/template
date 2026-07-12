@@ -1,0 +1,23 @@
+packages:
+{{WORKSPACE_PACKAGE_GLOBS}}
+
+nodeLinker: isolated
+autoInstallPeers: false
+injectWorkspacePackages: true
+dedupeInjectedDeps: false
+
+syncInjectedDepsAfterScripts:
+  - build
+  - build:run
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+
+overrides:
+{{DEPENDENCY_OVERRIDES}}
+
+allowBuilds:
+  esbuild: true
+
+catalog:
+{{DEPENDENCY_CATALOG}}

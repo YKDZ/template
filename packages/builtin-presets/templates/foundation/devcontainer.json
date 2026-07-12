@@ -1,0 +1,16 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "NODE_VERSION": "{{NODE_LTS_MAJOR}}",
+      "PACKAGE_MANAGER_PIN": "{{PACKAGE_MANAGER_PIN}}",
+      "PLAYWRIGHT_CLI_PACKAGE": "{{PLAYWRIGHT_CLI_PACKAGE}}"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["oxc.oxc-vscode"]
+    }
+  }
+}

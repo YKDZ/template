@@ -1,0 +1,21 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "args": {
+      "NODE_VERSION": "{{NODE_LTS_MAJOR}}",
+      "PACKAGE_MANAGER_PIN": "{{PACKAGE_MANAGER_PIN}}",
+      "RUST_TOOLCHAIN": "{{RUST_TOOLCHAIN}}"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer", "tamasfe.even-better-toml"]
+    }
+  },
+  "mounts": [
+    "source=${localWorkspaceFolderBasename}-cargo-registry,target=/usr/local/cargo/registry,type=volume",
+    "source=${localWorkspaceFolderBasename}-cargo-git,target=/usr/local/cargo/git,type=volume",
+    "source=${localWorkspaceFolderBasename}-target,target=${containerWorkspaceFolder}/target,type=volume"
+  ]
+}

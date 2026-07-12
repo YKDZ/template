@@ -22,12 +22,18 @@ catalogs:
     '@types/semver':
       specifier: ^7.7.1
       version: 7.7.1
+    '@types/web-bluetooth':
+      specifier: ^0.0.21
+      version: 0.0.21
     '@vikejs/hono':
       specifier: ^0.2.1
       version: 0.2.1
     '@vitejs/plugin-vue':
       specifier: ^6.0.7
       version: 6.0.7
+    '@vue/tsconfig':
+      specifier: ^0.9.1
+      version: 0.9.1
     drizzle-kit:
       specifier: 1.0.0-rc.4
       version: 1.0.0-rc.4
@@ -55,6 +61,9 @@ catalogs:
     semver:
       specifier: ^7.8.5
       version: 7.8.5
+    tailwindcss:
+      specifier: ^4.3.2
+      version: 4.3.2
     telefunc:
       specifier: ^0.2.22
       version: 0.2.22
@@ -97,8 +106,6 @@ overrides:
   valibot>typescript: '-'
   vue>typescript: '-'
 
-pnpmfileChecksum: sha256-EO7Dbruee2Wzi6F0RwQfsWc8lf+VNytY/Qb4T/HSpRU=
-
 importers:
 
   .:
@@ -106,18 +113,18 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@ykdz/template-builtin-source':
+      '@ykdz/template-builtin-presets':
         specifier: workspace:*
-        version: file:packages/builtin-source
+        version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
       '@ykdz/template-checks':
         specifier: workspace:*
-        version: file:packages/checks
+        version: file:packages/checks(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
         version: file:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
-        version: file:packages/shared
+        version: file:packages/shared(@typescript/typescript6@6.0.2)
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -141,7 +148,7 @@ importers:
         version: typescript@7.0.2
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2
+        version: 1.4.2(@typescript/typescript6@6.0.2)
       vitest:
         specifier: 'catalog:'
         version: 4.1.10(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
@@ -149,17 +156,14 @@ importers:
         specifier: 'catalog:'
         version: 2.9.0
 
-  packages/builtin-source:
+  packages/builtin-presets:
     dependencies:
       '@ykdz/template-core':
         specifier: workspace:*
         version: file:packages/core
-      '@ykdz/template-shared':
-        specifier: workspace:*
-        version: file:packages/shared
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2
+        version: 1.4.2(@typescript/typescript6@6.0.2)
     devDependencies:
       '@hono/node-server':
         specifier: 'catalog:'
@@ -173,21 +177,27 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@types/semver':
+      '@types/web-bluetooth':
         specifier: 'catalog:'
-        version: 7.7.1
+        version: 0.0.21
       '@vikejs/hono':
         specifier: 'catalog:'
         version: 0.2.1(hono@4.12.28)(srvx@0.11.21)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))
       '@vitejs/plugin-vue':
         specifier: 'catalog:'
-        version: 6.0.7(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39)
+        version: 6.0.7(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(@typescript/typescript6@6.0.2))
+      '@vue/tsconfig':
+        specifier: 'catalog:'
+        version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2))
       drizzle-kit:
         specifier: 'catalog:'
         version: 1.0.0-rc.4
       drizzle-orm:
         specifier: 'catalog:'
-        version: 1.0.0-rc.4(valibot@1.4.2)
+        version: 1.0.0-rc.4(valibot@1.4.2(@typescript/typescript6@6.0.2))
+      execa:
+        specifier: 'catalog:'
+        version: 9.6.1
       hono:
         specifier: 'catalog:'
         version: 4.12.28
@@ -202,10 +212,10 @@ importers:
         version: 0.24.0
       pinia:
         specifier: 'catalog:'
-        version: 3.0.4(vue@3.5.39)
-      semver:
+        version: 3.0.4(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2))
+      tailwindcss:
         specifier: 'catalog:'
-        version: 7.8.5
+        version: 4.3.2
       telefunc:
         specifier: 'catalog:'
         version: 0.2.22(@babel/core@7.29.7)(@babel/parser@7.29.7)(@babel/types@7.29.7)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
@@ -220,7 +230,7 @@ importers:
         version: 0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
       vike-vue:
         specifier: 'catalog:'
-        version: 0.9.13(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))(vue@3.5.39)
+        version: 0.9.13(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))(vue@3.5.39(@typescript/typescript6@6.0.2))
       vite:
         specifier: 'catalog:'
         version: 8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
@@ -229,25 +239,19 @@ importers:
         version: 4.1.10(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
       vue:
         specifier: 'catalog:'
-        version: 3.5.39
+        version: 3.5.39(@typescript/typescript6@6.0.2)
       vue-tsc:
         specifier: 'catalog:'
         version: 3.3.7(@typescript/typescript6@6.0.2)
-      yaml:
-        specifier: 'catalog:'
-        version: 2.9.0
 
   packages/checks:
     dependencies:
-      '@ykdz/template-builtin-source':
+      '@ykdz/template-builtin-presets':
         specifier: workspace:*
-        version: file:packages/builtin-source
+        version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
         version: file:packages/core
-      '@ykdz/template-shared':
-        specifier: workspace:*
-        version: file:packages/shared
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -267,21 +271,24 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
   packages/cli:
     dependencies:
-      '@ykdz/template-builtin-source':
+      '@typescript/old':
+        specifier: npm:typescript@^6.0.0
+        version: typescript@6.0.3
+      '@ykdz/template-builtin-presets':
         specifier: workspace:*
-        version: file:packages/builtin-source
+        version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
         version: file:packages/core
-      '@ykdz/template-shared':
-        specifier: workspace:*
-        version: file:packages/shared
       semver:
         specifier: 'catalog:'
         version: 7.8.5
@@ -290,7 +297,7 @@ importers:
         version: '@typescript/typescript6@6.0.2'
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2
+        version: 1.4.2(@typescript/typescript6@6.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -310,9 +317,6 @@ importers:
 
   packages/core:
     dependencies:
-      '@ykdz/template-shared':
-        specifier: workspace:*
-        version: file:packages/shared
       semver:
         specifier: 'catalog:'
         version: 7.8.5
@@ -321,7 +325,7 @@ importers:
         version: '@typescript/typescript6@6.0.2'
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2
+        version: 1.4.2(@typescript/typescript6@6.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -349,7 +353,7 @@ importers:
     dependencies:
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2
+        version: 1.4.2(typescript@7.0.2)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -1455,6 +1459,9 @@ packages:
   '@types/semver@7.7.1':
     resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
+  '@types/web-bluetooth@0.0.21':
+    resolution: {integrity: sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -1736,8 +1743,19 @@ packages:
   '@vue/shared@3.5.39':
     resolution: {integrity: sha512-l1rrBtBfTnmxvtsvdQDXltUUy8S1Y+ZaqdfUzmAnJkTd8Z8rv5v/ytW+TKiqEOWyHPoqtPlNFSs0lhRmYVSHVA==}
 
-  '@ykdz/template-builtin-source@file:packages/builtin-source':
-    resolution: {directory: packages/builtin-source, type: directory}
+  '@vue/tsconfig@0.9.1':
+    resolution: {integrity: sha512-buvjm+9NzLCJL29KY1j1991YYJ5e6275OiK+G4jtmfIb+z4POywbdm0wXusT9adVWqe0xqg70TbI7+mRx4uU9w==}
+    peerDependencies:
+      typescript: '>= 5.8'
+      vue: ^3.4.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+      vue:
+        optional: true
+
+  '@ykdz/template-builtin-presets@file:packages/builtin-presets':
+    resolution: {directory: packages/builtin-presets, type: directory}
 
   '@ykdz/template-checks@file:packages/checks':
     resolution: {directory: packages/checks, type: directory}
@@ -2358,7 +2376,11 @@ packages:
   pinia@3.0.4:
     resolution: {integrity: sha512-l7pqLUFTI/+ESXn6k3nu30ZIzW5E2WZF/LaHJEpoq6ElcLD+wduZoB2kBN19du6K/4FDpPMazY2wJr+IndBtQw==}
     peerDependencies:
+      typescript: '*'
       vue: ^3.5.11
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   pkg-types@1.3.1:
     resolution: {integrity: sha512-/Jm5M4RvtBFVkKWRu2BLUTNP8/M2a+UwuAX+ae4770q1qVGtfjG+WTCupoZixokjmHiry8uI+dlY8KXYV5HVVQ==}
@@ -2372,10 +2394,6 @@ packages:
     resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
     engines: {node: '>=18'}
     hasBin: true
-
-  postcss@8.5.15:
-    resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
-    engines: {node: ^10 || ^12 || >=14}
 
   postcss@8.5.16:
     resolution: {integrity: sha512-vuwillviilfKZsg0VGj5R/YwwcHx4SLsIOI/7K6mQkWx+l5cUHTjj5g0AasTBcyXsbfTgrwsUNmVUb5xVwyPwg==}
@@ -2593,6 +2611,11 @@ packages:
 
   valibot@1.4.2:
     resolution: {integrity: sha512-gjdCvJ6d3RyHAneqxMYMW9QMCwYMb3jpOO0IyHZV1bnRHFBHrX3VkIILt5XYR0WhwHiH7Mty8ovuPZ/O3gamrg==}
+    peerDependencies:
+      typescript: '*'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   vike-vue@0.9.13:
     resolution: {integrity: sha512-M7G5rBHiuLulXtPCEM25hNLoGWpO2JvsUZOMOP79DyesR8I7kw9hSXH6RBB/VrbdNCmpFQHEmjIkFlBKp+CkNQ==}
@@ -2712,6 +2735,11 @@ packages:
 
   vue@3.5.39:
     resolution: {integrity: sha512-xmZCYabFGcirU8r0fTuvl/LICc1OU620rnqepaJDL/a141ZigkG7AyaxQLdqJ02ZRYzWe6YPaDHeQx7MfknQfA==}
+    peerDependencies:
+      typescript: '*'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   webpack-virtual-modules@0.6.2:
     resolution: {integrity: sha512-66/V2i5hQanC51vBQKPH4aI8NMAcBW59FVBs+rC7eGHupMyfn34q7rZIE+ETlJ+XTevqfUhVVBgSUNSW2flEUQ==}
@@ -3437,6 +3465,8 @@ snapshots:
 
   '@types/semver@7.7.1': {}
 
+  '@types/web-bluetooth@0.0.21': {}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -3606,11 +3636,11 @@ snapshots:
       - h3
       - srvx
 
-  '@vitejs/plugin-vue@6.0.7(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39)':
+  '@vitejs/plugin-vue@6.0.7(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))(vue@3.5.39(@typescript/typescript6@6.0.2))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
       vite: 8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
-      vue: 3.5.39
+      vue: 3.5.39(@typescript/typescript6@6.0.2)
 
   '@vitest/expect@4.1.10':
     dependencies:
@@ -3687,7 +3717,7 @@ snapshots:
       '@vue/shared': 3.5.39
       estree-walker: 2.0.2
       magic-string: 0.30.21
-      postcss: 8.5.15
+      postcss: 8.5.16
       source-map-js: 1.2.1
 
   '@vue/compiler-ssr@3.5.39':
@@ -3739,38 +3769,46 @@ snapshots:
       '@vue/shared': 3.5.39
       csstype: 3.2.3
 
-  '@vue/server-renderer@3.5.39(vue@3.5.39)':
+  '@vue/server-renderer@3.5.39(vue@3.5.39(@typescript/typescript6@6.0.2))':
     dependencies:
       '@vue/compiler-ssr': 3.5.39
       '@vue/shared': 3.5.39
-      vue: 3.5.39
+      vue: 3.5.39(@typescript/typescript6@6.0.2)
 
   '@vue/shared@3.5.39': {}
 
-  '@ykdz/template-builtin-source@file:packages/builtin-source':
-    dependencies:
-      '@ykdz/template-core': file:packages/core
-      '@ykdz/template-shared': file:packages/shared
-      valibot: 1.4.2
+  '@vue/tsconfig@0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2))':
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
+      vue: 3.5.39(@typescript/typescript6@6.0.2)
 
-  '@ykdz/template-checks@file:packages/checks':
+  '@ykdz/template-builtin-presets@file:packages/builtin-presets(@typescript/typescript6@6.0.2)':
     dependencies:
-      '@ykdz/template-builtin-source': file:packages/builtin-source
       '@ykdz/template-core': file:packages/core
-      '@ykdz/template-shared': file:packages/shared
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-checks@file:packages/checks(@typescript/typescript6@6.0.2)':
+    dependencies:
+      '@ykdz/template-builtin-presets': file:packages/builtin-presets(@typescript/typescript6@6.0.2)
+      '@ykdz/template-core': file:packages/core
       execa: 9.6.1
       yaml: 2.9.0
+    transitivePeerDependencies:
+      - typescript
 
   '@ykdz/template-core@file:packages/core':
     dependencies:
-      '@ykdz/template-shared': file:packages/shared
       semver: 7.8.5
       typescript: '@typescript/typescript6@6.0.2'
-      valibot: 1.4.2
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
 
-  '@ykdz/template-shared@file:packages/shared':
+  '@ykdz/template-shared@file:packages/shared(@typescript/typescript6@6.0.2)':
     dependencies:
-      valibot: 1.4.2
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - typescript
 
   acorn@8.17.0: {}
 
@@ -3846,9 +3884,9 @@ snapshots:
       get-tsconfig: 4.14.0
       jiti: 2.7.0
 
-  drizzle-orm@1.0.0-rc.4(valibot@1.4.2):
+  drizzle-orm@1.0.0-rc.4(valibot@1.4.2(@typescript/typescript6@6.0.2)):
     optionalDependencies:
-      valibot: 1.4.2
+      valibot: 1.4.2(@typescript/typescript6@6.0.2)
 
   electron-to-chromium@1.5.389: {}
 
@@ -4235,10 +4273,12 @@ snapshots:
 
   picomatch@4.0.5: {}
 
-  pinia@3.0.4(vue@3.5.39):
+  pinia@3.0.4(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2)):
     dependencies:
       '@vue/devtools-api': 7.7.10
-      vue: 3.5.39
+      vue: 3.5.39(@typescript/typescript6@6.0.2)
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
 
   pkg-types@1.3.1:
     dependencies:
@@ -4253,12 +4293,6 @@ snapshots:
       playwright-core: 1.61.1
     optionalDependencies:
       fsevents: 2.3.2
-
-  postcss@8.5.15:
-    dependencies:
-      nanoid: 3.3.15
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
 
   postcss@8.5.16:
     dependencies:
@@ -4466,15 +4500,21 @@ snapshots:
       escalade: 3.2.0
       picocolors: 1.1.1
 
-  valibot@1.4.2: {}
+  valibot@1.4.2(@typescript/typescript6@6.0.2):
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
 
-  vike-vue@0.9.13(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))(vue@3.5.39):
+  valibot@1.4.2(typescript@7.0.2):
+    optionalDependencies:
+      typescript: 7.0.2
+
+  vike-vue@0.9.13(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(vike@0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)))(vue@3.5.39(@typescript/typescript6@6.0.2)):
     dependencies:
       magic-string: 0.30.21
       oxc-parser: 0.104.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
       oxc-walker: 0.6.0(oxc-parser@0.104.0(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1))
       vike: 0.4.260(hono@4.12.28)(srvx@0.11.21)(vite@8.1.4(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
-      vue: 3.5.39
+      vue: 3.5.39(@typescript/typescript6@6.0.2)
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -4497,7 +4537,7 @@ snapshots:
       esbuild: 0.28.1
       json5: 2.2.3
       magic-string: 0.30.21
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       semver: 7.8.5
       sirv: 3.0.2
       source-map-support: 0.5.21
@@ -4581,13 +4621,15 @@ snapshots:
       '@vue/language-core': 3.3.7
       typescript: '@typescript/typescript6@6.0.2'
 
-  vue@3.5.39:
+  vue@3.5.39(@typescript/typescript6@6.0.2):
     dependencies:
       '@vue/compiler-dom': 3.5.39
       '@vue/compiler-sfc': 3.5.39
       '@vue/runtime-dom': 3.5.39
-      '@vue/server-renderer': 3.5.39(vue@3.5.39)
+      '@vue/server-renderer': 3.5.39(vue@3.5.39(@typescript/typescript6@6.0.2))
       '@vue/shared': 3.5.39
+    optionalDependencies:
+      typescript: '@typescript/typescript6@6.0.2'
 
   webpack-virtual-modules@0.6.2: {}
 

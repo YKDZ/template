@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
 import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-core/dependency-catalog";
 import { execa } from "execa";
 
@@ -45,7 +46,7 @@ async function generateTsLibProject(prefix: string): Promise<string> {
       "init",
       projectDir,
       "--preset",
-      "ts-lib",
+      builtInPresetRegistry.all()[0]!.metadata.name,
       "--yes",
     ],
     { cwd: repoRoot, env: toolchainEnvironment },
