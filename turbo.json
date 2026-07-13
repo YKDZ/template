@@ -73,7 +73,7 @@
       "outputs": ["dist/**"]
     },
     "check:fixtures": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
@@ -83,7 +83,7 @@
       ]
     },
     "check:generated": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
@@ -93,68 +93,79 @@
       ]
     },
     "check:deployment": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
+      "cache": false,
       "outputs": []
     },
     "check:templates": {
+      "dependsOn": ["^build"],
       "outputs": [],
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     },
     "check:templates:boundary": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "check:templates:github-yaml": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
       "outputs": []
-    },
-    "check:templates:shared-oxc": {
-      "outputs": []
-    },
-    "check:templates:static-source": {
-      "outputs": [],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     },
     "check:toolchain:online": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "format:check": {
       "outputs": []
     },
     "format:write": {
+      "dependsOn": ["lint:fix"],
       "cache": false
     },
     "lint": {
-      "dependsOn": ["transit"],
       "outputs": []
     },
     "lint:fix": {
       "cache": false
     },
-    "transit": {
-      "dependsOn": ["^transit"]
-    },
     "typecheck": {
-      "dependsOn": ["transit"],
+      "dependsOn": ["^typecheck"],
       "outputs": []
     },
-    "//#format:check:root": {
+    "test": {
+      "dependsOn": ["build"],
       "outputs": []
     },
-    "//#format:write:root": {
+    "test:e2e": {
+      "dependsOn": ["build"],
       "cache": false
     },
-    "//#lint:root": {
+    "boundaries": {
+      "cache": false,
       "outputs": []
     },
-    "//#lint:fix:root": {
+    "//#boundaries": {
+      "cache": false,
+      "outputs": []
+    },
+    "//#format:check": {
+      "outputs": []
+    },
+    "//#format:write": {
+      "dependsOn": ["lint:fix"],
       "cache": false
+    },
+    "//#lint": {
+      "outputs": []
+    },
+    "//#lint:fix": {
+      "cache": false
+    },
+    "//#typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
     },
     "//#test": {
-      "outputs": []
-    },
-    "//#typecheck:root": {
+      "dependsOn": ["^build"],
       "outputs": []
     }
   }

@@ -188,4 +188,33 @@ describe("Legacy Architecture Removal Check", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("does not require unrelated distribution artifacts during a source-focused audit", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all(
+        ["cli", "builtin-presets", "core"].map(
+          async (name) =>
+            await mkdir(path.join(root, "packages", name), {
+              recursive: true,
+            }),
+        ),
+      );
+      await Promise.all(
+        ["cli", "builtin-presets", "core"].map(
+          async (name) =>
+            await writeFile(
+              path.join(root, "packages", name, "package.json"),
+              "{}",
+            ),
+        ),
+      );
+
+      await expect(
+        findLegacyArchitectureDistributionFindings(root),
+      ).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

@@ -7,10 +7,7 @@
   "include": [
     "oxfmt.config.ts",
     "oxlint.config.ts",
-    "packages/*/src/**/*.ts",
-    "packages/builtin-presets/src/*/behavior.test.ts",
-    "packages/builtin-presets/templates/foundation/scripts/check-boundaries.ts",
-    "packages/builtin-presets/templates/foundation/scripts/run-root-owned-task.ts",
+    "scripts/**/*.ts",
     "test/**/*.ts",
     "vitest.config.ts"
   ]

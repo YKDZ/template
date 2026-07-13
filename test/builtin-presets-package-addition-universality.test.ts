@@ -18,6 +18,16 @@ import { describe, expect, it } from "vitest";
 describe("Built-in Preset Package Addition universality", () => {
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
 
+  function firstAddableDefinition() {
+    const definition = builtInPresetRegistry
+      .all()
+      .find((candidate) => candidate.planPackageAddition !== undefined);
+    if (definition === undefined) {
+      throw new Error("Expected an addable Built-in Preset Definition");
+    }
+    return definition;
+  }
+
   it("initializes every Project Shape with both Standard Package Roots", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
@@ -204,8 +214,8 @@ describe("Built-in Preset Package Addition universality", () => {
       scope: "demo",
       toolchain,
     });
-    const base = builtInPresetRegistry.require("ts-lib");
-    const addition = builtInPresetRegistry.require("ts-lib");
+    const base = firstAddableDefinition();
+    const addition = firstAddableDefinition();
 
     try {
       const initialization = planGeneratedRepositoryInitialization({
@@ -317,7 +327,13 @@ describe("Built-in Preset Package Addition universality", () => {
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry.require("rust-bin"),
+      definition: builtInPresetRegistry
+        .all()
+        .find((definition) =>
+          definition
+            .planInitialization(context)
+            .environmentNeeds.some((need) => need.kind === "rust-toolchain"),
+        )!,
       context,
     });
 
@@ -327,7 +343,18 @@ describe("Built-in Preset Package Addition universality", () => {
         operations: [...initialization.operations],
       });
       const addition = planGeneratedRepositoryPackageAddition({
-        definition: builtInPresetRegistry.require("vue-app"),
+        definition: builtInPresetRegistry.all().find(
+          (definition) =>
+            definition
+              .planPackageAddition?.({
+                context,
+                packageLeafName: "web",
+                packagePath: "apps/web",
+              })
+              .environmentNeeds.some(
+                (need) => need.kind === "playwright-browser-assets",
+              ) ?? false,
+        )!,
         context,
         blueprint: initialization.blueprint,
         packageLeafName: "web",
@@ -365,7 +392,7 @@ describe("Built-in Preset Package Addition universality", () => {
       scope: "demo",
       toolchain,
     });
-    const base = builtInPresetRegistry.require("ts-lib");
+    const base = firstAddableDefinition();
     const initialization = planGeneratedRepositoryInitialization({
       definition: base,
       context,
@@ -429,7 +456,7 @@ describe("Built-in Preset Package Addition universality", () => {
       scope: "demo",
       toolchain,
     });
-    const base = builtInPresetRegistry.require("ts-lib");
+    const base = firstAddableDefinition();
     const initialization = planGeneratedRepositoryInitialization({
       definition: base,
       context,

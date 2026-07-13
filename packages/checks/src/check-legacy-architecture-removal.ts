@@ -592,7 +592,7 @@ export async function findLegacyArchitectureDistributionFindings(
   const hasDistribution = await Promise.all(
     packageRoots.map(async (packageRoot) => {
       try {
-        await access(path.join(repositoryRoot, packageRoot));
+        await access(path.join(repositoryRoot, packageRoot, "dist"));
         return true;
       } catch {
         return false;
@@ -600,7 +600,8 @@ export async function findLegacyArchitectureDistributionFindings(
     }),
   );
   if (!hasDistribution.some(Boolean)) return findings;
-  for (const packageRoot of packageRoots) {
+  for (const [index, packageRoot] of packageRoots.entries()) {
+    if (!hasDistribution[index]) continue;
     const manifestPath = `${packageRoot}/package.json`;
     try {
       findings.push(

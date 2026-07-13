@@ -10,8 +10,9 @@ import { describe, expect, it } from "vitest";
 import { assertGeneratedTaskDiscovery } from "../packages/checks/src/check-generated-registry.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
+  const definition = builtInPresetRegistry.all()[0]!;
   const plan = planGeneratedRepositoryInitialization({
-    definition: builtInPresetRegistry.require("ts-lib"),
+    definition,
     context: createGenerationContext({
       targetDir: path.join("generated-repository", "fixture-dry-run"),
       scope: "fixture",
