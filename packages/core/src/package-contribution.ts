@@ -7,6 +7,12 @@ import type { PackageDefinition } from "./project-blueprint-v2.ts";
 import type { DependencyMaintenancePolicy } from "./project-github.ts";
 import type { RenderOperation } from "./renderer.ts";
 
+const operationPath = (operation: RenderOperation): string => {
+  if ("to" in operation) return operation.to;
+  if ("path" in operation) return operation.path;
+  return "";
+};
+
 export type FoundationContribution = {
   /** Toolchains the Foundation must install and project into coordinated root files. */
   readonly toolchains: {
@@ -53,11 +59,6 @@ export function assertPackageContribution(
       "Package Contribution manifest name must match its Package Definition",
     );
   }
-  const operationPath = (operation: RenderOperation): string => {
-    if ("to" in operation) return operation.to;
-    if ("path" in operation) return operation.path;
-    return "";
-  };
   const outsideOperation = contribution.operations.find(
     (operation) =>
       !operationPath(operation).startsWith(`${contribution.definition.path}/`),
