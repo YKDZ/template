@@ -122,6 +122,7 @@ const ignoredDirectories = new Set([
   ".scratch",
   ".turbo",
   ".template-boundary-check",
+  ".pnpm-store",
   "node_modules",
 ]);
 

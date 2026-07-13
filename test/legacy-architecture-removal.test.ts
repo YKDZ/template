@@ -219,6 +219,23 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
+  it("ignores local package-manager stores outside repository ownership", async () => {
+    const root = await fixture();
+    try {
+      await mkdir(path.join(root, ".pnpm-store/v11/files"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(root, ".pnpm-store/v11/files/third-party-cache"),
+        "Preset File build:run",
+      );
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects retired task selection from source, generated manifests, documentation, and builds", async () => {
     const root = await fixture();
     try {
