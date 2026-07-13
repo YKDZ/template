@@ -2,8 +2,8 @@
   "extends": ["//"],
   "tags": ["library"],
   "tasks": {
-    "build:run": {
-      "dependsOn": ["^build:run"],
+    "build": {
+      "dependsOn": ["^build"],
       "outputs": []
     }
   }

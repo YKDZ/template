@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,8 +53,11 @@ async function checkContributionTemplateSource(
   const formattedFiles = sourceFiles.filter((sourceFile) =>
     formattedTemplateSourceFile.test(sourceFile),
   );
-  const lintedFiles = sourceFiles.filter((sourceFile) =>
-    lintedTemplateSourceFile.test(sourceFile),
+  const lintedFiles = sourceFiles.filter(
+    (sourceFile) =>
+      lintedTemplateSourceFile.test(sourceFile) &&
+      !sourceFile.endsWith("/foundation/scripts/check-boundaries.ts") &&
+      !sourceFile.endsWith("/foundation/scripts/run-root-owned-task.ts"),
   );
   const rustSourceFiles = sourceFiles.filter((sourceFile) =>
     sourceFile.endsWith(".rs"),
@@ -107,18 +110,19 @@ async function checkContributionTemplateSource(
       operations: [...context.plan.operations],
     });
     await execa("pnpm", ["install", "--ignore-scripts"], { cwd: checkRoot });
-    await execa("pnpm", ["run", "typecheck:run"], { cwd: checkRoot });
+    await execa("pnpm", ["run", "typecheck"], { cwd: checkRoot });
+    await execa("pnpm", ["run", "lint"], { cwd: checkRoot });
     for (const definition of context.plan.blueprint.packages) {
-      const requiresTypecheck = context.plan.checks.some(
-        (check) =>
-          check.owner.kind === "package-boundary" &&
-          check.owner.path === definition.path &&
-          check.kind === "typescript-typecheck",
-      );
-      if (!requiresTypecheck) continue;
+      const manifest = JSON.parse(
+        await readFile(
+          path.join(checkRoot, definition.path, "package.json"),
+          "utf8",
+        ),
+      ) as { scripts?: Record<string, unknown> };
+      if (typeof manifest.scripts?.typecheck !== "string") continue;
       await execa(
         "pnpm",
-        ["--filter", `./${definition.path}`, "run", "typecheck:run"],
+        ["--filter", `./${definition.path}`, "run", "typecheck"],
         { cwd: checkRoot },
       );
     }

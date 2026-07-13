@@ -10,23 +10,6 @@ export type WorkspaceOrchestrationOwner = {
 
 export type ComponentOwner = PackageBoundaryOwner | WorkspaceOrchestrationOwner;
 
-export type CheckComponentKind =
-  | "typescript-typecheck"
-  | "oxc-lint"
-  | "oxc-format-check"
-  | "build"
-  | "unit-test"
-  | "e2e-test"
-  | "turbo-check"
-  | "turbo-package-typecheck"
-  | "turbo-package-build"
-  | "turbo-package-test"
-  | "turbo-package-e2e-test"
-  | "turbo-package-check"
-  | "rustfmt-check"
-  | "cargo-clippy"
-  | "cargo-test";
-
 export type FixComponentKind =
   | "oxc-format-write"
   | "oxc-lint-fix"
@@ -108,11 +91,6 @@ export function rustToolchainEnvironmentNeed(
   };
 }
 
-export type CheckComponent = {
-  readonly kind: CheckComponentKind;
-  readonly owner: ComponentOwner;
-};
-
 export type DeploymentCheckComponent = {
   readonly kind: "deployment-image";
   readonly owner: PackageBoundaryOwner;
@@ -127,12 +105,6 @@ export type FixComponent = {
   readonly owner: ComponentOwner;
 };
 
-export type CheckPlan = {
-  readonly components: CheckComponent[];
-  readonly environmentNeeds: CheckEnvironmentNeed[];
-  readonly deploymentChecks?: DeploymentCheckComponent[] | undefined;
-};
-
 export type FixPlan = {
   readonly components: FixComponent[];
 };
@@ -145,56 +117,36 @@ function renderTurboPackageFilter(owner: ComponentOwner): string {
   return `--filter './${owner.path}'`;
 }
 
-const turboAgentOutputArgs = [
-  "--output-logs=errors-only",
-  "--log-order=grouped",
+export const qualityTaskVocabulary = [
+  "boundaries",
+  "format:check",
+  "lint",
+  "typecheck",
+  "build",
+  "test",
+  "test:e2e",
 ] as const;
 
 export function renderTurboRunCommand(
   taskNames: readonly string[],
   args: readonly string[] = [],
+  options: {
+    readonly outputLogs?: "errors-only" | "full";
+    readonly continueAfterFailure?: boolean;
+    readonly taskPrefix?: boolean;
+  } = {},
 ): string {
-  return ["turbo run", ...taskNames, ...args, ...turboAgentOutputArgs].join(
-    " ",
-  );
-}
-
-export function checkComponentTaskName(component: CheckComponent): string {
-  return checkComponentTaskNames(component)[0] ?? "check:run";
-}
-
-function checkComponentTaskNames(component: CheckComponent): readonly string[] {
-  switch (component.kind) {
-    case "typescript-typecheck":
-    case "turbo-package-typecheck":
-      return ["typecheck:run"];
-    case "oxc-lint":
-    case "cargo-clippy":
-      return ["lint:run"];
-    case "oxc-format-check":
-    case "rustfmt-check":
-      return ["format:check:run"];
-    case "build":
-    case "turbo-package-build":
-      return ["build:run"];
-    case "unit-test":
-    case "cargo-test":
-    case "turbo-package-test":
-      return ["test:run"];
-    case "e2e-test":
-    case "turbo-package-e2e-test":
-      return ["test:e2e:run"];
-    case "turbo-check":
-    case "turbo-package-check":
-      return [
-        "format:check:run",
-        "lint:run",
-        "typecheck:run",
-        "build:run",
-        "test:run",
-        "test:e2e:run",
-      ];
-  }
+  return [
+    "turbo run",
+    ...taskNames,
+    ...args,
+    ...(options.continueAfterFailure
+      ? ["--continue=dependencies-successful"]
+      : []),
+    `--output-logs=${options.outputLogs ?? "errors-only"}`,
+    "--log-order=grouped",
+    ...(options.taskPrefix ? ["--log-prefix=task"] : []),
+  ].join(" ");
 }
 
 export function fixComponentTaskName(component: FixComponent): string {
@@ -218,56 +170,6 @@ function uniqueTaskNames(taskNames: readonly string[]): string[] {
   return [...new Set(taskNames)];
 }
 
-export function renderCheckLeafCommand(component: CheckComponent): string {
-  switch (component.kind) {
-    case "typescript-typecheck":
-      return "pnpm run typecheck";
-    case "oxc-lint":
-      return "pnpm run lint";
-    case "oxc-format-check":
-      return "pnpm run format:check";
-    case "build":
-      return "pnpm run build";
-    case "unit-test":
-      return "pnpm run test";
-    case "e2e-test":
-      return "pnpm run test:e2e";
-    case "turbo-check":
-      return renderTurboRunCommand(["check"]);
-    case "turbo-package-typecheck":
-      return renderTurboRunCommand(
-        ["typecheck"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-build":
-      return renderTurboRunCommand(
-        ["build"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-test":
-      return renderTurboRunCommand(
-        ["test"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-e2e-test":
-      return renderTurboRunCommand(
-        ["test:e2e"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-check":
-      return renderTurboRunCommand(
-        ["check"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "rustfmt-check":
-      return "cargo fmt --all -- --check";
-    case "cargo-clippy":
-      return "cargo clippy --workspace --all-targets -- -D warnings";
-    case "cargo-test":
-      return "cargo test --workspace";
-  }
-}
-
 export function renderFixLeafCommand(component: FixComponent): string {
   switch (component.kind) {
     case "oxc-format-write":
@@ -286,13 +188,11 @@ export function renderFixLeafCommand(component: FixComponent): string {
   }
 }
 
-export function renderRootCheckCommand(plan: CheckPlan): string {
-  return renderTurboRunCommand(
-    uniqueTaskNames([
-      ...plan.components.flatMap(checkComponentTaskNames),
-      "check:run",
-    ]),
-  );
+export function renderRootCheckCommand(): string {
+  return renderTurboRunCommand(qualityTaskVocabulary, [], {
+    continueAfterFailure: true,
+    taskPrefix: true,
+  });
 }
 
 export function deploymentCheckEnvironmentNeeds(
@@ -319,9 +219,9 @@ export function renderDeploymentCheckLeafCommand(
   return `pnpm --filter './${check.owner.path}' run ${deploymentCheckTaskName(check)}`;
 }
 
-export function renderDeploymentCheckCommand(
-  plan: Pick<CheckPlan, "deploymentChecks">,
-): string {
+export function renderDeploymentCheckCommand(plan: {
+  readonly deploymentChecks?: readonly DeploymentCheckComponent[];
+}): string {
   return uniqueTaskNames(
     (plan.deploymentChecks ?? []).map(renderDeploymentCheckLeafCommand),
   ).join(" && ");

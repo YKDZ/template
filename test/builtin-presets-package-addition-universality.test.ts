@@ -50,9 +50,8 @@ describe("Built-in Preset Package Addition universality", () => {
             packageLeafName: `durable-${additionDefinition.metadata.name}`,
           });
 
-          expect(addition.checks).toEqual(
-            expect.arrayContaining([...initialization.checks]),
-          );
+          expect(addition).not.toHaveProperty("checks");
+          expect(initialization).not.toHaveProperty("checks");
           expect(addition.fixes).toEqual(
             expect.arrayContaining([...initialization.fixes]),
           );

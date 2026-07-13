@@ -13,15 +13,14 @@ import {
   type EditorCustomizationCapability,
 } from "@ykdz/template-core/editor-customization";
 import type {
-  CheckComponent,
   CheckEnvironmentNeed,
   DeploymentCheckComponent,
   FixComponent,
 } from "@ykdz/template-core/module-graph";
 import {
-  checkComponentTaskName,
   fixComponentTaskName,
   playwrightBrowserAssetsEnvironmentNeed,
+  renderRootCheckCommand,
   renderTurboRunCommand,
   rustToolchainEnvironmentNeed,
   shellCheckEnvironmentNeed,
@@ -88,7 +87,6 @@ export type GeneratedRepositoryPlan = {
     readonly toolchain: BuiltInGenerationContext["toolchain"];
   };
   readonly operations: readonly RenderOperation[];
-  readonly checks: readonly CheckComponent[];
   readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   readonly deploymentChecks: readonly DeploymentCheckComponent[];
@@ -109,7 +107,7 @@ export type BuiltInPresetTemplateSourceCheckContext = {
 /**
  * The Foundation persists the non-rendering half of every Package
  * Contribution with the Generated Repository.  Package Addition cannot infer
- * check, fix, deployment, or maintenance semantics from a package name (or
+ * fix, deployment, or maintenance semantics from a package name (or
  * from a lossy subset of scripts), so this is the durable topology it reads.
  */
 /** Resolve an owned source handle for diagnostics and source checks. */
@@ -306,32 +304,6 @@ function existingPackageContribution(options: {
           ? (["vitest"] as const)
           : []),
       ];
-  const checks: CheckComponent[] = rust
-    ? [
-        { kind: "rustfmt-check", owner },
-        { kind: "cargo-clippy", owner },
-        { kind: "cargo-test", owner },
-      ]
-    : [
-        ...(scripts["typecheck:run"] === undefined
-          ? []
-          : [{ kind: "typescript-typecheck" as const, owner }]),
-        ...(scripts["lint:run"] === undefined
-          ? []
-          : [{ kind: "oxc-lint" as const, owner }]),
-        ...(scripts["format:check:run"] === undefined
-          ? []
-          : [{ kind: "oxc-format-check" as const, owner }]),
-        ...(scripts["build:run"] === undefined
-          ? []
-          : [{ kind: "build" as const, owner }]),
-        ...(scripts["test:run"] === undefined
-          ? []
-          : [{ kind: "unit-test" as const, owner }]),
-        ...(scripts["test:e2e:run"] === undefined
-          ? []
-          : [{ kind: "e2e-test" as const, owner }]),
-      ];
   return {
     definition: options.definition,
     manifest: record,
@@ -346,7 +318,6 @@ function existingPackageContribution(options: {
           : {},
     },
     operations: [],
-    checks,
     fixes: rust
       ? [{ kind: "rustfmt-write", owner }]
       : [
@@ -359,7 +330,7 @@ function existingPackageContribution(options: {
         ],
     environmentNeeds: [
       ...(rust ? [rustToolchainEnvironmentNeed(owner)] : []),
-      ...(scripts["test:e2e:run"] === undefined
+      ...(scripts["test:e2e"] === undefined
         ? []
         : [
             playwrightBrowserAssetsEnvironmentNeed({
@@ -452,28 +423,6 @@ function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
 }
 
-function rootCheckCommand(checks: readonly CheckComponent[]): string {
-  const rootTasks = unique(
-    checks
-      .filter((check) => check.owner.kind === "workspace-orchestration")
-      .map(checkComponentTaskName),
-  );
-  const packageChecks = checks.filter(
-    (check) => check.owner.kind === "package-boundary",
-  );
-  const packageTasks = unique(packageChecks.map(checkComponentTaskName));
-  const packageFilters = unique(
-    packageChecks.map((check) => `--filter './${check.owner.path}'`),
-  );
-  return [
-    "pnpm run check:boundaries",
-    ...rootTasks.map((task) => `pnpm run ${task}`),
-    ...(packageTasks.length === 0
-      ? []
-      : [renderTurboRunCommand(packageTasks, packageFilters)]),
-  ].join(" && ");
-}
-
 function rootFixCommand(fixes: readonly FixComponent[]): string {
   const rootTasks = unique(
     fixes
@@ -558,20 +507,6 @@ function foundationPlan(options: {
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
-  const foundationChecks: CheckComponent[] = [
-    {
-      kind: "oxc-format-check",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "oxc-lint",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "typescript-typecheck",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-  ];
   const foundationFixes: FixComponent[] = [
     {
       kind: "oxc-format-write",
@@ -581,10 +516,6 @@ function foundationPlan(options: {
       kind: "oxc-lint-fix",
       owner: { kind: "workspace-orchestration", path: "." },
     },
-  ];
-  const checks = [
-    ...foundationChecks,
-    ...options.contributions.flatMap((item) => item.checks),
   ];
   const fixes = [
     ...foundationFixes,
@@ -619,13 +550,17 @@ function foundationPlan(options: {
     throw new Error("Foundation requires one coordinated Rust toolchain");
   }
   const workspacePackageGlobs = [
+    "apps/*",
+    "packages/*",
     ...new Set([
-      ...options.blueprint.packages.map(
-        (definition) => `${definition.path.split("/")[0]}/*`,
-      ),
-      ...options.contributions.flatMap(
-        (contribution) => contribution.foundation.workspacePackageGlobs ?? [],
-      ),
+      ...options.blueprint.packages
+        .map((definition) => `${definition.path.split("/")[0]}/*`)
+        .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
+      ...options.contributions
+        .flatMap(
+          (contribution) => contribution.foundation.workspacePackageGlobs ?? [],
+        )
+        .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
     ]),
   ];
   const editorCustomization = editorCustomizationForCapabilities(
@@ -670,8 +605,8 @@ function foundationPlan(options: {
     private: true,
     type: "module",
     scripts: {
-      check: rootCheckCommand(checks),
-      "check:boundaries": "turbo boundaries --no-color",
+      check: renderRootCheckCommand(),
+      boundaries: "node scripts/check-boundaries.ts",
       ...(deploymentChecks.length === 0
         ? {}
         : {
@@ -683,12 +618,11 @@ function foundationPlan(options: {
               .join(" && "),
           }),
       fix: rootFixCommand(fixes),
-      "format:check:run": "oxfmt --list-different --config oxfmt.config.ts .",
+      "format:check": "node scripts/run-root-owned-task.ts format:check",
       "format:write:run": "oxfmt --write --config oxfmt.config.ts .",
-      "lint:run": "oxlint --quiet --format=unix --config oxlint.config.ts .",
+      lint: "node scripts/run-root-owned-task.ts lint",
       "lint:fix:run": "oxlint --format=unix --config oxlint.config.ts . --fix",
-      typecheck: "pnpm run typecheck:run",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+      typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
       "@types/node": "catalog:",
@@ -708,7 +642,6 @@ function foundationPlan(options: {
     ]),
   );
   const dependencyOverrides = {
-    "valibot>typescript": "-",
     ...(Object.hasOwn(dependencyCatalog, "vue") ||
     Object.hasOwn(dependencyCatalog, "pinia")
       ? vuePnpmDependencyOverrides
@@ -733,13 +666,20 @@ function foundationPlan(options: {
                   `  ${JSON.stringify(name)}: ${String(version)}`,
               )
               .join("\n"),
-            DEPENDENCY_OVERRIDES: Object.entries(dependencyOverrides)
-              .toSorted(([left], [right]) => left.localeCompare(right))
-              .map(
-                ([dependency, version]) =>
-                  `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
-              )
-              .join("\n"),
+            DEPENDENCY_OVERRIDES_SECTION:
+              Object.keys(dependencyOverrides).length === 0
+                ? ""
+                : [
+                    "",
+                    "overrides:",
+                    ...Object.entries(dependencyOverrides)
+                      .toSorted(([left], [right]) => left.localeCompare(right))
+                      .map(
+                        ([dependency, version]) =>
+                          `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
+                      ),
+                    "",
+                  ].join("\n"),
           },
           ...(options.mode === "addition" ? { overwrite: true } : {}),
         }
@@ -755,7 +695,7 @@ function foundationPlan(options: {
     from: ".github/workflows/check.dynamic.template",
     to: ".github/workflows/check.yml",
     replacements: projectCheckWorkflowTemplateReplacements({
-      checkPlan: { components: checks, environmentNeeds, deploymentChecks },
+      environment: { needs: environmentNeeds, deploymentChecks },
     }),
     ...(options.mode === "addition" ? { overwrite: true } : {}),
   };
@@ -788,14 +728,20 @@ function foundationPlan(options: {
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: ".pnpmfile.cts",
-      to: ".pnpmfile.cts",
+      from: "turbo.json",
+      to: "turbo.json",
     },
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: "turbo.json",
-      to: "turbo.json",
+      from: "scripts/check-boundaries.ts",
+      to: "scripts/check-boundaries.ts",
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/run-root-owned-task.ts",
+      to: "scripts/run-root-owned-task.ts",
     },
     {
       kind: "copyFile",
@@ -989,7 +935,6 @@ function foundationPlan(options: {
       toolchain: options.context.toolchain,
     },
     operations,
-    checks,
     fixes,
     environmentNeeds,
     deploymentChecks,

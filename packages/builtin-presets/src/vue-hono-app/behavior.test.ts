@@ -80,7 +80,10 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
           library: { dependencies: { allow: ["library"] } },
         },
       },
-      tasks: { "build:run": { dependsOn: ["^build:run"] } },
+      tasks: {
+        build: { dependsOn: ["^build"] },
+        typecheck: { dependsOn: ["^typecheck"] },
+      },
     });
     expect(
       await readFile(path.join(targetDir, "apps/api/src/runtime.ts"), "utf8"),

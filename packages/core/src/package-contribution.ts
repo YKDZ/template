@@ -1,6 +1,5 @@
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
-  CheckComponent,
   CheckEnvironmentNeed,
   DeploymentCheckComponent,
   FixComponent,
@@ -38,7 +37,6 @@ export type PackageContribution = {
   readonly operations: readonly RenderOperation[];
   /** Typed requirements consumed by the Foundation for coordinated root outputs. */
   readonly foundation: FoundationContribution;
-  readonly checks: readonly CheckComponent[];
   readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   /** Deployment checks are package-owned and composed by the Foundation. */

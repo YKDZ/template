@@ -19,7 +19,6 @@ minimumReleaseAgeStrict: true
 
 overrides:
   "pinia>typescript": "-"
-  "valibot>typescript": "-"
   "vue>typescript": "-"
 
 catalog:

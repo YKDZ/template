@@ -1,6 +1,5 @@
 import {
   playwrightBrowserAssetsEnvironmentNeed,
-  type CheckComponent,
   type FixComponent,
 } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
@@ -35,18 +34,16 @@ const sharedVueSourceFiles = [
 
 export function vueApplicationScripts(): Record<string, string> {
   return {
-    "build:run": "vite build",
+    build: "vite build",
     dev: "vite",
-    "format:check:run":
-      "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run":
-      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     "lint:fix:run":
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
-    "test:run": "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e:run": "node scripts/run-playwright.ts",
+    test: "vitest run --reporter=agent --silent=passed-only",
+    "test:e2e": "node scripts/run-playwright.ts",
   };
 }
 
@@ -71,20 +68,6 @@ export function vueTypecheckRunnerSourceOperation(
     from: "typescript/run-vue-tsc.ts",
     to: `${packagePath}/scripts/run-vue-tsc.ts`,
   };
-}
-
-export function vueApplicationChecks(
-  packagePath: string,
-): readonly CheckComponent[] {
-  const owner = { kind: "package-boundary" as const, path: packagePath };
-  return [
-    { kind: "typescript-typecheck", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "oxc-format-check", owner },
-    { kind: "build", owner },
-    { kind: "unit-test", owner },
-    { kind: "e2e-test", owner },
-  ];
 }
 
 export function vueApplicationFixes(

@@ -19,7 +19,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { tsLibDefinition } from "./definition.ts";
 
 describe("ts-lib Built-in Preset Definition behavior", () => {
-  it("owns its source, explicit exposure, catalog dependency, and package checks", () => {
+  it("owns conventional task scripts without a package check registration", () => {
     const context = {
       targetDir: "/tmp/demo-library",
       projectName: "demo-library",
@@ -40,18 +40,50 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       dependencies: { valibot: "catalog:" },
       exports: { ".": { default: "./src/index.ts" } },
       imports: { "#/*": { default: "./src/*.ts" } },
+      scripts: {
+        "format:check":
+          "oxfmt --list-different --config ../../oxfmt.config.ts .",
+        "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+        lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
+        "lint:fix:run":
+          "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+        typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
+      },
     });
-    expect(contribution.checks.map((check) => check.kind)).toEqual([
-      "typescript-typecheck",
-      "oxc-lint",
-      "oxc-format-check",
-    ]);
+    expect(contribution).not.toHaveProperty("checks");
     expect(contribution.operations).toContainEqual({
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "turbo.json",
       to: "packages/demo-library/turbo.json",
     });
+
+    const plan = planGeneratedRepositoryInitialization({
+      definition: tsLibDefinition,
+      context,
+    });
+    const rootManifest = plan.operations.find(
+      (operation) =>
+        operation.kind === "writeJson" && operation.to === "package.json",
+    );
+    expect(rootManifest).toMatchObject({
+      value: {
+        scripts: {
+          check:
+            "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+        },
+      },
+    });
+    expect(plan).not.toHaveProperty("checks");
+    expect(plan.operations).toContainEqual(
+      expect.objectContaining({
+        kind: "writeTextTemplate",
+        to: "pnpm-workspace.yaml",
+        replacements: expect.objectContaining({
+          WORKSPACE_PACKAGE_GLOBS: "  - apps/*\n  - packages/*",
+        }),
+      }),
+    );
   });
 
   it("renders its owned source through opaque handles and persists durable addition facts", async () => {

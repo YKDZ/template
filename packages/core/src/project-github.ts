@@ -1,6 +1,6 @@
 import {
   type CheckEnvironmentNeed,
-  type CheckPlan,
+  type DeploymentCheckComponent,
   deploymentCheckEnvironmentNeeds,
   deploymentCheckTaskName,
   renderPlaywrightBrowserInstallCommand,
@@ -43,7 +43,10 @@ export type DependencyMaintenancePolicy = {
 };
 
 type ProjectCheckWorkflowOptions = {
-  readonly checkPlan: CheckPlan;
+  readonly environment: {
+    readonly needs: readonly CheckEnvironmentNeed[];
+    readonly deploymentChecks?: readonly DeploymentCheckComponent[];
+  };
   readonly capability?: CiCapability | undefined;
   readonly environmentPreparation?:
     | Partial<CiEnvironmentPreparation>
@@ -73,11 +76,9 @@ export function projectCheckWorkflow(
   };
   const requiresRustToolchain =
     environmentPreparation.rustToolchain ||
-    options.checkPlan.environmentNeeds.some(
-      (need) => need.kind === "rust-toolchain",
-    );
+    options.environment.needs.some((need) => need.kind === "rust-toolchain");
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
-  const deploymentChecks = options.checkPlan.deploymentChecks ?? [];
+  const deploymentChecks = options.environment.deploymentChecks ?? [];
   const needsDocker = deploymentChecks.some((check) =>
     deploymentCheckEnvironmentNeeds(check).some(
       (need) => need.kind === "docker-engine",
@@ -126,7 +127,7 @@ export function projectCheckWorkflow(
 
   lines.push(`      - run: ${taskLayer.installCommand}`);
   const checkEnvironmentLines: string[] = [];
-  for (const need of options.checkPlan.environmentNeeds) {
+  for (const need of options.environment.needs) {
     if (need.kind === "rust-toolchain") continue;
     checkEnvironmentLines.push(
       `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
@@ -163,22 +164,23 @@ function rustCiPreparationLines(): string[] {
 
 /** Limited substitutions for the Foundation-owned workflow Template Source. */
 export function projectCheckWorkflowTemplateReplacements(options: {
-  readonly checkPlan: CheckPlan;
+  readonly environment: {
+    readonly needs: readonly CheckEnvironmentNeed[];
+    readonly deploymentChecks?: readonly DeploymentCheckComponent[];
+  };
   readonly environmentPreparation?: Partial<CiEnvironmentPreparation>;
 }): Record<string, string> {
   const requiresRustToolchain =
     options.environmentPreparation?.rustToolchain === true ||
-    options.checkPlan.environmentNeeds.some(
-      (need) => need.kind === "rust-toolchain",
-    );
-  const deploymentChecks = options.checkPlan.deploymentChecks ?? [];
+    options.environment.needs.some((need) => need.kind === "rust-toolchain");
+  const deploymentChecks = options.environment.deploymentChecks ?? [];
   const needsDocker = deploymentChecks.some((check) =>
     deploymentCheckEnvironmentNeeds(check).some(
       (need) => need.kind === "docker-engine",
     ),
   );
   const deploymentCheck = deploymentChecks[0];
-  const environmentSteps = options.checkPlan.environmentNeeds
+  const environmentSteps = options.environment.needs
     .filter((need) => need.kind !== "rust-toolchain")
     .map((need) =>
       [

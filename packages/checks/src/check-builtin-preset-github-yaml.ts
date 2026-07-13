@@ -101,9 +101,8 @@ function expectedGithubTemplate(
   }
 
   return projectCheckWorkflow({
-    checkPlan: {
-      components: [...plan.checks],
-      environmentNeeds: [...plan.environmentNeeds],
+    environment: {
+      needs: [...plan.environmentNeeds],
       deploymentChecks: [...plan.deploymentChecks],
     },
   });

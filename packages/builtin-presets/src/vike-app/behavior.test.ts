@@ -113,9 +113,9 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       operations: [...plan.operations],
     });
 
-    expect(
-      await readFile(path.join(targetDir, ".pnpmfile.cts"), "utf8"),
-    ).toContain("readPackage");
+    await expect(
+      stat(path.join(targetDir, ".pnpmfile.cts")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
 
     expect(
       JSON.parse(
@@ -167,9 +167,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(dockerfile).toContain(
       "pnpm exec turbo prune @demo/web @demo/db-migrations --docker",
     );
-    expect(dockerfile).toContain(
-      "COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./",
-    );
+    expect(dockerfile).not.toContain(".pnpmfile.cts");
     expect(dockerfile).toContain('ENV DATABASE_PACKAGE_NAME="@demo/db"');
     expect(dockerfile).toContain("for attempt in 1 2 3; do");
     expect(
@@ -213,7 +211,8 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     ).toMatchObject({
       scripts: {
         "check:deployment": "pnpm --filter './apps/web' run check:deployment",
-        check: expect.stringContaining("pnpm run check:boundaries"),
+        check:
+          "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
         fix: expect.stringContaining("pnpm run format:write:run"),
       },
     });

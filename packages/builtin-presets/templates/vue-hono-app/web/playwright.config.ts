@@ -24,7 +24,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `pnpm --dir ../api run build:run && PORT=${apiPort} pnpm --dir ../api run start`,
+      command: `pnpm --dir ../api run build && PORT=${apiPort} pnpm --dir ../api run start`,
       url: apiHealthUrl,
       reuseExistingServer: false,
     },

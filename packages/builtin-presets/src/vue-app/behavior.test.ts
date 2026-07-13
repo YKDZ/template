@@ -47,14 +47,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       exports: { ".": { default: "./src/main.ts", types: "./src/main.ts" } },
       imports: { "#/*": { default: "./src/*.ts", types: "./src/*.ts" } },
     });
-    expect(contribution.checks.map((check) => check.kind)).toEqual([
-      "typescript-typecheck",
-      "oxc-lint",
-      "oxc-format-check",
-      "build",
-      "unit-test",
-      "e2e-test",
-    ]);
+    expect(contribution).not.toHaveProperty("checks");
     expect(contribution.environmentNeeds).toMatchObject([
       { kind: "playwright-browser-assets", browser: "chromium" },
     ]);

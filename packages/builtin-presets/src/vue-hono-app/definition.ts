@@ -1,7 +1,4 @@
-import {
-  type CheckComponent,
-  type FixComponent,
-} from "@ykdz/template-core/module-graph";
+import { type FixComponent } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
@@ -12,7 +9,6 @@ import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import {
   sharedVueSourceOperations,
-  vueApplicationChecks,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
   vueApplicationFixes,
@@ -23,26 +19,23 @@ import { templateSources } from "../template-sources.ts";
 
 function apiScripts(): Record<string, string> {
   return {
-    "build:run":
-      "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
+    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     dev: "node --watch src/server.ts",
-    "format:check:run":
-      "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run":
-      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     "lint:fix:run":
       "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
-    "test:run": "vitest run --reporter=agent --silent=passed-only",
-    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+    test: "vitest run --reporter=agent --silent=passed-only",
+    typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
 function webScripts(): Record<string, string> {
   return {
     ...vueApplicationScripts(),
-    "typecheck:run": "node scripts/run-vue-tsc.ts --build --pretty false",
+    typecheck: "node scripts/run-vue-tsc.ts --build --pretty false",
   };
 }
 
@@ -71,13 +64,6 @@ function apiContribution(context: GenerationContext): PackageContribution {
     imports: { "#/*": { default: "./dist/*.js", types: "./src/*.ts" } },
   };
   const owner = { kind: "package-boundary" as const, path: definition.path };
-  const checks: CheckComponent[] = [
-    { kind: "typescript-typecheck", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "oxc-format-check", owner },
-    { kind: "build", owner },
-    { kind: "unit-test", owner },
-  ];
   const fixes: FixComponent[] = [
     { kind: "oxc-format-write", owner },
     { kind: "oxc-lint-fix", owner },
@@ -124,7 +110,6 @@ function apiContribution(context: GenerationContext): PackageContribution {
       engines: { node: context.toolchain.nodeLtsMajor },
     },
     operations,
-    checks,
     fixes,
     environmentNeeds: [],
     foundation: packageFoundation(),
@@ -169,7 +154,6 @@ function webContribution(context: GenerationContext): PackageContribution {
       scripts: webScripts(),
     }),
     operations,
-    checks: vueApplicationChecks(definition.path),
     fixes: vueApplicationFixes(definition.path),
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
     foundation: packageFoundation(),

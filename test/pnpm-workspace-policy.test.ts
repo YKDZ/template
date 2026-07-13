@@ -90,6 +90,17 @@ async function dockerIsAvailable(): Promise<boolean> {
 const hasDocker = await dockerIsAvailable();
 
 describe("pnpm Workspace Policy", () => {
+  it("renders only explicitly requested dependency overrides", () => {
+    const workspace = renderGeneratedPnpmWorkspaceYaml({
+      dependencies: [],
+      overrides: { "example>peer": "-" },
+    });
+
+    expect(workspace).toContain('"example>peer": "-"');
+    expect(workspace).not.toContain("valibot>typescript");
+    expect(workspace).not.toContain("pnpmfile");
+  });
+
   it("selects a Node-only Definition by contribution semantics", () => {
     const context = {
       targetDir: "/tmp/pnpm-policy-definition",

@@ -18,7 +18,7 @@ RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
   && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"
 
 FROM base AS pruner
-COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm fetch
 COPY package.json turbo.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -31,13 +31,12 @@ RUN pnpm exec turbo prune {{WEB_PACKAGE_NAME}} {{DB_MIGRATIONS_PACKAGE_NAME}} --
 FROM base AS build
 COPY --from=pruner /repo/out/json/pnpm-lock.yaml ./pnpm-lock.yaml
 COPY --from=pruner /repo/out/json/pnpm-workspace.yaml ./pnpm-workspace.yaml
-COPY --from=pruner /repo/.pnpmfile.cts ./.pnpmfile.cts
 RUN pnpm fetch
 COPY --from=pruner /repo/out/json/ ./
 RUN pnpm install --offline --frozen-lockfile
 COPY --from=pruner /repo/out/full/ ./
-RUN pnpm --filter ./packages/db run build:run
-RUN pnpm --filter ./apps/web run build:run
+RUN pnpm --filter ./packages/db run build
+RUN pnpm --filter ./apps/web run build
 RUN pnpm --filter ./apps/web deploy --prod /runtime-deploy
 RUN pnpm --filter ./packages/db-migrations deploy --prod /migration-deploy
 

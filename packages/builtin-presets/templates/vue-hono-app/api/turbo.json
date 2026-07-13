@@ -2,7 +2,7 @@
   "extends": ["//"],
   "tags": ["app"],
   "tasks": {
-    "build:run": {
+    "build": {
       "outputs": ["dist/**"]
     }
   }
