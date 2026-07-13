@@ -60,4 +60,14 @@ describe("npm release workflow", () => {
     expect(workflow).not.toContain("run: pnpm run check\n");
     expect(workflow).not.toContain("run: pnpm run check:fixtures");
   });
+
+  it("keeps focused generated links as a durable CI gate", async () => {
+    const workflow = await readFile(
+      path.join(repoRoot, ".github/workflows/check.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain("run: pnpm run check:focused");
+    expect(workflow).toContain("run: pnpm install --frozen-lockfile");
+  });
 });

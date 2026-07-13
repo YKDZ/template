@@ -37,7 +37,7 @@ export type ShellCheckEnvironmentNeed = {
   };
 };
 
-/** Rust check components require the maintained toolchain in local and CI plans. */
+/** Rust task leaves require the maintained toolchain in local and CI plans. */
 export type RustToolchainEnvironmentNeed = {
   readonly kind: "rust-toolchain";
   readonly owner: ComponentOwner;
@@ -85,7 +85,7 @@ export type CheckEnvironmentNeedFact =
   | Pick<ShellCheckEnvironmentNeed, "kind" | "owner">
   | Pick<RustToolchainEnvironmentNeed, "kind" | "owner" | "toolchain">;
 
-/** Deployment preparation is likewise durable without a deployment owner. */
+/** Deployment preparation is likewise durable without selecting an executing package. */
 export type DeploymentEnvironmentNeedFact = Pick<
   DockerEngineEnvironmentNeed,
   "kind"

@@ -11,7 +11,6 @@ dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:
   - build
-  - build:run
 
 minimumReleaseAge: 1440
 

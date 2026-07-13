@@ -147,7 +147,7 @@ describe("pnpm Workspace Policy", () => {
           name: "@fixture/provider",
           version: "0.0.0",
           scripts: {
-            "build:run":
+            build:
               "node -e \"require('node:fs').copyFileSync('source.txt', 'dist/version.txt')\"",
           },
         })}\n`,
@@ -192,7 +192,7 @@ describe("pnpm Workspace Policy", () => {
     await writeFile(path.join(provider, "source.txt"), "after\n");
     await execa(
       "corepack",
-      ["pnpm@11.11.0", "--filter", "@fixture/provider", "run", "build:run"],
+      ["pnpm@11.11.0", "--filter", "@fixture/provider", "run", "build"],
       { cwd: root, env: environment },
     );
 

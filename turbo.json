@@ -92,6 +92,10 @@
         "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
       ]
     },
+    "check:focused": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "check:deployment": {
       "dependsOn": ["^build"],
       "cache": false,

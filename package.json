@@ -7,6 +7,7 @@
     "build": "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     "check": "turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
     "check:fixtures": "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
+    "check:focused": "turbo run check:focused --output-logs=errors-only --log-order=grouped",
     "check:generated": "turbo run check:generated --output-logs=errors-only --log-order=grouped",
     "check:deployment": "turbo run check:deployment --output-logs=errors-only --log-order=grouped",
     "check:templates": "turbo run check:templates --output-logs=errors-only --log-order=grouped",

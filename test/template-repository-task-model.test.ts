@@ -34,6 +34,10 @@ describe("Template Repository native task model", () => {
     expect(scripts.build).toBe(
       "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     );
+    expect(scripts["check:focused"]).toBe(
+      "turbo run check:focused --output-logs=errors-only --log-order=grouped",
+    );
+    expect(scripts.check).not.toContain("check:focused");
 
     for (const task of [
       "boundaries",
@@ -99,6 +103,7 @@ describe("Template Repository native task model", () => {
     expect(tasks["test:e2e"]?.dependsOn).toContain("build");
     expect(tasks["test:e2e"]?.cache).toBe(false);
     expect(tasks["check:templates"]?.dependsOn).toContain("^build");
+    expect(tasks["check:focused"]?.dependsOn).toContain("^build");
     expect(tasks["check:deployment"]?.cache).toBe(false);
     expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");
     expect(tasks.boundaries?.cache).toBe(false);
@@ -159,7 +164,11 @@ describe("Template Repository native task model", () => {
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
-    expect(taskIds.filter((task) => task === "@ykdz/template-checks#check:templates")).toHaveLength(1);
+    expect(
+      taskIds.filter(
+        (task) => task === "@ykdz/template-checks#check:templates",
+      ),
+    ).toHaveLength(1);
     expect(
       taskIds.filter(
         (task) => task === "@ykdz/template-builtin-presets#check:templates",

@@ -388,7 +388,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
     "injectWorkspacePackages: true",
     "dedupeInjectedDeps: false",
     "syncInjectedDepsAfterScripts:",
-    "  - build:run",
+    "  - build",
     "minimumReleaseAge: 1440",
     "minimumReleaseAgeStrict: true",
     "",

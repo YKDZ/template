@@ -93,7 +93,7 @@ describe("Preset Registry generated scenarios", () => {
 
   it("derives focused Project Link scenarios from Definition contributions", async () => {
     const focused = deriveFocusedProjectLinkScenarios();
-    expect(focused).not.toHaveLength(0);
+    expect(focused).toHaveLength(5);
     for (const scenario of focused) {
       expect(scenario.addition?.planPackageAddition !== undefined).toBe(true);
       expect(scenario.linkFrom).toHaveLength(1);

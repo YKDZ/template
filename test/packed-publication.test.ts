@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +7,78 @@ import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
+
+async function generatedTextFiles(
+  root: string,
+  relative = "",
+): Promise<readonly { readonly path: string; readonly source: string }[]> {
+  const files: { path: string; source: string }[] = [];
+  for (const entry of await readdir(path.join(root, relative), {
+    withFileTypes: true,
+  })) {
+    const child = path.join(relative, entry.name);
+    if (entry.isDirectory()) {
+      if (!new Set([".git", "node_modules", ".turbo"]).has(entry.name)) {
+        files.push(...(await generatedTextFiles(root, child)));
+      }
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    try {
+      files.push({
+        path: child,
+        source: await readFile(path.join(root, child), "utf8"),
+      });
+    } catch {
+      // Binary generated assets are outside the task-model text contract.
+    }
+  }
+  return files;
+}
+
+async function expectNativeTaskModel(projectDir: string): Promise<void> {
+  const manifest = JSON.parse(
+    await readFile(path.join(projectDir, "package.json"), "utf8"),
+  ) as { readonly scripts: Record<string, string> };
+  const taskModel = JSON.stringify({
+    scripts: manifest.scripts,
+    turbo: JSON.parse(
+      await readFile(path.join(projectDir, "turbo.json"), "utf8"),
+    ),
+  });
+
+  expect(Object.keys(manifest.scripts)).not.toEqual(
+    expect.arrayContaining([
+      expect.stringMatching(/:(?:run|root)$/u),
+      "transit",
+    ]),
+  );
+  for (const command of [
+    manifest.scripts.check,
+    manifest.scripts.fix,
+    manifest.scripts["check:deployment"],
+  ]) {
+    if (command !== undefined) expect(command).not.toContain("--filter");
+  }
+  expect(taskModel).not.toMatch(/(?:Check|Fix) (?:Component|Plan)/u);
+  expect(taskModel).not.toMatch(/Deployment Check Component/u);
+  expect(taskModel).not.toMatch(/deployment[\s-]*(?:task[\s-]*)?owner/iu);
+
+  const fullTree = await generatedTextFiles(projectDir);
+  for (const file of fullTree) {
+    expect(file.source).not.toMatch(/\b[\p{L}\p{N}_-]+:(?:run|root)\b/iu);
+    expect(file.source).not.toMatch(/\btransit\b/iu);
+    expect(file.source).not.toMatch(
+      /(?:Check|Fix) (?:Component|Plan)|Deployment Check Component/iu,
+    );
+  }
+
+  const retiredBuild = await execa("pnpm", ["run", "build:run"], {
+    cwd: projectDir,
+    reject: false,
+  });
+  expect(retiredBuild.exitCode).not.toBe(0);
+}
 
 describe("packed public CLI consumer", () => {
   it("runs the archive alone: import, help, every initialization, and package addition", async () => {
@@ -97,6 +169,9 @@ describe("packed public CLI consumer", () => {
             },
           },
         );
+        await expectNativeTaskModel(
+          path.join(consumer, "generated", definition.name),
+        );
       }
       const expectedAddableDefinitions = builtInPresetRegistry
         .all()
@@ -129,6 +204,9 @@ describe("packed public CLI consumer", () => {
         );
         if (result.exitCode === 0) {
           completedAdditions.push(candidate.name);
+          await expectNativeTaskModel(
+            path.join(consumer, "generated", candidate.name),
+          );
         }
       }
       expect(completedAdditions.toSorted()).toEqual(expectedAddableDefinitions);
