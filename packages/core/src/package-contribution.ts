@@ -2,7 +2,6 @@ import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
   CheckEnvironmentNeed,
   DeploymentCheckComponent,
-  FixComponent,
 } from "./module-graph.ts";
 import type { PackageDefinition } from "./project-blueprint-v2.ts";
 import type { DependencyMaintenancePolicy } from "./project-github.ts";
@@ -37,7 +36,6 @@ export type PackageContribution = {
   readonly operations: readonly RenderOperation[];
   /** Typed requirements consumed by the Foundation for coordinated root outputs. */
   readonly foundation: FoundationContribution;
-  readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   /** Deployment checks are package-owned and composed by the Foundation. */
   readonly deploymentChecks?: readonly DeploymentCheckComponent[];

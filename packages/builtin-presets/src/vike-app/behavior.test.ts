@@ -213,7 +213,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         "check:deployment": "pnpm --filter './apps/web' run check:deployment",
         check:
           "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
-        fix: expect.stringContaining("pnpm run format:write:run"),
+        fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
       },
     });
   });

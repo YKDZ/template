@@ -15,13 +15,11 @@ import {
 import type {
   CheckEnvironmentNeed,
   DeploymentCheckComponent,
-  FixComponent,
 } from "@ykdz/template-core/module-graph";
 import {
-  fixComponentTaskName,
   playwrightBrowserAssetsEnvironmentNeed,
+  renderFixCommand,
   renderRootCheckCommand,
-  renderTurboRunCommand,
   rustToolchainEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
@@ -87,7 +85,6 @@ export type GeneratedRepositoryPlan = {
     readonly toolchain: BuiltInGenerationContext["toolchain"];
   };
   readonly operations: readonly RenderOperation[];
-  readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   readonly deploymentChecks: readonly DeploymentCheckComponent[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
@@ -318,16 +315,6 @@ function existingPackageContribution(options: {
           : {},
     },
     operations: [],
-    fixes: rust
-      ? [{ kind: "rustfmt-write", owner }]
-      : [
-          ...(scripts["format:write:run"] === undefined
-            ? []
-            : [{ kind: "oxc-format-write" as const, owner }]),
-          ...(scripts["lint:fix:run"] === undefined
-            ? []
-            : [{ kind: "oxc-lint-fix" as const, owner }]),
-        ],
     environmentNeeds: [
       ...(rust ? [rustToolchainEnvironmentNeed(owner)] : []),
       ...(scripts["test:e2e"] === undefined
@@ -419,31 +406,6 @@ function existingDependencyMaintenancePolicy(
   };
 }
 
-function unique<T>(values: readonly T[]): T[] {
-  return [...new Set(values)];
-}
-
-function rootFixCommand(fixes: readonly FixComponent[]): string {
-  const rootTasks = unique(
-    fixes
-      .filter((fix) => fix.owner.kind === "workspace-orchestration")
-      .map(fixComponentTaskName),
-  );
-  const packageFixes = fixes.filter(
-    (fix) => fix.owner.kind === "package-boundary",
-  );
-  const packageTasks = unique(packageFixes.map(fixComponentTaskName));
-  const packageFilters = unique(
-    packageFixes.map((fix) => `--filter './${fix.owner.path}'`),
-  );
-  return [
-    ...rootTasks.map((task) => `pnpm run ${task}`),
-    ...(packageTasks.length === 0
-      ? []
-      : [renderTurboRunCommand(packageTasks, packageFilters)]),
-  ].join(" && ");
-}
-
 function devcontainerDockerfileOperations(options: {
   readonly context: BuiltInGenerationContext;
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
@@ -507,20 +469,6 @@ function foundationPlan(options: {
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
-  const foundationFixes: FixComponent[] = [
-    {
-      kind: "oxc-format-write",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "oxc-lint-fix",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-  ];
-  const fixes = [
-    ...foundationFixes,
-    ...options.contributions.flatMap((item) => item.fixes),
-  ];
   const environmentNeeds = options.contributions.flatMap(
     (item) => item.environmentNeeds,
   );
@@ -617,11 +565,11 @@ function foundationPlan(options: {
               )
               .join(" && "),
           }),
-      fix: rootFixCommand(fixes),
+      fix: renderFixCommand(),
       "format:check": "node scripts/run-root-owned-task.ts format:check",
-      "format:write:run": "oxfmt --write --config oxfmt.config.ts .",
+      "format:write": "node scripts/run-root-owned-task.ts format:write",
       lint: "node scripts/run-root-owned-task.ts lint",
-      "lint:fix:run": "oxlint --format=unix --config oxlint.config.ts . --fix",
+      "lint:fix": "node scripts/run-root-owned-task.ts lint:fix",
       typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
@@ -935,7 +883,6 @@ function foundationPlan(options: {
       toolchain: options.context.toolchain,
     },
     operations,
-    fixes,
     environmentNeeds,
     deploymentChecks,
     manifests: [

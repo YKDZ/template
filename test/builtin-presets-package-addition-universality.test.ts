@@ -52,9 +52,8 @@ describe("Built-in Preset Package Addition universality", () => {
 
           expect(addition).not.toHaveProperty("checks");
           expect(initialization).not.toHaveProperty("checks");
-          expect(addition.fixes).toEqual(
-            expect.arrayContaining([...initialization.fixes]),
-          );
+          expect(addition).not.toHaveProperty("fixes");
+          expect(initialization).not.toHaveProperty("fixes");
           expect(addition.environmentNeeds).toEqual(
             expect.arrayContaining([...initialization.environmentNeeds]),
           );

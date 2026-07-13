@@ -13,10 +13,9 @@ import { templateSources } from "../template-sources.ts";
 function packageScripts(): Record<string, string> {
   return {
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -83,16 +82,6 @@ function libraryContribution(options: {
       scripts: packageScripts(),
     },
     operations,
-    fixes: [
-      {
-        kind: "oxc-format-write",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-      {
-        kind: "oxc-lint-fix",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
     environmentNeeds: [],
     foundation: {
       toolchains: {},

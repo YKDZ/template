@@ -10,7 +10,6 @@ import {
   sharedVueSourceOperations,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
-  vueApplicationFixes,
   vueApplicationManifest,
   vueApplicationScripts,
 } from "../shared/vue.ts";
@@ -64,7 +63,6 @@ function appContribution(options: {
       scripts: packageScripts(),
     }),
     operations,
-    fixes: vueApplicationFixes(definition.path),
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
     foundation: {
       toolchains: {},

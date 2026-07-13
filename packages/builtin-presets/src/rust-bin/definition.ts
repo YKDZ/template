@@ -25,7 +25,7 @@ function cargoPackageName(projectName: string): string {
 function packageScripts(): Record<string, string> {
   return {
     "format:check": "cargo fmt --all -- --check",
-    "format:write:run": "cargo fmt --all",
+    "format:write": "cargo fmt --all",
     lint: "cargo clippy --workspace --all-targets -- -D warnings",
     test: "cargo test --workspace",
   };
@@ -84,12 +84,6 @@ function rustContribution(context: GenerationContext): PackageContribution {
       engines: { node: context.toolchain.nodeLtsMajor },
     },
     operations,
-    fixes: [
-      {
-        kind: "rustfmt-write",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
     environmentNeeds: [
       rustToolchainEnvironmentNeed({
         kind: "package-boundary",

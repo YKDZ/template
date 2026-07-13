@@ -9,6 +9,8 @@
     "//#boundaries": { "cache": false },
     "//#format:check": { "outputs": [] },
     "//#lint": { "outputs": [] },
+    "//#format:write": { "dependsOn": ["//#lint:fix"], "cache": false },
+    "//#lint:fix": { "cache": false },
     "//#typecheck": { "outputs": [] },
     "format:check": { "outputs": [] },
     "lint": { "outputs": [] },
@@ -16,7 +18,7 @@
     "build": { "dependsOn": ["^build"] },
     "test": { "dependsOn": ["build"], "outputs": [] },
     "test:e2e": { "dependsOn": ["build"], "cache": false },
-    "format:write:run": { "cache": false },
-    "lint:fix:run": { "cache": false }
+    "format:write": { "dependsOn": ["lint:fix"], "cache": false },
+    "lint:fix": { "cache": false }
   }
 }

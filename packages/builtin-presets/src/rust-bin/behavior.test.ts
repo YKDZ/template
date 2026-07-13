@@ -57,9 +57,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       ]),
     );
     expect(contribution).not.toHaveProperty("checks");
-    expect(contribution.fixes.map((fix) => fix.kind)).toEqual([
-      "rustfmt-write",
-    ]);
+    expect(contribution).not.toHaveProperty("fixes");
     expect(contribution).not.toHaveProperty("foundationOperations");
     expect(contribution.foundation).toMatchObject({
       toolchains: {
@@ -94,13 +92,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     });
 
     expect(plan).not.toHaveProperty("checks");
-    expect(plan.fixes.map((fix) => fix.kind)).toEqual(
-      expect.arrayContaining([
-        "oxc-format-write",
-        "oxc-lint-fix",
-        "rustfmt-write",
-      ]),
-    );
+    expect(plan).not.toHaveProperty("fixes");
 
     await renderNewProject({
       targetRoot: targetDir,
@@ -127,7 +119,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     ).toMatchObject({
       scripts: {
         check: expect.stringContaining("test"),
-        fix: expect.stringContaining("format:write:run"),
+        fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
       },
     });
 
@@ -296,5 +288,17 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(output).toContain("TODO.md");
     expect(output).toContain(".devcontainer/devcontainer.json");
     expect(output).not.toContain("packages/demo-rust/package.json");
+
+    await execa(
+      "pnpm",
+      ["exec", "turbo", "run", "format:write", "--filter=//"],
+      { cwd: targetDir },
+    );
+    expect(
+      await readFile(path.join(targetDir, "TODO.md"), "utf8"),
+    ).not.toContain("-   text");
+    await expect(
+      readFile(path.join(targetDir, "packages/demo-rust/package.json"), "utf8"),
+    ).resolves.toBe('{"name":"@demo/package-pollution"}\n');
   }, 180_000);
 });

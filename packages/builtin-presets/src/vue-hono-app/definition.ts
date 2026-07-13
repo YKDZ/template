@@ -1,4 +1,3 @@
-import { type FixComponent } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
@@ -11,7 +10,6 @@ import {
   sharedVueSourceOperations,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
-  vueApplicationFixes,
   vueApplicationManifest,
   vueApplicationScripts,
 } from "../shared/vue.ts";
@@ -22,10 +20,9 @@ function apiScripts(): Record<string, string> {
     build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
     dev: "node --watch src/server.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     start: "node dist/server.js",
     test: "vitest run --reporter=agent --silent=passed-only",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
@@ -63,11 +60,6 @@ function apiContribution(context: GenerationContext): PackageContribution {
     },
     imports: { "#/*": { default: "./dist/*.js", types: "./src/*.ts" } },
   };
-  const owner = { kind: "package-boundary" as const, path: definition.path };
-  const fixes: FixComponent[] = [
-    { kind: "oxc-format-write", owner },
-    { kind: "oxc-lint-fix", owner },
-  ];
   const sourceFiles = [
     "turbo.json",
     "vitest.config.ts",
@@ -110,7 +102,6 @@ function apiContribution(context: GenerationContext): PackageContribution {
       engines: { node: context.toolchain.nodeLtsMajor },
     },
     operations,
-    fixes,
     environmentNeeds: [],
     foundation: packageFoundation(),
   };
@@ -154,7 +145,6 @@ function webContribution(context: GenerationContext): PackageContribution {
       scripts: webScripts(),
     }),
     operations,
-    fixes: vueApplicationFixes(definition.path),
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
     foundation: packageFoundation(),
   };

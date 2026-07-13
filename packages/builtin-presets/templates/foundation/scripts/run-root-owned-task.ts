@@ -33,23 +33,36 @@ const task = process.argv[2];
 const command =
   task === "format:check"
     ? ["exec", "oxfmt", "--list-different", "--config", "oxfmt.config.ts"]
-    : task === "lint"
-      ? [
-          "exec",
-          "oxlint",
-          "--quiet",
-          "--format=unix",
-          "--config",
-          "oxlint.config.ts",
-        ]
-      : undefined;
+    : task === "format:write"
+      ? ["exec", "oxfmt", "--write", "--config", "oxfmt.config.ts"]
+      : task === "lint"
+        ? [
+            "exec",
+            "oxlint",
+            "--quiet",
+            "--format=unix",
+            "--config",
+            "oxlint.config.ts",
+          ]
+        : task === "lint:fix"
+          ? [
+              "exec",
+              "oxlint",
+              "--format=unix",
+              "--config",
+              "oxlint.config.ts",
+              "--fix",
+            ]
+          : undefined;
 
 if (command === undefined) {
   throw new Error(`Unknown root-owned task: ${task ?? "(missing)"}`);
 }
 
 const inputs = existing(
-  task === "format:check" ? rootOwnedFormatInputs : rootOwnedLintInputs,
+  task === "format:check" || task === "format:write"
+    ? rootOwnedFormatInputs
+    : rootOwnedLintInputs,
 );
 const result = spawnSync("pnpm", [...command, ...inputs], { stdio: "inherit" });
 if (result.error) throw result.error;

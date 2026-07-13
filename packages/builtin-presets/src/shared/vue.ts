@@ -1,7 +1,4 @@
-import {
-  playwrightBrowserAssetsEnvironmentNeed,
-  type FixComponent,
-} from "@ykdz/template-core/module-graph";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
@@ -37,10 +34,9 @@ export function vueApplicationScripts(): Record<string, string> {
     build: "vite build",
     dev: "vite",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run --reporter=agent --silent=passed-only",
     "test:e2e": "node scripts/run-playwright.ts",
@@ -68,16 +64,6 @@ export function vueTypecheckRunnerSourceOperation(
     from: "typescript/run-vue-tsc.ts",
     to: `${packagePath}/scripts/run-vue-tsc.ts`,
   };
-}
-
-export function vueApplicationFixes(
-  packagePath: string,
-): readonly FixComponent[] {
-  const owner = { kind: "package-boundary" as const, path: packagePath };
-  return [
-    { kind: "oxc-format-write", owner },
-    { kind: "oxc-lint-fix", owner },
-  ];
 }
 
 export function vueApplicationEnvironmentNeeds(packagePath: string) {

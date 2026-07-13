@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import {
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-  type FixComponent,
 } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
@@ -54,14 +53,6 @@ function foundation(): PackageContribution["foundation"] {
   };
 }
 
-function fixes(packagePath: string): FixComponent[] {
-  const owner = { kind: "package-boundary" as const, path: packagePath };
-  return [
-    { kind: "oxc-format-write", owner },
-    { kind: "oxc-lint-fix", owner },
-  ];
-}
-
 function webScripts(): Record<string, string> {
   const prepareDatabase =
     "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
@@ -70,9 +61,9 @@ function webScripts(): Record<string, string> {
     "check:deployment": "node scripts/check-standalone-deployment.ts",
     dev: `${prepareDatabase} && vike dev`,
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
-    "lint:fix:run":
+    "lint:fix":
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
     preview: `${prepareDatabase} && vike preview`,
     start: "node ./dist/server/index.mjs",
@@ -87,10 +78,9 @@ function databaseScripts(): Record<string, string> {
     build: "tsc -p tsconfig.json --noEmit",
     "db:seed:example": "node scripts/seed-example.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     test: 'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
@@ -111,10 +101,9 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
     ),
     "db:studio": withDatabasePackage("drizzle-kit studio"),
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -280,7 +269,6 @@ function webContribution(context: GenerationContext): PackageContribution {
       packageManager: context.toolchain.packageManagerPin,
     },
     operations,
-    fixes: fixes(web.path),
     environmentNeeds: [
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
       shellCheckEnvironmentNeed(owner),
@@ -346,7 +334,6 @@ function databaseContribution(context: GenerationContext): PackageContribution {
       { kind: "writeJson", to: `${db.path}/package.json`, value: {} },
       ...copyOperations(db.path, sourceFiles),
     ],
-    fixes: fixes(db.path),
     environmentNeeds: [],
     foundation: foundation(),
   };
@@ -393,7 +380,6 @@ function migrationsContribution(
       },
       ...copyOperations(migrations.path, sourceFiles),
     ],
-    fixes: fixes(migrations.path),
     environmentNeeds: [],
     foundation: foundation(),
   };
