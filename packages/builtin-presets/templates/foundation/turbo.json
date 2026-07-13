@@ -18,6 +18,7 @@
     "build": { "dependsOn": ["^build"] },
     "test": { "dependsOn": ["build"], "outputs": [] },
     "test:e2e": { "dependsOn": ["build"], "cache": false },
+    "deployment": { "cache": false },
     "format:write": { "dependsOn": ["lint:fix"], "cache": false },
     "lint:fix": { "cache": false }
   }

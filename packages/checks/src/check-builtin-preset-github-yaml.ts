@@ -103,8 +103,16 @@ function expectedGithubTemplate(
   return projectCheckWorkflow({
     environment: {
       needs: [...plan.environmentNeeds],
-      deploymentChecks: [...plan.deploymentChecks],
     },
+    deploymentEnvironmentNeeds: [...plan.deploymentEnvironmentNeeds],
+    hasDeploymentTask: plan.manifests.some((manifest) => {
+      const scripts = manifest.scripts;
+      return (
+        typeof scripts === "object" &&
+        scripts !== null &&
+        typeof (scripts as Record<string, unknown>).deployment === "string"
+      );
+    }),
   });
 }
 

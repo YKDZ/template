@@ -1,8 +1,6 @@
 import {
   type CheckEnvironmentNeed,
-  type DeploymentCheckComponent,
-  deploymentCheckEnvironmentNeeds,
-  deploymentCheckTaskName,
+  type DeploymentEnvironmentNeed,
   renderPlaywrightBrowserInstallCommand,
 } from "./module-graph.ts";
 
@@ -45,8 +43,9 @@ export type DependencyMaintenancePolicy = {
 type ProjectCheckWorkflowOptions = {
   readonly environment: {
     readonly needs: readonly CheckEnvironmentNeed[];
-    readonly deploymentChecks?: readonly DeploymentCheckComponent[];
   };
+  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
+  readonly hasDeploymentTask?: boolean | undefined;
   readonly capability?: CiCapability | undefined;
   readonly environmentPreparation?:
     | Partial<CiEnvironmentPreparation>
@@ -78,11 +77,9 @@ export function projectCheckWorkflow(
     environmentPreparation.rustToolchain ||
     options.environment.needs.some((need) => need.kind === "rust-toolchain");
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
-  const deploymentChecks = options.environment.deploymentChecks ?? [];
-  const needsDocker = deploymentChecks.some((check) =>
-    deploymentCheckEnvironmentNeeds(check).some(
-      (need) => need.kind === "docker-engine",
-    ),
+  const hasDeploymentTask = options.hasDeploymentTask === true;
+  const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
+    (need) => need.kind === "docker-engine",
   );
   const lines = [
     `name: ${capability.workflowName}`,
@@ -96,13 +93,9 @@ export function projectCheckWorkflow(
     "jobs:",
     `  ${capability.jobName}:`,
     `    runs-on: ${capability.runner}`,
-    ...(deploymentChecks.length === 0
-      ? []
-      : [
-          "    strategy:",
-          "      matrix:",
-          "        check: [root, deployment]",
-        ]),
+    ...(hasDeploymentTask
+      ? ["    strategy:", "      matrix:", "        check: [root, deployment]"]
+      : []),
     "    steps:",
     "      - uses: actions/checkout@v7",
   ];
@@ -116,7 +109,7 @@ export function projectCheckWorkflow(
     );
   }
 
-  if (needsDocker) {
+  if (hasDeploymentTask && needsDocker) {
     lines.push(
       "      - uses: docker/setup-buildx-action@v3",
       "        if: matrix.check == 'deployment'",
@@ -128,23 +121,24 @@ export function projectCheckWorkflow(
   lines.push(`      - run: ${taskLayer.installCommand}`);
   const checkEnvironmentLines: string[] = [];
   for (const need of options.environment.needs) {
-    if (need.kind === "rust-toolchain") continue;
+    if (need.kind === "rust-toolchain") {
+      continue;
+    }
     checkEnvironmentLines.push(
       `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
     );
-    if (deploymentChecks.length > 0 && need.kind === "shellcheck-command") {
+    if (hasDeploymentTask && need.kind === "shellcheck-command") {
       checkEnvironmentLines.push("        if: matrix.check == 'root'");
     }
   }
   lines.push(...checkEnvironmentLines);
   lines.push(`      - run: ${taskLayer.checkCommand}`);
-  if (deploymentChecks.length > 0) {
+  if (hasDeploymentTask) {
     lines.push("        if: matrix.check == 'root'");
   }
-  const deploymentCheck = deploymentChecks[0];
-  if (deploymentCheck !== undefined) {
+  if (hasDeploymentTask) {
     lines.push(
-      `      - run: pnpm run ${deploymentCheckTaskName(deploymentCheck)}`,
+      "      - run: pnpm run check:deployment",
       "        if: matrix.check == 'deployment'",
     );
   }
@@ -166,26 +160,24 @@ function rustCiPreparationLines(): string[] {
 export function projectCheckWorkflowTemplateReplacements(options: {
   readonly environment: {
     readonly needs: readonly CheckEnvironmentNeed[];
-    readonly deploymentChecks?: readonly DeploymentCheckComponent[];
   };
+  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
+  readonly hasDeploymentTask?: boolean | undefined;
   readonly environmentPreparation?: Partial<CiEnvironmentPreparation>;
 }): Record<string, string> {
   const requiresRustToolchain =
     options.environmentPreparation?.rustToolchain === true ||
     options.environment.needs.some((need) => need.kind === "rust-toolchain");
-  const deploymentChecks = options.environment.deploymentChecks ?? [];
-  const needsDocker = deploymentChecks.some((check) =>
-    deploymentCheckEnvironmentNeeds(check).some(
-      (need) => need.kind === "docker-engine",
-    ),
+  const hasDeploymentTask = options.hasDeploymentTask === true;
+  const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
+    (need) => need.kind === "docker-engine",
   );
-  const deploymentCheck = deploymentChecks[0];
   const environmentSteps = options.environment.needs
     .filter((need) => need.kind !== "rust-toolchain")
     .map((need) =>
       [
         `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
-        ...(deploymentChecks.length > 0 && need.kind === "shellcheck-command"
+        ...(hasDeploymentTask && need.kind === "shellcheck-command"
           ? ["        if: matrix.check == 'root'"]
           : []),
       ].join("\n"),
@@ -196,21 +188,19 @@ export function projectCheckWorkflowTemplateReplacements(options: {
       : "",
     CHECK_ENVIRONMENT_PREPARATION:
       environmentSteps.length === 0 ? "" : `\n${environmentSteps.join("\n")}`,
-    DEPLOYMENT_MATRIX:
-      deploymentChecks.length === 0
-        ? ""
-        : "\n    strategy:\n      matrix:\n        check: [root, deployment]",
-    DEPLOYMENT_DOCKER_PREPARATION: needsDocker
-      ? "\n      - uses: docker/setup-buildx-action@v3\n        if: matrix.check == 'deployment'"
+    DEPLOYMENT_MATRIX: hasDeploymentTask
+      ? "\n    strategy:\n      matrix:\n        check: [root, deployment]"
       : "",
-    ROOT_CHECK_CONDITION:
-      deploymentChecks.length === 0
-        ? ""
-        : "\n        if: matrix.check == 'root'",
-    DEPLOYMENT_CHECK:
-      deploymentCheck === undefined
-        ? ""
-        : `\n      - run: pnpm run ${deploymentCheckTaskName(deploymentCheck)}\n        if: matrix.check == 'deployment'`,
+    DEPLOYMENT_DOCKER_PREPARATION:
+      hasDeploymentTask && needsDocker
+        ? "\n      - uses: docker/setup-buildx-action@v3\n        if: matrix.check == 'deployment'"
+        : "",
+    ROOT_CHECK_CONDITION: hasDeploymentTask
+      ? "\n        if: matrix.check == 'root'"
+      : "",
+    DEPLOYMENT_CHECK: hasDeploymentTask
+      ? "\n      - run: pnpm run check:deployment\n        if: matrix.check == 'deployment'"
+      : "",
   };
 }
 

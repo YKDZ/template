@@ -86,17 +86,32 @@ export async function generatedScenariosFor(
   }
 }
 
-async function prepareEnvironment(options: {
+/**
+ * Fast generated scenarios prepare only ordinary check requirements. The
+ * focused deployment mode adds its explicitly declared deployment needs.
+ */
+export async function prepareGeneratedScenarioEnvironment(options: {
   readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
   readonly projectDir: string;
+  readonly mode: GeneratedScenarioSet;
+  readonly run?: GeneratedCommandRunner;
 }): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
   const seen = new Set<string>();
-  for (const need of options.plan.environmentNeeds) {
-    if (!need.nextStep.machineVerifiable || seen.has(need.nextStep.display)) {
+  const needs = [
+    ...options.plan.environmentNeeds.map((need) => need.nextStep),
+    ...(options.mode === "deployment"
+      ? options.plan.deploymentEnvironmentNeeds.map((need) => need.preparation)
+      : []),
+  ];
+  for (const preparation of needs) {
+    if (!preparation.machineVerifiable || seen.has(preparation.display)) {
       continue;
     }
-    seen.add(need.nextStep.display);
-    await execa(need.nextStep.command, [...need.nextStep.args], {
+    seen.add(preparation.display);
+    await run(preparation.command, [...preparation.args], {
       cwd: options.projectDir,
       stdio: "inherit",
     });
@@ -113,7 +128,16 @@ export async function runRequiredDeploymentQualityGate(options: {
   readonly projectDir: string;
   readonly run?: GeneratedCommandRunner;
 }): Promise<void> {
-  if (options.plan.deploymentChecks.length === 0) return;
+  const hasDeploymentEntrypoint = options.plan.manifests.some((manifest) => {
+    const scripts = manifest.scripts;
+    return (
+      typeof scripts === "object" &&
+      scripts !== null &&
+      typeof (scripts as Record<string, unknown>)["check:deployment"] ===
+        "string"
+    );
+  });
+  if (!hasDeploymentEntrypoint) return;
   const run =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
@@ -149,7 +173,7 @@ async function requireDockerForDeploymentGate(
 async function runScenario(
   scenario: GeneratedScenario,
   options: GeneratedScenarioRunOptions,
-  runDeployment: boolean,
+  mode: GeneratedScenarioSet,
   checks: RegistryChecks,
 ): Promise<void> {
   const projectDir = path.join(options.workspace, scenario.id);
@@ -198,9 +222,13 @@ async function runScenario(
 
   options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
   await execa("pnpm", ["install"], { cwd: projectDir, stdio: "inherit" });
-  await prepareEnvironment({ plan: finalPlan, projectDir });
+  await prepareGeneratedScenarioEnvironment({
+    plan: finalPlan,
+    projectDir,
+    mode,
+  });
   await execa("pnpm", ["run", "check"], { cwd: projectDir, stdio: "inherit" });
-  if (runDeployment) {
+  if (mode === "deployment") {
     await runRequiredDeploymentQualityGate({
       plan: finalPlan,
       projectDir,
@@ -218,7 +246,7 @@ export async function runGeneratedScenarioSet(
   }
   const checks = await sourceOnlyRegistryChecks();
   for (const scenario of await generatedScenariosFor(set)) {
-    await runScenario(scenario, options, set === "deployment", checks);
+    await runScenario(scenario, options, set, checks);
   }
 }
 

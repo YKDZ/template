@@ -52,10 +52,29 @@ export type RustToolchainEnvironmentNeed = {
   };
 };
 
+/**
+ * Docker is needed only by the focused deployment mode. It is deliberately
+ * outside ordinary Check Environment Needs, whose preparation and next steps
+ * apply to every generated-check scenario.
+ */
+export type DockerEngineEnvironmentNeed = {
+  readonly kind: "docker-engine";
+  readonly preparation: {
+    readonly id: "verify-docker-engine";
+    readonly label: "Verify Docker engine";
+    readonly command: "docker";
+    readonly args: readonly ["version", "--format", "{{.Server.Version}}"];
+    readonly display: "docker version --format {{.Server.Version}}";
+    readonly machineVerifiable: true;
+  };
+};
+
 export type CheckEnvironmentNeed =
   | PlaywrightBrowserAssetsEnvironmentNeed
   | ShellCheckEnvironmentNeed
   | RustToolchainEnvironmentNeed;
+
+export type DeploymentEnvironmentNeed = DockerEngineEnvironmentNeed;
 
 export function rustToolchainEnvironmentNeed(
   owner: ComponentOwner,
@@ -84,14 +103,19 @@ export function rustToolchainEnvironmentNeed(
   };
 }
 
-export type DeploymentCheckComponent = {
-  readonly kind: "deployment-image";
-  readonly owner: PackageBoundaryOwner;
-};
-
-export type DeploymentCheckEnvironmentNeed = {
-  readonly kind: "docker-engine";
-};
+export function dockerEngineEnvironmentNeed(): DockerEngineEnvironmentNeed {
+  return {
+    kind: "docker-engine",
+    preparation: {
+      id: "verify-docker-engine",
+      label: "Verify Docker engine",
+      command: "docker",
+      args: ["version", "--format", "{{.Server.Version}}"],
+      display: "docker version --format {{.Server.Version}}",
+      machineVerifiable: true,
+    },
+  };
+}
 
 export const qualityTaskVocabulary = [
   "boundaries",
@@ -125,10 +149,6 @@ export function renderTurboRunCommand(
   ].join(" ");
 }
 
-function uniqueTaskNames(taskNames: readonly string[]): string[] {
-  return [...new Set(taskNames)];
-}
-
 export function renderRootCheckCommand(): string {
   return renderTurboRunCommand(qualityTaskVocabulary, [], {
     continueAfterFailure: true,
@@ -136,36 +156,8 @@ export function renderRootCheckCommand(): string {
   });
 }
 
-export function deploymentCheckEnvironmentNeeds(
-  check: DeploymentCheckComponent,
-): DeploymentCheckEnvironmentNeed[] {
-  switch (check.kind) {
-    case "deployment-image":
-      return [{ kind: "docker-engine" }];
-  }
-}
-
-export function deploymentCheckTaskName(
-  check: DeploymentCheckComponent,
-): "check:deployment" {
-  switch (check.kind) {
-    case "deployment-image":
-      return "check:deployment";
-  }
-}
-
-export function renderDeploymentCheckLeafCommand(
-  check: DeploymentCheckComponent,
-): string {
-  return `pnpm --filter './${check.owner.path}' run ${deploymentCheckTaskName(check)}`;
-}
-
-export function renderDeploymentCheckCommand(plan: {
-  readonly deploymentChecks?: readonly DeploymentCheckComponent[];
-}): string {
-  return uniqueTaskNames(
-    (plan.deploymentChecks ?? []).map(renderDeploymentCheckLeafCommand),
-  ).join(" && ");
+export function renderDeploymentCheckCommand(): string {
+  return renderTurboRunCommand(["deployment"], [], { taskPrefix: true });
 }
 
 export function renderFixCommand(): string {

@@ -57,9 +57,8 @@ describe("Built-in Preset Package Addition universality", () => {
           expect(addition.environmentNeeds).toEqual(
             expect.arrayContaining([...initialization.environmentNeeds]),
           );
-          expect(addition.deploymentChecks).toEqual(
-            expect.arrayContaining([...initialization.deploymentChecks]),
-          );
+          expect(addition).not.toHaveProperty("deploymentChecks");
+          expect(initialization).not.toHaveProperty("deploymentChecks");
           expect(addition.dependencyMaintenancePolicy.ecosystems).toEqual(
             expect.arrayContaining(
               initialization.dependencyMaintenancePolicy.ecosystems,
@@ -80,9 +79,14 @@ describe("Built-in Preset Package Addition universality", () => {
             value: {
               scripts: expect.objectContaining({
                 check: expect.any(String),
-                ...(initialization.deploymentChecks.length === 0
-                  ? {}
-                  : { "check:deployment": expect.any(String) }),
+                ...(initialization.manifests.some(
+                  (manifest) =>
+                    (manifest.scripts as Record<string, unknown> | undefined)?.[
+                      "check:deployment"
+                    ] !== undefined,
+                )
+                  ? { "check:deployment": expect.any(String) }
+                  : {}),
               }),
             },
           });

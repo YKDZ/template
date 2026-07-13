@@ -95,17 +95,20 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
-    expect(plan.deploymentChecks).toEqual([
-      {
-        kind: "deployment-image",
-        owner: { kind: "package-boundary", path: "apps/web" },
-      },
-    ]);
+    expect(plan).not.toHaveProperty("deploymentChecks");
+    expect(plan.deploymentEnvironmentNeeds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "docker-engine" }),
+      ]),
+    );
     expect(plan.nextStepInstructions.map((step) => step.display)).toEqual(
       expect.arrayContaining([
         "pnpm --filter ./apps/web exec playwright install chromium",
         "sudo apt-get update && sudo apt-get install -y shellcheck",
       ]),
+    );
+    expect(plan.nextStepInstructions.map((step) => step.display)).not.toContain(
+      "docker version --format {{.Server.Version}}",
     );
 
     await renderNewProject({
@@ -200,17 +203,19 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(
       await readFile(path.join(targetDir, ".gitignore"), "utf8"),
     ).toContain(".template/");
-    expect(
-      await readFile(
-        path.join(targetDir, ".github/workflows/check.yml"),
-        "utf8",
-      ),
-    ).toContain("check: [root, deployment]");
+    const checkWorkflow = await readFile(
+      path.join(targetDir, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    expect(checkWorkflow).toContain("check: [root, deployment]");
+    expect(checkWorkflow).toContain("uses: docker/setup-buildx-action@v3");
+    expect(checkWorkflow).toContain("if: matrix.check == 'deployment'");
     expect(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
     ).toMatchObject({
       scripts: {
-        "check:deployment": "pnpm --filter './apps/web' run check:deployment",
+        "check:deployment":
+          "turbo run deployment --output-logs=errors-only --log-order=grouped --log-prefix=task",
         check:
           "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
         fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",

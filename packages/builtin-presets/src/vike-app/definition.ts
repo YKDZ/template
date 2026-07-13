@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 
 import {
+  dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
@@ -58,7 +59,7 @@ function webScripts(): Record<string, string> {
     "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
   return {
     build: "vike build",
-    "check:deployment": "node scripts/check-standalone-deployment.ts",
+    deployment: "node scripts/check-standalone-deployment.ts",
     dev: `${prepareDatabase} && vike dev`,
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -273,7 +274,7 @@ function webContribution(context: GenerationContext): PackageContribution {
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
       shellCheckEnvironmentNeed(owner),
     ],
-    deploymentChecks: [{ kind: "deployment-image", owner }],
+    deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
     foundation: foundation(),
   };
 }

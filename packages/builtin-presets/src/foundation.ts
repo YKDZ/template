@@ -14,10 +14,12 @@ import {
 } from "@ykdz/template-core/editor-customization";
 import type {
   CheckEnvironmentNeed,
-  DeploymentCheckComponent,
+  DeploymentEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
+  dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
+  renderDeploymentCheckCommand,
   renderFixCommand,
   renderRootCheckCommand,
   rustToolchainEnvironmentNeed,
@@ -86,7 +88,7 @@ export type GeneratedRepositoryPlan = {
   };
   readonly operations: readonly RenderOperation[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
-  readonly deploymentChecks: readonly DeploymentCheckComponent[];
+  readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
   readonly manifests: readonly Readonly<Record<string, unknown>>[];
   readonly dependencyCatalog: Readonly<Record<string, string>>;
@@ -231,7 +233,8 @@ export function createGenerationContext(options: {
 /**
  * Package Addition reconstructs generic current facts from the Blueprint
  * topology and each package's real manifest/configuration.  A second durable
- * Contribution database would drift from the generated repository.
+ * Contribution database would drift from the generated repository. Package
+ * task scripts and explicit environment needs are enough to reconstruct it.
  */
 function existingPackageContribution(options: {
   readonly context: BuiltInGenerationContext;
@@ -331,9 +334,9 @@ function existingPackageContribution(options: {
         ? [shellCheckEnvironmentNeed(owner)]
         : []),
     ],
-    ...(scripts["check:deployment"] === undefined
+    ...(scripts.deployment === undefined
       ? {}
-      : { deploymentChecks: [{ kind: "deployment-image" as const, owner }] }),
+      : { deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()] }),
     foundation: {
       toolchains: rust
         ? { rust: { toolchain: "stable", components: ["rustfmt", "clippy"] } }
@@ -472,9 +475,17 @@ function foundationPlan(options: {
   const environmentNeeds = options.contributions.flatMap(
     (item) => item.environmentNeeds,
   );
-  const deploymentChecks = options.contributions.flatMap(
-    (item) => item.deploymentChecks ?? [],
+  const deploymentEnvironmentNeeds = options.contributions.flatMap(
+    (item) => item.deploymentEnvironmentNeeds ?? [],
   );
+  const hasDeploymentTask = options.contributions.some((contribution) => {
+    const scripts = contribution.manifest.scripts;
+    return (
+      typeof scripts === "object" &&
+      scripts !== null &&
+      typeof (scripts as Record<string, unknown>).deployment === "string"
+    );
+  });
   const packagePaths = options.contributions.map(
     (contribution) => contribution.definition.path,
   );
@@ -555,16 +566,9 @@ function foundationPlan(options: {
     scripts: {
       check: renderRootCheckCommand(),
       boundaries: "node scripts/check-boundaries.ts",
-      ...(deploymentChecks.length === 0
-        ? {}
-        : {
-            "check:deployment": deploymentChecks
-              .map(
-                (check) =>
-                  `pnpm --filter './${check.owner.path}' run check:deployment`,
-              )
-              .join(" && "),
-          }),
+      ...(hasDeploymentTask
+        ? { "check:deployment": renderDeploymentCheckCommand() }
+        : {}),
       fix: renderFixCommand(),
       "format:check": "node scripts/run-root-owned-task.ts format:check",
       "format:write": "node scripts/run-root-owned-task.ts format:write",
@@ -643,7 +647,9 @@ function foundationPlan(options: {
     from: ".github/workflows/check.dynamic.template",
     to: ".github/workflows/check.yml",
     replacements: projectCheckWorkflowTemplateReplacements({
-      environment: { needs: environmentNeeds, deploymentChecks },
+      environment: { needs: environmentNeeds },
+      deploymentEnvironmentNeeds,
+      hasDeploymentTask,
     }),
     ...(options.mode === "addition" ? { overwrite: true } : {}),
   };
@@ -884,7 +890,7 @@ function foundationPlan(options: {
     },
     operations,
     environmentNeeds,
-    deploymentChecks,
+    deploymentEnvironmentNeeds,
     manifests: [
       ...options.contributions.map((item) => item.manifest),
       rootManifest,
