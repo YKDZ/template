@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkLegacyArchitectureRemoval,
+  checkPackedPublicArtifact,
   findLegacyArchitectureFindings,
   findLegacyArchitectureDistributionFindings,
   findLegacyArchitectureTarballFindings,
@@ -17,6 +18,18 @@ async function fixture(): Promise<string> {
 }
 
 describe("Legacy Architecture Removal Check", () => {
+  it("audits the built public artifact without rebuilding shared distributions", async () => {
+    const builtDefinition = path.join(
+      process.cwd(),
+      "packages/builtin-presets/dist/src/rust-bin/definition.js",
+    );
+    const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
+
+    await checkPackedPublicArtifact();
+
+    expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
+  });
+
   it("reports a focused finding for every protected surface", async () => {
     const root = await fixture();
     try {

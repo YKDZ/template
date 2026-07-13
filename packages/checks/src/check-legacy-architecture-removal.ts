@@ -1146,6 +1146,7 @@ export async function checkPackedPublicArtifact(
       "pnpm",
       [
         "--config.node-linker=hoisted",
+        "--config.ignore-scripts=true",
         "--filter",
         publicCliPackageName,
         "pack",

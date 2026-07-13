@@ -96,6 +96,8 @@ describe("Template Repository native task model", () => {
     expect(tasks["check:templates:shared-oxc"]).toBeUndefined();
     expect(tasks["check:templates:static-source"]).toBeUndefined();
     expect(tasks.typecheck?.dependsOn).toContain("^typecheck");
+    expect(tasks.typecheck?.dependsOn).toContain("^build");
+    expect(tasks["//#typecheck"]?.dependsOn).toContain("^build");
     expect(tasks.build?.dependsOn).toContain("^build");
     expect(tasks.lint?.dependsOn).toContain("^build");
     expect(tasks.test?.dependsOn).toContain("build");
