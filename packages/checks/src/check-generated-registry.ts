@@ -81,6 +81,12 @@ const qualityTaskNames = [
 
 const fixTaskNames = ["lint:fix", "format:write"] as const;
 
+export function generatedScenarioInstallArgs(
+  workspace: string,
+): readonly string[] {
+  return ["install", "--store-dir", path.join(workspace, ".pnpm-store")];
+}
+
 function expectedTaskIds(options: {
   readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
   readonly taskNames: readonly string[];
@@ -310,7 +316,10 @@ async function runScenario(
   }
 
   options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
-  await run("pnpm", ["install"], { cwd: projectDir, stdio: "inherit" });
+  await run("pnpm", generatedScenarioInstallArgs(options.workspace), {
+    cwd: projectDir,
+    stdio: "inherit",
+  });
   await assertGeneratedTaskDiscovery({
     plan: finalPlan,
     projectDir,

@@ -7,7 +7,10 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { describe, expect, it } from "vitest";
 
-import { assertGeneratedTaskDiscovery } from "../packages/checks/src/check-generated-registry.ts";
+import {
+  assertGeneratedTaskDiscovery,
+  generatedScenarioInstallArgs,
+} from "../packages/checks/src/check-generated-registry.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
   const definition = builtInPresetRegistry.all()[0]!;
@@ -40,5 +43,13 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
         run: async () => ({ stdout: "completed successfully" }),
       }),
     ).rejects.toThrow("Turbo dry-run did not return a task graph");
+  });
+
+  it("isolates generated installs from the repository pnpm store", () => {
+    expect(generatedScenarioInstallArgs("/tmp/generated-scenarios")).toEqual([
+      "install",
+      "--store-dir",
+      "/tmp/generated-scenarios/.pnpm-store",
+    ]);
   });
 });
