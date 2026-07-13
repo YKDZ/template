@@ -60,6 +60,7 @@ async function sourceOnlyRegistryChecks(): Promise<RegistryChecks> {
 type GeneratedScenarioRunOptions = {
   readonly workspace: string;
   readonly reporter?: { readonly info?: (message: string) => void };
+  readonly run?: GeneratedCommandRunner;
 };
 
 type GeneratedCommandRunner = (
@@ -67,6 +68,97 @@ type GeneratedCommandRunner = (
   args: readonly string[],
   options: { readonly cwd: string; readonly stdio?: "inherit" },
 ) => Promise<unknown>;
+
+const qualityTaskNames = [
+  "boundaries",
+  "format:check",
+  "lint",
+  "typecheck",
+  "build",
+  "test",
+  "test:e2e",
+] as const;
+
+const fixTaskNames = ["lint:fix", "format:write"] as const;
+
+export function generatedScenarioInstallArgs(
+  workspace: string,
+): readonly string[] {
+  return ["install", "--store-dir", path.join(workspace, ".pnpm-store")];
+}
+
+function expectedTaskIds(options: {
+  readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
+  readonly taskNames: readonly string[];
+}): readonly string[] {
+  return options.plan.manifests.flatMap((manifest) => {
+    const name = manifest.name;
+    const scripts = manifest.scripts;
+    if (
+      typeof name !== "string" ||
+      typeof scripts !== "object" ||
+      scripts === null
+    ) {
+      return [];
+    }
+    return options.taskNames.flatMap((taskName) =>
+      typeof (scripts as Record<string, unknown>)[taskName] !== "string"
+        ? []
+        : [`${name.startsWith("@") ? name : "//"}#${taskName}`],
+    );
+  });
+}
+
+/**
+ * Validates the real Turbo action graph rather than treating a successful
+ * command launch as proof that every generated Package Boundary was selected.
+ */
+export async function assertGeneratedTaskDiscovery(options: {
+  readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
+  readonly projectDir: string;
+  readonly taskNames: readonly string[];
+  readonly run?: GeneratedCommandRunner;
+}): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
+  const result = await run(
+    "pnpm",
+    ["exec", "turbo", "run", ...options.taskNames, "--dry-run=json"],
+    { cwd: options.projectDir },
+  );
+  let taskIds: Set<string>;
+  try {
+    const stdout =
+      typeof result === "object" &&
+      result !== null &&
+      "stdout" in result &&
+      typeof result.stdout === "string"
+        ? result.stdout
+        : "";
+    const dryRun = JSON.parse(stdout) as {
+      tasks?: readonly { taskId?: unknown }[];
+    };
+    if (!Array.isArray(dryRun.tasks)) throw new Error("tasks is missing");
+    taskIds = new Set(
+      dryRun.tasks.flatMap((task) =>
+        typeof task.taskId === "string" ? [task.taskId] : [],
+      ),
+    );
+  } catch (error) {
+    throw new Error(
+      `Turbo dry-run did not return a task graph for ${options.taskNames.join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const missing = expectedTaskIds(options).filter(
+    (taskId) => !taskIds.has(taskId),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Turbo dry-run omitted generated task(s): ${missing.join(", ")}`,
+    );
+  }
+}
 
 export async function generatedScenariosFor(
   set: GeneratedScenarioSet,
@@ -86,17 +178,32 @@ export async function generatedScenariosFor(
   }
 }
 
-async function prepareEnvironment(options: {
+/**
+ * Fast generated scenarios prepare only ordinary check requirements. The
+ * focused deployment mode adds its explicitly declared deployment needs.
+ */
+export async function prepareGeneratedScenarioEnvironment(options: {
   readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
   readonly projectDir: string;
+  readonly mode: GeneratedScenarioSet;
+  readonly run?: GeneratedCommandRunner;
 }): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
   const seen = new Set<string>();
-  for (const need of options.plan.environmentNeeds) {
-    if (!need.nextStep.machineVerifiable || seen.has(need.nextStep.display)) {
+  const needs = [
+    ...options.plan.environmentNeeds.map((need) => need.nextStep),
+    ...(options.mode === "deployment"
+      ? options.plan.deploymentEnvironmentNeeds.map((need) => need.preparation)
+      : []),
+  ];
+  for (const preparation of needs) {
+    if (!preparation.machineVerifiable || seen.has(preparation.display)) {
       continue;
     }
-    seen.add(need.nextStep.display);
-    await execa(need.nextStep.command, [...need.nextStep.args], {
+    seen.add(preparation.display);
+    await run(preparation.command, [...preparation.args], {
       cwd: options.projectDir,
       stdio: "inherit",
     });
@@ -113,7 +220,16 @@ export async function runRequiredDeploymentQualityGate(options: {
   readonly projectDir: string;
   readonly run?: GeneratedCommandRunner;
 }): Promise<void> {
-  if (options.plan.deploymentChecks.length === 0) return;
+  const hasDeploymentEntrypoint = options.plan.manifests.some((manifest) => {
+    const scripts = manifest.scripts;
+    return (
+      typeof scripts === "object" &&
+      scripts !== null &&
+      typeof (scripts as Record<string, unknown>)["check:deployment"] ===
+        "string"
+    );
+  });
+  if (!hasDeploymentEntrypoint) return;
   const run =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
@@ -149,9 +265,12 @@ async function requireDockerForDeploymentGate(
 async function runScenario(
   scenario: GeneratedScenario,
   options: GeneratedScenarioRunOptions,
-  runDeployment: boolean,
+  mode: GeneratedScenarioSet,
   checks: RegistryChecks,
 ): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
   const projectDir = path.join(options.workspace, scenario.id);
   const context = createGenerationContext({
     targetDir: projectDir,
@@ -197,13 +316,53 @@ async function runScenario(
   }
 
   options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
-  await execa("pnpm", ["install"], { cwd: projectDir, stdio: "inherit" });
-  await prepareEnvironment({ plan: finalPlan, projectDir });
-  await execa("pnpm", ["run", "check"], { cwd: projectDir, stdio: "inherit" });
-  if (runDeployment) {
+  await run("pnpm", generatedScenarioInstallArgs(options.workspace), {
+    cwd: projectDir,
+    stdio: "inherit",
+  });
+  await assertGeneratedTaskDiscovery({
+    plan: finalPlan,
+    projectDir,
+    taskNames: qualityTaskNames,
+    run,
+  });
+  if (mode === "package-addition-matrix" || mode === "deployment") {
+    await assertGeneratedTaskDiscovery({
+      plan: finalPlan,
+      projectDir,
+      taskNames: fixTaskNames,
+      run,
+    });
+  }
+  if (mode === "deployment") {
+    await assertGeneratedTaskDiscovery({
+      plan: finalPlan,
+      projectDir,
+      taskNames: ["deployment"],
+      run,
+    });
+  }
+  await prepareGeneratedScenarioEnvironment({
+    plan: finalPlan,
+    projectDir,
+    mode,
+    run,
+  });
+  if (mode === "package-addition-matrix" || mode === "deployment") {
+    await run("pnpm", ["run", "fix"], {
+      cwd: projectDir,
+      stdio: "inherit",
+    });
+  }
+  await run("pnpm", ["run", "check"], {
+    cwd: projectDir,
+    stdio: "inherit",
+  });
+  if (mode === "deployment") {
     await runRequiredDeploymentQualityGate({
       plan: finalPlan,
       projectDir,
+      run,
     });
   }
 }
@@ -218,7 +377,7 @@ export async function runGeneratedScenarioSet(
   }
   const checks = await sourceOnlyRegistryChecks();
   for (const scenario of await generatedScenariosFor(set)) {
-    await runScenario(scenario, options, set === "deployment", checks);
+    await runScenario(scenario, options, set, checks);
   }
 }
 

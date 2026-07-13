@@ -1,4 +1,5 @@
 packages:
+  - apps/*
   - packages/*
 
 nodeLinker: isolated
@@ -8,13 +9,11 @@ dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:
   - build
-  - build:run
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 
 overrides:
-  "valibot>typescript": "-"
 
 allowBuilds:
   esbuild: true

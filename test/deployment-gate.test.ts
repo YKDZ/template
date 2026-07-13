@@ -7,21 +7,28 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { describe, expect, it } from "vitest";
 
-import { runRequiredDeploymentQualityGate } from "../packages/checks/src/check-generated-registry.ts";
+import {
+  prepareGeneratedScenarioEnvironment,
+  runRequiredDeploymentQualityGate,
+} from "../packages/checks/src/check-generated-registry.ts";
 
 function deploymentPlan() {
-  const definition = builtInPresetRegistry.all().find(
-    (candidate) =>
-      planGeneratedRepositoryInitialization({
-        definition: candidate,
-        context: createGenerationContext({
-          targetDir: path.join("generated-repository", "deployment-gate"),
-          toolchain: {
-            nodeLtsMajor: "24",
-            packageManagerPin: "pnpm@11.11.0",
-          },
-        }),
-      }).deploymentChecks.length > 0,
+  const definition = builtInPresetRegistry.all().find((candidate) =>
+    planGeneratedRepositoryInitialization({
+      definition: candidate,
+      context: createGenerationContext({
+        targetDir: path.join("generated-repository", "deployment-gate"),
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    }).manifests.some(
+      (manifest) =>
+        (manifest.scripts as Record<string, unknown> | undefined)?.[
+          "check:deployment"
+        ] !== undefined,
+    ),
   );
   if (definition === undefined) {
     throw new Error("A deployment Definition is required");
@@ -36,6 +43,47 @@ function deploymentPlan() {
 }
 
 describe("deployment quality gate", () => {
+  it("prepares Docker only for the deployment scenario mode", async () => {
+    const plan = deploymentPlan();
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const run = async (command: string, args: readonly string[]) => {
+      calls.push({ command, args });
+    };
+
+    await prepareGeneratedScenarioEnvironment({
+      plan,
+      projectDir: "/tmp/deployment-quality-gate",
+      mode: "init",
+      run,
+    });
+    await prepareGeneratedScenarioEnvironment({
+      plan,
+      projectDir: "/tmp/deployment-quality-gate",
+      mode: "focused",
+      run,
+    });
+    await prepareGeneratedScenarioEnvironment({
+      plan,
+      projectDir: "/tmp/deployment-quality-gate",
+      mode: "package-addition-matrix",
+      run,
+    });
+    expect(calls).not.toContainEqual(
+      expect.objectContaining({ command: "docker" }),
+    );
+
+    await prepareGeneratedScenarioEnvironment({
+      plan,
+      projectDir: "/tmp/deployment-quality-gate",
+      mode: "deployment",
+      run,
+    });
+    expect(calls).toContainEqual({
+      command: "docker",
+      args: ["version", "--format", "{{.Server.Version}}"],
+    });
+  });
+
   it("fails explicitly when Docker is unavailable instead of reporting a semantic skip", async () => {
     await expect(
       runRequiredDeploymentQualityGate({

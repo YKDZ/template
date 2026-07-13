@@ -286,7 +286,7 @@ if (row.count !== 0) throw new Error(\`Fresh deployment must contain zero TODOs,
 }
 
 async function runPlaywright(baseUrl: string): Promise<void> {
-  await runCommand("pnpm", ["--dir", "apps/web", "run", "test:e2e:run"], {
+  await runCommand("pnpm", ["--dir", "apps/web", "run", "test:e2e"], {
     cwd: repositoryRoot,
     env: {
       ...process.env,

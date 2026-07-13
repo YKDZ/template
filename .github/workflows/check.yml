@@ -57,6 +57,9 @@ jobs:
           TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
           TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
 
+      - name: Check focused project links
+        run: pnpm run check:focused
+
       - name: Check deployment artifacts
         run: pnpm run check:deployment
 

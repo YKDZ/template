@@ -1,13 +1,17 @@
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
-  CheckComponent,
   CheckEnvironmentNeed,
-  DeploymentCheckComponent,
-  FixComponent,
+  DeploymentEnvironmentNeed,
 } from "./module-graph.ts";
 import type { PackageDefinition } from "./project-blueprint-v2.ts";
 import type { DependencyMaintenancePolicy } from "./project-github.ts";
 import type { RenderOperation } from "./renderer.ts";
+
+const operationPath = (operation: RenderOperation): string => {
+  if ("to" in operation) return operation.to;
+  if ("path" in operation) return operation.path;
+  return "";
+};
 
 export type FoundationContribution = {
   /** Toolchains the Foundation must install and project into coordinated root files. */
@@ -38,11 +42,9 @@ export type PackageContribution = {
   readonly operations: readonly RenderOperation[];
   /** Typed requirements consumed by the Foundation for coordinated root outputs. */
   readonly foundation: FoundationContribution;
-  readonly checks: readonly CheckComponent[];
-  readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
-  /** Deployment checks are package-owned and composed by the Foundation. */
-  readonly deploymentChecks?: readonly DeploymentCheckComponent[];
+  /** Requirements prepared only by a focused deployment entrypoint. */
+  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
 };
 
 export function assertPackageContribution(
@@ -57,11 +59,6 @@ export function assertPackageContribution(
       "Package Contribution manifest name must match its Package Definition",
     );
   }
-  const operationPath = (operation: RenderOperation): string => {
-    if ("to" in operation) return operation.to;
-    if ("path" in operation) return operation.path;
-    return "";
-  };
   const outsideOperation = contribution.operations.find(
     (operation) =>
       !operationPath(operation).startsWith(`${contribution.definition.path}/`),

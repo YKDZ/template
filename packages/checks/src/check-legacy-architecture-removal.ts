@@ -76,6 +76,35 @@ const retiredText = [
   "Package Source Preset",
 ] as const;
 
+const retiredTaskSymbols = new Set([
+  "CheckComponent",
+  "FixComponent",
+  "CheckPlan",
+  "FixPlan",
+  "DeploymentCheckComponent",
+]);
+
+const deploymentOwnerRegistrationSymbols = new Set([
+  "deploymentOwner",
+  "deploymentOwners",
+  "deploymentTaskOwner",
+  "deploymentTaskOwners",
+  "deploymentCheckOwner",
+  "deploymentCheckOwners",
+]);
+
+const retiredTaskTerms = [
+  "Check Component",
+  "Fix Component",
+  "Check Plan",
+  "Fix Plan",
+  "Deployment Check Component",
+] as const;
+
+const deploymentOwnerRegistration = /deployment[\s-]*(?:task[\s-]*)?owner/iu;
+const taskCompatibilityOrMigration =
+  /\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b[\s\S]{0,80}\b(?:task[- ](?:model|vocabulary|script|name|selection)|:run|:root|transit|(?:Check|Fix) (?:Component|Plan)|Deployment Check Component)\b|\b(?:task[- ](?:model|vocabulary|script|name|selection)|:run|:root|transit|(?:Check|Fix) (?:Component|Plan)|Deployment Check Component)\b[\s\S]{0,80}\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b/iu;
+
 const concretePresetNames = new Set([
   "ts-lib",
   "rust-bin",
@@ -93,12 +122,15 @@ const ignoredDirectories = new Set([
   ".scratch",
   ".turbo",
   ".template-boundary-check",
+  ".pnpm-store",
   "node_modules",
 ]);
 
 function isTextFile(relativePath: string): boolean {
   if (relativePath.includes("/dist/")) return false;
-  return /\.(?:[cm]?[jt]sx?|json|ya?ml|toml|md)$/u.test(relativePath);
+  return !/\.(?:png|jpe?g|gif|webp|ico|woff2?|ttf|eot|wasm|zip|tgz)$/iu.test(
+    relativePath,
+  );
 }
 
 function isTypeScript(relativePath: string): boolean {
@@ -106,7 +138,10 @@ function isTypeScript(relativePath: string): boolean {
 }
 
 function isRemovalRule(relativePath: string): boolean {
-  return relativePath.endsWith("check-legacy-architecture-removal.ts");
+  return (
+    relativePath.endsWith("check-legacy-architecture-removal.ts") ||
+    relativePath.endsWith("legacy-architecture-removal.test.ts")
+  );
 }
 
 function isHistoricalAdr(relativePath: string): boolean {
@@ -125,6 +160,125 @@ function isGenericSurface(relativePath: string): boolean {
 
 function isBuiltInShared(relativePath: string): boolean {
   return relativePath.startsWith("packages/builtin-presets/src/shared/");
+}
+
+function propertyNameText(name: ts.PropertyName): string | undefined {
+  if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) return name.text;
+  return undefined;
+}
+
+function isScriptsObject(node: ts.ObjectLiteralExpression): boolean {
+  return (
+    ts.isPropertyAssignment(node.parent) &&
+    propertyNameText(node.parent.name) === "scripts"
+  );
+}
+
+function isTaskScriptName(name: string): boolean {
+  return hasRetiredTaskName(name) || hasRetiredTransitTask(name);
+}
+
+function hasRetiredTaskName(source: string): boolean {
+  return [":run", ":root"].some((suffix) => {
+    let index = source.indexOf(suffix);
+    while (index >= 0) {
+      const before = source[index - 1] ?? "";
+      const after = source[index + suffix.length] ?? "";
+      if (/[A-Za-z0-9_-]/u.test(before) && !/[A-Za-z0-9_-]/u.test(after)) {
+        return true;
+      }
+      index = source.indexOf(suffix, index + suffix.length);
+    }
+    return false;
+  });
+}
+
+function hasRetiredTransitTask(source: string): boolean {
+  let index = source.indexOf("transit");
+  while (index >= 0) {
+    const before = source[index - 1] ?? "";
+    const after = source[index + "transit".length] ?? "";
+    if (!/[A-Za-z0-9_-]/u.test(before) && !/[A-Za-z0-9_-]/u.test(after)) {
+      return true;
+    }
+    index = source.indexOf("transit", index + "transit".length);
+  }
+  return false;
+}
+
+function isTaskCommandWithFilter(command: string): boolean {
+  return (
+    /\bturbo\s+run\b/iu.test(command) &&
+    /(?:^|\s)--filter(?:=|\s|$)/iu.test(command)
+  );
+}
+
+const prohibitedTaskPlanFields = new Set([
+  "checks",
+  "fixes",
+  "checkPlan",
+  "fixPlan",
+  "components",
+  "deploymentChecks",
+]);
+
+function declarationName(node: ts.NamedDeclaration): string | undefined {
+  return node.name !== undefined && ts.isIdentifier(node.name)
+    ? node.name.text
+    : undefined;
+}
+
+function hasProtectedTaskShapeName(node: ts.Node): boolean {
+  return (
+    (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) &&
+    (node.name.text === "PackageContribution" ||
+      node.name.text === "GeneratedRepositoryPlan")
+  );
+}
+
+function hasProtectedTaskShapeAncestor(node: ts.Node): boolean {
+  for (
+    let current: ts.Node | undefined = node.parent;
+    current;
+    current = current.parent
+  ) {
+    if (hasProtectedTaskShapeName(current)) return true;
+  }
+  return false;
+}
+
+function isTaskRenderBoundary(node: ts.Node): boolean {
+  const name =
+    ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node)
+      ? node.name?.text
+      : ts.isVariableDeclaration(node)
+        ? declarationName(node)
+        : undefined;
+  return /^(?:renderRootCheckCommand|renderFixCommand|renderDeploymentCheckCommand)$/u.test(
+    name ?? "",
+  );
+}
+
+function taskRenderBoundaryAncestor(node: ts.Node): ts.Node | undefined {
+  for (
+    let current: ts.Node | undefined = node.parent;
+    current;
+    current = current.parent
+  ) {
+    if (isTaskRenderBoundary(current)) return current;
+  }
+  return undefined;
+}
+
+function hasRetiredTaskVocabulary(source: string): boolean {
+  return (
+    retiredTaskTerms.some((term) => source.includes(term)) ||
+    [...retiredTaskSymbols].some((symbol) => source.includes(symbol)) ||
+    hasRetiredTaskName(source) ||
+    hasRetiredTransitTask(source) ||
+    deploymentOwnerRegistration.test(source) ||
+    taskCompatibilityOrMigration.test(source)
+  );
 }
 
 async function filesUnder(root: string, relative = ""): Promise<string[]> {
@@ -206,6 +360,26 @@ function evaluatedString(
         .map((span, index) => `${substitutions[index]!}${span.literal.text}`)
         .join("")
     );
+  }
+  if (
+    ts.isCallExpression(expression) &&
+    ts.isPropertyAccessExpression(expression.expression) &&
+    expression.expression.name.text === "join" &&
+    ts.isArrayLiteralExpression(expression.expression.expression)
+  ) {
+    const separator =
+      expression.arguments.length === 0
+        ? ","
+        : evaluatedString(checker, expression.arguments[0]!, seen);
+    if (separator === undefined) return undefined;
+    const values = expression.expression.expression.elements.map((element) =>
+      ts.isExpression(element)
+        ? evaluatedString(checker, element, new Set(seen))
+        : undefined,
+    );
+    return values.some((value) => value === undefined)
+      ? undefined
+      : values.join(separator);
   }
   if (ts.isIdentifier(expression)) {
     const symbol = resolvedSymbol(checker, expression);
@@ -291,6 +465,125 @@ function collectTypeScriptFindings(
           "retired-symbol",
           relativePath,
           `${location} references ${node.text}`,
+        ),
+      );
+    }
+    if (ts.isIdentifier(node) && retiredTaskSymbols.has(node.text)) {
+      findings.push(
+        finding(
+          "retired-task-symbol",
+          relativePath,
+          `${location} references retired task-selection symbol ${node.text}`,
+        ),
+      );
+    }
+    if (
+      ts.isPropertySignature(node) &&
+      hasProtectedTaskShapeAncestor(node) &&
+      prohibitedTaskPlanFields.has(propertyNameText(node.name) ?? "")
+    ) {
+      findings.push(
+        finding(
+          "retired-task-plan-field",
+          relativePath,
+          `${location} retains ${propertyNameText(node.name)} on a task planning shape`,
+        ),
+      );
+    }
+    if (
+      ts.isParameter(node) &&
+      taskRenderBoundaryAncestor(node) !== undefined
+    ) {
+      const names: string[] = [];
+      const collectParameterNames = (name: ts.BindingName): void => {
+        if (ts.isIdentifier(name)) {
+          names.push(name.text);
+          return;
+        }
+        for (const element of name.elements) {
+          if (!ts.isOmittedExpression(element)) {
+            collectParameterNames(element.name);
+          }
+        }
+      };
+      collectParameterNames(node.name);
+      for (const name of names) {
+        if (/(?:owner|filter)/iu.test(name)) {
+          findings.push(
+            finding(
+              "retired-task-render-parameter",
+              relativePath,
+              `${location} passes ${name} through a task command render boundary`,
+            ),
+          );
+        }
+      }
+    }
+    if (
+      ts.isIdentifier(node) &&
+      deploymentOwnerRegistrationSymbols.has(node.text)
+    ) {
+      findings.push(
+        finding(
+          "deployment-owner-registration",
+          relativePath,
+          `${location} registers deployment execution owner ${node.text}`,
+        ),
+      );
+    }
+    if (
+      !relativePath.startsWith("test/") &&
+      ts.isStringLiteralLike(node) &&
+      isTaskCommandWithFilter(node.text)
+    ) {
+      findings.push(
+        finding(
+          "generated-task-filter",
+          relativePath,
+          `${location} renders a Turbo task command with a Package filter`,
+        ),
+      );
+    }
+    const composedCommand = ts.isVariableDeclaration(node)
+      ? node.initializer
+      : ts.isReturnStatement(node)
+        ? node.expression
+        : undefined;
+    if (!relativePath.startsWith("test/") && composedCommand !== undefined) {
+      const command = evaluatedString(checker, composedCommand);
+      if (command !== undefined && isTaskCommandWithFilter(command)) {
+        findings.push(
+          finding(
+            "generated-task-filter",
+            relativePath,
+            `${location} composes a Turbo task command with a Package filter`,
+          ),
+        );
+      }
+    }
+    if (
+      ts.isStringLiteralLike(node) &&
+      taskCompatibilityOrMigration.test(node.text)
+    ) {
+      findings.push(
+        finding(
+          "task-model-compatibility",
+          relativePath,
+          `${location} retains a task-model compatibility or migration path`,
+        ),
+      );
+    }
+    if (
+      ts.isPropertyAssignment(node) &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      isScriptsObject(node.parent) &&
+      isTaskScriptName(propertyNameText(node.name) ?? "")
+    ) {
+      findings.push(
+        finding(
+          "retired-task-script",
+          relativePath,
+          `${location} declares retired task script ${propertyNameText(node.name)}`,
         ),
       );
     }
@@ -447,7 +740,10 @@ function collectTextFindings(
 ): LegacyArchitectureFinding[] {
   if (isRemovalRule(relativePath)) return [];
   if (isHistoricalAdr(relativePath)) {
-    if (relativePath.endsWith("0093-trusted-built-in-preset-definitions.md")) {
+    if (
+      relativePath.endsWith("0093-trusted-built-in-preset-definitions.md") ||
+      relativePath.endsWith("0094-native-workspace-task-discovery.md")
+    ) {
       return [];
     }
     if (
@@ -462,6 +758,21 @@ function collectTextFindings(
         ),
       ];
     }
+    if (
+      (retiredTaskTerms.some((term) => source.includes(term)) ||
+        hasRetiredTaskName(source) ||
+        hasRetiredTransitTask(source) ||
+        deploymentOwnerRegistration.test(source)) &&
+      !/superseded(?:\s+in\s+part)?\s+by\s+ADR-0094/iu.test(source)
+    ) {
+      return [
+        finding(
+          "historical-task-adr-status",
+          relativePath,
+          "contains retired task-model vocabulary without an explicit ADR-0094 supersession note",
+        ),
+      ];
+    }
     return [];
   }
   const findings: LegacyArchitectureFinding[] = [];
@@ -469,6 +780,42 @@ function collectTextFindings(
     if (new RegExp(term, "iu").test(source)) {
       findings.push(
         finding("retired-vocabulary", relativePath, `contains ${term}`),
+      );
+    }
+  }
+  if (!isTypeScript(relativePath)) {
+    for (const term of retiredTaskTerms) {
+      if (source.includes(term)) {
+        findings.push(
+          finding("retired-task-vocabulary", relativePath, `contains ${term}`),
+        );
+      }
+    }
+    if (hasRetiredTaskName(source) || hasRetiredTransitTask(source)) {
+      findings.push(
+        finding(
+          "retired-task-vocabulary",
+          relativePath,
+          "contains retired :run, :root, or transit task vocabulary",
+        ),
+      );
+    }
+    if (deploymentOwnerRegistration.test(source)) {
+      findings.push(
+        finding(
+          "deployment-owner-registration",
+          relativePath,
+          "contains deployment execution-owner registration vocabulary",
+        ),
+      );
+    }
+    if (taskCompatibilityOrMigration.test(source)) {
+      findings.push(
+        finding(
+          "task-model-compatibility",
+          relativePath,
+          "contains a task-model compatibility, migration, alias, or deprecation path",
+        ),
       );
     }
   }
@@ -576,6 +923,38 @@ function manifestFindings(
       ),
     );
   }
+  const scripts = manifest.scripts;
+  if (
+    scripts !== undefined &&
+    typeof scripts === "object" &&
+    scripts !== null
+  ) {
+    const manifestName = typeof manifest.name === "string" ? manifest.name : "";
+    for (const [name, command] of Object.entries(scripts)) {
+      if (isTaskScriptName(name)) {
+        findings.push(
+          finding(
+            "retired-task-script",
+            relativePath,
+            `declares retired task script ${name}`,
+          ),
+        );
+      }
+      if (
+        typeof command === "string" &&
+        isTaskCommandWithFilter(command) &&
+        !(manifestName === "@ykdz/template-repository" && name === "build")
+      ) {
+        findings.push(
+          finding(
+            "generated-task-filter",
+            relativePath,
+            `${name} renders a Turbo task command with a Package filter`,
+          ),
+        );
+      }
+    }
+  }
   return findings;
 }
 
@@ -592,7 +971,7 @@ export async function findLegacyArchitectureDistributionFindings(
   const hasDistribution = await Promise.all(
     packageRoots.map(async (packageRoot) => {
       try {
-        await access(path.join(repositoryRoot, packageRoot));
+        await access(path.join(repositoryRoot, packageRoot, "dist"));
         return true;
       } catch {
         return false;
@@ -600,7 +979,8 @@ export async function findLegacyArchitectureDistributionFindings(
     }),
   );
   if (!hasDistribution.some(Boolean)) return findings;
-  for (const packageRoot of packageRoots) {
+  for (const [index, packageRoot] of packageRoots.entries()) {
+    if (!hasDistribution[index]) continue;
     const manifestPath = `${packageRoot}/package.json`;
     try {
       findings.push(
@@ -643,11 +1023,81 @@ export async function findLegacyArchitectureDistributionFindings(
             ),
           );
         }
+        if (hasRetiredTaskVocabulary(source)) {
+          findings.push(
+            finding(
+              "built-artifact-task-vocabulary",
+              displayPath,
+              "contains retired task-model vocabulary or deployment owner registration",
+            ),
+          );
+        }
       }
     } catch {
       findings.push(
         finding("built-artifact", `${packageRoot}/dist`, "is missing"),
       );
+    }
+  }
+  return findings;
+}
+
+/** Audits the unpacked CLI and every package named by its real bundleDependencies. */
+export async function findPackedTaskVocabularyFindings(
+  packedRoot: string,
+): Promise<readonly LegacyArchitectureFinding[]> {
+  const findings: LegacyArchitectureFinding[] = [];
+  let manifest: { readonly bundleDependencies?: unknown };
+  try {
+    manifest = JSON.parse(
+      await readFile(path.join(packedRoot, "package.json"), "utf8"),
+    ) as { readonly bundleDependencies?: unknown };
+  } catch {
+    return [
+      finding(
+        "packed-package-manifest",
+        "package.json",
+        "is missing or unreadable while auditing bundled package roots",
+      ),
+    ];
+  }
+  const bundleDependencies = Array.isArray(manifest.bundleDependencies)
+    ? manifest.bundleDependencies.filter(
+        (dependency): dependency is string => typeof dependency === "string",
+      )
+    : [];
+  const managedRoots = [
+    { display: "dist", required: true },
+    ...bundleDependencies.map((dependency) => ({
+      display: `node_modules/${dependency}`,
+      required: true,
+    })),
+  ];
+  for (const { display, required } of managedRoots) {
+    const root = path.join(packedRoot, display);
+    try {
+      for (const relativePath of await filesUnder(root)) {
+        const source = await readFile(path.join(root, relativePath), "utf8");
+        if (hasRetiredTaskVocabulary(source)) {
+          findings.push(
+            finding(
+              "packed-artifact-task-vocabulary",
+              `${display}/${relativePath}`,
+              "contains retired task-model vocabulary or deployment owner registration",
+            ),
+          );
+        }
+      }
+    } catch {
+      if (required) {
+        findings.push(
+          finding(
+            "packed-bundled-root",
+            display,
+            "is missing or unreadable in the packed public artifact",
+          ),
+        );
+      }
     }
   }
   return findings;
@@ -696,6 +1146,7 @@ export async function checkPackedPublicArtifact(
       "pnpm",
       [
         "--config.node-linker=hoisted",
+        "--config.ignore-scripts=true",
         "--filter",
         publicCliPackageName,
         "pack",
@@ -744,6 +1195,15 @@ export async function checkPackedPublicArtifact(
     await mkdir(unpacked);
     await execa("tar", ["-xf", archivePath, "-C", unpacked]);
     const packedRoot = path.join(unpacked, "package");
+    const packedVocabularyFindings =
+      await findPackedTaskVocabularyFindings(packedRoot);
+    if (packedVocabularyFindings.length > 0) {
+      throw new Error(
+        `Legacy Architecture Removal Check found packed task-model finding(s):\n${packedVocabularyFindings
+          .map(({ rule, file, detail }) => `- [${rule}] ${file}: ${detail}`)
+          .join("\n")}`,
+      );
+    }
     for (const args of [
       ["dist/cli.js", "--help"],
       ["dist/cli.js", "presets"],
@@ -770,11 +1230,17 @@ export async function findLegacyArchitectureFindings(
   const program = createAuditProgram(repositoryRoot, files);
   const checker = program.getTypeChecker();
   for (const relativePath of files) {
-    const source = await readFile(
-      path.join(repositoryRoot, relativePath),
-      "utf8",
-    );
+    let source: string;
+    try {
+      source = await readFile(path.join(repositoryRoot, relativePath), "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
     findings.push(...collectTextFindings(relativePath, source));
+    if (relativePath.endsWith("package.json")) {
+      findings.push(...manifestFindings(relativePath, source));
+    }
     const sourceFile = program.getSourceFile(
       path.join(repositoryRoot, relativePath),
     );

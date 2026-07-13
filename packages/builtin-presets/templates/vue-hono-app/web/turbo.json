@@ -2,10 +2,10 @@
   "extends": ["//"],
   "tags": ["app"],
   "tasks": {
-    "build:run": {
+    "build": {
       "outputs": ["dist/**"]
     },
-    "test:e2e:run": {
+    "test:e2e": {
       "cache": false
     }
   }

@@ -14,7 +14,7 @@
     "check:generated": "node src/check-generated-registry.ts init",
     "check:focused": "node src/check-generated-registry.ts focused",
     "check:deployment": "node src/check-generated-registry.ts deployment",
-    "check:templates": "pnpm --filter @ykdz/template-builtin-presets run check:templates && node src/check-legacy-architecture-removal.ts --packed",
+    "check:templates": "node src/check-legacy-architecture-removal.ts --packed",
     "check:templates:github-yaml": "node src/check-builtin-preset-github-yaml.ts",
     "check:toolchain:online": "node src/check-online-toolchain-resolution-contract.ts",
     "update:toolchain": "node src/update-toolchain-baseline.ts",

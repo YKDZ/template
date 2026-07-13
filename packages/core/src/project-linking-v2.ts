@@ -11,7 +11,7 @@ export type ExplicitProjectLinkPlan = {
   >;
   /**
    * Build ordering follows the same explicit package relationships as manifest
-   * dependencies.  Turbo resolves ^build:run through the derived workspace
+   * dependencies. Turbo resolves ^build through the derived workspace
    * dependency rather than through Preset or framework vocabulary.
    */
   readonly hasBuildOrdering: boolean;

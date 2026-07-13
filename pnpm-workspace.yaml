@@ -11,7 +11,6 @@ dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:
   - build
-  - build:run
 
 minimumReleaseAge: 1440
 
@@ -19,7 +18,6 @@ minimumReleaseAgeStrict: true
 
 overrides:
   "pinia>typescript": "-"
-  "valibot>typescript": "-"
   "vue>typescript": "-"
 
 catalog:

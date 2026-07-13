@@ -10,30 +10,6 @@ export type WorkspaceOrchestrationOwner = {
 
 export type ComponentOwner = PackageBoundaryOwner | WorkspaceOrchestrationOwner;
 
-export type CheckComponentKind =
-  | "typescript-typecheck"
-  | "oxc-lint"
-  | "oxc-format-check"
-  | "build"
-  | "unit-test"
-  | "e2e-test"
-  | "turbo-check"
-  | "turbo-package-typecheck"
-  | "turbo-package-build"
-  | "turbo-package-test"
-  | "turbo-package-e2e-test"
-  | "turbo-package-check"
-  | "rustfmt-check"
-  | "cargo-clippy"
-  | "cargo-test";
-
-export type FixComponentKind =
-  | "oxc-format-write"
-  | "oxc-lint-fix"
-  | "turbo-fix"
-  | "turbo-package-fix"
-  | "rustfmt-write";
-
 export type PlaywrightBrowserAssetsEnvironmentNeed = {
   readonly kind: "playwright-browser-assets";
   readonly browser: "chromium";
@@ -61,7 +37,7 @@ export type ShellCheckEnvironmentNeed = {
   };
 };
 
-/** Rust check components require the maintained toolchain in local and CI plans. */
+/** Rust task leaves require the maintained toolchain in local and CI plans. */
 export type RustToolchainEnvironmentNeed = {
   readonly kind: "rust-toolchain";
   readonly owner: ComponentOwner;
@@ -76,10 +52,92 @@ export type RustToolchainEnvironmentNeed = {
   };
 };
 
+/**
+ * Docker is needed only by the focused deployment mode. It is deliberately
+ * outside ordinary Check Environment Needs, whose preparation and next steps
+ * apply to every generated-check scenario.
+ */
+export type DockerEngineEnvironmentNeed = {
+  readonly kind: "docker-engine";
+  readonly preparation: {
+    readonly id: "verify-docker-engine";
+    readonly label: "Verify Docker engine";
+    readonly command: "docker";
+    readonly args: readonly ["version", "--format", "{{.Server.Version}}"];
+    readonly display: "docker version --format {{.Server.Version}}";
+    readonly machineVerifiable: true;
+  };
+};
+
 export type CheckEnvironmentNeed =
   | PlaywrightBrowserAssetsEnvironmentNeed
   | ShellCheckEnvironmentNeed
   | RustToolchainEnvironmentNeed;
+
+export type DeploymentEnvironmentNeed = DockerEngineEnvironmentNeed;
+
+/**
+ * The durable form of a Check Environment Need. It deliberately retains only
+ * the explicit preparation fact, never a task name or package execution list.
+ */
+export type CheckEnvironmentNeedFact =
+  | Pick<PlaywrightBrowserAssetsEnvironmentNeed, "kind" | "browser" | "owner">
+  | Pick<ShellCheckEnvironmentNeed, "kind" | "owner">
+  | Pick<RustToolchainEnvironmentNeed, "kind" | "owner" | "toolchain">;
+
+/** Deployment preparation is likewise durable without selecting an executing package. */
+export type DeploymentEnvironmentNeedFact = Pick<
+  DockerEngineEnvironmentNeed,
+  "kind"
+>;
+
+export function checkEnvironmentNeedFact(
+  need: CheckEnvironmentNeed,
+): CheckEnvironmentNeedFact {
+  switch (need.kind) {
+    case "playwright-browser-assets":
+      return { kind: need.kind, browser: need.browser, owner: need.owner };
+    case "shellcheck-command":
+      return { kind: need.kind, owner: need.owner };
+    case "rust-toolchain":
+      return {
+        kind: need.kind,
+        owner: need.owner,
+        toolchain: need.toolchain,
+      };
+  }
+}
+
+export function checkEnvironmentNeedFromFact(
+  fact: CheckEnvironmentNeedFact,
+): CheckEnvironmentNeed {
+  switch (fact.kind) {
+    case "playwright-browser-assets":
+      return playwrightBrowserAssetsEnvironmentNeed({
+        browser: fact.browser,
+        owner: fact.owner,
+      });
+    case "shellcheck-command":
+      return shellCheckEnvironmentNeed(fact.owner);
+    case "rust-toolchain":
+      return rustToolchainEnvironmentNeed(fact.owner);
+  }
+}
+
+export function deploymentEnvironmentNeedFact(
+  need: DeploymentEnvironmentNeed,
+): DeploymentEnvironmentNeedFact {
+  return { kind: need.kind };
+}
+
+export function deploymentEnvironmentNeedFromFact(
+  fact: DeploymentEnvironmentNeedFact,
+): DeploymentEnvironmentNeed {
+  if (fact.kind !== "docker-engine") {
+    throw new Error("Unsupported Deployment Environment Need fact.");
+  }
+  return dockerEngineEnvironmentNeed();
+}
 
 export function rustToolchainEnvironmentNeed(
   owner: ComponentOwner,
@@ -108,232 +166,69 @@ export function rustToolchainEnvironmentNeed(
   };
 }
 
-export type CheckComponent = {
-  readonly kind: CheckComponentKind;
-  readonly owner: ComponentOwner;
-};
-
-export type DeploymentCheckComponent = {
-  readonly kind: "deployment-image";
-  readonly owner: PackageBoundaryOwner;
-};
-
-export type DeploymentCheckEnvironmentNeed = {
-  readonly kind: "docker-engine";
-};
-
-export type FixComponent = {
-  readonly kind: FixComponentKind;
-  readonly owner: ComponentOwner;
-};
-
-export type CheckPlan = {
-  readonly components: CheckComponent[];
-  readonly environmentNeeds: CheckEnvironmentNeed[];
-  readonly deploymentChecks?: DeploymentCheckComponent[] | undefined;
-};
-
-export type FixPlan = {
-  readonly components: FixComponent[];
-};
-
-function renderTurboPackageFilter(owner: ComponentOwner): string {
-  if (owner.kind !== "package-boundary") {
-    throw new Error("Turbo package tasks require a Package Boundary owner.");
-  }
-
-  return `--filter './${owner.path}'`;
+export function dockerEngineEnvironmentNeed(): DockerEngineEnvironmentNeed {
+  return {
+    kind: "docker-engine",
+    preparation: {
+      id: "verify-docker-engine",
+      label: "Verify Docker engine",
+      command: "docker",
+      args: ["version", "--format", "{{.Server.Version}}"],
+      display: "docker version --format {{.Server.Version}}",
+      machineVerifiable: true,
+    },
+  };
 }
 
-const turboAgentOutputArgs = [
-  "--output-logs=errors-only",
-  "--log-order=grouped",
+export const qualityTaskVocabulary = [
+  "boundaries",
+  "format:check",
+  "lint",
+  "typecheck",
+  "build",
+  "test",
+  "test:e2e",
 ] as const;
 
 export function renderTurboRunCommand(
   taskNames: readonly string[],
   args: readonly string[] = [],
+  options: {
+    readonly outputLogs?: "errors-only" | "full";
+    readonly continueAfterFailure?: boolean;
+    readonly taskPrefix?: boolean;
+  } = {},
 ): string {
-  return ["turbo run", ...taskNames, ...args, ...turboAgentOutputArgs].join(
-    " ",
-  );
+  return [
+    "turbo run",
+    ...taskNames,
+    ...args,
+    ...(options.continueAfterFailure
+      ? ["--continue=dependencies-successful"]
+      : []),
+    `--output-logs=${options.outputLogs ?? "errors-only"}`,
+    "--log-order=grouped",
+    ...(options.taskPrefix ? ["--log-prefix=task"] : []),
+  ].join(" ");
 }
 
-export function checkComponentTaskName(component: CheckComponent): string {
-  return checkComponentTaskNames(component)[0] ?? "check:run";
+export function renderRootCheckCommand(): string {
+  return renderTurboRunCommand(qualityTaskVocabulary, [], {
+    continueAfterFailure: true,
+    taskPrefix: true,
+  });
 }
 
-function checkComponentTaskNames(component: CheckComponent): readonly string[] {
-  switch (component.kind) {
-    case "typescript-typecheck":
-    case "turbo-package-typecheck":
-      return ["typecheck:run"];
-    case "oxc-lint":
-    case "cargo-clippy":
-      return ["lint:run"];
-    case "oxc-format-check":
-    case "rustfmt-check":
-      return ["format:check:run"];
-    case "build":
-    case "turbo-package-build":
-      return ["build:run"];
-    case "unit-test":
-    case "cargo-test":
-    case "turbo-package-test":
-      return ["test:run"];
-    case "e2e-test":
-    case "turbo-package-e2e-test":
-      return ["test:e2e:run"];
-    case "turbo-check":
-    case "turbo-package-check":
-      return [
-        "format:check:run",
-        "lint:run",
-        "typecheck:run",
-        "build:run",
-        "test:run",
-        "test:e2e:run",
-      ];
-  }
+export function renderDeploymentCheckCommand(): string {
+  return renderTurboRunCommand(["deployment"], [], { taskPrefix: true });
 }
 
-export function fixComponentTaskName(component: FixComponent): string {
-  return fixComponentTaskNames(component)[0] ?? "fix:run";
-}
-
-function fixComponentTaskNames(component: FixComponent): readonly string[] {
-  switch (component.kind) {
-    case "oxc-format-write":
-    case "rustfmt-write":
-      return ["format:write:run"];
-    case "oxc-lint-fix":
-      return ["lint:fix:run"];
-    case "turbo-fix":
-    case "turbo-package-fix":
-      return ["format:write:run", "lint:fix:run"];
-  }
-}
-
-function uniqueTaskNames(taskNames: readonly string[]): string[] {
-  return [...new Set(taskNames)];
-}
-
-export function renderCheckLeafCommand(component: CheckComponent): string {
-  switch (component.kind) {
-    case "typescript-typecheck":
-      return "pnpm run typecheck";
-    case "oxc-lint":
-      return "pnpm run lint";
-    case "oxc-format-check":
-      return "pnpm run format:check";
-    case "build":
-      return "pnpm run build";
-    case "unit-test":
-      return "pnpm run test";
-    case "e2e-test":
-      return "pnpm run test:e2e";
-    case "turbo-check":
-      return renderTurboRunCommand(["check"]);
-    case "turbo-package-typecheck":
-      return renderTurboRunCommand(
-        ["typecheck"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-build":
-      return renderTurboRunCommand(
-        ["build"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-test":
-      return renderTurboRunCommand(
-        ["test"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-e2e-test":
-      return renderTurboRunCommand(
-        ["test:e2e"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "turbo-package-check":
-      return renderTurboRunCommand(
-        ["check"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "rustfmt-check":
-      return "cargo fmt --all -- --check";
-    case "cargo-clippy":
-      return "cargo clippy --workspace --all-targets -- -D warnings";
-    case "cargo-test":
-      return "cargo test --workspace";
-  }
-}
-
-export function renderFixLeafCommand(component: FixComponent): string {
-  switch (component.kind) {
-    case "oxc-format-write":
-      return "pnpm run format:write";
-    case "oxc-lint-fix":
-      return "pnpm run lint:fix";
-    case "turbo-fix":
-      return renderTurboRunCommand(["fix"]);
-    case "turbo-package-fix":
-      return renderTurboRunCommand(
-        ["fix"],
-        [renderTurboPackageFilter(component.owner)],
-      );
-    case "rustfmt-write":
-      return "cargo fmt --all";
-  }
-}
-
-export function renderRootCheckCommand(plan: CheckPlan): string {
-  return renderTurboRunCommand(
-    uniqueTaskNames([
-      ...plan.components.flatMap(checkComponentTaskNames),
-      "check:run",
-    ]),
-  );
-}
-
-export function deploymentCheckEnvironmentNeeds(
-  check: DeploymentCheckComponent,
-): DeploymentCheckEnvironmentNeed[] {
-  switch (check.kind) {
-    case "deployment-image":
-      return [{ kind: "docker-engine" }];
-  }
-}
-
-export function deploymentCheckTaskName(
-  check: DeploymentCheckComponent,
-): "check:deployment" {
-  switch (check.kind) {
-    case "deployment-image":
-      return "check:deployment";
-  }
-}
-
-export function renderDeploymentCheckLeafCommand(
-  check: DeploymentCheckComponent,
-): string {
-  return `pnpm --filter './${check.owner.path}' run ${deploymentCheckTaskName(check)}`;
-}
-
-export function renderDeploymentCheckCommand(
-  plan: Pick<CheckPlan, "deploymentChecks">,
-): string {
-  return uniqueTaskNames(
-    (plan.deploymentChecks ?? []).map(renderDeploymentCheckLeafCommand),
-  ).join(" && ");
-}
-
-export function renderFixCommand(plan: FixPlan): string {
-  return renderTurboRunCommand(
-    uniqueTaskNames([
-      ...plan.components.flatMap(fixComponentTaskNames),
-      "fix:run",
-    ]),
-  );
+export function renderFixCommand(): string {
+  return renderTurboRunCommand(["lint:fix", "format:write"], [], {
+    continueAfterFailure: true,
+    outputLogs: "full",
+    taskPrefix: true,
+  });
 }
 
 function playwrightBrowserInstallArgs(

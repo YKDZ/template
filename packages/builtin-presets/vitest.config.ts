@@ -1,7 +1,5 @@
 import { defineConfig } from "vitest/config";
 
-process.env.TEMPLATE_REPOSITORY_ROOT ??= process.cwd();
-
 export default defineConfig({
   ssr: {
     noExternal: [
@@ -13,7 +11,7 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ["test/**/*.test.ts"],
+    include: ["src/*/behavior.test.ts"],
     exclude: [
       "**/node_modules/**",
       "templates/**",

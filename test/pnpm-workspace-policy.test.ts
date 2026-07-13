@@ -90,6 +90,17 @@ async function dockerIsAvailable(): Promise<boolean> {
 const hasDocker = await dockerIsAvailable();
 
 describe("pnpm Workspace Policy", () => {
+  it("renders only explicitly requested dependency overrides", () => {
+    const workspace = renderGeneratedPnpmWorkspaceYaml({
+      dependencies: [],
+      overrides: { "example>peer": "-" },
+    });
+
+    expect(workspace).toContain('"example>peer": "-"');
+    expect(workspace).not.toContain("valibot>typescript");
+    expect(workspace).not.toContain("pnpmfile");
+  });
+
   it("selects a Node-only Definition by contribution semantics", () => {
     const context = {
       targetDir: "/tmp/pnpm-policy-definition",
@@ -136,7 +147,7 @@ describe("pnpm Workspace Policy", () => {
           name: "@fixture/provider",
           version: "0.0.0",
           scripts: {
-            "build:run":
+            build:
               "node -e \"require('node:fs').copyFileSync('source.txt', 'dist/version.txt')\"",
           },
         })}\n`,
@@ -181,7 +192,7 @@ describe("pnpm Workspace Policy", () => {
     await writeFile(path.join(provider, "source.txt"), "after\n");
     await execa(
       "corepack",
-      ["pnpm@11.11.0", "--filter", "@fixture/provider", "run", "build:run"],
+      ["pnpm@11.11.0", "--filter", "@fixture/provider", "run", "build"],
       { cwd: root, env: environment },
     );
 

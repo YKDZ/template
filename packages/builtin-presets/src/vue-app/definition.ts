@@ -8,10 +8,8 @@ import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import {
   sharedVueSourceOperations,
-  vueApplicationChecks,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
-  vueApplicationFixes,
   vueApplicationManifest,
   vueApplicationScripts,
 } from "../shared/vue.ts";
@@ -20,8 +18,7 @@ import { templateSources } from "../template-sources.ts";
 function packageScripts(): Record<string, string> {
   return {
     ...vueApplicationScripts(),
-    "typecheck:run":
-      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    typecheck: "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 
@@ -66,8 +63,6 @@ function appContribution(options: {
       scripts: packageScripts(),
     }),
     operations,
-    checks: vueApplicationChecks(definition.path),
-    fixes: vueApplicationFixes(definition.path),
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
     foundation: {
       toolchains: {},

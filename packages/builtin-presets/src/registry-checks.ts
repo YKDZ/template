@@ -330,6 +330,25 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
           dependabotPath,
           projectDependabotConfig(initialization.dependencyMaintenancePolicy),
         );
+        const environmentNeedsOperation = initialization.operations.find(
+          (operation) =>
+            operation.kind === "writeJson" &&
+            operation.to === ".template/environment-needs.json",
+        );
+        if (environmentNeedsOperation?.kind !== "writeJson") {
+          throw new Error(
+            "Initialization plan must persist Check Environment Need facts",
+          );
+        }
+        const environmentNeedsFile = path.join(
+          context.targetDir,
+          ".template/environment-needs.json",
+        );
+        mkdirSync(path.dirname(environmentNeedsFile), { recursive: true });
+        writeFileSync(
+          environmentNeedsFile,
+          JSON.stringify(environmentNeedsOperation.value),
+        );
         plans.push({
           definition: scenario.addition,
           plan: planGeneratedRepositoryPackageAddition({

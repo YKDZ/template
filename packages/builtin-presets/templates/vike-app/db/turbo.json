@@ -2,7 +2,7 @@
   "extends": ["//"],
   "tags": ["library"],
   "tasks": {
-    "build:run": {
+    "build": {
       "outputs": []
     }
   }

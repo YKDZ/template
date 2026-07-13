@@ -24,10 +24,10 @@ function cargoPackageName(projectName: string): string {
 
 function packageScripts(): Record<string, string> {
   return {
-    "format:check:run": "cargo fmt --all -- --check",
-    "format:write:run": "cargo fmt --all",
-    "lint:run": "cargo clippy --workspace --all-targets -- -D warnings",
-    "test:run": "cargo test --workspace",
+    "format:check": "cargo fmt --all -- --check",
+    "format:write": "cargo fmt --all",
+    lint: "cargo clippy --workspace --all-targets -- -D warnings",
+    test: "cargo test --workspace",
   };
 }
 
@@ -84,26 +84,6 @@ function rustContribution(context: GenerationContext): PackageContribution {
       engines: { node: context.toolchain.nodeLtsMajor },
     },
     operations,
-    checks: [
-      {
-        kind: "rustfmt-check",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-      {
-        kind: "cargo-clippy",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-      {
-        kind: "cargo-test",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
-    fixes: [
-      {
-        kind: "rustfmt-write",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
     environmentNeeds: [
       rustToolchainEnvironmentNeed({
         kind: "package-boundary",

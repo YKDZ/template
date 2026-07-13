@@ -1,10 +1,9 @@
 import { fileURLToPath } from "node:url";
 
 import {
+  dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-  type CheckComponent,
-  type FixComponent,
 } from "@ykdz/template-core/module-graph";
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
@@ -55,67 +54,36 @@ function foundation(): PackageContribution["foundation"] {
   };
 }
 
-function checks(
-  packagePath: string,
-  options: { readonly browser?: boolean; readonly unit?: boolean } = {},
-): CheckComponent[] {
-  const owner = { kind: "package-boundary" as const, path: packagePath };
-  return [
-    { kind: "typescript-typecheck", owner },
-    { kind: "oxc-lint", owner },
-    { kind: "oxc-format-check", owner },
-    { kind: "build", owner },
-    ...((options.unit ?? true) ? [{ kind: "unit-test" as const, owner }] : []),
-    ...(options.browser ? [{ kind: "e2e-test" as const, owner }] : []),
-  ];
-}
-
-function fixes(packagePath: string): FixComponent[] {
-  const owner = { kind: "package-boundary" as const, path: packagePath };
-  return [
-    { kind: "oxc-format-write", owner },
-    { kind: "oxc-lint-fix", owner },
-  ];
-}
-
 function webScripts(): Record<string, string> {
   const prepareDatabase =
     "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
   return {
-    "build:run": "vike build",
-    "check:deployment": "node scripts/check-standalone-deployment.ts",
+    build: "vike build",
+    deployment: "node scripts/check-standalone-deployment.ts",
     dev: `${prepareDatabase} && vike dev`,
-    "format:check:run":
-      "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run":
-      "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
-    "lint:fix:run":
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
+    "lint:fix":
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
     preview: `${prepareDatabase} && vike preview`,
     start: "node ./dist/server/index.mjs",
-    "test:run":
-      "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
-    "test:e2e:run": "node scripts/run-playwright.ts",
-    "typecheck:run":
-      "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
+    "test:e2e": "node scripts/run-playwright.ts",
+    typecheck: "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 
 function databaseScripts(): Record<string, string> {
   return {
-    "build:run": "tsc -p tsconfig.json --noEmit",
+    build: "tsc -p tsconfig.json --noEmit",
     "db:seed:example": "node scripts/seed-example.ts",
-    "format:check:run":
-      "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run":
-      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
-    "test:run":
-      'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
-    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    test: 'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
+    typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
@@ -123,7 +91,7 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
   const withDatabasePackage = (command: string): string =>
     `DATABASE_PACKAGE_NAME=${databasePackageName} ${command}`;
   return {
-    "build:run": "tsc -p tsconfig.json --noEmit",
+    build: "tsc -p tsconfig.json --noEmit",
     "db:generate": withDatabasePackage("drizzle-kit generate"),
     "db:migrate": withDatabasePackage("drizzle-kit migrate"),
     "db:prepare:deploy": "pnpm run db:migrate",
@@ -133,14 +101,11 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
       "mkdir -p data node_modules/.tmp && drizzle-kit push",
     ),
     "db:studio": withDatabasePackage("drizzle-kit studio"),
-    "format:check:run":
-      "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write:run": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint:run":
-      "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix:run":
-      "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
-    "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
+    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
@@ -305,13 +270,11 @@ function webContribution(context: GenerationContext): PackageContribution {
       packageManager: context.toolchain.packageManagerPin,
     },
     operations,
-    checks: checks(web.path, { browser: true }),
-    fixes: fixes(web.path),
     environmentNeeds: [
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
       shellCheckEnvironmentNeed(owner),
     ],
-    deploymentChecks: [{ kind: "deployment-image", owner }],
+    deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
     foundation: foundation(),
   };
 }
@@ -372,8 +335,6 @@ function databaseContribution(context: GenerationContext): PackageContribution {
       { kind: "writeJson", to: `${db.path}/package.json`, value: {} },
       ...copyOperations(db.path, sourceFiles),
     ],
-    checks: checks(db.path),
-    fixes: fixes(db.path),
     environmentNeeds: [],
     foundation: foundation(),
   };
@@ -420,10 +381,6 @@ function migrationsContribution(
       },
       ...copyOperations(migrations.path, sourceFiles),
     ],
-    // This package has no test:run manifest script, so the durable
-    // contribution reconstruction must not invent a unit-test check for it.
-    checks: checks(migrations.path, { unit: false }),
-    fixes: fixes(migrations.path),
     environmentNeeds: [],
     foundation: foundation(),
   };

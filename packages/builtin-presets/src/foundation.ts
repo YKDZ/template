@@ -13,18 +13,22 @@ import {
   type EditorCustomizationCapability,
 } from "@ykdz/template-core/editor-customization";
 import type {
-  CheckComponent,
   CheckEnvironmentNeed,
-  DeploymentCheckComponent,
-  FixComponent,
+  DeploymentEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
-  checkComponentTaskName,
-  fixComponentTaskName,
-  playwrightBrowserAssetsEnvironmentNeed,
-  renderTurboRunCommand,
-  rustToolchainEnvironmentNeed,
-  shellCheckEnvironmentNeed,
+  checkEnvironmentNeedFact,
+  checkEnvironmentNeedFromFact,
+  deploymentEnvironmentNeedFact,
+  deploymentEnvironmentNeedFromFact,
+  renderDeploymentCheckCommand,
+  renderFixCommand,
+  renderRootCheckCommand,
+} from "@ykdz/template-core/module-graph";
+import type {
+  CheckEnvironmentNeedFact,
+  ComponentOwner,
+  DeploymentEnvironmentNeedFact,
 } from "@ykdz/template-core/module-graph";
 import {
   assertPackageContribution,
@@ -88,16 +92,22 @@ export type GeneratedRepositoryPlan = {
     readonly toolchain: BuiltInGenerationContext["toolchain"];
   };
   readonly operations: readonly RenderOperation[];
-  readonly checks: readonly CheckComponent[];
-  readonly fixes: readonly FixComponent[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
-  readonly deploymentChecks: readonly DeploymentCheckComponent[];
+  readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
   readonly manifests: readonly Readonly<Record<string, unknown>>[];
   readonly dependencyCatalog: Readonly<Record<string, string>>;
   readonly dependencyMaintenancePolicy: DependencyMaintenancePolicy;
   readonly nextStepInstructions: readonly NextStepInstruction[];
 };
+
+type PersistedEnvironmentNeeds = {
+  readonly schemaVersion: 1;
+  readonly check: readonly CheckEnvironmentNeedFact[];
+  readonly deployment: readonly DeploymentEnvironmentNeedFact[];
+};
+
+const environmentNeedsPath = ".template/environment-needs.json";
 
 /** One independently checkable initial Package Contribution and its real plan. */
 export type BuiltInPresetTemplateSourceCheckContext = {
@@ -109,7 +119,7 @@ export type BuiltInPresetTemplateSourceCheckContext = {
 /**
  * The Foundation persists the non-rendering half of every Package
  * Contribution with the Generated Repository.  Package Addition cannot infer
- * check, fix, deployment, or maintenance semantics from a package name (or
+ * fix, deployment, or maintenance semantics from a package name (or
  * from a lossy subset of scripts), so this is the durable topology it reads.
  */
 /** Resolve an owned source handle for diagnostics and source checks. */
@@ -233,14 +243,115 @@ export function createGenerationContext(options: {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function environmentNeedOwner(value: unknown): ComponentOwner | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "workspace-orchestration" && value.path === ".") {
+    return { kind: "workspace-orchestration", path: "." };
+  }
+  if (value.kind === "package-boundary" && typeof value.path === "string") {
+    return { kind: "package-boundary", path: value.path };
+  }
+  return undefined;
+}
+
+function persistedCheckEnvironmentNeedFact(
+  value: unknown,
+): CheckEnvironmentNeedFact | undefined {
+  if (!isRecord(value)) return undefined;
+  const owner = environmentNeedOwner(value.owner);
+  if (owner === undefined) return undefined;
+  switch (value.kind) {
+    case "playwright-browser-assets":
+      return value.browser === "chromium"
+        ? { kind: value.kind, browser: value.browser, owner }
+        : undefined;
+    case "shellcheck-command":
+      return { kind: value.kind, owner };
+    case "rust-toolchain":
+      return value.toolchain === "stable"
+        ? { kind: value.kind, toolchain: value.toolchain, owner }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function readPersistedEnvironmentNeeds(targetDir: string): {
+  readonly check: readonly CheckEnvironmentNeed[];
+  readonly deployment: readonly DeploymentEnvironmentNeed[];
+} {
+  const filePath = path.join(targetDir, environmentNeedsPath);
+  if (!existsSync(filePath)) {
+    throw new Error(
+      `Package Addition requires explicit Check Environment Need facts: ${environmentNeedsPath} is missing`,
+    );
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Package Addition requires valid Check Environment Need facts: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.check) ||
+    !Array.isArray(value.deployment)
+  ) {
+    throw new Error(
+      `Package Addition requires valid Check Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  const check = value.check.map(persistedCheckEnvironmentNeedFact);
+  if (check.some((fact) => fact === undefined)) {
+    throw new Error(
+      `Package Addition requires supported Check Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  if (
+    value.deployment.some(
+      (fact) => !isRecord(fact) || fact.kind !== "docker-engine",
+    )
+  ) {
+    throw new Error(
+      `Package Addition requires supported deployment Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  return {
+    check: (check as CheckEnvironmentNeedFact[]).map(
+      checkEnvironmentNeedFromFact,
+    ),
+    deployment: value.deployment.map((fact) =>
+      deploymentEnvironmentNeedFromFact(fact as DeploymentEnvironmentNeedFact),
+    ),
+  };
+}
+
+function uniqueEnvironmentNeeds<T>(needs: readonly T[]): readonly T[] {
+  const seen = new Set<string>();
+  return needs.filter((need) => {
+    const key = JSON.stringify(need);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
- * Package Addition reconstructs generic current facts from the Blueprint
- * topology and each package's real manifest/configuration.  A second durable
- * Contribution database would drift from the generated repository.
+ * Package Addition reconstructs generic current facts from the Blueprint,
+ * manifest truth, and explicit persisted Environment Need facts. Environment
+ * preparation is never derived from task script text.
  */
 function existingPackageContribution(options: {
   readonly context: BuiltInGenerationContext;
   readonly definition: ProjectBlueprintV2["packages"][number];
+  readonly environmentNeeds: readonly CheckEnvironmentNeed[];
 }): PackageContribution {
   const packageRoot = path.join(
     options.context.targetDir,
@@ -264,18 +375,15 @@ function existingPackageContribution(options: {
     );
   }
   const record = manifest as Record<string, unknown>;
-  const scripts =
-    typeof record.scripts === "object" && record.scripts !== null
-      ? (record.scripts as Record<string, unknown>)
-      : {};
-  const owner = {
-    kind: "package-boundary" as const,
-    path: options.definition.path,
-  };
   const dependencyMaintenance = existingDependencyMaintenancePolicy(
     options.context.targetDir,
   );
-  const rust = existsSync(path.join(packageRoot, "Cargo.toml"));
+  const environmentNeeds = options.environmentNeeds.filter(
+    (need) =>
+      need.owner.kind === "package-boundary" &&
+      need.owner.path === options.definition.path,
+  );
+  const rust = environmentNeeds.some((need) => need.kind === "rust-toolchain");
   const editorRecommendationsPath = path.join(
     options.context.targetDir,
     ".vscode/extensions.json",
@@ -306,32 +414,6 @@ function existingPackageContribution(options: {
           ? (["vitest"] as const)
           : []),
       ];
-  const checks: CheckComponent[] = rust
-    ? [
-        { kind: "rustfmt-check", owner },
-        { kind: "cargo-clippy", owner },
-        { kind: "cargo-test", owner },
-      ]
-    : [
-        ...(scripts["typecheck:run"] === undefined
-          ? []
-          : [{ kind: "typescript-typecheck" as const, owner }]),
-        ...(scripts["lint:run"] === undefined
-          ? []
-          : [{ kind: "oxc-lint" as const, owner }]),
-        ...(scripts["format:check:run"] === undefined
-          ? []
-          : [{ kind: "oxc-format-check" as const, owner }]),
-        ...(scripts["build:run"] === undefined
-          ? []
-          : [{ kind: "build" as const, owner }]),
-        ...(scripts["test:run"] === undefined
-          ? []
-          : [{ kind: "unit-test" as const, owner }]),
-        ...(scripts["test:e2e:run"] === undefined
-          ? []
-          : [{ kind: "e2e-test" as const, owner }]),
-      ];
   return {
     definition: options.definition,
     manifest: record,
@@ -346,36 +428,7 @@ function existingPackageContribution(options: {
           : {},
     },
     operations: [],
-    checks,
-    fixes: rust
-      ? [{ kind: "rustfmt-write", owner }]
-      : [
-          ...(scripts["format:write:run"] === undefined
-            ? []
-            : [{ kind: "oxc-format-write" as const, owner }]),
-          ...(scripts["lint:fix:run"] === undefined
-            ? []
-            : [{ kind: "oxc-lint-fix" as const, owner }]),
-        ],
-    environmentNeeds: [
-      ...(rust ? [rustToolchainEnvironmentNeed(owner)] : []),
-      ...(scripts["test:e2e:run"] === undefined
-        ? []
-        : [
-            playwrightBrowserAssetsEnvironmentNeed({
-              browser: "chromium",
-              owner,
-            }),
-          ]),
-      ...(Object.values(scripts).some(
-        (script) => typeof script === "string" && script.includes("shellcheck"),
-      )
-        ? [shellCheckEnvironmentNeed(owner)]
-        : []),
-    ],
-    ...(scripts["check:deployment"] === undefined
-      ? {}
-      : { deploymentChecks: [{ kind: "deployment-image" as const, owner }] }),
+    environmentNeeds,
     foundation: {
       toolchains: rust
         ? { rust: { toolchain: "stable", components: ["rustfmt", "clippy"] } }
@@ -448,53 +501,6 @@ function existingDependencyMaintenancePolicy(
   };
 }
 
-function unique<T>(values: readonly T[]): T[] {
-  return [...new Set(values)];
-}
-
-function rootCheckCommand(checks: readonly CheckComponent[]): string {
-  const rootTasks = unique(
-    checks
-      .filter((check) => check.owner.kind === "workspace-orchestration")
-      .map(checkComponentTaskName),
-  );
-  const packageChecks = checks.filter(
-    (check) => check.owner.kind === "package-boundary",
-  );
-  const packageTasks = unique(packageChecks.map(checkComponentTaskName));
-  const packageFilters = unique(
-    packageChecks.map((check) => `--filter './${check.owner.path}'`),
-  );
-  return [
-    "pnpm run check:boundaries",
-    ...rootTasks.map((task) => `pnpm run ${task}`),
-    ...(packageTasks.length === 0
-      ? []
-      : [renderTurboRunCommand(packageTasks, packageFilters)]),
-  ].join(" && ");
-}
-
-function rootFixCommand(fixes: readonly FixComponent[]): string {
-  const rootTasks = unique(
-    fixes
-      .filter((fix) => fix.owner.kind === "workspace-orchestration")
-      .map(fixComponentTaskName),
-  );
-  const packageFixes = fixes.filter(
-    (fix) => fix.owner.kind === "package-boundary",
-  );
-  const packageTasks = unique(packageFixes.map(fixComponentTaskName));
-  const packageFilters = unique(
-    packageFixes.map((fix) => `--filter './${fix.owner.path}'`),
-  );
-  return [
-    ...rootTasks.map((task) => `pnpm run ${task}`),
-    ...(packageTasks.length === 0
-      ? []
-      : [renderTurboRunCommand(packageTasks, packageFilters)]),
-  ].join(" && ");
-}
-
 function devcontainerDockerfileOperations(options: {
   readonly context: BuiltInGenerationContext;
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
@@ -555,47 +561,33 @@ function foundationPlan(options: {
   readonly contributions: readonly PackageContribution[];
   /** Contributions whose package-owned operations are rendered in this pass. */
   readonly renderContributions?: readonly PackageContribution[];
+  /** Focused deployment preparation recovered from durable Environment Need facts. */
+  readonly existingDeploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
-  const foundationChecks: CheckComponent[] = [
-    {
-      kind: "oxc-format-check",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "oxc-lint",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "typescript-typecheck",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-  ];
-  const foundationFixes: FixComponent[] = [
-    {
-      kind: "oxc-format-write",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-    {
-      kind: "oxc-lint-fix",
-      owner: { kind: "workspace-orchestration", path: "." },
-    },
-  ];
-  const checks = [
-    ...foundationChecks,
-    ...options.contributions.flatMap((item) => item.checks),
-  ];
-  const fixes = [
-    ...foundationFixes,
-    ...options.contributions.flatMap((item) => item.fixes),
-  ];
-  const environmentNeeds = options.contributions.flatMap(
-    (item) => item.environmentNeeds,
+  const environmentNeeds = uniqueEnvironmentNeeds(
+    options.contributions.flatMap((item) => item.environmentNeeds),
   );
-  const deploymentChecks = options.contributions.flatMap(
-    (item) => item.deploymentChecks ?? [],
-  );
+  const deploymentEnvironmentNeeds = uniqueEnvironmentNeeds([
+    ...(options.existingDeploymentEnvironmentNeeds ?? []),
+    ...options.contributions.flatMap(
+      (item) => item.deploymentEnvironmentNeeds ?? [],
+    ),
+  ]);
+  const persistedEnvironmentNeeds: PersistedEnvironmentNeeds = {
+    schemaVersion: 1,
+    check: environmentNeeds.map(checkEnvironmentNeedFact),
+    deployment: deploymentEnvironmentNeeds.map(deploymentEnvironmentNeedFact),
+  };
+  const hasDeploymentTask = options.contributions.some((contribution) => {
+    const scripts = contribution.manifest.scripts;
+    return (
+      typeof scripts === "object" &&
+      scripts !== null &&
+      typeof (scripts as Record<string, unknown>).deployment === "string"
+    );
+  });
   const packagePaths = options.contributions.map(
     (contribution) => contribution.definition.path,
   );
@@ -619,13 +611,17 @@ function foundationPlan(options: {
     throw new Error("Foundation requires one coordinated Rust toolchain");
   }
   const workspacePackageGlobs = [
+    "apps/*",
+    "packages/*",
     ...new Set([
-      ...options.blueprint.packages.map(
-        (definition) => `${definition.path.split("/")[0]}/*`,
-      ),
-      ...options.contributions.flatMap(
-        (contribution) => contribution.foundation.workspacePackageGlobs ?? [],
-      ),
+      ...options.blueprint.packages
+        .map((definition) => `${definition.path.split("/")[0]}/*`)
+        .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
+      ...options.contributions
+        .flatMap(
+          (contribution) => contribution.foundation.workspacePackageGlobs ?? [],
+        )
+        .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
     ]),
   ];
   const editorCustomization = editorCustomizationForCapabilities(
@@ -670,25 +666,17 @@ function foundationPlan(options: {
     private: true,
     type: "module",
     scripts: {
-      check: rootCheckCommand(checks),
-      "check:boundaries": "turbo boundaries --no-color",
-      ...(deploymentChecks.length === 0
-        ? {}
-        : {
-            "check:deployment": deploymentChecks
-              .map(
-                (check) =>
-                  `pnpm --filter './${check.owner.path}' run check:deployment`,
-              )
-              .join(" && "),
-          }),
-      fix: rootFixCommand(fixes),
-      "format:check:run": "oxfmt --list-different --config oxfmt.config.ts .",
-      "format:write:run": "oxfmt --write --config oxfmt.config.ts .",
-      "lint:run": "oxlint --quiet --format=unix --config oxlint.config.ts .",
-      "lint:fix:run": "oxlint --format=unix --config oxlint.config.ts . --fix",
-      typecheck: "pnpm run typecheck:run",
-      "typecheck:run": "tsc -p tsconfig.json --noEmit --pretty false",
+      check: renderRootCheckCommand(),
+      boundaries: "node scripts/check-boundaries.ts",
+      ...(hasDeploymentTask
+        ? { "check:deployment": renderDeploymentCheckCommand() }
+        : {}),
+      fix: renderFixCommand(),
+      "format:check": "node scripts/run-root-owned-task.ts format:check",
+      "format:write": "node scripts/run-root-owned-task.ts format:write",
+      lint: "node scripts/run-root-owned-task.ts lint",
+      "lint:fix": "node scripts/run-root-owned-task.ts lint:fix",
+      typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
       "@types/node": "catalog:",
@@ -708,7 +696,6 @@ function foundationPlan(options: {
     ]),
   );
   const dependencyOverrides = {
-    "valibot>typescript": "-",
     ...(Object.hasOwn(dependencyCatalog, "vue") ||
     Object.hasOwn(dependencyCatalog, "pinia")
       ? vuePnpmDependencyOverrides
@@ -733,13 +720,20 @@ function foundationPlan(options: {
                   `  ${JSON.stringify(name)}: ${String(version)}`,
               )
               .join("\n"),
-            DEPENDENCY_OVERRIDES: Object.entries(dependencyOverrides)
-              .toSorted(([left], [right]) => left.localeCompare(right))
-              .map(
-                ([dependency, version]) =>
-                  `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
-              )
-              .join("\n"),
+            DEPENDENCY_OVERRIDES_SECTION:
+              Object.keys(dependencyOverrides).length === 0
+                ? ""
+                : [
+                    "",
+                    "overrides:",
+                    ...Object.entries(dependencyOverrides)
+                      .toSorted(([left], [right]) => left.localeCompare(right))
+                      .map(
+                        ([dependency, version]) =>
+                          `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
+                      ),
+                    "",
+                  ].join("\n"),
           },
           ...(options.mode === "addition" ? { overwrite: true } : {}),
         }
@@ -755,7 +749,9 @@ function foundationPlan(options: {
     from: ".github/workflows/check.dynamic.template",
     to: ".github/workflows/check.yml",
     replacements: projectCheckWorkflowTemplateReplacements({
-      checkPlan: { components: checks, environmentNeeds, deploymentChecks },
+      environment: { needs: environmentNeeds },
+      deploymentEnvironmentNeeds,
+      hasDeploymentTask,
     }),
     ...(options.mode === "addition" ? { overwrite: true } : {}),
   };
@@ -788,14 +784,20 @@ function foundationPlan(options: {
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: ".pnpmfile.cts",
-      to: ".pnpmfile.cts",
+      from: "turbo.json",
+      to: "turbo.json",
     },
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: "turbo.json",
-      to: "turbo.json",
+      from: "scripts/check-boundaries.ts",
+      to: "scripts/check-boundaries.ts",
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/run-root-owned-task.ts",
+      to: "scripts/run-root-owned-task.ts",
     },
     {
       kind: "copyFile",
@@ -873,6 +875,26 @@ function foundationPlan(options: {
                 source: templateSources.foundation,
                 from: "rust/devcontainer/rust.Dockerfile",
               },
+              ...(environmentNeeds.some(
+                (need) => need.kind === "playwright-browser-assets",
+              )
+                ? [
+                    {
+                      source: templateSources.sharedDevcontainer,
+                      from: "browser-test.Dockerfile",
+                    },
+                  ]
+                : []),
+              ...(environmentNeeds.some(
+                (need) => need.kind === "shellcheck-command",
+              )
+                ? [
+                    {
+                      source: templateSources.sharedDevcontainer,
+                      from: "shellcheck.Dockerfile",
+                    },
+                  ]
+                : []),
             ],
           },
         ]),
@@ -881,6 +903,11 @@ function foundationPlan(options: {
       kind: "writeJson",
       to: ".template/blueprint.json",
       value: options.blueprint,
+    },
+    {
+      kind: "writeJson",
+      to: environmentNeedsPath,
+      value: persistedEnvironmentNeeds,
     },
     {
       kind: "writeJson",
@@ -989,10 +1016,8 @@ function foundationPlan(options: {
       toolchain: options.context.toolchain,
     },
     operations,
-    checks,
-    fixes,
     environmentNeeds,
-    deploymentChecks,
+    deploymentEnvironmentNeeds,
     manifests: [
       ...options.contributions.map((item) => item.manifest),
       rootManifest,
@@ -1080,8 +1105,15 @@ export function planGeneratedRepositoryPackageAddition(options: {
       : {}),
   };
   assertProjectBlueprintV2(blueprint);
+  const persistedEnvironmentNeeds = readPersistedEnvironmentNeeds(
+    options.context.targetDir,
+  );
   const existingContributions = options.blueprint.packages.map((definition) =>
-    existingPackageContribution({ context: options.context, definition }),
+    existingPackageContribution({
+      context: options.context,
+      definition,
+      environmentNeeds: persistedEnvironmentNeeds.check,
+    }),
   );
   if (
     existingContributions.length !== options.blueprint.packages.length ||
@@ -1104,6 +1136,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
     blueprint,
     contributions: [...existingContributions, contribution],
     renderContributions: [contribution],
+    existingDeploymentEnvironmentNeeds: persistedEnvironmentNeeds.deployment,
     mode: "addition",
   });
 }

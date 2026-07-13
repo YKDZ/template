@@ -95,17 +95,20 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
-    expect(plan.deploymentChecks).toEqual([
-      {
-        kind: "deployment-image",
-        owner: { kind: "package-boundary", path: "apps/web" },
-      },
-    ]);
+    expect(plan).not.toHaveProperty("deploymentChecks");
+    expect(plan.deploymentEnvironmentNeeds).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "docker-engine" }),
+      ]),
+    );
     expect(plan.nextStepInstructions.map((step) => step.display)).toEqual(
       expect.arrayContaining([
         "pnpm --filter ./apps/web exec playwright install chromium",
         "sudo apt-get update && sudo apt-get install -y shellcheck",
       ]),
+    );
+    expect(plan.nextStepInstructions.map((step) => step.display)).not.toContain(
+      "docker version --format {{.Server.Version}}",
     );
 
     await renderNewProject({
@@ -113,9 +116,9 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       operations: [...plan.operations],
     });
 
-    expect(
-      await readFile(path.join(targetDir, ".pnpmfile.cts"), "utf8"),
-    ).toContain("readPackage");
+    await expect(
+      stat(path.join(targetDir, ".pnpmfile.cts")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
 
     expect(
       JSON.parse(
@@ -167,9 +170,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(dockerfile).toContain(
       "pnpm exec turbo prune @demo/web @demo/db-migrations --docker",
     );
-    expect(dockerfile).toContain(
-      "COPY pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cts ./",
-    );
+    expect(dockerfile).not.toContain(".pnpmfile.cts");
     expect(dockerfile).toContain('ENV DATABASE_PACKAGE_NAME="@demo/db"');
     expect(dockerfile).toContain("for attempt in 1 2 3; do");
     expect(
@@ -202,19 +203,22 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(
       await readFile(path.join(targetDir, ".gitignore"), "utf8"),
     ).toContain(".template/");
-    expect(
-      await readFile(
-        path.join(targetDir, ".github/workflows/check.yml"),
-        "utf8",
-      ),
-    ).toContain("check: [root, deployment]");
+    const checkWorkflow = await readFile(
+      path.join(targetDir, ".github/workflows/check.yml"),
+      "utf8",
+    );
+    expect(checkWorkflow).toContain("check: [root, deployment]");
+    expect(checkWorkflow).toContain("uses: docker/setup-buildx-action@v3");
+    expect(checkWorkflow).toContain("if: matrix.check == 'deployment'");
     expect(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
     ).toMatchObject({
       scripts: {
-        "check:deployment": "pnpm --filter './apps/web' run check:deployment",
-        check: expect.stringContaining("pnpm run check:boundaries"),
-        fix: expect.stringContaining("pnpm run format:write:run"),
+        "check:deployment":
+          "turbo run deployment --output-logs=errors-only --log-order=grouped --log-prefix=task",
+        check:
+          "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+        fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
       },
     });
   });

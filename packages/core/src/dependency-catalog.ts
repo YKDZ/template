@@ -14,7 +14,6 @@ export type GeneratedDependencyCatalogOptions = {
     | { readonly kind: "hoisted"; readonly evidence: string };
   readonly minimumReleaseAgeExclude?: readonly string[];
   readonly overrides?: Readonly<Record<string, string>>;
-  readonly pnpmfile?: string;
 };
 
 export type GeneratedPackageManifestDependencies = {
@@ -384,15 +383,12 @@ export function renderGeneratedPnpmWorkspaceYaml(
         ]
       : []),
     `nodeLinker: ${dependencyLinker}`,
-    ...(options.pnpmfile === undefined
-      ? []
-      : [`pnpmfile: ${options.pnpmfile}`]),
     "autoInstallPeers: false",
     "resolvePeersFromWorkspaceRoot: false",
     "injectWorkspacePackages: true",
     "dedupeInjectedDeps: false",
     "syncInjectedDepsAfterScripts:",
-    "  - build:run",
+    "  - build",
     "minimumReleaseAge: 1440",
     "minimumReleaseAgeStrict: true",
     "",
@@ -418,10 +414,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
     );
   }
 
-  const overrides = {
-    "valibot>typescript": "-",
-    ...options.overrides,
-  };
+  const overrides = options.overrides ?? {};
   if (Object.keys(overrides).length > 0) {
     lines.push(
       "overrides:",

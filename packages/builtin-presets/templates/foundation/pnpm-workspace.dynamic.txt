@@ -8,14 +8,10 @@ dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:
   - build
-  - build:run
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
-
-overrides:
-{{DEPENDENCY_OVERRIDES}}
-
+{{DEPENDENCY_OVERRIDES_SECTION}}
 allowBuilds:
   esbuild: true
 
