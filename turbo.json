@@ -126,6 +126,7 @@
       "cache": false
     },
     "lint": {
+      "dependsOn": ["^build"],
       "outputs": []
     },
     "lint:fix": {

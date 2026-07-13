@@ -97,6 +97,7 @@ describe("Template Repository native task model", () => {
     expect(tasks["check:templates:static-source"]).toBeUndefined();
     expect(tasks.typecheck?.dependsOn).toContain("^typecheck");
     expect(tasks.build?.dependsOn).toContain("^build");
+    expect(tasks.lint?.dependsOn).toContain("^build");
     expect(tasks.test?.dependsOn).toContain("build");
     expect(tasks["//#test"]?.dependsOn).toContain("^build");
     expect(tasks["//#test:e2e"]).toBeUndefined();
@@ -126,7 +127,10 @@ describe("Template Repository native task model", () => {
       { reject: true },
     );
     const actionGraph = JSON.parse(result.stdout) as {
-      readonly tasks: readonly { readonly taskId: string }[];
+      readonly tasks: readonly {
+        readonly dependencies: readonly string[];
+        readonly taskId: string;
+      }[];
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
@@ -138,6 +142,15 @@ describe("Template Repository native task model", () => {
     expect(taskIds).not.toContain("//#test:e2e");
     expect(taskIds).toContain("@ykdz/template-core#format:check");
     expect(taskIds).toContain("@ykdz/template-core#typecheck");
+    expect(
+      actionGraph.tasks.find(({ taskId }) => taskId === "@ykdz/template#lint")
+        ?.dependencies,
+    ).toContain("@ykdz/template-builtin-presets#build");
+    expect(
+      actionGraph.tasks.find(
+        ({ taskId }) => taskId === "@ykdz/template-checks#lint",
+      )?.dependencies,
+    ).toContain("@ykdz/template-core#build");
     expect(taskIds.some((taskId) => taskId.includes("transit"))).toBe(false);
   });
 
