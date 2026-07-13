@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -87,10 +87,16 @@ describe("packed public CLI consumer", () => {
     );
     try {
       const archiveDirectory = path.join(workspace, "archives");
+      const builtDefinition = path.join(
+        process.cwd(),
+        "packages/builtin-presets/dist/src/rust-bin/definition.js",
+      );
+      const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
       await execa(
         "pnpm",
         [
           "--config.node-linker=hoisted",
+          "--config.ignore-scripts=true",
           "--filter",
           publicCliPackageName,
           "pack",
@@ -99,6 +105,7 @@ describe("packed public CLI consumer", () => {
         ],
         { cwd: process.cwd() },
       );
+      expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
       const archive = (await readdir(archiveDirectory)).find((file) =>
         file.endsWith(".tgz"),
       );
