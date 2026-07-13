@@ -17,13 +17,18 @@ import type {
   DeploymentEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
-  dockerEngineEnvironmentNeed,
-  playwrightBrowserAssetsEnvironmentNeed,
+  checkEnvironmentNeedFact,
+  checkEnvironmentNeedFromFact,
+  deploymentEnvironmentNeedFact,
+  deploymentEnvironmentNeedFromFact,
   renderDeploymentCheckCommand,
   renderFixCommand,
   renderRootCheckCommand,
-  rustToolchainEnvironmentNeed,
-  shellCheckEnvironmentNeed,
+} from "@ykdz/template-core/module-graph";
+import type {
+  CheckEnvironmentNeedFact,
+  ComponentOwner,
+  DeploymentEnvironmentNeedFact,
 } from "@ykdz/template-core/module-graph";
 import {
   assertPackageContribution,
@@ -95,6 +100,14 @@ export type GeneratedRepositoryPlan = {
   readonly dependencyMaintenancePolicy: DependencyMaintenancePolicy;
   readonly nextStepInstructions: readonly NextStepInstruction[];
 };
+
+type PersistedEnvironmentNeeds = {
+  readonly schemaVersion: 1;
+  readonly check: readonly CheckEnvironmentNeedFact[];
+  readonly deployment: readonly DeploymentEnvironmentNeedFact[];
+};
+
+const environmentNeedsPath = ".template/environment-needs.json";
 
 /** One independently checkable initial Package Contribution and its real plan. */
 export type BuiltInPresetTemplateSourceCheckContext = {
@@ -230,15 +243,115 @@ export function createGenerationContext(options: {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function environmentNeedOwner(value: unknown): ComponentOwner | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === "workspace-orchestration" && value.path === ".") {
+    return { kind: "workspace-orchestration", path: "." };
+  }
+  if (value.kind === "package-boundary" && typeof value.path === "string") {
+    return { kind: "package-boundary", path: value.path };
+  }
+  return undefined;
+}
+
+function persistedCheckEnvironmentNeedFact(
+  value: unknown,
+): CheckEnvironmentNeedFact | undefined {
+  if (!isRecord(value)) return undefined;
+  const owner = environmentNeedOwner(value.owner);
+  if (owner === undefined) return undefined;
+  switch (value.kind) {
+    case "playwright-browser-assets":
+      return value.browser === "chromium"
+        ? { kind: value.kind, browser: value.browser, owner }
+        : undefined;
+    case "shellcheck-command":
+      return { kind: value.kind, owner };
+    case "rust-toolchain":
+      return value.toolchain === "stable"
+        ? { kind: value.kind, toolchain: value.toolchain, owner }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function readPersistedEnvironmentNeeds(targetDir: string): {
+  readonly check: readonly CheckEnvironmentNeed[];
+  readonly deployment: readonly DeploymentEnvironmentNeed[];
+} {
+  const filePath = path.join(targetDir, environmentNeedsPath);
+  if (!existsSync(filePath)) {
+    throw new Error(
+      `Package Addition requires explicit Check Environment Need facts: ${environmentNeedsPath} is missing`,
+    );
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Package Addition requires valid Check Environment Need facts: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.check) ||
+    !Array.isArray(value.deployment)
+  ) {
+    throw new Error(
+      `Package Addition requires valid Check Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  const check = value.check.map(persistedCheckEnvironmentNeedFact);
+  if (check.some((fact) => fact === undefined)) {
+    throw new Error(
+      `Package Addition requires supported Check Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  if (
+    value.deployment.some(
+      (fact) => !isRecord(fact) || fact.kind !== "docker-engine",
+    )
+  ) {
+    throw new Error(
+      `Package Addition requires supported deployment Environment Need facts in ${environmentNeedsPath}`,
+    );
+  }
+  return {
+    check: (check as CheckEnvironmentNeedFact[]).map(
+      checkEnvironmentNeedFromFact,
+    ),
+    deployment: value.deployment.map((fact) =>
+      deploymentEnvironmentNeedFromFact(fact as DeploymentEnvironmentNeedFact),
+    ),
+  };
+}
+
+function uniqueEnvironmentNeeds<T>(needs: readonly T[]): readonly T[] {
+  const seen = new Set<string>();
+  return needs.filter((need) => {
+    const key = JSON.stringify(need);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
- * Package Addition reconstructs generic current facts from the Blueprint
- * topology and each package's real manifest/configuration.  A second durable
- * Contribution database would drift from the generated repository. Package
- * task scripts and explicit environment needs are enough to reconstruct it.
+ * Package Addition reconstructs generic current facts from the Blueprint,
+ * manifest truth, and explicit persisted Environment Need facts. Environment
+ * preparation is never derived from task script text.
  */
 function existingPackageContribution(options: {
   readonly context: BuiltInGenerationContext;
   readonly definition: ProjectBlueprintV2["packages"][number];
+  readonly environmentNeeds: readonly CheckEnvironmentNeed[];
 }): PackageContribution {
   const packageRoot = path.join(
     options.context.targetDir,
@@ -262,18 +375,15 @@ function existingPackageContribution(options: {
     );
   }
   const record = manifest as Record<string, unknown>;
-  const scripts =
-    typeof record.scripts === "object" && record.scripts !== null
-      ? (record.scripts as Record<string, unknown>)
-      : {};
-  const owner = {
-    kind: "package-boundary" as const,
-    path: options.definition.path,
-  };
   const dependencyMaintenance = existingDependencyMaintenancePolicy(
     options.context.targetDir,
   );
-  const rust = existsSync(path.join(packageRoot, "Cargo.toml"));
+  const environmentNeeds = options.environmentNeeds.filter(
+    (need) =>
+      need.owner.kind === "package-boundary" &&
+      need.owner.path === options.definition.path,
+  );
+  const rust = environmentNeeds.some((need) => need.kind === "rust-toolchain");
   const editorRecommendationsPath = path.join(
     options.context.targetDir,
     ".vscode/extensions.json",
@@ -318,25 +428,7 @@ function existingPackageContribution(options: {
           : {},
     },
     operations: [],
-    environmentNeeds: [
-      ...(rust ? [rustToolchainEnvironmentNeed(owner)] : []),
-      ...(scripts["test:e2e"] === undefined
-        ? []
-        : [
-            playwrightBrowserAssetsEnvironmentNeed({
-              browser: "chromium",
-              owner,
-            }),
-          ]),
-      ...(Object.values(scripts).some(
-        (script) => typeof script === "string" && script.includes("shellcheck"),
-      )
-        ? [shellCheckEnvironmentNeed(owner)]
-        : []),
-    ],
-    ...(scripts.deployment === undefined
-      ? {}
-      : { deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()] }),
+    environmentNeeds,
     foundation: {
       toolchains: rust
         ? { rust: { toolchain: "stable", components: ["rustfmt", "clippy"] } }
@@ -469,15 +561,25 @@ function foundationPlan(options: {
   readonly contributions: readonly PackageContribution[];
   /** Contributions whose package-owned operations are rendered in this pass. */
   readonly renderContributions?: readonly PackageContribution[];
+  /** Focused deployment preparation recovered from durable Environment Need facts. */
+  readonly existingDeploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
-  const environmentNeeds = options.contributions.flatMap(
-    (item) => item.environmentNeeds,
+  const environmentNeeds = uniqueEnvironmentNeeds(
+    options.contributions.flatMap((item) => item.environmentNeeds),
   );
-  const deploymentEnvironmentNeeds = options.contributions.flatMap(
-    (item) => item.deploymentEnvironmentNeeds ?? [],
-  );
+  const deploymentEnvironmentNeeds = uniqueEnvironmentNeeds([
+    ...(options.existingDeploymentEnvironmentNeeds ?? []),
+    ...options.contributions.flatMap(
+      (item) => item.deploymentEnvironmentNeeds ?? [],
+    ),
+  ]);
+  const persistedEnvironmentNeeds: PersistedEnvironmentNeeds = {
+    schemaVersion: 1,
+    check: environmentNeeds.map(checkEnvironmentNeedFact),
+    deployment: deploymentEnvironmentNeeds.map(deploymentEnvironmentNeedFact),
+  };
   const hasDeploymentTask = options.contributions.some((contribution) => {
     const scripts = contribution.manifest.scripts;
     return (
@@ -773,6 +875,26 @@ function foundationPlan(options: {
                 source: templateSources.foundation,
                 from: "rust/devcontainer/rust.Dockerfile",
               },
+              ...(environmentNeeds.some(
+                (need) => need.kind === "playwright-browser-assets",
+              )
+                ? [
+                    {
+                      source: templateSources.sharedDevcontainer,
+                      from: "browser-test.Dockerfile",
+                    },
+                  ]
+                : []),
+              ...(environmentNeeds.some(
+                (need) => need.kind === "shellcheck-command",
+              )
+                ? [
+                    {
+                      source: templateSources.sharedDevcontainer,
+                      from: "shellcheck.Dockerfile",
+                    },
+                  ]
+                : []),
             ],
           },
         ]),
@@ -781,6 +903,11 @@ function foundationPlan(options: {
       kind: "writeJson",
       to: ".template/blueprint.json",
       value: options.blueprint,
+    },
+    {
+      kind: "writeJson",
+      to: environmentNeedsPath,
+      value: persistedEnvironmentNeeds,
     },
     {
       kind: "writeJson",
@@ -978,8 +1105,15 @@ export function planGeneratedRepositoryPackageAddition(options: {
       : {}),
   };
   assertProjectBlueprintV2(blueprint);
+  const persistedEnvironmentNeeds = readPersistedEnvironmentNeeds(
+    options.context.targetDir,
+  );
   const existingContributions = options.blueprint.packages.map((definition) =>
-    existingPackageContribution({ context: options.context, definition }),
+    existingPackageContribution({
+      context: options.context,
+      definition,
+      environmentNeeds: persistedEnvironmentNeeds.check,
+    }),
   );
   if (
     existingContributions.length !== options.blueprint.packages.length ||
@@ -1002,6 +1136,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
     blueprint,
     contributions: [...existingContributions, contribution],
     renderContributions: [contribution],
+    existingDeploymentEnvironmentNeeds: persistedEnvironmentNeeds.deployment,
     mode: "addition",
   });
 }

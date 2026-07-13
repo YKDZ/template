@@ -60,6 +60,7 @@ async function sourceOnlyRegistryChecks(): Promise<RegistryChecks> {
 type GeneratedScenarioRunOptions = {
   readonly workspace: string;
   readonly reporter?: { readonly info?: (message: string) => void };
+  readonly run?: GeneratedCommandRunner;
 };
 
 type GeneratedCommandRunner = (
@@ -67,6 +68,91 @@ type GeneratedCommandRunner = (
   args: readonly string[],
   options: { readonly cwd: string; readonly stdio?: "inherit" },
 ) => Promise<unknown>;
+
+const qualityTaskNames = [
+  "boundaries",
+  "format:check",
+  "lint",
+  "typecheck",
+  "build",
+  "test",
+  "test:e2e",
+] as const;
+
+const fixTaskNames = ["lint:fix", "format:write"] as const;
+
+function expectedTaskIds(options: {
+  readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
+  readonly taskNames: readonly string[];
+}): readonly string[] {
+  return options.plan.manifests.flatMap((manifest) => {
+    const name = manifest.name;
+    const scripts = manifest.scripts;
+    if (
+      typeof name !== "string" ||
+      typeof scripts !== "object" ||
+      scripts === null
+    ) {
+      return [];
+    }
+    return options.taskNames.flatMap((taskName) =>
+      typeof (scripts as Record<string, unknown>)[taskName] !== "string"
+        ? []
+        : [`${name.startsWith("@") ? name : "//"}#${taskName}`],
+    );
+  });
+}
+
+/**
+ * Validates the real Turbo action graph rather than treating a successful
+ * command launch as proof that every generated Package Boundary was selected.
+ */
+export async function assertGeneratedTaskDiscovery(options: {
+  readonly plan: ReturnType<typeof planGeneratedRepositoryInitialization>;
+  readonly projectDir: string;
+  readonly taskNames: readonly string[];
+  readonly run?: GeneratedCommandRunner;
+}): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
+  const result = await run(
+    "pnpm",
+    ["exec", "turbo", "run", ...options.taskNames, "--dry-run=json"],
+    { cwd: options.projectDir },
+  );
+  let taskIds: Set<string>;
+  try {
+    const stdout =
+      typeof result === "object" &&
+      result !== null &&
+      "stdout" in result &&
+      typeof result.stdout === "string"
+        ? result.stdout
+        : "";
+    const dryRun = JSON.parse(stdout) as {
+      tasks?: readonly { taskId?: unknown }[];
+    };
+    if (!Array.isArray(dryRun.tasks)) throw new Error("tasks is missing");
+    taskIds = new Set(
+      dryRun.tasks.flatMap((task) =>
+        typeof task.taskId === "string" ? [task.taskId] : [],
+      ),
+    );
+  } catch (error) {
+    throw new Error(
+      `Turbo dry-run did not return a task graph for ${options.taskNames.join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const missing = expectedTaskIds(options).filter(
+    (taskId) => !taskIds.has(taskId),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Turbo dry-run omitted generated task(s): ${missing.join(", ")}`,
+    );
+  }
+}
 
 export async function generatedScenariosFor(
   set: GeneratedScenarioSet,
@@ -176,6 +262,9 @@ async function runScenario(
   mode: GeneratedScenarioSet,
   checks: RegistryChecks,
 ): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
   const projectDir = path.join(options.workspace, scenario.id);
   const context = createGenerationContext({
     targetDir: projectDir,
@@ -221,17 +310,50 @@ async function runScenario(
   }
 
   options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
-  await execa("pnpm", ["install"], { cwd: projectDir, stdio: "inherit" });
+  await run("pnpm", ["install"], { cwd: projectDir, stdio: "inherit" });
+  await assertGeneratedTaskDiscovery({
+    plan: finalPlan,
+    projectDir,
+    taskNames: qualityTaskNames,
+    run,
+  });
+  if (mode === "package-addition-matrix" || mode === "deployment") {
+    await assertGeneratedTaskDiscovery({
+      plan: finalPlan,
+      projectDir,
+      taskNames: fixTaskNames,
+      run,
+    });
+  }
+  if (mode === "deployment") {
+    await assertGeneratedTaskDiscovery({
+      plan: finalPlan,
+      projectDir,
+      taskNames: ["deployment"],
+      run,
+    });
+  }
   await prepareGeneratedScenarioEnvironment({
     plan: finalPlan,
     projectDir,
     mode,
+    run,
   });
-  await execa("pnpm", ["run", "check"], { cwd: projectDir, stdio: "inherit" });
+  if (mode === "package-addition-matrix" || mode === "deployment") {
+    await run("pnpm", ["run", "fix"], {
+      cwd: projectDir,
+      stdio: "inherit",
+    });
+  }
+  await run("pnpm", ["run", "check"], {
+    cwd: projectDir,
+    stdio: "inherit",
+  });
   if (mode === "deployment") {
     await runRequiredDeploymentQualityGate({
       plan: finalPlan,
       projectDir,
+      run,
     });
   }
 }

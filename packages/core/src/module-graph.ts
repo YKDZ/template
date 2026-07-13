@@ -76,6 +76,69 @@ export type CheckEnvironmentNeed =
 
 export type DeploymentEnvironmentNeed = DockerEngineEnvironmentNeed;
 
+/**
+ * The durable form of a Check Environment Need. It deliberately retains only
+ * the explicit preparation fact, never a task name or package execution list.
+ */
+export type CheckEnvironmentNeedFact =
+  | Pick<PlaywrightBrowserAssetsEnvironmentNeed, "kind" | "browser" | "owner">
+  | Pick<ShellCheckEnvironmentNeed, "kind" | "owner">
+  | Pick<RustToolchainEnvironmentNeed, "kind" | "owner" | "toolchain">;
+
+/** Deployment preparation is likewise durable without a deployment owner. */
+export type DeploymentEnvironmentNeedFact = Pick<
+  DockerEngineEnvironmentNeed,
+  "kind"
+>;
+
+export function checkEnvironmentNeedFact(
+  need: CheckEnvironmentNeed,
+): CheckEnvironmentNeedFact {
+  switch (need.kind) {
+    case "playwright-browser-assets":
+      return { kind: need.kind, browser: need.browser, owner: need.owner };
+    case "shellcheck-command":
+      return { kind: need.kind, owner: need.owner };
+    case "rust-toolchain":
+      return {
+        kind: need.kind,
+        owner: need.owner,
+        toolchain: need.toolchain,
+      };
+  }
+}
+
+export function checkEnvironmentNeedFromFact(
+  fact: CheckEnvironmentNeedFact,
+): CheckEnvironmentNeed {
+  switch (fact.kind) {
+    case "playwright-browser-assets":
+      return playwrightBrowserAssetsEnvironmentNeed({
+        browser: fact.browser,
+        owner: fact.owner,
+      });
+    case "shellcheck-command":
+      return shellCheckEnvironmentNeed(fact.owner);
+    case "rust-toolchain":
+      return rustToolchainEnvironmentNeed(fact.owner);
+  }
+}
+
+export function deploymentEnvironmentNeedFact(
+  need: DeploymentEnvironmentNeed,
+): DeploymentEnvironmentNeedFact {
+  return { kind: need.kind };
+}
+
+export function deploymentEnvironmentNeedFromFact(
+  fact: DeploymentEnvironmentNeedFact,
+): DeploymentEnvironmentNeed {
+  if (fact.kind !== "docker-engine") {
+    throw new Error("Unsupported Deployment Environment Need fact.");
+  }
+  return dockerEngineEnvironmentNeed();
+}
+
 export function rustToolchainEnvironmentNeed(
   owner: ComponentOwner,
 ): RustToolchainEnvironmentNeed {
