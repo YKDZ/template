@@ -25,6 +25,7 @@ export type GeneratedPackageManifestDependencies = {
 
 const exactNpmPackageIdentityPattern =
   /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
+const defaultGeneratedMinimumReleaseAgeExclusions = ["@ykdz/template"] as const;
 
 function assertMinimumReleaseAgeExclusions(
   exclusions: readonly string[],
@@ -360,7 +361,15 @@ export function pnpmWorkspaceYamlWithCatalogDependencies(
 export function renderGeneratedPnpmWorkspaceYaml(
   options: GeneratedDependencyCatalogOptions,
 ): string {
-  assertMinimumReleaseAgeExclusions(options.minimumReleaseAgeExclude ?? []);
+  const configuredMinimumReleaseAgeExclusions =
+    options.minimumReleaseAgeExclude ?? [];
+  assertMinimumReleaseAgeExclusions(configuredMinimumReleaseAgeExclusions);
+  const minimumReleaseAgeExclude = [
+    ...new Set([
+      ...defaultGeneratedMinimumReleaseAgeExclusions,
+      ...configuredMinimumReleaseAgeExclusions,
+    ]),
+  ];
   if (
     options.dependencyLinker?.kind === "hoisted" &&
     (options.dependencyLinker.evidence.trim().length === 0 ||
@@ -394,10 +403,10 @@ export function renderGeneratedPnpmWorkspaceYaml(
     "",
   ];
 
-  if (options.minimumReleaseAgeExclude?.length) {
+  if (minimumReleaseAgeExclude.length) {
     lines.push(
       "minimumReleaseAgeExclude:",
-      ...options.minimumReleaseAgeExclude
+      ...minimumReleaseAgeExclude
         .toSorted()
         .map((dependency) => `  - ${JSON.stringify(dependency)}`),
       "",

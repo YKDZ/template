@@ -11,6 +11,9 @@ syncInjectedDepsAfterScripts:
 
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
+
+minimumReleaseAgeExclude:
+  - "@ykdz/template"
 {{DEPENDENCY_OVERRIDES_SECTION}}
 allowBuilds:
   esbuild: true

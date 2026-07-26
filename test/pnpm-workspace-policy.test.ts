@@ -97,8 +97,23 @@ describe("pnpm Workspace Policy", () => {
     });
 
     expect(workspace).toContain('"example>peer": "-"');
+    expect(workspace).toContain(
+      'minimumReleaseAgeExclude:\n  - "@ykdz/template"',
+    );
     expect(workspace).not.toContain("valibot>typescript");
     expect(workspace).not.toContain("pnpmfile");
+  });
+
+  it("keeps the template CLI out of generated repository maturity delays", async () => {
+    const projectDir = await generateNodeOnlyProject("pnpm-template-cli-age-");
+    const workspace = await readFile(
+      path.join(projectDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+
+    expect(workspace).toContain(
+      'minimumReleaseAgeExclude:\n  - "@ykdz/template"',
+    );
   });
 
   it("selects a Node-only Definition by contribution semantics", () => {
