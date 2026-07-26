@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
+import {
+  builtInPresetRegistry,
+  createGenerationContext,
+  planGeneratedRepositoryInitialization,
+} from "@ykdz/template-builtin-presets";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
@@ -42,6 +46,38 @@ async function packTemplateArchive(workspace: string): Promise<string> {
   );
   expect(archive).toBeDefined();
   return path.join(archiveDirectory, archive!);
+}
+
+function definitionWithPackagePath(packagePath: string) {
+  const definition = builtInPresetRegistry.all().find((candidate) =>
+    planGeneratedRepositoryInitialization({
+      definition: candidate,
+      context: createGenerationContext({
+        targetDir: path.join("generated-repository", "package-path-selection"),
+        scope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    }).blueprint.packages.some((pkg) => pkg.path === packagePath),
+  );
+  if (definition === undefined) {
+    throw new Error(
+      `Expected a Built-in Preset Definition with package path ${packagePath}`,
+    );
+  }
+  return definition;
+}
+
+function firstAddableDefinition() {
+  const definition = builtInPresetRegistry
+    .all()
+    .find((candidate) => candidate.planPackageAddition !== undefined);
+  if (definition === undefined) {
+    throw new Error("Expected an addable Built-in Preset Definition");
+  }
+  return definition;
 }
 
 async function generatedTextFiles(
@@ -242,6 +278,8 @@ describe("packed public CLI consumer", () => {
       const consumer = path.join(workspace, "consumer");
       const generated = path.join(workspace, "digital");
       const archivePath = await packTemplateArchive(workspace);
+      const baseDefinition = definitionWithPackagePath("packages/db");
+      const additionDefinition = firstAddableDefinition();
       await mkdir(consumer, { recursive: true });
       await execa("npm", ["init", "--yes"], { cwd: consumer });
       await execa("pnpm", ["add", archivePath], { cwd: consumer });
@@ -260,7 +298,7 @@ describe("packed public CLI consumer", () => {
           "init",
           generated,
           "--preset",
-          "vike-app",
+          baseDefinition.metadata.name,
           "--scope",
           "demo",
           "--yes",
@@ -289,7 +327,7 @@ describe("packed public CLI consumer", () => {
           "add",
           "package",
           "--preset",
-          "ts-lib",
+          additionDefinition.metadata.name,
           "--name",
           "domain",
           "--path",

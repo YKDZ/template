@@ -28,6 +28,26 @@ describe("Built-in Preset Package Addition universality", () => {
     return definition;
   }
 
+  function definitionWithPackagePath(packagePath: string) {
+    const context = createGenerationContext({
+      targetDir: path.join("generated-repository", "package-path-selection"),
+      scope: "demo",
+      toolchain,
+    });
+    const definition = builtInPresetRegistry.all().find((candidate) =>
+      planGeneratedRepositoryInitialization({
+        definition: candidate,
+        context,
+      }).blueprint.packages.some((pkg) => pkg.path === packagePath),
+    );
+    if (definition === undefined) {
+      throw new Error(
+        `Expected a Built-in Preset Definition with package path ${packagePath}`,
+      );
+    }
+    return definition;
+  }
+
   it("initializes every Project Shape with both Standard Package Roots", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
@@ -394,7 +414,7 @@ describe("Built-in Preset Package Addition universality", () => {
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry.require("vike-app"),
+      definition: definitionWithPackagePath("packages/db"),
       context,
     });
 
@@ -413,7 +433,7 @@ describe("Built-in Preset Package Addition universality", () => {
       ).toBe(true);
 
       const addition = planGeneratedRepositoryPackageAddition({
-        definition: builtInPresetRegistry.require("ts-lib"),
+        definition: firstAddableDefinition(),
         context,
         blueprint: initialization.blueprint,
         packageLeafName: "domain",
