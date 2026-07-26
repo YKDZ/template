@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -382,6 +382,62 @@ describe("Built-in Preset Package Addition universality", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it("adds a package after pnpm has created package-local node_modules symlinks", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-with-node-modules-"),
+    );
+    const targetDir = path.join(workspace, "digital");
+    const context = createGenerationContext({
+      targetDir,
+      scope: "demo",
+      toolchain,
+    });
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: builtInPresetRegistry.require("vike-app"),
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      expect(
+        (
+          await lstat(
+            path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+          )
+        ).isSymbolicLink(),
+      ).toBe(true);
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: builtInPresetRegistry.require("ts-lib"),
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "domain",
+        packagePath: "packages/domain",
+      });
+      await renderProjectAtomically({
+        targetRoot: targetDir,
+        operations: [...addition.operations],
+      });
+
+      await expect(
+        readFile(path.join(targetDir, "packages/domain/package.json"), "utf8"),
+      ).resolves.toContain('"name": "@demo/domain"');
+      expect(
+        (
+          await lstat(
+            path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+          )
+        ).isSymbolicLink(),
+      ).toBe(true);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 300_000);
 
   it("recovers preparation only from persisted Environment Need facts, never task script text", async () => {
     const workspace = await mkdtemp(

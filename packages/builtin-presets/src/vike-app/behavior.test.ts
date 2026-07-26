@@ -173,6 +173,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(dockerfile).not.toContain(".pnpmfile.cts");
     expect(dockerfile).toContain('ENV DATABASE_PACKAGE_NAME="@demo/db"');
     expect(dockerfile).toContain("for attempt in 1 2 3; do");
+    expect(dockerfile).toContain('ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"');
     expect(
       await readFile(
         path.join(targetDir, "apps/web/scripts/container-entrypoint.sh"),
@@ -181,12 +182,25 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     ).toContain("cd /migration");
     await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
     await assertDockerCopyInputsExist(targetDir, dockerfile);
-    expect(
-      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
-    ).toContain("playwright install-deps chromium");
-    expect(
-      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
-    ).toContain("install -y --no-install-recommends shellcheck");
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+    expect(devcontainerDockerfile).toContain(
+      'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
+    );
+    expect(devcontainerDockerfile).toContain(
+      'install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" "$PNPM_HOME/bin"',
+    );
+    expect(devcontainerDockerfile).toContain(
+      "apt-get install -y --no-install-recommends ca-certificates",
+    );
+    expect(devcontainerDockerfile).toContain(
+      "playwright install-deps chromium",
+    );
+    expect(devcontainerDockerfile).toContain(
+      "install -y --no-install-recommends shellcheck",
+    );
     const dependabot = await readFile(
       path.join(targetDir, ".github/dependabot.yml"),
       "utf8",

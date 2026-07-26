@@ -6,9 +6,9 @@ FROM node:{{NODE_VERSION}}-bookworm-slim AS base
 ARG PACKAGE_MANAGER_PIN="{{PACKAGE_MANAGER_PIN}}"
 ENV COREPACK_HOME="/corepack"
 ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"
 WORKDIR /repo
-RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
+RUN install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" "$PNPM_HOME/bin" \
   && corepack enable --install-directory "$PNPM_HOME" \
   && for attempt in 1 2 3; do \
     if corepack prepare "$PACKAGE_MANAGER_PIN" --activate; then break; fi; \

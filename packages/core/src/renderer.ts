@@ -895,35 +895,46 @@ export async function renderProjectAtomically(
   const backupRoot = await mkdtemp(
     path.join(parent, `.${path.basename(targetRoot)}.template-backup-`),
   );
-  const changedEntries = changedRootEntries(options.operations);
+  const changedPaths = changedOutputPaths(options.operations);
   let committed = false;
   try {
-    await cp(targetRoot, stagingRoot, { recursive: true });
+    await cp(targetRoot, stagingRoot, {
+      recursive: true,
+      filter: generatedDependencyTreeCopyFilter,
+    });
     await renderProject({ ...options, targetRoot: stagingRoot });
 
-    // Commit only the entries changed by the staged plan.  In particular, do
+    // Commit only the files changed by the staged plan.  In particular, do
     // not rename the target directory: callers commonly run `template add`
     // from that directory, and renaming it leaves their shell on a deleted
-    // inode.  Each entry has a rollback copy before it is made visible.
-    for (const entry of changedEntries) {
-      const current = path.join(targetRoot, entry);
+    // inode.  Each path has a rollback copy before it is made visible.
+    for (const changedPath of changedPaths) {
+      const current = path.join(targetRoot, changedPath);
       try {
-        await cp(current, path.join(backupRoot, entry), { recursive: true });
+        const backup = path.join(backupRoot, changedPath);
+        await mkdir(path.dirname(backup), { recursive: true });
+        await cp(current, backup, {
+          recursive: true,
+          filter: generatedDependencyTreeCopyFilter,
+        });
       } catch (error: unknown) {
         if (!isNodeError(error) || error.code !== "ENOENT") throw error;
       }
     }
 
     try {
-      for (const entry of changedEntries) {
-        await cp(path.join(stagingRoot, entry), path.join(targetRoot, entry), {
+      for (const changedPath of changedPaths) {
+        const target = path.join(targetRoot, changedPath);
+        await mkdir(path.dirname(target), { recursive: true });
+        await cp(path.join(stagingRoot, changedPath), target, {
           recursive: true,
           force: true,
+          filter: generatedDependencyTreeCopyFilter,
         });
       }
       committed = true;
     } catch (error) {
-      await rollbackStagedEntries({ targetRoot, backupRoot, changedEntries });
+      await rollbackStagedPaths({ targetRoot, backupRoot, changedPaths });
       throw error;
     }
   } finally {
@@ -933,32 +944,39 @@ export async function renderProjectAtomically(
   }
 }
 
-function changedRootEntries(
+function changedOutputPaths(
   operations: readonly RenderOperation[],
 ): readonly string[] {
-  const entries = new Set<string>();
+  const changedPaths = new Set<string>();
   for (const operation of operations) {
     const outputPath =
       operation.kind === "setExecutable" || operation.kind === "replaceAnchors"
         ? operation.path
         : operation.to;
-    const entry = outputPath.split(/[\\/]/)[0];
-    if (entry !== undefined && entry.length > 0) entries.add(entry);
+    if (outputPath.length > 0) changedPaths.add(path.normalize(outputPath));
   }
-  return [...entries];
+  return [...changedPaths];
 }
 
-async function rollbackStagedEntries(options: {
+function generatedDependencyTreeCopyFilter(source: string): boolean {
+  return !source.split(/[\\/]/).includes("node_modules");
+}
+
+async function rollbackStagedPaths(options: {
   readonly targetRoot: string;
   readonly backupRoot: string;
-  readonly changedEntries: readonly string[];
+  readonly changedPaths: readonly string[];
 }): Promise<void> {
-  for (const entry of options.changedEntries) {
-    const target = path.join(options.targetRoot, entry);
-    const backup = path.join(options.backupRoot, entry);
+  for (const changedPath of options.changedPaths) {
+    const target = path.join(options.targetRoot, changedPath);
+    const backup = path.join(options.backupRoot, changedPath);
     await rm(target, { recursive: true, force: true });
     try {
-      await cp(backup, target, { recursive: true });
+      await mkdir(path.dirname(target), { recursive: true });
+      await cp(backup, target, {
+        recursive: true,
+        filter: generatedDependencyTreeCopyFilter,
+      });
     } catch (error: unknown) {
       if (!isNodeError(error) || error.code !== "ENOENT") throw error;
     }

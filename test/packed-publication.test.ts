@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -7,6 +15,34 @@ import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
+
+async function packTemplateArchive(workspace: string): Promise<string> {
+  const archiveDirectory = path.join(workspace, "archives");
+  const builtDefinition = path.join(
+    process.cwd(),
+    "packages/builtin-presets/dist/src/rust-bin/definition.js",
+  );
+  const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
+  await execa(
+    "pnpm",
+    [
+      "--config.node-linker=hoisted",
+      "--config.ignore-scripts=true",
+      "--filter",
+      publicCliPackageName,
+      "pack",
+      "--pack-destination",
+      archiveDirectory,
+    ],
+    { cwd: process.cwd() },
+  );
+  expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
+  const archive = (await readdir(archiveDirectory)).find((file) =>
+    file.endsWith(".tgz"),
+  );
+  expect(archive).toBeDefined();
+  return path.join(archiveDirectory, archive!);
+}
 
 async function generatedTextFiles(
   root: string,
@@ -86,32 +122,8 @@ describe("packed public CLI consumer", () => {
       path.join(tmpdir(), "template-packed-consumer-"),
     );
     try {
-      const archiveDirectory = path.join(workspace, "archives");
-      const builtDefinition = path.join(
-        process.cwd(),
-        "packages/builtin-presets/dist/src/rust-bin/definition.js",
-      );
-      const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
-      await execa(
-        "pnpm",
-        [
-          "--config.node-linker=hoisted",
-          "--config.ignore-scripts=true",
-          "--filter",
-          publicCliPackageName,
-          "pack",
-          "--pack-destination",
-          archiveDirectory,
-        ],
-        { cwd: process.cwd() },
-      );
-      expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
-      const archive = (await readdir(archiveDirectory)).find((file) =>
-        file.endsWith(".tgz"),
-      );
-      expect(archive).toBeDefined();
       const consumer = path.join(workspace, "consumer");
-      const archivePath = path.join(archiveDirectory, archive!);
+      const archivePath = await packTemplateArchive(workspace);
       await mkdir(consumer, { recursive: true });
       await execa("npm", ["init", "--yes"], { cwd: consumer });
       await execa("pnpm", ["add", archivePath], { cwd: consumer });
@@ -217,6 +229,91 @@ describe("packed public CLI consumer", () => {
         }
       }
       expect(completedAdditions.toSorted()).toEqual(expectedAddableDefinitions);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("adds a package with the packed CLI after the generated repository is installed", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-packed-ready-add-"),
+    );
+    try {
+      const consumer = path.join(workspace, "consumer");
+      const generated = path.join(workspace, "digital");
+      const archivePath = await packTemplateArchive(workspace);
+      await mkdir(consumer, { recursive: true });
+      await execa("npm", ["init", "--yes"], { cwd: consumer });
+      await execa("pnpm", ["add", archivePath], { cwd: consumer });
+
+      const cli = path.join(
+        consumer,
+        "node_modules",
+        "@ykdz",
+        "template",
+        "dist/cli.js",
+      );
+      await execa(
+        "node",
+        [
+          cli,
+          "init",
+          generated,
+          "--preset",
+          "vike-app",
+          "--scope",
+          "demo",
+          "--yes",
+        ],
+        {
+          cwd: consumer,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+        },
+      );
+      await execa("pnpm", ["install"], { cwd: generated });
+      expect(
+        (
+          await lstat(
+            path.join(generated, "packages/db/node_modules/drizzle-orm"),
+          )
+        ).isSymbolicLink(),
+      ).toBe(true);
+
+      await execa(
+        "node",
+        [
+          cli,
+          "add",
+          "package",
+          "--preset",
+          "ts-lib",
+          "--name",
+          "domain",
+          "--path",
+          "packages/domain",
+        ],
+        {
+          cwd: generated,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+        },
+      );
+
+      await expect(
+        readFile(path.join(generated, "packages/domain/package.json"), "utf8"),
+      ).resolves.toContain('"name": "@demo/domain"');
+      expect(
+        (
+          await lstat(
+            path.join(generated, "packages/db/node_modules/drizzle-orm"),
+          )
+        ).isSymbolicLink(),
+      ).toBe(true);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
