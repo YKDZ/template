@@ -102,7 +102,7 @@ export function projectCheckWorkflow(
 
   if (environmentPreparation.nodeFromPackageMetadata) {
     lines.push(
-      "      - uses: actions/setup-node@v6",
+      "      - uses: actions/setup-node@v7",
       "        with:",
       "          node-version-file: package.json",
       "      - run: corepack enable",

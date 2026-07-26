@@ -26,24 +26,24 @@ catalog:
   "@tailwindcss/vite": ^4.3.2
   "@types/node": ^24.13.3
   "@types/web-bluetooth": ^0.0.21
-  "@vitejs/plugin-vue": ^6.0.7
+  "@vitejs/plugin-vue": ^6.0.8
   "@vikejs/hono": ^0.2.1
   "@vue/tsconfig": ^0.9.1
   drizzle-kit: 1.0.0-rc.4
   drizzle-orm: 1.0.0-rc.4
-  execa: ^9.6.1
-  hono: ^4.12.27
+  execa: ^10.0.0
+  hono: ^4.12.31
   oxfmt: ^0.58.0
   oxlint: ^1.73.0
   oxlint-tsgolint: ^0.24.0
   semver: ^7.8.5
   "@types/semver": ^7.7.1
   pinia: ^3.0.4
-  srvx: ^0.11.21
+  srvx: ^0.12.1
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
   tsc-alias: ^1.8.17
-  turbo: 2.10.2
+  turbo: 2.10.5
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
