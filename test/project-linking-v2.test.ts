@@ -1,10 +1,11 @@
+import { describe, expect, it } from "vitest";
+
 import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   PackageDefinition,
   ProjectBlueprintV2,
 } from "#template-core/project-blueprint-v2";
 import { planExplicitProjectLinks } from "#template-core/project-linking-v2";
-import { describe, expect, it } from "vitest";
 
 function contribution(
   definition: PackageDefinition,

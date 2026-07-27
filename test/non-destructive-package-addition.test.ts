@@ -9,6 +9,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { describe, expect, it } from "vitest";
+
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -26,7 +28,6 @@ import {
   reconcileAndApplyProjectProjections,
 } from "#template-core/project-projection";
 import { renderNewProject } from "#template-core/renderer";
-import { describe, expect, it } from "vitest";
 
 function requireAddableDefinitionForRole(
   context: BuiltInGenerationContext,
