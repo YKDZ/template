@@ -37,8 +37,8 @@ RUN pnpm install --offline --frozen-lockfile
 COPY --from=pruner /repo/out/full/ ./
 RUN pnpm --filter ./packages/db run build
 RUN pnpm --filter ./apps/web run build
-RUN pnpm --filter ./apps/web deploy --prod /runtime-deploy
-RUN pnpm --filter ./packages/db-migrations deploy --prod /migration-deploy
+RUN pnpm --config.inject-workspace-packages=true --filter ./apps/web deploy --prod /runtime-deploy
+RUN pnpm --config.inject-workspace-packages=true --filter ./packages/db-migrations deploy --prod /migration-deploy
 
 FROM node:{{NODE_VERSION}}-bookworm-slim AS application-runtime
 ENV NODE_ENV="production"

@@ -71,6 +71,41 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     );
   });
 
+  it("keeps source-linked workspaces while injecting pnpm 11 deploy closures", async () => {
+    const targetDir = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-vike-deploy-policy-")),
+      "demo-vike",
+    );
+    const plan = planGeneratedRepositoryInitialization({
+      definition: builtInPresetRegistry.require("vike-app"),
+      context: createGenerationContext({
+        targetDir,
+        scope: "demo",
+        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      }),
+    });
+
+    await renderNewProject({
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const [workspace, dockerfile] = await Promise.all([
+      readFile(path.join(targetDir, "pnpm-workspace.yaml"), "utf8"),
+      readFile(path.join(targetDir, "apps/web/Dockerfile"), "utf8"),
+    ]);
+
+    expect(dockerfile).toContain(
+      "pnpm --config.inject-workspace-packages=true --filter ./apps/web deploy --prod /runtime-deploy",
+    );
+    expect(dockerfile).toContain(
+      "pnpm --config.inject-workspace-packages=true --filter ./packages/db-migrations deploy --prod /migration-deploy",
+    );
+    expect(dockerfile).not.toContain("--legacy");
+    expect(workspace).toContain("injectWorkspacePackages: false");
+    expect(workspace).toContain("syncInjectedDepsAfterScripts:\n  - build");
+  });
+
   it("projects linked web, database, migration, and deployment boundaries", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vike-")),
