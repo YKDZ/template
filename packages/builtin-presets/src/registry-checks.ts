@@ -6,10 +6,14 @@ import path from "node:path";
 import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
-} from "@ykdz/template-core/dependency-catalog";
-import type { BuiltInPresetDefinition } from "@ykdz/template-core/preset-definition";
-import { projectDependabotConfig } from "@ykdz/template-core/project-github";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/dependency-catalog";
+import type { BuiltInPresetDefinition } from "#template-core/preset-definition";
+import {
+  canConsumeNodePackageNameImport,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImport,
+} from "#template-core/project-linking-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import {
   builtInPresetRegistry,
@@ -105,7 +109,12 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
       const contribution =
         base.planInitializationContributions?.(context)[0] ??
         base.planInitialization(context);
-      if (contribution === undefined) return [];
+      if (
+        contribution === undefined ||
+        !canConsumeNodePackageNameImport(contribution)
+      ) {
+        return [];
+      }
       const packageLeafName = `focused-${addition.metadata.name}`;
       const packagePath = addition.defaultPackagePath?.({
         context,
@@ -117,10 +126,16 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
         packageLeafName,
         packagePath,
       });
-      // Boundary policies permit generated packages to import a shared
-      // library, not another runtime service. Derive the focused link from
-      // the actual addition Contribution instead of Preset identity.
-      if (provider?.definition.role !== "shared-library") return [];
+      if (
+        provider === undefined ||
+        !canProvideSourceConditionPackageNameImport(provider) ||
+        !canLinkNodePackageRoles(
+          contribution.definition.role,
+          provider.definition.role,
+        )
+      ) {
+        return [];
+      }
       return [
         {
           id,
@@ -321,34 +336,21 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
           mkdirSync(path.dirname(manifestPath), { recursive: true });
           writeFileSync(manifestPath, JSON.stringify(contribution.manifest));
         }
-        const dependabotPath = path.join(
-          context.targetDir,
-          ".github/dependabot.yml",
-        );
-        mkdirSync(path.dirname(dependabotPath), { recursive: true });
-        writeFileSync(
-          dependabotPath,
-          projectDependabotConfig(initialization.dependencyMaintenancePolicy),
-        );
-        const environmentNeedsOperation = initialization.operations.find(
-          (operation) =>
-            operation.kind === "writeJson" &&
-            operation.to === ".template/environment-needs.json",
-        );
-        if (environmentNeedsOperation?.kind !== "writeJson") {
-          throw new Error(
-            "Initialization plan must persist Check Environment Need facts",
-          );
-        }
-        const environmentNeedsFile = path.join(
-          context.targetDir,
+        for (const metadataPath of [
           ".template/environment-needs.json",
-        );
-        mkdirSync(path.dirname(environmentNeedsFile), { recursive: true });
-        writeFileSync(
-          environmentNeedsFile,
-          JSON.stringify(environmentNeedsOperation.value),
-        );
+          ".template/generation.json",
+        ]) {
+          const operation = initialization.operations.find(
+            (candidate) =>
+              candidate.kind === "writeJson" && candidate.to === metadataPath,
+          );
+          if (operation?.kind !== "writeJson") {
+            throw new Error(`Initialization plan must persist ${metadataPath}`);
+          }
+          const metadataFile = path.join(context.targetDir, metadataPath);
+          mkdirSync(path.dirname(metadataFile), { recursive: true });
+          writeFileSync(metadataFile, JSON.stringify(operation.value));
+        }
         plans.push({
           definition: scenario.addition,
           plan: planGeneratedRepositoryPackageAddition({

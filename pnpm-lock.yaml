@@ -34,6 +34,9 @@ catalogs:
     '@vue/tsconfig':
       specifier: ^0.9.1
       version: 0.9.1
+    commander:
+      specifier: ^15.0.0
+      version: 15.0.0
     drizzle-kit:
       specifier: 1.0.0-rc.4
       version: 1.0.0-rc.4
@@ -46,6 +49,9 @@ catalogs:
     hono:
       specifier: ^4.12.31
       version: 4.12.32
+    node-diff3:
+      specifier: ^3.2.1
+      version: 3.2.1
     oxfmt:
       specifier: ^0.58.0
       version: 0.58.0
@@ -100,6 +106,10 @@ catalogs:
     yaml:
       specifier: ^2.9.0
       version: 2.9.0
+  public-cli-runtime:
+    typescript:
+      specifier: npm:typescript@^6.0.3
+      version: 6.0.3
 
 overrides:
   pinia>typescript: '-'
@@ -115,12 +125,21 @@ importers:
       '@ykdz/template-builtin-presets':
         specifier: workspace:*
         version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
+      '@ykdz/template-builtin-presets-source':
+        specifier: link:packages/builtin-presets
+        version: link:packages/builtin-presets
       '@ykdz/template-checks':
         specifier: workspace:*
         version: file:packages/checks(@typescript/typescript6@6.0.2)
+      '@ykdz/template-checks-source':
+        specifier: link:packages/checks
+        version: link:packages/checks
       '@ykdz/template-core':
         specifier: workspace:*
-        version: file:packages/core
+        version: file:packages/core(@typescript/typescript6@6.0.2)
+      '@ykdz/template-core-source':
+        specifier: link:packages/core
+        version: link:packages/core
       '@ykdz/template-shared':
         specifier: workspace:*
         version: file:packages/shared(@typescript/typescript6@6.0.2)
@@ -159,7 +178,7 @@ importers:
     dependencies:
       '@ykdz/template-core':
         specifier: workspace:*
-        version: file:packages/core
+        version: file:packages/core(@typescript/typescript6@6.0.2)
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(@typescript/typescript6@6.0.2)
@@ -188,6 +207,12 @@ importers:
       '@vue/tsconfig':
         specifier: 'catalog:'
         version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.39(@typescript/typescript6@6.0.2))
+      '@ykdz/template-core-source':
+        specifier: link:../core
+        version: link:../core
+      commander:
+        specifier: 'catalog:'
+        version: 15.0.0
       drizzle-kit:
         specifier: 'catalog:'
         version: 1.0.0-rc.4
@@ -250,7 +275,7 @@ importers:
         version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
       '@ykdz/template-core':
         specifier: workspace:*
-        version: file:packages/core
+        version: file:packages/core(@typescript/typescript6@6.0.2)
       execa:
         specifier: 'catalog:'
         version: 10.0.0
@@ -261,6 +286,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@ykdz/template-builtin-presets-source':
+        specifier: link:../builtin-presets
+        version: link:../builtin-presets
+      '@ykdz/template-core-source':
+        specifier: link:../core
+        version: link:../core
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -279,28 +310,40 @@ importers:
 
   packages/cli:
     dependencies:
-      '@typescript/old':
-        specifier: npm:typescript@^6.0.0
-        version: typescript@6.0.3
       '@ykdz/template-builtin-presets':
         specifier: workspace:*
-        version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
+        version: file:packages/builtin-presets(typescript@6.0.3)
       '@ykdz/template-core':
         specifier: workspace:*
-        version: file:packages/core
+        version: file:packages/core(typescript@6.0.3)
+      commander:
+        specifier: 'catalog:'
+        version: 15.0.0
+      node-diff3:
+        specifier: 'catalog:'
+        version: 3.2.1
       semver:
         specifier: 'catalog:'
         version: 7.8.5
       typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
+        specifier: catalog:public-cli-runtime
+        version: 6.0.3
       valibot:
         specifier: 'catalog:'
-        version: 1.4.2(@typescript/typescript6@6.0.2)
+        version: 1.4.2(typescript@6.0.3)
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@ykdz/template-builtin-presets-source':
+        specifier: link:../builtin-presets
+        version: link:../builtin-presets
+      '@ykdz/template-core-source':
+        specifier: link:../core
+        version: link:../core
+      execa:
+        specifier: 'catalog:'
+        version: 10.0.0
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -313,15 +356,18 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
 
   packages/core:
     dependencies:
+      node-diff3:
+        specifier: 'catalog:'
+        version: 3.2.1
       semver:
         specifier: 'catalog:'
         version: 7.8.5
-      typescript:
-        specifier: 'catalog:'
-        version: '@typescript/typescript6@6.0.2'
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(@typescript/typescript6@6.0.2)
@@ -344,6 +390,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 0.24.0
+      typescript:
+        specifier: 'catalog:'
+        version: '@typescript/typescript6@6.0.2'
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -1761,6 +1810,8 @@ packages:
 
   '@ykdz/template-core@file:packages/core':
     resolution: {directory: packages/core, type: directory}
+    peerDependencies:
+      typescript: '>=6 <7'
 
   '@ykdz/template-shared@file:packages/shared':
     resolution: {directory: packages/shared, type: directory}
@@ -1818,6 +1869,10 @@ packages:
 
   code-block-writer@13.0.3:
     resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
+
+  commander@15.0.0:
+    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
+    engines: {node: '>=22.12.0'}
 
   confbox@0.1.8:
     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
@@ -2277,6 +2332,10 @@ packages:
     resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
+
+  node-diff3@3.2.1:
+    resolution: {integrity: sha512-eKZcJ8RtMQ3cIaA15EgmtwG927fYnRlhtdA4Q9HAcCpAZPQhhU2XptnTH9GeAkMiX2bAXxlJSAFa9shFbztPgw==}
+    engines: {bun: '>=1.3.10'}
 
   node-releases@2.0.50:
     resolution: {integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==}
@@ -3764,25 +3823,40 @@ snapshots:
 
   '@ykdz/template-builtin-presets@file:packages/builtin-presets(@typescript/typescript6@6.0.2)':
     dependencies:
-      '@ykdz/template-core': file:packages/core
+      '@ykdz/template-core': file:packages/core(@typescript/typescript6@6.0.2)
       valibot: 1.4.2(@typescript/typescript6@6.0.2)
+    transitivePeerDependencies:
+      - typescript
+
+  '@ykdz/template-builtin-presets@file:packages/builtin-presets(typescript@6.0.3)':
+    dependencies:
+      '@ykdz/template-core': file:packages/core(typescript@6.0.3)
+      valibot: 1.4.2(typescript@6.0.3)
     transitivePeerDependencies:
       - typescript
 
   '@ykdz/template-checks@file:packages/checks(@typescript/typescript6@6.0.2)':
     dependencies:
       '@ykdz/template-builtin-presets': file:packages/builtin-presets(@typescript/typescript6@6.0.2)
-      '@ykdz/template-core': file:packages/core
+      '@ykdz/template-core': file:packages/core(@typescript/typescript6@6.0.2)
       execa: 10.0.0
       yaml: 2.9.0
     transitivePeerDependencies:
       - typescript
 
-  '@ykdz/template-core@file:packages/core':
+  '@ykdz/template-core@file:packages/core(@typescript/typescript6@6.0.2)':
     dependencies:
+      node-diff3: 3.2.1
       semver: 7.8.5
       typescript: '@typescript/typescript6@6.0.2'
       valibot: 1.4.2(@typescript/typescript6@6.0.2)
+
+  '@ykdz/template-core@file:packages/core(typescript@6.0.3)':
+    dependencies:
+      node-diff3: 3.2.1
+      semver: 7.8.5
+      typescript: 6.0.3
+      valibot: 1.4.2(typescript@6.0.3)
 
   '@ykdz/template-shared@file:packages/shared(@typescript/typescript6@6.0.2)':
     dependencies:
@@ -3827,6 +3901,8 @@ snapshots:
   chai@6.2.2: {}
 
   code-block-writer@13.0.3: {}
+
+  commander@15.0.0: {}
 
   confbox@0.1.8: {}
 
@@ -4132,6 +4208,8 @@ snapshots:
   muggle-string@0.4.1: {}
 
   nanoid@3.3.15: {}
+
+  node-diff3@3.2.1: {}
 
   node-releases@2.0.50: {}
 
@@ -4468,6 +4546,10 @@ snapshots:
   valibot@1.4.2(@typescript/typescript6@6.0.2):
     optionalDependencies:
       typescript: '@typescript/typescript6@6.0.2'
+
+  valibot@1.4.2(typescript@6.0.3):
+    optionalDependencies:
+      typescript: 6.0.3
 
   valibot@1.4.2(typescript@7.0.2):
     optionalDependencies:

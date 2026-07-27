@@ -1,7 +1,7 @@
 import {
   runToolchainBaselineUpdate,
   type ToolchainBaselineUpdateRepository,
-} from "@ykdz/template-checks/update-toolchain-baseline";
+} from "#template-checks/update-toolchain-baseline";
 
 function fakeRepository(options: {
   candidate?: number;

@@ -2,22 +2,41 @@
   "name": "@ykdz/template-checks",
   "private": true,
   "type": "module",
+  "imports": {
+    "#template-builtin-presets": {
+      "source": "@ykdz/template-builtin-presets-source",
+      "types": "@ykdz/template-builtin-presets",
+      "default": "@ykdz/template-builtin-presets"
+    },
+    "#template-core/*": {
+      "source": "@ykdz/template-core-source/*",
+      "types": "@ykdz/template-core/*",
+      "default": "@ykdz/template-core/*"
+    }
+  },
   "exports": {
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "default": "./dist/*.js"
+    "./check-generated-registry": null,
+    "./check-online-toolchain-resolution-contract": {
+      "source": "./src/check-online-toolchain-resolution-contract.ts",
+      "types": "./dist/check-online-toolchain-resolution-contract.d.ts",
+      "default": "./dist/check-online-toolchain-resolution-contract.js"
+    },
+    "./update-toolchain-baseline": {
+      "source": "./src/update-toolchain-baseline.ts",
+      "types": "./dist/update-toolchain-baseline.d.ts",
+      "default": "./dist/update-toolchain-baseline.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:fixtures": "node src/check-generated-registry.ts package-addition-matrix",
-    "check:generated": "node src/check-generated-registry.ts init",
-    "check:focused": "node src/check-generated-registry.ts focused",
-    "check:deployment": "node src/check-generated-registry.ts deployment",
-    "check:templates": "node src/check-legacy-architecture-removal.ts --packed",
-    "check:templates:github-yaml": "node src/check-builtin-preset-github-yaml.ts",
-    "check:toolchain:online": "node src/check-online-toolchain-resolution-contract.ts",
-    "update:toolchain": "node src/update-toolchain-baseline.ts",
+    "check:fixtures": "node --conditions=source src/check-generated-registry.ts package-addition-matrix",
+    "check:generated": "node --conditions=source src/check-generated-registry.ts init",
+    "check:focused": "node --conditions=source src/check-generated-registry.ts focused",
+    "check:deployment": "node --conditions=source src/check-generated-registry.ts deployment",
+    "check:templates": "node --conditions=source src/check-legacy-architecture-removal.ts --packed",
+    "check:templates:github-yaml": "node --conditions=source src/check-builtin-preset-github-yaml.ts",
+    "check:toolchain:online": "node --conditions=source src/check-online-toolchain-resolution-contract.ts",
+    "update:toolchain": "node --conditions=source src/update-toolchain-baseline.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
@@ -32,6 +51,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
+    "@ykdz/template-builtin-presets-source": "link:../builtin-presets",
+    "@ykdz/template-core-source": "link:../core",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

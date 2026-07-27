@@ -1,4 +1,4 @@
-import { resolveToolchainVersions } from "@ykdz/template-core/toolchain-resolution";
+import { resolveToolchainVersions } from "#template-core/toolchain-resolution";
 
 const nodeReleaseIndex = [
   { version: "v24.11.0", lts: "Krypton" },

@@ -2,7 +2,7 @@
 import {
   checkTemplateSourceBoundary,
   checkTemplateSourceContexts,
-} from "@ykdz/template-core/template-boundary-check";
+} from "#template-core/template-boundary-check";
 
 import {
   builtInPresetTemplateSourceContexts,
@@ -13,9 +13,9 @@ import { deriveVerificationPlans } from "./registry-checks.ts";
 /** Checks every real registry initialization and Package Addition plan. */
 export async function checkBuiltInPresetTemplateBoundary(): Promise<void> {
   const result = await checkTemplateSourceBoundary({
-    templateSourceContexts: await checkTemplateSourceContexts(
-      builtInPresetTemplateSourceContexts(),
-    ),
+    templateSourceContexts: await checkTemplateSourceContexts([
+      ...builtInPresetTemplateSourceContexts(),
+    ]),
     projections: deriveVerificationPlans().flatMap(({ definition, plan }) => {
       const operationsByPlanner = new Map<
         string,

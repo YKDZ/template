@@ -3,6 +3,7 @@
  * operations. Preset provenance deliberately belongs in Generation Record.
  */
 export type PackageRole =
+  | "cli-tool"
   | "runtime-service"
   | "shared-library"
   | "native-package";
@@ -38,7 +39,17 @@ export type BlueprintV2ValidationResult =
 
 const packageName = /^@[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
 const packagePath = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/;
+const reservedWorkspaceCollections = new Set([
+  ".git",
+  ".github",
+  ".devcontainer",
+  ".template",
+  "node_modules",
+  "dist",
+  "target",
+]);
 const roles = new Set<PackageRole>([
+  "cli-tool",
   "runtime-service",
   "shared-library",
   "native-package",
@@ -108,13 +119,26 @@ export function validateProjectBlueprintV2(
         continue;
       }
       reportUnknownKeys(item, ["name", "path", "role"], itemPath, issues);
+      const workspaceCollection =
+        typeof item.path === "string" ? item.path.split("/", 1)[0]! : undefined;
+      const usesReservedWorkspaceCollection =
+        workspaceCollection !== undefined &&
+        reservedWorkspaceCollections.has(workspaceCollection);
       if (typeof item.name !== "string" || !packageName.test(item.name)) {
         issues.push({
           path: `${itemPath}.name`,
           message: "Package name must be a scoped lowercase package name",
         });
       }
-      if (typeof item.path !== "string" || !packagePath.test(item.path)) {
+      if (usesReservedWorkspaceCollection) {
+        issues.push({
+          path: `${itemPath}.path`,
+          message: `Package Path ${item.path as string} uses reserved workspace collection ${workspaceCollection}`,
+        });
+      } else if (
+        typeof item.path !== "string" ||
+        !packagePath.test(item.path)
+      ) {
         issues.push({
           path: `${itemPath}.path`,
           message: "Package Path must be exactly two safe path segments",
@@ -127,7 +151,7 @@ export function validateProjectBlueprintV2(
         issues.push({
           path: `${itemPath}.role`,
           message:
-            "Package Role must be runtime-service, shared-library, or native-package",
+            "Package Role must be cli-tool, runtime-service, shared-library, or native-package",
         });
       }
       if (
@@ -136,6 +160,7 @@ export function validateProjectBlueprintV2(
         typeof item.role === "string" &&
         packageName.test(item.name) &&
         packagePath.test(item.path) &&
+        !usesReservedWorkspaceCollection &&
         roles.has(item.role as PackageRole)
       ) {
         definitions.push(item as PackageDefinition);

@@ -2,7 +2,7 @@ import {
   checkOnlineToolchainResolutionContract,
   nodeReleaseIndexUrl,
   pnpmRegistryUrl,
-} from "@ykdz/template-core/toolchain-resolution";
+} from "#template-core/toolchain-resolution";
 
 describe("online toolchain resolution contract check", () => {
   it("validates official Node and pnpm source data through the online resolution contract", async () => {

@@ -1,451 +1,195 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { createInterface } from "node:readline/promises";
+import { Command, CommanderError } from "commander";
 
 import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-  planGeneratedRepositoryPackageAddition,
-  templateSources,
-} from "@ykdz/template-builtin-presets";
-import {
-  assertProjectBlueprintV2,
-  validateProjectBlueprintV2,
-  type ProjectBlueprintV2,
-} from "@ykdz/template-core/project-blueprint-v2";
-import {
-  renderNewProject,
-  renderProjectAtomically,
-} from "@ykdz/template-core/renderer";
-import {
-  resolveToolchainVersions,
-  type ResolvedToolchainVersions,
-  type ToolchainResolutionSource,
-} from "@ykdz/template-core/toolchain-resolution";
+  formatPresetCatalog,
+  runAddPackage,
+  runInit,
+  validateBlueprintFile,
+  type AddPackageCommandOptions,
+  type ApplicationRuntime,
+  type InitCommandOptions,
+} from "./application.ts";
 
-type InitOptions = {
-  readonly dir: string;
-  readonly preset: string;
-  readonly yes: boolean;
-  readonly dryRun: boolean;
-  readonly json: boolean;
-  readonly todo: boolean;
-  readonly scope?: string;
+export type CliRuntime = ApplicationRuntime & {
+  readonly argv: readonly string[];
+  readonly streams: {
+    readonly stdin: object;
+    readonly stdout: { write(chunk: string): unknown };
+    readonly stderr: { write(chunk: string): unknown };
+  };
+  readonly version: string;
 };
 
-type AddPackageOptions = {
-  readonly preset: string;
-  readonly name: string;
-  readonly path?: string;
-  readonly linkFrom: readonly string[];
-};
+class HandledCliExit extends Error {
+  readonly exitCode: number;
 
-function usage(): string {
-  return [
-    "template CLI",
-    "",
-    "Usage:",
-    "  template <command> [options]",
-    "",
-    "Commands:",
-    "  template init <dir> --preset <name> --yes",
-    "  template add package --preset <name> --name <name> [--path <package-path>] [--link-from <package-path>]...",
-    "  template presets",
-    "  template blueprint validate <path>",
-    "",
-    "Init options:",
-    "  --preset <name>  Project preset to generate",
-    "  --scope <name>   Package scope for workspace package names",
-    "  --yes            Accept defaults for non-interactive generation",
-    "  --dry-run        Print the planned generation without writing files",
-    "  --json           Print machine-readable output",
-    "  --no-todo        Do not write the generated follow-up TODO.md document",
-    "",
-    "Add package options:",
-    "  --preset <name>     Package preset to add",
-    "  --name <name>       Package name to add",
-    "  --path <path>       Two-segment Package Path to add",
-    "  --link-from <path>  Existing consumer Package Path to link from; repeatable",
-  ].join("\n");
-}
-
-function printJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
-}
-
-function formatRows(rows: readonly (readonly [string, string])[]): string[] {
-  const width = Math.max(...rows.map(([label]) => `${label}:`.length));
-  return rows.map(
-    ([label, value]) => `  ${`${label}:`.padEnd(width)} ${value}`,
-  );
-}
-
-function formatCatalog(): string {
-  return [
-    "Built-in presets",
-    "",
-    ...formatRows(
-      builtInPresetRegistry
-        .all()
-        .map((definition) => [
-          definition.metadata.name,
-          `${definition.metadata.title} - ${definition.metadata.description}`,
-        ]),
-    ),
-  ].join("\n");
-}
-
-function normalizeNpmScope(value: string): string {
-  const scope = value.startsWith("@") ? value.slice(1) : value;
-  if (value !== value.trim() || !/^[a-z0-9][a-z0-9._-]*$/.test(scope)) {
-    throw new Error("--scope must be a valid npm scope without whitespace");
-  }
-  return scope;
-}
-
-function parseInitOptions(args: readonly string[]): InitOptions {
-  const dir = args[1];
-  if (!dir) throw new Error("init requires a target directory");
-  let preset = "";
-  let yes = false;
-  let dryRun = false;
-  let json = false;
-  let todo = true;
-  let scope: string | undefined;
-  for (let index = 2; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--yes" || arg === "-y") yes = true;
-    else if (arg === "--dry-run") dryRun = true;
-    else if (arg === "--json") json = true;
-    else if (arg === "--no-todo") todo = false;
-    else if (arg === "--preset" || arg === "--scope") {
-      const value = args[index + 1];
-      if (!value) throw new Error(`${arg} requires a value`);
-      if (arg === "--preset") preset = value;
-      else scope = normalizeNpmScope(value);
-      index += 1;
-    } else throw new Error(`Unknown option: ${arg}`);
-  }
-  return { dir, preset, yes, dryRun, json, todo, ...(scope ? { scope } : {}) };
-}
-
-function parseAddPackageOptions(args: readonly string[]): AddPackageOptions {
-  let preset = "";
-  let name = "";
-  let packagePath: string | undefined;
-  const linkFrom: string[] = [];
-  for (let index = 2; index < args.length; index += 1) {
-    const arg = args[index];
-    if (!["--preset", "--name", "--path", "--link-from"].includes(arg ?? "")) {
-      throw new Error(`Unknown option: ${arg}`);
-    }
-    const value = args[index + 1];
-    if (!value) throw new Error(`${arg} requires a value`);
-    if (arg === "--preset") preset = value;
-    if (arg === "--name") name = value;
-    if (arg === "--path") packagePath = value;
-    if (arg === "--link-from") linkFrom.push(value);
-    index += 1;
-  }
-  if (!preset) throw new Error("add package requires --preset");
-  if (!name) throw new Error("add package requires --name");
-  return {
-    preset,
-    name,
-    ...(packagePath ? { path: packagePath } : {}),
-    linkFrom,
-  };
-}
-
-function toolchainSourceFromEnv(): ToolchainResolutionSource | undefined {
-  const source = process.env.TEMPLATE_TOOLCHAIN_RESOLUTION;
-  return source === "online" || source === "bundled-fallback"
-    ? source
-    : undefined;
-}
-
-async function resolveToolchain(): Promise<ResolvedToolchainVersions> {
-  return await resolveToolchainVersions({
-    source: toolchainSourceFromEnv(),
-    nodeReleaseIndexUrl: process.env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
-    pnpmRegistryUrl: process.env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
-  });
-}
-
-async function planInitialization(options: InitOptions) {
-  const definition = builtInPresetRegistry.require(options.preset);
-  const toolchain = await resolveToolchain();
-  const context = createGenerationContext({
-    targetDir: options.dir,
-    ...(options.scope ? { scope: options.scope } : {}),
-    toolchain: {
-      nodeLtsMajor: toolchain.nodeLtsMajor.value,
-      packageManagerPin: toolchain.packageManagerPin.value,
-    },
-  });
-  return {
-    definition,
-    context,
-    toolchain,
-    plan: planGeneratedRepositoryInitialization({ definition, context }),
-  };
-}
-
-function toolchainReport(toolchain: ResolvedToolchainVersions) {
-  return {
-    nodeLtsMajor: toolchain.nodeLtsMajor.value,
-    packageManagerPin: toolchain.packageManagerPin.value,
-    source: toolchain.source,
-    diagnostics: toolchain.diagnostics,
-  };
-}
-
-function initOutput(
-  options: InitOptions,
-  result: Awaited<ReturnType<typeof planInitialization>>,
-) {
-  return {
-    command: "init",
-    dryRun: options.dryRun,
-    targetDir: options.dir,
-    blueprint: result.plan.blueprint,
-    generationRecord: result.plan.generationRecord,
-    toolchain: toolchainReport(result.toolchain),
-    nextSteps: result.plan.nextStepInstructions,
-    followUpDocument: {
-      enabled: options.todo,
-      path: options.todo ? "TODO.md" : undefined,
-    },
-  };
-}
-
-function followUpDocumentOperation(
-  result: Awaited<ReturnType<typeof planInitialization>>,
-) {
-  return {
-    kind: "writeTextTemplate" as const,
-    source: templateSources.foundation,
-    from: "TODO.md.template",
-    to: "TODO.md",
-    replacements: {
-      NEXT_STEPS: result.plan.nextStepInstructions
-        .map((instruction, index) => `${index + 1}. \`${instruction.display}\``)
-        .join("\n"),
-    },
-  };
-}
-
-function isInteractiveTerminal(): boolean {
-  return process.stdin.isTTY && process.stdout.isTTY;
-}
-
-async function confirmInit(
-  options: InitOptions,
-  blueprint: ProjectBlueprintV2,
-): Promise<boolean> {
-  console.log(
-    [
-      "Planned project",
-      "",
-      ...formatRows([
-        ["Target", options.dir],
-        ["Packages", String(blueprint.packages.length)],
-      ]),
-    ].join("\n"),
-  );
-  const readline = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  try {
-    const answer = await readline.question("Generate this project? [y/N] ");
-    return ["y", "yes"].includes(answer.trim().toLowerCase());
-  } finally {
-    readline.close();
+  constructor(exitCode: number) {
+    super(`CLI exited with status ${exitCode}`);
+    this.exitCode = exitCode;
   }
 }
 
-async function readBlueprint(filePath: string): Promise<ProjectBlueprintV2> {
-  const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "schemaVersion" in value &&
-    value.schemaVersion === 1
-  ) {
-    throw new Error(
-      "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
-    );
+function writeResult(
+  runtime: CliRuntime,
+  result: {
+    readonly exitCode: number;
+    readonly stdout?: string;
+    readonly stderr?: string;
+  },
+): void {
+  if (result.stdout !== undefined) {
+    runtime.streams.stdout.write(`${result.stdout}\n`);
   }
-  return assertProjectBlueprintV2(value);
+  if (result.stderr !== undefined) {
+    runtime.streams.stderr.write(`${result.stderr}\n`);
+  }
+  if (result.exitCode !== 0) throw new HandledCliExit(result.exitCode);
 }
 
-/**
- * Package Addition has no Preset provenance to consult.  The current
- * Blueprint topology and the real package manifests are the durable facts;
- * their shared npm scope is the context for a newly planned package.
- */
-async function deriveExistingPackageScope(options: {
-  readonly targetDir: string;
-  readonly blueprint: ProjectBlueprintV2;
-}): Promise<string> {
-  const scopes = new Set<string>();
-  for (const definition of options.blueprint.packages) {
-    const match = definition.name.match(/^@([^/]+)\//);
-    if (!match?.[1]) {
-      throw new Error(
-        `Package Addition requires a scoped Package Definition: ${definition.name}`,
-      );
-    }
-    const manifestPath = path.join(
-      options.targetDir,
-      definition.path,
-      "package.json",
-    );
-    const manifest: unknown = JSON.parse(await readFile(manifestPath, "utf8"));
-    if (
-      typeof manifest !== "object" ||
-      manifest === null ||
-      (manifest as { name?: unknown }).name !== definition.name
-    ) {
-      throw new Error(
-        `Package Addition requires manifest truth for ${definition.path}: expected name ${definition.name}`,
-      );
-    }
-    scopes.add(match[1]);
-  }
-  if (scopes.size !== 1) {
-    throw new Error(
-      `Package Addition requires exactly one existing npm scope; found ${[...scopes].join(", ") || "none"}`,
-    );
-  }
-  return [...scopes][0]!;
-}
-
-async function main(args: readonly string[]): Promise<void> {
-  const command = args[0];
-  if (command === "--help" || command === "-h") {
-    console.log(usage());
-    return;
-  }
-  if (command === "presets") {
-    console.log(formatCatalog());
-    return;
-  }
-  if (command === "blueprint" && args[1] === "validate") {
-    const filePath = args[2];
-    if (!filePath) throw new Error("blueprint validate requires a path");
-    const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "schemaVersion" in value &&
-      value.schemaVersion === 1
-    ) {
-      throw new Error(
-        "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
-      );
-    }
-    const result = validateProjectBlueprintV2(value);
-    if (!result.ok)
-      throw new Error(
-        result.issues
-          .map((issue) => `${issue.path}: ${issue.message}`)
-          .join("\n"),
-      );
-    console.log("Blueprint is valid");
-    return;
-  }
-  if (command === "init") {
-    const options = parseInitOptions(args);
-    const result = await planInitialization(options);
-    if (options.dryRun) {
-      if (options.json) printJson(initOutput(options, result));
-      else console.log(JSON.stringify(initOutput(options, result), null, 2));
-      return;
-    }
-    if (!options.yes && (options.json || !isInteractiveTerminal())) {
-      throw new Error("Non-interactive init requires --yes");
-    }
-    if (!options.yes && !(await confirmInit(options, result.plan.blueprint)))
-      throw new Error("Init cancelled");
-    await renderNewProject({
-      targetRoot: options.dir,
-      operations: [
-        ...result.plan.operations,
-        ...(options.todo ? [followUpDocumentOperation(result)] : []),
-      ],
-    });
-    if (options.json) printJson(initOutput(options, result));
-    else
-      console.log(
-        [
-          "Initialized project",
-          "",
-          ...formatRows([
-            ["Preset", result.definition.metadata.name],
-            ["Target", options.dir],
-          ]),
-          "",
-          "Next steps",
-          "",
-          ...result.plan.nextStepInstructions.map(
-            (instruction, index) => `  ${index + 1}. ${instruction.display}`,
-          ),
-        ].join("\n"),
-      );
-    return;
-  }
-  if (command === "add" && args[1] === "package") {
-    const options = parseAddPackageOptions(args);
-    const blueprint = await readBlueprint(
-      path.join(process.cwd(), ".template/blueprint.json"),
-    );
-    const toolchain = await resolveToolchain();
-    const definition = builtInPresetRegistry.require(options.preset);
-    const context = createGenerationContext({
-      targetDir: process.cwd(),
-      scope: await deriveExistingPackageScope({
-        targetDir: process.cwd(),
-        blueprint,
-      }),
-      toolchain: {
-        nodeLtsMajor: toolchain.nodeLtsMajor.value,
-        packageManagerPin: toolchain.packageManagerPin.value,
+export function createCliCommand(runtime: CliRuntime): Command {
+  const command = new Command()
+    .name("template")
+    .description("Create repositories from maintained project presets.")
+    .version(runtime.version)
+    .configureOutput({
+      writeOut: (text) => runtime.streams.stdout.write(text),
+      writeErr: (text) => runtime.streams.stderr.write(text),
+    })
+    .configureHelp({
+      subcommandTerm(subcommand) {
+        switch (subcommand.name()) {
+          case "init":
+            return "template init <dir>";
+          case "add":
+            return "template add package";
+          case "presets":
+            return "template presets";
+          case "blueprint":
+            return "template blueprint validate <path>";
+          default:
+            return `template ${subcommand.name()}`;
+        }
       },
-    });
-    const plan = planGeneratedRepositoryPackageAddition({
-      definition,
-      context,
-      blueprint,
-      packageLeafName: options.name,
-      ...(options.path ? { packagePath: options.path } : {}),
-      ...(options.linkFrom.length > 0 ? { linkFrom: options.linkFrom } : {}),
-    });
-    await renderProjectAtomically({
-      targetRoot: process.cwd(),
-      operations: [...plan.operations],
-    });
-    console.log(
-      [
-        "Added package",
-        "",
-        ...formatRows([
-          ["Preset", definition.metadata.name],
-          ["Name", options.name],
-        ]),
-      ].join("\n"),
+    })
+    .showHelpAfterError()
+    .exitOverride();
+
+  command
+    .command("init <dir>")
+    .description("Initialize a repository.")
+    .requiredOption("--preset <name>", "Project preset to generate")
+    .option("--scope <name>", "Package scope for workspace package names")
+    .option("-y, --yes", "Accept defaults for non-interactive generation")
+    .option("--dry-run", "Print the planned generation without writing files")
+    .option("--json", "Print machine-readable output")
+    .option("--no-todo", "Do not write the generated follow-up TODO.md")
+    .action(
+      async (
+        dir: string,
+        options: {
+          readonly preset: string;
+          readonly scope?: string;
+          readonly yes?: boolean;
+          readonly dryRun?: boolean;
+          readonly json?: boolean;
+          readonly todo: boolean;
+        },
+      ) => {
+        const initOptions: InitCommandOptions = {
+          dir,
+          preset: options.preset,
+          yes: Boolean(options.yes),
+          dryRun: Boolean(options.dryRun),
+          json: Boolean(options.json),
+          todo: options.todo,
+          ...(options.scope === undefined ? {} : { scope: options.scope }),
+        };
+        runtime.streams.stdout.write(
+          `${await runInit(initOptions, runtime)}\n`,
+        );
+      },
     );
-    return;
-  }
-  throw new Error(command ? `Unknown command: ${command}` : "Missing command");
+
+  const addCommand = command
+    .command("add")
+    .description(
+      "Add to a Generated Repository; package supports --dry-run and --json.",
+    );
+  addCommand
+    .command("package")
+    .description("Add a Package Boundary.")
+    .requiredOption("--preset <name>", "Package preset to add")
+    .requiredOption("--name <name>", "Package name to add")
+    .option("--path <path>", "Two-segment Package Path to add")
+    .option(
+      "--link-from <path>",
+      "Existing consumer Package Path to link from; repeatable",
+      (value: string, previous: readonly string[]) => [...previous, value],
+      [],
+    )
+    .option("--dry-run", "Preview the Addition Delta without writing files")
+    .option("--json", "Print machine-readable output")
+    .action(
+      async (options: {
+        readonly preset: string;
+        readonly name: string;
+        readonly path?: string;
+        readonly linkFrom: readonly string[];
+        readonly dryRun?: boolean;
+        readonly json?: boolean;
+      }) => {
+        const addOptions: AddPackageCommandOptions = {
+          preset: options.preset,
+          name: options.name,
+          ...(options.path === undefined ? {} : { path: options.path }),
+          linkFrom: options.linkFrom,
+          dryRun: Boolean(options.dryRun),
+          json: Boolean(options.json),
+        };
+        writeResult(runtime, await runAddPackage(addOptions, runtime));
+      },
+    );
+
+  command
+    .command("presets")
+    .description("List Built-in Presets.")
+    .action(() => {
+      runtime.streams.stdout.write(`${formatPresetCatalog()}\n`);
+    });
+
+  command
+    .command("blueprint")
+    .description("Work with Project Blueprints.")
+    .command("validate <path>")
+    .description("Validate a Project Blueprint.")
+    .action(async (filePath: string) => {
+      runtime.streams.stdout.write(
+        `${await validateBlueprintFile(filePath, runtime)}\n`,
+      );
+    });
+
+  return command;
 }
 
-main(process.argv.slice(2)).catch((error: unknown) => {
-  console.error(
-    `Error: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  console.error("\nRun `template --help` for usage.");
-  process.exitCode = 1;
-});
+export async function runCli(runtime: CliRuntime): Promise<number> {
+  try {
+    const command = createCliCommand(runtime);
+    if (runtime.argv.length <= 2) {
+      command.error("error: missing command", {
+        exitCode: 1,
+        code: "commander.missingCommand",
+      });
+    }
+    await command.parseAsync([...runtime.argv], {
+      from: "node",
+    });
+    return 0;
+  } catch (error) {
+    if (error instanceof HandledCliExit) return error.exitCode;
+    if (error instanceof CommanderError) return error.exitCode;
+    runtime.streams.stderr.write(
+      `Error: ${error instanceof Error ? error.message : String(error)}\n\nRun \`template --help\` for usage.\n`,
+    );
+    return 1;
+  }
+}

@@ -8,6 +8,7 @@
   "type": "module",
   "exports": {
     "./*": {
+      "source": "./src/*.ts",
       "types": "./dist/*.d.ts",
       "default": "./dist/*.js"
     }
@@ -21,8 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "node-diff3": "catalog:",
     "semver": "catalog:",
-    "typescript": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
@@ -32,7 +33,11 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
     "typescript-7": "catalog:"
+  },
+  "peerDependencies": {
+    "typescript": ">=6 <7"
   },
   "turbo": {
     "tags": [

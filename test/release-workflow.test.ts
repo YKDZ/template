@@ -17,6 +17,31 @@ function expectWorkflowUsesVersionedAction(
 }
 
 describe("npm release workflow", () => {
+  it("keeps the unreleased CLI version in one package manifest field", async () => {
+    const manifest = JSON.parse(
+      await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"),
+    ) as { readonly version: string };
+    const cliSource = await readFile(
+      path.join(repoRoot, "packages/cli/src/cli.ts"),
+      "utf8",
+    );
+    const applicationSource = await readFile(
+      path.join(repoRoot, "packages/cli/src/application.ts"),
+      "utf8",
+    );
+    const controlSource = await readFile(
+      path.join(repoRoot, "packages/cli/src/main.ts"),
+      "utf8",
+    );
+
+    expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(cliSource).toContain('require("../package.json")');
+    expect(cliSource.match(/packageManifest\.version/gu)).toHaveLength(1);
+    expect(
+      `${cliSource}\n${applicationSource}\n${controlSource}`,
+    ).not.toContain(manifest.version);
+  });
+
   it("publishes through GitHub Actions OIDC without a long-lived npm token", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),

@@ -2,7 +2,7 @@
 import {
   checkOnlineToolchainResolutionContract,
   type OnlineToolchainResolutionContractResult,
-} from "@ykdz/template-core/toolchain-resolution";
+} from "#template-core/toolchain-resolution";
 
 type RunOnlineToolchainResolutionContractCheckOptions = {
   readonly fetchJson?: (url: string) => Promise<unknown>;

@@ -1,11 +1,12 @@
-import { fileURLToPath, URL } from "node:url";
-
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "#": fileURLToPath(new URL("./src", import.meta.url)),
+    conditions: ["source"],
+  },
+  ssr: {
+    resolve: {
+      conditions: ["source"],
     },
   },
   test: {

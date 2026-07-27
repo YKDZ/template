@@ -1,4 +1,4 @@
-import { planToolchainBaselineUpdate } from "@ykdz/template-core/toolchain-baseline-update";
+import { planToolchainBaselineUpdate } from "#template-core/toolchain-baseline-update";
 
 const current = {
   nodeLtsMajor: "24",

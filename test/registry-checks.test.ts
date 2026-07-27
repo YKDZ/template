@@ -1,5 +1,8 @@
-import { readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { describe, expect, it } from "vitest";
 
 import {
   builtInPresetRegistry,
@@ -7,13 +10,13 @@ import {
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
-} from "@ykdz/template-builtin-presets";
-import { assertPackageContribution } from "@ykdz/template-core/package-contribution";
+} from "#template-builtin-presets";
+import { assertPackageContribution } from "#template-core/package-contribution";
+import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import {
   createTemplateSourceHandle,
   renderNewProject,
-} from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+} from "#template-core/renderer";
 
 import {
   deriveFixtureMatrix,
@@ -93,7 +96,8 @@ describe("Preset Registry generated scenarios", () => {
 
   it("derives focused Project Link scenarios from Definition contributions", async () => {
     const focused = deriveFocusedProjectLinkScenarios();
-    expect(focused).toHaveLength(5);
+    const consumerRoles = new Set<string>();
+    const providerRoles = new Set<string>();
     for (const scenario of focused) {
       expect(scenario.addition?.planPackageAddition !== undefined).toBe(true);
       expect(scenario.linkFrom).toHaveLength(1);
@@ -121,6 +125,11 @@ describe("Preset Registry generated scenarios", () => {
         linkFrom: scenario.linkFrom!,
       });
       const consumerPath = scenario.linkFrom![0]!;
+      const consumerRole = initialization.blueprint.packages.find(
+        (definition) => definition.path === consumerPath,
+      )?.role;
+      expect(consumerRole).not.toBe("native-package");
+      consumerRoles.add(consumerRole!);
       const provider = addition.blueprint.packages.find(
         (definition) =>
           definition.path ===
@@ -129,7 +138,8 @@ describe("Preset Registry generated scenarios", () => {
             packageLeafName: `focused-${scenario.addition!.metadata.name}`,
           }),
       );
-      expect(provider?.role).toBe("shared-library");
+      expect(["shared-library", "cli-tool"]).toContain(provider?.role);
+      providerRoles.add(provider!.role);
       expect(addition.blueprint.packageLinkIntents).toEqual(
         expect.arrayContaining([
           {
@@ -143,15 +153,124 @@ describe("Preset Registry generated scenarios", () => {
           expect.objectContaining({
             kind: "mergeJson",
             to: `${consumerPath}/package.json`,
-            value: {
+            value: expect.objectContaining({
               dependencies: expect.objectContaining({
                 [provider!.name]: "workspace:*",
               }),
-            },
+              dependenciesMeta: expect.objectContaining({
+                [provider!.name]: { injected: false },
+              }),
+            }),
           }),
         ]),
       );
     }
+    expect(consumerRoles).toContain("cli-tool");
+    expect(providerRoles).toContain("cli-tool");
+  });
+
+  it("plans an exact repeated Package Addition as a no-op", async () => {
+    const scenario = deriveFocusedProjectLinkScenarios()[0]!;
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-repeat-addition-"),
+    );
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, scenario.id),
+      scope: "focused",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const packageLeafName = `focused-${scenario.addition!.metadata.name}`;
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: scenario.base,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: scenario.addition!,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName,
+        linkFrom: scenario.linkFrom!,
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: context.targetDir,
+        ...addition.projectProjections,
+      });
+      const repeatedAddition = planGeneratedRepositoryPackageAddition({
+        definition: scenario.addition!,
+        context,
+        blueprint: addition.blueprint,
+        packageLeafName,
+        linkFrom: scenario.linkFrom!,
+      });
+
+      expect(repeatedAddition.blueprint).toBe(addition.blueprint);
+      expect(repeatedAddition.operations).toEqual([]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects mismatched Package Definition and Link Intent occupancy", () => {
+    const scenario = deriveFocusedProjectLinkScenarios()[0]!;
+    const context = createGenerationContext({
+      targetDir: path.join("generated-repository", scenario.id),
+      scope: "focused",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const packageLeafName = `focused-${scenario.addition!.metadata.name}`;
+    const packagePath = scenario.addition!.defaultPackagePath!({
+      context,
+      packageLeafName,
+    });
+    const contribution = scenario.addition!.planPackageAddition!({
+      context,
+      packageLeafName,
+      packagePath,
+    });
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: scenario.base,
+      context,
+    });
+    const occupiedBlueprint = {
+      ...initialization.blueprint,
+      packages: [...initialization.blueprint.packages, contribution.definition],
+    };
+
+    expect(() =>
+      planGeneratedRepositoryPackageAddition({
+        definition: scenario.addition!,
+        context,
+        blueprint: {
+          ...occupiedBlueprint,
+          packages: occupiedBlueprint.packages.map((definition) =>
+            definition.path === contribution.definition.path
+              ? { ...definition, role: "native-package" as const }
+              : definition,
+          ),
+        },
+        packageLeafName,
+      }),
+    ).toThrow(
+      `existing Package Definition ${contribution.definition.name} at ${contribution.definition.path} (native-package); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
+    );
+
+    expect(() =>
+      planGeneratedRepositoryPackageAddition({
+        definition: scenario.addition!,
+        context,
+        blueprint: occupiedBlueprint,
+        packageLeafName,
+        linkFrom: scenario.linkFrom!,
+      }),
+    ).toThrow(
+      `requested Package Link Intent ${scenario.linkFrom![0]} -> ${contribution.definition.path} does not already exist`,
+    );
   });
 
   it("exposes focused links and Docker-required deployment as distinct runnable check modes", async () => {

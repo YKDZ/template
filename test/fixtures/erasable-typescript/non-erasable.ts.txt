@@ -1,0 +1,13 @@
+enum Direction {
+  Up,
+}
+
+namespace LegacyValue {
+  export const value = Direction.Up;
+}
+
+class Service {
+  constructor(public readonly value: typeof LegacyValue.value) {}
+}
+
+void new Service(LegacyValue.value);

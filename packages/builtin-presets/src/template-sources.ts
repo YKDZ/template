@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   createTemplateSourceHandle,
   type TemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
+} from "#template-core/renderer";
 
 function templateRoot(...segments: string[]): string {
   const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +31,7 @@ export const templateSources = {
   sharedOxc: source("shared", "oxc"),
   editorCustomization: source("shared", "editor-customization"),
   vue: source("shared", "vue"),
+  tsCli: source("ts-cli"),
   tsLib: source("ts-lib"),
   rustBin: source("rust-bin"),
   vueApp: source("vue-app"),

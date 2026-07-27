@@ -1,12 +1,12 @@
 import { fileURLToPath } from "node:url";
 
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 
@@ -16,6 +16,7 @@ function packageScripts(): Record<string, string> {
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    build: "tsc -p tsconfig.build.json --pretty false",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -31,8 +32,20 @@ function libraryContribution(options: {
     role: "shared-library",
   };
   const exposure = {
-    exports: { ".": { default: "./src/index.ts", types: "./src/index.ts" } },
-    imports: { "#/*": { default: "./src/*.ts", types: "./src/*.ts" } },
+    exports: {
+      ".": {
+        source: "./src/index.ts",
+        types: "./dist/index.d.ts",
+        default: "./dist/index.js",
+      },
+    },
+    imports: {
+      "#/*": {
+        source: "./src/*.ts",
+        types: "./src/*.ts",
+        default: "./dist/*.js",
+      },
+    },
   };
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
@@ -41,6 +54,12 @@ function libraryContribution(options: {
       source: templateSources.tsLib,
       from: "tsconfig.json",
       to: `${definition.path}/tsconfig.json`,
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.tsLib,
+      from: "tsconfig.build.json",
+      to: `${definition.path}/tsconfig.build.json`,
     },
     {
       kind: "copyFile",

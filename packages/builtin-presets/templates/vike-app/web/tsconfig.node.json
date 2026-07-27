@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "composite": true,
+    "customConditions": ["source"],
     "erasableSyntaxOnly": true,
     "exactOptionalPropertyTypes": true,
     "forceConsistentCasingInFileNames": true,
@@ -13,7 +14,6 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
-    "paths": { "#/*": ["./*"] },
     "rewriteRelativeImportExtensions": false,
     "skipLibCheck": true,
     "strict": true,

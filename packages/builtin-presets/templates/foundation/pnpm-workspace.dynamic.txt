@@ -2,8 +2,9 @@ packages:
 {{WORKSPACE_PACKAGE_GLOBS}}
 
 nodeLinker: isolated
+preferSymlinkedExecutables: true
 autoInstallPeers: false
-injectWorkspacePackages: true
+injectWorkspacePackages: false
 dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:

@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "composite": true,
+    "customConditions": ["source"],
     "declaration": true,
     "declarationMap": true,
     "erasableSyntaxOnly": true,
@@ -14,7 +15,6 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
-    "paths": { "#db/*": ["./src/*"] },
     "rootDir": ".",
     "skipLibCheck": true,
     "strict": true,

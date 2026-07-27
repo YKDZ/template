@@ -52,7 +52,13 @@ type InlineProtectedOperation = Extract<
 >;
 type SourceBackedOperation = Extract<
   RenderOperation,
-  { kind: "copyFile" | "writeTextTemplate" | "writeTextFromFragments" }
+  {
+    kind:
+      | "copyFile"
+      | "mergeJsonTemplate"
+      | "writeTextTemplate"
+      | "writeTextFromFragments";
+  }
 >;
 
 const inlineOperationKinds = new Set<RenderOperation["kind"]>([
@@ -133,6 +139,7 @@ function isProtectedSourceBackedOperation(
   return (
     generatedPath !== undefined &&
     (operation.kind === "copyFile" ||
+      operation.kind === "mergeJsonTemplate" ||
       operation.kind === "writeTextTemplate" ||
       operation.kind === "writeTextFromFragments") &&
     isProtectedGeneratedPath(generatedPath)

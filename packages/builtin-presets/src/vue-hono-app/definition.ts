@@ -1,10 +1,10 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import {
   sharedVueSourceOperations,
@@ -17,8 +17,8 @@ import { templateSources } from "../template-sources.ts";
 
 function apiScripts(): Record<string, string> {
   return {
-    build: "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    dev: "node --watch src/server.ts",
+    build: "tsc -p tsconfig.build.json",
+    dev: "node --conditions=source --watch src/server.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
@@ -32,7 +32,8 @@ function apiScripts(): Record<string, string> {
 function webScripts(): Record<string, string> {
   return {
     ...vueApplicationScripts(),
-    typecheck: "node scripts/run-vue-tsc.ts --build --pretty false",
+    typecheck:
+      "node --conditions=source scripts/run-vue-tsc.ts --build --pretty false",
   };
 }
 
@@ -58,7 +59,13 @@ function apiContribution(context: GenerationContext): PackageContribution {
     exports: {
       ".": { default: "./dist/index.js", types: "./dist/index.d.ts" },
     },
-    imports: { "#/*": { default: "./dist/*.js", types: "./src/*.ts" } },
+    imports: {
+      "#/*": {
+        source: "./src/*.ts",
+        types: "./src/*.ts",
+        default: "./dist/*.js",
+      },
+    },
   };
   const sourceFiles = [
     "turbo.json",
@@ -95,7 +102,6 @@ function apiContribution(context: GenerationContext): PackageContribution {
         oxfmt: "catalog:",
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
-        "tsc-alias": "catalog:",
         "typescript-7": "catalog:",
         vitest: "catalog:",
       },

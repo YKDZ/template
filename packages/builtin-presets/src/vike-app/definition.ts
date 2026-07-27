@@ -4,14 +4,14 @@ import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+} from "#template-core/module-graph";
+import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import { vueTypecheckRunnerSourceOperation } from "../shared/vue.ts";
 import { templateSources } from "../template-sources.ts";
@@ -59,7 +59,8 @@ function webScripts(): Record<string, string> {
     "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
   return {
     build: "vike build",
-    deployment: "node scripts/check-standalone-deployment.ts",
+    deployment:
+      "node --conditions=source scripts/check-standalone-deployment.ts",
     dev: `${prepareDatabase} && vike dev`,
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -69,15 +70,16 @@ function webScripts(): Record<string, string> {
     preview: `${prepareDatabase} && vike preview`,
     start: "node ./dist/server/index.mjs",
     test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
-    "test:e2e": "node scripts/run-playwright.ts",
-    typecheck: "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    "test:e2e": "node --conditions=source scripts/run-playwright.ts",
+    typecheck:
+      "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 
 function databaseScripts(): Record<string, string> {
   return {
-    build: "tsc -p tsconfig.json --noEmit",
-    "db:seed:example": "node scripts/seed-example.ts",
+    build: "tsc -p tsconfig.build.json --noEmit",
+    "db:seed:example": "node --conditions=source scripts/seed-example.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
@@ -91,12 +93,12 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
   const withDatabasePackage = (command: string): string =>
     `DATABASE_PACKAGE_NAME=${databasePackageName} ${command}`;
   return {
-    build: "tsc -p tsconfig.json --noEmit",
+    build: "tsc -p tsconfig.build.json --noEmit",
     "db:generate": withDatabasePackage("drizzle-kit generate"),
     "db:migrate": withDatabasePackage("drizzle-kit migrate"),
     "db:prepare:deploy": "pnpm run db:migrate",
-    "db:prepare:dev": `DATABASE_PACKAGE_NAME=${databasePackageName} node scripts/prepare-database.ts dev`,
-    "db:prepare:test": `DATABASE_PACKAGE_NAME=${databasePackageName} node scripts/prepare-database.ts test`,
+    "db:prepare:dev": `DATABASE_PACKAGE_NAME=${databasePackageName} node --conditions=source scripts/prepare-database.ts dev`,
+    "db:prepare:test": `DATABASE_PACKAGE_NAME=${databasePackageName} node --conditions=source scripts/prepare-database.ts test`,
     "db:push": withDatabasePackage(
       "mkdir -p data node_modules/.tmp && drizzle-kit push",
     ),
@@ -226,7 +228,12 @@ function webContribution(context: GenerationContext): PackageContribution {
     exposure: {
       exports: {},
       imports: {
-        "#/*": { default: "./*.ts", types: "./*.ts" },
+        "#/assets/*": { default: "./assets/*", types: "./assets/*" },
+        "#/components/*": {
+          default: "./components/*",
+          types: "./components/*",
+        },
+        "#/server/*": { default: "./server/*.ts", types: "./server/*.ts" },
         "#db/*": { default: `${db.name}/*`, types: `${db.name}/*` },
       },
     },
@@ -237,7 +244,12 @@ function webContribution(context: GenerationContext): PackageContribution {
       type: "module",
       files: ["dist"],
       imports: {
-        "#/*": { default: "./*.ts", types: "./*.ts" },
+        "#/assets/*": { default: "./assets/*", types: "./assets/*" },
+        "#/components/*": {
+          default: "./components/*",
+          types: "./components/*",
+        },
+        "#/server/*": { default: "./server/*.ts", types: "./server/*.ts" },
         "#db/*": { default: `${db.name}/*`, types: `${db.name}/*` },
       },
       scripts: webScripts(),
@@ -284,6 +296,7 @@ function databaseContribution(context: GenerationContext): PackageContribution {
   const sourceFiles = [
     "db/turbo.json",
     "db/tsconfig.json",
+    "db/tsconfig.build.json",
     "db/scripts/seed-example.ts",
     "db/src/db.ts",
     "db/src/index.ts",
@@ -347,6 +360,7 @@ function migrationsContribution(
   const sourceFiles = [
     "db-migrations/drizzle.config.ts",
     "db-migrations/tsconfig.json",
+    "db-migrations/tsconfig.build.json",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
     "db-migrations/scripts/prepare-database.ts",

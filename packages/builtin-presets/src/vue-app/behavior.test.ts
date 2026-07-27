@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -8,13 +8,11 @@ import {
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
-import {
-  renderNewProject,
-  renderProject,
-  renderProjectAtomically,
-} from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+
+import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
+import { renderNewProject } from "#template-core/renderer";
 
 import { vueAppDefinition } from "./definition.ts";
 
@@ -88,9 +86,37 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       targetRoot: targetDir,
       operations: [...initialization.operations],
     });
+    const viteConfig = await readFile(
+      path.join(targetDir, "apps/web/vite.config.ts"),
+      "utf8",
+    );
+    expect(viteConfig).toContain("@tailwindcss/vite");
+    expect(viteConfig).not.toContain("alias:");
     expect(
-      await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8"),
-    ).toContain("@tailwindcss/vite");
+      await readFile(path.join(targetDir, "apps/web/vitest.config.ts"), "utf8"),
+    ).not.toContain("alias:");
+    for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
+      const config = JSON.parse(
+        await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
+      ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
+      expect(config.compilerOptions).toMatchObject({
+        customConditions: ["source"],
+      });
+      expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
+    }
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, "apps/web/tsconfig.node.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      compilerOptions: {
+        customConditions: ["source"],
+        erasableSyntaxOnly: true,
+      },
+    });
 
     const defaultAddition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
@@ -98,9 +124,9 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       blueprint: initialization.blueprint,
       packageLeafName: "admin",
     });
-    await renderProjectAtomically({
+    await reconcileAndApplyProjectProjections({
       targetRoot: targetDir,
-      operations: [...defaultAddition.operations],
+      ...defaultAddition.projectProjections,
     });
     const explicitAddition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
@@ -109,9 +135,9 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       packageLeafName: "portal",
       packagePath: "products/portal",
     });
-    await renderProject({
+    await reconcileAndApplyProjectProjections({
       targetRoot: targetDir,
-      operations: [...explicitAddition.operations],
+      ...explicitAddition.projectProjections,
     });
 
     expect(explicitAddition.blueprint.packages).toEqual(
@@ -179,7 +205,10 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       expect.objectContaining({
         kind: "mergeJson",
         to: "apps/web/package.json",
-        value: { dependencies: { "@demo/admin": "workspace:*" } },
+        value: {
+          dependencies: { "@demo/admin": "workspace:*" },
+          dependenciesMeta: { "@demo/admin": { injected: true } },
+        },
         provenance: expect.objectContaining({
           definitionName: "vue-app",
           planningContribution: "foundationPlan",
@@ -187,9 +216,9 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       }),
     );
 
-    await renderProjectAtomically({
+    await reconcileAndApplyProjectProjections({
       targetRoot: targetDir,
-      operations: [...addition.operations],
+      ...addition.projectProjections,
     });
     expect(
       JSON.parse(
@@ -204,4 +233,131 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     );
     await execa("pnpm", ["run", "check"], { cwd: targetDir });
   }, 300_000);
+
+  it("reconciles Foundation structured customization and reruns idempotently", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vue-structured-addition-"),
+    );
+    const targetDir = path.join(workspace, "project");
+    const context = createGenerationContext({
+      targetDir,
+      scope: "demo",
+      toolchain,
+    });
+    const baseDefinition = builtInPresetRegistry.require("ts-lib");
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: baseDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const turboPath = path.join(targetDir, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<string, unknown>;
+      };
+      turbo.tasks["user:report"] = { cache: false };
+      await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "dashboard",
+      });
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      await expect(
+        readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
+      ).resolves.toMatchObject({
+        boundaries: {
+          tags: {
+            app: { dependencies: { allow: ["app", "library"] } },
+          },
+        },
+        tasks: { "user:report": { cache: false } },
+      });
+
+      const repeated = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        context,
+        blueprint: addition.blueprint,
+        packageLeafName: "dashboard",
+      });
+      await expect(
+        reconcileAndApplyProjectProjections({
+          targetRoot: targetDir,
+          ...repeated.projectProjections,
+        }),
+      ).resolves.toEqual({ ok: true, changedPaths: [], actions: [] });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("returns a structured conflict before mutating an incompatible Turbo customization", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vue-structured-conflict-"),
+    );
+    const targetDir = path.join(workspace, "project");
+    const context = createGenerationContext({
+      targetDir,
+      scope: "demo",
+      toolchain,
+    });
+    const baseDefinition = builtInPresetRegistry.require("ts-lib");
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: baseDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const turboPath = path.join(targetDir, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        boundaries: { tags: Record<string, unknown> };
+      };
+      turbo.boundaries.tags.app = {
+        dependencies: { allow: ["app"] },
+      };
+      await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "dashboard",
+      });
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        conflicts: [
+          expect.objectContaining({
+            path: "turbo.json",
+            driver: "structured",
+            location: "/boundaries/tags/app/dependencies/allow",
+          }),
+        ],
+      });
+      await expect(
+        readFile(path.join(targetDir, "apps/dashboard/package.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
 });

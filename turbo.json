@@ -73,7 +73,6 @@
       "outputs": ["dist/**"]
     },
     "check:fixtures": {
-      "dependsOn": ["^build"],
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
@@ -83,7 +82,6 @@
       ]
     },
     "check:generated": {
-      "dependsOn": ["^build"],
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
@@ -93,29 +91,24 @@
       ]
     },
     "check:focused": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "check:deployment": {
-      "dependsOn": ["^build"],
       "cache": false,
       "outputs": []
     },
     "check:templates": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["//#test"],
       "outputs": [],
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     },
     "check:templates:boundary": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "check:templates:github-yaml": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "check:toolchain:online": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "format:check": {
@@ -126,22 +119,19 @@
       "cache": false
     },
     "lint": {
-      "dependsOn": ["^build"],
       "outputs": []
     },
     "lint:fix": {
       "cache": false
     },
     "typecheck": {
-      "dependsOn": ["^build", "^typecheck"],
+      "dependsOn": ["^typecheck"],
       "outputs": []
     },
     "test": {
-      "dependsOn": ["build"],
       "outputs": []
     },
     "test:e2e": {
-      "dependsOn": ["build"],
       "cache": false
     },
     "boundaries": {
@@ -166,11 +156,11 @@
       "cache": false
     },
     "//#typecheck": {
-      "dependsOn": ["^build", "^typecheck"],
+      "dependsOn": ["^typecheck"],
       "outputs": []
     },
     "//#test": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["@ykdz/template#build"],
       "outputs": []
     }
   }

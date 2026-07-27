@@ -29,10 +29,12 @@ catalog:
   "@vitejs/plugin-vue": ^6.0.8
   "@vikejs/hono": ^0.2.1
   "@vue/tsconfig": ^0.9.1
+  commander: ^15.0.0
   drizzle-kit: 1.0.0-rc.4
   drizzle-orm: 1.0.0-rc.4
   execa: ^10.0.0
   hono: ^4.12.31
+  node-diff3: ^3.2.1
   oxfmt: ^0.58.0
   oxlint: ^1.73.0
   oxlint-tsgolint: ^0.24.0
@@ -42,7 +44,6 @@ catalog:
   srvx: ^0.12.1
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
-  tsc-alias: ^1.8.17
   turbo: 2.10.5
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
@@ -54,6 +55,10 @@ catalog:
   vue: ^3.5.39
   vue-tsc: ^3.3.6
   yaml: ^2.9.0
+
+catalogs:
+  public-cli-runtime:
+    typescript: npm:typescript@^6.0.3
 
 allowBuilds:
   esbuild: true

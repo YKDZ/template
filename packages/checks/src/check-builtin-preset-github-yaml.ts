@@ -2,18 +2,19 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parseDocument } from "yaml";
+
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   resolveBuiltInTemplateSource,
   type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
+} from "#template-builtin-presets";
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
-} from "@ykdz/template-core/project-github";
-import { parseDocument } from "yaml";
+} from "#template-core/project-github";
 
 type GithubTemplateKind = "workflow" | "dependabot";
 type SourceBackedOperation = Extract<

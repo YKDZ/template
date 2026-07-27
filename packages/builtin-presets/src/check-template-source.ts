@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import type { TemplateSourceHandle } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+
+import { renderNewProject } from "#template-core/renderer";
+import type { TemplateSourceHandle } from "#template-core/renderer";
 
 import {
   builtInPresetTemplateSourceCheckContexts,
@@ -109,7 +110,7 @@ async function checkContributionTemplateSource(
       targetRoot: checkRoot,
       operations: [...context.plan.operations],
     });
-    await execa("pnpm", ["install", "--ignore-scripts"], { cwd: checkRoot });
+    await execa("pnpm", ["install"], { cwd: checkRoot });
     await execa("pnpm", ["run", "typecheck"], { cwd: checkRoot });
     await execa("pnpm", ["run", "lint"], { cwd: checkRoot });
     for (const definition of context.plan.blueprint.packages) {

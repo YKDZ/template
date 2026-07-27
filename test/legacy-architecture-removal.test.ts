@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -6,7 +6,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkLegacyArchitectureRemoval,
-  checkPackedPublicArtifact,
   findLegacyArchitectureFindings,
   findLegacyArchitectureDistributionFindings,
   findLegacyArchitectureTarballFindings,
@@ -18,18 +17,6 @@ async function fixture(): Promise<string> {
 }
 
 describe("Legacy Architecture Removal Check", () => {
-  it("audits the built public artifact without rebuilding shared distributions", async () => {
-    const builtDefinition = path.join(
-      process.cwd(),
-      "packages/builtin-presets/dist/src/rust-bin/definition.js",
-    );
-    const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
-
-    await checkPackedPublicArtifact();
-
-    expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
-  });
-
   it("reports a focused finding for every protected surface", async () => {
     const root = await fixture();
     try {
@@ -46,6 +33,10 @@ describe("Legacy Architecture Removal Check", () => {
         writeFile(
           path.join(root, "packages/core/src/old.ts"),
           `import { x } from "./preset-${"source"}.ts";\nexport { x } from "./preset-${"source"}.ts";\nexport type ${"Preset"}Source = typeof x;`,
+        ),
+        writeFile(
+          path.join(root, "packages/core/src/renderer.ts"),
+          'export function driver(path: string) { if (path === "turbo.json") return "structured"; return "text"; }',
         ),
         writeFile(
           path.join(root, "packages/cli/src/cli.ts"),
@@ -68,6 +59,7 @@ describe("Legacy Architecture Removal Check", () => {
           expect.objectContaining({ rule: "retired-vocabulary" }),
           expect.objectContaining({ rule: "retired-cli-command" }),
           expect.objectContaining({ rule: "identity-branch" }),
+          expect.objectContaining({ rule: "foundation-output-branch" }),
         ]),
       );
       await expect(checkLegacyArchitectureRemoval(root)).rejects.toThrow(
@@ -356,6 +348,408 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
+  it("permits the package-local Turbo prepack build selector", async () => {
+    const root = await fixture();
+    try {
+      await mkdir(path.join(root, "packages/builtin-presets/src"), {
+        recursive: true,
+      });
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/builtin-presets/src/definition.ts"),
+          'export const prepack = "pnpm exec turbo run build --filter=.";\n',
+        ),
+        writeFile(
+          path.join(root, "packages/builtin-presets/package.json"),
+          JSON.stringify({
+            name: "@example/preset",
+            scripts: {
+              prepack: "pnpm exec turbo run build --filter=.",
+            },
+          }),
+        ),
+      ]);
+
+      const findings = await findLegacyArchitectureFindings(root);
+      expect(
+        findings.filter((finding) => finding.rule === "generated-task-filter"),
+      ).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects the retired public CLI parser, manual prepack chain, and packed lifecycle bypass", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/cli/src"), { recursive: true }),
+        mkdir(path.join(root, "test"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/cli/src/main.ts"),
+          "function parseInitOptions(args: readonly string[]) { return args; }\n",
+        ),
+        writeFile(
+          path.join(root, "packages/cli/package.json"),
+          JSON.stringify({
+            name: "@ykdz/template",
+            scripts: {
+              prepack:
+                "pnpm --filter @ykdz/template-core run build && pnpm run build",
+            },
+          }),
+        ),
+        writeFile(
+          path.join(root, "test/packed-publication.test.ts"),
+          'const packArgs = ["--config.ignore-scripts=true"];\n',
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ rule: "hand-written-cli-parser" }),
+          expect.objectContaining({ rule: "manual-prepack-chain" }),
+          expect.objectContaining({ rule: "packed-lifecycle-bypass" }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects directly executed TypeScript without native erasability enforcement", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/missing/scripts"), {
+          recursive: true,
+        }),
+        mkdir(path.join(root, "packages/disabled/scripts"), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/missing/package.json"),
+          JSON.stringify({
+            name: "@example/missing",
+            scripts: { check: "node scripts/check.ts" },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/missing/tsconfig.json"),
+          JSON.stringify({ compilerOptions: { strict: true } }),
+        ),
+        writeFile(
+          path.join(root, "packages/missing/scripts/check.ts"),
+          "export {};\n",
+        ),
+        writeFile(
+          path.join(root, "packages/disabled/package.json"),
+          JSON.stringify({
+            name: "@example/disabled",
+            scripts: { check: "node scripts/check.ts" },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/disabled/tsconfig.json"),
+          JSON.stringify({
+            compilerOptions: { erasableSyntaxOnly: false },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/disabled/scripts/check.ts"),
+          "export {};\n",
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "non-erasable-typescript-config",
+            file: "packages/missing/tsconfig.json",
+          }),
+          expect.objectContaining({
+            rule: "non-erasable-typescript-config",
+            file: "packages/disabled/tsconfig.json",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects non-erasable TypeScript syntax in repository-authored source", async () => {
+    const root = await fixture();
+    try {
+      const sourceRoot = path.join(root, "packages/api/src");
+      await mkdir(sourceRoot, { recursive: true });
+      await writeFile(
+        path.join(sourceRoot, "legacy.ts"),
+        [
+          "enum Status { Ready }",
+          "namespace RuntimeState { export const ready = true; }",
+          "export class Service {",
+          "  constructor(readonly name: string) {}",
+          "}",
+          "",
+        ].join("\n"),
+      );
+
+      const findings = await findLegacyArchitectureFindings(root);
+      expect(
+        findings.filter(
+          ({ rule }) => rule === "non-erasable-typescript-syntax",
+        ),
+      ).toHaveLength(3);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not scan non-erasable negative fixtures or generated output", async () => {
+    const root = await fixture();
+    const source = "enum HistoricalExample { Retired }\n";
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "test/fixtures/erasability"), {
+          recursive: true,
+        }),
+        mkdir(path.join(root, "generated-repository/example"), {
+          recursive: true,
+        }),
+        mkdir(path.join(root, "docs/adr"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "test/fixtures/erasability/non-erasable.ts"),
+          source,
+        ),
+        writeFile(
+          path.join(root, "generated-repository/example/non-erasable.ts"),
+          source,
+        ),
+        writeFile(
+          path.join(root, "docs/adr/0001-historical.md"),
+          `Historical example:\n\n\`\`\`ts\n${source}\`\`\`\n`,
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects TypeScript runtime loaders and source runners", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/cli"), { recursive: true }),
+        mkdir(path.join(root, "packages/builtin-presets/src"), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/cli/package.json"),
+          JSON.stringify({
+            name: "@example/cli",
+            scripts: {
+              dev: "node --loader ts-node/esm src/cli.ts",
+              check: "tsx scripts/check.ts",
+            },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/builtin-presets/src/definition.ts"),
+          'export const sourceCommand = "node --import tsx src/cli.ts";\n',
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "typescript-runtime-loader",
+            file: "packages/cli/package.json",
+          }),
+          expect.objectContaining({
+            rule: "typescript-runtime-loader",
+            file: "packages/builtin-presets/src/definition.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects TypeScript paths aliases and alias rewriting", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/api"), { recursive: true }),
+        mkdir(path.join(root, "packages/builtin-presets/src"), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/api/tsconfig.json"),
+          JSON.stringify({
+            compilerOptions: {
+              paths: { "#/*": ["./src/*"] },
+            },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/api/package.json"),
+          JSON.stringify({
+            name: "@example/api",
+            scripts: {
+              build: "tsc -p tsconfig.build.json && tsc-alias",
+            },
+            devDependencies: { "tsc-alias": "1.0.0" },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/builtin-presets/src/definition.ts"),
+          'export const build = "tsc && tsc-alias";\n',
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "typescript-path-alias",
+            file: "packages/api/tsconfig.json",
+          }),
+          expect.objectContaining({
+            rule: "typescript-path-alias",
+            file: "packages/api/package.json",
+          }),
+          expect.objectContaining({
+            rule: "typescript-path-alias",
+            file: "packages/builtin-presets/src/definition.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Generated Repository Vitest resolver aliases structurally", async () => {
+    const root = await fixture();
+    try {
+      const configDirectory = path.join(
+        root,
+        "packages/builtin-presets/templates/vue-app",
+      );
+      const checksDirectory = path.join(root, "packages/checks");
+      await Promise.all([
+        mkdir(configDirectory, { recursive: true }),
+        mkdir(checksDirectory, { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(configDirectory, "vitest.config.ts"),
+          [
+            'import { defineConfig } from "vitest/config";',
+            "export default defineConfig({",
+            '  resolve: { alias: { "@": "./src" } },',
+            "  test: { globals: true },",
+            "});",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          path.join(checksDirectory, "package.json"),
+          JSON.stringify({
+            exports: { "./check-generated-registry": null },
+          }),
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([
+        expect.objectContaining({
+          rule: "vitest-resolver-alias",
+          file: "packages/builtin-presets/templates/vue-app/vitest.config.ts",
+        }),
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects manual cross-package build chains outside Turbo topology", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/web"), { recursive: true }),
+        mkdir(path.join(root, "packages/builtin-presets/src"), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/web/package.json"),
+          JSON.stringify({
+            name: "@example/web",
+            scripts: {
+              "test:e2e": "pnpm --dir ../api run build && playwright test",
+            },
+          }),
+        ),
+        writeFile(
+          path.join(root, "packages/builtin-presets/src/definition.ts"),
+          'export const deployment = "pnpm --filter @example/api run build && node dist/server.js";\n',
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "manual-dependency-build-chain",
+            file: "packages/web/package.json",
+          }),
+          expect.objectContaining({
+            rule: "manual-dependency-build-chain",
+            file: "packages/builtin-presets/src/definition.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects lifecycle bypasses in active generated-template checks", async () => {
+    const root = await fixture();
+    try {
+      const checkRoot = path.join(root, "packages/builtin-presets/src");
+      await mkdir(checkRoot, { recursive: true });
+      await writeFile(
+        path.join(checkRoot, "check-template-source.ts"),
+        'const installArgs = ["install", "--ignore-scripts"];\n',
+      );
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "packed-lifecycle-bypass",
+            file: "packages/builtin-presets/src/check-template-source.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("detects retired task words through Markdown and YAML punctuation, requiring explicit ADR-0094 supersession", async () => {
     const root = await fixture();
     try {
@@ -396,7 +790,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("audits every bundled package root and text template in a packed CLI", async () => {
+  it("requires every bundled root and audits repository-owned packed source", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -411,6 +805,9 @@ describe("Legacy Architecture Removal Check", () => {
           path.join(root, "node_modules/@ykdz/template-builtin-presets/dist"),
           { recursive: true },
         ),
+        mkdir(path.join(root, "node_modules/typescript/lib"), {
+          recursive: true,
+        }),
       ]);
       await writeFile(
         path.join(root, "package.json"),
@@ -418,6 +815,7 @@ describe("Legacy Architecture Removal Check", () => {
           bundleDependencies: [
             "@ykdz/template-builtin-presets",
             "@ykdz/template-core",
+            "typescript",
           ],
         }),
       );
@@ -443,9 +841,14 @@ describe("Legacy Architecture Removal Check", () => {
           ),
           "turbo run transit",
         ),
+        writeFile(
+          path.join(root, "node_modules/typescript/lib/typesMap.json"),
+          '{"transit":"third-party vocabulary"}',
+        ),
       ]);
 
-      await expect(findPackedTaskVocabularyFindings(root)).resolves.toEqual(
+      const findings = await findPackedTaskVocabularyFindings(root);
+      expect(findings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             rule: "packed-artifact-task-vocabulary",
@@ -457,6 +860,9 @@ describe("Legacy Architecture Removal Check", () => {
           }),
         ]),
       );
+      expect(
+        findings.some(({ file }) => file.includes("node_modules/typescript")),
+      ).toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

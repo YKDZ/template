@@ -3,16 +3,17 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { execa } from "execa";
+
 import {
   planToolchainBaselineUpdate,
   type ToolchainBaseline,
   type ToolchainUpdateCandidate,
-} from "@ykdz/template-core/toolchain-baseline-update";
+} from "#template-core/toolchain-baseline-update";
 import {
   resolveToolchainVersions,
   type ResolvedToolchainVersions,
-} from "@ykdz/template-core/toolchain-resolution";
-import { execa } from "execa";
+} from "#template-core/toolchain-resolution";
 
 export const toolchainAutomationBranch = "automation/toolchain-baseline";
 

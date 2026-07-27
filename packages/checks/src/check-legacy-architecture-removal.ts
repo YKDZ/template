@@ -6,6 +6,7 @@ import {
   readdir,
   readFile,
   rm,
+  writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -115,6 +116,17 @@ const concretePresetNames = new Set([
 ]);
 const frameworkNames = new Set(["vue", "vike", "hono", "rust"]);
 const publicCliPackageName = ["@ykdz", "template"].join("/");
+const foundationOutputPaths = new Set([
+  ".devcontainer/Dockerfile",
+  ".devcontainer/devcontainer.json",
+  ".github/dependabot.yml",
+  ".gitignore",
+  ".vscode/extensions.json",
+  ".vscode/settings.json",
+  "package.json",
+  "pnpm-workspace.yaml",
+  "turbo.json",
+]);
 
 const ignoredDirectories = new Set([
   ".git",
@@ -123,6 +135,8 @@ const ignoredDirectories = new Set([
   ".turbo",
   ".template-boundary-check",
   ".pnpm-store",
+  "fixtures",
+  "generated-repository",
   "node_modules",
 ]);
 
@@ -210,6 +224,44 @@ function isTaskCommandWithFilter(command: string): boolean {
   return (
     /\bturbo\s+run\b/iu.test(command) &&
     /(?:^|\s)--filter(?:=|\s|$)/iu.test(command)
+  );
+}
+
+function isForbiddenTaskCommandWithFilter(command: string): boolean {
+  return (
+    isTaskCommandWithFilter(command) &&
+    command.trim() !== "pnpm exec turbo run build --filter=."
+  );
+}
+
+function usesTypeScriptRuntimeLoader(command: string): boolean {
+  return (
+    /(?:^|\s)(?:tsx|ts-node)(?:\s|$)/u.test(command) ||
+    /\bnode\b[^\n;&|]*\s--(?:experimental-)?loader(?:=|\s)/u.test(command) ||
+    /\bnode\b[^\n;&|]*\s--import(?:=|\s)(?:tsx|ts-node)(?:\s|$)/u.test(command)
+  );
+}
+
+function usesTypeScriptPathAliasTool(command: string): boolean {
+  return /(?:^|\s|&&|\|\|)tsc-alias(?:\s|$)/u.test(command);
+}
+
+function usesManualDependencyBuildChain(command: string): boolean {
+  return (
+    /\b(?:pnpm|npm)\s+(?:(?:--dir|-C|--prefix)\s+\S+|--filter(?:=|\s)\S+)\s+(?:run\s+)?build\b/u.test(
+      command,
+    ) || /\byarn\s+workspace\s+\S+\s+(?:run\s+)?build\b/u.test(command)
+  );
+}
+
+function isAssertionArgument(node: ts.Node): boolean {
+  return (
+    ts.isCallExpression(node.parent) &&
+    node.parent.arguments.includes(node as ts.Expression) &&
+    ts.isPropertyAccessExpression(node.parent.expression) &&
+    /^(?:toContain|toEqual|toHaveProperty|toMatch)$/u.test(
+      node.parent.expression.name.text,
+    )
   );
 }
 
@@ -415,6 +467,26 @@ function containsIdentity(
   return identity;
 }
 
+function containsFoundationOutputPath(
+  checker: ts.TypeChecker,
+  expression: ts.Expression,
+): string | undefined {
+  let outputPath: string | undefined;
+  const inspect = (node: ts.Node): void => {
+    if (outputPath !== undefined) return;
+    if (ts.isExpression(node)) {
+      const value = evaluatedString(checker, node);
+      if (value !== undefined && foundationOutputPaths.has(value)) {
+        outputPath = value;
+        return;
+      }
+    }
+    ts.forEachChild(node, inspect);
+  };
+  inspect(expression);
+  return outputPath;
+}
+
 function collectTypeScriptFindings(
   relativePath: string,
   sourceFile: ts.SourceFile,
@@ -424,9 +496,53 @@ function collectTypeScriptFindings(
   const findings: LegacyArchitectureFinding[] = [];
   const generic = isGenericSurface(relativePath);
   const shared = isBuiltInShared(relativePath);
+  const packageAdditionCore =
+    relativePath === "packages/core/src/renderer.ts" ||
+    relativePath === "packages/core/src/project-projection.ts";
 
   const inspect = (node: ts.Node): void => {
     const location = nodeLocation(sourceFile, node);
+    if (
+      relativePath.endsWith("vitest.config.ts") &&
+      ts.isPropertyAssignment(node) &&
+      propertyNameText(node.name) === "alias" &&
+      ts.isObjectLiteralExpression(node.parent) &&
+      ts.isPropertyAssignment(node.parent.parent) &&
+      propertyNameText(node.parent.parent.name) === "resolve"
+    ) {
+      findings.push(
+        finding(
+          "vitest-resolver-alias",
+          relativePath,
+          `${location} configures a Vitest resolver alias instead of Native Package Imports`,
+        ),
+      );
+    }
+    if (
+      !sourceFile.isDeclarationFile &&
+      (ts.isEnumDeclaration(node) ||
+        (ts.isModuleDeclaration(node) &&
+          !node.modifiers?.some(
+            ({ kind }) => kind === ts.SyntaxKind.DeclareKeyword,
+          )) ||
+        (ts.isParameter(node) &&
+          node.modifiers?.some(({ kind }) =>
+            [
+              ts.SyntaxKind.PublicKeyword,
+              ts.SyntaxKind.ProtectedKeyword,
+              ts.SyntaxKind.PrivateKeyword,
+              ts.SyntaxKind.ReadonlyKeyword,
+            ].includes(kind),
+          )))
+    ) {
+      findings.push(
+        finding(
+          "non-erasable-typescript-syntax",
+          relativePath,
+          `${location} uses TypeScript syntax that Node cannot erase`,
+        ),
+      );
+    }
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       const moduleSpecifier = node.moduleSpecifier;
       if (
@@ -534,7 +650,7 @@ function collectTypeScriptFindings(
     if (
       !relativePath.startsWith("test/") &&
       ts.isStringLiteralLike(node) &&
-      isTaskCommandWithFilter(node.text)
+      isForbiddenTaskCommandWithFilter(node.text)
     ) {
       findings.push(
         finding(
@@ -551,7 +667,7 @@ function collectTypeScriptFindings(
         : undefined;
     if (!relativePath.startsWith("test/") && composedCommand !== undefined) {
       const command = evaluatedString(checker, composedCommand);
-      if (command !== undefined && isTaskCommandWithFilter(command)) {
+      if (command !== undefined && isForbiddenTaskCommandWithFilter(command)) {
         findings.push(
           finding(
             "generated-task-filter",
@@ -570,6 +686,45 @@ function collectTypeScriptFindings(
           "task-model-compatibility",
           relativePath,
           `${location} retains a task-model compatibility or migration path`,
+        ),
+      );
+    }
+    if (
+      ts.isStringLiteralLike(node) &&
+      !isAssertionArgument(node) &&
+      usesTypeScriptRuntimeLoader(node.text)
+    ) {
+      findings.push(
+        finding(
+          "typescript-runtime-loader",
+          relativePath,
+          `${location} executes TypeScript through a runtime loader or source runner`,
+        ),
+      );
+    }
+    if (
+      ts.isStringLiteralLike(node) &&
+      !isAssertionArgument(node) &&
+      usesTypeScriptPathAliasTool(node.text)
+    ) {
+      findings.push(
+        finding(
+          "typescript-path-alias",
+          relativePath,
+          `${location} rewrites TypeScript-only path aliases`,
+        ),
+      );
+    }
+    if (
+      ts.isStringLiteralLike(node) &&
+      !isAssertionArgument(node) &&
+      usesManualDependencyBuildChain(node.text)
+    ) {
+      findings.push(
+        finding(
+          "manual-dependency-build-chain",
+          relativePath,
+          `${location} manually builds another Package instead of declaring Turbo topology`,
         ),
       );
     }
@@ -662,6 +817,24 @@ function collectTypeScriptFindings(
         );
       }
     }
+    if (
+      packageAdditionCore &&
+      (ts.isIfStatement(node) || ts.isConditionalExpression(node))
+    ) {
+      const condition = ts.isIfStatement(node)
+        ? node.expression
+        : node.condition;
+      const outputPath = containsFoundationOutputPath(checker, condition);
+      if (outputPath !== undefined) {
+        findings.push(
+          finding(
+            "foundation-output-branch",
+            relativePath,
+            `${location} branches on Foundation output path ${outputPath}`,
+          ),
+        );
+      }
+    }
     if (generic && ts.isSwitchStatement(node)) {
       const identity = containsIdentity(checker, node.expression);
       const hasIdentityCase = node.caseBlock.clauses.some(
@@ -675,6 +848,24 @@ function collectTypeScriptFindings(
             "identity-branch",
             relativePath,
             `${location} switches on a closed Preset identity branch`,
+          ),
+        );
+      }
+    }
+    if (packageAdditionCore && ts.isSwitchStatement(node)) {
+      let outputPath = containsFoundationOutputPath(checker, node.expression);
+      for (const clause of node.caseBlock.clauses) {
+        if (outputPath !== undefined) break;
+        if (ts.isCaseClause(clause)) {
+          outputPath = containsFoundationOutputPath(checker, clause.expression);
+        }
+      }
+      if (outputPath !== undefined) {
+        findings.push(
+          finding(
+            "foundation-output-branch",
+            relativePath,
+            `${location} switches on Foundation output path ${outputPath}`,
           ),
         );
       }
@@ -727,6 +918,20 @@ function collectTypeScriptFindings(
           ),
         );
       }
+    }
+    if (
+      relativePath.startsWith("packages/cli/src/") &&
+      ts.isFunctionDeclaration(node) &&
+      node.name !== undefined &&
+      /^parse(?:Init|AddPackage)Options$/u.test(node.name.text)
+    ) {
+      findings.push(
+        finding(
+          "hand-written-cli-parser",
+          relativePath,
+          `${location} retains the retired ${node.name.text} argument parser`,
+        ),
+      );
     }
     ts.forEachChild(node, inspect);
   };
@@ -844,6 +1049,24 @@ function collectTextFindings(
       ),
     );
   }
+  if (
+    relativePath !==
+      "packages/checks/src/check-legacy-architecture-removal.ts" &&
+    (relativePath === "test/packed-publication.test.ts" ||
+      relativePath.startsWith("packages/checks/src/") ||
+      /^packages\/builtin-presets\/src\/check-.*\.ts$/u.test(relativePath)) &&
+    /(?:--(?:config\.)?ignore-scripts(?:=true)?|(?:npm|pnpm)_config_ignore_scripts)/iu.test(
+      source,
+    )
+  ) {
+    findings.push(
+      finding(
+        "packed-lifecycle-bypass",
+        relativePath,
+        "publication and generated-template checks must allow lifecycle scripts",
+      ),
+    );
+  }
   return findings;
 }
 
@@ -904,8 +1127,54 @@ function manifestFindings(
     optionalDependencies: manifest.optionalDependencies,
     peerDependencies: manifest.peerDependencies,
   });
+  const exposesRepositoryCheckModule = (value: unknown): boolean => {
+    if (typeof value === "string") {
+      return /registry-checks|(?:^|[/-])check-[\w-]*/iu.test(value);
+    }
+    if (Array.isArray(value)) return value.some(exposesRepositoryCheckModule);
+    if (typeof value !== "object" || value === null) return false;
+    return Object.entries(value).some(
+      ([key, target]) =>
+        target !== null &&
+        !(
+          relativePath === "packages/checks/package.json" &&
+          key === "./check-online-toolchain-resolution-contract"
+        ) &&
+        (/(?:registry-checks|(?:^|[/-])check-[\w-]*)/iu.test(key) ||
+          exposesRepositoryCheckModule(target)),
+    );
+  };
   const findings: LegacyArchitectureFinding[] = [];
-  if (/registry-checks|(?:^|[/-])check-[\w-]*/iu.test(serialized)) {
+  const dependencySections = [
+    manifest.dependencies,
+    manifest.devDependencies,
+    manifest.optionalDependencies,
+    manifest.peerDependencies,
+  ];
+  if (
+    dependencySections.some(
+      (section) =>
+        typeof section === "object" &&
+        section !== null &&
+        Object.hasOwn(section, "tsc-alias"),
+    )
+  ) {
+    findings.push(
+      finding(
+        "typescript-path-alias",
+        relativePath,
+        "declares the obsolete tsc-alias resolution rewriter",
+      ),
+    );
+  }
+  if (
+    exposesRepositoryCheckModule({
+      exports: manifest.exports,
+      dependencies: manifest.dependencies,
+      optionalDependencies: manifest.optionalDependencies,
+      peerDependencies: manifest.peerDependencies,
+    })
+  ) {
     findings.push(
       finding(
         "package-manifest-export",
@@ -930,6 +1199,20 @@ function manifestFindings(
     scripts !== null
   ) {
     const manifestName = typeof manifest.name === "string" ? manifest.name : "";
+    const prepack = (scripts as Record<string, unknown>).prepack;
+    if (
+      manifestName === "@ykdz/template" &&
+      typeof prepack === "string" &&
+      prepack !== "pnpm exec turbo run build --filter=."
+    ) {
+      findings.push(
+        finding(
+          "manual-prepack-chain",
+          relativePath,
+          "public CLI prepack must let Turbo build the package dependency topology",
+        ),
+      );
+    }
     for (const [name, command] of Object.entries(scripts)) {
       if (isTaskScriptName(name)) {
         findings.push(
@@ -942,7 +1225,7 @@ function manifestFindings(
       }
       if (
         typeof command === "string" &&
-        isTaskCommandWithFilter(command) &&
+        isForbiddenTaskCommandWithFilter(command) &&
         !(manifestName === "@ykdz/template-repository" && name === "build")
       ) {
         findings.push(
@@ -953,6 +1236,138 @@ function manifestFindings(
           ),
         );
       }
+      if (typeof command === "string" && usesTypeScriptRuntimeLoader(command)) {
+        findings.push(
+          finding(
+            "typescript-runtime-loader",
+            relativePath,
+            `${name} executes TypeScript through a runtime loader or source runner`,
+          ),
+        );
+      }
+      if (typeof command === "string" && usesTypeScriptPathAliasTool(command)) {
+        findings.push(
+          finding(
+            "typescript-path-alias",
+            relativePath,
+            `${name} rewrites TypeScript-only path aliases`,
+          ),
+        );
+      }
+      if (
+        typeof command === "string" &&
+        usesManualDependencyBuildChain(command)
+      ) {
+        findings.push(
+          finding(
+            "manual-dependency-build-chain",
+            relativePath,
+            `${name} manually builds another Package instead of declaring Turbo topology`,
+          ),
+        );
+      }
+    }
+  }
+  return findings;
+}
+
+function tsconfigFindings(
+  relativePath: string,
+  source: string,
+): LegacyArchitectureFinding[] {
+  if (!/(?:^|\/)tsconfig(?:\.[^/]+)?\.json$/u.test(relativePath)) return [];
+  let config: {
+    readonly compilerOptions?: { readonly paths?: unknown };
+  };
+  try {
+    config = JSON.parse(source) as {
+      readonly compilerOptions?: { readonly paths?: unknown };
+    };
+  } catch {
+    return [];
+  }
+  const paths = config.compilerOptions?.paths;
+  if (
+    typeof paths !== "object" ||
+    paths === null ||
+    Object.keys(paths).length === 0
+  ) {
+    return [];
+  }
+  return [
+    finding(
+      "typescript-path-alias",
+      relativePath,
+      "uses compilerOptions.paths instead of Native Package Imports",
+    ),
+  ];
+}
+
+function directlyExecutesTypeScript(command: unknown): boolean {
+  return (
+    typeof command === "string" &&
+    /(?:^|[;&|]\s*)node(?:\s+--[^\s]+)*\s+[^\s;&|]+\.ts(?:\s|$)/u.test(command)
+  );
+}
+
+async function collectNativeErasabilityFindings(
+  repositoryRoot: string,
+  files: readonly string[],
+): Promise<LegacyArchitectureFinding[]> {
+  const findings: LegacyArchitectureFinding[] = [];
+  for (const manifestPath of files.filter((file) =>
+    file.endsWith("package.json"),
+  )) {
+    let manifest: { readonly scripts?: Readonly<Record<string, unknown>> };
+    try {
+      manifest = JSON.parse(
+        await readFile(path.join(repositoryRoot, manifestPath), "utf8"),
+      ) as { readonly scripts?: Readonly<Record<string, unknown>> };
+    } catch {
+      continue;
+    }
+    if (
+      !Object.values(manifest.scripts ?? {}).some(directlyExecutesTypeScript)
+    ) {
+      continue;
+    }
+
+    const configPath = path.join(
+      repositoryRoot,
+      path.dirname(manifestPath),
+      "tsconfig.json",
+    );
+    const relativeConfigPath = path
+      .relative(repositoryRoot, configPath)
+      .replaceAll(path.sep, "/");
+    const config = ts.readConfigFile(configPath, (fileName) =>
+      ts.sys.readFile(fileName),
+    );
+    if (config.error !== undefined) {
+      findings.push(
+        finding(
+          "non-erasable-typescript-config",
+          relativeConfigPath,
+          "directly executed TypeScript requires a readable tsconfig.json with erasableSyntaxOnly enabled",
+        ),
+      );
+      continue;
+    }
+    const parsed = ts.parseJsonConfigFileContent(
+      config.config,
+      ts.sys,
+      path.dirname(configPath),
+      {},
+      configPath,
+    );
+    if (parsed.options.erasableSyntaxOnly !== true) {
+      findings.push(
+        finding(
+          "non-erasable-typescript-config",
+          relativeConfigPath,
+          "directly executed TypeScript requires effective compilerOptions.erasableSyntaxOnly=true",
+        ),
+      );
     }
   }
   return findings;
@@ -1076,7 +1491,12 @@ export async function findPackedTaskVocabularyFindings(
   for (const { display, required } of managedRoots) {
     const root = path.join(packedRoot, display);
     try {
-      for (const relativePath of await filesUnder(root)) {
+      const relativePaths = await filesUnder(root);
+      const ownsTaskVocabulary =
+        display === "dist" ||
+        display.startsWith("node_modules/@ykdz/template-");
+      if (!ownsTaskVocabulary) continue;
+      for (const relativePath of relativePaths) {
         const source = await readFile(path.join(root, relativePath), "utf8");
         if (hasRetiredTaskVocabulary(source)) {
           findings.push(
@@ -1146,7 +1566,6 @@ export async function checkPackedPublicArtifact(
       "pnpm",
       [
         "--config.node-linker=hoisted",
-        "--config.ignore-scripts=true",
         "--filter",
         publicCliPackageName,
         "pack",
@@ -1191,12 +1610,21 @@ export async function checkPackedPublicArtifact(
           .join("\n")}`,
       );
     }
-    const unpacked = path.join(destination, "unpacked");
-    await mkdir(unpacked);
-    await execa("tar", ["-xf", archivePath, "-C", unpacked]);
-    const packedRoot = path.join(unpacked, "package");
+    const consumerRoot = path.join(destination, "consumer");
+    await mkdir(consumerRoot);
+    await writeFile(
+      path.join(consumerRoot, "package.json"),
+      `${JSON.stringify({ name: "packed-audit-consumer", private: true })}\n`,
+    );
+    await execa("pnpm", ["install", archivePath], { cwd: consumerRoot });
+    const installedPackageRoot = path.join(
+      consumerRoot,
+      "node_modules",
+      "@ykdz",
+      "template",
+    );
     const packedVocabularyFindings =
-      await findPackedTaskVocabularyFindings(packedRoot);
+      await findPackedTaskVocabularyFindings(installedPackageRoot);
     if (packedVocabularyFindings.length > 0) {
       throw new Error(
         `Legacy Architecture Removal Check found packed task-model finding(s):\n${packedVocabularyFindings
@@ -1204,12 +1632,10 @@ export async function checkPackedPublicArtifact(
           .join("\n")}`,
       );
     }
-    for (const args of [
-      ["dist/cli.js", "--help"],
-      ["dist/cli.js", "presets"],
-    ]) {
-      await execa("node", args, {
-        cwd: packedRoot,
+    const installedBin = path.join(consumerRoot, "node_modules/.bin/template");
+    for (const args of [["--help"], ["presets"]]) {
+      await execa(installedBin, args, {
+        cwd: consumerRoot,
         env: { ...process.env, TEMPLATE_REPOSITORY_ROOT: "" },
       });
     }
@@ -1241,6 +1667,7 @@ export async function findLegacyArchitectureFindings(
     if (relativePath.endsWith("package.json")) {
       findings.push(...manifestFindings(relativePath, source));
     }
+    findings.push(...tsconfigFindings(relativePath, source));
     const sourceFile = program.getSourceFile(
       path.join(repositoryRoot, relativePath),
     );
@@ -1251,6 +1678,7 @@ export async function findLegacyArchitectureFindings(
     }
   }
   findings.push(
+    ...(await collectNativeErasabilityFindings(repositoryRoot, files)),
     ...(await findLegacyArchitectureDistributionFindings(repositoryRoot)),
   );
   return findings;

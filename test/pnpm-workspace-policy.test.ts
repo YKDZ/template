@@ -10,10 +10,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
-import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-core/dependency-catalog";
-import type { GenerationContext } from "@ykdz/template-core/preset-definition";
 import { execa } from "execa";
+
+import { builtInPresetRegistry } from "#template-builtin-presets";
+import { renderGeneratedPnpmWorkspaceYaml } from "#template-core/dependency-catalog";
+import type { GenerationContext } from "#template-core/preset-definition";
 
 const packageManagerPin = "pnpm@11.11.0";
 const repoRoot = path.resolve(
@@ -100,6 +101,7 @@ describe("pnpm Workspace Policy", () => {
     expect(workspace).toContain(
       'minimumReleaseAgeExclude:\n  - "@ykdz/template"',
     );
+    expect(workspace).toContain("injectWorkspacePackages: false");
     expect(workspace).not.toContain("valibot>typescript");
     expect(workspace).not.toContain("pnpmfile");
   });
@@ -114,6 +116,7 @@ describe("pnpm Workspace Policy", () => {
     expect(workspace).toContain(
       'minimumReleaseAgeExclude:\n  - "@ykdz/template"',
     );
+    expect(workspace).toContain("preferSymlinkedExecutables: true");
   });
 
   it("selects a Node-only Definition by contribution semantics", () => {
@@ -175,6 +178,9 @@ describe("pnpm Workspace Policy", () => {
           name: "@fixture/consumer",
           version: "0.0.0",
           dependencies: { "@fixture/provider": "workspace:*" },
+          dependenciesMeta: {
+            "@fixture/provider": { injected: true },
+          },
         })}\n`,
       ),
     ]);
@@ -266,12 +272,42 @@ describe("pnpm Workspace Policy", () => {
       imageId = (await readFile(imageIdFile, "utf8")).trim();
 
       for (const user of ["0", "node"]) {
-        const result = await execa(
+        await execa(
+          "docker",
+          [
+            "run",
+            "--rm",
+            "--user",
+            user,
+            imageId,
+            "bash",
+            "-lc",
+            "test -s /etc/ssl/certs/ca-certificates.crt && git --version >/dev/null",
+          ],
+          { cwd: projectDir },
+        );
+        const pnpmVersion = await execa(
           "docker",
           ["run", "--rm", "--user", user, imageId, "pnpm", "--version"],
           { cwd: projectDir },
         );
-        expect(result.stdout.trim()).toBe("11.11.0");
+        expect(pnpmVersion.stdout.trim()).toBe("11.11.0");
+
+        const gitDefaultBranch = await execa(
+          "docker",
+          [
+            "run",
+            "--rm",
+            "--user",
+            user,
+            imageId,
+            "bash",
+            "-lc",
+            "cd $(mktemp -d) && git init --quiet && git branch --show-current",
+          ],
+          { cwd: projectDir },
+        );
+        expect(gitDefaultBranch.stdout.trim()).toBe("main");
       }
     } finally {
       if (imageId !== undefined) {

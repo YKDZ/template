@@ -394,7 +394,7 @@ export function renderGeneratedPnpmWorkspaceYaml(
     `nodeLinker: ${dependencyLinker}`,
     "autoInstallPeers: false",
     "resolvePeersFromWorkspaceRoot: false",
-    "injectWorkspacePackages: true",
+    "injectWorkspacePackages: false",
     "dedupeInjectedDeps: false",
     "syncInjectedDepsAfterScripts:",
     "  - build",

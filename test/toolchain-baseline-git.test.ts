@@ -2,14 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { execa } from "execa";
+
 import {
   GitHubToolchainBaselineUpdateRepository,
   runToolchainBaselineUpdate,
   toolchainAutomationBranch,
   type ToolchainPullRequestApi,
   type ToolchainPullRequestMetadata,
-} from "@ykdz/template-checks/update-toolchain-baseline";
-import { execa } from "execa";
+} from "#template-checks/update-toolchain-baseline";
 
 const owner = "example-owner";
 

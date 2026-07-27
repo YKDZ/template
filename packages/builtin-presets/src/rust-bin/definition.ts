@@ -1,13 +1,13 @@
 import { fileURLToPath } from "node:url";
 
-import { rustToolchainEnvironmentNeed } from "@ykdz/template-core/module-graph";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import { rustToolchainEnvironmentNeed } from "#template-core/module-graph";
+import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 

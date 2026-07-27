@@ -1,14 +1,16 @@
 import path from "node:path";
 
+import { describe, expect, it } from "vitest";
+
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { describe, expect, it } from "vitest";
+} from "#template-builtin-presets";
 
 import {
   prepareGeneratedScenarioEnvironment,
+  runGeneratedScenarioSet,
   runRequiredDeploymentQualityGate,
 } from "../packages/checks/src/check-generated-registry.ts";
 
@@ -113,5 +115,22 @@ describe("deployment quality gate", () => {
       },
       { command: "pnpm", args: ["run", "check:deployment"] },
     ]);
+  });
+
+  it("fails the deployment scenario set explicitly when Docker is unavailable", async () => {
+    const messages: string[] = [];
+    await expect(
+      runGeneratedScenarioSet("deployment", {
+        workspace: "/tmp/deployment-quality-gate",
+        reporter: { info: (message) => messages.push(message) },
+        run: async () => {
+          throw new Error("docker executable unavailable");
+        },
+      }),
+    ).rejects.toThrow(
+      /Docker is required.*check:deployment was not executed.*docker executable unavailable/u,
+    );
+
+    expect(messages).toEqual([]);
   });
 });

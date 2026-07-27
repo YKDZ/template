@@ -2,7 +2,7 @@
   "extends": "@vue/tsconfig/tsconfig.dom.json",
   "compilerOptions": {
     "composite": true,
-    "erasableSyntaxOnly": true,
+    "customConditions": ["source"],
     "exactOptionalPropertyTypes": true,
     "forceConsistentCasingInFileNames": true,
     "isolatedModules": true,
@@ -13,7 +13,6 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
-    "paths": { "#/*": ["./*"] },
     "rewriteRelativeImportExtensions": false,
     "skipLibCheck": true,
     "strict": true,

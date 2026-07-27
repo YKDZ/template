@@ -1,10 +1,10 @@
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import {
   sharedVueSourceOperations,
@@ -18,7 +18,8 @@ import { templateSources } from "../template-sources.ts";
 function packageScripts(): Record<string, string> {
   return {
     ...vueApplicationScripts(),
-    typecheck: "node scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    typecheck:
+      "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 

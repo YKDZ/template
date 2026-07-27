@@ -96,17 +96,29 @@ describe("Template Repository native task model", () => {
     expect(tasks["check:templates:shared-oxc"]).toBeUndefined();
     expect(tasks["check:templates:static-source"]).toBeUndefined();
     expect(tasks.typecheck?.dependsOn).toContain("^typecheck");
-    expect(tasks.typecheck?.dependsOn).toContain("^build");
-    expect(tasks["//#typecheck"]?.dependsOn).toContain("^build");
+    expect(tasks.typecheck?.dependsOn).not.toContain("^build");
+    expect(tasks["//#typecheck"]?.dependsOn).toEqual(["^typecheck"]);
     expect(tasks.build?.dependsOn).toContain("^build");
-    expect(tasks.lint?.dependsOn).toContain("^build");
-    expect(tasks.test?.dependsOn).toContain("build");
-    expect(tasks["//#test"]?.dependsOn).toContain("^build");
+    expect(tasks.lint?.dependsOn ?? []).not.toContain("^build");
+    expect(tasks.test?.dependsOn ?? []).not.toContain("build");
+    expect(tasks["//#test"]?.dependsOn ?? []).not.toContain("^build");
+    expect(tasks["//#test"]?.dependsOn).toContain("@ykdz/template#build");
+    expect(tasks["check:templates"]?.dependsOn).toContain("//#test");
     expect(tasks["//#test:e2e"]).toBeUndefined();
-    expect(tasks["test:e2e"]?.dependsOn).toContain("build");
+    expect(tasks["test:e2e"]?.dependsOn ?? []).not.toContain("build");
     expect(tasks["test:e2e"]?.cache).toBe(false);
-    expect(tasks["check:templates"]?.dependsOn).toContain("^build");
-    expect(tasks["check:focused"]?.dependsOn).toContain("^build");
+    for (const task of [
+      "check:fixtures",
+      "check:generated",
+      "check:focused",
+      "check:deployment",
+      "check:templates",
+      "check:templates:boundary",
+      "check:templates:github-yaml",
+      "check:toolchain:online",
+    ]) {
+      expect(tasks[task]?.dependsOn ?? []).not.toContain("^build");
+    }
     expect(tasks["check:deployment"]?.cache).toBe(false);
     expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");
     expect(tasks.boundaries?.cache).toBe(false);
@@ -147,12 +159,12 @@ describe("Template Repository native task model", () => {
     expect(
       actionGraph.tasks.find(({ taskId }) => taskId === "@ykdz/template#lint")
         ?.dependencies,
-    ).toContain("@ykdz/template-builtin-presets#build");
+    ).not.toContain("@ykdz/template-builtin-presets#build");
     expect(
       actionGraph.tasks.find(
         ({ taskId }) => taskId === "@ykdz/template-checks#lint",
       )?.dependencies,
-    ).toContain("@ykdz/template-core#build");
+    ).not.toContain("@ykdz/template-core#build");
     expect(taskIds.some((taskId) => taskId.includes("transit"))).toBe(false);
   });
 
@@ -192,6 +204,9 @@ describe("Template Repository native task model", () => {
     expect(taskIds).not.toContain(
       "@ykdz/template-builtin-presets#check:templates:boundary",
     );
+    expect(taskIds).toContain("@ykdz/template-core#build");
+    expect(taskIds).toContain("@ykdz/template-builtin-presets#build");
+    expect(taskIds).toContain("@ykdz/template#build");
   });
 
   it("builds every package without scheduling the recursive root build script", async () => {
@@ -215,5 +230,71 @@ describe("Template Repository native task model", () => {
     ]) {
       expect(taskIds).toContain(`${packageName}#build`);
     }
+  });
+
+  it("lets the public CLI prepack select itself while Turbo builds dependencies", async () => {
+    const cli = await readJson<Manifest>("packages/cli/package.json");
+
+    expect(cli.scripts.prepack).toBe("pnpm exec turbo run build --filter=.");
+    expect(cli.scripts.prepack).not.toContain("@ykdz/template-core");
+    expect(cli.scripts.prepack).not.toContain("@ykdz/template-builtin-presets");
+
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        "build",
+        "--filter=@ykdz/template",
+        "--dry-run=json",
+      ],
+      { reject: true },
+    );
+    const tasks = (
+      JSON.parse(result.stdout) as {
+        readonly tasks: readonly { readonly taskId: string }[];
+      }
+    ).tasks.map(({ taskId }) => taskId);
+    expect(tasks).toContain("@ykdz/template#build");
+    expect(tasks).toContain("@ykdz/template-core#build");
+    expect(tasks).toContain("@ykdz/template-builtin-presets#build");
+  });
+
+  it("keeps source tests build-free and orders distribution e2e through Turbo", async () => {
+    const cli = await readJson<Manifest>("packages/cli/package.json");
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        "test",
+        "test:e2e",
+        "--filter=@ykdz/template",
+        "--dry-run=json",
+      ],
+      { reject: true },
+    );
+    const tasks = (
+      JSON.parse(result.stdout) as {
+        readonly tasks: readonly {
+          readonly taskId: string;
+          readonly dependencies: readonly string[];
+        }[];
+      }
+    ).tasks;
+
+    expect(
+      tasks.find(({ taskId }) => taskId === "@ykdz/template#test")
+        ?.dependencies,
+    ).toEqual([]);
+    expect(
+      tasks.find(({ taskId }) => taskId === "@ykdz/template#test:e2e")
+        ?.dependencies,
+    ).toContain("@ykdz/template#build");
+    expect(cli.scripts["test:e2e"]).toBe(
+      "node --conditions=source test/e2e/check-source-and-distribution.ts",
+    );
   });
 });

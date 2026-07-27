@@ -1,19 +1,29 @@
-import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
-} from "@ykdz/template-builtin-presets";
+} from "#template-builtin-presets";
 import {
-  renderNewProject,
-  renderProjectAtomically,
-} from "@ykdz/template-core/renderer";
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+  materializeProjectProjection,
+  reconcileAndApplyProjectProjections,
+} from "#template-core/project-projection";
+import { renderNewProject } from "#template-core/renderer";
 
 describe("Built-in Preset Package Addition universality", () => {
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
@@ -77,6 +87,52 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
+  it("rejects reserved workspace collections from initialization and explicit Package Addition planning", () => {
+    const context = createGenerationContext({
+      targetDir: path.join("generated-repository", "reserved-package-path"),
+      scope: "demo",
+      toolchain,
+    });
+    const definition = firstAddableDefinition();
+    const invalidInitializationDefinition = {
+      ...definition,
+      blueprint(planningContext: Parameters<typeof definition.blueprint>[0]) {
+        const blueprint = definition.blueprint(planningContext);
+        return {
+          ...blueprint,
+          packages: blueprint.packages.map((pkg, index) =>
+            index === 0 ? { ...pkg, path: "dist/evil" } : pkg,
+          ),
+        };
+      },
+    };
+
+    expect(() =>
+      planGeneratedRepositoryInitialization({
+        definition: invalidInitializationDefinition,
+        context,
+      }),
+    ).toThrow(
+      ".packages[0].path: Package Path dist/evil uses reserved workspace collection dist",
+    );
+
+    const initialization = planGeneratedRepositoryInitialization({
+      definition,
+      context,
+    });
+    expect(() =>
+      planGeneratedRepositoryPackageAddition({
+        definition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "evil",
+        packagePath: "target/evil",
+      }),
+    ).toThrow(
+      `Package Path target/evil uses reserved workspace collection target`,
+    );
+  });
+
   it("reconstructs every base contribution from durable generated state before an addition", async () => {
     const definitions = builtInPresetRegistry.all();
     const addableDefinitions = definitions.filter(
@@ -109,6 +165,14 @@ describe("Built-in Preset Package Addition universality", () => {
             blueprint: initialization.blueprint,
             packageLeafName: `durable-${additionDefinition.metadata.name}`,
           });
+          const [initializationProjection, preAdditionProjection] =
+            await Promise.all([
+              materializeProjectProjection({
+                operations: initialization.operations,
+                reconciliation: initialization.reconciliation,
+              }),
+              materializeProjectProjection(addition.projectProjections.before),
+            ]);
 
           expect(addition).not.toHaveProperty("checks");
           expect(initialization).not.toHaveProperty("checks");
@@ -119,6 +183,7 @@ describe("Built-in Preset Package Addition universality", () => {
           );
           expect(addition).not.toHaveProperty("deploymentChecks");
           expect(initialization).not.toHaveProperty("deploymentChecks");
+          expect(preAdditionProjection).toEqual(initializationProjection);
           expect(addition.dependencyMaintenancePolicy.ecosystems).toEqual(
             expect.arrayContaining(
               initialization.dependencyMaintenancePolicy.ecosystems,
@@ -212,9 +277,9 @@ describe("Built-in Preset Package Addition universality", () => {
               }),
             }),
           );
-          await renderProjectAtomically({
+          await reconcileAndApplyProjectProjections({
             targetRoot: targetDir,
-            operations: [...addition.operations],
+            ...addition.projectProjections,
           });
           currentBlueprint = addition.blueprint;
         }
@@ -260,9 +325,9 @@ describe("Built-in Preset Package Addition universality", () => {
         blueprint: initialization.blueprint,
         packageLeafName: "natural",
       });
-      await renderProjectAtomically({
+      await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
-        operations: [...packageAddition.operations],
+        ...packageAddition.projectProjections,
       });
       const rootScriptsAfter = (
         JSON.parse(
@@ -282,9 +347,9 @@ describe("Built-in Preset Package Addition universality", () => {
         blueprint: packageAddition.blueprint,
         packageLeafName: "natural-repeat",
       });
-      await renderProjectAtomically({
+      await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
-        operations: [...repeatedAddition.operations],
+        ...repeatedAddition.projectProjections,
       });
       const rootScriptsAfterRepeat = (
         JSON.parse(
@@ -379,9 +444,9 @@ describe("Built-in Preset Package Addition universality", () => {
         blueprint: initialization.blueprint,
         packageLeafName: "web",
       });
-      await renderProjectAtomically({
+      await reconcileAndApplyProjectProjections({
         targetRoot: context.targetDir,
-        operations: [...addition.operations],
+        ...addition.projectProjections,
       });
 
       const devcontainer = await readFile(
@@ -424,6 +489,13 @@ describe("Built-in Preset Package Addition universality", () => {
         operations: [...initialization.operations],
       });
       await execa("pnpm", ["install"], { cwd: targetDir });
+      await mkdir(path.join(targetDir, ".pnpm-store/v11/files"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
+        "store content must stay outside staging\n",
+      );
       expect(
         (
           await lstat(
@@ -439,9 +511,33 @@ describe("Built-in Preset Package Addition universality", () => {
         packageLeafName: "domain",
         packagePath: "packages/domain",
       });
-      await renderProjectAtomically({
-        targetRoot: targetDir,
-        operations: [...addition.operations],
+      const installedTargetsBefore = await Promise.all([
+        realpath(path.join(targetDir, "node_modules/.bin/oxfmt")),
+        realpath(path.join(targetDir, "packages/db/node_modules/drizzle-orm")),
+      ]);
+      await expect(
+        reconcileAndApplyProjectProjections({
+          targetRoot: targetDir,
+          ...addition.projectProjections,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+
+      await expect(
+        Promise.all([
+          realpath(path.join(targetDir, "node_modules/.bin/oxfmt")),
+          realpath(
+            path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+          ),
+        ]),
+      ).resolves.toEqual(installedTargetsBefore);
+      await expect(
+        readFile(
+          path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
+          "utf8",
+        ),
+      ).resolves.toBe("store content must stay outside staging\n");
+      await execa("pnpm", ["exec", "oxfmt", "--version"], {
+        cwd: targetDir,
       });
 
       await expect(
@@ -577,9 +673,9 @@ describe("Built-in Preset Package Addition universality", () => {
           }),
         ]),
       );
-      await renderProjectAtomically({
+      await reconcileAndApplyProjectProjections({
         targetRoot: context.targetDir,
-        operations: [...addition.operations],
+        ...addition.projectProjections,
       });
       await execa("pnpm", ["install"], { cwd: context.targetDir });
       const dryRun = await execa(

@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "composite": true,
+    "customConditions": ["source"],
     "declaration": true,
     "declarationMap": true,
     "erasableSyntaxOnly": true,

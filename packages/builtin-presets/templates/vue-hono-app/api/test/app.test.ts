@@ -1,4 +1,4 @@
-import { app } from "../src/runtime.ts";
+import { app } from "#/runtime";
 
 describe("Hono API", () => {
   it("responds to the health route", async () => {

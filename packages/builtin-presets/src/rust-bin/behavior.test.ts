@@ -6,9 +6,10 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
-import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+
+import { renderNewProject } from "#template-core/renderer";
 
 import { rustBinDefinition } from "./definition.ts";
 
@@ -108,9 +109,29 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(
       await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
     ).toContain('channel = "stable"');
+    const devcontainerDockerfile = await readFile(
+      path.join(targetDir, ".devcontainer/Dockerfile"),
+      "utf8",
+    );
+    expect(devcontainerDockerfile).toContain(
+      "rustup toolchain install ${RUST_TOOLCHAIN}",
+    );
+    expect(devcontainerDockerfile).toContain(
+      "apt-get install -y --no-install-recommends ca-certificates git",
+    );
+    expect(devcontainerDockerfile).toContain(
+      'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
+    );
+    expect(devcontainerDockerfile).toContain(
+      'corepack prepare "${PACKAGE_MANAGER_PIN}" --activate',
+    );
+    expect(devcontainerDockerfile).toContain("    git \\");
+    expect(devcontainerDockerfile).toContain(
+      "git config --system init.defaultBranch main",
+    );
     expect(
-      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
-    ).toContain("rustup toolchain install ${RUST_TOOLCHAIN}");
+      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
+    ).toContain(".pnpm-store/");
     expect(
       await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8"),
     ).toContain('directory: "/packages/demo-rust"');
@@ -184,7 +205,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(
       tasks.find((task) => task.taskId === "@demo/discovered#test")
         ?.dependencies,
-    ).toContain("@demo/discovered#build");
+    ).not.toContain("@demo/discovered#build");
     expect(
       tasks.find((task) => task.taskId === "@demo/discovered#lint")
         ?.resolvedTaskDefinition.cache,
@@ -196,7 +217,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     await execa("pnpm", ["run", "check"], { cwd: targetDir });
   }, 180_000);
 
-  it("discovers a manual package, continues independent failures, and skips failed-dependency tests", async () => {
+  it("discovers a manual package and runs source tests independently of failed builds", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-rust-discovery-")),
       "demo-rust",
@@ -245,7 +266,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(`${failure.stdout}\n${failure.stderr}`).toContain("LINT_FAIL");
     await expect(
       readFile(path.join(targetDir, "apps/controlled/TEST_EXECUTED"), "utf8"),
-    ).rejects.toMatchObject({ code: "ENOENT" });
+    ).resolves.toBe("yes");
   }, 180_000);
 
   it("keeps root-owned formatting inputs separate from package pollution", async () => {

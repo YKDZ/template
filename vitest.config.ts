@@ -3,7 +3,13 @@ import { defineConfig } from "vitest/config";
 process.env.TEMPLATE_REPOSITORY_ROOT ??= process.cwd();
 
 export default defineConfig({
+  resolve: {
+    conditions: ["source"],
+  },
   ssr: {
+    resolve: {
+      conditions: ["source"],
+    },
     noExternal: [
       "@ykdz/template-builtin-presets",
       "@ykdz/template-core",

@@ -1,8 +1,8 @@
-import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
-import type { PackageContribution } from "@ykdz/template-core/package-contribution";
-import type { GenerationContext } from "@ykdz/template-core/preset-definition";
-import type { PackageDefinition } from "@ykdz/template-core/project-blueprint-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+import { playwrightBrowserAssetsEnvironmentNeed } from "#template-core/module-graph";
+import type { PackageContribution } from "#template-core/package-contribution";
+import type { GenerationContext } from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 
@@ -39,7 +39,7 @@ export function vueApplicationScripts(): Record<string, string> {
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e": "node scripts/run-playwright.ts",
+    "test:e2e": "node --conditions=source scripts/run-playwright.ts",
   };
 }
 

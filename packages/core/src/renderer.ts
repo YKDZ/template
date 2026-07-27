@@ -11,6 +11,7 @@ import {
   rm,
   rmdir,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -64,7 +65,6 @@ export type CopyFileOperation = {
   from: string;
   to: string;
   source: TemplateSourceHandle;
-  /** Foundation refreshes coordinated outputs during Package Addition. */
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -74,6 +74,8 @@ export type WriteJsonOperation = {
   to: string;
   value: unknown;
   multilineArrays?: string[];
+  keyOrder?: readonly string[];
+  nestedKeyOrder?: readonly string[];
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -83,6 +85,19 @@ export type MergeJsonOperation = {
   to: string;
   value: unknown;
   multilineArrays?: string[];
+  keyOrder?: readonly string[];
+  nestedKeyOrder?: readonly string[];
+  provenance?: RenderOperationProvenance;
+};
+
+export type MergeJsonTemplateOperation = {
+  kind: "mergeJsonTemplate";
+  from: string;
+  to: string;
+  source: TemplateSourceHandle;
+  multilineArrays?: string[];
+  keyOrder?: readonly string[];
+  nestedKeyOrder?: readonly string[];
   provenance?: RenderOperationProvenance;
 };
 
@@ -134,6 +149,7 @@ export type RenderOperation =
   | CopyFileOperation
   | WriteJsonOperation
   | MergeJsonOperation
+  | MergeJsonTemplateOperation
   | WriteTextOperation
   | WriteTextFromFragmentsOperation
   | WriteTextTemplateOperation
@@ -231,6 +247,7 @@ function serializeJsonValue(
   pathSegments: string[],
   multilineArrays: Set<string>,
   rootKeyOrder?: Map<string, number>,
+  nestedKeyOrder?: Map<string, number>,
 ): string {
   if (Array.isArray(value)) {
     const compact = `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
@@ -251,6 +268,7 @@ function serializeJsonValue(
           [...pathSegments, String(index)],
           multilineArrays,
           rootKeyOrder,
+          nestedKeyOrder,
         )}`,
     );
     return `[\n${items.join(",\n")}\n${" ".repeat(indentation)}]`;
@@ -261,7 +279,7 @@ function serializeJsonValue(
   }
 
   const entries = Object.entries(value).toSorted(([left], [right]) =>
-    compareJsonKeys(left, right, pathSegments, rootKeyOrder),
+    compareJsonKeys(left, right, pathSegments, rootKeyOrder, nestedKeyOrder),
   );
 
   if (entries.length === 0) {
@@ -279,6 +297,7 @@ function serializeJsonValue(
             [...pathSegments, key],
             multilineArrays,
             rootKeyOrder,
+            nestedKeyOrder,
           )}`,
       )
       .join(",\n") +
@@ -286,49 +305,17 @@ function serializeJsonValue(
   );
 }
 
-const packageJsonRootKeyOrder = [
-  "name",
-  "version",
-  "private",
-  "files",
-  "type",
-  "types",
-  "imports",
-  "exports",
-  "scripts",
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-  "engines",
-  "packageManager",
-];
-
-const devcontainerJsonRootKeyOrder = [
-  "name",
-  "build",
-  "image",
-  "customizations",
-];
-
-const tsconfigJsonRootKeyOrder = [
-  "extends",
-  "compilerOptions",
-  "files",
-  "references",
-  "include",
-  "exclude",
-];
-
 function compareJsonKeys(
   left: string,
   right: string,
   pathSegments: string[],
   rootKeyOrder?: Map<string, number>,
+  nestedKeyOrder?: Map<string, number>,
 ): number {
-  if (pathSegments.length === 0 && rootKeyOrder) {
-    const leftOrder = rootKeyOrder.get(left) ?? Number.POSITIVE_INFINITY;
-    const rightOrder = rootKeyOrder.get(right) ?? Number.POSITIVE_INFINITY;
+  const keyOrder = pathSegments.length === 0 ? rootKeyOrder : nestedKeyOrder;
+  if (keyOrder) {
+    const leftOrder = keyOrder.get(left) ?? Number.POSITIVE_INFINITY;
+    const rightOrder = keyOrder.get(right) ?? Number.POSITIVE_INFINITY;
 
     if (leftOrder !== rightOrder) {
       return leftOrder - rightOrder;
@@ -338,30 +325,20 @@ function compareJsonKeys(
   return left.localeCompare(right);
 }
 
-function rootKeyOrderForPath(toPath: string): Map<string, number> | undefined {
-  if (path.basename(toPath) === "package.json") {
-    return new Map(packageJsonRootKeyOrder.map((key, index) => [key, index]));
-  }
-
-  if (/^tsconfig(?:\..*)?\.json$/.test(path.basename(toPath))) {
-    return new Map(tsconfigJsonRootKeyOrder.map((key, index) => [key, index]));
-  }
-
-  if (toPath.split(path.sep).join("/") === ".devcontainer/devcontainer.json") {
-    return new Map(
-      devcontainerJsonRootKeyOrder.map((key, index) => [key, index]),
-    );
-  }
-
-  return undefined;
-}
-
 function serializeJson(
   value: unknown,
   multilineArrays: string[] = [],
   rootKeyOrder?: Map<string, number>,
+  nestedKeyOrder?: Map<string, number>,
 ): string {
-  return `${serializeJsonValue(value, 0, [], new Set(multilineArrays), rootKeyOrder)}\n`;
+  return `${serializeJsonValue(
+    value,
+    0,
+    [],
+    new Set(multilineArrays),
+    rootKeyOrder,
+    nestedKeyOrder,
+  )}\n`;
 }
 
 function mergeJsonValue(base: unknown, patch: unknown): unknown {
@@ -383,6 +360,8 @@ async function writeJsonFile(
   toPath: string,
   value: unknown,
   multilineArrays?: string[],
+  keyOrder?: readonly string[],
+  nestedKeyOrder?: readonly string[],
   overwrite = false,
 ): Promise<void> {
   const to = resolveContainedPath(targetRoot, toPath);
@@ -390,7 +369,16 @@ async function writeJsonFile(
   await mkdir(path.dirname(to), { recursive: true });
   await writeGeneratedFile(
     to,
-    serializeJson(value, multilineArrays, rootKeyOrderForPath(toPath)),
+    serializeJson(
+      value,
+      multilineArrays,
+      keyOrder === undefined
+        ? undefined
+        : new Map(keyOrder.map((key, index) => [key, index])),
+      nestedKeyOrder === undefined
+        ? undefined
+        : new Map(nestedKeyOrder.map((key, index) => [key, index])),
+    ),
     overwrite,
   );
 }
@@ -404,6 +392,8 @@ async function renderWriteJson(
     expandOperationPath(operation.to, options),
     operation.value,
     operation.multilineArrays,
+    operation.keyOrder,
+    operation.nestedKeyOrder,
     operation.overwrite,
   );
 }
@@ -412,8 +402,53 @@ async function renderMergeJson(
   operation: MergeJsonOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const toPath = expandOperationPath(operation.to, options);
-  const to = resolveContainedPath(options.targetRoot, toPath);
+  await mergeJsonIntoFile({
+    options,
+    patch: operation.value,
+    toPath: expandOperationPath(operation.to, options),
+    multilineArrays: operation.multilineArrays,
+    keyOrder: operation.keyOrder,
+    nestedKeyOrder: operation.nestedKeyOrder,
+  });
+}
+
+async function renderMergeJsonTemplate(
+  operation: MergeJsonTemplateOperation,
+  options: RenderProjectOptions,
+): Promise<void> {
+  const variables = options.variables ?? {};
+  const sourcePath = resolveTemplateSource(
+    operation.source,
+    expandTemplatePath(operation.from, variables),
+  );
+  let patch: unknown;
+  try {
+    patch = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON Template Source ${operation.from}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  await mergeJsonIntoFile({
+    options,
+    patch,
+    toPath: expandOperationPath(operation.to, options),
+    multilineArrays: operation.multilineArrays,
+    keyOrder: operation.keyOrder,
+    nestedKeyOrder: operation.nestedKeyOrder,
+  });
+}
+
+async function mergeJsonIntoFile(options: {
+  readonly options: RenderProjectOptions;
+  readonly patch: unknown;
+  readonly toPath: string;
+  readonly multilineArrays: string[] | undefined;
+  readonly keyOrder: readonly string[] | undefined;
+  readonly nestedKeyOrder: readonly string[] | undefined;
+}): Promise<void> {
+  const to = resolveContainedPath(options.options.targetRoot, options.toPath);
   let existing: unknown = {};
 
   try {
@@ -425,103 +460,14 @@ async function renderMergeJson(
   }
 
   await writeJsonFile(
-    options.targetRoot,
-    toPath,
-    mergeJsonValue(existing, operation.value),
-    operation.multilineArrays,
+    options.options.targetRoot,
+    options.toPath,
+    mergeJsonValue(existing, options.patch),
+    options.multilineArrays,
+    options.keyOrder,
+    options.nestedKeyOrder,
     true,
   );
-}
-
-const foundationTextFiles = new Set([
-  ".dockerignore",
-  ".env.example",
-  ".gitattributes",
-  ".gitignore",
-  ".npmignore",
-  ".npmrc",
-  "README",
-  "README.md",
-  "LICENSE",
-  "CHANGELOG.md",
-]);
-
-function assertFoundationTextPath(relativePath: string): void {
-  const normalizedPath = relativePath.split(path.sep).join("/");
-  const isRootLevel = !normalizedPath.includes("/");
-
-  if (isRootLevel && foundationTextFiles.has(normalizedPath)) {
-    return;
-  }
-
-  if (isRootLevel && relativePath.endsWith(".md")) {
-    return;
-  }
-
-  if (
-    isRootLevel &&
-    (relativePath.endsWith(".yaml") || relativePath.endsWith(".yml"))
-  ) {
-    return;
-  }
-
-  if (
-    isRootLevel &&
-    [
-      "Cargo.toml",
-      "Cargo.lock",
-      "rustfmt.toml",
-      "rust-toolchain.toml",
-    ].includes(normalizedPath)
-  ) {
-    return;
-  }
-
-  if (
-    /^packages\/[A-Za-z0-9._-]+\/(?:Cargo\.toml|Cargo\.lock|rustfmt\.toml)$/.test(
-      normalizedPath,
-    )
-  ) {
-    return;
-  }
-
-  if (/^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/.test(normalizedPath)) {
-    return;
-  }
-
-  if (/^\.github\/dependabot\.ya?ml$/.test(normalizedPath)) {
-    return;
-  }
-
-  if (normalizedPath === ".devcontainer/Dockerfile") {
-    return;
-  }
-
-  if (normalizedPath === ".devcontainer/devcontainer.json") {
-    return;
-  }
-
-  throw new Error(
-    `Text output is limited to foundation files: ${relativePath}`,
-  );
-}
-
-function assertTextTemplatePath(relativePath: string): void {
-  const normalizedPath = relativePath.split(path.sep).join("/");
-
-  if (
-    /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/(?:playwright|vite|vitest|oxfmt|oxlint)\.config\.ts$/.test(
-      normalizedPath,
-    )
-  ) {
-    return;
-  }
-
-  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\/Dockerfile$/.test(normalizedPath)) {
-    return;
-  }
-
-  assertFoundationTextPath(relativePath);
 }
 
 async function renderWriteText(
@@ -529,7 +475,6 @@ async function renderWriteText(
   options: RenderProjectOptions,
 ): Promise<void> {
   const toPath = expandOperationPath(operation.to, options);
-  assertFoundationTextPath(toPath);
   const to = resolveContainedPath(options.targetRoot, toPath);
 
   await mkdir(path.dirname(to), { recursive: true });
@@ -541,7 +486,6 @@ async function renderWriteTextFromFragments(
   options: RenderProjectOptions,
 ): Promise<void> {
   const toPath = expandOperationPath(operation.to, options);
-  assertFoundationTextPath(toPath);
   const to = resolveContainedPath(options.targetRoot, toPath);
   const texts = await Promise.all(
     operation.fragments.map(async (fragment) => {
@@ -596,7 +540,6 @@ async function renderWriteTextTemplate(
   options: RenderProjectOptions,
 ): Promise<void> {
   const toPath = expandOperationPath(operation.to, options);
-  assertTextTemplatePath(toPath);
   const from = resolveTemplateSource(
     operation.source,
     expandTemplatePath(operation.from, options.variables ?? {}),
@@ -848,6 +791,11 @@ export async function renderProject(
       continue;
     }
 
+    if (operation.kind === "mergeJsonTemplate") {
+      await renderMergeJsonTemplate(operation, options);
+      continue;
+    }
+
     if (operation.kind === "writeText") {
       await renderWriteText(operation, options);
       continue;
@@ -879,70 +827,94 @@ export async function renderProject(
   }
 }
 
+export type AtomicPathCommitOptions = {
+  readonly relativePath: string;
+  readonly stagingRoot: string;
+  readonly targetRoot: string;
+  readonly commit: () => Promise<void>;
+};
+
+export type AtomicProjectRendererDependencies = {
+  readonly commitPath?: (options: AtomicPathCommitOptions) => Promise<void>;
+};
+
 /**
- * Applies a follow-up plan in a sibling staging directory.  In particular,
- * metadata updates cannot become visible when a later source operation fails.
+ * Creates a renderer that applies a follow-up plan in a sibling staging
+ * directory. Metadata updates cannot become visible when a later source
+ * operation fails.
  */
-export async function renderProjectAtomically(
-  options: RenderProjectOptions,
-): Promise<void> {
-  const targetRoot = path.resolve(options.targetRoot);
-  await stat(targetRoot);
-  const parent = path.dirname(targetRoot);
-  const stagingRoot = await mkdtemp(
-    path.join(parent, `.${path.basename(targetRoot)}.template-update-`),
-  );
-  const backupRoot = await mkdtemp(
-    path.join(parent, `.${path.basename(targetRoot)}.template-backup-`),
-  );
-  const changedPaths = changedOutputPaths(options.operations);
-  let committed = false;
-  try {
-    await cp(targetRoot, stagingRoot, {
-      recursive: true,
-      filter: generatedDependencyTreeCopyFilter,
-    });
-    await renderProject({ ...options, targetRoot: stagingRoot });
+export function createAtomicProjectRenderer(
+  dependencies: AtomicProjectRendererDependencies = {},
+): (options: RenderProjectOptions) => Promise<void> {
+  const commitPath =
+    dependencies.commitPath ??
+    (async (options: AtomicPathCommitOptions) => options.commit());
 
-    // Commit only the files changed by the staged plan.  In particular, do
-    // not rename the target directory: callers commonly run `template add`
-    // from that directory, and renaming it leaves their shell on a deleted
-    // inode.  Each path has a rollback copy before it is made visible.
-    for (const changedPath of changedPaths) {
-      const current = path.join(targetRoot, changedPath);
-      try {
-        const backup = path.join(backupRoot, changedPath);
-        await mkdir(path.dirname(backup), { recursive: true });
-        await cp(current, backup, {
-          recursive: true,
-          filter: generatedDependencyTreeCopyFilter,
-        });
-      } catch (error: unknown) {
-        if (!isNodeError(error) || error.code !== "ENOENT") throw error;
-      }
-    }
-
+  return async (options: RenderProjectOptions): Promise<void> => {
+    const targetRoot = path.resolve(options.targetRoot);
+    await stat(targetRoot);
+    const parent = path.dirname(targetRoot);
+    const stagingRoot = await mkdtemp(
+      path.join(parent, `.${path.basename(targetRoot)}.template-update-`),
+    );
+    const backupRoot = await mkdtemp(
+      path.join(parent, `.${path.basename(targetRoot)}.template-backup-`),
+    );
+    const changedPaths = changedOutputPaths(options.operations);
+    let committed = false;
     try {
+      await stageInstalledWorkspace(targetRoot, stagingRoot);
+      await renderProject({ ...options, targetRoot: stagingRoot });
+
+      // Commit only the files changed by the staged plan.  In particular, do
+      // not rename the target directory: callers commonly run `template add`
+      // from that directory, and renaming it leaves their shell on a deleted
+      // inode.  Each path has a rollback copy before it is made visible.
       for (const changedPath of changedPaths) {
-        const target = path.join(targetRoot, changedPath);
-        await mkdir(path.dirname(target), { recursive: true });
-        await cp(path.join(stagingRoot, changedPath), target, {
-          recursive: true,
-          force: true,
-          filter: generatedDependencyTreeCopyFilter,
-        });
+        const current = path.join(targetRoot, changedPath);
+        try {
+          const backup = path.join(backupRoot, changedPath);
+          await mkdir(path.dirname(backup), { recursive: true });
+          await cp(current, backup, {
+            recursive: true,
+            filter: createGeneratedDependencyTreeCopyFilter(current),
+          });
+        } catch (error: unknown) {
+          if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+        }
       }
-      committed = true;
-    } catch (error) {
-      await rollbackStagedPaths({ targetRoot, backupRoot, changedPaths });
-      throw error;
+
+      try {
+        for (const changedPath of changedPaths) {
+          const target = path.join(targetRoot, changedPath);
+          const staged = path.join(stagingRoot, changedPath);
+          await mkdir(path.dirname(target), { recursive: true });
+          await commitPath({
+            relativePath: changedPath,
+            stagingRoot,
+            targetRoot,
+            commit: async () =>
+              cp(staged, target, {
+                recursive: true,
+                force: true,
+                filter: createGeneratedDependencyTreeCopyFilter(staged),
+              }),
+          });
+        }
+        committed = true;
+      } catch (error) {
+        await rollbackStagedPaths({ targetRoot, backupRoot, changedPaths });
+        throw error;
+      }
+    } finally {
+      if (!committed) await rm(stagingRoot, { recursive: true, force: true });
+      await rm(backupRoot, { recursive: true, force: true });
+      if (committed) await rm(stagingRoot, { recursive: true, force: true });
     }
-  } finally {
-    if (!committed) await rm(stagingRoot, { recursive: true, force: true });
-    await rm(backupRoot, { recursive: true, force: true });
-    if (committed) await rm(stagingRoot, { recursive: true, force: true });
-  }
+  };
 }
+
+export const renderProjectAtomically = createAtomicProjectRenderer();
 
 function changedOutputPaths(
   operations: readonly RenderOperation[],
@@ -958,8 +930,58 @@ function changedOutputPaths(
   return [...changedPaths];
 }
 
-function generatedDependencyTreeCopyFilter(source: string): boolean {
-  return !source.split(/[\\/]/).includes("node_modules");
+const stagedDependencyTreeDirectoryNames = new Set([
+  ".pnpm-store",
+  "node_modules",
+]);
+
+function createGeneratedDependencyTreeCopyFilter(
+  sourceRoot: string,
+): (source: string) => boolean {
+  const resolvedSourceRoot = path.resolve(sourceRoot);
+  return (source: string) =>
+    !path
+      .relative(resolvedSourceRoot, source)
+      .split(path.sep)
+      .some((part) => stagedDependencyTreeDirectoryNames.has(part));
+}
+
+async function stageInstalledWorkspace(
+  targetRoot: string,
+  stagingRoot: string,
+): Promise<void> {
+  await cp(targetRoot, stagingRoot, {
+    recursive: true,
+    filter: createGeneratedDependencyTreeCopyFilter(targetRoot),
+  });
+  await linkInstalledDependencyTrees(targetRoot, stagingRoot);
+}
+
+async function linkInstalledDependencyTrees(
+  sourceDirectory: string,
+  stagingDirectory: string,
+): Promise<void> {
+  for (const entry of await readdir(sourceDirectory, { withFileTypes: true })) {
+    const source = path.join(sourceDirectory, entry.name);
+    const staged = path.join(stagingDirectory, entry.name);
+
+    if (entry.name === ".pnpm-store") {
+      continue;
+    }
+
+    if (entry.name === "node_modules") {
+      await symlink(
+        source,
+        staged,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      await linkInstalledDependencyTrees(source, staged);
+    }
+  }
 }
 
 async function rollbackStagedPaths(options: {
@@ -975,7 +997,7 @@ async function rollbackStagedPaths(options: {
       await mkdir(path.dirname(target), { recursive: true });
       await cp(backup, target, {
         recursive: true,
-        filter: generatedDependencyTreeCopyFilter,
+        filter: createGeneratedDependencyTreeCopyFilter(backup),
       });
     } catch (error: unknown) {
       if (!isNodeError(error) || error.code !== "ENOENT") throw error;

@@ -3,6 +3,23 @@
   "private": true,
   "description": "Repository workspace for the YKDZ template generator.",
   "type": "module",
+  "imports": {
+    "#template-builtin-presets": {
+      "source": "@ykdz/template-builtin-presets-source",
+      "types": "@ykdz/template-builtin-presets",
+      "default": "@ykdz/template-builtin-presets"
+    },
+    "#template-checks/*": {
+      "source": "@ykdz/template-checks-source/*",
+      "types": "@ykdz/template-checks/*",
+      "default": "@ykdz/template-checks/*"
+    },
+    "#template-core/*": {
+      "source": "@ykdz/template-core-source/*",
+      "types": "@ykdz/template-core/*",
+      "default": "@ykdz/template-core/*"
+    }
+  },
   "scripts": {
     "build": "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     "check": "turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
@@ -15,9 +32,9 @@
     "check:templates:github-yaml": "turbo run check:templates:github-yaml --output-logs=errors-only --log-order=grouped",
     "check:toolchain:online": "turbo run check:toolchain:online --output-logs=errors-only --log-order=grouped",
     "update:toolchain": "pnpm --filter @ykdz/template-checks update:toolchain",
-    "resolve:toolchain:update": "node packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs",
+    "resolve:toolchain:update": "node --conditions=source packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs",
     "fix": "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
-    "boundaries": "node scripts/check-boundaries.ts",
+    "boundaries": "node --conditions=source scripts/check-boundaries.ts",
     "format:check": "oxfmt --list-different --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "format:write": "oxfmt --write --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts scripts test",
@@ -28,8 +45,11 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
+    "@ykdz/template-builtin-presets-source": "link:packages/builtin-presets",
     "@ykdz/template-checks": "workspace:*",
+    "@ykdz/template-checks-source": "link:packages/checks",
     "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-core-source": "link:packages/core",
     "@ykdz/template-shared": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",

@@ -6,32 +6,35 @@ import {
   readdir,
   rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+} from "#template-builtin-presets";
+import type { PackageRole } from "#template-core/project-blueprint-v2";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
 
 async function packTemplateArchive(workspace: string): Promise<string> {
   const archiveDirectory = path.join(workspace, "archives");
-  const builtDefinition = path.join(
-    process.cwd(),
-    "packages/builtin-presets/dist/src/rust-bin/definition.js",
-  );
-  const builtDefinitionMtime = (await stat(builtDefinition)).mtimeMs;
+  await rm(path.join(process.cwd(), "packages/cli/dist"), {
+    recursive: true,
+    force: true,
+  });
   await execa(
     "pnpm",
     [
       "--config.node-linker=hoisted",
-      "--config.ignore-scripts=true",
       "--filter",
       publicCliPackageName,
       "pack",
@@ -40,12 +43,86 @@ async function packTemplateArchive(workspace: string): Promise<string> {
     ],
     { cwd: process.cwd() },
   );
-  expect((await stat(builtDefinition)).mtimeMs).toBe(builtDefinitionMtime);
+  await expect(
+    readFile(path.join(process.cwd(), "packages/cli/dist/cli.js"), "utf8"),
+  ).resolves.toMatch(/^#!\/usr\/bin\/env node/u);
   const archive = (await readdir(archiveDirectory)).find((file) =>
     file.endsWith(".tgz"),
   );
   expect(archive).toBeDefined();
   return path.join(archiveDirectory, archive!);
+}
+
+async function expectPackedProjectionRollback(
+  consumer: string,
+  workspace: string,
+): Promise<void> {
+  const targetRoot = path.join(workspace, "packed-projection-rollback");
+  const canonicalPath = path.join(targetRoot, ".template/state.json");
+  const contentPath = path.join(targetRoot, "content.txt");
+  await mkdir(path.dirname(canonicalPath), { recursive: true });
+  await Promise.all([
+    writeFile(contentPath, "before\n"),
+    writeFile(canonicalPath, '{\n  "state": "before"\n}\n'),
+  ]);
+
+  const packedProjectionModule = path.join(
+    consumer,
+    "node_modules",
+    "@ykdz",
+    "template",
+    "node_modules",
+    "@ykdz",
+    "template-core",
+    "dist",
+    "project-projection.js",
+  );
+  const projection = (await import(
+    pathToFileURL(packedProjectionModule).href
+  )) as typeof import("#template-core/project-projection");
+  const committedPaths: string[] = [];
+  const reconcile = projection.createProjectProjectionReconciler({
+    async commitMutation(options) {
+      committedPaths.push(options.relativePath);
+      if (committedPaths.length === 2) {
+        throw new Error("injected packed projection commit failure");
+      }
+      await options.commit();
+    },
+  });
+  const plan = (state: "before" | "after") => ({
+    operations: [
+      {
+        kind: "writeText" as const,
+        to: "content.txt",
+        text: `${state}\n`,
+      },
+      {
+        kind: "writeJson" as const,
+        to: ".template/state.json",
+        value: { state },
+      },
+    ],
+    reconciliation: [
+      {
+        path: ".template/state.json",
+        driver: "canonical" as const,
+      },
+    ],
+  });
+
+  await expect(
+    reconcile({
+      targetRoot,
+      before: plan("before"),
+      after: plan("after"),
+    }),
+  ).rejects.toThrow("injected packed projection commit failure");
+  await expect(readFile(contentPath, "utf8")).resolves.toBe("before\n");
+  await expect(readFile(canonicalPath, "utf8")).resolves.toBe(
+    '{\n  "state": "before"\n}\n',
+  );
+  expect(committedPaths).toHaveLength(2);
 }
 
 function definitionWithPackagePath(packagePath: string) {
@@ -80,6 +157,56 @@ function firstAddableDefinition() {
   return definition;
 }
 
+function definitionWithInitialPackageRole(role: PackageRole) {
+  const definition = builtInPresetRegistry.all().find((candidate) =>
+    planGeneratedRepositoryInitialization({
+      definition: candidate,
+      context: createGenerationContext({
+        targetDir: path.join("generated-repository", "role-selection"),
+        scope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    }).blueprint.packages.some((pkg) => pkg.role === role),
+  );
+  if (definition === undefined) {
+    throw new Error(`Expected a Definition for initial Package Role ${role}`);
+  }
+  return definition;
+}
+
+function addableDefinitionWithPackageRole(role: PackageRole) {
+  const context = createGenerationContext({
+    targetDir: path.join("generated-repository", "addition-role-selection"),
+    scope: "demo",
+    toolchain: {
+      nodeLtsMajor: "24",
+      packageManagerPin: "pnpm@11.11.0",
+    },
+  });
+  const packageLeafName = "role-probe";
+  const definition = builtInPresetRegistry.all().find((candidate) => {
+    const packagePath = candidate.defaultPackagePath?.({
+      context,
+      packageLeafName,
+    });
+    return (
+      packagePath !== undefined &&
+      candidate.planPackageAddition?.({
+        context,
+        packageLeafName,
+        packagePath,
+      }).definition.role === role
+    );
+  });
+  if (definition === undefined) {
+    throw new Error(`Expected an addable Definition for Package Role ${role}`);
+  }
+  return definition;
+}
+
 async function generatedTextFiles(
   root: string,
   relative = "",
@@ -106,6 +233,38 @@ async function generatedTextFiles(
     }
   }
   return files;
+}
+
+async function workspaceByteSnapshot(
+  root: string,
+  relative = "",
+): Promise<
+  readonly {
+    readonly path: string;
+    readonly mode: number;
+    readonly content: string;
+  }[]
+> {
+  const files: { path: string; mode: number; content: string }[] = [];
+  for (const entry of await readdir(path.join(root, relative), {
+    withFileTypes: true,
+  })) {
+    const child = path.join(relative, entry.name);
+    if (entry.isDirectory()) {
+      if (!new Set(["node_modules", ".turbo"]).has(entry.name)) {
+        files.push(...(await workspaceByteSnapshot(root, child)));
+      }
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const filePath = path.join(root, child);
+    files.push({
+      path: child.split(path.sep).join("/"),
+      mode: (await stat(filePath)).mode & 0o777,
+      content: (await readFile(filePath)).toString("base64"),
+    });
+  }
+  return files.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
 async function expectNativeTaskModel(projectDir: string): Promise<void> {
@@ -160,17 +319,139 @@ describe("packed public CLI consumer", () => {
     try {
       const consumer = path.join(workspace, "consumer");
       const archivePath = await packTemplateArchive(workspace);
+      const packedPaths = (await execa("tar", ["-tf", archivePath])).stdout
+        .split("\n")
+        .filter(Boolean);
+      expect(
+        packedPaths.every(
+          (entry) =>
+            entry.startsWith("package/") && !entry.split("/").includes(".."),
+        ),
+      ).toBe(true);
+      expect(packedPaths).toEqual(
+        expect.arrayContaining([
+          "package/dist/application.d.ts",
+          "package/dist/application.js",
+          "package/dist/cli.d.ts",
+          "package/dist/cli.js",
+          "package/dist/main.d.ts",
+          "package/dist/main.js",
+          "package/node_modules/commander/package.json",
+          "package/node_modules/@ykdz/template-core/package.json",
+          "package/node_modules/@ykdz/template-builtin-presets/package.json",
+          "package/node_modules/@ykdz/template-builtin-presets/templates/foundation/turbo.json",
+          "package/node_modules/@ykdz/template-builtin-presets/dist/src/ts-cli/definition.js",
+          "package/node_modules/@ykdz/template-builtin-presets/templates/ts-cli/src/cli.ts",
+          "package/node_modules/typescript/package.json",
+        ]),
+      );
+      expect(
+        packedPaths.some((entry) => entry.startsWith("package/src/")),
+      ).toBe(false);
+      expect(
+        packedPaths.some(
+          (entry) =>
+            entry.includes("behavior.test") ||
+            entry.startsWith("package/test/") ||
+            entry.includes("/.template/") ||
+            entry.includes("template-checks"),
+        ),
+      ).toBe(false);
+      const packedManifest = await execa("tar", [
+        "-xOf",
+        archivePath,
+        "package/package.json",
+      ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
+      const packedCoreManifest = await execa("tar", [
+        "-xOf",
+        archivePath,
+        "package/node_modules/@ykdz/template-core/package.json",
+      ]).then(
+        ({ stdout }) =>
+          JSON.parse(stdout) as {
+            readonly dependencies?: Readonly<Record<string, unknown>>;
+            readonly peerDependencies?: Readonly<Record<string, unknown>>;
+          },
+      );
+      const sourceManifest = JSON.parse(
+        await readFile(
+          path.join(process.cwd(), "packages/cli/package.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly version: string;
+        readonly scripts: Readonly<Record<string, string>>;
+      };
+      expect(sourceManifest.scripts.prepack).toBe(
+        "pnpm exec turbo run build --filter=.",
+      );
+      expect(packedManifest).toMatchObject({
+        version: sourceManifest.version,
+        bin: { template: "dist/cli.js" },
+        exports: {
+          ".": {
+            source: "./src/main.ts",
+            types: "./dist/main.d.ts",
+            default: "./dist/main.js",
+          },
+        },
+        dependencies: { commander: expect.any(String) },
+        bundleDependencies: expect.arrayContaining([
+          "@ykdz/template-core",
+          "@ykdz/template-builtin-presets",
+          "commander",
+          "typescript",
+        ]),
+      });
+      expect(packedManifest.dependencies).toHaveProperty("typescript");
+      expect(packedCoreManifest.dependencies).not.toHaveProperty("typescript");
+      expect(packedCoreManifest.peerDependencies).toHaveProperty("typescript");
       await mkdir(consumer, { recursive: true });
       await execa("npm", ["init", "--yes"], { cwd: consumer });
       await execa("pnpm", ["add", archivePath], { cwd: consumer });
-
-      const cli = path.join(
+      const bundledCoreRenderer = path.join(
         consumer,
         "node_modules",
         "@ykdz",
         "template",
-        "dist/cli.js",
+        "node_modules",
+        "@ykdz",
+        "template-core",
+        "dist",
+        "renderer.js",
       );
+      const compiler = createRequire(pathToFileURL(bundledCoreRenderer))(
+        "typescript",
+      ) as { readonly version: string };
+      expect(compiler.version).toMatch(/^6\./u);
+      await expectPackedProjectionRollback(consumer, workspace);
+
+      const installedBin = path.join(
+        consumer,
+        "node_modules",
+        ".bin",
+        "template",
+      );
+      const packedJourneys = await execa(
+        "node",
+        [
+          "--conditions=source",
+          path.join(process.cwd(), "packages/cli/test/e2e/run-journeys.ts"),
+          "packed",
+          installedBin,
+        ],
+        { cwd: process.cwd() },
+      );
+      const journeyCount = (
+        await readdir(
+          path.join(process.cwd(), "packages/cli/test/e2e/journeys"),
+        )
+      ).filter((entry) => entry.endsWith(".journey.ts")).length;
+      expect(
+        packedJourneys.stdout
+          .split("\n")
+          .filter((line) => line.endsWith(":passed")),
+      ).toHaveLength(journeyCount);
       const bundledDefinitions = path.join(
         consumer,
         "node_modules",
@@ -195,9 +476,29 @@ describe("packed public CLI consumer", () => {
           },
         ),
       ).resolves.toMatchObject({ exitCode: 0 });
-      const help = await execa("node", [cli, "--help"], { cwd: consumer });
+      await expect(
+        execa(
+          "node",
+          [
+            "--input-type=module",
+            "-e",
+            [
+              `const api = await import(${JSON.stringify(publicCliPackageName)});`,
+              'if (typeof api.runCli !== "function" || typeof api.createCliCommand !== "function") process.exit(1);',
+            ].join(""),
+          ],
+          { cwd: consumer },
+        ),
+      ).resolves.toMatchObject({ exitCode: 0 });
+      const help = await execa(installedBin, ["--help"], { cwd: consumer });
       expect(help.stdout).toContain("template init <dir>");
-      const presets = await execa("node", [cli, "presets"], {
+      const addHelp = await execa(installedBin, ["add", "package", "--help"], {
+        cwd: consumer,
+      });
+      expect(addHelp.stdout).toContain("template add package");
+      expect(addHelp.stdout).toContain("--link-from <path>");
+      expect(addHelp.stdout).not.toContain("template init <dir>");
+      const presets = await execa(installedBin, ["presets"], {
         cwd: consumer,
       });
       const definitions = presets.stdout.split("\n").flatMap((line) => {
@@ -207,9 +508,8 @@ describe("packed public CLI consumer", () => {
       expect(definitions.length).toBeGreaterThan(0);
       for (const definition of definitions) {
         await execa(
-          "node",
+          installedBin,
           [
-            cli,
             "init",
             path.join(consumer, "generated", definition.name),
             "--preset",
@@ -236,9 +536,8 @@ describe("packed public CLI consumer", () => {
       const completedAdditions: string[] = [];
       for (const candidate of definitions) {
         const result = await execa(
-          "node",
+          installedBin,
           [
-            cli,
             "add",
             "package",
             "--preset",
@@ -265,6 +564,306 @@ describe("packed public CLI consumer", () => {
         }
       }
       expect(completedAdditions.toSorted()).toEqual(expectedAddableDefinitions);
+
+      const cliAdditionDefinition =
+        addableDefinitionWithPackageRole("cli-tool");
+      const cliTarget = path.join(
+        consumer,
+        "generated",
+        cliAdditionDefinition.metadata.name,
+      );
+      const explicitCliManifest = JSON.parse(
+        await readFile(
+          path.join(cliTarget, "packages/archive-addition/package.json"),
+          "utf8",
+        ),
+      ) as { readonly bin?: Readonly<Record<string, string>> };
+      expect(explicitCliManifest.bin).toEqual({
+        "archive-addition": "./dist/cli.js",
+      });
+      const cliBlueprint = JSON.parse(
+        await readFile(
+          path.join(cliTarget, ".template/blueprint.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly packages: readonly {
+          readonly path: string;
+          readonly role: PackageRole;
+        }[];
+      };
+      const cliConsumerPath = cliBlueprint.packages.find(
+        (pkg) =>
+          pkg.role === "cli-tool" && pkg.path !== "packages/archive-addition",
+      )?.path;
+      expect(cliConsumerPath).toBeDefined();
+      const addLinkedCli = async (): Promise<void> => {
+        await execa(
+          installedBin,
+          [
+            "add",
+            "package",
+            "--preset",
+            cliAdditionDefinition.metadata.name,
+            "--name",
+            "default-command",
+            "--link-from",
+            cliConsumerPath!,
+          ],
+          {
+            cwd: cliTarget,
+            env: {
+              ...process.env,
+              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+            },
+          },
+        );
+      };
+      await addLinkedCli();
+      const linkedProviderManifest = JSON.parse(
+        await readFile(
+          path.join(cliTarget, "packages/default-command/package.json"),
+          "utf8",
+        ),
+      ) as {
+        readonly name: string;
+        readonly bin: Readonly<Record<string, string>>;
+      };
+      expect(linkedProviderManifest.bin).toEqual({
+        "default-command": "./dist/cli.js",
+      });
+      await expect(
+        readFile(
+          path.join(cliTarget, cliConsumerPath!, "package.json"),
+          "utf8",
+        ).then(
+          (source) =>
+            (
+              JSON.parse(source) as {
+                dependencies: Readonly<Record<string, string>>;
+              }
+            ).dependencies[linkedProviderManifest.name],
+        ),
+      ).resolves.toBe("workspace:*");
+      const linkedCliSnapshot = await workspaceByteSnapshot(cliTarget);
+      await addLinkedCli();
+      expect(await workspaceByteSnapshot(cliTarget)).toEqual(linkedCliSnapshot);
+
+      const previewBaseDefinition =
+        definitionWithInitialPackageRole("shared-library");
+      const previewAdditionDefinition =
+        addableDefinitionWithPackageRole("runtime-service");
+      const previewTarget = path.join(
+        consumer,
+        "generated",
+        previewBaseDefinition.metadata.name,
+      );
+      const reservedBefore = await workspaceByteSnapshot(previewTarget);
+      const reservedPackagePath = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          previewAdditionDefinition.metadata.name,
+          "--name",
+          "evil",
+          "--path",
+          "dist/evil",
+          "--dry-run",
+          "--json",
+        ],
+        {
+          cwd: previewTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+          reject: false,
+        },
+      );
+      expect(reservedPackagePath.exitCode).not.toBe(0);
+      expect(
+        `${reservedPackagePath.stdout}\n${reservedPackagePath.stderr}`,
+      ).toContain(
+        "Package Path dist/evil uses reserved workspace collection dist",
+      );
+      expect(await workspaceByteSnapshot(previewTarget)).toEqual(
+        reservedBefore,
+      );
+
+      await mkdir(path.join(previewTarget, "services/existing"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(previewTarget, "services/existing/OWNER"),
+        "user\n",
+      );
+      const existingBefore = await workspaceByteSnapshot(previewTarget);
+      const existingPackagePath = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          previewAdditionDefinition.metadata.name,
+          "--name",
+          "existing",
+          "--path",
+          "services/existing",
+          "--json",
+        ],
+        {
+          cwd: previewTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+          reject: false,
+        },
+      );
+      expect(existingPackagePath.exitCode).not.toBe(0);
+      expect(JSON.parse(existingPackagePath.stdout)).toMatchObject({
+        status: "conflict",
+        actions: [],
+        conflicts: [
+          {
+            path: "services/existing",
+            driver: "precondition",
+            reason: expect.stringContaining(
+              "Package Path services/existing already exists",
+            ),
+          },
+        ],
+      });
+      expect(await workspaceByteSnapshot(previewTarget)).toEqual(
+        existingBefore,
+      );
+
+      const previewBefore = await workspaceByteSnapshot(previewTarget);
+      const preview = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          previewAdditionDefinition.metadata.name,
+          "--name",
+          "dashboard",
+          "--path",
+          "services/dashboard",
+          "--dry-run",
+          "--json",
+        ],
+        {
+          cwd: previewTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+        },
+      );
+      expect(JSON.parse(preview.stdout)).toMatchObject({
+        schemaVersion: 1,
+        command: "add package",
+        status: "success",
+        dryRun: true,
+        actions: expect.arrayContaining([
+          {
+            path: "services/dashboard/package.json",
+            driver: "structured",
+            action: "create",
+          },
+        ]),
+      });
+      expect(await workspaceByteSnapshot(previewTarget)).toEqual(previewBefore);
+
+      const turboPath = path.join(previewTarget, "turbo.json");
+      const originalTurbo = await readFile(turboPath, "utf8");
+      const turbo = JSON.parse(originalTurbo) as {
+        boundaries: { tags: Record<string, unknown> };
+      };
+      turbo.boundaries.tags.app = { dependencies: { allow: ["app"] } };
+      await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+      const structuredBefore = await workspaceByteSnapshot(previewTarget);
+      const structuredConflict = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          previewAdditionDefinition.metadata.name,
+          "--name",
+          "dashboard",
+          "--path",
+          "services/dashboard",
+          "--json",
+        ],
+        {
+          cwd: previewTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+          reject: false,
+        },
+      );
+      expect(structuredConflict.exitCode).not.toBe(0);
+      expect(JSON.parse(structuredConflict.stdout)).toMatchObject({
+        status: "conflict",
+        actions: [],
+        conflicts: [
+          {
+            path: "turbo.json",
+            driver: "structured",
+            location: "/boundaries/tags/app/dependencies/allow",
+            context: {
+              before: expect.any(String),
+              current: expect.any(String),
+              after: expect.any(String),
+            },
+          },
+        ],
+      });
+      expect(await workspaceByteSnapshot(previewTarget)).toEqual(
+        structuredBefore,
+      );
+
+      await writeFile(turboPath, originalTurbo);
+      const dockerfilePath = path.join(
+        previewTarget,
+        ".devcontainer/Dockerfile",
+      );
+      await writeFile(dockerfilePath, "\n# incompatible insertion\n", {
+        flag: "a",
+      });
+      const textBefore = await workspaceByteSnapshot(previewTarget);
+      const textConflict = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          previewAdditionDefinition.metadata.name,
+          "--name",
+          "dashboard",
+          "--path",
+          "services/dashboard",
+        ],
+        {
+          cwd: previewTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+          reject: false,
+        },
+      );
+      expect(textConflict.exitCode).not.toBe(0);
+      expect(textConflict.stderr).toContain(".devcontainer/Dockerfile (text)");
+      expect(textConflict.stderr).toContain("Region:");
+      expect(textConflict.stderr).toContain("Current:");
+      expect(await workspaceByteSnapshot(previewTarget)).toEqual(textBefore);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -284,17 +883,15 @@ describe("packed public CLI consumer", () => {
       await execa("npm", ["init", "--yes"], { cwd: consumer });
       await execa("pnpm", ["add", archivePath], { cwd: consumer });
 
-      const cli = path.join(
+      const installedBin = path.join(
         consumer,
         "node_modules",
-        "@ykdz",
+        ".bin",
         "template",
-        "dist/cli.js",
       );
       await execa(
-        "node",
+        installedBin,
         [
-          cli,
           "init",
           generated,
           "--preset",
@@ -311,6 +908,14 @@ describe("packed public CLI consumer", () => {
           },
         },
       );
+      const gitignorePath = path.join(generated, ".gitignore");
+      const workspaceManifestPath = path.join(generated, "pnpm-workspace.yaml");
+      await Promise.all([
+        writeFile(gitignorePath, "private-artifacts/\n", { flag: "a" }),
+        writeFile(workspaceManifestPath, "# private workspace policy\n", {
+          flag: "a",
+        }),
+      ]);
       await execa("pnpm", ["install"], { cwd: generated });
       expect(
         (
@@ -320,31 +925,83 @@ describe("packed public CLI consumer", () => {
         ).isSymbolicLink(),
       ).toBe(true);
 
-      await execa(
-        "node",
-        [
-          cli,
-          "add",
-          "package",
-          "--preset",
-          additionDefinition.metadata.name,
-          "--name",
-          "domain",
-          "--path",
-          "packages/domain",
-        ],
-        {
-          cwd: generated,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+      const addPackage = async (packageName: string): Promise<void> => {
+        await execa(
+          installedBin,
+          [
+            "add",
+            "package",
+            "--preset",
+            additionDefinition.metadata.name,
+            "--name",
+            packageName,
+            "--path",
+            `services/${packageName}`,
+          ],
+          {
+            cwd: generated,
+            env: {
+              ...process.env,
+              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+            },
           },
-        },
-      );
+        );
+      };
 
+      await addPackage("domain");
+      const firstAdditionManifest = await readFile(
+        path.join(generated, "services/domain/package.json"),
+        "utf8",
+      );
+      const firstRootManifest = await readFile(
+        path.join(generated, "package.json"),
+        "utf8",
+      );
+      const firstWorkspaceManifest = await readFile(
+        workspaceManifestPath,
+        "utf8",
+      );
+      expect(firstWorkspaceManifest).toContain("# private workspace policy");
+      await expect(readFile(gitignorePath, "utf8")).resolves.toContain(
+        "private-artifacts/",
+      );
+      const workspaceBeforeRepeat = (
+        await generatedTextFiles(generated)
+      ).toSorted((left, right) => left.path.localeCompare(right.path));
+      expect(
+        workspaceBeforeRepeat.some(
+          (file) => file.path === ".template/blueprint.json",
+        ),
+      ).toBe(true);
+
+      await addPackage("domain");
+      expect(
+        (await generatedTextFiles(generated)).toSorted((left, right) =>
+          left.path.localeCompare(right.path),
+        ),
+      ).toEqual(workspaceBeforeRepeat);
       await expect(
-        readFile(path.join(generated, "packages/domain/package.json"), "utf8"),
-      ).resolves.toContain('"name": "@demo/domain"');
+        readFile(path.join(generated, "services/domain/package.json"), "utf8"),
+      ).resolves.toBe(firstAdditionManifest);
+
+      await addPackage("domain-two");
+      await expect(
+        readFile(
+          path.join(generated, "services/domain-two/package.json"),
+          "utf8",
+        ),
+      ).resolves.toContain('"name": "@demo/domain-two"');
+      await expect(
+        readFile(path.join(generated, "services/domain/package.json"), "utf8"),
+      ).resolves.toBe(firstAdditionManifest);
+      await expect(
+        readFile(path.join(generated, "package.json"), "utf8"),
+      ).resolves.toBe(firstRootManifest);
+      await expect(readFile(workspaceManifestPath, "utf8")).resolves.toBe(
+        firstWorkspaceManifest,
+      );
+      const finalGitignore = await readFile(gitignorePath, "utf8");
+      expect(finalGitignore.match(/^private-artifacts\/$/gmu)).toHaveLength(1);
       expect(
         (
           await lstat(
@@ -352,6 +1009,7 @@ describe("packed public CLI consumer", () => {
           )
         ).isSymbolicLink(),
       ).toBe(true);
+      await execa("pnpm", ["exec", "oxfmt", "--version"], { cwd: generated });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

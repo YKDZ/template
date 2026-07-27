@@ -4,5 +4,6 @@
     "customConditions": [],
     "declarationMap": false,
     "rootDir": "src"
-  }
+  },
+  "include": ["src/**/*.ts"]
 }

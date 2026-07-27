@@ -1,10 +1,5 @@
 {
-  "boundaries": {
-    "tags": {
-      "app": { "dependencies": { "allow": ["app", "library"] } },
-      "library": { "dependencies": { "allow": ["library"] } }
-    }
-  },
+  "boundaries": { "tags": {} },
   "tasks": {
     "//#boundaries": { "cache": false },
     "//#format:check": { "outputs": [] },
@@ -16,7 +11,7 @@
     "lint": { "outputs": [] },
     "typecheck": { "dependsOn": ["^typecheck"], "outputs": [] },
     "build": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["build"], "outputs": [] },
+    "test": { "outputs": [] },
     "test:e2e": { "dependsOn": ["build"], "cache": false },
     "deployment": { "cache": false },
     "format:write": { "dependsOn": ["lint:fix"], "cache": false },

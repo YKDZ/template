@@ -11,16 +11,24 @@
     "!dist/src/registry-checks.d.ts"
   ],
   "type": "module",
+  "imports": {
+    "#template-core/*": {
+      "source": "@ykdz/template-core-source/*",
+      "types": "@ykdz/template-core/*",
+      "default": "@ykdz/template-core/*"
+    }
+  },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:templates": "node src/check-template-source.ts && node src/check-registry-contract.ts && node src/check-publication-source.ts",
-    "check:templates:boundary": "node src/check-template-boundary.ts",
+    "check:templates": "node --conditions=source src/check-template-source.ts && node --conditions=source src/check-registry-contract.ts && node --conditions=source src/check-publication-source.ts",
+    "check:templates:boundary": "node --conditions=source src/check-template-boundary.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates .",
@@ -41,6 +49,8 @@
     "@vikejs/hono": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
     "@vue/tsconfig": "catalog:",
+    "@ykdz/template-core-source": "link:../core",
+    "commander": "catalog:",
     "drizzle-kit": "catalog:",
     "drizzle-orm": "catalog:",
     "execa": "catalog:",

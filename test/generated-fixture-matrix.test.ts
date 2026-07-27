@@ -1,15 +1,28 @@
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
-import { describe, expect, it } from "vitest";
+} from "#template-builtin-presets";
 
 import {
   assertGeneratedTaskDiscovery,
   generatedScenarioInstallArgs,
+  runFocusedProviderConsumptionProbe,
 } from "../packages/checks/src/check-generated-registry.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
@@ -51,5 +64,112 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
       "--store-dir",
       "/tmp/generated-scenarios/.pnpm-store",
     ]);
+  });
+
+  it("consumes manifest-derived provider source and distribution exports by package name", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "focused-provider-probe-"));
+    const consumerPackagePath = "apps/unusual-consumer";
+    const providerPackagePath = "tools/unusual-provider";
+    const consumerRoot = path.join(root, consumerPackagePath);
+    const providerRoot = path.join(root, providerPackagePath);
+    const providerName = "@fixture/unusual-provider";
+    const sourceTarget = "implementation/current-entry.ts";
+    const defaultTarget = "output/default-entry.js";
+    const calls: { command: string; args: readonly string[] }[] = [];
+
+    try {
+      await Promise.all([
+        mkdir(path.join(consumerRoot, "node_modules/@fixture"), {
+          recursive: true,
+        }),
+        mkdir(path.join(providerRoot, path.dirname(sourceTarget)), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(consumerRoot, "package.json"),
+          `${JSON.stringify({ name: "@fixture/unusual-consumer" })}\n`,
+        ),
+        writeFile(
+          path.join(providerRoot, "package.json"),
+          `${JSON.stringify({
+            name: providerName,
+            type: "module",
+            exports: {
+              ".": {
+                source: `./${sourceTarget}`,
+                default: `./${defaultTarget}`,
+              },
+            },
+          })}\n`,
+        ),
+        writeFile(
+          path.join(providerRoot, sourceTarget),
+          "export const existing = true;\n",
+        ),
+      ]);
+      await symlink(
+        providerRoot,
+        path.join(consumerRoot, "node_modules/@fixture/unusual-provider"),
+        "dir",
+      );
+
+      await runFocusedProviderConsumptionProbe({
+        scenarioLabel: "dynamic provider fixture",
+        projectDir: root,
+        consumerPackagePath,
+        providerPackagePath,
+        run: async (command, args, options) => {
+          calls.push({ command, args });
+          if (command === "pnpm") {
+            expect(args).toEqual([
+              "exec",
+              "turbo",
+              "run",
+              "build",
+              "--filter=@fixture/unusual-consumer",
+              `--filter=${providerName}`,
+              "--force",
+            ]);
+            const builtSource = await readFile(
+              path.join(providerRoot, sourceTarget),
+              "utf8",
+            );
+            await mkdir(path.join(providerRoot, path.dirname(defaultTarget)), {
+              recursive: true,
+            });
+            await writeFile(
+              path.join(providerRoot, defaultTarget),
+              builtSource,
+            );
+            return {};
+          }
+          return await execa(command, [...args], options);
+        },
+      });
+
+      await expect(
+        readFile(path.join(providerRoot, sourceTarget), "utf8"),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        readFile(path.join(providerRoot, defaultTarget), "utf8"),
+      ).resolves.toContain("templateFocusedExport");
+      expect(
+        calls
+          .filter(({ command }) => command === "node")
+          .map(({ args }) => args),
+      ).toEqual([
+        expect.arrayContaining(["--conditions=source"]),
+        expect.not.arrayContaining(["--conditions=source"]),
+      ]);
+      expect(
+        (await readdir(consumerRoot)).filter((entry) =>
+          entry.includes("focused-provider-probe"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -5,17 +5,16 @@ import { fileURLToPath } from "node:url";
 import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
-} from "@ykdz/template-core/dependency-catalog";
-import { browserTestToolLayer } from "@ykdz/template-core/devcontainer";
+} from "#template-core/dependency-catalog";
+import { browserTestToolLayer } from "#template-core/devcontainer";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
-  type EditorCustomizationCapability,
-} from "@ykdz/template-core/editor-customization";
+} from "#template-core/editor-customization";
 import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
-} from "@ykdz/template-core/module-graph";
+} from "#template-core/module-graph";
 import {
   checkEnvironmentNeedFact,
   checkEnvironmentNeedFromFact,
@@ -24,43 +23,46 @@ import {
   renderDeploymentCheckCommand,
   renderFixCommand,
   renderRootCheckCommand,
-} from "@ykdz/template-core/module-graph";
+} from "#template-core/module-graph";
 import type {
   CheckEnvironmentNeedFact,
   ComponentOwner,
   DeploymentEnvironmentNeedFact,
-} from "@ykdz/template-core/module-graph";
+} from "#template-core/module-graph";
 import {
   assertPackageContribution,
   type PackageContribution,
-} from "@ykdz/template-core/package-contribution";
+} from "#template-core/package-contribution";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
-} from "@ykdz/template-core/preset-definition";
+} from "#template-core/preset-definition";
 import {
   assertProjectBlueprintV2,
   validateProjectBlueprintV2 as validateCoreProjectBlueprintV2,
   type ProjectBlueprintV2,
-} from "@ykdz/template-core/project-blueprint-v2";
-import type {
-  DependencyEcosystem,
-  DependencyMaintenancePolicy,
-} from "@ykdz/template-core/project-github";
+} from "#template-core/project-blueprint-v2";
+import type { DependencyMaintenancePolicy } from "#template-core/project-github";
 import {
   projectCheckWorkflowTemplateReplacements,
   projectDependabotTemplateReplacements,
-} from "@ykdz/template-core/project-github";
-import { planExplicitProjectLinks } from "@ykdz/template-core/project-linking-v2";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
+} from "#template-core/project-github";
+import { planExplicitProjectLinks } from "#template-core/project-linking-v2";
+import type {
+  MaterializeProjectProjectionOptions,
+  ProjectProjectionPathPrecondition,
+  ProjectProjectionReconciliation,
+} from "#template-core/project-projection";
+import type { RenderOperation } from "#template-core/renderer";
 import {
   resolveTemplateSource,
   type TemplateSourceHandle,
-} from "@ykdz/template-core/renderer";
+} from "#template-core/renderer";
 
 import { rustBinDefinition } from "./rust-bin/definition.ts";
 import { vuePnpmDependencyOverrides } from "./shared/vue.ts";
 import { templateSources } from "./template-sources.ts";
+import { tsCliDefinition } from "./ts-cli/definition.ts";
 import { tsLibDefinition } from "./ts-lib/definition.ts";
 import { vikeAppDefinition } from "./vike-app/definition.ts";
 import { vueAppDefinition } from "./vue-app/definition.ts";
@@ -71,14 +73,28 @@ export type {
   PackageLinkIntent,
   PackageRole,
   ProjectBlueprintV2,
-} from "@ykdz/template-core/project-blueprint-v2";
-export type { PackageContribution } from "@ykdz/template-core/package-contribution";
+} from "#template-core/project-blueprint-v2";
+export type { PackageContribution } from "#template-core/package-contribution";
 
 export type BuiltInGenerationContext = GenerationContext;
-export type { BuiltInPresetDefinition } from "@ykdz/template-core/preset-definition";
+export type { BuiltInPresetDefinition } from "#template-core/preset-definition";
 
 export type NextStepInstruction = {
   readonly display: string;
+};
+
+type GeneratedPackagePlanningRecord = {
+  readonly path: string;
+  readonly definitionName: string;
+  readonly planningContribution: "planInitialization" | "planPackageAddition";
+};
+
+type GenerationRecord = {
+  readonly schemaVersion: 1;
+  readonly preset: string;
+  readonly templateVersion: "0.0.0";
+  readonly toolchain: BuiltInGenerationContext["toolchain"];
+  readonly packages: readonly GeneratedPackagePlanningRecord[];
 };
 
 export type GeneratedRepositoryPlan = {
@@ -86,12 +102,9 @@ export type GeneratedRepositoryPlan = {
   readonly plannerSourceFile: string;
   readonly planningContribution: "planInitialization" | "planPackageAddition";
   readonly blueprint: ProjectBlueprintV2;
-  readonly generationRecord: {
-    readonly preset: string;
-    readonly templateVersion: "0.0.0";
-    readonly toolchain: BuiltInGenerationContext["toolchain"];
-  };
+  readonly generationRecord: GenerationRecord;
   readonly operations: readonly RenderOperation[];
+  readonly reconciliation: readonly ProjectProjectionReconciliation[];
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
@@ -101,6 +114,14 @@ export type GeneratedRepositoryPlan = {
   readonly nextStepInstructions: readonly NextStepInstruction[];
 };
 
+export type GeneratedRepositoryPackageAdditionPlan = GeneratedRepositoryPlan & {
+  readonly projectProjections: {
+    readonly before: MaterializeProjectProjectionOptions;
+    readonly after: MaterializeProjectProjectionOptions;
+    readonly preconditions: readonly ProjectProjectionPathPrecondition[];
+  };
+};
+
 type PersistedEnvironmentNeeds = {
   readonly schemaVersion: 1;
   readonly check: readonly CheckEnvironmentNeedFact[];
@@ -108,6 +129,28 @@ type PersistedEnvironmentNeeds = {
 };
 
 const environmentNeedsPath = ".template/environment-needs.json";
+
+const packageManifestKeyOrder = [
+  "name",
+  "version",
+  "private",
+  "bin",
+  "files",
+  "type",
+  "types",
+  "imports",
+  "exports",
+  "publishConfig",
+  "scripts",
+  "dependencies",
+  "devDependencies",
+  "dependenciesMeta",
+  "peerDependencies",
+  "optionalDependencies",
+  "engines",
+  "packageManager",
+] as const;
+const packageConditionKeyOrder = ["source", "types", "default"] as const;
 
 /** One independently checkable initial Package Contribution and its real plan. */
 export type BuiltInPresetTemplateSourceCheckContext = {
@@ -163,6 +206,7 @@ class PresetRegistry {
 }
 
 export const builtInPresetRegistry = new PresetRegistry([
+  tsCliDefinition,
   tsLibDefinition,
   rustBinDefinition,
   vueAppDefinition,
@@ -247,6 +291,188 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function readGenerationRecord(options: {
+  readonly context: BuiltInGenerationContext;
+  readonly blueprint: ProjectBlueprintV2;
+}): GenerationRecord {
+  const generationPath = path.join(
+    options.context.targetDir,
+    ".template/generation.json",
+  );
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(generationPath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Package Addition requires valid Generation Record facts: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (isRecord(value)) {
+    for (const key of Object.keys(value)) {
+      if (
+        ![
+          "schemaVersion",
+          "preset",
+          "templateVersion",
+          "toolchain",
+          "packages",
+        ].includes(key)
+      ) {
+        throw new Error(
+          `Package Addition Generation Record contains unknown field: ${key}`,
+        );
+      }
+    }
+    if (isRecord(value.toolchain)) {
+      for (const key of Object.keys(value.toolchain)) {
+        if (!["nodeLtsMajor", "packageManagerPin"].includes(key)) {
+          throw new Error(
+            `Package Addition Generation Record toolchain contains unknown field: ${key}`,
+          );
+        }
+      }
+    }
+  }
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    typeof value.preset !== "string" ||
+    value.templateVersion !== "0.0.0" ||
+    !isRecord(value.toolchain) ||
+    typeof value.toolchain.nodeLtsMajor !== "string" ||
+    typeof value.toolchain.packageManagerPin !== "string" ||
+    !Array.isArray(value.packages)
+  ) {
+    throw new Error(
+      "Package Addition requires a supported Generation Record in .template/generation.json",
+    );
+  }
+  const packages: GeneratedPackagePlanningRecord[] = [];
+  for (const [index, item] of value.packages.entries()) {
+    if (isRecord(item)) {
+      for (const key of Object.keys(item)) {
+        if (!["path", "definitionName", "planningContribution"].includes(key)) {
+          throw new Error(
+            `Package Addition Generation Record packages[${index}] contains unknown field: ${key}`,
+          );
+        }
+      }
+    }
+    if (
+      !isRecord(item) ||
+      typeof item.path !== "string" ||
+      typeof item.definitionName !== "string" ||
+      !["planInitialization", "planPackageAddition"].includes(
+        String(item.planningContribution),
+      )
+    ) {
+      throw new Error(
+        `Package Addition requires valid package planning facts at .template/generation.json packages[${index}]`,
+      );
+    }
+    packages.push(item as GeneratedPackagePlanningRecord);
+  }
+  const blueprintPaths = options.blueprint.packages
+    .map((definition) => definition.path)
+    .toSorted();
+  const recordedPaths = packages.map((item) => item.path).toSorted();
+  if (
+    JSON.stringify(blueprintPaths) !== JSON.stringify(recordedPaths) ||
+    new Set(recordedPaths).size !== recordedPaths.length
+  ) {
+    throw new Error(
+      "Package Addition requires Generation Record packages to match the current Project Blueprint",
+    );
+  }
+  const generationRecord: GenerationRecord = {
+    schemaVersion: 1,
+    preset: value.preset,
+    templateVersion: value.templateVersion,
+    toolchain: {
+      nodeLtsMajor: value.toolchain.nodeLtsMajor,
+      packageManagerPin: value.toolchain.packageManagerPin,
+    },
+    packages,
+  };
+  assertGenerationRecordFoundationConsistency({
+    context: options.context,
+    blueprint: options.blueprint,
+    generationRecord,
+  });
+  return generationRecord;
+}
+
+function assertGenerationRecordFoundationConsistency(options: {
+  readonly context: BuiltInGenerationContext;
+  readonly blueprint: ProjectBlueprintV2;
+  readonly generationRecord: GenerationRecord;
+}): void {
+  const initialRecords = options.generationRecord.packages.filter(
+    (record) => record.planningContribution === "planInitialization",
+  );
+  if (initialRecords.length === 0) {
+    throw new Error(
+      `Package Addition Generation Record preset ${options.generationRecord.preset} has no initial Package provenance`,
+    );
+  }
+  const conflictingRecord = initialRecords.find(
+    (record) => record.definitionName !== options.generationRecord.preset,
+  );
+  if (conflictingRecord !== undefined) {
+    throw new Error(
+      `Package Addition Generation Record preset ${options.generationRecord.preset} conflicts with initial Package provenance ${conflictingRecord.definitionName} for Blueprint package ${conflictingRecord.path}`,
+    );
+  }
+
+  let rootDefinition: BuiltInPresetDefinition;
+  try {
+    rootDefinition = builtInPresetRegistry.require(
+      options.generationRecord.preset,
+    );
+  } catch {
+    throw new Error(
+      `Package Addition Generation Record preset ${options.generationRecord.preset} is not a registered Built-in Preset`,
+    );
+  }
+  const initialBlueprint = rootDefinition.blueprint(options.context);
+  assertProjectBlueprintV2(initialBlueprint);
+  const expectedPaths = initialBlueprint.packages
+    .map((definition) => definition.path)
+    .toSorted();
+  const recordedInitialPaths = initialRecords
+    .map((record) => record.path)
+    .toSorted();
+  if (JSON.stringify(recordedInitialPaths) !== JSON.stringify(expectedPaths)) {
+    throw new Error(
+      `Package Addition Generation Record preset ${options.generationRecord.preset} expects initial Blueprint packages ${expectedPaths.join(", ")}, but initial provenance records ${recordedInitialPaths.join(", ")}`,
+    );
+  }
+  for (const expectedDefinition of initialBlueprint.packages) {
+    const currentDefinition = options.blueprint.packages.find(
+      (definition) => definition.path === expectedDefinition.path,
+    );
+    if (
+      currentDefinition === undefined ||
+      !packageDefinitionsEqual(currentDefinition, expectedDefinition)
+    ) {
+      throw new Error(
+        `Package Addition Generation Record preset ${options.generationRecord.preset} cannot reproduce initial Blueprint Package Definition ${expectedDefinition.name} at ${expectedDefinition.path} (${expectedDefinition.role})`,
+      );
+    }
+  }
+  for (const expectedIntent of initialBlueprint.packageLinkIntents ?? []) {
+    if (
+      !(options.blueprint.packageLinkIntents ?? []).some((currentIntent) =>
+        packageLinkIntentsEqual(currentIntent, expectedIntent),
+      )
+    ) {
+      throw new Error(
+        `Package Addition Generation Record preset ${options.generationRecord.preset} cannot reproduce initial Blueprint Package Link Intent ${expectedIntent.consumerPackagePath} -> ${expectedIntent.providerPackagePath}`,
+      );
+    }
+  }
+}
+
 function environmentNeedOwner(value: unknown): ComponentOwner | undefined {
   if (!isRecord(value)) return undefined;
   if (value.kind === "workspace-orchestration" && value.path === ".") {
@@ -258,10 +484,54 @@ function environmentNeedOwner(value: unknown): ComponentOwner | undefined {
   return undefined;
 }
 
+function assertEnvironmentNeedFactKeys(
+  value: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  context: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.includes(key)) {
+      throw new Error(
+        `Package Addition Environment Need ${context} contains unknown field: ${key}`,
+      );
+    }
+  }
+}
+
 function persistedCheckEnvironmentNeedFact(
   value: unknown,
+  index: number,
 ): CheckEnvironmentNeedFact | undefined {
   if (!isRecord(value)) return undefined;
+  const context = `check[${index}]`;
+  switch (value.kind) {
+    case "playwright-browser-assets":
+      assertEnvironmentNeedFactKeys(
+        value,
+        ["kind", "browser", "owner"],
+        context,
+      );
+      break;
+    case "shellcheck-command":
+      assertEnvironmentNeedFactKeys(value, ["kind", "owner"], context);
+      break;
+    case "rust-toolchain":
+      assertEnvironmentNeedFactKeys(
+        value,
+        ["kind", "owner", "toolchain"],
+        context,
+      );
+      break;
+    default:
+      return undefined;
+  }
+  if (isRecord(value.owner)) {
+    assertEnvironmentNeedFactKeys(
+      value.owner,
+      ["kind", "path"],
+      `${context}.owner`,
+    );
+  }
   const owner = environmentNeedOwner(value.owner);
   if (owner === undefined) return undefined;
   switch (value.kind) {
@@ -298,6 +568,15 @@ function readPersistedEnvironmentNeeds(targetDir: string): {
       `Package Addition requires valid Check Environment Need facts: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  if (isRecord(value)) {
+    for (const key of Object.keys(value)) {
+      if (!["schemaVersion", "check", "deployment"].includes(key)) {
+        throw new Error(
+          `Package Addition Environment Need facts contain unknown field: ${key}`,
+        );
+      }
+    }
+  }
   if (
     !isRecord(value) ||
     value.schemaVersion !== 1 ||
@@ -315,9 +594,11 @@ function readPersistedEnvironmentNeeds(targetDir: string): {
     );
   }
   if (
-    value.deployment.some(
-      (fact) => !isRecord(fact) || fact.kind !== "docker-engine",
-    )
+    value.deployment.some((fact, index) => {
+      if (!isRecord(fact) || fact.kind !== "docker-engine") return true;
+      assertEnvironmentNeedFactKeys(fact, ["kind"], `deployment[${index}]`);
+      return false;
+    })
   ) {
     throw new Error(
       `Package Addition requires supported deployment Environment Need facts in ${environmentNeedsPath}`,
@@ -343,162 +624,156 @@ function uniqueEnvironmentNeeds<T>(needs: readonly T[]): readonly T[] {
   });
 }
 
-/**
- * Package Addition reconstructs generic current facts from the Blueprint,
- * manifest truth, and explicit persisted Environment Need facts. Environment
- * preparation is never derived from task script text.
- */
-function existingPackageContribution(options: {
+function readExistingPackageAdditionState(options: {
   readonly context: BuiltInGenerationContext;
-  readonly definition: ProjectBlueprintV2["packages"][number];
-  readonly environmentNeeds: readonly CheckEnvironmentNeed[];
-}): PackageContribution {
-  const packageRoot = path.join(
+  readonly blueprint: ProjectBlueprintV2;
+}): {
+  readonly contributions: readonly PackageContribution[];
+  readonly manifestTruthByPackagePath: ReadonlyMap<
+    string,
+    Readonly<Record<string, unknown>>
+  >;
+  readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
+  readonly generationRecord: GenerationRecord;
+} {
+  const generationRecord = readGenerationRecord(options);
+  const persistedEnvironmentNeeds = readPersistedEnvironmentNeeds(
     options.context.targetDir,
-    options.definition.path,
   );
-  const manifestPath = path.join(packageRoot, "package.json");
-  if (!existsSync(manifestPath)) {
-    throw new Error(
-      `Package Addition requires manifest truth for ${options.definition.path}: package.json is missing`,
+  const manifestTruthByPackagePath = new Map<
+    string,
+    Readonly<Record<string, unknown>>
+  >();
+  const contributions = generationRecord.packages.map((record) => {
+    const expectedDefinition = options.blueprint.packages.find(
+      (definition) => definition.path === record.path,
+    )!;
+    const definition = builtInPresetRegistry.require(record.definitionName);
+    let candidates: readonly PackageContribution[];
+    if (record.planningContribution === "planInitialization") {
+      candidates = definition.planInitializationContributions?.(
+        options.context,
+      ) ?? [definition.planInitialization(options.context)];
+    } else {
+      if (definition.planPackageAddition === undefined) {
+        throw new Error(
+          `Generation Record Definition ${record.definitionName} no longer supports Package Addition`,
+        );
+      }
+      const packageLeafName = expectedDefinition.name.split("/")[1];
+      if (!packageLeafName) {
+        throw new Error(
+          `Generation Record package has an invalid name: ${expectedDefinition.name}`,
+        );
+      }
+      candidates = [
+        definition.planPackageAddition({
+          context: options.context,
+          packageLeafName,
+          packagePath: expectedDefinition.path,
+        }),
+      ];
+    }
+    const contribution = candidates.find((candidate) =>
+      packageDefinitionsEqual(candidate.definition, expectedDefinition),
     );
-  }
-  const manifest: unknown = JSON.parse(readFileSync(manifestPath, "utf8"));
+    if (contribution === undefined) {
+      throw new Error(
+        `Generation Record cannot reproduce Package Definition ${expectedDefinition.name} at ${expectedDefinition.path}`,
+      );
+    }
+    const manifestPath = path.join(
+      options.context.targetDir,
+      expectedDefinition.path,
+      "package.json",
+    );
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    } catch (error) {
+      throw new Error(
+        `Package Addition requires manifest truth for ${expectedDefinition.path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!isRecord(manifest) || manifest.name !== expectedDefinition.name) {
+      throw new Error(
+        `Package Addition requires manifest truth for ${expectedDefinition.path}: expected name ${expectedDefinition.name}`,
+      );
+    }
+    manifestTruthByPackagePath.set(expectedDefinition.path, manifest);
+    return contribution;
+  });
+  const reconstructedCheckFacts = uniqueEnvironmentNeeds(
+    contributions.flatMap((contribution) => contribution.environmentNeeds),
+  ).map(checkEnvironmentNeedFact);
+  const reconstructedDeploymentFacts = uniqueEnvironmentNeeds(
+    contributions.flatMap(
+      (contribution) => contribution.deploymentEnvironmentNeeds ?? [],
+    ),
+  ).map(deploymentEnvironmentNeedFact);
+  const persistedCheckFacts = persistedEnvironmentNeeds.check.map(
+    checkEnvironmentNeedFact,
+  );
+  const persistedDeploymentFacts = persistedEnvironmentNeeds.deployment.map(
+    deploymentEnvironmentNeedFact,
+  );
   if (
-    typeof manifest !== "object" ||
-    manifest === null ||
-    Array.isArray(manifest) ||
-    (manifest as { name?: unknown }).name !== options.definition.name
+    JSON.stringify(reconstructedCheckFacts) !==
+      JSON.stringify(persistedCheckFacts) ||
+    JSON.stringify(reconstructedDeploymentFacts) !==
+      JSON.stringify(persistedDeploymentFacts)
   ) {
     throw new Error(
-      `Package Addition requires manifest truth for ${options.definition.path}: expected name ${options.definition.name}`,
+      "Package Addition requires persisted Environment Need facts to match the reproducible Project Projection",
     );
   }
-  const record = manifest as Record<string, unknown>;
-  const dependencyMaintenance = existingDependencyMaintenancePolicy(
-    options.context.targetDir,
-  );
-  const environmentNeeds = options.environmentNeeds.filter(
-    (need) =>
-      need.owner.kind === "package-boundary" &&
-      need.owner.path === options.definition.path,
-  );
-  const rust = environmentNeeds.some((need) => need.kind === "rust-toolchain");
-  const editorRecommendationsPath = path.join(
-    options.context.targetDir,
-    ".vscode/extensions.json",
-  );
-  const editorRecommendations = existsSync(editorRecommendationsPath)
-    ? (
-        JSON.parse(readFileSync(editorRecommendationsPath, "utf8")) as {
-          recommendations?: unknown;
-        }
-      ).recommendations
-    : [];
-  const existingExtensions = Array.isArray(editorRecommendations)
-    ? new Set(
-        editorRecommendations.filter(
-          (item): item is string => typeof item === "string",
-        ),
-      )
-    : new Set<string>();
-  const editorCapabilities: readonly EditorCustomizationCapability[] = rust
-    ? (["rust-tooling"] as const)
-    : [
-        "oxc-format-lint",
-        ...(existingExtensions.has("Vue.volar") ? (["vue"] as const) : []),
-        ...(existingExtensions.has("bradlc.vscode-tailwindcss")
-          ? (["tailwind"] as const)
-          : []),
-        ...(existingExtensions.has("vitest.explorer")
-          ? (["vitest"] as const)
-          : []),
-      ];
   return {
-    definition: options.definition,
-    manifest: record,
-    exposure: {
-      exports:
-        typeof record.exports === "object" && record.exports !== null
-          ? (record.exports as Record<string, unknown>)
-          : {},
-      imports:
-        typeof record.imports === "object" && record.imports !== null
-          ? (record.imports as Record<string, unknown>)
-          : {},
-    },
-    operations: [],
-    environmentNeeds,
-    foundation: {
-      toolchains: rust
-        ? { rust: { toolchain: "stable", components: ["rustfmt", "clippy"] } }
-        : {},
-      editorCapabilities,
-      dependencyMaintenance: {
-        ...dependencyMaintenance,
-      },
-    },
+    contributions,
+    manifestTruthByPackagePath,
+    deploymentEnvironmentNeeds: persistedEnvironmentNeeds.deployment,
+    generationRecord,
   };
 }
 
-/**
- * Dependabot is the Foundation-owned durable declaration of maintenance
- * coverage. Package Addition reads it back so rebuilding root policy cannot
- * silently discard a base repository's non-default directories.
- */
-function existingDependencyMaintenancePolicy(
-  targetDir: string,
-): DependencyMaintenancePolicy {
-  const dependabotPath = path.join(targetDir, ".github/dependabot.yml");
-  if (!existsSync(dependabotPath)) {
-    throw new Error(
-      "Package Addition requires maintenance truth: .github/dependabot.yml is missing",
-    );
-  }
-  const ecosystems: DependencyEcosystem[] = [];
-  const directories: Partial<Record<DependencyEcosystem, `/${string}`>> = {};
-  const extraDirectories: Partial<Record<DependencyEcosystem, `/${string}`[]>> =
-    {};
-  const supportedEcosystems = new Set<DependencyEcosystem>([
-    "npm",
-    "cargo",
-    "github-actions",
-    "docker",
-    "rust-toolchain",
-  ]);
-  let ecosystem: DependencyEcosystem | undefined;
-  for (const line of readFileSync(dependabotPath, "utf8").split("\n")) {
-    const ecosystemMatch = /^\s*- package-ecosystem: (\S+)\s*$/u.exec(line);
-    if (ecosystemMatch) {
-      if (!supportedEcosystems.has(ecosystemMatch[1] as DependencyEcosystem)) {
-        throw new Error(
-          `Package Addition requires supported Dependabot ecosystems: ${ecosystemMatch[1]}`,
-        );
-      }
-      ecosystem = ecosystemMatch[1] as DependencyEcosystem;
-      if (!ecosystems.includes(ecosystem)) ecosystems.push(ecosystem);
-      continue;
-    }
-    const directoryMatch = /^\s+directory: "?(\/[^"\s]*)"?\s*$/u.exec(line);
-    if (!directoryMatch || ecosystem === undefined) continue;
-    const directory = directoryMatch[1] as `/${string}`;
-    if (directories[ecosystem] === undefined) {
-      directories[ecosystem] = directory;
-    } else {
-      (extraDirectories[ecosystem] ??= []).push(directory);
+function packageDefinitionsEqual(
+  left: ProjectBlueprintV2["packages"][number],
+  right: ProjectBlueprintV2["packages"][number],
+): boolean {
+  return (
+    left.name === right.name &&
+    left.path === right.path &&
+    left.role === right.role
+  );
+}
+
+function packageLinkIntentsEqual(
+  left: NonNullable<ProjectBlueprintV2["packageLinkIntents"]>[number],
+  right: NonNullable<ProjectBlueprintV2["packageLinkIntents"]>[number],
+): boolean {
+  return (
+    left.consumerPackagePath === right.consumerPackagePath &&
+    left.providerPackagePath === right.providerPackagePath
+  );
+}
+
+function turboBoundaryTagsForContributions(
+  contributions: readonly PackageContribution[],
+): readonly ("app" | "library")[] {
+  const selectedTags = new Set<"app" | "library">();
+  for (const contribution of contributions) {
+    switch (contribution.definition.role) {
+      case "cli-tool":
+      case "runtime-service":
+        selectedTags.add("app");
+        break;
+      case "shared-library":
+        selectedTags.add("library");
+        break;
+      case "native-package":
+        break;
     }
   }
-  if (ecosystems.length === 0) {
-    throw new Error(
-      "Package Addition requires maintenance truth: .github/dependabot.yml has no update entries",
-    );
-  }
-  return {
-    ecosystems,
-    directories,
-    ...(Object.keys(extraDirectories).length === 0 ? {} : { extraDirectories }),
-    interval: "weekly",
-  };
+  return [...selectedTags];
 }
 
 function devcontainerDockerfileOperations(options: {
@@ -563,9 +838,29 @@ function foundationPlan(options: {
   readonly renderContributions?: readonly PackageContribution[];
   /** Focused deployment preparation recovered from durable Environment Need facts. */
   readonly existingDeploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
+  /** Current manifests used only to decide explicitly requested links. */
+  readonly manifestTruthByPackagePath?: ReadonlyMap<
+    string,
+    Readonly<Record<string, unknown>>
+  >;
+  readonly generationRecord?: GenerationRecord;
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
+  const generationRecord: GenerationRecord = options.generationRecord ?? {
+    schemaVersion: 1,
+    preset: options.definition.metadata.name,
+    templateVersion: "0.0.0",
+    toolchain: options.context.toolchain,
+    packages: options.contributions.map((contribution) => ({
+      path: contribution.definition.path,
+      definitionName: options.definition.metadata.name,
+      planningContribution:
+        options.mode === "initialization"
+          ? "planInitialization"
+          : "planPackageAddition",
+    })),
+  };
   const environmentNeeds = uniqueEnvironmentNeeds(
     options.contributions.flatMap((item) => item.environmentNeeds),
   );
@@ -667,15 +962,18 @@ function foundationPlan(options: {
     type: "module",
     scripts: {
       check: renderRootCheckCommand(),
-      boundaries: "node scripts/check-boundaries.ts",
+      boundaries: "node --conditions=source scripts/check-boundaries.ts",
       ...(hasDeploymentTask
         ? { "check:deployment": renderDeploymentCheckCommand() }
         : {}),
       fix: renderFixCommand(),
-      "format:check": "node scripts/run-root-owned-task.ts format:check",
-      "format:write": "node scripts/run-root-owned-task.ts format:write",
-      lint: "node scripts/run-root-owned-task.ts lint",
-      "lint:fix": "node scripts/run-root-owned-task.ts lint:fix",
+      "format:check":
+        "node --conditions=source scripts/run-root-owned-task.ts format:check",
+      "format:write":
+        "node --conditions=source scripts/run-root-owned-task.ts format:write",
+      lint: "node --conditions=source scripts/run-root-owned-task.ts lint",
+      "lint:fix":
+        "node --conditions=source scripts/run-root-owned-task.ts lint:fix",
       typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
@@ -701,48 +999,37 @@ function foundationPlan(options: {
       ? vuePnpmDependencyOverrides
       : {}),
   };
-  const requiresCoordinatedWorkspaceRefresh = true;
-  const workspaceOperation: RenderOperation =
-    requiresCoordinatedWorkspaceRefresh
-      ? {
-          kind: "writeTextTemplate",
-          source: templateSources.foundation,
-          from: "pnpm-workspace.dynamic.txt",
-          to: "pnpm-workspace.yaml",
-          replacements: {
-            WORKSPACE_PACKAGE_GLOBS: workspacePackageGlobs
-              .map((glob) => `  - ${glob}`)
-              .join("\n"),
-            DEPENDENCY_CATALOG: Object.entries(dependencyCatalog)
-              .toSorted(([left], [right]) => left.localeCompare(right))
-              .map(
-                ([name, version]) =>
-                  `  ${JSON.stringify(name)}: ${String(version)}`,
-              )
-              .join("\n"),
-            DEPENDENCY_OVERRIDES_SECTION:
-              Object.keys(dependencyOverrides).length === 0
-                ? ""
-                : [
-                    "",
-                    "overrides:",
-                    ...Object.entries(dependencyOverrides)
-                      .toSorted(([left], [right]) => left.localeCompare(right))
-                      .map(
-                        ([dependency, version]) =>
-                          `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
-                      ),
-                    "",
-                  ].join("\n"),
-          },
-          ...(options.mode === "addition" ? { overwrite: true } : {}),
-        }
-      : {
-          kind: "copyFile",
-          source: templateSources.foundation,
-          from: "pnpm-workspace.yaml",
-          to: "pnpm-workspace.yaml",
-        };
+  const workspaceOperation: RenderOperation = {
+    kind: "writeTextTemplate",
+    source: templateSources.foundation,
+    from: "pnpm-workspace.dynamic.txt",
+    to: "pnpm-workspace.yaml",
+    replacements: {
+      WORKSPACE_PACKAGE_GLOBS: workspacePackageGlobs
+        .map((glob) => `  - ${glob}`)
+        .join("\n"),
+      DEPENDENCY_CATALOG: Object.entries(dependencyCatalog)
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(
+          ([name, version]) => `  ${JSON.stringify(name)}: ${String(version)}`,
+        )
+        .join("\n"),
+      DEPENDENCY_OVERRIDES_SECTION:
+        Object.keys(dependencyOverrides).length === 0
+          ? ""
+          : [
+              "",
+              "overrides:",
+              ...Object.entries(dependencyOverrides)
+                .toSorted(([left], [right]) => left.localeCompare(right))
+                .map(
+                  ([dependency, version]) =>
+                    `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
+                ),
+              "",
+            ].join("\n"),
+    },
+  };
   const workflowOperation: RenderOperation = {
     kind: "writeTextTemplate",
     source: templateSources.foundation,
@@ -753,7 +1040,6 @@ function foundationPlan(options: {
       deploymentEnvironmentNeeds,
       hasDeploymentTask,
     }),
-    ...(options.mode === "addition" ? { overwrite: true } : {}),
   };
   const workflowOperations: RenderOperation[] = [
     workflowOperation,
@@ -765,15 +1051,28 @@ function foundationPlan(options: {
       replacements: projectDependabotTemplateReplacements(
         dependencyMaintenancePolicy,
       ),
-      ...(options.mode === "addition" ? { overwrite: true } : {}),
     },
   ];
   const projectLinkPlan = planExplicitProjectLinks({
     blueprint: options.blueprint,
     contributions: options.contributions,
+    ...(options.manifestTruthByPackagePath === undefined
+      ? {}
+      : {
+          manifestTruthByPackagePath: options.manifestTruthByPackagePath,
+        }),
   });
+  const turboBoundaryTags = turboBoundaryTagsForContributions(
+    options.contributions,
+  );
   const initializationFoundationOperations: RenderOperation[] = [
-    { kind: "writeJson", to: "package.json", value: rootManifest },
+    {
+      kind: "writeJson",
+      to: "package.json",
+      value: rootManifest,
+      keyOrder: packageManifestKeyOrder,
+      nestedKeyOrder: packageConditionKeyOrder,
+    },
     workspaceOperation,
     {
       kind: "copyFile",
@@ -787,6 +1086,14 @@ function foundationPlan(options: {
       from: "turbo.json",
       to: "turbo.json",
     },
+    ...turboBoundaryTags.map(
+      (tag): RenderOperation => ({
+        kind: "mergeJsonTemplate",
+        source: templateSources.foundation,
+        from: `turbo-boundary-tags/${tag}.json`,
+        to: "turbo.json",
+      }),
+    ),
     {
       kind: "copyFile",
       source: templateSources.foundation,
@@ -912,48 +1219,19 @@ function foundationPlan(options: {
     {
       kind: "writeJson",
       to: ".template/generation.json",
-      value: {
-        preset: options.definition.metadata.name,
-        templateVersion: "0.0.0",
-        toolchain: options.context.toolchain,
-      },
+      value: generationRecord,
     },
   ];
-  const refreshFoundationOperation = (
-    operation: RenderOperation,
-  ): RenderOperation => {
-    switch (operation.kind) {
-      case "copyFile":
-      case "writeTextTemplate":
-      case "writeTextFromFragments":
-      case "writeJson":
-        return { ...operation, overwrite: true };
-      case "mergeJson":
-      case "replaceAnchors":
-      case "setExecutable":
-      case "writeText":
-        return operation;
-    }
-  };
-  const plannedFoundationOperations: RenderOperation[] =
-    options.mode === "addition"
-      ? initializationFoundationOperations
-          .filter(
-            (operation) =>
-              !(
-                "to" in operation &&
-                operation.to === ".template/generation.json"
-              ),
-          )
-          .map(refreshFoundationOperation)
-      : initializationFoundationOperations;
+  const plannedFoundationOperations = initializationFoundationOperations;
   const linkOperations: RenderOperation[] = [
-    ...projectLinkPlan.manifestDependenciesByPackagePath,
-  ].map(([packagePath, dependencies]) => ({
+    ...projectLinkPlan.manifestPatchesByPackagePath,
+  ].map(([packagePath, manifestPatch]) => ({
     kind: "mergeJson" as const,
     to: `${packagePath}/package.json`,
-    value: { dependencies },
+    value: manifestPatch,
     multilineArrays: ["files"],
+    keyOrder: packageManifestKeyOrder,
+    nestedKeyOrder: packageConditionKeyOrder,
   }));
   const contributionProvenance = {
     definitionName: options.definition.metadata.name,
@@ -990,7 +1268,12 @@ function foundationPlan(options: {
         item.operations.map((operation) =>
           operation.kind === "writeJson" &&
           operation.to.endsWith("/package.json")
-            ? { ...operation, value: item.manifest }
+            ? {
+                ...operation,
+                value: item.manifest,
+                keyOrder: packageManifestKeyOrder,
+                nestedKeyOrder: packageConditionKeyOrder,
+              }
             : operation,
         ),
       )
@@ -1002,6 +1285,23 @@ function foundationPlan(options: {
       withProvenance(operation, foundationProvenance),
     ),
   ];
+  const reconciliation: readonly ProjectProjectionReconciliation[] = [
+    { path: "turbo.json", driver: "structured" },
+    { path: ".devcontainer/devcontainer.json", driver: "structured" },
+    {
+      path: ".vscode/extensions.json",
+      driver: "structured",
+      identitySets: [
+        {
+          location: "/recommendations",
+          identity: { kind: "self" },
+        },
+      ],
+    },
+    { path: ".template/blueprint.json", driver: "canonical" },
+    { path: environmentNeedsPath, driver: "canonical" },
+    { path: ".template/generation.json", driver: "canonical" },
+  ];
   return {
     definitionName: options.definition.metadata.name,
     plannerSourceFile: options.definition.plannerSourceFile,
@@ -1010,12 +1310,9 @@ function foundationPlan(options: {
         ? "planPackageAddition"
         : "planInitialization",
     blueprint: options.blueprint,
-    generationRecord: {
-      preset: options.definition.metadata.name,
-      templateVersion: "0.0.0",
-      toolchain: options.context.toolchain,
-    },
+    generationRecord,
     operations,
+    reconciliation,
     environmentNeeds,
     deploymentEnvironmentNeeds,
     manifests: [
@@ -1038,13 +1335,14 @@ export function planGeneratedRepositoryInitialization(options: {
   readonly context: BuiltInGenerationContext;
 }): GeneratedRepositoryPlan {
   const blueprint = options.definition.blueprint(options.context);
+  const contributions = options.definition.planInitializationContributions?.(
+    options.context,
+  ) ?? [options.definition.planInitialization(options.context)];
   return foundationPlan({
     definition: options.definition,
     context: options.context,
     blueprint,
-    contributions: options.definition.planInitializationContributions?.(
-      options.context,
-    ) ?? [options.definition.planInitialization(options.context)],
+    contributions,
     mode: "initialization",
   });
 }
@@ -1057,7 +1355,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
   readonly packagePath?: string;
   /** Existing consumers that explicitly import the newly added provider. */
   readonly linkFrom?: readonly string[];
-}): GeneratedRepositoryPlan {
+}): GeneratedRepositoryPackageAdditionPlan {
   assertProjectBlueprintV2(options.blueprint);
   if (!options.definition.planPackageAddition)
     throw new Error(
@@ -1079,64 +1377,157 @@ export function planGeneratedRepositoryPackageAddition(options: {
     packageLeafName: options.packageLeafName,
     packagePath,
   });
+  const requestedPackageLinkIntents = [...new Set(options.linkFrom ?? [])].map(
+    (consumerPackagePath) => ({
+      consumerPackagePath,
+      providerPackagePath: contribution.definition.path,
+    }),
+  );
   const conflictingPackage = options.blueprint.packages.find(
     (existing) =>
       existing.name === contribution.definition.name ||
       existing.path === contribution.definition.path,
   );
   if (conflictingPackage !== undefined) {
+    const isExactPackageDefinition = packageDefinitionsEqual(
+      conflictingPackage,
+      contribution.definition,
+    );
+    const existingPackageLinkIntents =
+      options.blueprint.packageLinkIntents ?? [];
+    const missingPackageLinkIntent = requestedPackageLinkIntents.find(
+      (requested) =>
+        !existingPackageLinkIntents.some((existing) =>
+          packageLinkIntentsEqual(existing, requested),
+        ),
+    );
+    if (isExactPackageDefinition && missingPackageLinkIntent === undefined) {
+      const existing = readExistingPackageAdditionState(options);
+      const plan = foundationPlan({
+        definition: options.definition,
+        context: options.context,
+        blueprint: options.blueprint,
+        contributions: existing.contributions,
+        renderContributions: [],
+        existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+        generationRecord: existing.generationRecord,
+        mode: "addition",
+      });
+      const currentProjection = foundationPlan({
+        definition: options.definition,
+        context: options.context,
+        blueprint: options.blueprint,
+        contributions: existing.contributions,
+        existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+        generationRecord: existing.generationRecord,
+        mode: "initialization",
+      });
+      return {
+        ...plan,
+        operations: [],
+        projectProjections: {
+          before: {
+            operations: currentProjection.operations,
+            reconciliation: currentProjection.reconciliation,
+          },
+          after: {
+            operations: currentProjection.operations,
+            reconciliation: currentProjection.reconciliation,
+          },
+          preconditions: [],
+        },
+      };
+    }
+    if (isExactPackageDefinition) {
+      throw new Error(
+        `Package Addition conflicts because requested Package Link Intent ${missingPackageLinkIntent!.consumerPackagePath} -> ${missingPackageLinkIntent!.providerPackagePath} does not already exist`,
+      );
+    }
     throw new Error(
-      `Package Addition conflicts with existing Package Definition ${conflictingPackage.name} at ${conflictingPackage.path}`,
+      `Package Addition conflicts with existing Package Definition ${conflictingPackage.name} at ${conflictingPackage.path} (${conflictingPackage.role}); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
     );
   }
   const blueprint: ProjectBlueprintV2 = {
     ...options.blueprint,
     packages: [...options.blueprint.packages, contribution.definition],
-    ...(options.linkFrom && options.linkFrom.length > 0
+    ...(requestedPackageLinkIntents.length > 0
       ? {
           packageLinkIntents: [
             ...(options.blueprint.packageLinkIntents ?? []),
-            ...[...new Set(options.linkFrom)].map((consumerPackagePath) => ({
-              consumerPackagePath,
-              providerPackagePath: contribution.definition.path,
-            })),
+            ...requestedPackageLinkIntents,
           ],
         }
       : {}),
   };
   assertProjectBlueprintV2(blueprint);
-  const persistedEnvironmentNeeds = readPersistedEnvironmentNeeds(
-    options.context.targetDir,
-  );
-  const existingContributions = options.blueprint.packages.map((definition) =>
-    existingPackageContribution({
-      context: options.context,
-      definition,
-      environmentNeeds: persistedEnvironmentNeeds.check,
-    }),
-  );
-  if (
-    existingContributions.length !== options.blueprint.packages.length ||
-    existingContributions.some(
-      (existing) =>
-        !options.blueprint.packages.some(
-          (definition) =>
-            definition.path === existing.definition.path &&
-            definition.name === existing.definition.name,
-        ),
-    )
-  ) {
-    throw new Error(
-      "Migration Package Addition check Contributions must match the current Project Blueprint",
-    );
-  }
-  return foundationPlan({
+  const existing = readExistingPackageAdditionState(options);
+  const generationRecord: GenerationRecord = {
+    ...existing.generationRecord,
+    packages: [
+      ...existing.generationRecord.packages,
+      {
+        path: contribution.definition.path,
+        definitionName: options.definition.metadata.name,
+        planningContribution: "planPackageAddition",
+      },
+    ],
+  };
+  const beforeProjection = foundationPlan({
+    definition: options.definition,
+    context: options.context,
+    blueprint: options.blueprint,
+    contributions: existing.contributions,
+    existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+    generationRecord: existing.generationRecord,
+    mode: "initialization",
+  });
+  const afterProjection = foundationPlan({
     definition: options.definition,
     context: options.context,
     blueprint,
-    contributions: [...existingContributions, contribution],
+    contributions: [...existing.contributions, contribution],
+    existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+    ...(requestedPackageLinkIntents.length === 0
+      ? {}
+      : {
+          manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
+        }),
+    generationRecord,
+    mode: "initialization",
+  });
+  const plan = foundationPlan({
+    definition: options.definition,
+    context: options.context,
+    blueprint,
+    contributions: [...existing.contributions, contribution],
     renderContributions: [contribution],
-    existingDeploymentEnvironmentNeeds: persistedEnvironmentNeeds.deployment,
+    existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+    ...(requestedPackageLinkIntents.length === 0
+      ? {}
+      : {
+          manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
+        }),
+    generationRecord,
     mode: "addition",
   });
+  return {
+    ...plan,
+    projectProjections: {
+      before: {
+        operations: beforeProjection.operations,
+        reconciliation: beforeProjection.reconciliation,
+      },
+      after: {
+        operations: afterProjection.operations,
+        reconciliation: afterProjection.reconciliation,
+      },
+      preconditions: [
+        {
+          path: contribution.definition.path,
+          kind: "must-not-exist",
+          reason: `Package Path ${contribution.definition.path} already exists and cannot be used for a new Package Addition`,
+        },
+      ],
+    },
+  };
 }

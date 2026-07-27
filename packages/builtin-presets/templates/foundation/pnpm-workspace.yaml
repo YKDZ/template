@@ -3,8 +3,9 @@ packages:
   - packages/*
 
 nodeLinker: isolated
+preferSymlinkedExecutables: true
 autoInstallPeers: false
-injectWorkspacePackages: true
+injectWorkspacePackages: false
 dedupeInjectedDeps: false
 
 syncInjectedDepsAfterScripts:

@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+
+import { execa } from "execa";
 
 import {
   createGenerationContext,
@@ -10,12 +13,9 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
-import {
-  renderNewProject,
-  renderProjectAtomically,
-} from "@ykdz/template-core/renderer";
-import { execa } from "execa";
+} from "#template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
+import { renderNewProject } from "#template-core/renderer";
 
 type GeneratedScenarioSet =
   | "init"
@@ -69,6 +69,12 @@ type GeneratedCommandRunner = (
   options: { readonly cwd: string; readonly stdio?: "inherit" },
 ) => Promise<unknown>;
 
+type FocusedProviderManifest = {
+  readonly name: string;
+  readonly sourceTarget: string;
+  readonly defaultTarget: string;
+};
+
 const qualityTaskNames = [
   "boundaries",
   "format:check",
@@ -85,6 +91,182 @@ export function generatedScenarioInstallArgs(
   workspace: string,
 ): readonly string[] {
   return ["install", "--store-dir", path.join(workspace, ".pnpm-store")];
+}
+
+function packageTargetPath(options: {
+  readonly packageRoot: string;
+  readonly target: unknown;
+  readonly condition: "source" | "default";
+}): string {
+  if (typeof options.target !== "string" || !options.target.startsWith("./")) {
+    throw new Error(
+      `root ${options.condition} export must be a package-relative string`,
+    );
+  }
+  const resolved = path.resolve(options.packageRoot, options.target);
+  const relative = path.relative(options.packageRoot, resolved);
+  if (
+    relative === "" ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(
+      `root ${options.condition} export escapes the provider Package Boundary`,
+    );
+  }
+  return resolved;
+}
+
+async function readFocusedProviderManifest(
+  providerRoot: string,
+): Promise<FocusedProviderManifest> {
+  const manifest = JSON.parse(
+    await readFile(path.join(providerRoot, "package.json"), "utf8"),
+  ) as {
+    readonly name?: unknown;
+    readonly exports?: { readonly "."?: unknown };
+  };
+  if (typeof manifest.name !== "string" || manifest.name.length === 0) {
+    throw new Error("provider package manifest must declare a package name");
+  }
+  const rootExport = manifest.exports?.["."];
+  if (
+    typeof rootExport !== "object" ||
+    rootExport === null ||
+    Array.isArray(rootExport)
+  ) {
+    throw new Error(
+      "provider package manifest must declare conditional root exports",
+    );
+  }
+  const conditions = rootExport as Record<string, unknown>;
+  return {
+    name: manifest.name,
+    sourceTarget: packageTargetPath({
+      packageRoot: providerRoot,
+      target: conditions.source,
+      condition: "source",
+    }),
+    defaultTarget: packageTargetPath({
+      packageRoot: providerRoot,
+      target: conditions.default,
+      condition: "default",
+    }),
+  };
+}
+
+async function readPackageName(packageRoot: string): Promise<string> {
+  const manifest = JSON.parse(
+    await readFile(path.join(packageRoot, "package.json"), "utf8"),
+  ) as { readonly name?: unknown };
+  if (typeof manifest.name !== "string" || manifest.name.length === 0) {
+    throw new Error("consumer package manifest must declare a package name");
+  }
+  return manifest.name;
+}
+
+function commandStdout(result: unknown): string {
+  return typeof result === "object" &&
+    result !== null &&
+    "stdout" in result &&
+    typeof result.stdout === "string"
+    ? result.stdout.trim()
+    : "";
+}
+
+/**
+ * Proves one focused Package Link consumes the current provider manifest in
+ * both source and built-distribution modes.
+ */
+export async function runFocusedProviderConsumptionProbe(options: {
+  readonly scenarioLabel: string;
+  readonly projectDir: string;
+  readonly consumerPackagePath: string;
+  readonly providerPackagePath: string;
+  readonly run?: GeneratedCommandRunner;
+}): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
+  const consumerRoot = path.join(
+    options.projectDir,
+    options.consumerPackagePath,
+  );
+  const providerRoot = path.join(
+    options.projectDir,
+    options.providerPackagePath,
+  );
+  const diagnostic = `${options.scenarioLabel} (consumer ${options.consumerPackagePath}, provider ${options.providerPackagePath})`;
+  let consumerName: string;
+  let provider: FocusedProviderManifest;
+  try {
+    [consumerName, provider] = await Promise.all([
+      readPackageName(consumerRoot),
+      readFocusedProviderManifest(providerRoot),
+    ]);
+  } catch (error) {
+    throw new Error(
+      `Focused provider probe could not read manifests for ${diagnostic}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  const id = randomUUID().replaceAll("-", "");
+  const exportName = `templateFocusedExport${id}`;
+  const marker = `focused-provider-marker:${id}`;
+  const probeName = `.focused-provider-probe-${id}.mjs`;
+  const probePath = path.join(consumerRoot, probeName);
+  try {
+    const originalSource = await readFile(provider.sourceTarget, "utf8");
+    await Promise.all([
+      writeFile(
+        provider.sourceTarget,
+        `${originalSource}${originalSource.endsWith("\n") ? "" : "\n"}export const ${exportName} = ${JSON.stringify(marker)};\n`,
+      ),
+      writeFile(
+        probePath,
+        [
+          `import { ${exportName} } from ${JSON.stringify(provider.name)};`,
+          `console.log(${exportName});`,
+          "",
+        ].join("\n"),
+      ),
+    ]);
+    const sourceResult = await run("node", ["--conditions=source", probeName], {
+      cwd: consumerRoot,
+    });
+    if (commandStdout(sourceResult) !== marker) {
+      throw new Error("source probe did not print the injected marker");
+    }
+
+    await run(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        "build",
+        `--filter=${consumerName}`,
+        `--filter=${provider.name}`,
+        "--force",
+      ],
+      { cwd: options.projectDir, stdio: "inherit" },
+    );
+    await readFile(provider.defaultTarget);
+    await rm(provider.sourceTarget);
+
+    const defaultResult = await run("node", [probeName], {
+      cwd: consumerRoot,
+    });
+    if (commandStdout(defaultResult) !== marker) {
+      throw new Error("default probe did not print the built marker");
+    }
+  } catch (error) {
+    throw new Error(
+      `Focused provider consumption failed for ${diagnostic} (${provider.name}): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    await rm(probePath, { force: true });
+  }
 }
 
 function expectedTaskIds(options: {
@@ -248,16 +430,19 @@ export async function runRequiredDeploymentQualityGate(options: {
   });
 }
 
-async function requireDockerForDeploymentGate(
-  workspace: string,
+async function assertDockerAvailableForDeploymentGate(
+  options: GeneratedScenarioRunOptions,
 ): Promise<void> {
+  const run =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
   try {
-    await execa("docker", ["version", "--format", "{{.Server.Version}}"], {
-      cwd: workspace,
+    await run("docker", ["version", "--format", "{{.Server.Version}}"], {
+      cwd: options.workspace,
     });
   } catch (error) {
     throw new Error(
-      `Docker is required for the deployment gate; check:deployment was not executed: ${error instanceof Error ? error.message : String(error)}`,
+      `Docker is required for the deployment scenario set; check:deployment was not executed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -291,28 +476,32 @@ async function runScenario(
     operations: [...initialization.operations],
   });
 
-  const finalPlan =
-    scenario.addition === undefined
-      ? initialization
-      : planGeneratedRepositoryPackageAddition({
-          definition: scenario.addition,
-          context,
-          blueprint: initialization.blueprint,
-          packageLeafName: `fixture-${scenario.addition.metadata.name}`,
-          ...(scenario.linkFrom === undefined
-            ? {}
-            : { linkFrom: scenario.linkFrom }),
-        });
+  let finalPlan: GeneratedRepositoryPlan = initialization;
   if (scenario.addition !== undefined) {
+    const additionPlan = planGeneratedRepositoryPackageAddition({
+      definition: scenario.addition,
+      context,
+      blueprint: initialization.blueprint,
+      packageLeafName: `fixture-${scenario.addition.metadata.name}`,
+      ...(scenario.linkFrom === undefined
+        ? {}
+        : { linkFrom: scenario.linkFrom }),
+    });
+    finalPlan = additionPlan;
     await checks.validatePlanSources({
       definition: scenario.addition,
-      plan: finalPlan,
+      plan: additionPlan,
     });
-    checks.validatePlanDependencyCatalog(finalPlan);
-    await renderProjectAtomically({
+    checks.validatePlanDependencyCatalog(additionPlan);
+    const result = await reconcileAndApplyProjectProjections({
       targetRoot: projectDir,
-      operations: [...finalPlan.operations],
+      ...additionPlan.projectProjections,
     });
+    if (!result.ok) {
+      throw new Error(
+        `Generated Package Addition reconciliation conflicted: ${JSON.stringify(result.conflicts)}`,
+      );
+    }
   }
 
   options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
@@ -358,6 +547,27 @@ async function runScenario(
     cwd: projectDir,
     stdio: "inherit",
   });
+  if (mode === "focused") {
+    const initialPackagePaths = new Set(
+      initialization.blueprint.packages.map((item) => item.path),
+    );
+    const addedProviders = finalPlan.blueprint.packages.filter(
+      (item) => !initialPackagePaths.has(item.path),
+    );
+    const consumerPackagePath = scenario.linkFrom?.[0];
+    if (consumerPackagePath === undefined || addedProviders.length !== 1) {
+      throw new Error(
+        `Focused scenario ${scenario.label} did not identify exactly one consumer and added provider`,
+      );
+    }
+    await runFocusedProviderConsumptionProbe({
+      scenarioLabel: scenario.label,
+      projectDir,
+      consumerPackagePath,
+      providerPackagePath: addedProviders[0]!.path,
+      run,
+    });
+  }
   if (mode === "deployment") {
     await runRequiredDeploymentQualityGate({
       plan: finalPlan,
@@ -373,7 +583,7 @@ export async function runGeneratedScenarioSet(
   options: GeneratedScenarioRunOptions,
 ): Promise<void> {
   if (set === "deployment") {
-    await requireDockerForDeploymentGate(options.workspace);
+    await assertDockerAvailableForDeploymentGate(options);
   }
   const checks = await sourceOnlyRegistryChecks();
   for (const scenario of await generatedScenariosFor(set)) {
