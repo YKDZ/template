@@ -9,6 +9,8 @@ import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
+  ensureFixtureDependencies,
+  normalizedFixtureDependencyInstallationPlan,
   type FixtureCommandRunner,
 } from "../../kernel/index.ts";
 
@@ -148,6 +150,7 @@ export function normalizedFocusedPackageLinkPlan(
       rootExport: rootExport ?? null,
     },
     intent,
+    dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     probe: {
       sourceCondition: "source",
       build: {
@@ -273,6 +276,7 @@ function commandStdout(result: unknown): string {
 export async function executeFocusedPackageLink(options: {
   readonly scenarioLabel: string;
   readonly projectDir: string;
+  readonly fixtureWorkspace: string;
   readonly consumerPackagePath: string;
   readonly providerPackagePath: string;
   readonly run?: FixtureCommandRunner;
@@ -280,6 +284,11 @@ export async function executeFocusedPackageLink(options: {
   const run =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
+  await ensureFixtureDependencies({
+    projectDir: options.projectDir,
+    fixtureWorkspace: options.fixtureWorkspace,
+    run,
+  });
   const consumerRoot = path.join(
     options.projectDir,
     options.consumerPackagePath,

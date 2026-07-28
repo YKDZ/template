@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -84,54 +92,74 @@ function deploymentPlan() {
 
 describe("deployment quality gate", () => {
   it("owns the normalized Deployment Quality contract and complete executor", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "deployment-contract-"));
     const plan = deploymentPlan();
     const deployment = deriveDeploymentQualityPlanInput(plan);
-    expect(deployment).toBeDefined();
-    expect(normalizedDeploymentQualityPlan(deployment!)).toMatchObject({
-      gate: "deployment-quality",
-      executionResources: ["docker"],
-      generatedDeployment: {
-        command: "pnpm",
-        args: ["run", "check:deployment"],
-      },
-    });
-    await expect(
-      deriveDeploymentQualityContractIdentity(deployment!),
-    ).resolves.toMatch(/^[0-9a-f]{64}$/u);
+    const projectDir = path.join(root, "project");
+    const fixtureWorkspace = path.join(root, "workspace");
+    try {
+      expect(deployment).toBeDefined();
+      expect(normalizedDeploymentQualityPlan(deployment!)).toMatchObject({
+        gate: "deployment-quality",
+        executionResources: ["docker"],
+        dependencyInstallation: {
+          command: "pnpm",
+          args: ["install", "--store-dir", "{fixture-workspace}/.pnpm-store"],
+        },
+        generatedDeployment: {
+          command: "pnpm",
+          args: ["run", "check:deployment"],
+        },
+      });
+      await expect(
+        deriveDeploymentQualityContractIdentity(deployment!),
+      ).resolves.toMatch(/^[0-9a-f]{64}$/u);
 
-    const calls: Array<{ command: string; args: readonly string[] }> = [];
-    await executeDeploymentQuality({
-      deployment: deployment!,
-      projectDir: "/tmp/deployment-quality-gate",
-      run: async (command, args) => {
-        calls.push({ command, args });
-        return args.includes("--dry-run=json")
-          ? {
-              stdout: JSON.stringify({
-                tasks: plan.manifests.flatMap((manifest) =>
-                  typeof manifest.name === "string" &&
-                  typeof (manifest.scripts as Record<string, unknown> | null)
-                    ?.deployment === "string"
-                    ? [{ taskId: `${manifest.name}#deployment` }]
-                    : [],
-                ),
-              }),
-            }
-          : {};
-      },
-    });
+      const calls: Array<{ command: string; args: readonly string[] }> = [];
+      await executeDeploymentQuality({
+        deployment: deployment!,
+        projectDir,
+        fixtureWorkspace,
+        run: async (command, args) => {
+          calls.push({ command, args });
+          return args.includes("--dry-run=json")
+            ? {
+                stdout: JSON.stringify({
+                  tasks: plan.manifests.flatMap((manifest) =>
+                    typeof manifest.name === "string" &&
+                    typeof (manifest.scripts as Record<string, unknown> | null)
+                      ?.deployment === "string"
+                      ? [{ taskId: `${manifest.name}#deployment` }]
+                      : [],
+                  ),
+                }),
+              }
+            : {};
+        },
+      });
 
-    expect(calls).toEqual([
-      {
-        command: "pnpm",
-        args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-      },
-      {
-        command: "docker",
-        args: ["version", "--format", "{{.Server.Version}}"],
-      },
-      { command: "pnpm", args: ["run", "check:deployment"] },
-    ]);
+      expect(calls).toEqual([
+        {
+          command: "pnpm",
+          args: [
+            "install",
+            "--store-dir",
+            path.join(fixtureWorkspace, ".pnpm-store"),
+          ],
+        },
+        {
+          command: "pnpm",
+          args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
+        },
+        {
+          command: "docker",
+          args: ["version", "--format", "{{.Server.Version}}"],
+        },
+        { command: "pnpm", args: ["run", "check:deployment"] },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("establishes Root proof for real matrix-derived Deployment evidence and skips every warm executor", async () => {
@@ -156,6 +184,25 @@ describe("deployment quality gate", () => {
         if (command === "git") {
           return await execa(command, [...args], options);
         }
+        if (command === "pnpm" && args[0] === "install") {
+          await mkdir(path.join(options.cwd, "node_modules"), {
+            recursive: true,
+          });
+          await writeFile(
+            path.join(options.cwd, "pnpm-lock.yaml"),
+            "fixture-created: true\n",
+          );
+          return {};
+        }
+        if (command === "pnpm") {
+          try {
+            await access(path.join(options.cwd, "node_modules"));
+          } catch {
+            throw new Error(
+              "Local package.json exists, but node_modules missing",
+            );
+          }
+        }
         if (args.includes("--dry-run=json")) {
           return {
             stdout: JSON.stringify({
@@ -175,6 +222,7 @@ describe("deployment quality gate", () => {
         return {};
       };
     const coldCommands: Command[] = [];
+    const deploymentMissCommands: Command[] = [];
     const warmCommands: Command[] = [];
     const coldEvents: FixtureEvidenceLifecycleEvent[] = [];
     const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
@@ -199,6 +247,21 @@ describe("deployment quality gate", () => {
           recordLifecycle: (event) => {
             coldEvents.push(event);
           },
+        },
+      });
+      await rm(path.join(evidenceRoot, "deployment-quality"), {
+        recursive: true,
+        force: true,
+      });
+      await runGeneratedScenarioSet("deployment", {
+        workspace: path.join(root, "deployment-miss"),
+        run: createRunner(deploymentMissCommands),
+        scheduling: { concurrency: 4 },
+        evidence: {
+          storage,
+          clock,
+          writeEnabled: true,
+          producerCommit: "deployment-miss",
         },
       });
       await runGeneratedScenarioSet("deployment", {
@@ -226,7 +289,30 @@ describe("deployment quality gate", () => {
       expect(
         coldCommands.filter(({ command }) => command === "docker"),
       ).toHaveLength(deploymentCommands.length);
+      expect(
+        coldCommands.filter(
+          ({ command, args }) => command === "pnpm" && args[0] === "install",
+        ),
+      ).toHaveLength(deploymentCommands.length);
       expect(maxActiveDocker).toBe(1);
+      const deploymentMissExecutions = deploymentMissCommands.filter(
+        ({ command, args }) =>
+          command === "pnpm" &&
+          args[0] === "run" &&
+          args[1] === "check:deployment",
+      );
+      expect(deploymentMissExecutions).toHaveLength(deploymentCommands.length);
+      expect(
+        deploymentMissCommands.filter(
+          ({ command, args }) => command === "pnpm" && args[0] === "install",
+        ),
+      ).toHaveLength(deploymentMissExecutions.length);
+      expect(
+        deploymentMissCommands.filter(
+          ({ command, args }) =>
+            command === "pnpm" && args[0] === "run" && args[1] === "check",
+        ),
+      ).toEqual([]);
       expect(warmCommands.filter(({ command }) => command !== "git")).toEqual(
         [],
       );
@@ -322,67 +408,86 @@ describe("deployment quality gate", () => {
   });
 
   it("fails explicitly when Docker is unavailable instead of reporting a semantic skip", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "deployment-docker-"));
     const plan = deploymentPlan();
-    await expect(
-      executeDeploymentQuality({
-        deployment: deriveDeploymentQualityPlanInput(plan)!,
-        projectDir: "/tmp/deployment-quality-gate",
-        run: async (command, args) => {
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: plan.manifests.flatMap((manifest) =>
-                  typeof manifest.name === "string" &&
-                  typeof (manifest.scripts as Record<string, unknown> | null)
-                    ?.deployment === "string"
-                    ? [{ taskId: `${manifest.name}#deployment` }]
-                    : [],
-                ),
-              }),
-            };
-          }
-          expect(command).toBe("docker");
-          throw new Error("docker socket unavailable");
-        },
-      }),
-    ).rejects.toThrow(/Docker is required.*check:deployment was not executed/u);
+    try {
+      await expect(
+        executeDeploymentQuality({
+          deployment: deriveDeploymentQualityPlanInput(plan)!,
+          projectDir: path.join(root, "project"),
+          fixtureWorkspace: root,
+          run: async (command, args) => {
+            if (args[0] === "install") return {};
+            if (args.includes("--dry-run=json")) {
+              return {
+                stdout: JSON.stringify({
+                  tasks: plan.manifests.flatMap((manifest) =>
+                    typeof manifest.name === "string" &&
+                    typeof (manifest.scripts as Record<string, unknown> | null)
+                      ?.deployment === "string"
+                      ? [{ taskId: `${manifest.name}#deployment` }]
+                      : [],
+                  ),
+                }),
+              };
+            }
+            expect(command).toBe("docker");
+            throw new Error("docker socket unavailable");
+          },
+        }),
+      ).rejects.toThrow(
+        /Docker is required.*check:deployment was not executed/u,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("runs the generated deployment gate after Docker availability is confirmed", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "deployment-success-"));
     const plan = deploymentPlan();
     const calls: Array<{ command: string; args: readonly string[] }> = [];
-    await executeDeploymentQuality({
-      deployment: deriveDeploymentQualityPlanInput(plan)!,
-      projectDir: "/tmp/deployment-quality-gate",
-      run: async (command, args) => {
-        calls.push({ command, args });
-        return args.includes("--dry-run=json")
-          ? {
-              stdout: JSON.stringify({
-                tasks: plan.manifests.flatMap((manifest) =>
-                  typeof manifest.name === "string" &&
-                  typeof (manifest.scripts as Record<string, unknown> | null)
-                    ?.deployment === "string"
-                    ? [{ taskId: `${manifest.name}#deployment` }]
-                    : [],
-                ),
-              }),
-            }
-          : {};
-      },
-    });
+    try {
+      await executeDeploymentQuality({
+        deployment: deriveDeploymentQualityPlanInput(plan)!,
+        projectDir: path.join(root, "project"),
+        fixtureWorkspace: root,
+        run: async (command, args) => {
+          calls.push({ command, args });
+          return args.includes("--dry-run=json")
+            ? {
+                stdout: JSON.stringify({
+                  tasks: plan.manifests.flatMap((manifest) =>
+                    typeof manifest.name === "string" &&
+                    typeof (manifest.scripts as Record<string, unknown> | null)
+                      ?.deployment === "string"
+                      ? [{ taskId: `${manifest.name}#deployment` }]
+                      : [],
+                  ),
+                }),
+              }
+            : {};
+        },
+      });
 
-    expect(calls).toEqual([
-      {
-        command: "pnpm",
-        args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-      },
-      {
-        command: "docker",
-        args: ["version", "--format", "{{.Server.Version}}"],
-      },
-      { command: "pnpm", args: ["run", "check:deployment"] },
-    ]);
+      expect(calls).toEqual([
+        {
+          command: "pnpm",
+          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
+        },
+        {
+          command: "pnpm",
+          args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
+        },
+        {
+          command: "docker",
+          args: ["version", "--format", "{{.Server.Version}}"],
+        },
+        { command: "pnpm", args: ["run", "check:deployment"] },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("fails the deployment scenario set explicitly when Docker is unavailable", async () => {
@@ -462,7 +567,8 @@ describe("deployment quality gate", () => {
           execute: async () =>
             await executeDeploymentQuality({
               deployment: deriveDeploymentQualityPlanInput(plan)!,
-              projectDir: "/tmp/deployment-cancelled",
+              projectDir: path.join(root, "project"),
+              fixtureWorkspace: root,
               run: async (command, args) => {
                 if (args.includes("--dry-run=json")) {
                   return {
@@ -478,6 +584,7 @@ describe("deployment quality gate", () => {
                     }),
                   };
                 }
+                if (args[0] === "install") return {};
                 if (command === "docker") return {};
                 throw new Error("deployment command cancelled");
               },

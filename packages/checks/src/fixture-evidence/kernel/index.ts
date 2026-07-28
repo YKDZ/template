@@ -357,6 +357,119 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export type FixtureDependencyInstallationPlan = {
+  readonly command: "pnpm";
+  readonly args: readonly ["install", "--store-dir", string];
+};
+
+export function fixtureDependencyInstallationPlan(
+  fixtureWorkspace: string,
+): FixtureDependencyInstallationPlan {
+  return {
+    command: "pnpm",
+    args: [
+      "install",
+      "--store-dir",
+      path.join(fixtureWorkspace, ".pnpm-store"),
+    ],
+  };
+}
+
+export function normalizedFixtureDependencyInstallationPlan(): FixtureDependencyInstallationPlan {
+  return fixtureDependencyInstallationPlan("{fixture-workspace}");
+}
+
+const fixtureDependencyInstallationMarker =
+  ".template-fixture-dependency-installation.json";
+
+async function optionalFileIdentity(file: string): Promise<string | null> {
+  try {
+    return sha256(await readFile(file));
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function fixtureDependencyInstallationIdentity(options: {
+  readonly projectDir: string;
+  readonly plan: FixtureDependencyInstallationPlan;
+}): Promise<string> {
+  return sha256(
+    canonicalize({
+      schema: "fixture-dependency-installation/v1",
+      plan: options.plan,
+      inputs: {
+        packageManifest: await optionalFileIdentity(
+          path.join(options.projectDir, "package.json"),
+        ),
+        lockfile: await optionalFileIdentity(
+          path.join(options.projectDir, "pnpm-lock.yaml"),
+        ),
+      },
+    }),
+  );
+}
+
+export async function ensureFixtureDependencies(options: {
+  readonly projectDir: string;
+  readonly fixtureWorkspace: string;
+  readonly run: FixtureCommandRunner;
+}): Promise<"installed" | "ready"> {
+  const plan = fixtureDependencyInstallationPlan(options.fixtureWorkspace);
+  const expectedIdentity = await fixtureDependencyInstallationIdentity({
+    projectDir: options.projectDir,
+    plan,
+  });
+  const marker = path.join(
+    options.projectDir,
+    "node_modules",
+    fixtureDependencyInstallationMarker,
+  );
+  try {
+    const record = JSON.parse(await readFile(marker, "utf8")) as {
+      readonly schema?: unknown;
+      readonly identity?: unknown;
+    };
+    if (
+      record.schema === "fixture-dependency-installation/v1" &&
+      record.identity === expectedIdentity
+    ) {
+      return "ready";
+    }
+  } catch {
+    // Missing or malformed completion evidence requires an idempotent install.
+  }
+
+  await options.run(plan.command, plan.args, {
+    cwd: options.projectDir,
+    stdio: "inherit",
+  });
+  const installedIdentity = await fixtureDependencyInstallationIdentity({
+    projectDir: options.projectDir,
+    plan,
+  });
+  const markerDirectory = path.dirname(marker);
+  await mkdir(markerDirectory, { recursive: true });
+  const temporary = `${marker}.${randomUUID()}.tmp`;
+  await writeFile(
+    temporary,
+    `${JSON.stringify({
+      schema: "fixture-dependency-installation/v1",
+      identity: installedIdentity,
+    })}\n`,
+  );
+  await rename(temporary, marker);
+  return "installed";
+}
+
 function fixtureEvidenceIdentity(options: {
   readonly gate: FixtureEvidenceGate;
   readonly generatedContentIdentity: string;

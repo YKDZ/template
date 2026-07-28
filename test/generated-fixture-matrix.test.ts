@@ -19,11 +19,9 @@ import {
   planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
 
-import {
-  assertGeneratedTaskDiscovery,
-  generatedScenarioInstallArgs,
-} from "../packages/checks/src/check-generated-registry.ts";
+import { assertGeneratedTaskDiscovery } from "../packages/checks/src/check-generated-registry.ts";
 import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
+import { fixtureDependencyInstallationPlan } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
   const definition = builtInPresetRegistry.all()[0]!;
@@ -59,11 +57,12 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
   });
 
   it("isolates generated installs from the repository pnpm store", () => {
-    expect(generatedScenarioInstallArgs("/tmp/generated-scenarios")).toEqual([
-      "install",
-      "--store-dir",
-      "/tmp/generated-scenarios/.pnpm-store",
-    ]);
+    expect(
+      fixtureDependencyInstallationPlan("/tmp/generated-scenarios"),
+    ).toEqual({
+      command: "pnpm",
+      args: ["install", "--store-dir", "/tmp/generated-scenarios/.pnpm-store"],
+    });
   });
 
   it("consumes manifest-derived provider source and distribution exports by package name", async () => {
@@ -118,10 +117,12 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
       await executeFocusedPackageLink({
         scenarioLabel: "dynamic provider fixture",
         projectDir: root,
+        fixtureWorkspace: root,
         consumerPackagePath,
         providerPackagePath,
         run: async (command, args, options) => {
           calls.push({ command, args });
+          if (args[0] === "install") return {};
           if (command === "pnpm") {
             expect(args).toEqual([
               "exec",

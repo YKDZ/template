@@ -1,4 +1,5 @@
 import {
+  access,
   chmod,
   cp,
   mkdir,
@@ -58,6 +59,7 @@ import {
   checkFixtureEvidenceHealth,
   createFixtureEvidenceScheduler,
   deriveFixtureGateContractIdentity,
+  ensureFixtureDependencies,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   initializeFixtureGitRepository,
@@ -71,6 +73,24 @@ import {
 
 async function temporaryRepository(prefix: string): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), prefix));
+}
+
+function isolatedFixtureEnvironment(
+  overrides: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const environment = { ...process.env };
+  for (const name of [
+    "TEMPLATE_FIXTURE_CONCURRENCY",
+    "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+    "TEMPLATE_FIXTURE_EVIDENCE_READ",
+    "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+    "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+    "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+    "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+  ]) {
+    delete environment[name];
+  }
+  return { ...environment, ...overrides };
 }
 
 async function successfulRootEvidence(
@@ -194,6 +214,54 @@ async function focusedMarker(root: string): Promise<string> {
     throw new Error("Focused marker was not injected into the provider");
   }
   return marker;
+}
+
+function createBlockedConcurrencyProbe() {
+  let active = 0;
+  let maximum = 0;
+  let released = false;
+  const waiters = new Set<() => void>();
+  return {
+    enter: async (): Promise<void> => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      if (!released) {
+        await new Promise<void>((resolve) => {
+          waiters.add(resolve);
+        });
+      }
+      active -= 1;
+    },
+    release: (): void => {
+      released = true;
+      for (const resolve of waiters) resolve();
+      waiters.clear();
+    },
+    active: (): number => active,
+    maximum: (): number => maximum,
+  };
+}
+
+async function releaseAfterActive(options: {
+  readonly execution: Promise<void>;
+  readonly probe: ReturnType<typeof createBlockedConcurrencyProbe>;
+  readonly expected: number;
+}): Promise<void> {
+  let observationFailure: unknown;
+  try {
+    await vi.waitFor(
+      () => {
+        expect(options.probe.active()).toBe(options.expected);
+      },
+      { timeout: 30_000 },
+    );
+  } catch (error) {
+    observationFailure = error;
+  } finally {
+    options.probe.release();
+  }
+  await options.execution;
+  if (observationFailure !== undefined) throw observationFailure;
 }
 
 type MatrixScenario = Awaited<ReturnType<typeof generatedScenariosFor>>[number];
@@ -908,13 +976,12 @@ describe("Fixture Verification Evidence", () => {
       process.cwd(),
       "packages/checks/src/check-fixture-evidence-health.ts",
     );
-    const env = {
-      ...process.env,
+    const env = isolatedFixtureEnvironment({
       TEMPLATE_FIXTURE_EVIDENCE_DIR: evidenceRoot,
       TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: activityRoot,
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "health-cli-run",
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "1",
-    };
+    });
     try {
       await invocation.record({
         type: "invocation",
@@ -1200,10 +1267,9 @@ describe("Fixture Verification Evidence", () => {
 
   it("serializes ordinary evidence misses when the CLI environment sets concurrency to one", async () => {
     const workspace = await temporaryRepository("fixture-cli-concurrency-");
-    let activeInstalls = 0;
-    let maxActiveInstalls = 0;
+    const installs = createBlockedConcurrencyProbe();
     try {
-      await runGeneratedRegistryCli({
+      const cli = runGeneratedRegistryCli({
         scenarioSet: "focused",
         environment: { TEMPLATE_FIXTURE_CONCURRENCY: "1" },
         workspace,
@@ -1212,10 +1278,7 @@ describe("Fixture Verification Evidence", () => {
             return await execa(command, [...args], options);
           }
           if (args[0] === "install") {
-            activeInstalls += 1;
-            maxActiveInstalls = Math.max(maxActiveInstalls, activeInstalls);
-            await new Promise((resolve) => setTimeout(resolve, 20));
-            activeInstalls -= 1;
+            await installs.enter();
           }
           if (args.includes("--dry-run=json")) {
             return {
@@ -1243,9 +1306,15 @@ describe("Fixture Verification Evidence", () => {
           return {};
         },
       });
+      await releaseAfterActive({
+        execution: cli,
+        probe: installs,
+        expected: 1,
+      });
 
-      expect(maxActiveInstalls).toBe(1);
+      expect(installs.maximum()).toBe(1);
     } finally {
+      installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
   });
@@ -1254,10 +1323,9 @@ describe("Fixture Verification Evidence", () => {
     const workspace = await temporaryRepository(
       "fixture-cli-default-concurrency-",
     );
-    let activeInstalls = 0;
-    let maxActiveInstalls = 0;
+    const installs = createBlockedConcurrencyProbe();
     try {
-      await runGeneratedRegistryCli({
+      const cli = runGeneratedRegistryCli({
         scenarioSet: "init",
         environment: {},
         workspace,
@@ -1266,10 +1334,7 @@ describe("Fixture Verification Evidence", () => {
             return await execa(command, [...args], options);
           }
           if (args[0] === "install") {
-            activeInstalls += 1;
-            maxActiveInstalls = Math.max(maxActiveInstalls, activeInstalls);
-            await new Promise((resolve) => setTimeout(resolve, 20));
-            activeInstalls -= 1;
+            await installs.enter();
           }
           if (args.includes("--dry-run=json")) {
             return {
@@ -1283,9 +1348,15 @@ describe("Fixture Verification Evidence", () => {
           return {};
         },
       });
+      await releaseAfterActive({
+        execution: cli,
+        probe: installs,
+        expected: Math.min(2, (await generatedScenariosFor("init")).length),
+      });
 
-      expect(maxActiveInstalls).toBe(2);
+      expect(installs.maximum()).toBe(2);
     } finally {
+      installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
   });
@@ -1310,10 +1381,9 @@ describe("Fixture Verification Evidence", () => {
         process.execPath,
         ["--conditions=source", cliPath, "init"],
         {
-          env: {
-            ...process.env,
+          env: isolatedFixtureEnvironment({
             TEMPLATE_FIXTURE_CONCURRENCY: value,
-          },
+          }),
           reject: false,
         },
       );
@@ -1334,15 +1404,14 @@ describe("Fixture Verification Evidence", () => {
       "deployment",
     ] as const;
     const maxActiveInstalls = new Map<(typeof sets)[number], number>();
-    let activeBrowsers = 0;
+    const browserInstalls = createBlockedConcurrencyProbe();
     let maxActiveBrowsers = 0;
-    let activeDocker = 0;
-    let maxActiveDocker = 0;
+    const dockerCommands = createBlockedConcurrencyProbe();
+    let completedDeploymentRootChecks = 0;
     try {
       for (const scenarioSet of sets) {
-        let activeInstalls = 0;
-        let setMaxActiveInstalls = 0;
-        await runGeneratedRegistryCli({
+        const installs = createBlockedConcurrencyProbe();
+        const cli = runGeneratedRegistryCli({
           scenarioSet,
           environment: { TEMPLATE_FIXTURE_CONCURRENCY: "4" },
           workspace: path.join(root, scenarioSet),
@@ -1363,18 +1432,16 @@ describe("Fixture Verification Evidence", () => {
               const browser = environmentNeeds.check.some(
                 (need) => need.kind === "playwright-browser-assets",
               );
-              activeInstalls += 1;
-              setMaxActiveInstalls = Math.max(
-                setMaxActiveInstalls,
-                activeInstalls,
-              );
+              const install = installs.enter();
               if (browser) {
-                activeBrowsers += 1;
-                maxActiveBrowsers = Math.max(maxActiveBrowsers, activeBrowsers);
+                const browserInstall = browserInstalls.enter();
+                maxActiveBrowsers = Math.max(
+                  maxActiveBrowsers,
+                  browserInstalls.active(),
+                );
+                await browserInstall;
               }
-              await new Promise((resolve) => setTimeout(resolve, 100));
-              activeInstalls -= 1;
-              if (browser) activeBrowsers -= 1;
+              await install;
             }
             if (args.includes("--dry-run=json")) {
               return {
@@ -1400,15 +1467,55 @@ describe("Fixture Verification Evidence", () => {
               };
             }
             if (command === "docker") {
-              activeDocker += 1;
-              maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
-              await new Promise((resolve) => setTimeout(resolve, 20));
-              activeDocker -= 1;
+              await dockerCommands.enter();
+            }
+            if (
+              scenarioSet === "deployment" &&
+              command === "pnpm" &&
+              args[0] === "run" &&
+              args[1] === "check"
+            ) {
+              completedDeploymentRootChecks += 1;
             }
             return {};
           },
         });
-        maxActiveInstalls.set(scenarioSet, setMaxActiveInstalls);
+        const expected =
+          scenarioSet === "deployment"
+            ? 1
+            : Math.min(4, (await generatedScenariosFor(scenarioSet)).length);
+        let observationFailure: unknown;
+        try {
+          await vi.waitFor(
+            () => {
+              expect(installs.active()).toBe(expected);
+            },
+            { timeout: 30_000 },
+          );
+        } catch (error) {
+          observationFailure = error;
+        } finally {
+          installs.release();
+          browserInstalls.release();
+        }
+        if (scenarioSet === "deployment") {
+          try {
+            await vi.waitFor(
+              () => {
+                expect(dockerCommands.active()).toBe(1);
+                expect(completedDeploymentRootChecks).toBeGreaterThan(1);
+              },
+              { timeout: 30_000 },
+            );
+          } catch (error) {
+            observationFailure ??= error;
+          } finally {
+            dockerCommands.release();
+          }
+        }
+        await cli;
+        if (observationFailure !== undefined) throw observationFailure;
+        maxActiveInstalls.set(scenarioSet, installs.maximum());
       }
 
       expect(maxActiveInstalls).toEqual(
@@ -1420,8 +1527,10 @@ describe("Fixture Verification Evidence", () => {
         ]),
       );
       expect(maxActiveBrowsers).toBe(1);
-      expect(maxActiveDocker).toBe(1);
+      expect(dockerCommands.maximum()).toBe(1);
     } finally {
+      browserInstalls.release();
+      dockerCommands.release();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -2755,6 +2864,7 @@ describe("Fixture Verification Evidence", () => {
   });
 
   it("owns the normalized Generated Root Quality contract and complete executor", async () => {
+    const root = await temporaryRepository("fixture-root-contract-");
     const definition = builtInPresetRegistry.all()[0]!;
     const plan = planGeneratedRepositoryInitialization({
       definition,
@@ -2782,30 +2892,127 @@ describe("Fixture Verification Evidence", () => {
       }));
     });
 
-    const contractIdentity =
-      await deriveGeneratedRootQualityContractIdentity(plan);
-    expect(contractIdentity).toMatch(/^[0-9a-f]{64}$/u);
+    try {
+      const contractIdentity =
+        await deriveGeneratedRootQualityContractIdentity(plan);
+      expect(contractIdentity).toMatch(/^[0-9a-f]{64}$/u);
 
-    await executeGeneratedRootQuality({
-      plan,
-      projectDir: "/tmp/generated-root-quality",
-      fixtureWorkspace: "/tmp/fixture-workspace",
-      run: async (command, args) => {
-        calls.push({ command, args });
-        return args.includes("--dry-run=json")
-          ? { stdout: JSON.stringify({ tasks: expectedTasks }) }
-          : {};
-      },
-    });
+      await executeGeneratedRootQuality({
+        plan,
+        projectDir: path.join(root, "project"),
+        fixtureWorkspace: root,
+        run: async (command, args) => {
+          calls.push({ command, args });
+          return args.includes("--dry-run=json")
+            ? { stdout: JSON.stringify({ tasks: expectedTasks }) }
+            : {};
+        },
+      });
 
-    expect(calls[0]).toEqual({
-      command: "pnpm",
-      args: ["install", "--store-dir", "/tmp/fixture-workspace/.pnpm-store"],
-    });
-    expect(calls).toContainEqual({
-      command: "pnpm",
-      args: ["run", "check"],
-    });
+      expect(calls[0]).toEqual({
+        command: "pnpm",
+        args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
+      });
+      expect(calls).toContainEqual({
+        command: "pnpm",
+        args: ["run", "check"],
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("records dependency installation completion from the installed lockfile state", async () => {
+    const root = await temporaryRepository("fixture-dependency-installation-");
+    const projectDir = path.join(root, "project");
+    const calls: Array<{
+      readonly command: string;
+      readonly args: readonly string[];
+    }> = [];
+    try {
+      await mkdir(path.join(projectDir, "node_modules"), { recursive: true });
+      await Promise.all([
+        writeFile(
+          path.join(projectDir, "package.json"),
+          `${JSON.stringify({ name: "fixture" })}\n`,
+        ),
+        writeFile(
+          path.join(projectDir, "pnpm-lock.yaml"),
+          "lockfileVersion: 9\n",
+        ),
+      ]);
+      const install = async () =>
+        await ensureFixtureDependencies({
+          projectDir,
+          fixtureWorkspace: root,
+          run: async (command, args) => {
+            calls.push({ command, args });
+            await writeFile(
+              path.join(projectDir, "pnpm-lock.yaml"),
+              `lockfileVersion: 9\ninstallRevision: ${calls.length}\n`,
+            );
+            return {};
+          },
+        });
+
+      await expect(install()).resolves.toBe("installed");
+      await expect(install()).resolves.toBe("ready");
+      await writeFile(
+        path.join(projectDir, "pnpm-lock.yaml"),
+        "lockfileVersion: 9\nsettings: {}\n",
+      );
+      await expect(install()).resolves.toBe("installed");
+      await expect(install()).resolves.toBe("ready");
+
+      expect(calls).toEqual([
+        {
+          command: "pnpm",
+          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
+        },
+        {
+          command: "pnpm",
+          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
+        },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not record dependency installation completion after a failed install mutates the lockfile", async () => {
+    const root = await temporaryRepository(
+      "fixture-dependency-installation-failure-",
+    );
+    const projectDir = path.join(root, "project");
+    let attempts = 0;
+    try {
+      await mkdir(projectDir, { recursive: true });
+      await writeFile(
+        path.join(projectDir, "package.json"),
+        `${JSON.stringify({ name: "fixture" })}\n`,
+      );
+      const install = async () =>
+        await ensureFixtureDependencies({
+          projectDir,
+          fixtureWorkspace: root,
+          run: async () => {
+            attempts += 1;
+            await writeFile(
+              path.join(projectDir, "pnpm-lock.yaml"),
+              `lockfileVersion: 9\ninstallAttempt: ${attempts}\n`,
+            );
+            if (attempts === 1) throw new Error("install failed");
+            return {};
+          },
+        });
+
+      await expect(install()).rejects.toThrow("install failed");
+      await expect(install()).resolves.toBe("installed");
+      await expect(install()).resolves.toBe("ready");
+      expect(attempts).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("derives the Focused contract from the normalized consumer and provider plan", async () => {
@@ -2983,9 +3190,11 @@ describe("Fixture Verification Evidence", () => {
             await executeFocusedPackageLink({
               scenarioLabel: "focused failure",
               projectDir,
+              fixtureWorkspace: root,
               consumerPackagePath,
               providerPackagePath,
-              run: async (command) => {
+              run: async (command, args) => {
+                if (args[0] === "install") return {};
                 if (command === "node") {
                   return { stdout: await focusedMarker(projectDir) };
                 }
@@ -3171,6 +3380,12 @@ describe("Fixture Verification Evidence", () => {
         if (command === "git") {
           return await execa(command, [...args], options);
         }
+        if (command === "pnpm" && args[0] === "install") {
+          await writeFile(
+            path.join(options.cwd, "pnpm-lock.yaml"),
+            "fixture-created: true\n",
+          );
+        }
         if (args.includes("--dry-run=json")) {
           return {
             stdout: JSON.stringify({
@@ -3302,6 +3517,11 @@ describe("Fixture Verification Evidence", () => {
             event.gate === "generated-root-quality",
         ),
       ).toHaveLength(scenarioCount);
+      expect(
+        coldCommands.filter(
+          ({ command, args }) => command === "pnpm" && args[0] === "install",
+        ),
+      ).toHaveLength(scenarioCount);
       expect(maxActiveFocusedMisses).toBeGreaterThan(1);
       expect(maxActiveFocusedMisses).toBeLessThanOrEqual(2);
       expect(
@@ -3406,6 +3626,166 @@ describe("Fixture Verification Evidence", () => {
             event.outcome === "hit",
         ),
       ).toHaveLength(scenarioCount);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("prepares dependencies when Root evidence hits and Focused evidence misses in a new workspace", async () => {
+    const root = await temporaryRepository("fixture-focused-partial-warm-");
+    const evidenceRoot = path.join(root, "evidence");
+    const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+    const clock = () => new Date("2026-07-28T00:00:00.000Z");
+    type Command = {
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly cwd: string;
+    };
+    const createRunner =
+      (commands: Command[]) =>
+      async (
+        command: string,
+        args: readonly string[],
+        options: { readonly cwd: string; readonly stdio?: "inherit" },
+      ): Promise<unknown> => {
+        commands.push({ command, args, cwd: options.cwd });
+        if (command === "git") {
+          return await execa(command, [...args], options);
+        }
+        if (command === "pnpm" && args[0] === "install") {
+          await mkdir(path.join(options.cwd, "node_modules"), {
+            recursive: true,
+          });
+          return {};
+        }
+        if (command === "pnpm" || command === "node") {
+          const dependencyRoot =
+            command === "node"
+              ? path.dirname(path.dirname(options.cwd))
+              : options.cwd;
+          try {
+            await access(path.join(dependencyRoot, "node_modules"));
+          } catch {
+            throw new Error(
+              `node_modules missing before ${command} ${args.join(" ")}`,
+            );
+          }
+        }
+        if (args.includes("--dry-run=json")) {
+          return {
+            stdout: JSON.stringify({
+              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                taskId,
+              })),
+            }),
+          };
+        }
+        if (
+          command === "pnpm" &&
+          args.includes("build") &&
+          args.includes("--force")
+        ) {
+          await materializeFocusedProviderBuild(options.cwd);
+        }
+        if (command === "node") {
+          return {
+            stdout: await focusedMarker(
+              path.dirname(path.dirname(options.cwd)),
+            ),
+          };
+        }
+        return {};
+      };
+    const coldCommands: Command[] = [];
+    const partialWarmCommands: Command[] = [];
+    const completeWarmCommands: Command[] = [];
+    const partialWarmEvents: FixtureEvidenceLifecycleEvent[] = [];
+    try {
+      await runGeneratedScenarioSet("focused", {
+        workspace: path.join(root, "cold"),
+        run: createRunner(coldCommands),
+        evidence: {
+          storage,
+          clock,
+          writeEnabled: true,
+          producerCommit: "cold",
+        },
+      });
+      await rm(path.join(evidenceRoot, "focused-package-link"), {
+        recursive: true,
+        force: true,
+      });
+
+      await runGeneratedScenarioSet("focused", {
+        workspace: path.join(root, "partial-warm"),
+        run: createRunner(partialWarmCommands),
+        evidence: {
+          storage,
+          clock,
+          writeEnabled: true,
+          producerCommit: "partial-warm",
+          recordLifecycle: (event) => {
+            partialWarmEvents.push(event);
+          },
+        },
+      });
+      await runGeneratedScenarioSet("focused", {
+        workspace: path.join(root, "complete-warm"),
+        run: createRunner(completeWarmCommands),
+        evidence: {
+          storage,
+          clock,
+          writeEnabled: true,
+          producerCommit: "complete-warm",
+        },
+      });
+
+      const scenarioCount = (await generatedScenariosFor("focused")).length;
+      expect(
+        partialWarmEvents.filter(
+          (event) =>
+            event.type === "lookup" &&
+            event.gate === "generated-root-quality" &&
+            event.outcome === "hit",
+        ),
+      ).toHaveLength(scenarioCount);
+      expect(
+        partialWarmEvents.filter(
+          (event) =>
+            event.type === "lookup" &&
+            event.gate === "focused-package-link" &&
+            event.outcome === "miss",
+        ),
+      ).toHaveLength(scenarioCount);
+      expect(
+        partialWarmCommands.filter(
+          ({ command, args }) => command === "pnpm" && args[0] === "install",
+        ),
+      ).toHaveLength(scenarioCount);
+      expect(
+        partialWarmCommands.filter(
+          ({ command, args }) =>
+            command === "pnpm" &&
+            args.includes("build") &&
+            args.includes("--force"),
+        ),
+      ).toHaveLength(scenarioCount);
+      expect(
+        partialWarmCommands.filter(
+          ({ command, args }) =>
+            command === "node" && args.includes("--conditions=source"),
+        ),
+      ).toHaveLength(scenarioCount);
+      expect(
+        completeWarmCommands.filter(
+          ({ command, args }) =>
+            command === "pnpm" &&
+            (args[0] === "install" || args.includes("build")),
+        ),
+      ).toEqual([]);
+      expect(
+        completeWarmCommands.filter(({ command }) => command === "node"),
+      ).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -4052,7 +4432,7 @@ describe("Fixture Verification Evidence", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 180_000);
 
   it("runs all four source CLI scenario sets warm without an expensive command", async () => {
     const root = await temporaryRepository("fixture-evidence-cli-");
@@ -4164,8 +4544,7 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
         chmod(dockerPath, 0o755),
       ]);
 
-      const baseEnv = {
-        ...process.env,
+      const baseEnv = isolatedFixtureEnvironment({
         FIXTURE_COMMAND_LOG: commandLog,
         PATH: `${binRoot}${path.delimiter}${process.env.PATH ?? ""}`,
         TEMPLATE_FIXTURE_EVIDENCE_DIR: evidenceRoot,
@@ -4173,7 +4552,7 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
         TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1",
         TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: activityRoot,
         TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "source-cli-run",
-      };
+      });
       const sets = [
         "init",
         "package-addition-matrix",
@@ -4246,7 +4625,7 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 180_000);
 
   it("structurally enforces gate, kernel, test-source, and orchestrator ownership", async () => {
     const root = await temporaryRepository("fixture-evidence-architecture-");
@@ -4712,6 +5091,40 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
         expect.arrayContaining([
           expect.objectContaining({
             rule: "unassigned-orchestrator-command",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects dependency installation contracts owned by the scenario orchestrator", async () => {
+    const root = await temporaryRepository(
+      "fixture-evidence-orchestrator-install-contract-",
+    );
+    const orchestrator = path.join(
+      root,
+      "packages/checks/src/check-generated-registry.ts",
+    );
+    try {
+      await mkdir(path.dirname(orchestrator), { recursive: true });
+      await writeFile(
+        orchestrator,
+        [
+          'import { fixtureDependencyInstallationPlan as installPlan } from "./fixture-evidence/kernel/index.ts";',
+          'const dependencyInstallArgs = ["install", "--store-dir", "/tmp/store"];',
+          "await executeDeploymentQuality({ dependencyInstallArgs, installPlan });",
+          "",
+        ].join("\n"),
+      );
+
+      await expect(
+        findFixtureEvidenceArchitectureFindings(root),
+      ).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "orchestrator-dependency-install-contract",
           }),
         ]),
       );

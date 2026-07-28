@@ -50,10 +50,7 @@ import {
   type FixtureEvidenceStorage,
 } from "./fixture-evidence/kernel/index.ts";
 
-export {
-  assertGeneratedTaskDiscovery,
-  generatedScenarioInstallArgs,
-} from "./fixture-evidence/gates/root-quality/index.ts";
+export { assertGeneratedTaskDiscovery } from "./fixture-evidence/gates/root-quality/index.ts";
 
 type GeneratedScenarioSet =
   | "init"
@@ -444,6 +441,7 @@ async function runScenario(
             await executeFocusedPackageLink({
               scenarioLabel: scenario.label,
               projectDir,
+              fixtureWorkspace: options.workspace,
               consumerPackagePath: focusedPlan.consumerPackagePath,
               providerPackagePath: focusedPlan.providerPackagePath,
               run,
@@ -467,6 +465,7 @@ async function runScenario(
             await executeDeploymentQuality({
               deployment,
               projectDir,
+              fixtureWorkspace: options.workspace,
               run,
             });
           return evidenceScheduler === undefined

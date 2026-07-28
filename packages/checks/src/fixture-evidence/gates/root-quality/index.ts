@@ -1,4 +1,3 @@
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
@@ -7,6 +6,8 @@ import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
+  ensureFixtureDependencies,
+  normalizedFixtureDependencyInstallationPlan,
   type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
@@ -76,12 +77,6 @@ function environmentPreparations(plan: GeneratedRepositoryPlan): readonly {
   });
 }
 
-export function generatedScenarioInstallArgs(
-  workspace: string,
-): readonly string[] {
-  return ["install", "--store-dir", path.join(workspace, ".pnpm-store")];
-}
-
 export function generatedRootQualityExecutionResources(
   plan: GeneratedRepositoryPlan,
 ): readonly FixtureEvidenceExecutionResource[] {
@@ -99,10 +94,7 @@ export function normalizedGeneratedRootQualityPlan(
   return {
     gate: "generated-root-quality",
     executionResources: generatedRootQualityExecutionResources(plan),
-    dependencyInstallation: {
-      command: "pnpm",
-      args: ["install", "--store-dir", "{fixture-workspace}/.pnpm-store"],
-    },
+    dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     taskDiscovery: {
       command: "pnpm",
       args: ["exec", "turbo", "run", ...qualityTaskNames, "--dry-run=json"],
@@ -202,14 +194,11 @@ export async function executeGeneratedRootQuality(options: {
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
 }): Promise<void> {
-  await options.run(
-    "pnpm",
-    generatedScenarioInstallArgs(options.fixtureWorkspace),
-    {
-      cwd: options.projectDir,
-      stdio: "inherit",
-    },
-  );
+  await ensureFixtureDependencies({
+    projectDir: options.projectDir,
+    fixtureWorkspace: options.fixtureWorkspace,
+    run: options.run,
+  });
   await assertGeneratedTaskDiscovery({
     plan: options.plan,
     projectDir: options.projectDir,

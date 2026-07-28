@@ -6,6 +6,8 @@ import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
+  ensureFixtureDependencies,
+  normalizedFixtureDependencyInstallationPlan,
   type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
@@ -85,6 +87,7 @@ export function normalizedDeploymentQualityPlan(
   return {
     gate: "deployment-quality",
     executionResources: deploymentQualityExecutionResources(deployment),
+    dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     taskDiscovery: {
       command: "pnpm",
       args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
@@ -164,11 +167,17 @@ async function assertDeploymentTaskDiscovery(options: {
 export async function executeDeploymentQuality(options: {
   readonly deployment: DeploymentQualityPlanInput;
   readonly projectDir: string;
+  readonly fixtureWorkspace: string;
   readonly run?: FixtureCommandRunner;
 }): Promise<void> {
   const run =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
+  await ensureFixtureDependencies({
+    projectDir: options.projectDir,
+    fixtureWorkspace: options.fixtureWorkspace,
+    run,
+  });
   await assertDeploymentTaskDiscovery({
     deployment: options.deployment,
     projectDir: options.projectDir,

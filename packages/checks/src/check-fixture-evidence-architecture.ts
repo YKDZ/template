@@ -19,6 +19,7 @@ export type FixtureEvidenceArchitectureFinding = {
     | "hidden-root-quality-command"
     | "hidden-focused-package-link-command"
     | "hidden-deployment-quality-command"
+    | "orchestrator-dependency-install-contract"
     | "unassigned-orchestrator-command";
   readonly file: string;
   readonly detail: string;
@@ -672,6 +673,29 @@ function ownedCommands(sourceFile: ts.SourceFile): readonly OwnedCommand[] {
   return commands;
 }
 
+function orchestratorDependencyInstallationContracts(
+  sourceFile: ts.SourceFile,
+): readonly { readonly name: string; readonly node: ts.Node }[] {
+  const forbidden = new Set([
+    "dependencyInstallArgs",
+    "ensureFixtureDependencies",
+    "fixtureDependencyInstallationPlan",
+    "generatedScenarioInstallArgs",
+    "normalizedFixtureDependencyInstallationPlan",
+  ]);
+  const contracts = new Map<string, ts.Node>();
+  function visit(node: ts.Node): void {
+    if (ts.isIdentifier(node) && forbidden.has(node.text)) {
+      contracts.set(node.text, contracts.get(node.text) ?? node);
+    } else if (ts.isStringLiteralLike(node) && forbidden.has(node.text)) {
+      contracts.set(node.text, contracts.get(node.text) ?? node);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return [...contracts].map(([name, node]) => ({ name, node }));
+}
+
 export async function findFixtureEvidenceArchitectureFindings(
   repositoryRoot: string = defaultRepositoryRoot,
 ): Promise<readonly FixtureEvidenceArchitectureFinding[]> {
@@ -801,6 +825,21 @@ export async function findFixtureEvidenceArchitectureFindings(
       ts.ScriptTarget.Latest,
       true,
     );
+    for (const contract of orchestratorDependencyInstallationContracts(
+      sourceFile,
+    )) {
+      const position = sourceFile.getLineAndCharacterOfPosition(
+        contract.node.getStart(sourceFile),
+      );
+      findings.push({
+        rule: "orchestrator-dependency-install-contract",
+        file: path
+          .relative(repositoryRoot, orchestrator)
+          .split(path.sep)
+          .join("/"),
+        detail: `scenario orchestrator owns dependency installation contract ${contract.name} at ${position.line + 1}:${position.character + 1}`,
+      });
+    }
     for (const command of ownedCommands(sourceFile)) {
       const position = sourceFile.getLineAndCharacterOfPosition(
         command.call.getStart(sourceFile),
