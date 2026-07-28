@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   access,
   chmod,
@@ -65,8 +66,10 @@ import {
   initializeFixtureGitRepository,
   runFixtureEvidenceGate,
   type FixtureEvidenceActivityLedger,
+  type FixtureEvidenceExecutionResource,
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
+  type FixtureEvidenceSchedulerFactory,
   type FixtureEvidenceStorage,
   writeGeneratedRepositoryTree,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
@@ -238,6 +241,32 @@ function createBlockedConcurrencyProbe() {
       waiters.clear();
     },
     active: (): number => active,
+    maximum: (): number => maximum,
+  };
+}
+
+function createBlockedWorkProbe() {
+  const started: string[] = [];
+  const releases = new Map<string, () => void>();
+  let active = 0;
+  let maximum = 0;
+  return {
+    run: async (name: string): Promise<void> => {
+      started.push(name);
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await new Promise<void>((resolve) => {
+        releases.set(name, resolve);
+      });
+      active -= 1;
+    },
+    release: (name: string): void => {
+      releases.get(name)?.();
+    },
+    releaseAll: (): void => {
+      for (const release of releases.values()) release();
+    },
+    started: (): readonly string[] => started,
     maximum: (): number => maximum,
   };
 }
@@ -1214,55 +1243,83 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("bounds ordinary execution at two while serializing browser resources", async () => {
-    const scheduler = createFixtureEvidenceScheduler();
-    const started: string[] = [];
-    const releases = new Map<string, () => void>();
-    let active = 0;
-    let maxActive = 0;
-    let activeBrowsers = 0;
-    let maxActiveBrowsers = 0;
+  it("enforces configured ordinary, browser, and Docker capacities with queued work", async () => {
+    const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
 
-    const work = async (name: string, browser: boolean): Promise<void> => {
-      started.push(name);
-      active += 1;
-      maxActive = Math.max(maxActive, active);
-      if (browser) {
-        activeBrowsers += 1;
-        maxActiveBrowsers = Math.max(maxActiveBrowsers, activeBrowsers);
-      }
-      await new Promise<void>((resolve) => {
-        releases.set(name, resolve);
-      });
-      active -= 1;
-      if (browser) activeBrowsers -= 1;
-    };
-    const jobs = [
-      scheduler.run([], async () => await work("ordinary-a", false)),
-      scheduler.run(["browser"], async () => await work("browser-a", true)),
-    ];
-
-    await vi.waitFor(() => {
-      expect(started).toEqual(["ordinary-a", "browser-a"]);
-    });
-    jobs.push(
-      scheduler.run(["browser"], async () => await work("browser-b", true)),
-      scheduler.run([], async () => await work("ordinary-b", false)),
+    const ordinary = createBlockedWorkProbe();
+    const ordinaryJobs = ["a", "b", "c", "d", "e"].map(
+      async (name) =>
+        await scheduler.run(
+          [],
+          async () => await ordinary.run(`ordinary-${name}`),
+        ),
     );
-    releases.get("ordinary-a")!();
     await vi.waitFor(() => {
-      expect(started).toContain("ordinary-b");
+      expect(ordinary.started()).toEqual([
+        "ordinary-a",
+        "ordinary-b",
+        "ordinary-c",
+        "ordinary-d",
+      ]);
     });
-    releases.get("browser-a")!();
+    ordinary.release("ordinary-a");
     await vi.waitFor(() => {
-      expect(started).toContain("browser-b");
+      expect(ordinary.started()).toContain("ordinary-e");
     });
-    releases.get("ordinary-b")!();
-    releases.get("browser-b")!();
-    await Promise.all(jobs);
+    ordinary.releaseAll();
+    await Promise.all(ordinaryJobs);
 
-    expect(maxActive).toBe(2);
-    expect(maxActiveBrowsers).toBe(1);
+    const browser = createBlockedWorkProbe();
+    const browserJobs = [
+      scheduler.run(["browser"], async () => await browser.run("browser-a")),
+    ];
+    await vi.waitFor(() => {
+      expect(browser.started()).toEqual(["browser-a"]);
+    });
+    browserJobs.push(
+      scheduler.run(["browser"], async () => await browser.run("browser-b")),
+      scheduler.run(["browser"], async () => await browser.run("browser-c")),
+      scheduler.run(["browser"], async () => await browser.run("browser-d")),
+    );
+    expect(browser.started()).toEqual(["browser-a"]);
+    for (const [current, next] of [
+      ["browser-a", "browser-b"],
+      ["browser-b", "browser-c"],
+      ["browser-c", "browser-d"],
+    ] as const) {
+      browser.release(current);
+      await vi.waitFor(() => {
+        expect(browser.started()).toContain(next);
+      });
+    }
+    browser.release("browser-d");
+    await Promise.all(browserJobs);
+
+    const docker = createBlockedWorkProbe();
+    const dockerJobs = ["a", "b", "c"].map(
+      async (name) =>
+        await scheduler.run(
+          ["docker"],
+          async () => await docker.run(`docker-${name}`),
+        ),
+    );
+    await vi.waitFor(() => {
+      expect(docker.started()).toEqual(["docker-a"]);
+    });
+    docker.release("docker-a");
+    await vi.waitFor(() => {
+      expect(docker.started()).toEqual(["docker-a", "docker-b"]);
+    });
+    docker.release("docker-b");
+    await vi.waitFor(() => {
+      expect(docker.started()).toEqual(["docker-a", "docker-b", "docker-c"]);
+    });
+    docker.release("docker-c");
+    await Promise.all(dockerJobs);
+
+    expect(ordinary.maximum()).toBe(4);
+    expect(browser.maximum()).toBe(1);
+    expect(docker.maximum()).toBe(1);
   });
 
   it("serializes ordinary evidence misses when the CLI environment sets concurrency to one", async () => {
@@ -1395,7 +1452,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("applies CLI ordinary concurrency to every scenario set without bypassing resource caps", async () => {
+  it("applies CLI ordinary concurrency to every scenario set and controls Deployment Docker work", async () => {
     const root = await temporaryRepository("fixture-cli-resource-caps-");
     const sets = [
       "init",
@@ -1404,8 +1461,6 @@ describe("Fixture Verification Evidence", () => {
       "deployment",
     ] as const;
     const maxActiveInstalls = new Map<(typeof sets)[number], number>();
-    const browserInstalls = createBlockedConcurrencyProbe();
-    let maxActiveBrowsers = 0;
     const dockerCommands = createBlockedConcurrencyProbe();
     let completedDeploymentRootChecks = 0;
     try {
@@ -1421,27 +1476,7 @@ describe("Fixture Verification Evidence", () => {
               return await execa(command, [...args], options);
             }
             if (args[0] === "install") {
-              const environmentNeeds = JSON.parse(
-                await readFile(
-                  path.join(options.cwd, ".template/environment-needs.json"),
-                  "utf8",
-                ),
-              ) as {
-                readonly check: readonly { readonly kind?: string }[];
-              };
-              const browser = environmentNeeds.check.some(
-                (need) => need.kind === "playwright-browser-assets",
-              );
-              const install = installs.enter();
-              if (browser) {
-                const browserInstall = browserInstalls.enter();
-                maxActiveBrowsers = Math.max(
-                  maxActiveBrowsers,
-                  browserInstalls.active(),
-                );
-                await browserInstall;
-              }
-              await install;
+              await installs.enter();
             }
             if (args.includes("--dry-run=json")) {
               return {
@@ -1496,7 +1531,6 @@ describe("Fixture Verification Evidence", () => {
           observationFailure = error;
         } finally {
           installs.release();
-          browserInstalls.release();
         }
         if (scenarioSet === "deployment") {
           try {
@@ -1526,81 +1560,50 @@ describe("Fixture Verification Evidence", () => {
           ["deployment", 1],
         ]),
       );
-      expect(maxActiveBrowsers).toBe(1);
       expect(dockerCommands.maximum()).toBe(1);
     } finally {
-      browserInstalls.release();
       dockerCommands.release();
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("allows a general concurrency override without bypassing the browser limit", async () => {
+  it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
     const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
+    const started: string[] = [];
     const releases = new Map<string, () => void>();
-    let active = 0;
-    let maxActive = 0;
-    let activeBrowsers = 0;
-    let maxActiveBrowsers = 0;
-    const work = async (name: string, browser: boolean): Promise<void> => {
-      active += 1;
-      maxActive = Math.max(maxActive, active);
-      if (browser) {
-        activeBrowsers += 1;
-        maxActiveBrowsers = Math.max(maxActiveBrowsers, activeBrowsers);
-      }
+    let activeDocker = 0;
+    let maxActiveDocker = 0;
+    const work = async (name: string): Promise<void> => {
+      started.push(name);
+      activeDocker += 1;
+      maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
       await new Promise<void>((resolve) => {
         releases.set(name, resolve);
       });
-      active -= 1;
-      if (browser) activeBrowsers -= 1;
-    };
-    const jobs = [
-      scheduler.run([], async () => await work("ordinary-a", false)),
-      scheduler.run([], async () => await work("ordinary-b", false)),
-      scheduler.run([], async () => await work("ordinary-c", false)),
-      scheduler.run(["browser"], async () => await work("browser-a", true)),
-    ];
-    await vi.waitFor(() => {
-      expect(active).toBe(4);
-    });
-    jobs.push(
-      scheduler.run(["browser"], async () => await work("browser-b", true)),
-    );
-    releases.get("browser-a")!();
-    await vi.waitFor(() => {
-      expect(releases.has("browser-b")).toBe(true);
-    });
-    for (const name of [
-      "ordinary-a",
-      "ordinary-b",
-      "ordinary-c",
-      "browser-b",
-    ]) {
-      releases.get(name)!();
-    }
-    await Promise.all(jobs);
-
-    expect(maxActive).toBe(4);
-    expect(maxActiveBrowsers).toBe(1);
-  });
-
-  it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
-    const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
-    let activeDocker = 0;
-    let maxActiveDocker = 0;
-    const work = async (): Promise<void> => {
-      activeDocker += 1;
-      maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
-      await new Promise((resolve) => setTimeout(resolve, 20));
       activeDocker -= 1;
     };
 
-    await Promise.all([
-      scheduler.run(["docker"], work),
-      scheduler.run(["docker"], work),
-      scheduler.run(["docker"], work),
-    ]);
+    const jobs = [
+      scheduler.run(["docker"], async () => await work("docker-a")),
+    ];
+    await vi.waitFor(() => {
+      expect(started).toEqual(["docker-a"]);
+    });
+    jobs.push(
+      scheduler.run(["docker"], async () => await work("docker-b")),
+      scheduler.run(["docker"], async () => await work("docker-c")),
+    );
+    expect(started).toEqual(["docker-a"]);
+    releases.get("docker-a")!();
+    await vi.waitFor(() => {
+      expect(started).toEqual(["docker-a", "docker-b"]);
+    });
+    releases.get("docker-b")!();
+    await vi.waitFor(() => {
+      expect(started).toEqual(["docker-a", "docker-b", "docker-c"]);
+    });
+    releases.get("docker-c")!();
+    await Promise.all(jobs);
 
     expect(maxActiveDocker).toBe(1);
   });
@@ -3367,8 +3370,7 @@ describe("Fixture Verification Evidence", () => {
       readonly args: readonly string[];
       readonly cwd: string;
     };
-    let activeFocusedMisses = 0;
-    let maxActiveFocusedMisses = 0;
+    const focusedMisses = createBlockedConcurrencyProbe();
     const createRunner =
       (commands: Command[]) =>
       async (
@@ -3405,22 +3407,13 @@ describe("Fixture Verification Evidence", () => {
         if (command === "node") {
           const sourceProbe = args.includes("--conditions=source");
           if (sourceProbe) {
-            activeFocusedMisses += 1;
-            maxActiveFocusedMisses = Math.max(
-              maxActiveFocusedMisses,
-              activeFocusedMisses,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 20));
+            await focusedMisses.enter();
           }
-          try {
-            return {
-              stdout: await focusedMarker(
-                path.dirname(path.dirname(options.cwd)),
-              ),
-            };
-          } finally {
-            if (sourceProbe) activeFocusedMisses -= 1;
-          }
+          return {
+            stdout: await focusedMarker(
+              path.dirname(path.dirname(options.cwd)),
+            ),
+          };
         }
         return {};
       };
@@ -3433,18 +3426,22 @@ describe("Fixture Verification Evidence", () => {
     const rootChangedEvents: FixtureEvidenceLifecycleEvent[] = [];
     const rootExpiredEvents: FixtureEvidenceLifecycleEvent[] = [];
     try {
-      await runGeneratedScenarioSet("focused", {
-        workspace: path.join(root, "cold"),
-        run: createRunner(coldCommands),
-        evidence: {
-          storage,
-          clock,
-          writeEnabled: true,
-          producerCommit: "cold",
-          recordLifecycle: (event) => {
-            coldEvents.push(event);
+      await releaseAfterActive({
+        execution: runGeneratedScenarioSet("focused", {
+          workspace: path.join(root, "cold"),
+          run: createRunner(coldCommands),
+          evidence: {
+            storage,
+            clock,
+            writeEnabled: true,
+            producerCommit: "cold",
+            recordLifecycle: (event) => {
+              coldEvents.push(event);
+            },
           },
-        },
+        }),
+        probe: focusedMisses,
+        expected: 2,
       });
       await runGeneratedScenarioSet("focused", {
         workspace: path.join(root, "warm"),
@@ -3522,8 +3519,7 @@ describe("Fixture Verification Evidence", () => {
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         ),
       ).toHaveLength(scenarioCount);
-      expect(maxActiveFocusedMisses).toBeGreaterThan(1);
-      expect(maxActiveFocusedMisses).toBeLessThanOrEqual(2);
+      expect(focusedMisses.maximum()).toBe(2);
       expect(
         coldEvents.filter(
           (event) =>
@@ -3627,6 +3623,7 @@ describe("Fixture Verification Evidence", () => {
         ),
       ).toHaveLength(scenarioCount);
     } finally {
+      focusedMisses.release();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -4140,21 +4137,45 @@ describe("Fixture Verification Evidence", () => {
 
   it("schedules real matrix misses by final Check Environment Needs", async () => {
     const workspace = await temporaryRepository("fixture-matrix-scheduling-");
-    let active = 0;
-    let maxActive = 0;
-    let activeBrowsers = 0;
-    let maxActiveBrowsers = 0;
-    let installs = 0;
+    const scheduledResources = new AsyncLocalStorage<
+      readonly FixtureEvidenceExecutionResource[]
+    >();
+    const resourcesByScenario = new Map<
+      string,
+      readonly FixtureEvidenceExecutionResource[]
+    >();
+    const installedScenarios: string[] = [];
+    const scheduledRuns: (readonly FixtureEvidenceExecutionResource[])[] = [];
+    const needsByScenario = new Map<
+      string,
+      { readonly check: readonly { readonly kind?: string }[] }
+    >();
+    const ordinaryScenarios = new Set<string>();
+    const browserScenarios = new Set<string>();
+    const schedulerFactory = vi.fn<FixtureEvidenceSchedulerFactory>(
+      (scheduling) => {
+        const scheduler = createFixtureEvidenceScheduler(scheduling);
+        return {
+          run: async (resources, execute) => {
+            scheduledRuns.push(resources);
+            return await scheduler.run(
+              resources,
+              async () => await scheduledResources.run(resources, execute),
+            );
+          },
+        };
+      },
+    );
     try {
       await runGeneratedScenarioSet("package-addition-matrix", {
         workspace,
         scheduling: { concurrency: 4 },
+        schedulerFactory,
         run: async (command, args, options) => {
           if (command === "git") {
             return await execa(command, [...args], options);
           }
           if (args[0] === "install") {
-            installs += 1;
             const environmentNeeds = JSON.parse(
               await readFile(
                 path.join(options.cwd, ".template/environment-needs.json"),
@@ -4163,18 +4184,20 @@ describe("Fixture Verification Evidence", () => {
             ) as {
               readonly check: readonly { readonly kind?: string }[];
             };
+            const resources = scheduledResources.getStore();
+            expect(resources).toBeDefined();
             const browser = environmentNeeds.check.some(
               (need) => need.kind === "playwright-browser-assets",
             );
-            active += 1;
-            maxActive = Math.max(maxActive, active);
+            const scenarioId = path.basename(options.cwd);
+            installedScenarios.push(scenarioId);
+            needsByScenario.set(scenarioId, environmentNeeds);
+            resourcesByScenario.set(scenarioId, resources!);
             if (browser) {
-              activeBrowsers += 1;
-              maxActiveBrowsers = Math.max(maxActiveBrowsers, activeBrowsers);
+              browserScenarios.add(scenarioId);
+            } else {
+              ordinaryScenarios.add(scenarioId);
             }
-            await new Promise((resolve) => setTimeout(resolve, 25));
-            active -= 1;
-            if (browser) activeBrowsers -= 1;
           }
           if (args.includes("--dry-run=json")) {
             return {
@@ -4189,12 +4212,27 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(installs).toBe(
-        (await generatedScenariosFor("package-addition-matrix")).length,
-      );
-      expect(maxActive).toBeGreaterThan(1);
-      expect(maxActive).toBeLessThanOrEqual(4);
-      expect(maxActiveBrowsers).toBe(1);
+      const scenarios = await generatedScenariosFor("package-addition-matrix");
+      const scenarioIds = scenarios.map(({ id }) => id).sort();
+      expect(schedulerFactory).toHaveBeenCalledOnce();
+      expect(schedulerFactory).toHaveBeenCalledWith({ concurrency: 4 });
+      expect(scheduledRuns).toHaveLength(scenarios.length);
+      expect(installedScenarios.sort()).toEqual(scenarioIds);
+      expect([...resourcesByScenario.keys()].sort()).toEqual(scenarioIds);
+      expect(needsByScenario.size).toBe(scenarios.length);
+      expect(ordinaryScenarios.size).toBeGreaterThanOrEqual(2);
+      expect(browserScenarios.size).toBeGreaterThanOrEqual(2);
+      for (const scenario of scenarios) {
+        const finalNeeds = needsByScenario.get(scenario.id);
+        expect(finalNeeds).toBeDefined();
+        expect(resourcesByScenario.get(scenario.id)).toEqual(
+          finalNeeds!.check.some(
+            (need) => need.kind === "playwright-browser-assets",
+          )
+            ? ["browser"]
+            : [],
+        );
+      }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

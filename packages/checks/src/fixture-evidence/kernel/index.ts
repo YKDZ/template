@@ -240,12 +240,20 @@ export type FixtureEvidenceAtomicFileOperations = {
 
 export type FixtureEvidenceExecutionResource = "browser" | "docker";
 
+export type FixtureEvidenceSchedulingOptions = {
+  readonly concurrency?: number;
+};
+
 export type FixtureEvidenceScheduler = {
   readonly run: <Result>(
     resources: readonly FixtureEvidenceExecutionResource[],
     execute: () => Promise<Result>,
   ) => Promise<Result>;
 };
+
+export type FixtureEvidenceSchedulerFactory = (
+  options: FixtureEvidenceSchedulingOptions,
+) => FixtureEvidenceScheduler;
 
 export const fixtureEvidenceFreshnessMilliseconds = 7 * 24 * 60 * 60 * 1_000;
 
@@ -291,7 +299,7 @@ class CapacityLimiter {
 }
 
 export function createFixtureEvidenceScheduler(
-  options: { readonly concurrency?: number } = {},
+  options: FixtureEvidenceSchedulingOptions = {},
 ): FixtureEvidenceScheduler {
   const ordinary = new CapacityLimiter(
     options.concurrency ?? 2,

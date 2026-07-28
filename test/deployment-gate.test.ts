@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   builtInPresetRegistry,
@@ -173,6 +173,13 @@ describe("deployment quality gate", () => {
     };
     let activeDocker = 0;
     let maxActiveDocker = 0;
+    let dockerReleased = false;
+    const dockerWaiters = new Set<() => void>();
+    const releaseDocker = (): void => {
+      dockerReleased = true;
+      for (const resolve of dockerWaiters) resolve();
+      dockerWaiters.clear();
+    };
     const createRunner =
       (commands: Command[]) =>
       async (
@@ -215,9 +222,16 @@ describe("deployment quality gate", () => {
         if (command === "docker") {
           activeDocker += 1;
           maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          activeDocker -= 1;
-          return { stdout: "ambient-docker-version-ignored" };
+          try {
+            if (!dockerReleased) {
+              await new Promise<void>((resolve) => {
+                dockerWaiters.add(resolve);
+              });
+            }
+            return { stdout: "ambient-docker-version-ignored" };
+          } finally {
+            activeDocker -= 1;
+          }
         }
         return {};
       };
@@ -235,7 +249,7 @@ describe("deployment quality gate", () => {
           ({ id }) => id,
         ),
       );
-      await runGeneratedScenarioSet("deployment", {
+      const coldExecution = runGeneratedScenarioSet("deployment", {
         workspace: path.join(root, "cold"),
         run: createRunner(coldCommands),
         scheduling: { concurrency: 4 },
@@ -249,6 +263,29 @@ describe("deployment quality gate", () => {
           },
         },
       });
+      let observationFailure: unknown;
+      try {
+        await vi.waitFor(
+          () => {
+            expect(
+              coldEvents.filter(
+                (event) =>
+                  event.type === "execution" &&
+                  event.gate === "deployment-quality" &&
+                  event.outcome === "started",
+              ).length,
+            ).toBeGreaterThanOrEqual(2);
+            expect(activeDocker).toBe(1);
+          },
+          { timeout: 30_000 },
+        );
+      } catch (error) {
+        observationFailure = error;
+      } finally {
+        releaseDocker();
+      }
+      await coldExecution;
+      if (observationFailure !== undefined) throw observationFailure;
       await rm(path.join(evidenceRoot, "deployment-quality"), {
         recursive: true,
         force: true,
@@ -370,6 +407,7 @@ describe("deployment quality gate", () => {
         );
       }
     } finally {
+      releaseDocker();
       await rm(root, { recursive: true, force: true });
     }
   });

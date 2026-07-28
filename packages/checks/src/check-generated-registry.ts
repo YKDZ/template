@@ -47,6 +47,8 @@ import {
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
   type FixtureEvidenceScheduler,
+  type FixtureEvidenceSchedulerFactory,
+  type FixtureEvidenceSchedulingOptions,
   type FixtureEvidenceStorage,
 } from "./fixture-evidence/kernel/index.ts";
 
@@ -96,9 +98,8 @@ export type GeneratedScenarioRunOptions = {
   readonly workspace: string;
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
-  readonly scheduling?: {
-    readonly concurrency?: number;
-  };
+  readonly scheduling?: FixtureEvidenceSchedulingOptions;
+  readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
   readonly evidence?: {
     readonly storage?: FixtureEvidenceStorage;
     readonly clock?: () => Date;
@@ -560,7 +561,9 @@ export async function runGeneratedScenarioSet(
       throw error;
     }
   };
-  const scheduler = createFixtureEvidenceScheduler(options.scheduling);
+  const scheduler = (
+    options.schedulerFactory ?? createFixtureEvidenceScheduler
+  )(options.scheduling ?? {});
   const results = await Promise.allSettled(
     scenarios.map(
       async (scenario) => await executeScenario(scenario, scheduler),
