@@ -4,6 +4,7 @@ import {
   readdir,
   rm,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -503,6 +504,71 @@ describe("Non-Destructive Package Addition", () => {
         ),
       ).resolves.toMatchObject({
         exports: { ".": { default: "./dist/user-maintained.js" } },
+      });
+      await expect(
+        readFile(
+          path.join(targetDir, "packages/ordinary/package.json"),
+          "utf8",
+        ),
+      ).resolves.toContain('"name": "@demo/ordinary"');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("does not inspect or restore a missing non-delta Package manifest", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-missing-non-delta-manifest-"),
+    );
+    const targetDir = path.join(workspace, "project");
+    const context = createGenerationContext({
+      targetDir,
+      scope: "demo",
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+      },
+    });
+    const definition = requireAddableDefinitionForRole(
+      context,
+      "shared-library",
+    );
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const existingPath = initialization.blueprint.packages[0]!.path;
+      const existingManifestPath = path.join(
+        targetDir,
+        existingPath,
+        "package.json",
+      );
+      await unlink(existingManifestPath);
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "ordinary",
+      });
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.actions.map((action) => action.path)).not.toContain(
+        `${existingPath}/package.json`,
+      );
+      await expect(stat(existingManifestPath)).rejects.toMatchObject({
+        code: "ENOENT",
       });
       await expect(
         readFile(

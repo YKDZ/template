@@ -259,31 +259,13 @@ export async function validateBlueprintFile(
   return "Blueprint is valid";
 }
 
-async function deriveExistingPackageScope(options: {
-  readonly targetDir: string;
-  readonly blueprint: ProjectBlueprintV2;
-}): Promise<string> {
+function deriveExistingPackageScope(blueprint: ProjectBlueprintV2): string {
   const scopes = new Set<string>();
-  for (const definition of options.blueprint.packages) {
+  for (const definition of blueprint.packages) {
     const match = definition.name.match(/^@([^/]+)\//);
     if (!match?.[1]) {
       throw new Error(
         `Package Addition requires a scoped Package Definition: ${definition.name}`,
-      );
-    }
-    const manifestPath = path.join(
-      options.targetDir,
-      definition.path,
-      "package.json",
-    );
-    const manifest: unknown = JSON.parse(await readFile(manifestPath, "utf8"));
-    if (
-      typeof manifest !== "object" ||
-      manifest === null ||
-      (manifest as { name?: unknown }).name !== definition.name
-    ) {
-      throw new Error(
-        `Package Addition requires manifest truth for ${definition.path}: expected name ${definition.name}`,
       );
     }
     scopes.add(match[1]);
@@ -401,10 +383,7 @@ export async function runAddPackage(
   const definition = builtInPresetRegistry.require(options.preset);
   const context = createGenerationContext({
     targetDir: runtime.cwd,
-    scope: await deriveExistingPackageScope({
-      targetDir: runtime.cwd,
-      blueprint,
-    }),
+    scope: deriveExistingPackageScope(blueprint),
     toolchain: {
       nodeLtsMajor: toolchain.nodeLtsMajor.value,
       packageManagerPin: toolchain.packageManagerPin.value,

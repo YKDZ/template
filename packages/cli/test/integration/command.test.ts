@@ -5,6 +5,7 @@ import {
   readdir,
   stat,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -332,6 +333,74 @@ describe("template CLI command control", () => {
     await expect(
       stat(path.join(target, "packages/utility")),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("plans an addition without inspecting an unrelated missing Package manifest", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-missing-existing-manifest-"),
+    );
+    const initOutput = testRuntime([
+      "init",
+      "demo",
+      "--preset",
+      addablePresetName,
+      "--scope",
+      "acme",
+      "--yes",
+    ]);
+    await expect(
+      runCli({
+        ...initOutput.runtime,
+        cwd: workspace,
+        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
+      }),
+    ).resolves.toBe(0);
+
+    const target = path.join(workspace, "demo");
+    const blueprint = JSON.parse(
+      await readFile(path.join(target, ".template/blueprint.json"), "utf8"),
+    ) as { packages: { path: string }[] };
+    const unrelatedManifest = path.join(
+      target,
+      blueprint.packages[0]!.path,
+      "package.json",
+    );
+    await unlink(unrelatedManifest);
+    const before = await workspaceByteSnapshot(target);
+    const output = testRuntime([
+      "add",
+      "package",
+      "--preset",
+      addablePresetName,
+      "--name",
+      "utility",
+      "--path",
+      "packages/utility",
+      "--dry-run",
+      "--json",
+    ]);
+
+    const exitCode = await runCli({
+      ...output.runtime,
+      cwd: target,
+      env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
+    });
+    expect(exitCode).toBe(0);
+    expect(output.stderr()).toBe("");
+    expect(JSON.parse(output.stdout())).toMatchObject({
+      status: "success",
+      dryRun: true,
+      actions: expect.arrayContaining([
+        expect.objectContaining({
+          path: "packages/utility/package.json",
+          action: "create",
+        }),
+      ]),
+    });
+    await expect(stat(unrelatedManifest)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await workspaceByteSnapshot(target)).toEqual(before);
   });
 
   it.each([

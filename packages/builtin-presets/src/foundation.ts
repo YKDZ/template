@@ -627,6 +627,7 @@ function uniqueEnvironmentNeeds<T>(needs: readonly T[]): readonly T[] {
 function readExistingPackageAdditionState(options: {
   readonly context: BuiltInGenerationContext;
   readonly blueprint: ProjectBlueprintV2;
+  readonly manifestTruthPackagePaths?: readonly string[];
 }): {
   readonly contributions: readonly PackageContribution[];
   readonly manifestTruthByPackagePath: ReadonlyMap<
@@ -682,9 +683,20 @@ function readExistingPackageAdditionState(options: {
         `Generation Record cannot reproduce Package Definition ${expectedDefinition.name} at ${expectedDefinition.path}`,
       );
     }
+    return contribution;
+  });
+  for (const packagePath of new Set(options.manifestTruthPackagePaths ?? [])) {
+    const expectedDefinition = options.blueprint.packages.find(
+      (definition) => definition.path === packagePath,
+    );
+    if (expectedDefinition === undefined) {
+      throw new Error(
+        `Package Addition requires manifest truth for unknown Package Path ${packagePath}`,
+      );
+    }
     const manifestPath = path.join(
       options.context.targetDir,
-      expectedDefinition.path,
+      packagePath,
       "package.json",
     );
     let manifest: unknown;
@@ -701,8 +713,7 @@ function readExistingPackageAdditionState(options: {
       );
     }
     manifestTruthByPackagePath.set(expectedDefinition.path, manifest);
-    return contribution;
-  });
+  }
   const reconstructedCheckFacts = uniqueEnvironmentNeeds(
     contributions.flatMap((contribution) => contribution.environmentNeeds),
   ).map(checkEnvironmentNeedFact);
@@ -1460,7 +1471,22 @@ export function planGeneratedRepositoryPackageAddition(options: {
       : {}),
   };
   assertProjectBlueprintV2(blueprint);
-  const existing = readExistingPackageAdditionState(options);
+  const manifestTruthPackagePaths =
+    requestedPackageLinkIntents.length === 0
+      ? []
+      : [
+          ...(options.blueprint.packageLinkIntents ?? []).flatMap((intent) => [
+            intent.consumerPackagePath,
+            intent.providerPackagePath,
+          ]),
+          ...requestedPackageLinkIntents.map(
+            (intent) => intent.consumerPackagePath,
+          ),
+        ];
+  const existing = readExistingPackageAdditionState({
+    ...options,
+    manifestTruthPackagePaths,
+  });
   const generationRecord: GenerationRecord = {
     ...existing.generationRecord,
     packages: [
