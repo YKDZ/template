@@ -17,6 +17,80 @@ async function fixture(): Promise<string> {
 }
 
 describe("Legacy Architecture Removal Check", () => {
+  it("rejects every retired fixture replay API, marker, transport, and compatibility surface", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/checks/src"), { recursive: true }),
+        mkdir(path.join(root, ".github/workflows"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/checks/src/replay-compat.ts"),
+          [
+            "export type GeneratedScenarioReplayCache = { directory: string };",
+            "export function fixtureReplayCacheFromEnv(): GeneratedScenarioReplayCache | undefined {",
+            "  const replayCache = process.env.TEMPLATE_FIXTURE_REPLAY_CACHE_DIR;",
+            "  return replayCache === undefined ? undefined : { directory: replayCache };",
+            "}",
+            'export const marker = `${"identity"}.passed`;',
+            'export const compatibilityFlag = "TEMPLATE_FIXTURE_EVIDENCE_REPLAY_COMPAT";',
+          ].join("\n"),
+        ),
+        writeFile(
+          path.join(root, ".github/workflows/check.yml"),
+          [
+            "env:",
+            "  TEMPLATE_FIXTURE_REPLAY_CACHE_READ: '1'",
+            "steps:",
+            "  - uses: actions/cache/restore@v6",
+            "    with:",
+            "      path: .fixture-replay-cache",
+            "      key: fixture-replay-linux",
+          ].join("\n"),
+        ),
+        writeFile(
+          path.join(root, "turbo.json"),
+          JSON.stringify({
+            tasks: {
+              check: {
+                passThroughEnv: ["TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"],
+              },
+            },
+          }),
+        ),
+      ]);
+
+      const findings = await findLegacyArchitectureFindings(root);
+      expect(findings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "retired-fixture-replay-symbol",
+            file: "packages/checks/src/replay-compat.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-fixture-replay-surface",
+            file: "packages/checks/src/replay-compat.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-fixture-replay-marker",
+            file: "packages/checks/src/replay-compat.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-fixture-replay-surface",
+            file: ".github/workflows/check.yml",
+          }),
+          expect.objectContaining({
+            rule: "retired-fixture-replay-surface",
+            file: "turbo.json",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("reports a focused finding for every protected surface", async () => {
     const root = await fixture();
     try {

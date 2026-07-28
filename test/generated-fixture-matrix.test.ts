@@ -22,8 +22,8 @@ import {
 import {
   assertGeneratedTaskDiscovery,
   generatedScenarioInstallArgs,
-  runFocusedProviderConsumptionProbe,
 } from "../packages/checks/src/check-generated-registry.ts";
+import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
   const definition = builtInPresetRegistry.all()[0]!;
@@ -115,7 +115,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
         "dir",
       );
 
-      await runFocusedProviderConsumptionProbe({
+      await executeFocusedPackageLink({
         scenarioLabel: "dynamic provider fixture",
         projectDir: root,
         consumerPackagePath,

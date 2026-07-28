@@ -68,6 +68,22 @@ const retiredSymbols = new Set([
   "BlueprintV1",
 ]);
 
+const retiredFixtureReplaySymbols = new Set([
+  "GeneratedScenarioReplayCache",
+  "fixtureReplayCacheFromEnv",
+  "replayCache",
+  "scenarioReplayMarkerExists",
+  "writeScenarioReplayMarker",
+]);
+
+const retiredFixtureReplayText = [
+  "TEMPLATE_FIXTURE_REPLAY_CACHE_DIR",
+  "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
+  "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE",
+  ".fixture-replay-cache",
+  "fixture-replay-",
+] as const;
+
 const retiredText = [
   "@ykdz/template-builtin-source",
   "Preset Source",
@@ -584,6 +600,28 @@ function collectTypeScriptFindings(
         ),
       );
     }
+    if (ts.isIdentifier(node) && retiredFixtureReplaySymbols.has(node.text)) {
+      findings.push(
+        finding(
+          "retired-fixture-replay-symbol",
+          relativePath,
+          `${location} references retired Fixture replay API ${node.text}`,
+        ),
+      );
+    }
+    const fixtureReplayMarker =
+      (ts.isStringLiteralLike(node) && node.text.endsWith(".passed")) ||
+      (ts.isTemplateExpression(node) &&
+        node.templateSpans.at(-1)?.literal.text.endsWith(".passed") === true);
+    if (fixtureReplayMarker) {
+      findings.push(
+        finding(
+          "retired-fixture-replay-marker",
+          relativePath,
+          `${location} constructs a retired .passed Fixture replay marker`,
+        ),
+      );
+    }
     if (ts.isIdentifier(node) && retiredTaskSymbols.has(node.text)) {
       findings.push(
         finding(
@@ -981,6 +1019,28 @@ function collectTextFindings(
     return [];
   }
   const findings: LegacyArchitectureFinding[] = [];
+  for (const term of retiredFixtureReplayText) {
+    if (source.includes(term)) {
+      findings.push(
+        finding(
+          "retired-fixture-replay-surface",
+          relativePath,
+          `contains retired Fixture replay surface ${term}`,
+        ),
+      );
+    }
+  }
+  if (
+    /TEMPLATE_FIXTURE_EVIDENCE_[A-Z0-9_]*(?:REPLAY|LEGACY|COMPAT)/u.test(source)
+  ) {
+    findings.push(
+      finding(
+        "retired-fixture-replay-surface",
+        relativePath,
+        "contains a Fixture Evidence replay compatibility flag",
+      ),
+    );
+  }
   for (const term of retiredText) {
     if (new RegExp(term, "iu").test(source)) {
       findings.push(

@@ -73,29 +73,56 @@
       "outputs": ["dist/**"]
     },
     "check:fixtures": {
+      "cache": false,
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_DIR",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT"
       ]
     },
     "check:generated": {
+      "cache": false,
       "outputs": [],
       "passThroughEnv": [
         "TEMPLATE_FIXTURE_CONCURRENCY",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_DIR",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_READ",
-        "TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE"
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT"
       ]
     },
     "check:focused": {
-      "outputs": []
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT"
+      ]
     },
     "check:deployment": {
       "cache": false,
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT"
+      ]
     },
     "check:templates": {
       "dependsOn": ["//#test"],

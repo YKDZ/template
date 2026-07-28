@@ -8,11 +8,11 @@ CONTEXT.md
 .scratch/
 .template/
 .project-kit/
-.fixture-replay-cache/
+.fixture-evidence/
+.fixture-evidence-activity/
 .pnpm-store/
 .turbo/
 packages/**/.turbo/
 coverage
 target
 .template-boundary-check
-generated-repository

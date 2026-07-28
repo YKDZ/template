@@ -13,6 +13,13 @@ jobs:
   check:
     name: Check package and fixture matrix
     runs-on: ubuntu-latest
+    env:
+      TEMPLATE_FIXTURE_EVIDENCE_DIR: ${{ github.workspace }}/.fixture-evidence
+      TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
+      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "0"
+      TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: ${{ github.workspace }}/.fixture-evidence-activity
+      TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: ${{ github.run_id }}
+      TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -26,13 +33,17 @@ jobs:
           node-version-file: package.json
           cache: pnpm
 
-      - name: Restore fixture replay cache
+      - name: Restore Fixture Verification Evidence
         uses: actions/cache/restore@v6
         with:
-          path: .fixture-replay-cache
-          key: fixture-replay-${{ runner.os }}-${{ github.sha }}
+          path: .fixture-evidence
+          key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-replay-${{ runner.os }}-
+            fixture-verification-evidence-${{ runner.os }}-
+
+      - name: Enable trusted evidence publication
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref
+        run: echo "TEMPLATE_FIXTURE_EVIDENCE_WRITE=1" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -45,27 +56,27 @@ jobs:
 
       - name: Check package
         run: pnpm run check
-        env:
-          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: ${{ github.workspace }}/.fixture-replay-cache
-          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
-          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
 
       - name: Check fixture matrix
+        if: always()
         run: pnpm run check:fixtures
-        env:
-          TEMPLATE_FIXTURE_REPLAY_CACHE_DIR: ${{ github.workspace }}/.fixture-replay-cache
-          TEMPLATE_FIXTURE_REPLAY_CACHE_READ: "1"
-          TEMPLATE_FIXTURE_REPLAY_CACHE_WRITE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '0' }}
 
       - name: Check focused project links
+        if: always()
         run: pnpm run check:focused
 
       - name: Check deployment artifacts
+        if: always()
         run: pnpm run check:deployment
 
-      - name: Save fixture replay cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Check Fixture Evidence Health
+        id: fixture-evidence-health
+        if: always()
+        run: pnpm --filter @ykdz/template-checks run check:evidence-health
+
+      - name: Save Fixture Verification Evidence
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
         uses: actions/cache/save@v6
         with:
-          path: .fixture-replay-cache
-          key: fixture-replay-${{ runner.os }}-${{ github.sha }}
+          path: .fixture-evidence
+          key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

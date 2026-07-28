@@ -98,75 +98,82 @@ describe("Preset Registry generated scenarios", () => {
     const focused = deriveFocusedProjectLinkScenarios();
     const consumerRoles = new Set<string>();
     const providerRoles = new Set<string>();
-    for (const scenario of focused) {
-      expect(scenario.addition?.planPackageAddition !== undefined).toBe(true);
-      expect(scenario.linkFrom).toHaveLength(1);
-      expect(scenario.id).toContain(scenario.base.metadata.name);
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-focused-registry-"),
+    );
+    try {
+      for (const scenario of focused) {
+        expect(scenario.addition?.planPackageAddition !== undefined).toBe(true);
+        expect(scenario.linkFrom).toHaveLength(1);
+        expect(scenario.id).toContain(scenario.base.metadata.name);
 
-      const context = createGenerationContext({
-        targetDir: path.join("generated-repository", scenario.id),
-        scope: "focused",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-      });
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: scenario.base,
-        context,
-      });
-      await rm(context.targetDir, { recursive: true, force: true });
-      await renderNewProject({
-        targetRoot: context.targetDir,
-        operations: [...initialization.operations],
-      });
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: scenario.addition!,
-        context,
-        blueprint: initialization.blueprint,
-        packageLeafName: `focused-${scenario.addition!.metadata.name}`,
-        linkFrom: scenario.linkFrom!,
-      });
-      const consumerPath = scenario.linkFrom![0]!;
-      const consumerRole = initialization.blueprint.packages.find(
-        (definition) => definition.path === consumerPath,
-      )?.role;
-      expect(consumerRole).not.toBe("native-package");
-      consumerRoles.add(consumerRole!);
-      const provider = addition.blueprint.packages.find(
-        (definition) =>
-          definition.path ===
-          scenario.addition!.defaultPackagePath?.({
-            context,
-            packageLeafName: `focused-${scenario.addition!.metadata.name}`,
-          }),
-      );
-      expect(["shared-library", "cli-tool"]).toContain(provider?.role);
-      providerRoles.add(provider!.role);
-      expect(addition.blueprint.packageLinkIntents).toEqual(
-        expect.arrayContaining([
-          {
-            consumerPackagePath: consumerPath,
-            providerPackagePath: provider?.path,
-          },
-        ]),
-      );
-      expect(addition.operations).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            kind: "mergeJson",
-            to: `${consumerPath}/package.json`,
-            value: expect.objectContaining({
-              dependencies: expect.objectContaining({
-                [provider!.name]: "workspace:*",
-              }),
-              dependenciesMeta: expect.objectContaining({
-                [provider!.name]: { injected: false },
+        const context = createGenerationContext({
+          targetDir: path.join(workspace, scenario.id),
+          scope: "focused",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        });
+        expect(path.dirname(context.targetDir)).toBe(workspace);
+        const initialization = planGeneratedRepositoryInitialization({
+          definition: scenario.base,
+          context,
+        });
+        await renderNewProject({
+          targetRoot: context.targetDir,
+          operations: [...initialization.operations],
+        });
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: scenario.addition!,
+          context,
+          blueprint: initialization.blueprint,
+          packageLeafName: `focused-${scenario.addition!.metadata.name}`,
+          linkFrom: scenario.linkFrom!,
+        });
+        const consumerPath = scenario.linkFrom![0]!;
+        const consumerRole = initialization.blueprint.packages.find(
+          (definition) => definition.path === consumerPath,
+        )?.role;
+        expect(consumerRole).not.toBe("native-package");
+        consumerRoles.add(consumerRole!);
+        const provider = addition.blueprint.packages.find(
+          (definition) =>
+            definition.path ===
+            scenario.addition!.defaultPackagePath?.({
+              context,
+              packageLeafName: `focused-${scenario.addition!.metadata.name}`,
+            }),
+        );
+        expect(["shared-library", "cli-tool"]).toContain(provider?.role);
+        providerRoles.add(provider!.role);
+        expect(addition.blueprint.packageLinkIntents).toEqual(
+          expect.arrayContaining([
+            {
+              consumerPackagePath: consumerPath,
+              providerPackagePath: provider?.path,
+            },
+          ]),
+        );
+        expect(addition.operations).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "mergeJson",
+              to: `${consumerPath}/package.json`,
+              value: expect.objectContaining({
+                dependencies: expect.objectContaining({
+                  [provider!.name]: "workspace:*",
+                }),
+                dependenciesMeta: expect.objectContaining({
+                  [provider!.name]: { injected: false },
+                }),
               }),
             }),
-          }),
-        ]),
-      );
+          ]),
+        );
+      }
+      expect(consumerRoles).toContain("cli-tool");
+      expect(providerRoles).toContain("cli-tool");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
     }
-    expect(consumerRoles).toContain("cli-tool");
-    expect(providerRoles).toContain("cli-tool");
   });
 
   it("plans an exact repeated Package Addition as a no-op", async () => {

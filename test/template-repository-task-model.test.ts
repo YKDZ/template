@@ -10,6 +10,7 @@ type Manifest = {
 type TurboTask = {
   readonly cache?: boolean;
   readonly dependsOn?: readonly string[];
+  readonly passThroughEnv?: readonly string[];
 };
 
 type TurboConfig = {
@@ -119,7 +120,23 @@ describe("Template Repository native task model", () => {
     ]) {
       expect(tasks[task]?.dependsOn ?? []).not.toContain("^build");
     }
-    expect(tasks["check:deployment"]?.cache).toBe(false);
+    for (const task of [
+      "check:fixtures",
+      "check:generated",
+      "check:focused",
+      "check:deployment",
+    ]) {
+      expect(tasks[task]?.cache, `${task} cache`).toBe(false);
+      expect(tasks[task]?.passThroughEnv).toEqual([
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+      ]);
+    }
     expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");
     expect(tasks.boundaries?.cache).toBe(false);
     expect(tasks["format:write"]?.cache).toBe(false);
