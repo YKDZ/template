@@ -48,6 +48,7 @@
     "@types/web-bluetooth": "catalog:",
     "@vikejs/hono": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
+    "@vue/devtools-api": "catalog:",
     "@vue/tsconfig": "catalog:",
     "@ykdz/template-core-source": "link:../core",
     "commander": "catalog:",

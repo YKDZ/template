@@ -126,7 +126,14 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       JSON.parse(
         await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
       ),
-    ).toMatchObject({ dependencies: { "@demo/api": "workspace:*" } });
+    ).toMatchObject({
+      dependencies: {
+        "@demo/api": "workspace:*",
+        "@vue/devtools-api": "catalog:",
+        pinia: "catalog:",
+        vue: "catalog:",
+      },
+    });
     expect(
       JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
     ).toMatchObject({

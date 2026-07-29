@@ -28,6 +28,7 @@ catalog:
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.8
   "@vikejs/hono": ^0.2.1
+  "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
   commander: ^15.0.0
   drizzle-kit: 1.0.0-rc.4
