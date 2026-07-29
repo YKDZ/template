@@ -1,5 +1,7 @@
 import { defineConfig } from "vitest/config";
 
+process.env.TURBO_CACHE = "local:rw";
+
 export default defineConfig({
   resolve: {
     conditions: ["source"],
