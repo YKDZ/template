@@ -48,7 +48,7 @@ catalog:
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
-  vite: ^8.1.4
+  vite: ^8.1.5
   vike: ^0.4.260
   vike-vue: ^0.9.12
   vitest: ^4.1.10
