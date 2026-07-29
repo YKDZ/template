@@ -87,7 +87,11 @@ export function vueApplicationManifest(options: {
     type: "module",
     ...vueApplicationExposure,
     scripts: options.scripts,
-    dependencies: { pinia: "catalog:", vue: "catalog:" },
+    dependencies: {
+      "@vue/devtools-api": "catalog:",
+      pinia: "catalog:",
+      vue: "catalog:",
+    },
     devDependencies: {
       "@playwright/test": "catalog:",
       "@tailwindcss/vite": "catalog:",

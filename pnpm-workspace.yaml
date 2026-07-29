@@ -28,6 +28,7 @@ catalog:
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.8
   "@vikejs/hono": ^0.2.1
+  "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
   commander: ^15.0.0
   drizzle-kit: 1.0.0-rc.4
@@ -40,7 +41,7 @@ catalog:
   oxlint-tsgolint: ^7.0.2001
   semver: ^7.8.5
   "@types/semver": ^7.7.1
-  pinia: ^3.0.4
+  pinia: ^4.0.2
   srvx: ^0.12.1
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22

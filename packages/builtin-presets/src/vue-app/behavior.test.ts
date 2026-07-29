@@ -45,6 +45,11 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       exports: { ".": { default: "./src/main.ts", types: "./src/main.ts" } },
       imports: { "#/*": { default: "./src/*.ts", types: "./src/*.ts" } },
     });
+    expect(contribution.manifest.dependencies).toEqual({
+      "@vue/devtools-api": "catalog:",
+      pinia: "catalog:",
+      vue: "catalog:",
+    });
     expect(contribution).not.toHaveProperty("checks");
     expect(contribution.environmentNeeds).toMatchObject([
       { kind: "playwright-browser-assets", browser: "chromium" },
