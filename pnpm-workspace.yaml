@@ -23,7 +23,7 @@ overrides:
 catalog:
   "@hono/node-server": ^2.0.12
   "@playwright/test": ^1.61.1
-  "@tailwindcss/vite": ^4.3.2
+  "@tailwindcss/vite": ^4.3.3
   "@types/node": ^24.13.3
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.8
