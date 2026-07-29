@@ -8,8 +8,8 @@ settings:
 catalogs:
   default:
     '@hono/node-server':
-      specifier: ^2.0.6
-      version: 2.0.8
+      specifier: ^2.0.12
+      version: 2.0.12
     '@playwright/test':
       specifier: ^1.61.1
       version: 1.61.1
@@ -185,7 +185,7 @@ importers:
     devDependencies:
       '@hono/node-server':
         specifier: 'catalog:'
-        version: 2.0.8(hono@4.12.32)
+        version: 2.0.12(hono@4.12.32)
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.61.1
@@ -827,8 +827,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@hono/node-server@2.0.8':
-    resolution: {integrity: sha512-GuCWzLxwg218fy1JaHculFsdcuY12hxit83V+algozTPnwhNjLrRL/Alg9OYjLZLoUZ1rw/S4CdTMsnkSKCmFA==}
+  '@hono/node-server@2.0.12':
+    resolution: {integrity: sha512-eWpQYr67tqJLeaSUl0Q+TquuYfUdTibpOJlUMV2FfUP7+KqCC5TufnwnlXL6mobZBJbGAYRd7ZvEBDCbLInjhg==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -3097,7 +3097,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@hono/node-server@2.0.8(hono@4.12.32)':
+  '@hono/node-server@2.0.12(hono@4.12.32)':
     dependencies:
       hono: 4.12.32
 
