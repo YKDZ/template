@@ -5,6 +5,11 @@ on:
   push:
   workflow_dispatch:
   workflow_call:
+    secrets:
+      TURBO_TOKEN:
+        required: false
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -56,6 +61,11 @@ jobs:
 
       - name: Check package
         run: pnpm run check
+        env:
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.TURBO_TOKEN || '' }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+          TURBO_REMOTE_CACHE_READ_ONLY: ${{ github.event_name == 'release' && 'true' || 'false' }}
 
       - name: Check fixture matrix
         if: always()

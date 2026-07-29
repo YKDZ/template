@@ -14,6 +14,11 @@ type WorkflowStep = {
 };
 
 type CheckWorkflow = {
+  readonly on: {
+    readonly workflow_call: {
+      readonly secrets: Record<string, { readonly required: boolean }>;
+    };
+  };
   readonly jobs: {
     readonly check: {
       readonly env?: Record<string, string>;
@@ -31,11 +36,14 @@ async function checkWorkflow(): Promise<CheckWorkflow> {
 type ReleaseWorkflow = {
   readonly jobs: {
     readonly check: {
+      readonly name: string;
+      readonly secrets?: Record<string, string>;
       readonly uses: string;
       readonly with?: Record<string, unknown>;
     };
     readonly publish: {
       readonly needs: string;
+      readonly steps: readonly WorkflowStep[];
     };
   };
 };
@@ -66,7 +74,13 @@ describe("Fixture Verification Evidence check workflow", () => {
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
     );
     expect(scenarioSteps).toHaveLength(4);
-    expect(scenarioSteps.every((step) => step.env === undefined)).toBe(true);
+    expect(
+      scenarioSteps.every((step) =>
+        Object.keys(step.env ?? {}).every(
+          (name) => !name.startsWith("TEMPLATE_FIXTURE_EVIDENCE_"),
+        ),
+      ),
+    ).toBe(true);
     expect(
       job.steps.find(
         (step) => step.name === "Enable trusted evidence publication",
@@ -75,6 +89,54 @@ describe("Fixture Verification Evidence check workflow", () => {
       if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref",
       run: 'echo "TEMPLATE_FIXTURE_EVIDENCE_WRITE=1" >> "$GITHUB_ENV"',
     });
+  });
+
+  it("shares signed Turbo cache only with trusted producers and read-only Release consumers", async () => {
+    const trustedCacheCredential =
+      "${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.";
+    const checkWorkflowDocument = await checkWorkflow();
+    const check = checkWorkflowDocument.jobs.check;
+    const packageCheck = check.steps.find(
+      (step) => step.run === "pnpm run check",
+    );
+    const release = parse(
+      await readFile(".github/workflows/release.yml", "utf8"),
+    ) as ReleaseWorkflow;
+    const turboConfig = parse(await readFile("turbo.json", "utf8")) as Record<
+      string,
+      unknown
+    >;
+
+    expect(checkWorkflowDocument.on.workflow_call.secrets).toEqual({
+      TURBO_TOKEN: { required: false },
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: { required: false },
+    });
+    expect(packageCheck?.env).toEqual({
+      TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
+      TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
+      TURBO_REMOTE_CACHE_READ_ONLY:
+        "${{ github.event_name == 'release' && 'true' || 'false' }}",
+    });
+    expect(release.jobs.check.secrets).toEqual({
+      TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY:
+        "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
+    });
+    expect(
+      release.jobs.publish.steps.find(
+        (step) =>
+          step.run ===
+          "pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance",
+      )?.env,
+    ).toEqual({
+      TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
+      TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY:
+        "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
+      TURBO_REMOTE_CACHE_READ_ONLY: "true",
+    });
+    expect(turboConfig.remoteCache).toEqual({ signature: true });
   });
 
   it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
@@ -126,6 +188,11 @@ describe("Fixture Verification Evidence check workflow", () => {
     expect(workflow.jobs.check).toEqual({
       name: "Check package",
       uses: "./.github/workflows/check.yml",
+      secrets: {
+        TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
+        TURBO_REMOTE_CACHE_SIGNATURE_KEY:
+          "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
+      },
     });
     expect(workflow.jobs.check.with).toBeUndefined();
     expect(workflow.jobs.publish.needs).toBe("check");

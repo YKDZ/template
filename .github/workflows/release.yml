@@ -16,6 +16,9 @@ jobs:
   check:
     name: Check package
     uses: ./.github/workflows/check.yml
+    secrets:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
 
   publish:
     name: Publish to npm
@@ -44,3 +47,8 @@ jobs:
 
       - name: Publish package
         run: pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance
+        env:
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+          TURBO_REMOTE_CACHE_READ_ONLY: "true"
