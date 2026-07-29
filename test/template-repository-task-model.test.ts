@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 type Manifest = {
   readonly scripts: Record<string, string>;
@@ -17,11 +18,29 @@ type TurboConfig = {
   readonly tasks: Record<string, TurboTask>;
 };
 
+type WorkspaceConfig = {
+  readonly dedupeInjectedDeps?: boolean;
+  readonly injectWorkspacePackages?: boolean;
+  readonly syncInjectedDepsAfterScripts?: readonly string[];
+};
+
 async function readJson<T>(file: string): Promise<T> {
   return JSON.parse(await readFile(file, "utf8")) as T;
 }
 
 describe("Template Repository native task model", () => {
+  it("executes builds when injected workspace packages must be synchronized", async () => {
+    const workspace = parse(
+      await readFile("pnpm-workspace.yaml", "utf8"),
+    ) as WorkspaceConfig;
+    const turbo = await readJson<TurboConfig>("turbo.json");
+
+    expect(workspace.injectWorkspacePackages).toBe(true);
+    expect(workspace.dedupeInjectedDeps).toBe(false);
+    expect(workspace.syncInjectedDepsAfterScripts).toContain("build");
+    expect(turbo.tasks.build?.cache).toBe(false);
+  });
+
   it("uses conventional root leaf tasks and one native check/fix invocation", async () => {
     const manifest = await readJson<Manifest>("package.json");
     const scripts = manifest.scripts;
