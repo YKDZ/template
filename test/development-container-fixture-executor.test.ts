@@ -39,7 +39,15 @@ type Command = {
 };
 
 function fixtureIdLabel(projectDir: string): string {
-  return `com.ykdz.template.fixture.project=${createHash("sha256").update(projectDir).digest("hex")}`;
+  return `com.ykdz.template.fixture.project=${fixtureProjectIdentity(projectDir)}`;
+}
+
+function fixtureProjectIdentity(projectDir: string): string {
+  return createHash("sha256").update(projectDir).digest("hex");
+}
+
+function fixtureTurboCacheRemoteEnv(projectDir: string): string {
+  return `TURBO_CACHE_DIR=/tmp/template-turbo-cache-${fixtureProjectIdentity(projectDir)}`;
 }
 
 function nestedDevcontainerCommand(args: readonly string[]): {
@@ -225,6 +233,8 @@ describe("Development Container Fixture Executor", () => {
           projectDir,
           "--id-label",
           idLabel,
+          "--remote-env",
+          fixtureTurboCacheRemoteEnv(projectDir),
           "pnpm",
           "install",
           "--lockfile-only",
@@ -241,6 +251,8 @@ describe("Development Container Fixture Executor", () => {
           projectDir,
           "--id-label",
           idLabel,
+          "--remote-env",
+          fixtureTurboCacheRemoteEnv(projectDir),
           "pnpm",
           "fetch",
           "--store-dir",
@@ -256,6 +268,8 @@ describe("Development Container Fixture Executor", () => {
           projectDir,
           "--id-label",
           idLabel,
+          "--remote-env",
+          fixtureTurboCacheRemoteEnv(projectDir),
           "pnpm",
           "install",
           "--offline",
@@ -273,6 +287,8 @@ describe("Development Container Fixture Executor", () => {
           projectDir,
           "--id-label",
           idLabel,
+          "--remote-env",
+          fixtureTurboCacheRemoteEnv(projectDir),
           "pnpm",
           "run",
           "check",
@@ -1437,6 +1453,8 @@ describe("Development Container Fixture Executor", () => {
       projectDir,
       "--id-label",
       idLabel,
+      "--remote-env",
+      fixtureTurboCacheRemoteEnv(projectDir),
       "sh",
       "-c",
       'cd "$1" && shift && exec "$@"',
@@ -1479,6 +1497,8 @@ describe("Development Container Fixture Executor", () => {
     );
     expect(execCall?.args).toEqual(
       expect.arrayContaining([
+        "--remote-env",
+        expect.stringMatching(/^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u),
         "--remote-env",
         "TURBO_TEAM=fixture-team",
         "TURBO_TOKEN=fixture-token",

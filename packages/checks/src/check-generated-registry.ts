@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -152,6 +151,8 @@ const fixtureEnvironment = {
   pnpmCacheDirectory: "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
   workspaceDirectory: "TEMPLATE_FIXTURE_WORKSPACE_DIR",
 } as const;
+
+const defaultFixtureWorkspaceDirectory = ".fixture-workspace";
 
 const fixtureTurboEnvironment = [
   ["TURBO_TEAM", "TEMPLATE_FIXTURE_TURBO_TEAM"],
@@ -366,6 +367,7 @@ async function runScenario(
     targetRoot: projectDir,
     operations: [...initialization.operations],
   });
+  await prepareGeneratedRepositoryForContainerWrites(projectDir);
   if (
     mode === "init" ||
     mode === "package-addition-matrix" ||
@@ -602,6 +604,14 @@ async function runScenario(
   });
 }
 
+async function prepareGeneratedRepositoryForContainerWrites(
+  projectDir: string,
+): Promise<void> {
+  const turboDirectory = path.join(projectDir, ".turbo");
+  await mkdir(turboDirectory, { recursive: true });
+  await chmod(turboDirectory, 0o777);
+}
+
 /** Runs registry-derived generated repositories through their production plans. */
 export async function runGeneratedScenarioSet(
   set: GeneratedScenarioSet,
@@ -809,8 +819,10 @@ export async function runGeneratedRegistryCli(options: {
   let workspace = options.workspace;
   if (workspace === undefined) {
     if (configuredWorkspace === undefined) {
+      const workspaceRoot = path.resolve(defaultFixtureWorkspaceDirectory);
+      await mkdir(workspaceRoot, { recursive: true });
       workspace = await mkdtemp(
-        path.join(tmpdir(), "template-generated-check-"),
+        path.join(workspaceRoot, "template-generated-check-"),
       );
     } else {
       const workspaceRoot = path.resolve(configuredWorkspace);

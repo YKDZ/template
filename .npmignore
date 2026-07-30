@@ -6,6 +6,7 @@ AGENTS.md
 CONTEXT.md
 .agents/
 .scratch/
+.fixture-workspace/
 .pnpm-store/
 .devcontainer/
 .vscode/

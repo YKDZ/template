@@ -315,6 +315,44 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
+  it("ignores local fixture cache directories outside repository ownership", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, ".fixture-native-cache/pnpm/v11/files/00"), {
+          recursive: true,
+        }),
+        mkdir(path.join(root, ".fixture-evidence/activity"), {
+          recursive: true,
+        }),
+        mkdir(path.join(root, ".fixture-workspace/template-generated-check-x"), {
+          recursive: true,
+        }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, ".fixture-native-cache/pnpm/v11/files/00/cache"),
+          "Preset File\n",
+        ),
+        writeFile(
+          path.join(root, ".fixture-evidence/activity/event.jsonl"),
+          "Transit Task\n",
+        ),
+        writeFile(
+          path.join(
+            root,
+            ".fixture-workspace/template-generated-check-x/source.ts",
+          ),
+          "export const rootTask = true;\n",
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects retired task selection from source, generated manifests, documentation, and builds", async () => {
     const root = await fixture();
     try {

@@ -51,6 +51,7 @@ const developmentContainerSharedPnpmStore = "/pnpm/store";
 const developmentContainerCargoRegistry = "/usr/local/cargo/registry";
 const developmentContainerCargoGit = "/usr/local/cargo/git";
 const turboCacheEnvironmentNames = [
+  "TURBO_CACHE_DIR",
   "TURBO_TEAM",
   "TURBO_TOKEN",
   "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
@@ -235,10 +236,17 @@ export function createDevelopmentContainerFixtureSession(options: {
     "devcontainer.json",
   );
   const workspaceArgs = ["--workspace-folder", options.projectDir] as const;
-  const idLabel = `com.ykdz.template.fixture.project=${createHash("sha256").update(path.resolve(options.projectDir)).digest("hex")}`;
+  const projectIdentity = createHash("sha256")
+    .update(path.resolve(options.projectDir))
+    .digest("hex");
+  const idLabel = `com.ykdz.template.fixture.project=${projectIdentity}`;
   const identityArgs = ["--id-label", idLabel] as const;
   const remoteEnvironmentArgs = turboCacheEnvironmentNames.flatMap((name) => {
-    const value = environment[name];
+    const value =
+      environment[name] ??
+      (name === "TURBO_CACHE_DIR"
+        ? `/tmp/template-turbo-cache-${projectIdentity}`
+        : undefined);
     return value === undefined || value.length === 0
       ? []
       : ["--remote-env", `${name}=${value}`];

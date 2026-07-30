@@ -11,6 +11,7 @@ CONTEXT.md
 .fixture-evidence/
 .fixture-evidence-activity/
 .fixture-native-cache/
+.fixture-workspace/
 .pnpm-store/
 .turbo/
 packages/**/.turbo/

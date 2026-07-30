@@ -188,6 +188,7 @@ function isolatedFixtureEnvironment(
     "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
     "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
     "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+    "TEMPLATE_FIXTURE_WORKSPACE_DIR",
     "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
     "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
     "TEMPLATE_FIXTURE_TURBO_TEAM",
@@ -1824,6 +1825,49 @@ describe("Fixture Verification Evidence", () => {
       installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("uses a repository-local generated workspace by default", async () => {
+    const workspaceRoot = path.join(process.cwd(), ".fixture-workspace");
+    const observedProjectDirectories = new Set<string>();
+
+    await runGeneratedRegistryCli({
+      scenarioSet: "init",
+      environment: isolatedFixtureEnvironment({}),
+      run: async (command, args, options) => {
+        if (command === "git") {
+          return await execa(command, [...args], options);
+        }
+        if (args.includes("--dry-run=json")) {
+          observedProjectDirectories.add(options.cwd);
+          return {
+            stdout: JSON.stringify({
+              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                taskId,
+              })),
+            }),
+          };
+        }
+        if (command === "pnpm" && args[0] === "run") {
+          observedProjectDirectories.add(options.cwd);
+        }
+        return {};
+      },
+    });
+
+    expect(observedProjectDirectories.size).toBeGreaterThan(0);
+    for (const directory of observedProjectDirectories) {
+      expect(directory).toContain(
+        `${workspaceRoot}${path.sep}template-generated-check-`,
+      );
+    }
+    await expect(access(workspaceRoot)).resolves.toBeUndefined();
+    const remainingEntries = await readdir(workspaceRoot);
+    expect(
+      remainingEntries.filter((entry) =>
+        entry.startsWith("template-generated-check-"),
+      ),
+    ).toEqual([]);
   });
 
   it("rejects malformed concurrency at the real generated-registry CLI environment boundary", async () => {
