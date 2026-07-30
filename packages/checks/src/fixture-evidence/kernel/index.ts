@@ -503,7 +503,7 @@ export function createDevelopmentContainerFixtureSession(options: {
     } else {
       await recordCacheActivity("buildkit");
       await runDevelopmentContainerBuildFlight(
-        `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}`,
+        `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
         up,
       );
     }

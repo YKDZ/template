@@ -606,7 +606,7 @@ describe("Development Container Fixture Executor", () => {
     }
   });
 
-  it("single-flights equivalent Development Container builds", async () => {
+  it("does not single-flight Development Container startup across projects with equivalent builds", async () => {
     const cacheDirectory = path.resolve("/cache/template-buildkit");
     const buildIdentity = "b".repeat(64);
     const calls: Command[] = [];
@@ -657,7 +657,20 @@ describe("Development Container Fixture Executor", () => {
       calls.filter(
         ({ command, args }) => command === "devcontainer" && args[0] === "up",
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
+    for (const projectDir of projectDirs) {
+      expect(calls).toContainEqual({
+        command: "devcontainer",
+        args: expect.arrayContaining([
+          "up",
+          "--workspace-folder",
+          projectDir,
+          "--id-label",
+          fixtureIdLabel(projectDir),
+        ]),
+        cwd: projectDir,
+      });
+    }
     for (const projectDir of projectDirs) {
       const idLabel = fixtureIdLabel(projectDir);
       expect(calls).toContainEqual({
