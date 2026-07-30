@@ -19,11 +19,19 @@ import {
   planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
 
-import { assertGeneratedTaskDiscovery } from "../packages/checks/src/check-generated-registry.ts";
+import {
+  assertGeneratedTaskDiscovery,
+  runGeneratedScenarioSet,
+} from "../packages/checks/src/check-generated-registry.ts";
 import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
 import { fixtureDependencyInstallationPlan } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
 
 describe("registry-derived Package Addition Fixture Matrix", () => {
+  type GeneratedDevelopmentContainerConfig = {
+    build: { args: Record<string, string> };
+    mounts: Record<string, unknown>[];
+  };
+
   const definition = builtInPresetRegistry.all()[0]!;
   const plan = planGeneratedRepositoryInitialization({
     definition,
@@ -57,13 +65,102 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
   });
 
   it("isolates generated installs from the repository pnpm store", () => {
-    expect(
-      fixtureDependencyInstallationPlan("/tmp/generated-scenarios"),
-    ).toEqual({
-      command: "pnpm",
-      args: ["install", "--store-dir", "/tmp/generated-scenarios/.pnpm-store"],
+    expect(fixtureDependencyInstallationPlan("/pnpm/store")).toEqual({
+      storeDir: "/pnpm/store",
+      commands: [
+        {
+          command: "pnpm",
+          args: ["install", "--lockfile-only", "--store-dir", "/pnpm/store"],
+        },
+        {
+          command: "pnpm",
+          args: ["fetch", "--store-dir", "/pnpm/store"],
+        },
+        {
+          command: "pnpm",
+          args: [
+            "install",
+            "--offline",
+            "--frozen-lockfile",
+            "--store-dir",
+            "/pnpm/store",
+          ],
+        },
+      ],
     });
   });
+
+  it.each([
+    {
+      protectedField: "build argument",
+      mutate: (config: GeneratedDevelopmentContainerConfig) => {
+        config.build.args.NODE_VERSION = "999";
+      },
+      expectedError: "build arguments do not match the final Tool Layer plan",
+    },
+    {
+      protectedField: "mount",
+      mutate: (config: GeneratedDevelopmentContainerConfig) => {
+        const mount = config.mounts.find(
+          (candidate) => candidate.target === "/pnpm/store",
+        );
+        if (mount === undefined) {
+          throw new Error("Expected projected pnpm store mount");
+        }
+        mount.source = "user-overlap";
+      },
+      expectedError:
+        "mount pnpm-store does not match the final Tool Layer plan",
+    },
+  ])(
+    "rejects a protected Development Container $protectedField mismatch before evidence lookup",
+    async ({ mutate, expectedError }) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "fixture-final-projection-validation-"),
+      );
+      const evidenceEvents: Array<{ readonly type: string }> = [];
+
+      try {
+        await expect(
+          runGeneratedScenarioSet("init", {
+            workspace,
+            evidence: {
+              writeEnabled: false,
+              recordLifecycle: (event) => {
+                evidenceEvents.push(event);
+              },
+            },
+            run: async (command, args, options) => {
+              if (command !== "git") {
+                throw new Error(
+                  `Development Container execution started before projection validation: ${command}`,
+                );
+              }
+              const result = await execa(command, [...args], options);
+              if (args[0] === "init") {
+                const configPath = path.join(
+                  options.cwd,
+                  ".devcontainer/devcontainer.json",
+                );
+                const config = JSON.parse(
+                  await readFile(configPath, "utf8"),
+                ) as GeneratedDevelopmentContainerConfig;
+                mutate(config);
+                await writeFile(
+                  configPath,
+                  `${JSON.stringify(config, null, 2)}\n`,
+                );
+              }
+              return result;
+            },
+          }),
+        ).rejects.toThrow(expectedError);
+        expect(evidenceEvents).toEqual([]);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("consumes manifest-derived provider source and distribution exports by package name", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "focused-provider-probe-"));

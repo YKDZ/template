@@ -1,14 +1,14 @@
 {
+  "extends": "{{TYPESCRIPT_CONFIG_PACKAGE}}/base.json",
   "compilerOptions": {
     "customConditions": ["source"],
     "declaration": true,
     "erasableSyntaxOnly": true,
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "strict": true,
+    "rewriteRelativeImportExtensions": true,
     "target": "es2023",
-    "types": ["node"],
-    "verbatimModuleSyntax": true
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"]
 }

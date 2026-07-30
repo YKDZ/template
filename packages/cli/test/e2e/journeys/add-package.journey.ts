@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { builtInPresetRegistry } from "#template-builtin-presets";
+import {
+  builtInPresetRegistry,
+  createGenerationContext,
+} from "#template-builtin-presets";
+import {
+  canConsumeNodePackageNameImport,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImport,
+} from "#template-core/project-linking-v2";
 
 import type { CliJourney } from "../journey.ts";
 
@@ -10,17 +18,51 @@ const fallbackEnvironment = {
   TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
 };
 
-function requireAddablePresetName(): string {
-  const definition = builtInPresetRegistry
-    .all()
-    .find((candidate) => candidate.planPackageAddition !== undefined);
-  if (definition === undefined) {
-    throw new Error("add package journey requires an addable Preset");
+function requireLinkableAddition(): {
+  readonly presetName: string;
+  readonly consumerPath: string;
+} {
+  const context = createGenerationContext({
+    targetDir: "project",
+    scope: "acme",
+    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+  });
+  for (const definition of builtInPresetRegistry.all()) {
+    const packageLeafName = "utility";
+    const packagePath = definition.defaultPackagePath?.({
+      context,
+      packageLeafName,
+    });
+    if (packagePath === undefined || !definition.planPackageAddition) continue;
+    const provider = definition.planPackageAddition({
+      context,
+      packageLeafName,
+      packagePath,
+    });
+    if (!canProvideSourceConditionPackageNameImport(provider)) continue;
+    const consumers = definition.planInitializationContributions?.(context) ?? [
+      definition.planInitialization(context),
+    ];
+    const consumer = consumers.find(
+      (candidate) =>
+        canConsumeNodePackageNameImport(candidate) &&
+        canLinkNodePackageRoles(
+          candidate.definition.role,
+          provider.definition.role,
+        ),
+    );
+    if (consumer !== undefined) {
+      return {
+        presetName: definition.metadata.name,
+        consumerPath: consumer.definition.path,
+      };
+    }
   }
-  return definition.metadata.name;
+  throw new Error("add package journey requires a linkable addable Preset");
 }
 
-const addablePresetName = requireAddablePresetName();
+const { presetName: addablePresetName, consumerPath } =
+  requireLinkableAddition();
 
 async function snapshot(
   root: string,
@@ -76,7 +118,7 @@ const journey: CliJourney = {
           "--path",
           "packages/utility",
           "--link-from",
-          "packages/project",
+          consumerPath,
           "--dry-run",
           "--json",
         ],
@@ -100,7 +142,7 @@ const journey: CliJourney = {
           "--path",
           "packages/utility",
           "--link-from",
-          "packages/project",
+          consumerPath,
           "--json",
         ],
         env: fallbackEnvironment,
@@ -118,7 +160,7 @@ const journey: CliJourney = {
           "--path",
           "packages/utility",
           "--link-from",
-          "packages/project",
+          consumerPath,
           "--json",
         ],
         env: fallbackEnvironment,

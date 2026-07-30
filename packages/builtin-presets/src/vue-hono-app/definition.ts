@@ -6,8 +6,10 @@ import type {
 import type { PackageDefinition } from "#template-core/project-blueprint-v2";
 import type { RenderOperation } from "#template-core/renderer";
 
+import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import {
   sharedVueSourceOperations,
+  vueApplicationDevelopmentContainerToolLayers,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
   vueApplicationManifest,
@@ -33,7 +35,7 @@ function webScripts(): Record<string, string> {
   return {
     ...vueApplicationScripts(),
     typecheck:
-      "node --conditions=source scripts/run-vue-tsc.ts --build --pretty false",
+      "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
 }
 
@@ -79,12 +81,21 @@ function apiContribution(context: GenerationContext): PackageContribution {
   ] as const;
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
-    ...sourceFiles.map((from) => ({
-      kind: "copyFile" as const,
-      source: templateSources.vueHonoApp,
-      from: `api/${from}`,
-      to: `${definition.path}/${from}`,
-    })),
+    ...sourceFiles.map((from) =>
+      from === "tsconfig.json"
+        ? typescriptConfigSourceOperation({
+            context,
+            source: templateSources.vueHonoApp,
+            from: `api/${from}`,
+            to: `${definition.path}/${from}`,
+          })
+        : {
+            kind: "copyFile" as const,
+            source: templateSources.vueHonoApp,
+            from: `api/${from}`,
+            to: `${definition.path}/${from}`,
+          },
+    ),
   ];
   return {
     definition,
@@ -140,7 +151,7 @@ function webContribution(context: GenerationContext): PackageContribution {
       from: `web/${from}`,
       to: `${definition.path}/${from}`,
     })),
-    ...sharedVueSourceOperations(definition.path),
+    ...sharedVueSourceOperations(context, definition.path),
   ];
   return {
     definition,
@@ -152,7 +163,11 @@ function webContribution(context: GenerationContext): PackageContribution {
     }),
     operations,
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
-    foundation: packageFoundation(),
+    foundation: {
+      ...packageFoundation(),
+      developmentContainerToolLayers:
+        vueApplicationDevelopmentContainerToolLayers(),
+    },
   };
 }
 

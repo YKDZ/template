@@ -65,6 +65,11 @@ async function checkContributionTemplateSource(
   );
   const packageDirectory = path.dirname(fileURLToPath(import.meta.url));
   const oxcConfigRoot = path.resolve(packageDirectory, "..", "..", "..");
+  const templateSourceLintConfig = path.resolve(
+    packageDirectory,
+    "..",
+    "oxlint.template-source.json",
+  );
 
   if (formattedFiles.length > 0) {
     await execa(
@@ -89,7 +94,7 @@ async function checkContributionTemplateSource(
         "--quiet",
         "--format=unix",
         "--config",
-        path.join(oxcConfigRoot, "oxlint.config.ts"),
+        templateSourceLintConfig,
         ...lintedFiles,
       ],
       { cwd: packageDirectory },
@@ -120,6 +125,13 @@ async function checkContributionTemplateSource(
           "utf8",
         ),
       ) as { scripts?: Record<string, unknown> };
+      if (typeof manifest.scripts?.lint === "string") {
+        await execa(
+          "pnpm",
+          ["--filter", `./${definition.path}`, "run", "lint"],
+          { cwd: checkRoot },
+        );
+      }
       if (typeof manifest.scripts?.typecheck !== "string") continue;
       await execa(
         "pnpm",

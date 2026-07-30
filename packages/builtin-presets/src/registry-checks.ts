@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -279,6 +279,99 @@ export async function validatePlanSources(options: {
     }
   }
   return references;
+}
+
+function isStructuredRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Checks the materialized Development Container against the final Tool Layer
+ * plan before Fixture Verification Evidence can stand in for execution.
+ */
+export async function validateGeneratedDevelopmentContainerProjection(options: {
+  readonly plan: GeneratedRepositoryPlan;
+  readonly projectDir: string;
+}): Promise<void> {
+  const dockerfilePath = path.join(
+    options.projectDir,
+    ".devcontainer",
+    "Dockerfile",
+  );
+  const expectedDockerfile =
+    (
+      await Promise.all(
+        options.plan.developmentContainer.toolLayers.map(
+          async (layer) =>
+            await readFile(
+              resolveBuiltInTemplateSource(
+                layer.dockerfile.source,
+                layer.dockerfile.from,
+              ),
+              "utf8",
+            ),
+        ),
+      )
+    )
+      .map((source) => source.trimEnd())
+      .join("\n\n") + "\n";
+  const generatedDockerfile = await readFile(dockerfilePath, "utf8");
+  if (generatedDockerfile !== expectedDockerfile) {
+    throw new Error(
+      `Generated Development Container projection ${dockerfilePath} does not match the final Tool Layer plan`,
+    );
+  }
+
+  const configPath = path.join(
+    options.projectDir,
+    ".devcontainer",
+    "devcontainer.json",
+  );
+  const config = JSON.parse(await readFile(configPath, "utf8")) as {
+    readonly build?: { readonly args?: unknown };
+    readonly mounts?: unknown;
+  };
+  const expectedBuildArguments = Object.fromEntries(
+    options.plan.developmentContainer.buildArguments.map((argument) => [
+      argument.name,
+      argument.value,
+    ]),
+  );
+  const generatedBuildArguments = config.build?.args;
+  if (
+    !isStructuredRecord(generatedBuildArguments) ||
+    Object.entries(expectedBuildArguments).some(
+      ([name, value]) => generatedBuildArguments[name] !== value,
+    )
+  ) {
+    throw new Error(
+      `Generated Development Container projection ${configPath} build arguments do not match the final Tool Layer plan`,
+    );
+  }
+  if (!Array.isArray(config.mounts)) {
+    throw new Error(
+      `Generated Development Container projection ${configPath} mounts do not match the final Tool Layer plan`,
+    );
+  }
+  for (const { identity, ...expectedMount } of options.plan.developmentContainer
+    .mounts) {
+    const matchingMounts = config.mounts.filter(
+      (mount) =>
+        isStructuredRecord(mount) && mount.target === expectedMount.target,
+    );
+    if (
+      matchingMounts.length !== 1 ||
+      Object.entries(expectedMount).some(
+        ([field, value]) => matchingMounts[0]?.[field] !== value,
+      )
+    ) {
+      throw new Error(
+        `Generated Development Container projection ${configPath} mount ${identity} does not match the final Tool Layer plan`,
+      );
+    }
+  }
 }
 
 /** Verifies the generated catalog is derived solely from structured manifests. */

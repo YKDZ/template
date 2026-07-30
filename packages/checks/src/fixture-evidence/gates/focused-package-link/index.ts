@@ -3,13 +3,10 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
 import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
-  ensureFixtureDependencies,
   normalizedFixtureDependencyInstallationPlan,
   type FixtureCommandRunner,
 } from "../../kernel/index.ts";
@@ -279,16 +276,9 @@ export async function executeFocusedPackageLink(options: {
   readonly fixtureWorkspace: string;
   readonly consumerPackagePath: string;
   readonly providerPackagePath: string;
-  readonly run?: FixtureCommandRunner;
+  readonly run: FixtureCommandRunner;
 }): Promise<void> {
-  const run =
-    options.run ??
-    ((command, args, runOptions) => execa(command, [...args], runOptions));
-  await ensureFixtureDependencies({
-    projectDir: options.projectDir,
-    fixtureWorkspace: options.fixtureWorkspace,
-    run,
-  });
+  const run = options.run;
   const consumerRoot = path.join(
     options.projectDir,
     options.consumerPackagePath,

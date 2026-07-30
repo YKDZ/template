@@ -49,6 +49,50 @@ type ReleaseWorkflow = {
 };
 
 describe("Fixture Verification Evidence check workflow", () => {
+  it("validates fixture prerequisites before running container-backed gates", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const prerequisites = steps.find(
+      (step) => step.id === "fixture-prerequisites",
+    );
+    const workspace = parse(await readFile("pnpm-workspace.yaml", "utf8")) as {
+      readonly catalog: Record<string, string>;
+    };
+    const checksManifest = JSON.parse(
+      await readFile("packages/checks/package.json", "utf8"),
+    ) as {
+      readonly devDependencies: Record<string, string>;
+    };
+
+    expect(
+      steps.find((step) => step.uses === "docker/setup-buildx-action@v3"),
+    ).toBeDefined();
+    expect(workspace.catalog["@devcontainers/cli"]).toBe("0.88.0");
+    expect(checksManifest.devDependencies["@devcontainers/cli"]).toBe(
+      "catalog:",
+    );
+    expect(prerequisites).toMatchObject({
+      name: "Validate Fixture Gate Prerequisites",
+      run: [
+        "docker version --format '{{.Server.Version}}'",
+        "pnpm --filter @ykdz/template-checks exec devcontainer --version",
+        "",
+      ].join("\n"),
+    });
+
+    for (const command of [
+      "pnpm run check:fixtures",
+      "pnpm run check:focused",
+      "pnpm run check:deployment",
+    ]) {
+      expect(steps.find((step) => step.run === command)?.if).toBe(
+        "always() && steps.fixture-prerequisites.outcome == 'success'",
+      );
+    }
+    expect(
+      steps.find((step) => step.id === "fixture-evidence-health")?.if,
+    ).toBe("always()");
+  });
+
   it("propagates one job-level evidence policy with publication limited to trusted main pushes", async () => {
     const workflow = await checkWorkflow();
     const job = workflow.jobs.check;
@@ -62,6 +106,12 @@ describe("Fixture Verification Evidence check workflow", () => {
         "${{ github.workspace }}/.fixture-evidence-activity",
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "${{ github.run_id }}",
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "${{ github.run_attempt }}",
+      TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR:
+        "${{ github.workspace }}/.fixture-native-cache/buildkit",
+      TEMPLATE_FIXTURE_PNPM_CACHE_DIR:
+        "${{ github.workspace }}/.fixture-native-cache/pnpm",
+      TEMPLATE_FIXTURE_CARGO_CACHE_DIR:
+        "${{ github.workspace }}/.fixture-native-cache/cargo",
     });
 
     const scenarioCommands = new Set([
@@ -93,7 +143,7 @@ describe("Fixture Verification Evidence check workflow", () => {
 
   it("shares signed Turbo cache only with trusted producers and read-only Release consumers", async () => {
     const trustedCacheCredential =
-      "${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.";
+      "${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.";
     const checkWorkflowDocument = await checkWorkflow();
     const check = checkWorkflowDocument.jobs.check;
     const packageCheck = check.steps.find(
@@ -111,13 +161,25 @@ describe("Fixture Verification Evidence check workflow", () => {
       TURBO_TOKEN: { required: false },
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: { required: false },
     });
-    expect(packageCheck?.env).toEqual({
-      TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
-      TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
-      TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
-      TURBO_REMOTE_CACHE_READ_ONLY:
-        "${{ github.event_name == 'release' && 'true' || 'false' }}",
-    });
+    expect(packageCheck?.env).toBeUndefined();
+    expect(
+      check.steps.every((step) =>
+        Object.keys(step.env ?? {}).every((name) => !name.startsWith("TURBO_")),
+      ),
+    ).toBe(true);
+    for (const command of [
+      "pnpm run check:fixtures",
+      "pnpm run check:focused",
+      "pnpm run check:deployment",
+    ]) {
+      expect(check.steps.find((step) => step.run === command)?.env).toEqual({
+        TEMPLATE_FIXTURE_TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
+        TEMPLATE_FIXTURE_TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
+        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
+        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY:
+          "${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}",
+      });
+    }
     expect(release.jobs.check.secrets).toEqual({
       TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
       TURBO_REMOTE_CACHE_SIGNATURE_KEY:
@@ -146,7 +208,9 @@ describe("Fixture Verification Evidence check workflow", () => {
       "pnpm run check:focused",
       "pnpm run check:deployment",
     ]) {
-      expect(steps.find((step) => step.run === command)?.if).toBe("always()");
+      expect(steps.find((step) => step.run === command)?.if).toContain(
+        "always()",
+      );
     }
 
     expect(
@@ -161,9 +225,11 @@ describe("Fixture Verification Evidence check workflow", () => {
   it("uses a new Actions transport namespace and publishes only after healthy trusted work", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const restore = steps.find(
-      (step) => step.uses === "actions/cache/restore@v6",
+      (step) => step.name === "Restore Fixture Verification Evidence",
     );
-    const save = steps.find((step) => step.uses === "actions/cache/save@v6");
+    const save = steps.find(
+      (step) => step.name === "Save Fixture Verification Evidence",
+    );
 
     expect(restore?.with).toEqual({
       path: ".fixture-evidence",
@@ -178,6 +244,62 @@ describe("Fixture Verification Evidence check workflow", () => {
         key: "fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
       },
     });
+  });
+
+  it("persists isolated native caches only for trusted healthy fixture work", async () => {
+    const job = (await checkWorkflow()).jobs.check;
+    const trustedRead =
+      "(github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)";
+    const trustedHealthyWrite =
+      "always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'";
+    const caches = [
+      {
+        name: "BuildKit",
+        path: ".fixture-native-cache/buildkit",
+        keyInput:
+          "hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts')",
+      },
+      {
+        name: "pnpm downloads",
+        path: ".fixture-native-cache/pnpm",
+        keyInput: "hashFiles('pnpm-lock.yaml')",
+      },
+      {
+        name: "Cargo downloads",
+        path: ".fixture-native-cache/cargo",
+        keyInput:
+          "hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml')",
+      },
+    ] as const;
+
+    for (const cache of caches) {
+      const restore = job.steps.find(
+        (step) => step.name === `Restore ${cache.name} cache`,
+      );
+      const save = job.steps.find(
+        (step) => step.name === `Save ${cache.name} cache`,
+      );
+
+      expect(restore).toMatchObject({
+        if: trustedRead,
+        uses: "actions/cache/restore@v6",
+        with: { path: cache.path },
+      });
+      expect(restore?.with?.key).toContain(cache.keyInput);
+      expect(restore?.with?.key).toContain("${{ github.run_id }}");
+      expect(restore?.with?.["restore-keys"]).toContain(cache.keyInput);
+      expect(save).toMatchObject({
+        if: trustedHealthyWrite,
+        uses: "actions/cache/save@v6",
+        with: {
+          path: cache.path,
+          key: restore?.with?.key,
+        },
+      });
+      expect(cache.path).not.toMatch(
+        /(?:node_modules|pnpm-lock|workspace|target)/u,
+      );
+    }
   });
 
   it("keeps Release on the same read-only reusable check workflow", async () => {
@@ -198,6 +320,39 @@ describe("Fixture Verification Evidence check workflow", () => {
     expect(workflow.jobs.publish.needs).toBe("check");
   });
 
+  it("keeps Release readiness tied to packed Rust addition and container-backed generated quality", async () => {
+    const check = (await checkWorkflow()).jobs.check.steps;
+    const release = parse(
+      await readFile(".github/workflows/release.yml", "utf8"),
+    ) as ReleaseWorkflow;
+    const packedConsumerSource = await readFile(
+      "test/packed-publication.test.ts",
+      "utf8",
+    );
+
+    expect(release.jobs.check.uses).toBe("./.github/workflows/check.yml");
+    expect(release.jobs.publish.needs).toBe("check");
+    expect(check.find((step) => step.run === "pnpm run check")).toBeDefined();
+    expect(packedConsumerSource).toContain(
+      'addableDefinitionWithPackageRole("native-package")',
+    );
+    expect(packedConsumerSource).toContain(
+      '"--preset",\n          rustDefinition.metadata.name,',
+    );
+    expect(packedConsumerSource).toContain(
+      'await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });',
+    );
+    for (const command of [
+      "pnpm run check:fixtures",
+      "pnpm run check:focused",
+      "pnpm run check:deployment",
+    ]) {
+      expect(check.find((step) => step.run === command)?.if).toBe(
+        "always() && steps.fixture-prerequisites.outcome == 'success'",
+      );
+    }
+  });
+
   it("keeps only the new evidence store and current-run activity local", async () => {
     const ignored = new Set(
       (await readFile(".gitignore", "utf8"))
@@ -207,5 +362,6 @@ describe("Fixture Verification Evidence check workflow", () => {
 
     expect(ignored).toContain(".fixture-evidence/");
     expect(ignored).toContain(".fixture-evidence-activity/");
+    expect(ignored).toContain(".fixture-native-cache/");
   });
 });

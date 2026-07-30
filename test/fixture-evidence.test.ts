@@ -41,9 +41,11 @@ import {
 } from "../packages/builtin-presets/src/registry-checks.ts";
 import { findFixtureEvidenceArchitectureFindings } from "../packages/checks/src/check-fixture-evidence-architecture.ts";
 import {
+  fixtureContainerEnvironmentFromEnvironment,
+  fixtureDependencyCachesFromEnvironment,
   generatedScenariosFor,
-  runGeneratedRegistryCli,
-  runGeneratedScenarioSet,
+  runGeneratedRegistryCli as runGeneratedRegistryCliProduction,
+  runGeneratedScenarioSet as runGeneratedScenarioSetProduction,
 } from "../packages/checks/src/check-generated-registry.ts";
 import {
   deriveFocusedPackageLinkContractIdentity,
@@ -60,11 +62,12 @@ import {
   checkFixtureEvidenceHealth,
   createFixtureEvidenceScheduler,
   deriveFixtureGateContractIdentity,
-  ensureFixtureDependencies,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
+  formatFixtureEvidenceHealthReport,
   initializeFixtureGitRepository,
   runFixtureEvidenceGate,
+  type FixtureCommandRunner,
   type FixtureEvidenceActivityLedger,
   type FixtureEvidenceExecutionResource,
   type FixtureEvidenceInvocationEvent,
@@ -78,18 +81,117 @@ async function temporaryRepository(prefix: string): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), prefix));
 }
 
+async function textBelow(root: string): Promise<string> {
+  const contents: string[] = [];
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+      } else {
+        contents.push(await readFile(entryPath, "utf8"));
+      }
+    }
+  }
+  await visit(root);
+  return contents.join("\n");
+}
+
+function fixtureExecutorTestRunner(
+  run: FixtureCommandRunner,
+): FixtureCommandRunner {
+  return async (command, args, options) => {
+    if (command === "docker") return {};
+    if (command !== "devcontainer") {
+      return await run(command, args, options);
+    }
+    if (args[0] !== "exec") return {};
+    const idLabelIndex = args.indexOf("--id-label");
+    let nestedCommandIndex = idLabelIndex === -1 ? 3 : idLabelIndex + 2;
+    while (args[nestedCommandIndex] === "--remote-env") {
+      nestedCommandIndex += 2;
+    }
+    let nestedCommand = args[nestedCommandIndex];
+    let nestedArgs = args.slice(nestedCommandIndex + 1);
+    let cwd = options.cwd;
+    if (nestedCommand === "sh" && nestedArgs[0] === "-c") {
+      cwd = path.join(options.cwd, nestedArgs[3]!);
+      nestedCommand = nestedArgs[4];
+      nestedArgs = nestedArgs.slice(5);
+    }
+    if (nestedCommand === undefined) {
+      throw new Error("Dev Container exec test command is missing");
+    }
+    if (nestedCommand === "pnpm" && nestedArgs.includes("--lockfile-only")) {
+      return await run(
+        "pnpm",
+        [
+          "install",
+          "--store-dir",
+          path.join(path.dirname(options.cwd), ".pnpm-store"),
+        ],
+        { ...options, cwd },
+      );
+    }
+    if (
+      nestedCommand === "pnpm" &&
+      (nestedArgs[0] === "fetch" || nestedArgs.includes("--offline"))
+    ) {
+      return {};
+    }
+    const isQualityCommand =
+      nestedCommand === "git" ||
+      nestedCommand === "node" ||
+      (nestedCommand === "pnpm" &&
+        (nestedArgs[0] === "run" ||
+          (nestedArgs[0] === "exec" && nestedArgs[1] === "turbo")));
+    return isQualityCommand
+      ? await run(nestedCommand, nestedArgs, { ...options, cwd })
+      : {};
+  };
+}
+
+const runGeneratedScenarioSet = async (
+  ...[set, options]: Parameters<typeof runGeneratedScenarioSetProduction>
+): Promise<void> =>
+  await runGeneratedScenarioSetProduction(set, {
+    ...options,
+    ...(options.run === undefined
+      ? {}
+      : { run: fixtureExecutorTestRunner(options.run) }),
+  });
+
+const runGeneratedRegistryCli = async (
+  options: Parameters<typeof runGeneratedRegistryCliProduction>[0],
+): Promise<void> =>
+  await runGeneratedRegistryCliProduction({
+    ...options,
+    ...(options.run === undefined
+      ? {}
+      : { run: fixtureExecutorTestRunner(options.run) }),
+  });
+
 function isolatedFixtureEnvironment(
   overrides: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const environment = { ...process.env };
   for (const name of [
+    "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
+    "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
     "TEMPLATE_FIXTURE_CONCURRENCY",
+    "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
     "TEMPLATE_FIXTURE_EVIDENCE_DIR",
     "TEMPLATE_FIXTURE_EVIDENCE_READ",
     "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
     "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
     "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
     "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+    "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+    "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
+    "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+    "TEMPLATE_FIXTURE_TURBO_TEAM",
+    "TEMPLATE_FIXTURE_TURBO_TOKEN",
   ]) {
     delete environment[name];
   }
@@ -485,6 +587,106 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
+  it("reports deterministic cache activity alongside stage timing", async () => {
+    const root = await temporaryRepository("fixture-evidence-cache-activity-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "cache-activity",
+      label: "cache activity",
+      presetIdentities: ["fixture"],
+    };
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "cache-run",
+        runAttempt: "1",
+        invocationId: "cache-invocation",
+        scenarioSet: "package-addition-matrix",
+        writeEnabled: true,
+        clock: (() => {
+          const timestamps = [
+            "2026-07-28T00:00:00.000Z",
+            "2026-07-28T00:00:00.025Z",
+            "2026-07-28T00:00:00.050Z",
+            "2026-07-28T00:00:00.075Z",
+            "2026-07-28T00:00:00.100Z",
+            "2026-07-28T00:00:00.125Z",
+            "2026-07-28T00:00:00.150Z",
+            "2026-07-28T00:00:00.175Z",
+          ];
+          let index = 0;
+          return () => new Date(timestamps[index++] ?? timestamps.at(-1)!);
+        })(),
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      for (const cache of [
+        "buildkit",
+        "pnpm-downloads",
+        "cargo-downloads",
+        "turbo",
+      ] as const) {
+        await invocation.record({
+          type: "cache",
+          cache,
+          scenario,
+          at: "2026-07-28T00:00:00.050Z",
+          outcome: "used",
+        });
+      }
+      await invocation.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity: "a".repeat(64),
+        scenario,
+        at: "2026-07-28T00:00:00.125Z",
+        outcome: "hit",
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "completed",
+      });
+
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "cache-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["package-addition-matrix"],
+      });
+      expect(report).toMatchObject({
+        healthy: true,
+        stages: [
+          expect.objectContaining({
+            scenarioSet: "package-addition-matrix",
+            cacheActivity: {
+              buildkit: 1,
+              "pnpm-downloads": 1,
+              "cargo-downloads": 1,
+              turbo: 1,
+            },
+            durationMilliseconds: 175,
+          }),
+        ],
+      });
+      expect(formatFixtureEvidenceHealthReport(report)).toContain(
+        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=1 misses=none executions=0 issuances=0 lifecycle-errors=0 duration-ms=175 cache-activity=buildkit=1,pnpm-downloads=1,cargo-downloads=1,turbo=1",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("isolates activity from evidence through canonical paths and rejects either parent", async () => {
     const root = await temporaryRepository("fixture-activity-isolation-");
     const evidenceRoot = path.join(root, "evidence");
@@ -713,6 +915,79 @@ describe("Fixture Verification Evidence", () => {
             gate: "generated-root-quality",
           }),
         ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects failed fixture executions in current-run activity", async () => {
+    const root = await temporaryRepository("fixture-failed-execution-health-");
+    const evidenceRoot = path.join(root, "evidence");
+    const ledger = new FileFixtureEvidenceActivityLedger({
+      root: path.join(root, "activity"),
+      evidenceRoot,
+    });
+    const scenario = {
+      id: "semantic-failure",
+      label: "semantic failure",
+      presetIdentities: [],
+    };
+    const invocation = ledger.invocation({
+      runId: "failed-execution-run",
+      runAttempt: "1",
+      invocationId: "failed-execution",
+      scenarioSet: "focused",
+      writeEnabled: true,
+    });
+    try {
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      await expect(
+        runFixtureEvidenceGate({
+          gate: "generated-root-quality",
+          generatedContentIdentity: "5".repeat(40),
+          contractIdentity: "6".repeat(64),
+          scenario,
+          producerCommit: "test",
+          storage: new FileFixtureEvidenceStorage(evidenceRoot),
+          writeEnabled: true,
+          recordLifecycle: invocation.record,
+          execute: async () => {
+            throw new Error("semantic fixture failure");
+          },
+        }),
+      ).rejects.toThrow("semantic fixture failure");
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "failed",
+        error: "semantic fixture failure",
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "failed",
+        error: "semantic fixture failure",
+      });
+
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "failed-execution-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["focused"],
+      });
+      expect(report.healthy).toBe(false);
+      expect(report.failures).toContainEqual(
+        expect.objectContaining({
+          code: "failed-execution",
+          invocationId: "failed-execution",
+          scenarioId: "semantic-failure",
+          gate: "generated-root-quality",
+          detail: expect.stringContaining("semantic fixture failure"),
+        }),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -959,7 +1234,7 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(rootChecks).toBe((await generatedScenariosFor("init")).length);
+      expect(rootChecks).toBe((await generatedScenariosFor("init")).length * 2);
       await expect(
         checkFixtureEvidenceHealth({
           ledger: brokenLedger,
@@ -1208,6 +1483,19 @@ describe("Fixture Verification Evidence", () => {
     };
     try {
       await runComplete("complete-cold", path.join(root, "cold"), coldCommands);
+      const coldHealth = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "complete-cold",
+        runAttempt: "1",
+        enabledScenarioSets: sets,
+      });
+      expect(
+        coldHealth.stages.some(
+          (stage) =>
+            (stage.cacheActivity.buildkit ?? 0) > 0 &&
+            (stage.cacheActivity.turbo ?? 0) > 0,
+        ),
+      ).toBe(true);
       await runComplete("complete-warm", path.join(root, "warm"), warmCommands);
 
       const warmHealth = await checkFixtureEvidenceHealth({
@@ -1226,6 +1514,11 @@ describe("Fixture Verification Evidence", () => {
             stage.hits > 0 && stage.executions === 0 && stage.issuances === 0,
         ),
       ).toBe(true);
+      expect(
+        warmHealth.stages.every((stage) =>
+          Object.values(stage.cacheActivity).every((count) => count === 0),
+        ),
+      ).toBe(true);
       expect(warmCommands.filter(({ command }) => command !== "git")).toEqual(
         [],
       );
@@ -1235,9 +1528,6 @@ describe("Fixture Verification Evidence", () => {
         ),
       ).toBe(true);
       expect(coldCommands.some(({ command }) => command === "node")).toBe(true);
-      expect(coldCommands.some(({ command }) => command === "docker")).toBe(
-        true,
-      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1320,6 +1610,124 @@ describe("Fixture Verification Evidence", () => {
     expect(ordinary.maximum()).toBe(4);
     expect(browser.maximum()).toBe(1);
     expect(docker.maximum()).toBe(1);
+  });
+
+  it("bounds Development Container sessions independently of ordinary work", async () => {
+    const scheduler = createFixtureEvidenceScheduler({
+      concurrency: 4,
+      developmentContainerSessions: 2,
+    });
+    const sessions = createBlockedWorkProbe();
+    const jobs = ["a", "b", "c"].map(
+      async (name) =>
+        await scheduler.run(
+          ["development-container-session"],
+          async () => await sessions.run(`session-${name}`),
+        ),
+    );
+
+    await vi.waitFor(() => {
+      expect(sessions.started()).toEqual(["session-a", "session-b"]);
+    });
+    sessions.release("session-a");
+    await vi.waitFor(() => {
+      expect(sessions.started()).toEqual([
+        "session-a",
+        "session-b",
+        "session-c",
+      ]);
+    });
+    sessions.releaseAll();
+    await Promise.all(jobs);
+
+    expect(sessions.maximum()).toBe(2);
+  });
+
+  it("holds a Development Container session lease until explicit release", async () => {
+    const scheduler = createFixtureEvidenceScheduler({
+      concurrency: 4,
+      developmentContainerSessions: 1,
+    });
+    const releaseFirst = await scheduler.acquire([
+      "development-container-session",
+    ]);
+    let secondAcquired = false;
+    const second = scheduler
+      .acquire(["development-container-session"])
+      .then((release) => {
+        secondAcquired = true;
+        return release;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(secondAcquired).toBe(false);
+    releaseFirst();
+    const releaseSecond = await second;
+    expect(secondAcquired).toBe(true);
+    releaseSecond();
+  });
+
+  it("holds Docker capacity for each deployment-capable container session", async () => {
+    const workspace = await temporaryRepository(
+      "fixture-deployment-session-resources-",
+    );
+    const acquiredResources: (readonly FixtureEvidenceExecutionResource[])[] =
+      [];
+    const scheduledResources: (readonly FixtureEvidenceExecutionResource[])[] =
+      [];
+    const schedulerFactory: FixtureEvidenceSchedulerFactory = () => ({
+      acquire: async (resources) => {
+        acquiredResources.push(resources);
+        return () => undefined;
+      },
+      run: async (resources, execute) => {
+        scheduledResources.push(resources);
+        return await execute();
+      },
+    });
+    try {
+      await runGeneratedScenarioSet("deployment", {
+        workspace,
+        schedulerFactory,
+        run: async (command, args, options) => {
+          if (command === "git") {
+            return await execa(command, [...args], options);
+          }
+          if (command === "pnpm" && args[0] === "install") {
+            await mkdir(path.join(options.cwd, "node_modules"), {
+              recursive: true,
+            });
+            await writeFile(
+              path.join(options.cwd, "pnpm-lock.yaml"),
+              "fixture-created: true\n",
+            );
+          }
+          if (args.includes("--dry-run=json")) {
+            return {
+              stdout: JSON.stringify({
+                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                  taskId,
+                })),
+              }),
+            };
+          }
+          return {};
+        },
+      });
+
+      expect(acquiredResources).not.toHaveLength(0);
+      expect(acquiredResources).toEqual(
+        acquiredResources.map(() => [
+          "development-container-session",
+          "docker",
+        ]),
+      );
+      expect(
+        scheduledResources.some((resources) => resources.includes("docker")),
+      ).toBe(false);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("serializes ordinary evidence misses when the CLI environment sets concurrency to one", async () => {
@@ -1452,7 +1860,114 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("applies CLI ordinary concurrency to every scenario set and controls Deployment Docker work", async () => {
+  it("rejects a malformed Development Container session override", async () => {
+    await expect(
+      runGeneratedRegistryCli({
+        scenarioSet: "init",
+        environment: {
+          TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "0",
+        },
+      }),
+    ).rejects.toThrow(
+      "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS must be a positive integer",
+    );
+  });
+
+  it("translates only non-empty fixture Turbo inputs for container execution", () => {
+    expect(
+      fixtureContainerEnvironmentFromEnvironment({
+        TEMPLATE_FIXTURE_TURBO_TEAM: "fixture-team",
+        TEMPLATE_FIXTURE_TURBO_TOKEN: "",
+        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: "fixture-signature",
+        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: "true",
+        TURBO_TOKEN: "must-not-override-an-explicit-empty-fixture-token",
+        UNRELATED_SECRET: "must-not-be-forwarded",
+      }),
+    ).toEqual({
+      TURBO_TEAM: "fixture-team",
+      TURBO_REMOTE_CACHE_SIGNATURE_KEY: "fixture-signature",
+      TURBO_REMOTE_CACHE_READ_ONLY: "true",
+    });
+    expect(
+      fixtureContainerEnvironmentFromEnvironment({
+        TURBO_TEAM: "local-team",
+        TURBO_TOKEN: "local-token",
+      }),
+    ).toEqual({
+      TURBO_TEAM: "local-team",
+      TURBO_TOKEN: "local-token",
+    });
+  });
+
+  it("parses only external fixture dependency-download cache directories", () => {
+    const pnpmCache = path.resolve(".fixture-native-cache/pnpm");
+    const cargoCache = path.resolve(".fixture-native-cache/cargo");
+
+    expect(
+      fixtureDependencyCachesFromEnvironment({
+        TEMPLATE_FIXTURE_PNPM_CACHE_DIR: pnpmCache,
+        TEMPLATE_FIXTURE_CARGO_CACHE_DIR: cargoCache,
+      }),
+    ).toEqual({ pnpm: pnpmCache, cargo: cargoCache });
+    expect(fixtureDependencyCachesFromEnvironment({})).toBeUndefined();
+    expect(() =>
+      fixtureDependencyCachesFromEnvironment({
+        TEMPLATE_FIXTURE_PNPM_CACHE_DIR: "",
+      }),
+    ).toThrow("TEMPLATE_FIXTURE_PNPM_CACHE_DIR must not be empty");
+    expect(() =>
+      fixtureDependencyCachesFromEnvironment({
+        TEMPLATE_FIXTURE_CARGO_CACHE_DIR: "",
+      }),
+    ).toThrow("TEMPLATE_FIXTURE_CARGO_CACHE_DIR must not be empty");
+  });
+
+  it("applies the Development Container session environment override", async () => {
+    const workspace = await temporaryRepository(
+      "fixture-cli-container-session-concurrency-",
+    );
+    const installs = createBlockedConcurrencyProbe();
+    try {
+      const cli = runGeneratedRegistryCli({
+        scenarioSet: "init",
+        environment: {
+          TEMPLATE_FIXTURE_CONCURRENCY: "4",
+          TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "1",
+        },
+        workspace,
+        run: async (command, args, options) => {
+          if (command === "git") {
+            return await execa(command, [...args], options);
+          }
+          if (args[0] === "install") {
+            await installs.enter();
+          }
+          if (args.includes("--dry-run=json")) {
+            return {
+              stdout: JSON.stringify({
+                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                  taskId,
+                })),
+              }),
+            };
+          }
+          return {};
+        },
+      });
+      await releaseAfterActive({
+        execution: cli,
+        probe: installs,
+        expected: 1,
+      });
+
+      expect(installs.maximum()).toBe(1);
+    } finally {
+      installs.release();
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("applies CLI ordinary concurrency to every scenario set", async () => {
     const root = await temporaryRepository("fixture-cli-resource-caps-");
     const sets = [
       "init",
@@ -1461,14 +1976,15 @@ describe("Fixture Verification Evidence", () => {
       "deployment",
     ] as const;
     const maxActiveInstalls = new Map<(typeof sets)[number], number>();
-    const dockerCommands = createBlockedConcurrencyProbe();
-    let completedDeploymentRootChecks = 0;
     try {
       for (const scenarioSet of sets) {
         const installs = createBlockedConcurrencyProbe();
         const cli = runGeneratedRegistryCli({
           scenarioSet,
-          environment: { TEMPLATE_FIXTURE_CONCURRENCY: "4" },
+          environment: {
+            TEMPLATE_FIXTURE_CONCURRENCY: "4",
+            TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "4",
+          },
           workspace: path.join(root, scenarioSet),
           reporter: { info: () => undefined },
           run: async (command, args, options) => {
@@ -1501,17 +2017,6 @@ describe("Fixture Verification Evidence", () => {
                 ),
               };
             }
-            if (command === "docker") {
-              await dockerCommands.enter();
-            }
-            if (
-              scenarioSet === "deployment" &&
-              command === "pnpm" &&
-              args[0] === "run" &&
-              args[1] === "check"
-            ) {
-              completedDeploymentRootChecks += 1;
-            }
             return {};
           },
         });
@@ -1532,21 +2037,6 @@ describe("Fixture Verification Evidence", () => {
         } finally {
           installs.release();
         }
-        if (scenarioSet === "deployment") {
-          try {
-            await vi.waitFor(
-              () => {
-                expect(dockerCommands.active()).toBe(1);
-                expect(completedDeploymentRootChecks).toBeGreaterThan(1);
-              },
-              { timeout: 30_000 },
-            );
-          } catch (error) {
-            observationFailure ??= error;
-          } finally {
-            dockerCommands.release();
-          }
-        }
         await cli;
         if (observationFailure !== undefined) throw observationFailure;
         maxActiveInstalls.set(scenarioSet, installs.maximum());
@@ -1560,9 +2050,7 @@ describe("Fixture Verification Evidence", () => {
           ["deployment", 1],
         ]),
       );
-      expect(dockerCommands.maximum()).toBe(1);
     } finally {
-      dockerCommands.release();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -2914,105 +3402,24 @@ describe("Fixture Verification Evidence", () => {
 
       expect(calls[0]).toEqual({
         command: "pnpm",
-        args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
+        args: [
+          "exec",
+          "turbo",
+          "run",
+          "boundaries",
+          "format:check",
+          "lint",
+          "typecheck",
+          "build",
+          "test",
+          "test:e2e",
+          "--dry-run=json",
+        ],
       });
       expect(calls).toContainEqual({
         command: "pnpm",
         args: ["run", "check"],
       });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("records dependency installation completion from the installed lockfile state", async () => {
-    const root = await temporaryRepository("fixture-dependency-installation-");
-    const projectDir = path.join(root, "project");
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-    }> = [];
-    try {
-      await mkdir(path.join(projectDir, "node_modules"), { recursive: true });
-      await Promise.all([
-        writeFile(
-          path.join(projectDir, "package.json"),
-          `${JSON.stringify({ name: "fixture" })}\n`,
-        ),
-        writeFile(
-          path.join(projectDir, "pnpm-lock.yaml"),
-          "lockfileVersion: 9\n",
-        ),
-      ]);
-      const install = async () =>
-        await ensureFixtureDependencies({
-          projectDir,
-          fixtureWorkspace: root,
-          run: async (command, args) => {
-            calls.push({ command, args });
-            await writeFile(
-              path.join(projectDir, "pnpm-lock.yaml"),
-              `lockfileVersion: 9\ninstallRevision: ${calls.length}\n`,
-            );
-            return {};
-          },
-        });
-
-      await expect(install()).resolves.toBe("installed");
-      await expect(install()).resolves.toBe("ready");
-      await writeFile(
-        path.join(projectDir, "pnpm-lock.yaml"),
-        "lockfileVersion: 9\nsettings: {}\n",
-      );
-      await expect(install()).resolves.toBe("installed");
-      await expect(install()).resolves.toBe("ready");
-
-      expect(calls).toEqual([
-        {
-          command: "pnpm",
-          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
-        },
-        {
-          command: "pnpm",
-          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
-        },
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("does not record dependency installation completion after a failed install mutates the lockfile", async () => {
-    const root = await temporaryRepository(
-      "fixture-dependency-installation-failure-",
-    );
-    const projectDir = path.join(root, "project");
-    let attempts = 0;
-    try {
-      await mkdir(projectDir, { recursive: true });
-      await writeFile(
-        path.join(projectDir, "package.json"),
-        `${JSON.stringify({ name: "fixture" })}\n`,
-      );
-      const install = async () =>
-        await ensureFixtureDependencies({
-          projectDir,
-          fixtureWorkspace: root,
-          run: async () => {
-            attempts += 1;
-            await writeFile(
-              path.join(projectDir, "pnpm-lock.yaml"),
-              `lockfileVersion: 9\ninstallAttempt: ${attempts}\n`,
-            );
-            if (attempts === 1) throw new Error("install failed");
-            return {};
-          },
-        });
-
-      await expect(install()).rejects.toThrow("install failed");
-      await expect(install()).resolves.toBe("installed");
-      await expect(install()).resolves.toBe("ready");
-      expect(attempts).toBe(2);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -3271,11 +3678,20 @@ describe("Fixture Verification Evidence", () => {
       cwd: string;
     }> = [];
     const warmCommands: typeof coldCommands = [];
+    const warmOuterCommands: typeof coldCommands = [];
     const coldEvents: FixtureEvidenceLifecycleEvent[] = [];
     const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
+    const coldTurboToken = "cold-turbo-token-must-not-persist";
+    const warmTurboToken = "warm-turbo-token-must-not-persist";
     try {
       await runGeneratedScenarioSet("init", {
         workspace: firstWorkspace,
+        containerEnvironment: {
+          TURBO_TEAM: "fixture-team",
+          TURBO_TOKEN: coldTurboToken,
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: "cold-signature",
+          TURBO_REMOTE_CACHE_READ_ONLY: "false",
+        },
         run: createRunner(coldCommands),
         evidence: {
           storage,
@@ -3287,9 +3703,19 @@ describe("Fixture Verification Evidence", () => {
           },
         },
       });
-      await runGeneratedScenarioSet("init", {
+      const warmRunner = fixtureExecutorTestRunner(createRunner(warmCommands));
+      await runGeneratedScenarioSetProduction("init", {
         workspace: secondWorkspace,
-        run: createRunner(warmCommands),
+        containerEnvironment: {
+          TURBO_TEAM: "fixture-team",
+          TURBO_TOKEN: warmTurboToken,
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: "warm-signature",
+          TURBO_REMOTE_CACHE_READ_ONLY: "true",
+        },
+        run: async (command, args, options) => {
+          warmOuterCommands.push({ command, args, cwd: options.cwd });
+          return await warmRunner(command, args, options);
+        },
         evidence: {
           storage,
           clock,
@@ -3312,13 +3738,16 @@ describe("Fixture Verification Evidence", () => {
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount);
+      ).toHaveLength(scenarioCount * 2);
       expect(warmCommands.filter(({ command }) => command === "pnpm")).toEqual(
         [],
       );
       expect(new Set(warmCommands.map(({ command }) => command))).toEqual(
         new Set(["git"]),
       );
+      expect(
+        warmOuterCommands.filter(({ command }) => command !== "git"),
+      ).toEqual([]);
       expect(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
@@ -3347,6 +3776,9 @@ describe("Fixture Verification Evidence", () => {
       expect(warmEvents.filter((event) => event.type === "execution")).toEqual(
         [],
       );
+      const persistedText = `${await textBelow(firstWorkspace)}\n${await textBelow(secondWorkspace)}\n${await textBelow(evidenceRoot)}`;
+      expect(persistedText).not.toContain(coldTurboToken);
+      expect(persistedText).not.toContain(warmTurboToken);
       for (const scenario of await generatedScenariosFor("init")) {
         await expect(
           readFile(
@@ -3429,6 +3861,7 @@ describe("Fixture Verification Evidence", () => {
       await releaseAfterActive({
         execution: runGeneratedScenarioSet("focused", {
           workspace: path.join(root, "cold"),
+          scheduling: { developmentContainerSessions: 2 },
           run: createRunner(coldCommands),
           evidence: {
             storage,
@@ -3570,7 +4003,7 @@ describe("Fixture Verification Evidence", () => {
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount);
+      ).toHaveLength(scenarioCount * 2);
       expect(
         rootChangedCommands.filter(({ command }) => command === "node"),
       ).toEqual([]);
@@ -3601,7 +4034,7 @@ describe("Fixture Verification Evidence", () => {
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount);
+      ).toHaveLength(scenarioCount * 2);
       expect(
         rootExpiredCommands.filter(({ command }) => command === "node"),
       ).toEqual([]);
@@ -3957,7 +4390,7 @@ describe("Fixture Verification Evidence", () => {
         coldCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "add",
         ),
-      ).toHaveLength(scenarioCount * 2);
+      ).toHaveLength(scenarioCount * 4);
       expect(
         coldCommands.filter(
           ({ command, args }) =>
@@ -4156,6 +4589,7 @@ describe("Fixture Verification Evidence", () => {
       (scheduling) => {
         const scheduler = createFixtureEvidenceScheduler(scheduling);
         return {
+          acquire: scheduler.acquire,
           run: async (resources, execute) => {
             scheduledRuns.push(resources);
             return await scheduler.run(
@@ -4481,6 +4915,7 @@ describe("Fixture Verification Evidence", () => {
     const pnpmPath = path.join(binRoot, "pnpm");
     const nodePath = path.join(binRoot, "node");
     const dockerPath = path.join(binRoot, "docker");
+    const devcontainerPath = path.join(binRoot, "devcontainer");
     const cliPath = path.join(
       process.cwd(),
       "packages/checks/src/check-generated-registry.ts",
@@ -4576,10 +5011,45 @@ import { appendFileSync } from "node:fs";
 appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...process.argv.slice(2)]) + "\\n");
 `,
       );
+      await writeFile(
+        devcontainerPath,
+        `#!${process.execPath}
+import { appendFileSync } from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const args = process.argv.slice(2);
+appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["devcontainer", ...args]) + "\\n");
+if (args[0] !== "exec") process.exit(0);
+
+const idLabelIndex = args.indexOf("--id-label");
+let commandIndex = idLabelIndex === -1 ? 3 : idLabelIndex + 2;
+while (args[commandIndex] === "--remote-env") commandIndex += 2;
+let command = args[commandIndex];
+let commandArgs = args.slice(commandIndex + 1);
+let cwd = process.cwd();
+if (command === "sh" && commandArgs[0] === "-c") {
+  cwd = path.join(cwd, commandArgs[3]);
+  command = commandArgs[4];
+  commandArgs = commandArgs.slice(5);
+}
+const forwards =
+  command === "node" ||
+  (command === "pnpm" &&
+    (["install", "fetch", "run"].includes(commandArgs[0]) ||
+      (commandArgs[0] === "exec" && commandArgs[1] === "turbo")));
+if (!forwards) process.exit(0);
+const result = spawnSync(command, commandArgs, { cwd, encoding: "utf8" });
+process.stdout.write(result.stdout ?? "");
+process.stderr.write(result.stderr ?? "");
+process.exit(result.status ?? 1);
+`,
+      );
       await Promise.all([
         chmod(pnpmPath, 0o755),
         chmod(nodePath, 0o755),
         chmod(dockerPath, 0o755),
+        chmod(devcontainerPath, 0o755),
       ]);
 
       const baseEnv = isolatedFixtureEnvironment({
@@ -4628,6 +5098,26 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
       ).not.toHaveLength(0);
       expect(coldCommands.some(([binary]) => binary === "node")).toBe(true);
       expect(coldCommands.some(([binary]) => binary === "docker")).toBe(true);
+      const containerStarts = coldCommands.filter(
+        ([binary, command]) => binary === "devcontainer" && command === "up",
+      );
+      expect(containerStarts.length).toBeGreaterThan(0);
+      for (const command of containerStarts) {
+        const cacheFrom = command.indexOf("--cache-from");
+        const cacheTo = command.indexOf("--cache-to");
+        expect(command[cacheFrom + 1]).toMatch(
+          new RegExp(
+            `^type=local,src=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64}$`,
+            "u",
+          ),
+        );
+        expect(command[cacheTo + 1]).toMatch(
+          new RegExp(
+            `^type=local,dest=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64},mode=max$`,
+            "u",
+          ),
+        );
+      }
 
       await invoke("2");
       const allCommands = (await readFile(commandLog, "utf8"))

@@ -1,13 +1,11 @@
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
 import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
-  ensureFixtureDependencies,
   normalizedFixtureDependencyInstallationPlan,
+  writeGeneratedRepositoryTree,
   type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
@@ -55,28 +53,6 @@ function commandStdout(result: unknown): string {
     : "";
 }
 
-function environmentPreparations(plan: GeneratedRepositoryPlan): readonly {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly display: string;
-}[] {
-  const seen = new Set<string>();
-  return plan.environmentNeeds.flatMap((need) => {
-    const preparation = need.nextStep;
-    if (!preparation.machineVerifiable || seen.has(preparation.display)) {
-      return [];
-    }
-    seen.add(preparation.display);
-    return [
-      {
-        command: preparation.command,
-        args: [...preparation.args],
-        display: preparation.display,
-      },
-    ];
-  });
-}
-
 export function generatedRootQualityExecutionResources(
   plan: GeneratedRepositoryPlan,
 ): readonly FixtureEvidenceExecutionResource[] {
@@ -102,7 +78,15 @@ export function normalizedGeneratedRootQualityPlan(
         ...expectedTaskIds({ plan, taskNames: qualityTaskNames }),
       ].sort(),
     },
-    environmentPreparations: environmentPreparations(plan),
+    developmentContainer: {
+      lockfileWrites: false,
+      probes: plan.developmentContainer.probes.map((probe) => ({
+        identity: probe.identity,
+        command: probe.command,
+        args: [...(probe.args ?? [])],
+        failureMessage: probe.failureMessage ?? null,
+      })),
+    },
     normalization:
       options.includeFix === true
         ? {
@@ -151,12 +135,9 @@ export async function assertGeneratedTaskDiscovery(options: {
   readonly plan: GeneratedRepositoryPlan;
   readonly projectDir: string;
   readonly taskNames: readonly string[];
-  readonly run?: FixtureCommandRunner;
+  readonly run: FixtureCommandRunner;
 }): Promise<void> {
-  const run =
-    options.run ??
-    ((command, args, runOptions) => execa(command, [...args], runOptions));
-  const result = await run(
+  const result = await options.run(
     "pnpm",
     ["exec", "turbo", "run", ...options.taskNames, "--dry-run=json"],
     { cwd: options.projectDir },
@@ -193,12 +174,8 @@ export async function executeGeneratedRootQuality(options: {
   readonly fixtureWorkspace: string;
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
+  readonly identityRun?: FixtureCommandRunner;
 }): Promise<void> {
-  await ensureFixtureDependencies({
-    projectDir: options.projectDir,
-    fixtureWorkspace: options.fixtureWorkspace,
-    run: options.run,
-  });
   await assertGeneratedTaskDiscovery({
     plan: options.plan,
     projectDir: options.projectDir,
@@ -213,20 +190,31 @@ export async function executeGeneratedRootQuality(options: {
       run: options.run,
     });
   }
-  for (const preparation of environmentPreparations(options.plan)) {
-    await options.run(preparation.command, preparation.args, {
-      cwd: options.projectDir,
-      stdio: "inherit",
-    });
-  }
-  if (options.includeFix === true) {
-    await options.run("pnpm", ["run", "fix"], {
-      cwd: options.projectDir,
-      stdio: "inherit",
-    });
-  }
   await options.run("pnpm", ["run", "check"], {
     cwd: options.projectDir,
     stdio: "inherit",
   });
+  if (options.includeFix === true) {
+    const beforeFix = await writeGeneratedRepositoryTree({
+      repositoryRoot: options.projectDir,
+      run: options.identityRun ?? options.run,
+    });
+    await options.run("pnpm", ["run", "fix"], {
+      cwd: options.projectDir,
+      stdio: "inherit",
+    });
+    const afterFix = await writeGeneratedRepositoryTree({
+      repositoryRoot: options.projectDir,
+      run: options.identityRun ?? options.run,
+    });
+    if (afterFix !== beforeFix) {
+      throw new Error(
+        `Generated Repository Fix Command changed the working-tree identity from ${beforeFix} to ${afterFix}`,
+      );
+    }
+    await options.run("pnpm", ["run", "check"], {
+      cwd: options.projectDir,
+      stdio: "inherit",
+    });
+  }
 }

@@ -5,6 +5,8 @@ import type { PackageDefinition } from "#template-core/project-blueprint-v2";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
+import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
+import { typescriptConfigSourceOperation } from "./typescript.ts";
 
 /** Vue's tooling peers need these repository policy overrides, never Core defaults. */
 export const vuePnpmDependencyOverrides = {
@@ -44,14 +46,25 @@ export function vueApplicationScripts(): Record<string, string> {
 }
 
 export function sharedVueSourceOperations(
+  context: GenerationContext,
   packagePath: string,
 ): readonly RenderOperation[] {
-  return sharedVueSourceFiles.map((from) => ({
-    kind: "copyFile" as const,
-    source: templateSources.vue,
-    from,
-    to: `${packagePath}/${from.replace("typescript/", "scripts/")}`,
-  }));
+  return sharedVueSourceFiles.map((from) => {
+    const to = `${packagePath}/${from.replace("typescript/", "scripts/")}`;
+    return from === "tsconfig.app.json" || from === "tsconfig.node.json"
+      ? typescriptConfigSourceOperation({
+          context,
+          source: templateSources.vue,
+          from,
+          to,
+        })
+      : {
+          kind: "copyFile" as const,
+          source: templateSources.vue,
+          from,
+          to,
+        };
+  });
 }
 
 /** Vike shares Vue's compiler runner, but owns its distinct Vike source tree. */
@@ -73,6 +86,10 @@ export function vueApplicationEnvironmentNeeds(packagePath: string) {
       owner: { kind: "package-boundary" as const, path: packagePath },
     }),
   ];
+}
+
+export function vueApplicationDevelopmentContainerToolLayers() {
+  return [browserTestDevelopmentContainerToolLayer()];
 }
 
 export function vueApplicationManifest(options: {

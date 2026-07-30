@@ -10,7 +10,12 @@ import {
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
-import { renderNewProject } from "#template-core/renderer";
+import {
+  renderNewProject,
+  resolveTemplateSource,
+} from "#template-core/renderer";
+
+import { vikeAppDefinition } from "./definition.ts";
 
 function deploymentObserverCommand(taskIdentity: string): string {
   const source = [
@@ -44,6 +49,93 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     });
   });
 
+  it("declares its browser, ShellCheck, and Docker Client Tool Layers", () => {
+    const contribution = vikeAppDefinition.planInitialization({
+      targetDir: "/tmp/demo-vike",
+      projectName: "demo-vike",
+      scope: "demo",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const layers = contribution.foundation.developmentContainerToolLayers ?? [];
+    const byIdentity = new Map(layers.map((layer) => [layer.identity, layer]));
+    const browser = byIdentity.get("browser-test")!;
+    const shellCheck = byIdentity.get("shellcheck")!;
+    const dockerClient = byIdentity.get("docker-client")!;
+
+    expect([...byIdentity.keys()].toSorted()).toEqual([
+      "browser-test",
+      "docker-client",
+      "shellcheck",
+    ]);
+    expect(
+      resolveTemplateSource(browser.dockerfile.source, browser.dockerfile.from),
+    ).toBe(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/shared/devcontainer/browser-test.Dockerfile",
+      ),
+    );
+    expect(shellCheck).toMatchObject({
+      requires: ["node-pnpm"],
+      probes: [
+        {
+          identity: "shellcheck",
+          command: "shellcheck",
+          args: ["--version"],
+        },
+      ],
+    });
+    expect(
+      resolveTemplateSource(
+        shellCheck.dockerfile.source,
+        shellCheck.dockerfile.from,
+      ),
+    ).toBe(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/vike-app/devcontainer/shellcheck.Dockerfile",
+      ),
+    );
+    expect(dockerClient).toMatchObject({
+      requires: ["node-pnpm"],
+      mounts: [
+        {
+          identity: "docker-socket",
+          type: "bind",
+          source: "/var/run/docker.sock",
+          target: "/var/run/docker.sock",
+        },
+      ],
+      probes: [
+        {
+          identity: "docker-cli",
+          command: "docker",
+          args: ["--version"],
+          failureMessage:
+            "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
+        },
+        {
+          identity: "docker-daemon",
+          command: "docker",
+          args: ["version"],
+          failureMessage:
+            "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
+        },
+      ],
+    });
+    expect(
+      resolveTemplateSource(
+        dockerClient.dockerfile.source,
+        dockerClient.dockerfile.from,
+      ),
+    ).toBe(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/vike-app/devcontainer/docker-client.Dockerfile",
+      ),
+    );
+  });
+
   it("owns its Vike Template Source and deployment fragments through real handles", () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: builtInPresetRegistry.require("vike-app"),
@@ -64,7 +156,12 @@ describe("vike-app Built-in Preset Definition behavior", () => {
           to: ".devcontainer/Dockerfile",
           fragments: expect.arrayContaining([
             expect.objectContaining({ from: "browser-test.Dockerfile" }),
-            expect.objectContaining({ from: "shellcheck.Dockerfile" }),
+            expect.objectContaining({
+              from: "devcontainer/shellcheck.Dockerfile",
+            }),
+            expect.objectContaining({
+              from: "devcontainer/docker-client.Dockerfile",
+            }),
           ]),
         }),
       ]),
@@ -131,6 +228,11 @@ describe("vike-app Built-in Preset Definition behavior", () => {
           path: "packages/db-migrations",
           role: "shared-library",
         },
+        {
+          name: "@demo/typescript-config",
+          path: "packages/typescript-config",
+          role: "shared-library",
+        },
       ],
       packageLinkIntents: [
         { consumerPackagePath: "apps/web", providerPackagePath: "packages/db" },
@@ -146,15 +248,11 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         expect.objectContaining({ kind: "docker-engine" }),
       ]),
     );
-    expect(plan.nextStepInstructions.map((step) => step.display)).toEqual(
-      expect.arrayContaining([
-        "pnpm --filter ./apps/web exec playwright install chromium",
-        "sudo apt-get update && sudo apt-get install -y shellcheck",
-      ]),
-    );
-    expect(plan.nextStepInstructions.map((step) => step.display)).not.toContain(
-      "docker version --format {{.Server.Version}}",
-    );
+    expect(plan.nextStepInstructions.map((step) => step.display)).toEqual([
+      "pnpm install",
+      "pnpm run fix",
+      "pnpm run check",
+    ]);
 
     await renderNewProject({
       targetRoot: targetDir,
@@ -228,12 +326,22 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     ]) {
       const config = JSON.parse(
         await readFile(path.join(targetDir, configPath), "utf8"),
-      ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
+      ) as {
+        readonly compilerOptions?: Readonly<Record<string, unknown>>;
+        readonly extends?: string;
+      };
       expect(config.compilerOptions).not.toHaveProperty("paths");
       expect(config.compilerOptions).toMatchObject({
         customConditions: ["source"],
       });
       expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
+      if (configPath.endsWith("tsconfig.app.json")) {
+        expect(config.compilerOptions).toMatchObject({
+          exactOptionalPropertyTypes: false,
+        });
+      } else {
+        expect(config.extends).toBe("./tsconfig.app.json");
+      }
     }
     for (const configPath of [
       "packages/db/tsconfig.build.json",
@@ -273,6 +381,13 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         "utf8",
       ),
     ).toContain("cd /migration");
+    const deploymentCheckScript = await readFile(
+      path.join(targetDir, "apps/web/scripts/check-standalone-deployment.ts"),
+      "utf8",
+    );
+    expect(deploymentCheckScript).toContain('"0.0.0.0::3000"');
+    expect(deploymentCheckScript).toContain("dockerHostGatewayAddress");
+    expect(deploymentCheckScript).toContain("return baseUrl;");
     await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
     await assertDockerCopyInputsExist(targetDir, dockerfile);
     const devcontainerDockerfile = await readFile(
@@ -292,11 +407,40 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       "git config --system init.defaultBranch main",
     );
     expect(devcontainerDockerfile).toContain(
-      "playwright install-deps chromium",
+      "playwright install --with-deps chromium",
     );
     expect(devcontainerDockerfile).toContain(
       "install -y --no-install-recommends shellcheck",
     );
+    expect(devcontainerDockerfile).toContain(
+      "install -y --no-install-recommends docker.io",
+    );
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      build: {
+        args: {
+          PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
+        },
+      },
+      mounts: [
+        {
+          type: "volume",
+          source: "${devcontainerId}-pnpm-store",
+          target: "/pnpm/store",
+        },
+        {
+          type: "bind",
+          source: "/var/run/docker.sock",
+          target: "/var/run/docker.sock",
+        },
+      ],
+    });
     const dependabot = await readFile(
       path.join(targetDir, ".github/dependabot.yml"),
       "utf8",

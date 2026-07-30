@@ -9,11 +9,66 @@ import {
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
-import { renderNewProject } from "#template-core/renderer";
+import {
+  renderNewProject,
+  resolveTemplateSource,
+} from "#template-core/renderer";
 
 import { rustBinDefinition } from "./definition.ts";
 
 describe("rust-bin Built-in Preset Definition behavior", () => {
+  it("adds worker as @scope/worker with matching Cargo name and default path", () => {
+    const context = {
+      targetDir: "/tmp/demo",
+      projectName: "demo",
+      scope: "scope",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    };
+    const packagePath = rustBinDefinition.defaultPackagePath?.({
+      context,
+      packageLeafName: "worker",
+    });
+    const contribution = rustBinDefinition.planPackageAddition?.({
+      context,
+      packageLeafName: "worker",
+      packagePath: packagePath!,
+    });
+
+    expect(packagePath).toBe("packages/worker");
+    expect(contribution?.definition).toEqual({
+      name: "@scope/worker",
+      path: "packages/worker",
+      role: "native-package",
+    });
+    expect(
+      contribution?.operations.find(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          operation.from === "Cargo.toml",
+      ),
+    ).toMatchObject({
+      to: "packages/worker/Cargo.toml",
+      replacements: { CARGO_PACKAGE_NAME: "worker" },
+    });
+  });
+
+  it("keeps initialization and Package Addition Rust contributions aligned", () => {
+    const context = {
+      targetDir: "/tmp/worker",
+      projectName: "worker",
+      scope: "scope",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    };
+    const initialization = rustBinDefinition.planInitialization(context);
+    const addition = rustBinDefinition.planPackageAddition?.({
+      context,
+      packageLeafName: "worker",
+      packagePath: "packages/worker",
+    });
+
+    expect(addition).toEqual(initialization);
+  });
+
   it("owns a native package contribution with conventional scripts, fixes, and toolchain maintenance", () => {
     const context = {
       targetDir: "/tmp/Demo Rust!",
@@ -31,12 +86,12 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "Rust native binary workspace with rustfmt, clippy, and cargo tests.",
     });
     expect(contribution.definition).toEqual({
-      name: "@demo/demo-rust-native",
+      name: "@demo/demo-rust",
       path: "packages/demo-rust",
       role: "native-package",
     });
     expect(contribution.manifest).toMatchObject({
-      name: "@demo/demo-rust-native",
+      name: "@demo/demo-rust",
       scripts: {
         "format:check": "cargo fmt --all -- --check",
         lint: "cargo clippy --workspace --all-targets -- -D warnings",
@@ -77,6 +132,81 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     });
   });
 
+  it("declares its source-backed Rust Development Container Tool Layer", () => {
+    const contribution = rustBinDefinition.planInitialization({
+      targetDir: "/tmp/demo-rust",
+      projectName: "demo-rust",
+      scope: "demo",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const [layer] =
+      contribution.foundation.developmentContainerToolLayers ?? [];
+
+    expect(layer).toMatchObject({
+      identity: "rust",
+      requires: ["node-pnpm"],
+      buildArguments: [{ name: "RUST_TOOLCHAIN", value: "stable" }],
+      mounts: [
+        {
+          identity: "cargo-registry",
+          type: "volume",
+          source: "${devcontainerId}-cargo-registry",
+          target: "/usr/local/cargo/registry",
+        },
+        {
+          identity: "cargo-git",
+          type: "volume",
+          source: "${devcontainerId}-cargo-git",
+          target: "/usr/local/cargo/git",
+        },
+      ],
+      probes: [
+        { identity: "cargo", command: "cargo", args: ["--version"] },
+        { identity: "rustc", command: "rustc", args: ["--version"] },
+      ],
+    });
+    expect(
+      resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
+    ).toBe(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/rust-bin/devcontainer/rust.Dockerfile",
+      ),
+    );
+  });
+
+  it("ignores package-local Cargo target output in generated repositories", async () => {
+    const targetDir = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-rust-ignore-")),
+      "demo-rust",
+    );
+    const context = createGenerationContext({
+      targetDir,
+      scope: "demo",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const plan = planGeneratedRepositoryInitialization({
+      definition: rustBinDefinition,
+      context,
+    });
+    await renderNewProject({
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+    const artifactPath = "packages/demo-rust/target/debug/demo-rust";
+    await mkdir(path.join(targetDir, path.dirname(artifactPath)), {
+      recursive: true,
+    });
+    await writeFile(path.join(targetDir, artifactPath), "generated");
+    await execa("git", ["init", "--quiet"], { cwd: targetDir });
+
+    await expect(
+      execa("git", ["check-ignore", "--no-index", artifactPath], {
+        cwd: targetDir,
+      }),
+    ).resolves.toMatchObject({ stdout: artifactPath });
+  });
+
   it("generates a Rust repository whose Root Check runs native formatting, linting, and tests", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-rust-")),
@@ -114,7 +244,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       "utf8",
     );
     expect(devcontainerDockerfile).toContain(
-      "rustup toolchain install ${RUST_TOOLCHAIN}",
+      '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
     );
     expect(devcontainerDockerfile).toContain(
       "apt-get install -y --no-install-recommends ca-certificates git",
@@ -130,6 +260,47 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       "git config --system init.defaultBranch main",
     );
     expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      build: { args: { RUST_TOOLCHAIN: "stable" } },
+      mounts: [
+        {
+          type: "volume",
+          source: "${devcontainerId}-pnpm-store",
+          target: "/pnpm/store",
+        },
+        {
+          type: "volume",
+          source: "${devcontainerId}-cargo-git",
+          target: "/usr/local/cargo/git",
+        },
+        {
+          type: "volume",
+          source: "${devcontainerId}-cargo-registry",
+          target: "/usr/local/cargo/registry",
+        },
+      ],
+    });
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ).mounts,
+    ).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          target: expect.stringContaining("${containerWorkspaceFolder}"),
+        }),
+      ]),
+    );
+    expect(
       await readFile(path.join(targetDir, ".gitignore"), "utf8"),
     ).toContain(".pnpm-store/");
     expect(
@@ -142,6 +313,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         check: expect.stringContaining("test"),
         fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
       },
+    });
+    expect(
+      JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
+    ).toMatchObject({
+      globalPassThroughEnv: ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
     });
 
     await mkdir(path.join(targetDir, "apps/discovered"), { recursive: true });
@@ -193,9 +369,9 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "//#format:check",
         "//#lint",
         "//#typecheck",
-        "@demo/demo-rust-native#format:check",
-        "@demo/demo-rust-native#lint",
-        "@demo/demo-rust-native#test",
+        "@demo/demo-rust#format:check",
+        "@demo/demo-rust#lint",
+        "@demo/demo-rust#test",
         "@demo/discovered#lint",
         "@demo/discovered#build",
         "@demo/discovered#test",

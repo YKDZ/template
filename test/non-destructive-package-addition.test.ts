@@ -251,7 +251,7 @@ describe("Non-Destructive Package Addition", () => {
       ).resolves.toContain("  - services/*");
       await expect(
         readFile(path.join(targetDir, ".github/workflows/check.yml"), "utf8"),
-      ).resolves.toContain("exec playwright install --with-deps chromium");
+      ).resolves.not.toContain("playwright install");
       await expect(
         readFile(path.join(targetDir, ".vscode/extensions.json"), "utf8").then(
           (source) => JSON.parse(source),
@@ -268,6 +268,7 @@ describe("Non-Destructive Package Addition", () => {
         schemaVersion: 1,
         packages: [
           expect.objectContaining({ path: consumerPath }),
+          expect.objectContaining({ path: "packages/typescript-config" }),
           expect.objectContaining({ path: "services/dashboard" }),
         ],
       });
@@ -1233,7 +1234,9 @@ describe("Non-Destructive Package Addition", () => {
             generation.packages as readonly Record<string, unknown>[]
           ).map((item) => ({
             ...item,
-            definitionName: conflictingDefinition.metadata.name,
+            ...(item.planningContribution === "foundationPlan"
+              ? {}
+              : { definitionName: conflictingDefinition.metadata.name }),
           })),
         }),
       );

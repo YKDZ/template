@@ -422,6 +422,158 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
+  it("rejects retired Development Container capability APIs and switches", async () => {
+    const root = await fixture();
+    try {
+      await Promise.all([
+        mkdir(path.join(root, "packages/core/src"), { recursive: true }),
+        mkdir(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/foundation/rust/devcontainer",
+          ),
+          { recursive: true },
+        ),
+        mkdir(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/rust-bin/devcontainer",
+          ),
+          { recursive: true },
+        ),
+        mkdir(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/shared/devcontainer",
+          ),
+          { recursive: true },
+        ),
+        mkdir(path.join(root, "packages/checks/src"), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          path.join(root, "packages/core/src/devcontainer.ts"),
+          [
+            `export type ${"DevelopmentContainer"}RustLayer = { kind: "rust" };`,
+            `export type ${"DevelopmentContainer"}Capability = { kind: "docker-client" };`,
+            `export type ${"RustDevelopmentContainer"}Options = { toolchain: string };`,
+            `export function ${"rustTool"}Layer() { return { kind: "rust" }; }`,
+            `export function ${"createRustDevelopmentContainer"}Layer() { return { kind: "rust" }; }`,
+            `export function ${"developmentContainerCapability"}Compatibility() {}`,
+            `export function ${"dockerfileFirstRustPnpm"}Devcontainer() {}`,
+            `export function select(layer: { kind: string }) {`,
+            `  switch (layer.kind) { case "rust": return true; case "docker-client": return true; default: return false; }`,
+            `}`,
+          ].join("\n"),
+        ),
+        writeFile(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/foundation/rust/devcontainer/rust.Dockerfile",
+          ),
+          "RUN rustup --version\n",
+        ),
+        writeFile(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
+          ),
+          "{}\n",
+        ),
+        writeFile(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
+          ),
+          "RUN apt-get update && apt-get install -y shellcheck\n",
+        ),
+        writeFile(
+          path.join(
+            root,
+            "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
+          ),
+          "RUN rustup toolchain install stable\n",
+        ),
+        writeFile(
+          path.join(root, "packages/checks/src/check-generated-registry.ts"),
+          [
+            `async function ${"ensureHostFixtureDependencies"}() {`,
+            `  await run("rustup", ["toolchain", "install", "stable"], { cwd: "." });`,
+            `  await run("pnpm", ["exec", "playwright", "install", "--with-deps", "chromium"], { cwd: "." });`,
+            `}`,
+          ].join("\n"),
+        ),
+      ]);
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "retired-development-container-path",
+            file: "packages/core/src/devcontainer.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-symbol",
+            file: "packages/core/src/devcontainer.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-switch",
+            file: "packages/core/src/devcontainer.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-compatibility",
+            file: "packages/core/src/devcontainer.ts",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-path",
+            file: "packages/builtin-presets/templates/foundation/rust",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-path",
+            file: "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-path",
+            file: "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
+          }),
+          expect.objectContaining({
+            rule: "retired-development-container-path",
+            file: "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
+          }),
+          expect.objectContaining({
+            rule: "host-prepared-fixture-execution",
+            file: "packages/checks/src/check-generated-registry.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects sibling Preset imports", async () => {
+    const root = await fixture();
+    try {
+      await mkdir(path.join(root, "packages/builtin-presets/src/vike-app"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(root, "packages/builtin-presets/src/vike-app/definition.ts"),
+        `import { vueAppDefinition } from "../vue-${"app"}/definition.ts"; void vueAppDefinition;`,
+      );
+
+      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rule: "preset-sibling-import",
+            file: "packages/builtin-presets/src/vike-app/definition.ts",
+          }),
+        ]),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("permits the package-local Turbo prepack build selector", async () => {
     const root = await fixture();
     try {

@@ -8,6 +8,7 @@ import type { RenderOperation } from "#template-core/renderer";
 
 import {
   sharedVueSourceOperations,
+  vueApplicationDevelopmentContainerToolLayers,
   vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
   vueApplicationManifest,
@@ -53,7 +54,7 @@ function appContribution(options: {
       from,
       to: `${definition.path}/${from.replace("typescript/", "scripts/")}`,
     })),
-    ...sharedVueSourceOperations(definition.path),
+    ...sharedVueSourceOperations(options.context, definition.path),
   ];
   return {
     definition,
@@ -73,6 +74,8 @@ function appContribution(options: {
         interval: "weekly",
       },
       workspacePackageGlobs: [`${options.packagePath.split("/")[0]}/*`],
+      developmentContainerToolLayers:
+        vueApplicationDevelopmentContainerToolLayers(),
     },
   };
 }

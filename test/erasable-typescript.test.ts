@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -11,6 +19,7 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
+import { renderNewProject } from "#template-core/renderer";
 
 type Manifest = {
   readonly name?: string;
@@ -20,6 +29,27 @@ type Manifest = {
   readonly bundleDependencies?: readonly string[];
   readonly scripts?: Readonly<Record<string, unknown>>;
 };
+
+async function uiTsconfigPaths(root: string): Promise<readonly string[]> {
+  const configPaths: string[] = [];
+  async function visit(directory: string): Promise<void> {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.name === "node_modules") continue;
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await visit(entryPath);
+      } else if (
+        entry.isFile() &&
+        (entry.name === "tsconfig.app.json" ||
+          entry.name === "tsconfig.test.json")
+      ) {
+        configPaths.push(entryPath);
+      }
+    }
+  }
+  await visit(root);
+  return configPaths.toSorted();
+}
 
 async function compilerApiImports(
   packageRoot: string,
@@ -85,14 +115,62 @@ describe("Erasable TypeScript enforcement", () => {
     const projectRoot = await mkdtemp(
       path.join(tmpdir(), "template-ui-transform-typescript-"),
     );
-    const uiConfigPaths = [
-      "packages/builtin-presets/templates/shared/vue/tsconfig.app.json",
-      "packages/builtin-presets/templates/shared/vue/tsconfig.test.json",
-      "packages/builtin-presets/templates/vike-app/web/tsconfig.app.json",
-      "packages/builtin-presets/templates/vike-app/web/tsconfig.test.json",
-    ];
 
     try {
+      const generatedPresetTargets = builtInPresetRegistry
+        .all()
+        .map((definition) => ({
+          definition,
+          targetDir: path.join(projectRoot, definition.metadata.name),
+        }));
+      await Promise.all(
+        generatedPresetTargets.map(async ({ definition, targetDir }) => {
+          const plan = planGeneratedRepositoryInitialization({
+            definition,
+            context: createGenerationContext({
+              targetDir,
+              scope: "erasable",
+              toolchain: {
+                nodeLtsMajor: "24",
+                packageManagerPin: "pnpm@11.11.0",
+              },
+            }),
+          });
+          await renderNewProject({
+            targetRoot: targetDir,
+            operations: [...plan.operations],
+          });
+          await mkdir(path.join(targetDir, "node_modules/@vue"), {
+            recursive: true,
+          });
+          await mkdir(path.join(targetDir, "node_modules/@erasable"), {
+            recursive: true,
+          });
+          await Promise.all([
+            symlink(
+              path.join(
+                process.cwd(),
+                "packages/builtin-presets/node_modules/@vue/tsconfig",
+              ),
+              path.join(targetDir, "node_modules/@vue/tsconfig"),
+              "dir",
+            ),
+            symlink(
+              path.join(targetDir, "packages/typescript-config"),
+              path.join(targetDir, "node_modules/@erasable/typescript-config"),
+              "dir",
+            ),
+          ]);
+        }),
+      );
+      const uiConfigPaths = (
+        await Promise.all(
+          generatedPresetTargets.map(({ targetDir }) =>
+            uiTsconfigPaths(targetDir),
+          ),
+        )
+      ).flat();
+      expect(uiConfigPaths.length).toBeGreaterThan(0);
       await writeFile(
         path.join(projectRoot, "ui-transform-syntax.ts"),
         fixtureSource,
@@ -107,7 +185,7 @@ describe("Erasable TypeScript enforcement", () => {
           temporaryConfigPath,
           `${JSON.stringify(
             {
-              extends: path.join(process.cwd(), configPath),
+              extends: configPath,
               compilerOptions: {
                 composite: false,
                 noEmit: true,

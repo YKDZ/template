@@ -1,26 +1,16 @@
 {
+  "extends": "{{TYPESCRIPT_CONFIG_PACKAGE}}/base.json",
   "compilerOptions": {
     "composite": true,
     "customConditions": ["source"],
     "declaration": true,
     "declarationMap": true,
     "erasableSyntaxOnly": true,
-    "exactOptionalPropertyTypes": true,
-    "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true,
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "noEmitOnError": true,
-    "noFallthroughCasesInSwitch": true,
-    "noImplicitOverride": true,
-    "noImplicitReturns": true,
-    "noUncheckedIndexedAccess": true,
     "rewriteRelativeImportExtensions": true,
-    "skipLibCheck": false,
-    "strict": true,
     "target": "es2023",
-    "types": ["node", "vitest/globals"],
-    "verbatimModuleSyntax": true
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
 }

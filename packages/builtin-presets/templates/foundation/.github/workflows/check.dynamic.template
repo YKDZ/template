@@ -14,6 +14,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version-file: package.json
-      - run: corepack enable{{RUST_CI_PREPARATION}}{{DEPLOYMENT_DOCKER_PREPARATION}}
-      - run: pnpm install{{CHECK_ENVIRONMENT_PREPARATION}}
+      - run: corepack enable{{DEPLOYMENT_DOCKER_PREPARATION}}
+      - run: pnpm install
       - run: pnpm run check{{ROOT_CHECK_CONDITION}}{{DEPLOYMENT_CHECK}}

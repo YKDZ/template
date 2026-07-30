@@ -7,6 +7,9 @@ settings:
 
 catalogs:
   default:
+    '@devcontainers/cli':
+      specifier: 0.88.0
+      version: 0.88.0
     '@hono/node-server':
       specifier: ^2.0.12
       version: 2.0.12
@@ -289,6 +292,9 @@ importers:
         specifier: 'catalog:'
         version: 2.9.0
     devDependencies:
+      '@devcontainers/cli':
+        specifier: 'catalog:'
+        version: 0.88.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
@@ -508,6 +514,11 @@ packages:
 
   '@brillout/vite-plugin-server-entry@0.7.19':
     resolution: {integrity: sha512-XIT5xAB4x3XPTLF+WfXI92zFAcIcYZqkFkYY1tpg7wrsTWMzllRF2Fbnzy8S/Dilsw9y1qJOHUVrmLtNp2/6Yw==}
+
+  '@devcontainers/cli@0.88.0':
+    resolution: {integrity: sha512-sMkruPy/icfov20mdQh2EjFYZogxvMEZptDEvg5/eMBIUOr2xr+8wlsI7nvDR6EJxoBjqoasXqgRGbiMqbaJ1w==}
+    engines: {node: '>=20.0.0'}
+    hasBin: true
 
   '@drizzle-team/brocli@0.12.0':
     resolution: {integrity: sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ==}
@@ -3068,6 +3079,8 @@ snapshots:
     dependencies:
       '@brillout/import': 0.2.6
       '@brillout/picocolors': 1.0.31
+
+  '@devcontainers/cli@0.88.0': {}
 
   '@drizzle-team/brocli@0.12.0': {}
 

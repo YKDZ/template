@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -24,10 +24,13 @@ import {
   deriveInitializationScenarios,
   discoverPresetLocalBehaviorTests,
   deriveVerificationPlans,
+  validateGeneratedDevelopmentContainerProjection,
   validatePlanDependencyCatalog,
   validatePlanPublicationSources,
   validatePlanSources,
 } from "../packages/builtin-presets/src/registry-checks.ts";
+
+const rustPresetName = ["rust", "bin"].join("-");
 
 describe("Preset Registry generated scenarios", () => {
   it("derives one initialization scenario per Definition and the complete addition matrix", () => {
@@ -47,6 +50,20 @@ describe("Preset Registry generated scenarios", () => {
     expect(
       matrix.filter((scenario) => scenario.addition === undefined),
     ).toHaveLength(definitions.length);
+    const rustDefinition = definitions.find(
+      (definition) => definition.metadata.name === rustPresetName,
+    );
+    if (rustDefinition?.planPackageAddition === undefined) {
+      throw new Error("Expected Rust preset to support Package Addition");
+    }
+    expect(
+      matrix
+        .filter(
+          (scenario) =>
+            scenario.addition?.metadata.name === rustDefinition?.metadata.name,
+        )
+        .map((scenario) => scenario.base.metadata.name),
+    ).toEqual(definitions.map((definition) => definition.metadata.name));
 
     for (const scenario of matrix) {
       const context = createGenerationContext({
@@ -315,6 +332,85 @@ describe("Preset Registry generated scenarios", () => {
         ]),
       );
       expect(() => validatePlanDependencyCatalog(plan)).not.toThrow();
+    }
+  });
+
+  it("validates protected Tool Layer fields while allowing unrelated preserved Development Container additions", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-final-tool-layer-projection-"),
+    );
+    const definitions = builtInPresetRegistry.all();
+    const rustDefinition = definitions.find(
+      (definition) => definition.metadata.name === rustPresetName,
+    );
+    const base = definitions.find(
+      (definition) => definition.metadata.name !== rustPresetName,
+    );
+    if (rustDefinition === undefined || base === undefined) {
+      throw new Error("Expected Rust and non-Rust Built-in Presets");
+    }
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, "generated"),
+      scope: "fixture",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: base,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: rustDefinition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "worker",
+      });
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: context.targetDir,
+        ...addition.projectProjections,
+      });
+      expect(result.ok).toBe(true);
+
+      await expect(
+        validateGeneratedDevelopmentContainerProjection({
+          plan: addition,
+          projectDir: context.targetDir,
+        }),
+      ).resolves.toBeUndefined();
+      expect(
+        addition.developmentContainer.toolLayers.map((layer) => layer.identity),
+      ).toContain("rust");
+
+      const configPath = path.join(
+        context.targetDir,
+        ".devcontainer/devcontainer.json",
+      );
+      const config = JSON.parse(await readFile(configPath, "utf8")) as {
+        build: { args: Record<string, string> };
+        mounts: Record<string, unknown>[];
+      };
+      config.build.args.USER_IMAGE_FLAVOR = "custom";
+      config.mounts.push({
+        type: "bind",
+        source: "/tmp/user-cache",
+        target: "/workspaces/user-cache",
+        consistency: "cached",
+      });
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+      await expect(
+        validateGeneratedDevelopmentContainerProjection({
+          plan: addition,
+          projectDir: context.targetDir,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 

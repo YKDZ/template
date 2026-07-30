@@ -31,11 +31,14 @@ function packageScripts(): Record<string, string> {
   };
 }
 
-function rustContribution(context: GenerationContext): PackageContribution {
-  const cargoName = cargoPackageName(context.projectName);
+function rustContribution(options: {
+  readonly context: GenerationContext;
+  readonly packageLeafName: string;
+  readonly packagePath: string;
+}): PackageContribution {
   const definition: PackageDefinition = {
-    name: `@${context.scope}/${cargoName}-native`,
-    path: `packages/${cargoName}`,
+    name: `@${options.context.scope}/${options.packageLeafName}`,
+    path: options.packagePath,
     role: "native-package",
   };
   const operations: RenderOperation[] = [
@@ -45,14 +48,14 @@ function rustContribution(context: GenerationContext): PackageContribution {
       source: templateSources.rustBin,
       from: "Cargo.toml",
       to: `${definition.path}/Cargo.toml`,
-      replacements: { CARGO_PACKAGE_NAME: cargoName },
+      replacements: { CARGO_PACKAGE_NAME: options.packageLeafName },
     },
     {
       kind: "writeTextTemplate",
       source: templateSources.rustBin,
       from: "Cargo.lock",
       to: `${definition.path}/Cargo.lock`,
-      replacements: { CARGO_PACKAGE_NAME: cargoName },
+      replacements: { CARGO_PACKAGE_NAME: options.packageLeafName },
     },
     {
       kind: "copyFile",
@@ -81,7 +84,7 @@ function rustContribution(context: GenerationContext): PackageContribution {
       version: "0.0.0",
       private: true,
       scripts: packageScripts(),
-      engines: { node: context.toolchain.nodeLtsMajor },
+      engines: { node: options.context.toolchain.nodeLtsMajor },
     },
     operations,
     environmentNeeds: [
@@ -106,6 +109,44 @@ function rustContribution(context: GenerationContext): PackageContribution {
         directories: { cargo: `/${definition.path}` },
         interval: "weekly",
       },
+      developmentContainerToolLayers: [
+        {
+          identity: "rust",
+          dockerfile: {
+            source: templateSources.rustBin,
+            from: "devcontainer/rust.Dockerfile",
+          },
+          requires: ["node-pnpm"],
+          buildArguments: [{ name: "RUST_TOOLCHAIN", value: "stable" }],
+          mounts: [
+            {
+              identity: "cargo-registry",
+              type: "volume",
+              source: "${devcontainerId}-cargo-registry",
+              target: "/usr/local/cargo/registry",
+            },
+            {
+              identity: "cargo-git",
+              type: "volume",
+              source: "${devcontainerId}-cargo-git",
+              target: "/usr/local/cargo/git",
+            },
+          ],
+          probes: [
+            { identity: "cargo", command: "cargo", args: ["--version"] },
+            { identity: "rustc", command: "rustc", args: ["--version"] },
+          ],
+        },
+      ],
+      templateFiles: [
+        {
+          identity: "rust-toolchain",
+          source: templateSources.rustBin,
+          from: "rust-toolchain.toml",
+          to: "rust-toolchain.toml",
+          replacements: { RUST_TOOLCHAIN: "stable" },
+        },
+      ],
     },
   };
 }
@@ -120,10 +161,30 @@ export const rustBinDefinition: BuiltInPresetDefinition = {
   source: templateSources.rustBin,
   plannerSourceFile: fileURLToPath(import.meta.url),
   blueprint(context) {
+    const packageLeafName = cargoPackageName(context.projectName);
     return {
       schemaVersion: 2,
-      packages: [rustContribution(context).definition],
+      packages: [
+        rustContribution({
+          context,
+          packageLeafName,
+          packagePath: `packages/${packageLeafName}`,
+        }).definition,
+      ],
     };
   },
-  planInitialization: rustContribution,
+  planInitialization(context) {
+    const packageLeafName = cargoPackageName(context.projectName);
+    return rustContribution({
+      context,
+      packageLeafName,
+      packagePath: `packages/${packageLeafName}`,
+    });
+  },
+  defaultPackagePath({ packageLeafName }) {
+    return `packages/${packageLeafName}`;
+  },
+  planPackageAddition({ context, packageLeafName, packagePath }) {
+    return rustContribution({ context, packageLeafName, packagePath });
+  },
 };

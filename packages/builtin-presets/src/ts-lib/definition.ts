@@ -8,6 +8,7 @@ import type {
 import type { PackageDefinition } from "#template-core/project-blueprint-v2";
 import type { RenderOperation } from "#template-core/renderer";
 
+import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";
 
 function packageScripts(): Record<string, string> {
@@ -49,12 +50,12 @@ function libraryContribution(options: {
   };
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
-    {
-      kind: "copyFile",
+    typescriptConfigSourceOperation({
+      context: options.context,
       source: templateSources.tsLib,
       from: "tsconfig.json",
       to: `${definition.path}/tsconfig.json`,
-    },
+    }),
     {
       kind: "copyFile",
       source: templateSources.tsLib,

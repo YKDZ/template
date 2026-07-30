@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,7 +35,10 @@ import {
 } from "./fixture-evidence/gates/root-quality/index.ts";
 import {
   checkFixtureEvidenceHealth,
+  createDevelopmentContainerFixtureSession,
   createFixtureEvidenceScheduler,
+  defaultDevelopmentContainerSessionConcurrency,
+  deriveDevelopmentContainerBuildIdentity,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   formatFixtureEvidenceHealthReport,
@@ -44,6 +47,7 @@ import {
   stageFixtureGitRepository,
   writeGeneratedRepositoryTree,
   type FixtureEvidenceActivityLedger,
+  type DevelopmentContainerFixtureDependencyCaches,
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
   type FixtureEvidenceScheduler,
@@ -76,6 +80,10 @@ type RegistryChecks = {
   readonly validatePlanDependencyCatalog: (
     plan: GeneratedRepositoryPlan,
   ) => void;
+  readonly validateGeneratedDevelopmentContainerProjection: (options: {
+    readonly plan: GeneratedRepositoryPlan;
+    readonly projectDir: string;
+  }) => Promise<void>;
   readonly validatePlanSources: (options: {
     readonly definition: BuiltInPresetDefinition;
     readonly plan: GeneratedRepositoryPlan;
@@ -100,6 +108,11 @@ export type GeneratedScenarioRunOptions = {
   readonly run?: GeneratedCommandRunner;
   readonly scheduling?: FixtureEvidenceSchedulingOptions;
   readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
+  readonly buildKitCacheDirectory?: string;
+  readonly dependencyCaches?:
+    | DevelopmentContainerFixtureDependencyCaches
+    | undefined;
+  readonly containerEnvironment?: NodeJS.ProcessEnv;
   readonly evidence?: {
     readonly storage?: FixtureEvidenceStorage;
     readonly clock?: () => Date;
@@ -125,14 +138,70 @@ export type GeneratedCommandRunner = (
 ) => Promise<unknown>;
 
 const fixtureEnvironment = {
+  buildKitCacheDirectory: "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
+  cargoCacheDirectory: "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
   concurrency: "TEMPLATE_FIXTURE_CONCURRENCY",
+  developmentContainerSessions:
+    "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
   directory: "TEMPLATE_FIXTURE_EVIDENCE_DIR",
   read: "TEMPLATE_FIXTURE_EVIDENCE_READ",
   write: "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
   activityDirectory: "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
   runId: "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
   runAttempt: "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+  pnpmCacheDirectory: "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+  workspaceDirectory: "TEMPLATE_FIXTURE_WORKSPACE_DIR",
 } as const;
+
+const fixtureTurboEnvironment = [
+  ["TURBO_TEAM", "TEMPLATE_FIXTURE_TURBO_TEAM"],
+  ["TURBO_TOKEN", "TEMPLATE_FIXTURE_TURBO_TOKEN"],
+  [
+    "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+    "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+  ],
+  [
+    "TURBO_REMOTE_CACHE_READ_ONLY",
+    "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
+  ],
+] as const;
+
+export function fixtureContainerEnvironmentFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    fixtureTurboEnvironment.flatMap(([containerName, fixtureName]) => {
+      const value = environment[fixtureName] ?? environment[containerName];
+      return value === undefined || value.length === 0
+        ? []
+        : [[containerName, value]];
+    }),
+  );
+}
+
+export function fixtureDependencyCachesFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+): DevelopmentContainerFixtureDependencyCaches | undefined {
+  const configured = (
+    name:
+      | typeof fixtureEnvironment.pnpmCacheDirectory
+      | typeof fixtureEnvironment.cargoCacheDirectory,
+  ): string | undefined => {
+    const value = environment[name];
+    if (value === undefined) return undefined;
+    if (value.length === 0) {
+      throw new Error(`${name} must not be empty`);
+    }
+    return path.resolve(value);
+  };
+  const pnpm = configured(fixtureEnvironment.pnpmCacheDirectory);
+  const cargo = configured(fixtureEnvironment.cargoCacheDirectory);
+  if (pnpm === undefined && cargo === undefined) return undefined;
+  return {
+    ...(pnpm === undefined ? {} : { pnpm }),
+    ...(cargo === undefined ? {} : { cargo }),
+  };
+}
 
 function configuredBoolean(
   environment: NodeJS.ProcessEnv,
@@ -347,6 +416,10 @@ async function runScenario(
     }
   }
 
+  await checks.validateGeneratedDevelopmentContainerProjection({
+    plan: finalPlan,
+    projectDir,
+  });
   const deployment =
     mode === "deployment"
       ? deriveDeploymentQualityPlanInput(finalPlan)
@@ -355,131 +428,178 @@ async function runScenario(
     return "not-applicable";
   }
 
-  if (options.evidence?.activity === undefined) {
-    options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
-  }
-  const includeFix =
-    mode === "package-addition-matrix" || mode === "deployment";
-  const executeRootQuality = async () => {
-    const execute = async () =>
-      await executeGeneratedRootQuality({
-        plan: finalPlan,
-        projectDir,
-        fixtureWorkspace: options.workspace,
-        includeFix,
-        run,
-      });
-    return evidenceScheduler === undefined
-      ? await execute()
-      : await evidenceScheduler.run(
-          generatedRootQualityExecutionResources(finalPlan),
-          execute,
-        );
-  };
-
   const diagnostics = scenarioDiagnostics(scenario);
-  const evidenceOptions = {
-    scenario: diagnostics,
-    producerCommit:
-      options.evidence?.producerCommit ?? process.env.GITHUB_SHA ?? "local",
-    ...(options.evidence?.storage === undefined
+  const buildIdentity = await deriveDevelopmentContainerBuildIdentity({
+    projectDir,
+  });
+  const containerSessionResources = [
+    "development-container-session",
+    ...(deployment === undefined
+      ? []
+      : deploymentQualityExecutionResources(deployment)),
+  ] as const;
+  const containerSession = createDevelopmentContainerFixtureSession({
+    projectDir,
+    probes: finalPlan.developmentContainer.probes,
+    build: {
+      identity: buildIdentity,
+      cacheDirectory:
+        options.buildKitCacheDirectory ??
+        path.join(options.workspace, ".buildkit-cache"),
+    },
+    environment: options.containerEnvironment ?? process.env,
+    ...(options.dependencyCaches === undefined
       ? {}
-      : { storage: options.evidence.storage }),
-    ...(options.evidence?.clock === undefined
-      ? {}
-      : { clock: options.evidence.clock }),
-    ...(options.evidence?.freshnessMilliseconds === undefined
+      : { dependencyCaches: options.dependencyCaches }),
+    ...(evidenceScheduler === undefined
       ? {}
       : {
-          freshnessMilliseconds: options.evidence.freshnessMilliseconds,
+          acquireSession: async () =>
+            await evidenceScheduler.acquire(containerSessionResources),
         }),
-    ...(options.evidence?.readEnabled === undefined
-      ? {}
-      : { readEnabled: options.evidence.readEnabled }),
-    writeEnabled: options.evidence?.writeEnabled ?? false,
-    ...(options.evidence?.recordLifecycle === undefined
-      ? {}
-      : { recordLifecycle: options.evidence.recordLifecycle }),
-  };
+    recordCacheActivity: async (event) => {
+      const recordInvocationEvent = options.evidence?.recordLifecycle as
+        | ((event: FixtureEvidenceInvocationEvent) => void | Promise<void>)
+        | undefined;
+      await recordInvocationEvent?.({
+        type: "cache",
+        cache: event.cache,
+        scenario: diagnostics,
+        at: (options.evidence?.clock ?? (() => new Date()))().toISOString(),
+        outcome: "used",
+      });
+    },
+    run,
+  });
+  return await containerSession.execute<"completed">(async () => {
+    if (options.evidence?.activity === undefined) {
+      options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
+    }
+    const includeFix = true;
+    const executeRootQuality = async () => {
+      await containerSession.reserve();
+      const execute = async () => {
+        await executeGeneratedRootQuality({
+          plan: finalPlan,
+          projectDir,
+          fixtureWorkspace: options.workspace,
+          includeFix,
+          run: containerSession.run,
+          identityRun: run,
+        });
+      };
+      return evidenceScheduler === undefined
+        ? await execute()
+        : await evidenceScheduler.run(
+            generatedRootQualityExecutionResources(finalPlan),
+            execute,
+          );
+    };
 
-  if (
-    mode === "init" ||
-    mode === "package-addition-matrix" ||
-    mode === "focused" ||
-    mode === "deployment"
-  ) {
-    const generatedContentIdentity = await writeGeneratedRepositoryTree({
-      repositoryRoot: projectDir,
-      run,
-    });
-    const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
-      finalPlan,
-      { includeFix },
-    );
-    const rootEvidence = await runFixtureEvidenceGate({
-      gate: "generated-root-quality",
-      generatedContentIdentity,
-      contractIdentity,
-      ...evidenceOptions,
-      execute: executeRootQuality,
-    });
+    const evidenceOptions = {
+      scenario: diagnostics,
+      producerCommit:
+        options.evidence?.producerCommit ?? process.env.GITHUB_SHA ?? "local",
+      ...(options.evidence?.storage === undefined
+        ? {}
+        : { storage: options.evidence.storage }),
+      ...(options.evidence?.clock === undefined
+        ? {}
+        : { clock: options.evidence.clock }),
+      ...(options.evidence?.freshnessMilliseconds === undefined
+        ? {}
+        : {
+            freshnessMilliseconds: options.evidence.freshnessMilliseconds,
+          }),
+      ...(options.evidence?.readEnabled === undefined
+        ? {}
+        : { readEnabled: options.evidence.readEnabled }),
+      writeEnabled: options.evidence?.writeEnabled ?? false,
+      ...(options.evidence?.recordLifecycle === undefined
+        ? {}
+        : { recordLifecycle: options.evidence.recordLifecycle }),
+    };
 
-    if (mode === "focused") {
-      const focusedPlan = deriveFocusedPackageLinkPlanInput({
-        initialPlan: initialization,
+    if (
+      mode === "init" ||
+      mode === "package-addition-matrix" ||
+      mode === "focused" ||
+      mode === "deployment"
+    ) {
+      const generatedContentIdentity = await writeGeneratedRepositoryTree({
+        repositoryRoot: projectDir,
+        run,
+      });
+      const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
         finalPlan,
-        consumerPackagePaths: scenario.linkFrom ?? [],
-      });
-      await runFixtureEvidenceGate({
-        gate: "focused-package-link",
-        rootEvidence,
+        { includeFix },
+      );
+      const rootEvidence = await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
         generatedContentIdentity,
-        contractIdentity:
-          await deriveFocusedPackageLinkContractIdentity(focusedPlan),
+        contractIdentity,
         ...evidenceOptions,
-        execute: async () => {
-          const execute = async () =>
-            await executeFocusedPackageLink({
-              scenarioLabel: scenario.label,
-              projectDir,
-              fixtureWorkspace: options.workspace,
-              consumerPackagePath: focusedPlan.consumerPackagePath,
-              providerPackagePath: focusedPlan.providerPackagePath,
-              run,
-            });
-          return evidenceScheduler === undefined
-            ? await execute()
-            : await evidenceScheduler.run([], execute);
-        },
+        execute: executeRootQuality,
       });
+
+      if (mode === "focused") {
+        const focusedPlan = deriveFocusedPackageLinkPlanInput({
+          initialPlan: initialization,
+          finalPlan,
+          consumerPackagePaths: scenario.linkFrom ?? [],
+        });
+        await runFixtureEvidenceGate({
+          gate: "focused-package-link",
+          rootEvidence,
+          generatedContentIdentity,
+          contractIdentity:
+            await deriveFocusedPackageLinkContractIdentity(focusedPlan),
+          ...evidenceOptions,
+          execute: async () => {
+            await containerSession.reserve();
+            const execute = async () => {
+              await executeFocusedPackageLink({
+                scenarioLabel: scenario.label,
+                projectDir,
+                fixtureWorkspace: options.workspace,
+                consumerPackagePath: focusedPlan.consumerPackagePath,
+                providerPackagePath: focusedPlan.providerPackagePath,
+                run: containerSession.run,
+              });
+            };
+            return evidenceScheduler === undefined
+              ? await execute()
+              : await evidenceScheduler.run([], execute);
+          },
+        });
+      }
+      if (mode === "deployment" && deployment !== undefined) {
+        await runFixtureEvidenceGate({
+          gate: "deployment-quality",
+          rootEvidence,
+          generatedContentIdentity,
+          contractIdentity:
+            await deriveDeploymentQualityContractIdentity(deployment),
+          ...evidenceOptions,
+          execute: async () => {
+            await containerSession.reserve();
+            const execute = async () => {
+              await executeDeploymentQuality({
+                deployment,
+                projectDir,
+                fixtureWorkspace: options.workspace,
+                run: containerSession.run,
+              });
+            };
+            return evidenceScheduler === undefined
+              ? await execute()
+              : await evidenceScheduler.run([], execute);
+          },
+        });
+      }
     }
-    if (mode === "deployment" && deployment !== undefined) {
-      await runFixtureEvidenceGate({
-        gate: "deployment-quality",
-        rootEvidence,
-        generatedContentIdentity,
-        contractIdentity:
-          await deriveDeploymentQualityContractIdentity(deployment),
-        ...evidenceOptions,
-        execute: async () => {
-          const execute = async () =>
-            await executeDeploymentQuality({
-              deployment,
-              projectDir,
-              fixtureWorkspace: options.workspace,
-              run,
-            });
-          return evidenceScheduler === undefined
-            ? await execute()
-            : await evidenceScheduler.run(
-                deploymentQualityExecutionResources(deployment),
-                execute,
-              );
-        },
-      });
-    }
-  }
-  return "completed";
+    return "completed";
+  });
 }
 
 /** Runs registry-derived generated repositories through their production plans. */
@@ -656,18 +776,61 @@ export async function runGeneratedRegistryCli(options: {
       fixtureEnvironment.concurrency,
       2,
     ),
+    developmentContainerSessions: configuredPositiveInteger(
+      options.environment,
+      fixtureEnvironment.developmentContainerSessions,
+      defaultDevelopmentContainerSessionConcurrency(),
+    ),
   };
+  const buildKitCacheDirectory =
+    options.environment[fixtureEnvironment.buildKitCacheDirectory] ??
+    path.join(
+      options.environment[fixtureEnvironment.directory] ??
+        path.resolve(".fixture-evidence"),
+      "buildkit",
+    );
+  if (buildKitCacheDirectory.length === 0) {
+    throw new Error(
+      `${fixtureEnvironment.buildKitCacheDirectory} must not be empty`,
+    );
+  }
   const evidence = fixtureEvidenceFromEnvironment(options.environment);
+  const dependencyCaches = fixtureDependencyCachesFromEnvironment(
+    options.environment,
+  );
   const managesWorkspace = options.workspace === undefined;
-  const workspace =
-    options.workspace ??
-    (await mkdtemp(path.join(tmpdir(), "template-generated-check-")));
+  const configuredWorkspace =
+    options.environment[fixtureEnvironment.workspaceDirectory];
+  if (configuredWorkspace !== undefined && configuredWorkspace.length === 0) {
+    throw new Error(
+      `${fixtureEnvironment.workspaceDirectory} must not be empty`,
+    );
+  }
+  let workspace = options.workspace;
+  if (workspace === undefined) {
+    if (configuredWorkspace === undefined) {
+      workspace = await mkdtemp(
+        path.join(tmpdir(), "template-generated-check-"),
+      );
+    } else {
+      const workspaceRoot = path.resolve(configuredWorkspace);
+      await mkdir(workspaceRoot, { recursive: true });
+      workspace = await mkdtemp(
+        path.join(workspaceRoot, "template-generated-check-"),
+      );
+    }
+  }
   try {
     await runGeneratedScenarioSet(set, {
       workspace,
       reporter: options.reporter ?? console,
       ...(options.run === undefined ? {} : { run: options.run }),
       scheduling,
+      buildKitCacheDirectory: path.resolve(buildKitCacheDirectory),
+      containerEnvironment: fixtureContainerEnvironmentFromEnvironment(
+        options.environment,
+      ),
+      ...(dependencyCaches === undefined ? {} : { dependencyCaches }),
       ...(evidence === undefined ? {} : { evidence }),
     });
   } finally {

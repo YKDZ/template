@@ -1,18 +1,14 @@
 {
+  "extends": "{{TYPESCRIPT_CONFIG_PACKAGE}}/base.json",
   "compilerOptions": {
     "customConditions": ["source"],
     "declaration": true,
     "erasableSyntaxOnly": true,
-    "exactOptionalPropertyTypes": true,
-    "isolatedModules": true,
     "module": "nodenext",
     "moduleResolution": "nodenext",
-    "noUncheckedIndexedAccess": true,
     "rewriteRelativeImportExtensions": true,
-    "strict": true,
     "target": "es2023",
-    "types": ["node", "vitest/globals"],
-    "verbatimModuleSyntax": true
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

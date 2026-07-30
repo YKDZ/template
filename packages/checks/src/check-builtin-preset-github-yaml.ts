@@ -102,9 +102,6 @@ function expectedGithubTemplate(
   }
 
   return projectCheckWorkflow({
-    environment: {
-      needs: [...plan.environmentNeeds],
-    },
     deploymentEnvironmentNeeds: [...plan.deploymentEnvironmentNeeds],
     hasDeploymentTask: plan.manifests.some((manifest) => {
       const scripts = manifest.scripts;

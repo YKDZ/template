@@ -6,7 +6,14 @@ import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
 } from "#template-core/dependency-catalog";
-import { browserTestToolLayer } from "#template-core/devcontainer";
+import {
+  planDevelopmentContainerToolLayersSync,
+  type DevelopmentContainerToolLayer,
+  type DevelopmentContainerToolLayerBuildArgument,
+  type DevelopmentContainerToolLayerMount,
+  type DevelopmentContainerToolLayerProbe,
+  type PlannedDevelopmentContainerToolLayer,
+} from "#template-core/development-container-tool-layer";
 import {
   editorCustomizationForCapabilities,
   loadEditorCustomizationDeclarations,
@@ -52,6 +59,7 @@ import type {
   MaterializeProjectProjectionOptions,
   ProjectProjectionPathPrecondition,
   ProjectProjectionReconciliation,
+  StructuredIdentitySetPolicy,
 } from "#template-core/project-projection";
 import type { RenderOperation } from "#template-core/renderer";
 import {
@@ -60,6 +68,11 @@ import {
 } from "#template-core/renderer";
 
 import { rustBinDefinition } from "./rust-bin/definition.ts";
+import {
+  typescriptConfigContribution,
+  typescriptConfigPackageDefinition,
+  typescriptConfigPackageName,
+} from "./shared/typescript.ts";
 import { vuePnpmDependencyOverrides } from "./shared/vue.ts";
 import { templateSources } from "./template-sources.ts";
 import { tsCliDefinition } from "./ts-cli/definition.ts";
@@ -86,7 +99,10 @@ export type NextStepInstruction = {
 type GeneratedPackagePlanningRecord = {
   readonly path: string;
   readonly definitionName: string;
-  readonly planningContribution: "planInitialization" | "planPackageAddition";
+  readonly planningContribution:
+    | "foundationPlan"
+    | "planInitialization"
+    | "planPackageAddition";
 };
 
 type GenerationRecord = {
@@ -105,6 +121,12 @@ export type GeneratedRepositoryPlan = {
   readonly generationRecord: GenerationRecord;
   readonly operations: readonly RenderOperation[];
   readonly reconciliation: readonly ProjectProjectionReconciliation[];
+  readonly developmentContainer: {
+    readonly toolLayers: readonly PlannedDevelopmentContainerToolLayer[];
+    readonly buildArguments: readonly DevelopmentContainerToolLayerBuildArgument[];
+    readonly mounts: readonly DevelopmentContainerToolLayerMount[];
+    readonly probes: readonly DevelopmentContainerToolLayerProbe[];
+  };
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
@@ -362,7 +384,7 @@ function readGenerationRecord(options: {
       !isRecord(item) ||
       typeof item.path !== "string" ||
       typeof item.definitionName !== "string" ||
-      !["planInitialization", "planPackageAddition"].includes(
+      !["foundationPlan", "planInitialization", "planPackageAddition"].includes(
         String(item.planningContribution),
       )
     ) {
@@ -407,6 +429,19 @@ function assertGenerationRecordFoundationConsistency(options: {
   readonly blueprint: ProjectBlueprintV2;
   readonly generationRecord: GenerationRecord;
 }): void {
+  const configDefinition = typescriptConfigPackageDefinition(options.context);
+  const foundationRecords = options.generationRecord.packages.filter(
+    (record) => record.planningContribution === "foundationPlan",
+  );
+  if (
+    foundationRecords.length !== 1 ||
+    foundationRecords[0]!.definitionName !== "foundation" ||
+    foundationRecords[0]!.path !== configDefinition.path
+  ) {
+    throw new Error(
+      "Package Addition Generation Record must contain exactly one Foundation TypeScript configuration provenance record",
+    );
+  }
   const initialRecords = options.generationRecord.packages.filter(
     (record) => record.planningContribution === "planInitialization",
   );
@@ -645,7 +680,10 @@ function readExistingPackageAdditionState(options: {
     string,
     Readonly<Record<string, unknown>>
   >();
-  const contributions = generationRecord.packages.map((record) => {
+  const contributions = generationRecord.packages.flatMap((record) => {
+    if (record.planningContribution === "foundationPlan") {
+      return [];
+    }
     const expectedDefinition = options.blueprint.packages.find(
       (definition) => definition.path === record.path,
     )!;
@@ -683,7 +721,7 @@ function readExistingPackageAdditionState(options: {
         `Generation Record cannot reproduce Package Definition ${expectedDefinition.name} at ${expectedDefinition.path}`,
       );
     }
-    return contribution;
+    return [contribution];
   });
   for (const packagePath of new Set(options.manifestTruthPackagePaths ?? [])) {
     const expectedDefinition = options.blueprint.packages.find(
@@ -787,57 +825,231 @@ function turboBoundaryTagsForContributions(
   return [...selectedTags];
 }
 
-function devcontainerDockerfileOperations(options: {
+function contributedDevcontainerComposition(options: {
   readonly context: BuiltInGenerationContext;
-  readonly environmentNeeds: readonly CheckEnvironmentNeed[];
-}): RenderOperation[] {
-  const hasBrowserTests = options.environmentNeeds.some(
-    (need) => need.kind === "playwright-browser-assets",
-  );
-  const hasShellChecks = options.environmentNeeds.some(
-    (need) => need.kind === "shellcheck-command",
-  );
-  const browserLayer = hasBrowserTests ? browserTestToolLayer() : undefined;
-  return [
-    {
-      kind: "writeTextTemplate",
-      source: templateSources.foundation,
-      from: "devcontainer.json",
-      to: ".devcontainer/devcontainer.json",
-      replacements: {
-        PROJECT_NAME: options.context.projectName,
-        NODE_LTS_MAJOR: options.context.toolchain.nodeLtsMajor,
-        PACKAGE_MANAGER_PIN: options.context.toolchain.packageManagerPin,
-        PLAYWRIGHT_CLI_PACKAGE: browserLayer?.playwrightCliPackage ?? "unused",
+  readonly layers: readonly DevelopmentContainerToolLayer[];
+}): {
+  readonly operations: readonly RenderOperation[];
+  readonly mountIdentitySet: StructuredIdentitySetPolicy;
+  readonly toolLayers: readonly PlannedDevelopmentContainerToolLayer[];
+  readonly buildArguments: readonly DevelopmentContainerToolLayerBuildArgument[];
+  readonly mounts: readonly DevelopmentContainerToolLayerMount[];
+  readonly probes: readonly DevelopmentContainerToolLayerProbe[];
+} {
+  const layerPlan = planDevelopmentContainerToolLayersSync({
+    baseLayer: {
+      identity: "node-pnpm",
+      dockerfile: {
+        source: templateSources.sharedDevcontainer,
+        from: "node-pnpm.Dockerfile",
       },
-    },
-    {
-      kind: "writeTextFromFragments",
-      to: ".devcontainer/Dockerfile",
-      fragments: [
+      buildArguments: [
         {
-          source: templateSources.sharedDevcontainer,
-          from: "node-pnpm.Dockerfile",
+          name: "NODE_VERSION",
+          value: options.context.toolchain.nodeLtsMajor,
         },
-        ...(browserLayer === undefined
-          ? []
-          : [
-              {
-                source: templateSources.sharedDevcontainer,
-                from: "browser-test.Dockerfile",
-              },
-            ]),
-        ...(hasShellChecks
-          ? [
-              {
-                source: templateSources.sharedDevcontainer,
-                from: "shellcheck.Dockerfile",
-              },
-            ]
-          : []),
+        {
+          name: "PACKAGE_MANAGER_PIN",
+          value: options.context.toolchain.packageManagerPin,
+        },
+      ],
+      mounts: [
+        {
+          identity: "pnpm-store",
+          type: "volume",
+          source: "${devcontainerId}-pnpm-store",
+          target: "/pnpm/store",
+        },
       ],
     },
+    layers: options.layers,
+  });
+
+  return {
+    operations: [
+      {
+        kind: "writeTextTemplate",
+        source: templateSources.foundation,
+        from: "devcontainer.json",
+        to: ".devcontainer/devcontainer.json",
+        replacements: {
+          PROJECT_NAME: options.context.projectName,
+          NODE_LTS_MAJOR: options.context.toolchain.nodeLtsMajor,
+          PACKAGE_MANAGER_PIN: options.context.toolchain.packageManagerPin,
+        },
+      },
+      {
+        kind: "mergeJson",
+        to: ".devcontainer/devcontainer.json",
+        value: {
+          build: {
+            args: Object.fromEntries(
+              layerPlan.buildArguments.map((argument) => [
+                argument.name,
+                argument.value,
+              ]),
+            ),
+          },
+          ...(layerPlan.mounts.length === 0
+            ? {}
+            : {
+                mounts: layerPlan.mounts.map(
+                  ({ identity: _identity, ...mount }) => mount,
+                ),
+              }),
+        },
+      },
+      {
+        kind: "writeTextFromFragments",
+        to: ".devcontainer/Dockerfile",
+        validation: "development-container-dockerfile",
+        fragments: layerPlan.layers.map((layer) => layer.dockerfile),
+      },
+    ],
+    mountIdentitySet: {
+      location: "/mounts",
+      identity: {
+        kind: "projection",
+        members: layerPlan.mounts.map(
+          ({
+            identity,
+            target,
+          }): {
+            readonly identity: string;
+            readonly match: {
+              readonly target: string;
+            };
+          } => ({
+            identity,
+            match: { target },
+          }),
+        ),
+        fallback: { fields: ["target"] },
+      },
+    },
+    toolLayers: layerPlan.layers,
+    buildArguments: layerPlan.buildArguments,
+    mounts: layerPlan.mounts,
+    probes: layerPlan.probes,
+  };
+}
+
+function contributedFoundationTemplateFileOperations(
+  contributions: readonly PackageContribution[],
+): readonly RenderOperation[] {
+  const byIdentity = new Map<
+    string,
+    NonNullable<PackageContribution["foundation"]["templateFiles"]>[number]
+  >();
+  const outputOwners = new Map<string, string>();
+
+  for (const file of contributions.flatMap(
+    (contribution) => contribution.foundation.templateFiles ?? [],
+  )) {
+    const previous = byIdentity.get(file.identity);
+    if (previous !== undefined) {
+      const previousFingerprint = JSON.stringify({
+        source: resolveTemplateSource(previous.source, previous.from),
+        from: previous.from,
+        to: previous.to,
+        replacements: previous.replacements ?? {},
+      });
+      const fingerprint = JSON.stringify({
+        source: resolveTemplateSource(file.source, file.from),
+        from: file.from,
+        to: file.to,
+        replacements: file.replacements ?? {},
+      });
+      if (fingerprint !== previousFingerprint) {
+        throw new Error(
+          `Foundation Template File identity ${file.identity} has conflicting descriptors`,
+        );
+      }
+      continue;
+    }
+    const outputOwner = outputOwners.get(file.to);
+    if (outputOwner !== undefined) {
+      throw new Error(
+        `Foundation Template File output ${file.to} is declared by both ${outputOwner} and ${file.identity}`,
+      );
+    }
+    byIdentity.set(file.identity, file);
+    outputOwners.set(file.to, file.identity);
+  }
+
+  return [...byIdentity.values()]
+    .toSorted((left, right) => left.identity.localeCompare(right.identity))
+    .map(
+      (file): RenderOperation => ({
+        kind: "writeTextTemplate",
+        source: file.source,
+        from: file.from,
+        to: file.to,
+        replacements: { ...file.replacements },
+      }),
+    );
+}
+
+function assertCompatibleRustToolchainFacts(
+  contributions: readonly PackageContribution[],
+): void {
+  const facts = contributions.flatMap((contribution) => {
+    const rust = contribution.foundation.toolchains.rust;
+    return rust === undefined
+      ? []
+      : [
+          JSON.stringify({
+            toolchain: rust.toolchain,
+            components: [...new Set(rust.components)].toSorted(),
+          }),
+        ];
+  });
+  if (new Set(facts).size > 1) {
+    throw new Error("Foundation requires compatible Rust toolchain facts");
+  }
+}
+
+function composeDependencyMaintenancePolicy(
+  contributions: readonly PackageContribution[],
+): DependencyMaintenancePolicy {
+  const ecosystems = [
+    ...new Set(
+      contributions.flatMap(
+        (contribution) =>
+          contribution.foundation.dependencyMaintenance.ecosystems,
+      ),
+    ),
   ];
+  const directories: NonNullable<DependencyMaintenancePolicy["directories"]> =
+    {};
+  const extraDirectories: NonNullable<
+    DependencyMaintenancePolicy["extraDirectories"]
+  > = {};
+
+  for (const ecosystem of ecosystems) {
+    const candidates = [
+      ...new Set(
+        contributions.flatMap((contribution) => {
+          const policy = contribution.foundation.dependencyMaintenance;
+          const primary = policy.directories?.[ecosystem];
+          return [
+            ...(primary === undefined ? [] : [primary]),
+            ...(policy.extraDirectories?.[ecosystem] ?? []),
+          ];
+        }),
+      ),
+    ];
+    const [primary, ...extra] = candidates;
+    if (primary !== undefined) directories[ecosystem] = primary;
+    if (extra.length > 0) extraDirectories[ecosystem] = extra;
+  }
+
+  return {
+    ecosystems,
+    ...(Object.keys(directories).length === 0 ? {} : { directories }),
+    ...(Object.keys(extraDirectories).length === 0 ? {} : { extraDirectories }),
+    interval: "weekly",
+  };
 }
 
 function foundationPlan(options: {
@@ -858,35 +1070,100 @@ function foundationPlan(options: {
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
   assertProjectBlueprintV2(options.blueprint);
+  const configDefinition = typescriptConfigPackageDefinition(options.context);
+  const persistedConfigDefinition = options.blueprint.packages.find(
+    (definition) =>
+      definition.name === configDefinition.name ||
+      definition.path === configDefinition.path,
+  );
+  if (
+    persistedConfigDefinition === undefined ||
+    !packageDefinitionsEqual(persistedConfigDefinition, configDefinition)
+  ) {
+    throw new Error(
+      "Project Blueprint must contain the Foundation TypeScript configuration Package Definition",
+    );
+  }
+  const initialProjectLinkPlan = planExplicitProjectLinks({
+    blueprint: options.blueprint,
+    contributions: options.contributions,
+    ...(options.manifestTruthByPackagePath === undefined
+      ? {}
+      : {
+          manifestTruthByPackagePath: options.manifestTruthByPackagePath,
+        }),
+  });
+  const injectedProviderNames = new Set(
+    [...initialProjectLinkPlan.manifestPatchesByPackagePath.values()].flatMap(
+      (patch) =>
+        Object.entries(patch.dependenciesMeta)
+          .filter(([, metadata]) => metadata.injected)
+          .map(([name]) => name),
+    ),
+  );
+  const configPackageName = typescriptConfigPackageName(options.context);
+  const packageContributions = options.contributions.map((contribution) => {
+    const ownsTypeScriptConfig = contribution.operations.some(
+      (operation) =>
+        "to" in operation &&
+        operation.to === `${contribution.definition.path}/tsconfig.json`,
+    );
+    if (!ownsTypeScriptConfig) return contribution;
+    const dependencyField = injectedProviderNames.has(
+      contribution.definition.name,
+    )
+      ? "dependencies"
+      : "devDependencies";
+    const existingDependencies = contribution.manifest[dependencyField];
+    return {
+      ...contribution,
+      manifest: {
+        ...contribution.manifest,
+        [dependencyField]: {
+          ...(isRecord(existingDependencies) ? existingDependencies : {}),
+          [configPackageName]: "workspace:*",
+        },
+      },
+    };
+  });
+  const configContribution = typescriptConfigContribution(options.context);
+  const contributions = [configContribution, ...packageContributions];
   const generationRecord: GenerationRecord = options.generationRecord ?? {
     schemaVersion: 1,
     preset: options.definition.metadata.name,
     templateVersion: "0.0.0",
     toolchain: options.context.toolchain,
-    packages: options.contributions.map((contribution) => ({
-      path: contribution.definition.path,
-      definitionName: options.definition.metadata.name,
-      planningContribution:
-        options.mode === "initialization"
-          ? "planInitialization"
-          : "planPackageAddition",
-    })),
+    packages: [
+      ...options.contributions.map(
+        (contribution): GeneratedPackagePlanningRecord => ({
+          path: contribution.definition.path,
+          definitionName: options.definition.metadata.name,
+          planningContribution:
+            options.mode === "initialization"
+              ? "planInitialization"
+              : "planPackageAddition",
+        }),
+      ),
+      {
+        path: configDefinition.path,
+        definitionName: "foundation",
+        planningContribution: "foundationPlan",
+      },
+    ],
   };
   const environmentNeeds = uniqueEnvironmentNeeds(
-    options.contributions.flatMap((item) => item.environmentNeeds),
+    contributions.flatMap((item) => item.environmentNeeds),
   );
   const deploymentEnvironmentNeeds = uniqueEnvironmentNeeds([
     ...(options.existingDeploymentEnvironmentNeeds ?? []),
-    ...options.contributions.flatMap(
-      (item) => item.deploymentEnvironmentNeeds ?? [],
-    ),
+    ...contributions.flatMap((item) => item.deploymentEnvironmentNeeds ?? []),
   ]);
   const persistedEnvironmentNeeds: PersistedEnvironmentNeeds = {
     schemaVersion: 1,
     check: environmentNeeds.map(checkEnvironmentNeedFact),
     deployment: deploymentEnvironmentNeeds.map(deploymentEnvironmentNeedFact),
   };
-  const hasDeploymentTask = options.contributions.some((contribution) => {
+  const hasDeploymentTask = contributions.some((contribution) => {
     const scripts = contribution.manifest.scripts;
     return (
       typeof scripts === "object" &&
@@ -894,28 +1171,25 @@ function foundationPlan(options: {
       typeof (scripts as Record<string, unknown>).deployment === "string"
     );
   });
-  const packagePaths = options.contributions.map(
+  const packagePaths = contributions.map(
     (contribution) => contribution.definition.path,
   );
   if (new Set(packagePaths).size !== packagePaths.length)
     throw new Error("Package Contributions must have unique Package Paths");
-  const packageNames = options.contributions.map(
+  const packageNames = contributions.map(
     (contribution) => contribution.definition.name,
   );
   if (new Set(packageNames).size !== packageNames.length)
     throw new Error("Package Contributions must have unique package names");
-  const rustToolchain = options.contributions
-    .map((contribution) => contribution.foundation.toolchains.rust)
-    .find((toolchain) => toolchain !== undefined);
-  if (
-    options.contributions.some(
-      (contribution) =>
-        contribution.foundation.toolchains.rust !== undefined &&
-        contribution.foundation.toolchains.rust !== rustToolchain,
-    )
-  ) {
-    throw new Error("Foundation requires one coordinated Rust toolchain");
-  }
+  assertCompatibleRustToolchainFacts(contributions);
+  const contributedToolLayers = contributions.flatMap(
+    (contribution) =>
+      contribution.foundation.developmentContainerToolLayers ?? [],
+  );
+  const developmentContainer = contributedDevcontainerComposition({
+    context: options.context,
+    layers: contributedToolLayers,
+  });
   const workspacePackageGlobs = [
     "apps/*",
     "packages/*",
@@ -923,7 +1197,7 @@ function foundationPlan(options: {
       ...options.blueprint.packages
         .map((definition) => `${definition.path.split("/")[0]}/*`)
         .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
-      ...options.contributions
+      ...contributions
         .flatMap(
           (contribution) => contribution.foundation.workspacePackageGlobs ?? [],
         )
@@ -931,7 +1205,7 @@ function foundationPlan(options: {
     ]),
   ];
   const editorCustomization = editorCustomizationForCapabilities(
-    options.contributions.flatMap(
+    contributions.flatMap(
       (contribution) => contribution.foundation.editorCapabilities,
     ),
     loadEditorCustomizationDeclarations(
@@ -941,31 +1215,8 @@ function foundationPlan(options: {
       ),
     ),
   );
-  const dependencyMaintenancePolicy: DependencyMaintenancePolicy = {
-    ecosystems: [
-      ...new Set(
-        options.contributions.flatMap(
-          (contribution) =>
-            contribution.foundation.dependencyMaintenance.ecosystems,
-        ),
-      ),
-    ],
-    directories: Object.assign(
-      {},
-      ...options.contributions.map(
-        (contribution) =>
-          contribution.foundation.dependencyMaintenance.directories ?? {},
-      ),
-    ),
-    extraDirectories: Object.assign(
-      {},
-      ...options.contributions.map(
-        (contribution) =>
-          contribution.foundation.dependencyMaintenance.extraDirectories ?? {},
-      ),
-    ),
-    interval: "weekly",
-  };
+  const dependencyMaintenancePolicy =
+    composeDependencyMaintenancePolicy(contributions);
   const rootManifest = {
     name: options.context.projectName,
     version: "0.0.0",
@@ -1000,7 +1251,7 @@ function foundationPlan(options: {
   };
   const dependencyCatalog = selectTemplateDependencyCatalogEntries(
     collectGeneratedManifestCatalogReferences([
-      ...options.contributions.map((contribution) => contribution.manifest),
+      ...contributions.map((contribution) => contribution.manifest),
       rootManifest,
     ]),
   );
@@ -1047,7 +1298,6 @@ function foundationPlan(options: {
     from: ".github/workflows/check.dynamic.template",
     to: ".github/workflows/check.yml",
     replacements: projectCheckWorkflowTemplateReplacements({
-      environment: { needs: environmentNeeds },
       deploymentEnvironmentNeeds,
       hasDeploymentTask,
     }),
@@ -1064,18 +1314,8 @@ function foundationPlan(options: {
       ),
     },
   ];
-  const projectLinkPlan = planExplicitProjectLinks({
-    blueprint: options.blueprint,
-    contributions: options.contributions,
-    ...(options.manifestTruthByPackagePath === undefined
-      ? {}
-      : {
-          manifestTruthByPackagePath: options.manifestTruthByPackagePath,
-        }),
-  });
-  const turboBoundaryTags = turboBoundaryTagsForContributions(
-    options.contributions,
-  );
+  const projectLinkPlan = initialProjectLinkPlan;
+  const turboBoundaryTags = turboBoundaryTagsForContributions(contributions);
   const initializationFoundationOperations: RenderOperation[] = [
     {
       kind: "writeJson",
@@ -1154,68 +1394,8 @@ function foundationPlan(options: {
       to: ".vscode/settings.json",
       value: editorCustomization.settings,
     },
-    ...(rustToolchain === undefined
-      ? [
-          ...devcontainerDockerfileOperations({
-            context: options.context,
-            environmentNeeds,
-          }),
-        ]
-      : [
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.foundation,
-            from: "rust/rust-toolchain.toml",
-            to: "rust-toolchain.toml",
-            replacements: { RUST_TOOLCHAIN: rustToolchain.toolchain },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.foundation,
-            from: "rust/devcontainer/devcontainer.json",
-            to: ".devcontainer/devcontainer.json",
-            replacements: {
-              PROJECT_NAME: options.context.projectName,
-              NODE_LTS_MAJOR: options.context.toolchain.nodeLtsMajor,
-              PACKAGE_MANAGER_PIN: options.context.toolchain.packageManagerPin,
-              RUST_TOOLCHAIN: rustToolchain.toolchain,
-            },
-          },
-          {
-            kind: "writeTextFromFragments" as const,
-            to: ".devcontainer/Dockerfile",
-            fragments: [
-              {
-                source: templateSources.sharedDevcontainer,
-                from: "node-pnpm.Dockerfile",
-              },
-              {
-                source: templateSources.foundation,
-                from: "rust/devcontainer/rust.Dockerfile",
-              },
-              ...(environmentNeeds.some(
-                (need) => need.kind === "playwright-browser-assets",
-              )
-                ? [
-                    {
-                      source: templateSources.sharedDevcontainer,
-                      from: "browser-test.Dockerfile",
-                    },
-                  ]
-                : []),
-              ...(environmentNeeds.some(
-                (need) => need.kind === "shellcheck-command",
-              )
-                ? [
-                    {
-                      source: templateSources.sharedDevcontainer,
-                      from: "shellcheck.Dockerfile",
-                    },
-                  ]
-                : []),
-            ],
-          },
-        ]),
+    ...developmentContainer.operations,
+    ...contributedFoundationTemplateFileOperations(contributions),
     ...workflowOperations,
     {
       kind: "writeJson",
@@ -1265,7 +1445,21 @@ function foundationPlan(options: {
     provenance: typeof contributionProvenance | typeof foundationProvenance,
   ): RenderOperation => ({ ...operation, provenance });
   const operations: RenderOperation[] = [
-    ...(options.renderContributions ?? options.contributions)
+    ...(options.renderContributions === undefined
+      ? contributions
+      : options.renderContributions.map((renderContribution) => {
+          const enriched = packageContributions.find(
+            (candidate) =>
+              candidate.definition.path === renderContribution.definition.path,
+          );
+          if (enriched === undefined) {
+            throw new Error(
+              `Foundation cannot render unknown Package Contribution ${renderContribution.definition.path}`,
+            );
+          }
+          return enriched;
+        })
+    )
       .map((item) =>
         assertPackageContribution(item, {
           definitionName: options.definition.metadata.name,
@@ -1298,7 +1492,11 @@ function foundationPlan(options: {
   ];
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
     { path: "turbo.json", driver: "structured" },
-    { path: ".devcontainer/devcontainer.json", driver: "structured" },
+    {
+      path: ".devcontainer/devcontainer.json",
+      driver: "structured",
+      identitySets: [developmentContainer.mountIdentitySet],
+    },
     {
       path: ".vscode/extensions.json",
       driver: "structured",
@@ -1324,17 +1522,19 @@ function foundationPlan(options: {
     generationRecord,
     operations,
     reconciliation,
+    developmentContainer: {
+      toolLayers: developmentContainer.toolLayers,
+      buildArguments: developmentContainer.buildArguments,
+      mounts: developmentContainer.mounts,
+      probes: developmentContainer.probes,
+    },
     environmentNeeds,
     deploymentEnvironmentNeeds,
-    manifests: [
-      ...options.contributions.map((item) => item.manifest),
-      rootManifest,
-    ],
+    manifests: [...contributions.map((item) => item.manifest), rootManifest],
     dependencyCatalog,
     dependencyMaintenancePolicy,
     nextStepInstructions: [
       { display: "pnpm install" },
-      ...environmentNeeds.map((need) => ({ display: need.nextStep.display })),
       { display: "pnpm run fix" },
       { display: "pnpm run check" },
     ],
@@ -1345,7 +1545,23 @@ export function planGeneratedRepositoryInitialization(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
 }): GeneratedRepositoryPlan {
-  const blueprint = options.definition.blueprint(options.context);
+  const presetBlueprint = options.definition.blueprint(options.context);
+  const configDefinition = typescriptConfigPackageDefinition(options.context);
+  if (
+    presetBlueprint.packages.some(
+      (definition) =>
+        definition.name === configDefinition.name ||
+        definition.path === configDefinition.path,
+    )
+  ) {
+    throw new Error(
+      "Preset Blueprint must not redefine the Foundation TypeScript configuration Package Definition",
+    );
+  }
+  const blueprint: ProjectBlueprintV2 = {
+    ...presetBlueprint,
+    packages: [...presetBlueprint.packages, configDefinition],
+  };
   const contributions = options.definition.planInitializationContributions?.(
     options.context,
   ) ?? [options.definition.planInitialization(options.context)];

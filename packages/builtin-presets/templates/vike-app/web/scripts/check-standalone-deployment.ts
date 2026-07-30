@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 const webRoot = path.resolve(import.meta.dirname, "..");
@@ -194,7 +195,34 @@ async function deploymentLogs(): Promise<string> {
   return logs.join("\n");
 }
 
-async function publishedBaseUrl(container: string): Promise<string> {
+async function dockerHostGatewayAddress(): Promise<string | undefined> {
+  try {
+    const routes = await readFile("/proc/net/route", "utf8");
+    for (const line of routes.split("\n").slice(1)) {
+      const [, destination, gateway] = line.trim().split(/\s+/u);
+      if (
+        destination !== "00000000" ||
+        gateway === undefined ||
+        gateway === "00000000"
+      ) {
+        continue;
+      }
+      const octets = gateway.match(/../gu)?.reverse();
+      if (octets === undefined) return undefined;
+      return octets
+        .map((octet) => String(Number.parseInt(octet, 16)))
+        .join(".");
+    }
+  } catch {
+    // /proc/net/route is Linux-specific. Local Docker-on-host runs still use
+    // the loopback candidate below.
+  }
+  return undefined;
+}
+
+async function publishedBaseUrls(
+  container: string,
+): Promise<readonly string[]> {
   const portOutput = await dockerWithTimeout(
     10_000,
     "port",
@@ -207,26 +235,33 @@ async function publishedBaseUrl(container: string): Promise<string> {
       `Could not determine the published web port: ${portOutput}`,
     );
   }
-  return `http://127.0.0.1:${match[1]}`;
+  const gateway = await dockerHostGatewayAddress();
+  return [
+    `http://127.0.0.1:${match[1]}`,
+    gateway === undefined ? undefined : `http://${gateway}:${match[1]}`,
+  ].filter((candidate): candidate is string => candidate !== undefined);
 }
 
 async function waitForReady(
   phase: "Standalone" | "Runtime",
   container: string,
-  baseUrl: string,
-): Promise<void> {
+  baseUrls: readonly string[],
+): Promise<string> {
   const timeout = readinessTimeoutMs();
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    try {
-      const response = await fetch(baseUrl, {
-        signal: AbortSignal.timeout(2_000),
-      });
-      if (response.ok) {
-        return;
+    for (const baseUrl of baseUrls) {
+      try {
+        const response = await fetch(baseUrl, {
+          signal: AbortSignal.timeout(2_000),
+        });
+        if (response.ok) {
+          return baseUrl;
+        }
+      } catch {
+        // The container may still be starting the server, or this candidate may
+        // not be reachable from the current Docker execution topology.
       }
-    } catch {
-      // The container may still be starting the server.
     }
 
     const running = await dockerWithTimeout(
@@ -244,7 +279,7 @@ async function waitForReady(
   }
 
   throw new Error(
-    `${phase} container was not ready within ${timeout}ms.\n${await containerLogs(container)}`,
+    `${phase} container was not ready at ${baseUrls.join(", ")} within ${timeout}ms.\n${await containerLogs(container)}`,
   );
 }
 
@@ -313,17 +348,17 @@ async function runStartedDeployment(
       "--network",
       network,
       "--publish",
-      "127.0.0.1::3000",
+      "0.0.0.0::3000",
       "--volume",
       `${volume}:/data`,
       image,
     ),
   );
-  const baseUrl = await deploymentPhase(mode, "start", async () =>
-    publishedBaseUrl(container),
+  const baseUrls = await deploymentPhase(mode, "start", async () =>
+    publishedBaseUrls(container),
   );
-  await deploymentPhase(mode, "readiness", async () =>
-    waitForReady(readinessLabel, container, baseUrl),
+  const baseUrl = await deploymentPhase(mode, "readiness", async () =>
+    waitForReady(readinessLabel, container, baseUrls),
   );
   await deploymentPhase(mode, "identity", async () =>
     assertProcessIdentity(readinessLabel, container),
@@ -344,12 +379,12 @@ async function assertUnpreparedRuntimeFails(): Promise<void> {
     "--network",
     network,
     "--publish",
-    "127.0.0.1::3000",
+    "0.0.0.0::3000",
     "--volume",
     `${volumes.unprepared}:/data`,
     runtimeImage,
   );
-  const baseUrl = await publishedBaseUrl(containers.unprepared);
+  const baseUrls = await publishedBaseUrls(containers.unprepared);
   const deadline = Date.now() + 30_000;
 
   while (Date.now() < deadline) {
@@ -362,16 +397,21 @@ async function assertUnpreparedRuntimeFails(): Promise<void> {
       (state) => ({ state }),
       (error: unknown) => ({ error }),
     );
-    const probe = await fetch(baseUrl, {
-      signal: AbortSignal.timeout(500),
-    }).then(
-      (response) => ({ response }),
-      () => ({ response: undefined }),
+    const probes = await Promise.all(
+      baseUrls.map((baseUrl) =>
+        fetch(baseUrl, {
+          signal: AbortSignal.timeout(500),
+        }).then(
+          (response) => ({ baseUrl, response }),
+          () => ({ baseUrl, response: undefined }),
+        ),
+      ),
     );
 
-    if (probe.response !== undefined) {
+    const servedProbe = probes.find((probe) => probe.response !== undefined);
+    if (servedProbe?.response !== undefined) {
       throw new Error(
-        `Unprepared runtime served HTTP ${probe.response.status} before exiting.`,
+        `Unprepared runtime served HTTP ${servedProbe.response.status} at ${servedProbe.baseUrl} before exiting.`,
       );
     }
 

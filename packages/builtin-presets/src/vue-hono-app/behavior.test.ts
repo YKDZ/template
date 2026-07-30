@@ -34,12 +34,25 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       definition: vueHonoAppDefinition,
       context,
     });
+    const browserLayer = vueHonoAppDefinition.planInitializationContributions!(
+      context,
+    )
+      .flatMap(
+        (contribution) =>
+          contribution.foundation.developmentContainerToolLayers ?? [],
+      )
+      .find((layer) => layer.identity === "browser-test");
 
     expect(plan.blueprint).toMatchObject({
       schemaVersion: 2,
       packages: [
         { name: "@demo/api", path: "apps/api", role: "runtime-service" },
         { name: "@demo/web", path: "apps/web", role: "runtime-service" },
+        {
+          name: "@demo/typescript-config",
+          path: "packages/typescript-config",
+          role: "shared-library",
+        },
       ],
       packageLinkIntents: [
         {
@@ -48,9 +61,28 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
-    expect(plan.nextStepInstructions.map((step) => step.display)).toContain(
-      "pnpm --filter ./apps/web exec playwright install chromium",
-    );
+    expect(plan.nextStepInstructions.map((step) => step.display)).toEqual([
+      "pnpm install",
+      "pnpm run fix",
+      "pnpm run check",
+    ]);
+    expect(browserLayer).toMatchObject({
+      identity: "browser-test",
+      requires: ["node-pnpm"],
+      buildArguments: [
+        {
+          name: "PLAYWRIGHT_CLI_PACKAGE",
+          value: expect.stringMatching(/^@playwright\/test@/u),
+        },
+      ],
+      probes: [
+        {
+          identity: "playwright",
+          command: "npx",
+          args: expect.arrayContaining(["playwright", "--version"]),
+        },
+      ],
+    });
 
     await renderNewProject({
       targetRoot: targetDir,
@@ -103,11 +135,21 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
     ]) {
       const config = JSON.parse(
         await readFile(path.join(targetDir, configPath), "utf8"),
-      ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
+      ) as {
+        readonly compilerOptions?: Readonly<Record<string, unknown>>;
+        readonly extends?: string;
+      };
       expect(config.compilerOptions).toMatchObject({
         customConditions: ["source"],
       });
       expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
+      if (configPath.endsWith("tsconfig.app.json")) {
+        expect(config.compilerOptions).toMatchObject({
+          exactOptionalPropertyTypes: false,
+        });
+      } else {
+        expect(config.extends).toBe("./tsconfig.app.json");
+      }
     }
     expect(
       JSON.parse(
@@ -153,6 +195,23 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
     expect(
       await readFile(path.join(targetDir, "apps/web/src/api.ts"), "utf8"),
     ).toContain("/api/health");
+    expect(
+      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
+    ).toContain("playwright install --with-deps chromium");
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      build: {
+        args: {
+          PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
+        },
+      },
+    });
     expect(
       await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8"),
     ).not.toContain("alias:");

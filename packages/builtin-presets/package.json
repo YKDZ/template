@@ -33,7 +33,7 @@
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates .",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix",
-    "test": "vitest run --config vitest.config.ts --reporter=agent --silent=passed-only",
+    "test": "vitest run --config vitest.config.ts --reporter=agent --silent=passed-only --maxWorkers=1",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {

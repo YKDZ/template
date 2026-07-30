@@ -42,6 +42,7 @@
   },
   "remoteUser": "root",
   "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
     "source=agen-cargo-registry,target=/usr/local/cargo/registry,type=volume",
     "source=agen-cargo-git,target=/usr/local/cargo/git,type=volume",
     "source=agen-target,target=${containerWorkspaceFolder}/target,type=volume"

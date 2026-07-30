@@ -1,12 +1,9 @@
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
 import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
-  ensureFixtureDependencies,
   normalizedFixtureDependencyInstallationPlan,
   type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
@@ -31,28 +28,6 @@ function expectedDeploymentTaskIds(
     }
     return [
       `${manifest.name.startsWith("@") ? manifest.name : "//"}#deployment`,
-    ];
-  });
-}
-
-function deploymentPreparations(plan: GeneratedRepositoryPlan): readonly {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly display: string;
-}[] {
-  const seen = new Set<string>();
-  return plan.deploymentEnvironmentNeeds.flatMap((need) => {
-    const preparation = need.preparation;
-    if (!preparation.machineVerifiable || seen.has(preparation.display)) {
-      return [];
-    }
-    seen.add(preparation.display);
-    return [
-      {
-        command: preparation.command,
-        args: [...preparation.args],
-        display: preparation.display,
-      },
     ];
   });
 }
@@ -93,7 +68,6 @@ export function normalizedDeploymentQualityPlan(
       args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
       expectedTaskIds: [...expectedDeploymentTaskIds(deployment.plan)].sort(),
     },
-    environmentPreparations: deploymentPreparations(deployment.plan),
     generatedDeployment: {
       command: "pnpm",
       args: ["run", "check:deployment"],
@@ -168,33 +142,14 @@ export async function executeDeploymentQuality(options: {
   readonly deployment: DeploymentQualityPlanInput;
   readonly projectDir: string;
   readonly fixtureWorkspace: string;
-  readonly run?: FixtureCommandRunner;
+  readonly run: FixtureCommandRunner;
 }): Promise<void> {
-  const run =
-    options.run ??
-    ((command, args, runOptions) => execa(command, [...args], runOptions));
-  await ensureFixtureDependencies({
-    projectDir: options.projectDir,
-    fixtureWorkspace: options.fixtureWorkspace,
-    run,
-  });
+  const run = options.run;
   await assertDeploymentTaskDiscovery({
     deployment: options.deployment,
     projectDir: options.projectDir,
     run,
   });
-  for (const preparation of deploymentPreparations(options.deployment.plan)) {
-    try {
-      await run(preparation.command, preparation.args, {
-        cwd: options.projectDir,
-        stdio: "inherit",
-      });
-    } catch (error) {
-      throw new Error(
-        `Docker is required for the Deployment Quality gate; check:deployment was not executed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
   await run("pnpm", ["run", "check:deployment"], {
     cwd: options.projectDir,
     stdio: "inherit",

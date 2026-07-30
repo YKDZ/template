@@ -1,3 +1,4 @@
+import type { DevelopmentContainerToolLayer } from "./development-container-tool-layer.ts";
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
   CheckEnvironmentNeed,
@@ -5,7 +6,7 @@ import type {
 } from "./module-graph.ts";
 import type { PackageDefinition } from "./project-blueprint-v2.ts";
 import type { DependencyMaintenancePolicy } from "./project-github.ts";
-import type { RenderOperation } from "./renderer.ts";
+import type { RenderOperation, TemplateSourceHandle } from "./renderer.ts";
 
 const operationPath = (operation: RenderOperation): string => {
   if ("to" in operation) return operation.to;
@@ -29,6 +30,20 @@ export type FoundationContribution = {
   readonly workspacePackageGlobs?: readonly string[];
   /** Dependency Catalog entries required by package-owned manifests. */
   readonly dependencyCatalog?: Readonly<Record<string, string>>;
+  /** Source-backed Development Container capabilities coordinated by Foundation. */
+  readonly developmentContainerToolLayers?:
+    | readonly DevelopmentContainerToolLayer[]
+    | undefined;
+  /** Source-backed coordinated files projected by Foundation. */
+  readonly templateFiles?:
+    | readonly {
+        readonly identity: string;
+        readonly source: TemplateSourceHandle;
+        readonly from: string;
+        readonly to: string;
+        readonly replacements?: Readonly<Record<string, string>> | undefined;
+      }[]
+    | undefined;
 };
 
 /** A preset-agnostic package-sized part of a Generated Repository Plan. */

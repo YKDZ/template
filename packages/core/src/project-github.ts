@@ -1,8 +1,4 @@
-import {
-  type CheckEnvironmentNeed,
-  type DeploymentEnvironmentNeed,
-  renderPlaywrightBrowserInstallCommand,
-} from "./module-graph.ts";
+import type { DeploymentEnvironmentNeed } from "./module-graph.ts";
 
 export type CiCapability = {
   readonly workflowName: "Check";
@@ -12,7 +8,6 @@ export type CiCapability = {
 
 export type CiEnvironmentPreparation = {
   readonly nodeFromPackageMetadata: boolean;
-  readonly rustToolchain: boolean;
 };
 
 export type PnpmTaskLayer = {
@@ -41,9 +36,6 @@ export type DependencyMaintenancePolicy = {
 };
 
 type ProjectCheckWorkflowOptions = {
-  readonly environment: {
-    readonly needs: readonly CheckEnvironmentNeed[];
-  };
   readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
   readonly hasDeploymentTask?: boolean | undefined;
   readonly capability?: CiCapability | undefined;
@@ -70,12 +62,8 @@ export function projectCheckWorkflow(
   const capability = options.capability ?? defaultCiCapability;
   const environmentPreparation: CiEnvironmentPreparation = {
     nodeFromPackageMetadata: true,
-    rustToolchain: false,
     ...options.environmentPreparation,
   };
-  const requiresRustToolchain =
-    environmentPreparation.rustToolchain ||
-    options.environment.needs.some((need) => need.kind === "rust-toolchain");
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
   const hasDeploymentTask = options.hasDeploymentTask === true;
   const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
@@ -116,22 +104,7 @@ export function projectCheckWorkflow(
     );
   }
 
-  if (requiresRustToolchain) lines.push(...rustCiPreparationLines());
-
   lines.push(`      - run: ${taskLayer.installCommand}`);
-  const checkEnvironmentLines: string[] = [];
-  for (const need of options.environment.needs) {
-    if (need.kind === "rust-toolchain") {
-      continue;
-    }
-    checkEnvironmentLines.push(
-      `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
-    );
-    if (hasDeploymentTask && need.kind === "shellcheck-command") {
-      checkEnvironmentLines.push("        if: matrix.check == 'root'");
-    }
-  }
-  lines.push(...checkEnvironmentLines);
   lines.push(`      - run: ${taskLayer.checkCommand}`);
   if (hasDeploymentTask) {
     lines.push("        if: matrix.check == 'root'");
@@ -147,47 +120,16 @@ export function projectCheckWorkflow(
   return lines.join("\n");
 }
 
-function rustCiPreparationLines(): string[] {
-  return [
-    "      - uses: dtolnay/rust-toolchain@stable",
-    "        with:",
-    "          components: rustfmt, clippy",
-    "      - uses: Swatinem/rust-cache@v2",
-  ];
-}
-
 /** Limited substitutions for the Foundation-owned workflow Template Source. */
 export function projectCheckWorkflowTemplateReplacements(options: {
-  readonly environment: {
-    readonly needs: readonly CheckEnvironmentNeed[];
-  };
   readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
   readonly hasDeploymentTask?: boolean | undefined;
-  readonly environmentPreparation?: Partial<CiEnvironmentPreparation>;
 }): Record<string, string> {
-  const requiresRustToolchain =
-    options.environmentPreparation?.rustToolchain === true ||
-    options.environment.needs.some((need) => need.kind === "rust-toolchain");
   const hasDeploymentTask = options.hasDeploymentTask === true;
   const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
     (need) => need.kind === "docker-engine",
   );
-  const environmentSteps = options.environment.needs
-    .filter((need) => need.kind !== "rust-toolchain")
-    .map((need) =>
-      [
-        `      - run: ${renderCiEnvironmentNeedCommand(need)}`,
-        ...(hasDeploymentTask && need.kind === "shellcheck-command"
-          ? ["        if: matrix.check == 'root'"]
-          : []),
-      ].join("\n"),
-    );
   return {
-    RUST_CI_PREPARATION: requiresRustToolchain
-      ? `\n${rustCiPreparationLines().join("\n")}`
-      : "",
-    CHECK_ENVIRONMENT_PREPARATION:
-      environmentSteps.length === 0 ? "" : `\n${environmentSteps.join("\n")}`,
     DEPLOYMENT_MATRIX: hasDeploymentTask
       ? "\n    strategy:\n      matrix:\n        check: [root, deployment]"
       : "",
@@ -292,15 +234,4 @@ function defaultDependabotDirectory(
   ecosystem: DependencyEcosystem,
 ): DependabotDirectory {
   return ecosystem === "docker" ? "/.devcontainer" : "/";
-}
-
-function renderCiEnvironmentNeedCommand(need: CheckEnvironmentNeed): string {
-  switch (need.kind) {
-    case "playwright-browser-assets":
-      return renderPlaywrightBrowserInstallCommand(need, { withDeps: true });
-    case "shellcheck-command":
-      return need.nextStep.display;
-    case "rust-toolchain":
-      return need.nextStep.display;
-  }
 }

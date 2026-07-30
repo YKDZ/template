@@ -39,6 +39,18 @@ export type StructuredIdentitySetPolicy = {
     | {
         readonly kind: "fields";
         readonly fields: readonly string[];
+      }
+    | {
+        readonly kind: "projection";
+        readonly members: readonly {
+          readonly identity: string;
+          readonly match: Readonly<
+            Record<string, string | number | boolean | null>
+          >;
+        }[];
+        readonly fallback: {
+          readonly fields: readonly string[];
+        };
       };
 };
 
@@ -483,6 +495,27 @@ function memberIdentity(
 ): string | undefined {
   if (policy.identity.kind === "self") return scalarIdentity(member);
   if (!isStructuredObject(member)) return undefined;
+  if (policy.identity.kind === "projection") {
+    const matches = policy.identity.members.filter(({ match }) =>
+      Object.entries(match).every(
+        ([field, value]) =>
+          Object.hasOwn(member, field) &&
+          structuredValuesEqual(member[field]!, value),
+      ),
+    );
+    const matchingIdentities = new Set(matches.map(({ identity }) => identity));
+    if (matchingIdentities.size > 1) return undefined;
+    const [matchingIdentity] = matchingIdentities;
+    if (matchingIdentity !== undefined) {
+      return `projection:${JSON.stringify(matchingIdentity)}`;
+    }
+    const fallbackFields = policy.identity.fallback.fields.map((field) =>
+      Object.hasOwn(member, field) ? scalarIdentity(member[field]!) : undefined,
+    );
+    return fallbackFields.every((field) => field !== undefined)
+      ? `fallback:${JSON.stringify(fallbackFields)}`
+      : undefined;
+  }
   const fields = policy.identity.fields.map((field) =>
     Object.hasOwn(member, field) ? scalarIdentity(member[field]!) : undefined,
   );
@@ -787,11 +820,72 @@ function assertProjectionContract(
   return policies;
 }
 
-function reconciliationPoliciesEqual(
+function reconciliationPoliciesCompatible(
   left: ProjectProjectionReconciliation,
   right: ProjectProjectionReconciliation,
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+  if (
+    left.path !== right.path ||
+    left.driver !== right.driver ||
+    left.driver !== "structured" ||
+    right.driver !== "structured"
+  ) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+  const leftIdentitySets = left.identitySets ?? [];
+  const rightIdentitySets = right.identitySets ?? [];
+  if (leftIdentitySets.length !== rightIdentitySets.length) return false;
+
+  return leftIdentitySets.every((leftPolicy, index) => {
+    const rightPolicy = rightIdentitySets[index];
+    if (
+      rightPolicy === undefined ||
+      leftPolicy.location !== rightPolicy.location ||
+      leftPolicy.identity.kind !== rightPolicy.identity.kind
+    ) {
+      return false;
+    }
+    if (
+      leftPolicy.identity.kind !== "projection" ||
+      rightPolicy.identity.kind !== "projection"
+    ) {
+      return JSON.stringify(leftPolicy) === JSON.stringify(rightPolicy);
+    }
+    return (
+      JSON.stringify(leftPolicy.identity.fallback) ===
+      JSON.stringify(rightPolicy.identity.fallback)
+    );
+  });
+}
+
+function combinedIdentitySets(
+  before: ProjectProjectionReconciliation | undefined,
+  after: ProjectProjectionReconciliation | undefined,
+): readonly StructuredIdentitySetPolicy[] {
+  const beforeIdentitySets =
+    before?.driver === "structured" ? (before.identitySets ?? []) : [];
+  const afterIdentitySets =
+    after?.driver === "structured" ? (after.identitySets ?? []) : [];
+
+  return afterIdentitySets.map((afterPolicy, index) => {
+    const beforePolicy = beforeIdentitySets[index];
+    if (
+      beforePolicy?.identity.kind !== "projection" ||
+      afterPolicy.identity.kind !== "projection"
+    ) {
+      return afterPolicy;
+    }
+    return {
+      ...afterPolicy,
+      identity: {
+        ...afterPolicy.identity,
+        members: [
+          ...beforePolicy.identity.members,
+          ...afterPolicy.identity.members,
+        ],
+      },
+    };
+  });
 }
 
 function structuredValueAtLocation(
@@ -862,6 +956,40 @@ function assertIdentitySetPolicies(
         `Project Projection identity-set fields must be unique non-empty names: ${entry.path} ${location}`,
       );
     }
+    if (policy.identity.kind === "projection") {
+      const fallbackFields = policy.identity.fallback.fields;
+      if (
+        fallbackFields.length === 0 ||
+        new Set(fallbackFields).size !== fallbackFields.length ||
+        fallbackFields.some((field) => field.length === 0)
+      ) {
+        throw new Error(
+          `Project Projection identity-set projection fallback fields must be unique non-empty names: ${entry.path} ${location}`,
+        );
+      }
+      const memberIdentities = policy.identity.members.map(
+        (member) => member.identity,
+      );
+      if (
+        memberIdentities.some((identity) => identity.length === 0) ||
+        new Set(memberIdentities).size !== memberIdentities.length ||
+        policy.identity.members.some(
+          (member) =>
+            Object.keys(member.match).length === 0 ||
+            Object.values(member.match).some(
+              (value) =>
+                value !== null &&
+                typeof value !== "string" &&
+                typeof value !== "number" &&
+                typeof value !== "boolean",
+            ),
+        )
+      ) {
+        throw new Error(
+          `Project Projection identity-set projection members require unique non-empty identities and non-empty scalar matches: ${entry.path} ${location}`,
+        );
+      }
+    }
     const value = structuredValueAtLocation(parsed.value, pathSegments);
     if (!Array.isArray(value)) {
       throw new Error(
@@ -908,7 +1036,7 @@ export async function reconcileProjectProjections(options: {
     if (
       afterPolicy !== undefined &&
       beforePolicy !== undefined &&
-      !reconciliationPoliciesEqual(beforePolicy, afterPolicy)
+      !reconciliationPoliciesCompatible(beforePolicy, afterPolicy)
     ) {
       throw new Error(
         `Project Projection reconciliation policy changed for ${projectionPath}`,
@@ -932,8 +1060,9 @@ export async function reconcileProjectProjections(options: {
   for (const projectionPath of deltaPaths) {
     const before = beforeByPath.get(projectionPath);
     const after = afterByPath.get(projectionPath)!;
-    const policy =
-      afterPolicies.get(projectionPath) ?? beforePolicies.get(projectionPath)!;
+    const beforePolicy = beforePolicies.get(projectionPath);
+    const afterPolicy = afterPolicies.get(projectionPath);
+    const policy = afterPolicy ?? beforePolicy!;
     const driver = policy.driver;
     const current = await options.readCurrent(projectionPath);
     if (entriesEqual(current, after)) continue;
@@ -995,7 +1124,7 @@ export async function reconcileProjectProjections(options: {
             before,
             current,
             after,
-            identitySets: policy.identitySets ?? [],
+            identitySets: combinedIdentitySets(beforePolicy, afterPolicy),
           })
         : undefined;
     const text =

@@ -12,7 +12,10 @@ import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+import {
+  renderNewProject,
+  resolveTemplateSource,
+} from "#template-core/renderer";
 
 import { vueAppDefinition } from "./definition.ts";
 
@@ -59,6 +62,53 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     });
   });
 
+  it("declares the shared source-backed browser-test Tool Layer", () => {
+    const contribution = vueAppDefinition.planInitialization({
+      targetDir: "/tmp/demo-vue",
+      projectName: "demo-vue",
+      scope: "demo",
+      toolchain,
+    });
+    const [layer] =
+      contribution.foundation.developmentContainerToolLayers ?? [];
+    const playwrightCliPackage =
+      layer?.buildArguments?.find(
+        (argument) => argument.name === "PLAYWRIGHT_CLI_PACKAGE",
+      )?.value ?? "";
+
+    expect(layer).toMatchObject({
+      identity: "browser-test",
+      requires: ["node-pnpm"],
+      buildArguments: [
+        {
+          name: "PLAYWRIGHT_CLI_PACKAGE",
+          value: expect.stringMatching(/^@playwright\/test@/u),
+        },
+      ],
+      probes: [
+        {
+          identity: "playwright",
+          command: "npx",
+          args: [
+            "--yes",
+            "--package",
+            playwrightCliPackage,
+            "playwright",
+            "--version",
+          ],
+        },
+      ],
+    });
+    expect(
+      resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
+    ).toBe(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/shared/devcontainer/browser-test.Dockerfile",
+      ),
+    );
+  });
+
   it("initializes and adds Vue applications at default and explicit Package Paths", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vue-")),
@@ -76,7 +126,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
     expect(
       initialization.nextStepInstructions.map((step) => step.display),
-    ).toContain("pnpm --filter ./apps/web exec playwright install chromium");
+    ).toEqual(["pnpm install", "pnpm run fix", "pnpm run check"]);
     expect(initialization.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -95,6 +145,23 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       path.join(targetDir, "apps/web/vite.config.ts"),
       "utf8",
     );
+    expect(
+      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
+    ).toContain("playwright install --with-deps chromium");
+    expect(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ),
+    ).toMatchObject({
+      build: {
+        args: {
+          PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
+        },
+      },
+    });
     expect(viteConfig).toContain("@tailwindcss/vite");
     expect(viteConfig).not.toContain("alias:");
     expect(
@@ -103,11 +170,21 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
       const config = JSON.parse(
         await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
-      ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
+      ) as {
+        readonly compilerOptions?: Readonly<Record<string, unknown>>;
+        readonly extends?: string;
+      };
       expect(config.compilerOptions).toMatchObject({
         customConditions: ["source"],
       });
       expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
+      if (configPath === "tsconfig.app.json") {
+        expect(config.compilerOptions).toMatchObject({
+          exactOptionalPropertyTypes: false,
+        });
+      } else {
+        expect(config.extends).toBe("./tsconfig.app.json");
+      }
     }
     expect(
       JSON.parse(

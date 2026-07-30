@@ -52,6 +52,36 @@ const retiredPaths = [
   "packages/checks/src/fixture-replay-cache.ts",
 ] as const;
 
+const retiredDevelopmentContainerPaths = [
+  "packages/core/src/devcontainer.ts",
+  "packages/builtin-presets/templates/foundation/rust",
+  "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
+  "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
+  "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
+] as const;
+
+const retiredDevelopmentContainerSymbols = new Set([
+  "DevelopmentContainerCapability",
+  "DevelopmentContainerNodePnpmLayer",
+  "DevelopmentContainerBrowserTestLayer",
+  "DevelopmentContainerRustLayer",
+  "DevelopmentContainerShellCheckLayer",
+  "RustDevelopmentContainerOptions",
+  "DevelopmentContainerDockerfileFragments",
+  "DevelopmentContainerPlan",
+  "DevelopmentContainerDockerfileLayer",
+  "composeDevelopmentContainerDockerfile",
+  "createRustDevelopmentContainerLayer",
+  "nodePnpmToolLayer",
+  "browserTestToolLayer",
+  "shellCheckToolLayer",
+  "rustToolLayer",
+  "developmentContainerCapabilityCompatibility",
+  "dockerfileFirstNodePnpmDevcontainer",
+  "checkedDockerfileFirstNodePnpmDevcontainer",
+  "dockerfileFirstRustPnpmDevcontainer",
+]);
+
 const retiredSymbols = new Set([
   "PresetSource",
   "PresetFile",
@@ -121,8 +151,15 @@ const retiredTaskTerms = [
 const deploymentOwnerRegistration = /deployment[\s-]*(?:task[\s-]*)?owner/iu;
 const taskCompatibilityOrMigration =
   /\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b[\s\S]{0,80}\b(?:task[- ](?:model|vocabulary|script|name|selection)|:run|:root|transit|(?:Check|Fix) (?:Component|Plan)|Deployment Check Component)\b|\b(?:task[- ](?:model|vocabulary|script|name|selection)|:run|:root|transit|(?:Check|Fix) (?:Component|Plan)|Deployment Check Component)\b[\s\S]{0,80}\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b/iu;
+const developmentContainerCompatibilityOrMigration =
+  /\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b[\s\S]{0,100}\b(?:development\s+container|developmentContainer|devcontainer|capabilit(?:y|ies)|Capability|tool\s+layer|ToolLayer|rust|Rust)\b|\b(?:development\s+container|developmentContainer|devcontainer|capabilit(?:y|ies)|Capability|tool\s+layer|ToolLayer|rust|Rust)\b[\s\S]{0,100}\b(?:compatibility|migration|alias|dual(?:-name)?|deprecat(?:e|ion))\b/iu;
+const developmentContainerCompatibilitySymbol =
+  /(?:developmentContainer|DevelopmentContainer|RustDevelopmentContainer)[A-Za-z0-9_$]*(?:Compatibility|compatibility|Migration|migration|Alias|alias|Deprecated|deprecated)/u;
+const hostPreparedFixtureExecution =
+  /\b(?:ensureHostFixtureDependencies|hostPrepared|host-prepared|TEMPLATE_FIXTURE_HOST_PREPARE)\b|\b(?:rustup\s+toolchain\s+install|playwright\s+install\s+--with-deps|apt-get\s+install\b[\s\S]{0,80}\bshellcheck\b)\b/iu;
 
 const concretePresetNames = new Set([
+  "ts-cli",
   "ts-lib",
   "rust-bin",
   "vue-app",
@@ -566,6 +603,10 @@ function collectTypeScriptFindings(
         ts.isStringLiteral(moduleSpecifier)
       ) {
         const specifier = moduleSpecifier.text;
+        const ownerPreset = relativePath.match(
+          /^packages\/builtin-presets\/src\/([^/]+)\//u,
+        )?.[1];
+        const referencedPreset = specifier.match(/^\.\.\/([^/]+)\//u)?.[1];
         if (retiredPathParts.some((part) => specifier.includes(part))) {
           findings.push(
             finding(
@@ -589,6 +630,22 @@ function collectTypeScriptFindings(
             ),
           );
         }
+        if (
+          ownerPreset !== undefined &&
+          ownerPreset !== "shared" &&
+          referencedPreset !== undefined &&
+          referencedPreset !== ownerPreset &&
+          concretePresetNames.has(ownerPreset) &&
+          concretePresetNames.has(referencedPreset)
+        ) {
+          findings.push(
+            finding(
+              "preset-sibling-import",
+              relativePath,
+              `${location} imports sibling Preset source ${specifier}; promote shared behavior to src/shared`,
+            ),
+          );
+        }
       }
     }
     if (ts.isIdentifier(node) && retiredSymbols.has(node.text)) {
@@ -597,6 +654,52 @@ function collectTypeScriptFindings(
           "retired-symbol",
           relativePath,
           `${location} references ${node.text}`,
+        ),
+      );
+    }
+    if (
+      ts.isIdentifier(node) &&
+      retiredDevelopmentContainerSymbols.has(node.text)
+    ) {
+      findings.push(
+        finding(
+          "retired-development-container-symbol",
+          relativePath,
+          `${location} references retired Development Container API ${node.text}`,
+        ),
+      );
+    }
+    if (
+      ts.isSwitchStatement(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "kind" &&
+      node.caseBlock.clauses.some(
+        (clause) =>
+          ts.isCaseClause(clause) &&
+          ts.isStringLiteralLike(clause.expression) &&
+          ["browser-test", "docker-client", "rust", "shellcheck"].includes(
+            clause.expression.text,
+          ),
+      )
+    ) {
+      findings.push(
+        finding(
+          "retired-development-container-switch",
+          relativePath,
+          `${location} switches on a retired optional Development Container capability`,
+        ),
+      );
+    }
+    if (
+      isTypeScript(relativePath) &&
+      (developmentContainerCompatibilityOrMigration.test(sourceFile.text) ||
+        developmentContainerCompatibilitySymbol.test(sourceFile.text))
+    ) {
+      findings.push(
+        finding(
+          "retired-development-container-compatibility",
+          relativePath,
+          "contains a Development Container compatibility, migration, alias, or deprecation path",
         ),
       );
     }
@@ -1098,6 +1201,18 @@ function collectTextFindings(
     );
   }
   if (
+    relativePath.startsWith("packages/checks/src/") &&
+    hostPreparedFixtureExecution.test(source)
+  ) {
+    findings.push(
+      finding(
+        "host-prepared-fixture-execution",
+        relativePath,
+        "Generated Repository Fixture quality must not prepare Rust, browser, or ShellCheck tools on the host",
+      ),
+    );
+  }
+  if (
     relativePath.startsWith("packages/cli/") &&
     /(?:schema\s+preset|preset\s+validate|preset-source)/iu.test(source)
   ) {
@@ -1162,6 +1277,20 @@ async function collectPathFindings(
           "retired-path",
           relativePath,
           "remove this retired architecture path",
+        ),
+      );
+    } catch {
+      // Absence is the required state.
+    }
+  }
+  for (const relativePath of retiredDevelopmentContainerPaths) {
+    try {
+      await access(path.join(repositoryRoot, relativePath));
+      findings.push(
+        finding(
+          "retired-development-container-path",
+          relativePath,
+          "remove this retired Development Container architecture path",
         ),
       );
     } catch {

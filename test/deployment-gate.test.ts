@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { execa } from "execa";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   builtInPresetRegistry,
@@ -21,7 +21,8 @@ import {
 
 import {
   generatedScenariosFor,
-  runGeneratedScenarioSet,
+  runGeneratedScenarioSet as runGeneratedScenarioSetProduction,
+  type GeneratedCommandRunner,
 } from "../packages/checks/src/check-generated-registry.ts";
 import {
   deriveDeploymentQualityContractIdentity,
@@ -59,6 +60,60 @@ async function generatedTaskIds(root: string): Promise<readonly string[]> {
   await visit(root);
   return taskIds;
 }
+
+function fixtureExecutorTestRunner(
+  run: GeneratedCommandRunner,
+): GeneratedCommandRunner {
+  return async (command, args, options) => {
+    if (command === "docker") return {};
+    if (command !== "devcontainer") {
+      return await run(command, args, options);
+    }
+    if (args[0] !== "exec") return {};
+    const idLabelIndex = args.indexOf("--id-label");
+    let nestedCommandIndex = idLabelIndex === -1 ? 3 : idLabelIndex + 2;
+    while (args[nestedCommandIndex] === "--remote-env") {
+      nestedCommandIndex += 2;
+    }
+    const nestedCommand = args[nestedCommandIndex]!;
+    const nestedArgs = args.slice(nestedCommandIndex + 1);
+    if (nestedCommand === "pnpm" && nestedArgs.includes("--lockfile-only")) {
+      return await run(
+        "pnpm",
+        [
+          "install",
+          "--store-dir",
+          path.join(path.dirname(options.cwd), ".pnpm-store"),
+        ],
+        options,
+      );
+    }
+    if (
+      nestedCommand === "pnpm" &&
+      (nestedArgs[0] === "fetch" || nestedArgs.includes("--offline"))
+    ) {
+      return {};
+    }
+    const isQualityCommand =
+      nestedCommand === "git" ||
+      (nestedCommand === "pnpm" &&
+        (nestedArgs[0] === "run" ||
+          (nestedArgs[0] === "exec" && nestedArgs[1] === "turbo")));
+    return isQualityCommand
+      ? await run(nestedCommand, nestedArgs, options)
+      : {};
+  };
+}
+
+const runGeneratedScenarioSet = async (
+  ...[set, options]: Parameters<typeof runGeneratedScenarioSetProduction>
+): Promise<void> =>
+  await runGeneratedScenarioSetProduction(set, {
+    ...options,
+    ...(options.run === undefined
+      ? {}
+      : { run: fixtureExecutorTestRunner(options.run) }),
+  });
 
 function deploymentPlan() {
   const definition = builtInPresetRegistry.all().find((candidate) =>
@@ -103,8 +158,32 @@ describe("deployment quality gate", () => {
         gate: "deployment-quality",
         executionResources: ["docker"],
         dependencyInstallation: {
-          command: "pnpm",
-          args: ["install", "--store-dir", "{fixture-workspace}/.pnpm-store"],
+          storeDir: "/pnpm/store",
+          commands: [
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--lockfile-only",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+            {
+              command: "pnpm",
+              args: ["fetch", "--store-dir", "/pnpm/store"],
+            },
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--offline",
+                "--frozen-lockfile",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+          ],
         },
         generatedDeployment: {
           command: "pnpm",
@@ -141,19 +220,7 @@ describe("deployment quality gate", () => {
       expect(calls).toEqual([
         {
           command: "pnpm",
-          args: [
-            "install",
-            "--store-dir",
-            path.join(fixtureWorkspace, ".pnpm-store"),
-          ],
-        },
-        {
-          command: "pnpm",
           args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-        },
-        {
-          command: "docker",
-          args: ["version", "--format", "{{.Server.Version}}"],
         },
         { command: "pnpm", args: ["run", "check:deployment"] },
       ]);
@@ -170,15 +237,6 @@ describe("deployment quality gate", () => {
       readonly command: string;
       readonly args: readonly string[];
       readonly cwd: string;
-    };
-    let activeDocker = 0;
-    let maxActiveDocker = 0;
-    let dockerReleased = false;
-    const dockerWaiters = new Set<() => void>();
-    const releaseDocker = (): void => {
-      dockerReleased = true;
-      for (const resolve of dockerWaiters) resolve();
-      dockerWaiters.clear();
     };
     const createRunner =
       (commands: Command[]) =>
@@ -219,20 +277,6 @@ describe("deployment quality gate", () => {
             }),
           };
         }
-        if (command === "docker") {
-          activeDocker += 1;
-          maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
-          try {
-            if (!dockerReleased) {
-              await new Promise<void>((resolve) => {
-                dockerWaiters.add(resolve);
-              });
-            }
-            return { stdout: "ambient-docker-version-ignored" };
-          } finally {
-            activeDocker -= 1;
-          }
-        }
         return {};
       };
     const coldCommands: Command[] = [];
@@ -249,7 +293,7 @@ describe("deployment quality gate", () => {
           ({ id }) => id,
         ),
       );
-      const coldExecution = runGeneratedScenarioSet("deployment", {
+      await runGeneratedScenarioSet("deployment", {
         workspace: path.join(root, "cold"),
         run: createRunner(coldCommands),
         scheduling: { concurrency: 4 },
@@ -263,29 +307,6 @@ describe("deployment quality gate", () => {
           },
         },
       });
-      let observationFailure: unknown;
-      try {
-        await vi.waitFor(
-          () => {
-            expect(
-              coldEvents.filter(
-                (event) =>
-                  event.type === "execution" &&
-                  event.gate === "deployment-quality" &&
-                  event.outcome === "started",
-              ).length,
-            ).toBeGreaterThanOrEqual(2);
-            expect(activeDocker).toBe(1);
-          },
-          { timeout: 30_000 },
-        );
-      } catch (error) {
-        observationFailure = error;
-      } finally {
-        releaseDocker();
-      }
-      await coldExecution;
-      if (observationFailure !== undefined) throw observationFailure;
       await rm(path.join(evidenceRoot, "deployment-quality"), {
         recursive: true,
         force: true,
@@ -324,14 +345,10 @@ describe("deployment quality gate", () => {
       );
       expect(deploymentCommands.length).toBeGreaterThan(0);
       expect(
-        coldCommands.filter(({ command }) => command === "docker"),
-      ).toHaveLength(deploymentCommands.length);
-      expect(
         coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         ),
       ).toHaveLength(deploymentCommands.length);
-      expect(maxActiveDocker).toBe(1);
       const deploymentMissExecutions = deploymentMissCommands.filter(
         ({ command, args }) =>
           command === "pnpm" &&
@@ -407,7 +424,6 @@ describe("deployment quality gate", () => {
         );
       }
     } finally {
-      releaseDocker();
       await rm(root, { recursive: true, force: true });
     }
   });
@@ -445,43 +461,7 @@ describe("deployment quality gate", () => {
     ).toBeUndefined();
   });
 
-  it("fails explicitly when Docker is unavailable instead of reporting a semantic skip", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "deployment-docker-"));
-    const plan = deploymentPlan();
-    try {
-      await expect(
-        executeDeploymentQuality({
-          deployment: deriveDeploymentQualityPlanInput(plan)!,
-          projectDir: path.join(root, "project"),
-          fixtureWorkspace: root,
-          run: async (command, args) => {
-            if (args[0] === "install") return {};
-            if (args.includes("--dry-run=json")) {
-              return {
-                stdout: JSON.stringify({
-                  tasks: plan.manifests.flatMap((manifest) =>
-                    typeof manifest.name === "string" &&
-                    typeof (manifest.scripts as Record<string, unknown> | null)
-                      ?.deployment === "string"
-                      ? [{ taskId: `${manifest.name}#deployment` }]
-                      : [],
-                  ),
-                }),
-              };
-            }
-            expect(command).toBe("docker");
-            throw new Error("docker socket unavailable");
-          },
-        }),
-      ).rejects.toThrow(
-        /Docker is required.*check:deployment was not executed/u,
-      );
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("runs the generated deployment gate after Docker availability is confirmed", async () => {
+  it("runs the generated deployment gate after task discovery", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "deployment-success-"));
     const plan = deploymentPlan();
     const calls: Array<{ command: string; args: readonly string[] }> = [];
@@ -511,15 +491,7 @@ describe("deployment quality gate", () => {
       expect(calls).toEqual([
         {
           command: "pnpm",
-          args: ["install", "--store-dir", path.join(root, ".pnpm-store")],
-        },
-        {
-          command: "pnpm",
           args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-        },
-        {
-          command: "docker",
-          args: ["version", "--format", "{{.Server.Version}}"],
         },
         { command: "pnpm", args: ["run", "check:deployment"] },
       ]);
@@ -533,7 +505,7 @@ describe("deployment quality gate", () => {
     const messages: string[] = [];
     try {
       await expect(
-        runGeneratedScenarioSet("deployment", {
+        runGeneratedScenarioSetProduction("deployment", {
           workspace: root,
           reporter: { info: (message) => messages.push(message) },
           run: async (command, args, options) => {
@@ -556,7 +528,7 @@ describe("deployment quality gate", () => {
           },
         }),
       ).rejects.toThrow(
-        /Docker is required.*check:deployment was not executed.*docker executable unavailable/u,
+        /Docker is required for Generated Repository Fixture quality.*docker executable unavailable/u,
       );
       expect(messages.length).toBeGreaterThan(0);
     } finally {

@@ -8,6 +8,7 @@ import type {
 import type { PackageDefinition } from "#template-core/project-blueprint-v2";
 import type { RenderOperation } from "#template-core/renderer";
 
+import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";
 
 function packageScripts(): Record<string, string> {
@@ -60,12 +61,12 @@ function cliContribution(options: {
       value: {},
       multilineArrays: ["files"],
     },
-    {
-      kind: "copyFile",
+    typescriptConfigSourceOperation({
+      context: options.context,
       source: templateSources.tsCli,
       from: "tsconfig.json",
       to: `${definition.path}/tsconfig.json`,
-    },
+    }),
     {
       kind: "copyFile",
       source: templateSources.tsCli,

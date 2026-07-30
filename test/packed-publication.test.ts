@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 import {
   builtInPresetRegistry,
@@ -565,6 +566,254 @@ describe("packed public CLI consumer", () => {
       }
       expect(completedAdditions.toSorted()).toEqual(expectedAddableDefinitions);
 
+      const rustDefinition = addableDefinitionWithPackageRole("native-package");
+      const nonRustBase = builtInPresetRegistry.all().find((definition) => {
+        const context = createGenerationContext({
+          targetDir: path.join(consumer, "generated", definition.metadata.name),
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+          },
+        });
+        const contributions = definition.planInitializationContributions?.(
+          context,
+        ) ?? [definition.planInitialization(context)];
+        return contributions.every(
+          (contribution) =>
+            contribution.foundation.toolchains.rust === undefined,
+        );
+      });
+      expect(nonRustBase).toBeDefined();
+      const rustAdditionTarget = path.join(
+        consumer,
+        "generated",
+        nonRustBase!.metadata.name,
+      );
+      const rustDockerfilePath = path.join(
+        rustAdditionTarget,
+        ".devcontainer/Dockerfile",
+      );
+      const rustDevcontainerPath = path.join(
+        rustAdditionTarget,
+        ".devcontainer/devcontainer.json",
+      );
+      const rustToolchainPath = path.join(
+        rustAdditionTarget,
+        "rust-toolchain.toml",
+      );
+      const dependabotPath = path.join(
+        rustAdditionTarget,
+        ".github/dependabot.yml",
+      );
+      const dockerfileBeforeRust = await readFile(rustDockerfilePath, "utf8");
+      const devcontainerBeforeRust = JSON.parse(
+        await readFile(rustDevcontainerPath, "utf8"),
+      ) as {
+        readonly build: { readonly args: Readonly<Record<string, string>> };
+        readonly mounts: readonly { readonly target: string }[];
+      };
+      const dependabotBeforeRust = await readFile(dependabotPath, "utf8");
+      expect(dockerfileBeforeRust).not.toContain("ARG RUST_TOOLCHAIN");
+      expect(devcontainerBeforeRust.build.args).not.toHaveProperty(
+        "RUST_TOOLCHAIN",
+      );
+      expect(devcontainerBeforeRust.mounts).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ target: "/usr/local/cargo/registry" }),
+        ]),
+      );
+      await expect(stat(rustToolchainPath)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+      expect(dependabotBeforeRust).not.toContain("package-ecosystem: cargo");
+
+      const beforeRustPreview = await workspaceByteSnapshot(rustAdditionTarget);
+      const rustPreviewResult = await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          rustDefinition.metadata.name,
+          "--name",
+          "worker",
+          "--dry-run",
+          "--json",
+        ],
+        {
+          cwd: rustAdditionTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+        },
+      );
+      const rustPreview = JSON.parse(rustPreviewResult.stdout) as {
+        readonly status: string;
+        readonly dryRun: boolean;
+        readonly actions: readonly {
+          readonly path: string;
+          readonly action: string;
+        }[];
+        readonly conflicts?: readonly unknown[];
+      };
+      expect(rustPreview.status).toBe("success");
+      expect(rustPreview.dryRun).toBe(true);
+      expect(rustPreview.conflicts ?? []).toEqual([]);
+      expect(rustPreview.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ".devcontainer/Dockerfile",
+            action: "update",
+          }),
+          expect.objectContaining({
+            path: ".devcontainer/devcontainer.json",
+            action: "update",
+          }),
+          expect.objectContaining({
+            path: "rust-toolchain.toml",
+            action: "create",
+          }),
+          expect.objectContaining({
+            path: ".github/dependabot.yml",
+            action: "update",
+          }),
+          expect.objectContaining({
+            path: "packages/worker/package.json",
+            action: "create",
+          }),
+          expect.objectContaining({
+            path: "packages/worker/Cargo.toml",
+            action: "create",
+          }),
+        ]),
+      );
+      expect(await workspaceByteSnapshot(rustAdditionTarget)).toEqual(
+        beforeRustPreview,
+      );
+
+      await execa(
+        installedBin,
+        [
+          "add",
+          "package",
+          "--preset",
+          rustDefinition.metadata.name,
+          "--name",
+          "worker",
+        ],
+        {
+          cwd: rustAdditionTarget,
+          env: {
+            ...process.env,
+            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
+          },
+        },
+      );
+      await expect(
+        readFile(
+          path.join(rustAdditionTarget, "packages/worker/package.json"),
+          "utf8",
+        ).then(
+          (source) =>
+            JSON.parse(source) as {
+              readonly name: string;
+              readonly scripts: Readonly<Record<string, string>>;
+            },
+        ),
+      ).resolves.toMatchObject({
+        name: `@${nonRustBase!.metadata.name}/worker`,
+        scripts: {
+          "format:check": "cargo fmt --all -- --check",
+          lint: "cargo clippy --workspace --all-targets -- -D warnings",
+          test: "cargo test --workspace",
+        },
+      });
+      await expect(
+        readFile(
+          path.join(rustAdditionTarget, "packages/worker/Cargo.toml"),
+          "utf8",
+        ),
+      ).resolves.toContain('name = "worker"');
+      const dockerfileAfterRust = await readFile(rustDockerfilePath, "utf8");
+      expect(dockerfileAfterRust).toContain("ARG RUST_TOOLCHAIN");
+      expect(dockerfileAfterRust).toContain(
+        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+      );
+      const devcontainerAfterRust = JSON.parse(
+        await readFile(rustDevcontainerPath, "utf8"),
+      ) as {
+        readonly build: { readonly args: Readonly<Record<string, string>> };
+        readonly mounts: readonly {
+          readonly type: string;
+          readonly source: string;
+          readonly target: string;
+        }[];
+      };
+      expect(devcontainerAfterRust.build.args).toMatchObject({
+        RUST_TOOLCHAIN: "stable",
+      });
+      expect(devcontainerAfterRust.mounts).toEqual(
+        expect.arrayContaining([
+          {
+            type: "volume",
+            source: "${devcontainerId}-pnpm-store",
+            target: "/pnpm/store",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-git",
+            target: "/usr/local/cargo/git",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-registry",
+            target: "/usr/local/cargo/registry",
+          },
+        ]),
+      );
+      expect(devcontainerAfterRust.mounts).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            target: expect.stringContaining("${containerWorkspaceFolder}"),
+          }),
+        ]),
+      );
+      await expect(readFile(rustToolchainPath, "utf8")).resolves.toBe(
+        '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',
+      );
+      const dependabotAfterRust = parseYaml(
+        await readFile(dependabotPath, "utf8"),
+      ) as {
+        readonly updates: readonly {
+          readonly "package-ecosystem": string;
+          readonly directory: string;
+        }[];
+      };
+      expect(
+        dependabotAfterRust.updates
+          .filter((update) => update["package-ecosystem"] === "cargo")
+          .map((update) => update.directory),
+      ).toEqual(["/packages/worker"]);
+      await expect(
+        readFile(
+          path.join(rustAdditionTarget, "packages/worker/turbo.json"),
+          "utf8",
+        ).then((source) => JSON.parse(source)),
+      ).resolves.toEqual({
+        extends: ["//"],
+        tags: ["native"],
+      });
+      const rootManifestAfterRust = JSON.parse(
+        await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),
+      ) as { readonly scripts: Readonly<Record<string, string>> };
+      expect(rootManifestAfterRust.scripts.check).toContain(
+        "turbo run boundaries format:check lint typecheck build test test:e2e",
+      );
+
+      await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
+      await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });
+
       const cliAdditionDefinition =
         addableDefinitionWithPackageRole("cli-tool");
       const cliTarget = path.join(
@@ -834,9 +1083,15 @@ describe("packed public CLI consumer", () => {
         previewTarget,
         ".devcontainer/Dockerfile",
       );
-      await writeFile(dockerfilePath, "\n# incompatible insertion\n", {
-        flag: "a",
-      });
+      const dockerfile = await readFile(dockerfilePath, "utf8");
+      expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
+      await writeFile(
+        dockerfilePath,
+        dockerfile.replace(
+          "ARG RUST_TOOLCHAIN",
+          "# incompatible insertion\nARG RUST_TOOLCHAIN",
+        ),
+      );
       const textBefore = await workspaceByteSnapshot(previewTarget);
       const textConflict = await execa(
         installedBin,

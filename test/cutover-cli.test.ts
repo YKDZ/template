@@ -341,6 +341,10 @@ describe("cut-over CLI", () => {
     const target = path.join(workspace, "project");
     const cli = path.resolve("packages/cli/src/cli.ts");
     const env = { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" };
+    const initialPreset = requireAddableDefinitionForRole(
+      target,
+      "shared-library",
+    );
     const additionPreset = requireAddableDefinitionForRole(
       target,
       "runtime-service",
@@ -354,7 +358,7 @@ describe("cut-over CLI", () => {
         "init",
         target,
         "--preset",
-        addablePreset.metadata.name,
+        initialPreset.metadata.name,
         "--scope",
         "acme",
         "--yes",
@@ -403,6 +407,97 @@ describe("cut-over CLI", () => {
     await expect(
       readFile(path.join(target, "services/dashboard/package.json"), "utf8"),
     ).resolves.toContain('"name": "@acme/dashboard"');
+  });
+
+  it("reports an overlapping Development Container build argument atomically in normal, dry-run, and JSON modes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-devcontainer-conflict-"),
+    );
+    const target = path.join(workspace, "project");
+    const cli = path.resolve("packages/cli/src/cli.ts");
+    const env = { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" };
+    const initialPreset = requireAddableDefinitionForRole(
+      target,
+      "shared-library",
+    );
+    const additionPreset = requireAddableDefinitionForRole(
+      target,
+      "runtime-service",
+    );
+
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "init",
+        target,
+        "--preset",
+        initialPreset.metadata.name,
+        "--scope",
+        "acme",
+        "--yes",
+      ],
+      { env },
+    );
+    const devcontainerPath = path.join(
+      target,
+      ".devcontainer/devcontainer.json",
+    );
+    const devcontainer = JSON.parse(
+      await readFile(devcontainerPath, "utf8"),
+    ) as { build: { args: Record<string, string> } };
+    devcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE = "user-owned";
+    await writeFile(
+      devcontainerPath,
+      `${JSON.stringify(devcontainer, null, 2)}\n`,
+    );
+    const command = [
+      "--conditions=source",
+      cli,
+      "add",
+      "package",
+      "--preset",
+      additionPreset.metadata.name,
+      "--name",
+      "dashboard",
+      "--path",
+      "services/dashboard",
+    ];
+
+    for (const mode of [
+      { args: [] as string[], json: false },
+      { args: ["--dry-run"], json: false },
+      { args: ["--json"], json: true },
+    ]) {
+      const before = await workspaceSnapshot(target);
+      const conflict = await execa("node", [...command, ...mode.args], {
+        cwd: target,
+        env,
+        reject: false,
+      });
+
+      expect(conflict.exitCode).not.toBe(0);
+      if (mode.json) {
+        expect(JSON.parse(conflict.stdout)).toMatchObject({
+          status: "conflict",
+          actions: [],
+          conflicts: [
+            {
+              path: ".devcontainer/devcontainer.json",
+              driver: "structured",
+              location: "/build/args/PLAYWRIGHT_CLI_PACKAGE",
+            },
+          ],
+        });
+      } else {
+        expect(conflict.stderr).toContain(
+          ".devcontainer/devcontainer.json (structured)",
+        );
+        expect(conflict.stderr).toContain("/build/args/PLAYWRIGHT_CLI_PACKAGE");
+      }
+      expect(await workspaceSnapshot(target)).toEqual(before);
+    }
   });
 
   it("exposes only the supported catalog, initialization, addition, and Blueprint workflows", async () => {

@@ -38,6 +38,33 @@ describe("Built-in Preset Package Addition universality", () => {
     return definition;
   }
 
+  function rustAddableDefinition() {
+    const context = createGenerationContext({
+      targetDir: path.join("generated-repository", "rust-addition-selection"),
+      scope: "demo",
+      toolchain,
+    });
+    const packageLeafName = "rust-probe";
+    const definition = builtInPresetRegistry.all().find((candidate) => {
+      const packagePath = candidate.defaultPackagePath?.({
+        context,
+        packageLeafName,
+      });
+      return (
+        packagePath !== undefined &&
+        candidate.planPackageAddition?.({
+          context,
+          packageLeafName,
+          packagePath,
+        }).foundation.toolchains.rust !== undefined
+      );
+    });
+    if (definition === undefined) {
+      throw new Error("Expected an addable Definition with a Rust toolchain");
+    }
+    return definition;
+  }
+
   function definitionWithPackagePath(packagePath: string) {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "package-path-selection"),
@@ -289,6 +316,148 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
+  it("rejects conflicting Rust toolchain facts before repository writes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-rust-toolchain-conflict-"),
+    );
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, "demo"),
+      scope: "demo",
+      toolchain,
+    });
+    const rustDefinition = rustAddableDefinition();
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: rustDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const dockerfilePath = path.join(
+        context.targetDir,
+        ".devcontainer/Dockerfile",
+      );
+      const dockerfileBefore = await readFile(dockerfilePath, "utf8");
+      const conflictingDefinition = {
+        ...rustDefinition,
+        planPackageAddition(
+          options: Parameters<
+            NonNullable<typeof rustDefinition.planPackageAddition>
+          >[0],
+        ) {
+          const contribution = rustDefinition.planPackageAddition!(options);
+          return {
+            ...contribution,
+            foundation: {
+              ...contribution.foundation,
+              toolchains: {
+                rust: {
+                  toolchain: "nightly",
+                  components: ["rustfmt", "clippy"] as const,
+                },
+              },
+            },
+          };
+        },
+      };
+
+      expect(() =>
+        planGeneratedRepositoryPackageAddition({
+          definition: conflictingDefinition,
+          context,
+          blueprint: initialization.blueprint,
+          packageLeafName: "worker",
+        }),
+      ).toThrow("Foundation requires compatible Rust toolchain facts");
+      await expect(readFile(dockerfilePath, "utf8")).resolves.toBe(
+        dockerfileBefore,
+      );
+      await expect(
+        readFile(
+          path.join(context.targetDir, "packages/worker/Cargo.toml"),
+          "utf8",
+        ),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("adds Rust to Rust with one coordinated toolchain and both Cargo package directories", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-rust-to-rust-"),
+    );
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, "demo"),
+      scope: "demo",
+      toolchain,
+    });
+    const rustDefinition = rustAddableDefinition();
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: rustDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: rustDefinition,
+        context,
+        blueprint: initialization.blueprint,
+        packageLeafName: "worker",
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: context.targetDir,
+        ...addition.projectProjections,
+      });
+
+      await expect(
+        readFile(
+          path.join(context.targetDir, "packages/worker/Cargo.toml"),
+          "utf8",
+        ),
+      ).resolves.toContain('name = "worker"');
+      const dockerfile = await readFile(
+        path.join(context.targetDir, ".devcontainer/Dockerfile"),
+        "utf8",
+      );
+      expect(dockerfile.match(/^ARG RUST_TOOLCHAIN$/gmu)).toHaveLength(1);
+      expect(
+        dockerfile.match(
+          /"\$\{CARGO_HOME\}\/bin\/rustup" toolchain install \$\{RUST_TOOLCHAIN\}/gu,
+        ),
+      ).toHaveLength(1);
+      expect(dockerfile).toContain(
+        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+      );
+      const devcontainer = JSON.parse(
+        await readFile(
+          path.join(context.targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      ) as { readonly mounts: readonly { readonly target: string }[] };
+      expect(
+        devcontainer.mounts.filter(
+          (mount) => mount.target === "/usr/local/cargo/registry",
+        ),
+      ).toHaveLength(1);
+      const dependabot = await readFile(
+        path.join(context.targetDir, ".github/dependabot.yml"),
+        "utf8",
+      );
+      expect(dependabot).toContain('directory: "/packages/demo"');
+      expect(dependabot).toContain('directory: "/packages/worker"');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("keeps default-root task entrypoints stable while Turbo discovers added scripts", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-natural-addition-"),
@@ -454,9 +623,9 @@ describe("Built-in Preset Package Addition universality", () => {
         "utf8",
       );
       expect(devcontainer).toContain(
-        "rustup toolchain install ${RUST_TOOLCHAIN}",
+        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
       );
-      expect(devcontainer).toContain("playwright install-deps chromium");
+      expect(devcontainer).toContain("playwright install --with-deps chromium");
       expect(addition.environmentNeeds).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ kind: "rust-toolchain" }),
@@ -564,7 +733,31 @@ describe("Built-in Preset Package Addition universality", () => {
       scope: "demo",
       toolchain,
     });
-    const base = firstAddableDefinition();
+    const base = builtInPresetRegistry.all().find((candidate) => {
+      const packageLeafName = "environment-probe";
+      const packagePath = candidate.defaultPackagePath?.({
+        context,
+        packageLeafName,
+      });
+      const contribution =
+        packagePath === undefined
+          ? undefined
+          : candidate.planPackageAddition?.({
+              context,
+              packageLeafName,
+              packagePath,
+            });
+      return (
+        contribution !== undefined &&
+        contribution.environmentNeeds.length === 0 &&
+        (contribution.deploymentEnvironmentNeeds?.length ?? 0) === 0
+      );
+    });
+    if (base === undefined) {
+      throw new Error(
+        "Expected an addable Built-in Preset without Environment Needs",
+      );
+    }
     const initialization = planGeneratedRepositoryInitialization({
       definition: base,
       context,

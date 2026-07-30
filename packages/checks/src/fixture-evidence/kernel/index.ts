@@ -11,6 +11,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import path from "node:path";
 
 import { execa } from "execa";
@@ -20,6 +21,601 @@ export type FixtureCommandRunner = (
   args: readonly string[],
   options: { readonly cwd: string; readonly stdio?: "inherit" },
 ) => Promise<unknown>;
+
+export type DevelopmentContainerFixtureProbe = {
+  readonly identity: string;
+  readonly command: string;
+  readonly args?: readonly string[] | undefined;
+  readonly failureMessage?: string | undefined;
+};
+
+export type DevelopmentContainerFixtureSession = {
+  readonly reserve: () => Promise<void>;
+  readonly run: FixtureCommandRunner;
+  readonly execute: <Result>(
+    operation: (run: FixtureCommandRunner) => Promise<Result>,
+  ) => Promise<Result>;
+  readonly close: () => Promise<void>;
+};
+
+export type DevelopmentContainerFixtureDependencyCaches = {
+  readonly pnpm?: string | undefined;
+  readonly cargo?: string | undefined;
+};
+
+export type DevelopmentContainerFixtureCacheActivity = {
+  readonly cache: FixtureEvidenceCacheKind;
+};
+
+const developmentContainerSharedPnpmStore = "/pnpm/store";
+const developmentContainerCargoRegistry = "/usr/local/cargo/registry";
+const developmentContainerCargoGit = "/usr/local/cargo/git";
+const turboCacheEnvironmentNames = [
+  "TURBO_TEAM",
+  "TURBO_TOKEN",
+  "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+  "TURBO_REMOTE_CACHE_READ_ONLY",
+] as const;
+const turboCacheSecretEnvironmentNames = [
+  "TURBO_TOKEN",
+  "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+] as const;
+const developmentContainerBuildFlights = new Map<string, Promise<void>>();
+
+function redactSecretValues(
+  value: string,
+  secretValues: readonly string[],
+): string {
+  return [...secretValues]
+    .sort((left, right) => right.length - left.length)
+    .reduce(
+      (redacted, secret) => redacted.split(secret).join("[REDACTED]"),
+      value,
+    );
+}
+
+function redactCommandError(
+  error: unknown,
+  secretValues: readonly string[],
+): unknown {
+  if (error instanceof AggregateError) {
+    return new AggregateError(
+      error.errors.map((nested) => redactCommandError(nested, secretValues)),
+      redactSecretValues(error.message, secretValues),
+      error.cause === undefined
+        ? undefined
+        : { cause: redactCommandError(error.cause, secretValues) },
+    );
+  }
+  if (error instanceof Error) {
+    const redacted = new Error(
+      redactSecretValues(error.message, secretValues),
+      error.cause === undefined
+        ? undefined
+        : { cause: redactCommandError(error.cause, secretValues) },
+    );
+    redacted.name = error.name;
+    return redacted;
+  }
+  return typeof error === "string"
+    ? redactSecretValues(error, secretValues)
+    : error;
+}
+
+async function runDevelopmentContainerBuildFlight(
+  key: string,
+  execute: () => Promise<unknown>,
+): Promise<void> {
+  const existing = developmentContainerBuildFlights.get(key);
+  if (existing !== undefined) {
+    await existing;
+    return;
+  }
+  const current = (async () => {
+    await execute();
+  })();
+  developmentContainerBuildFlights.set(key, current);
+  try {
+    await current;
+  } finally {
+    if (developmentContainerBuildFlights.get(key) === current) {
+      developmentContainerBuildFlights.delete(key);
+    }
+  }
+}
+
+export async function deriveDevelopmentContainerBuildIdentity(options: {
+  readonly projectDir: string;
+}): Promise<string> {
+  const configDirectory = path.join(options.projectDir, ".devcontainer");
+  const configPath = path.join(configDirectory, "devcontainer.json");
+  const config = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+  if (
+    typeof config !== "object" ||
+    config === null ||
+    !("build" in config) ||
+    typeof config.build !== "object" ||
+    config.build === null
+  ) {
+    throw new Error(
+      `Generated Development Container configuration ${configPath} must declare an object build`,
+    );
+  }
+  const build = config.build as Record<string, unknown>;
+  const dockerfile =
+    build.dockerfile === undefined ? "Dockerfile" : build.dockerfile;
+  const context = build.context === undefined ? "." : build.context;
+  if (typeof dockerfile !== "string" || typeof context !== "string") {
+    throw new Error(
+      `Generated Development Container configuration ${configPath} must use string build paths`,
+    );
+  }
+  const resolveBuildPath = (value: string, label: string): string => {
+    const absolute = path.resolve(configDirectory, value);
+    const relative = path.relative(options.projectDir, absolute);
+    if (
+      path.isAbsolute(relative) ||
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`)
+    ) {
+      throw new Error(
+        `Generated Development Container ${label} must stay inside ${options.projectDir}`,
+      );
+    }
+    return relative.split(path.sep).join("/");
+  };
+  const dockerfilePath = path.resolve(configDirectory, dockerfile);
+  const args = build.args ?? {};
+  if (
+    typeof args !== "object" ||
+    args === null ||
+    Array.isArray(args) ||
+    !Object.values(args).every((value) => typeof value === "string")
+  ) {
+    throw new Error(
+      `Generated Development Container configuration ${configPath} must use string build arguments`,
+    );
+  }
+  return createHash("sha256")
+    .update(
+      canonicalize({
+        dockerfile: {
+          path: resolveBuildPath(dockerfile, "Dockerfile"),
+          sha256: createHash("sha256")
+            .update(await readFile(dockerfilePath))
+            .digest("hex"),
+        },
+        context: resolveBuildPath(context, "build context"),
+        args,
+      }),
+    )
+    .digest("hex");
+}
+
+export function createDevelopmentContainerFixtureSession(options: {
+  readonly projectDir: string;
+  readonly probes: readonly DevelopmentContainerFixtureProbe[];
+  readonly ownedVolumes?: readonly string[] | undefined;
+  readonly dependencyCaches?:
+    | DevelopmentContainerFixtureDependencyCaches
+    | undefined;
+  readonly build?:
+    | {
+        readonly identity: string;
+        readonly cacheDirectory: string;
+      }
+    | undefined;
+  readonly acquireSession?: (() => Promise<() => void>) | undefined;
+  readonly environment?: NodeJS.ProcessEnv | undefined;
+  readonly run?: FixtureCommandRunner;
+  readonly recordCacheActivity?:
+    | ((
+        event: DevelopmentContainerFixtureCacheActivity,
+      ) => void | Promise<void>)
+    | undefined;
+}): DevelopmentContainerFixtureSession {
+  const rawRun =
+    options.run ??
+    ((command, args, runOptions) => execa(command, [...args], runOptions));
+  const environment = options.environment ?? {};
+  const secretValues = turboCacheSecretEnvironmentNames.flatMap((name) => {
+    const value = environment[name];
+    return value === undefined || value.length === 0 ? [] : [value];
+  });
+  const run: FixtureCommandRunner = async (command, args, runOptions) => {
+    try {
+      return await rawRun(command, args, runOptions);
+    } catch (error) {
+      throw redactCommandError(error, secretValues);
+    }
+  };
+  const config = path.join(
+    options.projectDir,
+    ".devcontainer",
+    "devcontainer.json",
+  );
+  const workspaceArgs = ["--workspace-folder", options.projectDir] as const;
+  const idLabel = `com.ykdz.template.fixture.project=${createHash("sha256").update(path.resolve(options.projectDir)).digest("hex")}`;
+  const identityArgs = ["--id-label", idLabel] as const;
+  const remoteEnvironmentArgs = turboCacheEnvironmentNames.flatMap((name) => {
+    const value = environment[name];
+    return value === undefined || value.length === 0
+      ? []
+      : ["--remote-env", `${name}=${value}`];
+  });
+  const buildCacheArgs =
+    options.build === undefined
+      ? []
+      : [
+          "--cache-from",
+          `type=local,src=${path.join(options.build.cacheDirectory, options.build.identity)}`,
+          "--cache-to",
+          `type=local,dest=${path.join(options.build.cacheDirectory, options.build.identity)},mode=max`,
+        ];
+  const recordCacheActivity = async (
+    cache: FixtureEvidenceCacheKind,
+  ): Promise<void> => {
+    await options.recordCacheActivity?.({ cache });
+  };
+  const createDependencyCacheOverride = async (): Promise<
+    | {
+        readonly path: string;
+        readonly caches: readonly FixtureEvidenceCacheKind[];
+      }
+    | undefined
+  > => {
+    const configuredMounts = [
+      ...(options.dependencyCaches?.pnpm === undefined
+        ? []
+        : [
+            {
+              source: path.resolve(options.dependencyCaches.pnpm),
+              target: developmentContainerSharedPnpmStore,
+            },
+          ]),
+      ...(options.dependencyCaches?.cargo === undefined
+        ? []
+        : [
+            {
+              source: path.resolve(options.dependencyCaches.cargo, "registry"),
+              target: developmentContainerCargoRegistry,
+            },
+            {
+              source: path.resolve(options.dependencyCaches.cargo, "git"),
+              target: developmentContainerCargoGit,
+            },
+          ]),
+    ];
+    if (configuredMounts.length === 0) return undefined;
+
+    const generatedConfig = JSON.parse(
+      await readFile(config, "utf8"),
+    ) as Record<string, unknown>;
+    const generatedMounts = Array.isArray(generatedConfig.mounts)
+      ? generatedConfig.mounts
+      : [];
+    const generatedTargets = new Set(
+      generatedMounts.flatMap((mount) =>
+        typeof mount === "object" &&
+        mount !== null &&
+        "target" in mount &&
+        typeof mount.target === "string"
+          ? [mount.target]
+          : [],
+      ),
+    );
+    const mounts = configuredMounts
+      .filter(({ target }) => generatedTargets.has(target))
+      .map(({ source, target }) => ({ type: "bind", source, target }));
+    if (mounts.length === 0) return undefined;
+    const caches = [
+      ...(mounts.some(
+        ({ target }) => target === developmentContainerSharedPnpmStore,
+      )
+        ? (["pnpm-downloads"] as const)
+        : []),
+      ...(mounts.some(
+        ({ target }) =>
+          target === developmentContainerCargoRegistry ||
+          target === developmentContainerCargoGit,
+      )
+        ? (["cargo-downloads"] as const)
+        : []),
+    ];
+
+    await Promise.all(
+      mounts.map(async ({ source }) => {
+        await mkdir(source, { recursive: true });
+      }),
+    );
+    const overrideDirectory = path.join(options.projectDir, ".template");
+    await mkdir(overrideDirectory, { recursive: true });
+    const overridePath = path.join(
+      overrideDirectory,
+      `fixture-devcontainer-cache-${randomUUID()}.json`,
+    );
+    const mountsByTarget = new Map(
+      mounts.map((mount) => [mount.target, mount] as const),
+    );
+    const mergedMounts = generatedMounts.map((mount) =>
+      typeof mount === "object" &&
+      mount !== null &&
+      "target" in mount &&
+      typeof mount.target === "string"
+        ? (mountsByTarget.get(mount.target) ?? mount)
+        : mount,
+    );
+    await writeFile(
+      overridePath,
+      `${JSON.stringify({ ...generatedConfig, mounts: mergedMounts }, null, 2)}\n`,
+      { flag: "wx" },
+    );
+    return { path: overridePath, caches };
+  };
+  let startup: Promise<void> | undefined;
+  let reservation: Promise<void> | undefined;
+  let upAttempted = false;
+  let closed = false;
+  let releaseSession: (() => void) | undefined;
+  let dependencyCacheOverridePath: string | undefined;
+
+  const exec = async (
+    command: string,
+    args: readonly string[],
+    execOptions: {
+      readonly cwd?: string;
+      readonly stdio?: "inherit";
+    } = {},
+  ): Promise<unknown> => {
+    const commandCwd = path.resolve(execOptions.cwd ?? options.projectDir);
+    const relativeCwd = path.relative(options.projectDir, commandCwd);
+    if (
+      path.isAbsolute(relativeCwd) ||
+      relativeCwd === ".." ||
+      relativeCwd.startsWith(`..${path.sep}`)
+    ) {
+      throw new Error(
+        `Development Container Fixture command cwd must be inside ${options.projectDir}`,
+      );
+    }
+    const containerCommand =
+      relativeCwd.length === 0
+        ? [command, ...args]
+        : [
+            "sh",
+            "-c",
+            'cd "$1" && shift && exec "$@"',
+            "sh",
+            relativeCwd.split(path.sep).join("/"),
+            command,
+            ...args,
+          ];
+    if (
+      command === "pnpm" &&
+      ((args[0] === "run" &&
+        (args[1] === "check" ||
+          args[1] === "fix" ||
+          args[1] === "check:deployment")) ||
+        (args[0] === "exec" && args[1] === "turbo"))
+    ) {
+      await recordCacheActivity("turbo");
+    }
+    return await run(
+      "devcontainer",
+      [
+        "exec",
+        ...workspaceArgs,
+        ...identityArgs,
+        ...remoteEnvironmentArgs,
+        ...containerCommand,
+      ],
+      {
+        cwd: options.projectDir,
+        ...(execOptions.stdio === undefined
+          ? {}
+          : { stdio: execOptions.stdio }),
+      },
+    );
+  };
+
+  const reserve = async (): Promise<void> => {
+    reservation ??= (async () => {
+      releaseSession = await options.acquireSession?.();
+    })();
+    await reservation;
+  };
+
+  const start = async (): Promise<void> => {
+    await reserve();
+    try {
+      await run("docker", ["version", "--format", "{{.Server.Version}}"], {
+        cwd: options.projectDir,
+      });
+    } catch (error) {
+      throw new Error(
+        `Docker is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+      );
+    }
+    try {
+      await run("devcontainer", ["--version"], { cwd: options.projectDir });
+    } catch (error) {
+      throw new Error(
+        `The pinned Dev Container CLI is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+      );
+    }
+    const dependencyCacheOverride = await createDependencyCacheOverride();
+    dependencyCacheOverridePath = dependencyCacheOverride?.path;
+    for (const cache of dependencyCacheOverride?.caches ?? []) {
+      await recordCacheActivity(cache);
+    }
+    upAttempted = true;
+    const up = async () =>
+      await run(
+        "devcontainer",
+        [
+          "up",
+          ...workspaceArgs,
+          "--config",
+          config,
+          ...(dependencyCacheOverridePath === undefined
+            ? []
+            : ["--override-config", dependencyCacheOverridePath]),
+          "--no-lockfile",
+          ...identityArgs,
+          ...buildCacheArgs,
+        ],
+        { cwd: options.projectDir },
+      );
+    if (options.build === undefined) {
+      await up();
+    } else {
+      await recordCacheActivity("buildkit");
+      await runDevelopmentContainerBuildFlight(
+        `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}`,
+        up,
+      );
+    }
+    for (const probe of options.probes) {
+      try {
+        await exec(probe.command, probe.args ?? []);
+      } catch (error) {
+        throw new Error(
+          `Tool Layer capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
+        );
+      }
+    }
+    for (const command of fixtureDependencyInstallationPlan(
+      developmentContainerSharedPnpmStore,
+    ).commands) {
+      try {
+        await exec(command.command, command.args);
+      } catch (error) {
+        throw new Error(
+          `Dependency preparation failed during ${command.command} ${command.args[0]}: ${errorMessage(error)}`,
+        );
+      }
+    }
+  };
+
+  const sessionRun: FixtureCommandRunner = async (
+    command,
+    args,
+    runOptions,
+  ) => {
+    if (closed) {
+      throw new Error("Development Container Fixture session is closed");
+    }
+    startup ??= start();
+    await startup;
+    return await exec(command, args, runOptions);
+  };
+
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    if (!upAttempted) {
+      releaseSession?.();
+      return;
+    }
+    const cleanupErrors: unknown[] = [];
+    try {
+      const result = await run(
+        "docker",
+        ["ps", "-aq", "--filter", `label=${idLabel}`],
+        { cwd: options.projectDir },
+      );
+      const stdout =
+        typeof result === "object" &&
+        result !== null &&
+        "stdout" in result &&
+        typeof result.stdout === "string"
+          ? result.stdout
+          : "";
+      const containerIds = stdout.trim().split(/\s+/u).filter(Boolean);
+      if (containerIds.length > 0) {
+        await run("docker", ["rm", "-f", ...containerIds], {
+          cwd: options.projectDir,
+        });
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    for (const volume of options.ownedVolumes ?? []) {
+      try {
+        await run("docker", ["volume", "rm", volume], {
+          cwd: options.projectDir,
+        });
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (dependencyCacheOverridePath !== undefined) {
+      try {
+        await unlink(dependencyCacheOverridePath);
+      } catch (error) {
+        if (
+          typeof error !== "object" ||
+          error === null ||
+          !("code" in error) ||
+          error.code !== "ENOENT"
+        ) {
+          cleanupErrors.push(error);
+        }
+      }
+    }
+    releaseSession?.();
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        cleanupErrors,
+        "Development Container Fixture cleanup failed",
+      );
+    }
+  };
+
+  return {
+    reserve,
+    run: sessionRun,
+    execute: async <Result>(
+      operation: (run: FixtureCommandRunner) => Promise<Result>,
+    ): Promise<Result> => {
+      let execution:
+        | { readonly succeeded: true; readonly value: Result }
+        | { readonly succeeded: false; readonly error: unknown };
+      try {
+        execution = {
+          succeeded: true,
+          value: await operation(sessionRun),
+        };
+      } catch (error) {
+        execution = { succeeded: false, error };
+      }
+      let cleanup:
+        | { readonly succeeded: true }
+        | { readonly succeeded: false; readonly error: unknown };
+      try {
+        await close();
+        cleanup = { succeeded: true };
+      } catch (error) {
+        cleanup = { succeeded: false, error };
+      }
+      if (!execution.succeeded) {
+        if (cleanup.succeeded) throw execution.error;
+        const cleanupErrors =
+          cleanup.error instanceof AggregateError
+            ? cleanup.error.errors
+            : [cleanup.error];
+        throw new AggregateError(
+          [execution.error, ...cleanupErrors],
+          `${errorMessage(execution.error)}; Development Container Fixture cleanup also failed: ${cleanupErrors.map(errorMessage).join("; ")}`,
+          { cause: execution.error },
+        );
+      }
+      if (!cleanup.succeeded) throw cleanup.error;
+      return execution.value;
+    },
+    close,
+  };
+}
 
 const fixtureEvidenceGates = [
   "generated-root-quality",
@@ -103,8 +699,21 @@ export type FixtureEvidenceLifecycleEvent =
       readonly error?: string;
     };
 
+export type FixtureEvidenceCacheKind =
+  | "buildkit"
+  | "pnpm-downloads"
+  | "cargo-downloads"
+  | "turbo";
+
 export type FixtureEvidenceInvocationEvent =
   | FixtureEvidenceLifecycleEvent
+  | {
+      readonly type: "cache";
+      readonly cache: FixtureEvidenceCacheKind;
+      readonly scenario: FixtureEvidenceScenarioDiagnostics;
+      readonly at: string;
+      readonly outcome: "used";
+    }
   | {
       readonly type: "invocation";
       readonly outcome: "started";
@@ -168,6 +777,7 @@ export type FixtureEvidenceHealthFailureCode =
   | "activity-io-error"
   | "incomplete-invocation"
   | "incomplete-scenario"
+  | "failed-execution"
   | "lifecycle-error"
   | "missing-issuance"
   | "missing-scenario-set"
@@ -189,6 +799,7 @@ export type FixtureEvidenceHealthStage = {
   readonly scenarios: number;
   readonly hits: number;
   readonly misses: Partial<Record<FixtureEvidenceMissReason, number>>;
+  readonly cacheActivity: Partial<Record<FixtureEvidenceCacheKind, number>>;
   readonly executions: number;
   readonly issuances: number;
   readonly lifecycleErrors: number;
@@ -238,13 +849,20 @@ export type FixtureEvidenceAtomicFileOperations = {
   readonly replace?: (temporary: string, destination: string) => Promise<void>;
 };
 
-export type FixtureEvidenceExecutionResource = "browser" | "docker";
+export type FixtureEvidenceExecutionResource =
+  | "browser"
+  | "development-container-session"
+  | "docker";
 
 export type FixtureEvidenceSchedulingOptions = {
   readonly concurrency?: number;
+  readonly developmentContainerSessions?: number;
 };
 
 export type FixtureEvidenceScheduler = {
+  readonly acquire: (
+    resources: readonly FixtureEvidenceExecutionResource[],
+  ) => Promise<() => void>;
   readonly run: <Result>(
     resources: readonly FixtureEvidenceExecutionResource[],
     execute: () => Promise<Result>,
@@ -256,6 +874,10 @@ export type FixtureEvidenceSchedulerFactory = (
 ) => FixtureEvidenceScheduler;
 
 export const fixtureEvidenceFreshnessMilliseconds = 7 * 24 * 60 * 60 * 1_000;
+
+export function defaultDevelopmentContainerSessionConcurrency(): number {
+  return Math.max(1, Math.min(2, Math.floor(availableParallelism() / 2)));
+}
 
 class CapacityLimiter {
   readonly #capacity: number;
@@ -270,22 +892,28 @@ class CapacityLimiter {
   }
 
   async run<Result>(execute: () => Promise<Result>): Promise<Result> {
-    await this.#acquire();
+    const release = await this.acquire();
     try {
       return await execute();
     } finally {
-      this.#release();
+      release();
     }
   }
 
-  async #acquire(): Promise<void> {
+  async acquire(): Promise<() => void> {
     if (this.#active < this.#capacity) {
       this.#active += 1;
-      return;
+    } else {
+      await new Promise<void>((resolve) => {
+        this.#waiting.push(resolve);
+      });
     }
-    await new Promise<void>((resolve) => {
-      this.#waiting.push(resolve);
-    });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#release();
+    };
   }
 
   #release(): void {
@@ -306,16 +934,46 @@ export function createFixtureEvidenceScheduler(
     "Fixture evidence",
   );
   const browser = new CapacityLimiter(1, "Browser");
+  const developmentContainerSession = new CapacityLimiter(
+    options.developmentContainerSessions ??
+      defaultDevelopmentContainerSessionConcurrency(),
+    "Development Container session",
+  );
   const docker = new CapacityLimiter(1, "Docker");
+  const acquire = async (
+    resources: readonly FixtureEvidenceExecutionResource[],
+  ): Promise<() => void> => {
+    const releases: Array<() => void> = [];
+    try {
+      if (resources.includes("docker")) {
+        releases.push(await docker.acquire());
+      }
+      if (resources.includes("development-container-session")) {
+        releases.push(await developmentContainerSession.acquire());
+      }
+      if (resources.includes("browser")) {
+        releases.push(await browser.acquire());
+      }
+    } catch (error) {
+      for (const release of releases.reverse()) release();
+      throw error;
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const release of releases.reverse()) release();
+    };
+  };
   return {
+    acquire,
     run: async (resources, execute) => {
-      const runOrdinary = async () => await ordinary.run(execute);
-      const runBrowser = resources.includes("browser")
-        ? async () => await browser.run(runOrdinary)
-        : runOrdinary;
-      return resources.includes("docker")
-        ? await docker.run(runBrowser)
-        : await runBrowser();
+      const release = await acquire(resources);
+      try {
+        return await ordinary.run(execute);
+      } finally {
+        release();
+      }
     },
   };
 }
@@ -365,117 +1023,46 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-export type FixtureDependencyInstallationPlan = {
+export type FixtureDependencyInstallationCommand = {
   readonly command: "pnpm";
-  readonly args: readonly ["install", "--store-dir", string];
+  readonly args: readonly string[];
+};
+
+export type FixtureDependencyInstallationPlan = {
+  readonly storeDir: string;
+  readonly commands: readonly FixtureDependencyInstallationCommand[];
 };
 
 export function fixtureDependencyInstallationPlan(
-  fixtureWorkspace: string,
+  storeDir: string,
 ): FixtureDependencyInstallationPlan {
   return {
-    command: "pnpm",
-    args: [
-      "install",
-      "--store-dir",
-      path.join(fixtureWorkspace, ".pnpm-store"),
+    storeDir,
+    commands: [
+      {
+        command: "pnpm",
+        args: ["install", "--lockfile-only", "--store-dir", storeDir],
+      },
+      {
+        command: "pnpm",
+        args: ["fetch", "--store-dir", storeDir],
+      },
+      {
+        command: "pnpm",
+        args: [
+          "install",
+          "--offline",
+          "--frozen-lockfile",
+          "--store-dir",
+          storeDir,
+        ],
+      },
     ],
   };
 }
 
 export function normalizedFixtureDependencyInstallationPlan(): FixtureDependencyInstallationPlan {
-  return fixtureDependencyInstallationPlan("{fixture-workspace}");
-}
-
-const fixtureDependencyInstallationMarker =
-  ".template-fixture-dependency-installation.json";
-
-async function optionalFileIdentity(file: string): Promise<string | null> {
-  try {
-    return sha256(await readFile(file));
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function fixtureDependencyInstallationIdentity(options: {
-  readonly projectDir: string;
-  readonly plan: FixtureDependencyInstallationPlan;
-}): Promise<string> {
-  return sha256(
-    canonicalize({
-      schema: "fixture-dependency-installation/v1",
-      plan: options.plan,
-      inputs: {
-        packageManifest: await optionalFileIdentity(
-          path.join(options.projectDir, "package.json"),
-        ),
-        lockfile: await optionalFileIdentity(
-          path.join(options.projectDir, "pnpm-lock.yaml"),
-        ),
-      },
-    }),
-  );
-}
-
-export async function ensureFixtureDependencies(options: {
-  readonly projectDir: string;
-  readonly fixtureWorkspace: string;
-  readonly run: FixtureCommandRunner;
-}): Promise<"installed" | "ready"> {
-  const plan = fixtureDependencyInstallationPlan(options.fixtureWorkspace);
-  const expectedIdentity = await fixtureDependencyInstallationIdentity({
-    projectDir: options.projectDir,
-    plan,
-  });
-  const marker = path.join(
-    options.projectDir,
-    "node_modules",
-    fixtureDependencyInstallationMarker,
-  );
-  try {
-    const record = JSON.parse(await readFile(marker, "utf8")) as {
-      readonly schema?: unknown;
-      readonly identity?: unknown;
-    };
-    if (
-      record.schema === "fixture-dependency-installation/v1" &&
-      record.identity === expectedIdentity
-    ) {
-      return "ready";
-    }
-  } catch {
-    // Missing or malformed completion evidence requires an idempotent install.
-  }
-
-  await options.run(plan.command, plan.args, {
-    cwd: options.projectDir,
-    stdio: "inherit",
-  });
-  const installedIdentity = await fixtureDependencyInstallationIdentity({
-    projectDir: options.projectDir,
-    plan,
-  });
-  const markerDirectory = path.dirname(marker);
-  await mkdir(markerDirectory, { recursive: true });
-  const temporary = `${marker}.${randomUUID()}.tmp`;
-  await writeFile(
-    temporary,
-    `${JSON.stringify({
-      schema: "fixture-dependency-installation/v1",
-      identity: installedIdentity,
-    })}\n`,
-  );
-  await rename(temporary, marker);
-  return "installed";
+  return fixtureDependencyInstallationPlan(developmentContainerSharedPnpmStore);
 }
 
 function fixtureEvidenceIdentity(options: {
@@ -513,6 +1100,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isFixtureEvidenceGate(value: unknown): value is FixtureEvidenceGate {
   return fixtureEvidenceGates.some((gate) => gate === value);
+}
+
+function isFixtureEvidenceCacheKind(
+  value: unknown,
+): value is FixtureEvidenceCacheKind {
+  return (
+    value === "buildkit" ||
+    value === "pnpm-downloads" ||
+    value === "cargo-downloads" ||
+    value === "turbo"
+  );
 }
 
 function parseFixtureEvidenceRecord(value: unknown): FixtureEvidenceRecord {
@@ -708,6 +1306,18 @@ function parseFixtureEvidenceInvocationEvent(
       typeof value.error !== "string"
     ) {
       throw new Error("invalid Fixture Evidence lifecycle error");
+    }
+    return value as FixtureEvidenceInvocationEvent;
+  }
+  if (value.type === "cache") {
+    parseScenarioDiagnostics(value.scenario);
+    if (
+      !hasExactKeys(value, ["type", "cache", "scenario", "at", "outcome"]) ||
+      !isFixtureEvidenceCacheKind(value.cache) ||
+      !isIsoTimestamp(value.at) ||
+      value.outcome !== "used"
+    ) {
+      throw new Error("invalid Fixture Evidence cache activity");
     }
     return value as FixtureEvidenceInvocationEvent;
   }
@@ -977,6 +1587,7 @@ export async function checkFixtureEvidenceHealth(options: {
     const missCounts: Partial<Record<FixtureEvidenceMissReason, number>> = {};
     let scenarios = 0;
     let hits = 0;
+    const cacheActivity: Partial<Record<FixtureEvidenceCacheKind, number>> = {};
     let executions = 0;
     let issuances = 0;
     let lifecycleErrors = 0;
@@ -1045,6 +1656,9 @@ export async function checkFixtureEvidenceHealth(options: {
           ? [record.event]
           : [],
       );
+      const cacheEvents = invocationRecords.flatMap((record) =>
+        record.event.type === "cache" ? [record.event] : [],
+      );
       const expectedScenarioIds = new Set(
         expectedScenarios.map((scenario) => scenario.id),
       );
@@ -1056,6 +1670,16 @@ export async function checkFixtureEvidenceHealth(options: {
           invocationId,
           scenarioId: event.scenario.id,
           detail: `Lifecycle activity references undeclared scenario ${event.scenario.id}`,
+        });
+      }
+      for (const event of cacheEvents) {
+        if (expectedScenarioIds.has(event.scenario.id)) continue;
+        failures.push({
+          code: "incomplete-scenario",
+          scenarioSet,
+          invocationId,
+          scenarioId: event.scenario.id,
+          detail: `Cache activity references undeclared scenario ${event.scenario.id}`,
         });
       }
       for (const scenario of expectedScenarios) {
@@ -1160,6 +1784,16 @@ export async function checkFixtureEvidenceHealth(options: {
         ) {
           executions += 1;
           successfulExecutions.add(fixtureActivityGateKey(event));
+        } else if (event.type === "execution" && event.outcome === "failed") {
+          failures.push({
+            code: "failed-execution",
+            scenarioSet,
+            invocationId,
+            scenarioId: event.scenario.id,
+            gate: event.gate,
+            identity: event.identity,
+            detail: `Fixture execution failed for ${event.gate}: ${event.error}`,
+          });
         } else if (event.type === "issuance") {
           if (event.outcome === "issued") {
             issuances += 1;
@@ -1177,6 +1811,9 @@ export async function checkFixtureEvidenceHealth(options: {
             });
           }
         }
+      }
+      for (const event of cacheEvents) {
+        cacheActivity[event.cache] = (cacheActivity[event.cache] ?? 0) + 1;
       }
       for (const record of invocationRecords) {
         if (record.event.type !== "lifecycle-error") continue;
@@ -1210,6 +1847,7 @@ export async function checkFixtureEvidenceHealth(options: {
       scenarios,
       hits,
       misses: missCounts,
+      cacheActivity,
       executions,
       issuances,
       lifecycleErrors,
@@ -1252,7 +1890,18 @@ export function formatFixtureEvidenceHealthReport(
     const misses = Object.entries(stage.misses)
       .map(([reason, count]) => `${reason}=${count}`)
       .join(",");
-    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds}`;
+    const cacheActivity = [
+      "buildkit",
+      "pnpm-downloads",
+      "cargo-downloads",
+      "turbo",
+    ]
+      .map(
+        (cache) =>
+          `${cache}=${stage.cacheActivity[cache as FixtureEvidenceCacheKind] ?? 0}`,
+      )
+      .join(",");
+    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} cache-activity=${cacheActivity}`;
   });
   return [...scenarioLines, ...stageLines];
 }

@@ -25,6 +25,9 @@ jobs:
       TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: ${{ github.workspace }}/.fixture-evidence-activity
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: ${{ github.run_id }}
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: ${{ github.run_attempt }}
+      TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/buildkit
+      TEMPLATE_FIXTURE_PNPM_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/pnpm
+      TEMPLATE_FIXTURE_CARGO_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/cargo
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -37,6 +40,39 @@ jobs:
         with:
           node-version-file: package.json
           cache: pnpm
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Restore BuildKit cache
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        uses: actions/cache/restore@v6
+        with:
+          path: .fixture-native-cache/buildkit
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-
+            fixture-buildkit-${{ runner.os }}-
+
+      - name: Restore pnpm downloads cache
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        uses: actions/cache/restore@v6
+        with:
+          path: .fixture-native-cache/pnpm
+          key: fixture-pnpm-downloads-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fixture-pnpm-downloads-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            fixture-pnpm-downloads-${{ runner.os }}-
+
+      - name: Restore Cargo downloads cache
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        uses: actions/cache/restore@v6
+        with:
+          path: .fixture-native-cache/cargo
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-
+            fixture-cargo-downloads-${{ runner.os }}-
 
       - name: Restore Fixture Verification Evidence
         uses: actions/cache/restore@v6
@@ -53,6 +89,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate Fixture Gate Prerequisites
+        id: fixture-prerequisites
+        run: |
+          docker version --format '{{.Server.Version}}'
+          pnpm --filter @ykdz/template-checks exec devcontainer --version
+
       - name: Prepare shell checks
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
@@ -61,28 +103,59 @@ jobs:
 
       - name: Check package
         run: pnpm run check
-        env:
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_TOKEN: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.TURBO_TOKEN || '' }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
-          TURBO_REMOTE_CACHE_READ_ONLY: ${{ github.event_name == 'release' && 'true' || 'false' }}
 
       - name: Check fixture matrix
-        if: always()
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
         run: pnpm run check:fixtures
+        env:
+          TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
 
       - name: Check focused project links
-        if: always()
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
         run: pnpm run check:focused
+        env:
+          TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
 
       - name: Check deployment artifacts
-        if: always()
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
         run: pnpm run check:deployment
+        env:
+          TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
 
       - name: Check Fixture Evidence Health
         id: fixture-evidence-health
         if: always()
         run: pnpm --filter @ykdz/template-checks run check:evidence-health
+
+      - name: Save BuildKit cache
+        if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .fixture-native-cache/buildkit
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save pnpm downloads cache
+        if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .fixture-native-cache/pnpm
+          key: fixture-pnpm-downloads-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save Cargo downloads cache
+        if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .fixture-native-cache/cargo
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save Fixture Verification Evidence
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'

@@ -625,6 +625,113 @@ describe("Project Projection materialization", () => {
     });
   });
 
+  it("reconciles generated members by projection identity when visible fields change", async () => {
+    const beforeReconciliation = [
+      {
+        path: "config.json",
+        driver: "structured" as const,
+        identitySets: [
+          {
+            location: "/mounts",
+            identity: {
+              kind: "projection" as const,
+              members: [
+                {
+                  identity: "tool-cache",
+                  match: { target: "/var/cache/tool-v1" },
+                },
+              ],
+              fallback: { fields: ["target"] },
+            },
+          },
+        ],
+      },
+    ];
+    const afterReconciliation = [
+      {
+        path: "config.json",
+        driver: "structured" as const,
+        identitySets: [
+          {
+            location: "/mounts",
+            identity: {
+              kind: "projection" as const,
+              members: [
+                {
+                  identity: "tool-cache",
+                  match: { target: "/var/cache/tool-v2" },
+                },
+              ],
+              fallback: { fields: ["target"] },
+            },
+          },
+        ],
+      },
+    ];
+    const result = await reconcileProjectProjections({
+      before: {
+        ...structuredProjection("config.json", {
+          mounts: [
+            {
+              type: "volume",
+              source: "tool-cache",
+              target: "/var/cache/tool-v1",
+            },
+          ],
+        }),
+        reconciliation: beforeReconciliation,
+      },
+      after: {
+        ...structuredProjection("config.json", {
+          mounts: [
+            {
+              type: "volume",
+              source: "tool-cache",
+              target: "/var/cache/tool-v2",
+            },
+          ],
+        }),
+        reconciliation: afterReconciliation,
+      },
+      async readCurrent() {
+        return textEntry(
+          "config.json",
+          JSON.stringify({
+            mounts: [
+              {
+                type: "bind",
+                source: "${localEnv:HOME}/.user-cache",
+                target: "/var/cache/user",
+              },
+              {
+                type: "volume",
+                source: "tool-cache",
+                target: "/var/cache/tool-v1",
+              },
+            ],
+          }),
+        );
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
+      mounts: [
+        {
+          type: "bind",
+          source: "${localEnv:HOME}/.user-cache",
+          target: "/var/cache/user",
+        },
+        {
+          type: "volume",
+          source: "tool-cache",
+          target: "/var/cache/tool-v2",
+        },
+      ],
+    });
+  });
+
   it("distinguishes object members by multiple identity fields", async () => {
     const reconciliation = [
       {

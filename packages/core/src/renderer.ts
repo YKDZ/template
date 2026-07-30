@@ -115,6 +115,7 @@ export type WriteTextFromFragmentsOperation = {
     from: string;
     source: TemplateSourceHandle;
   }[];
+  validation?: "development-container-dockerfile" | undefined;
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -481,13 +482,16 @@ async function renderWriteText(
   await writeGeneratedFile(to, operation.text);
 }
 
-async function renderWriteTextFromFragments(
+type LoadedTextFragment = {
+  readonly from: string;
+  readonly text: string;
+};
+
+async function loadTextFragments(
   operation: WriteTextFromFragmentsOperation,
   options: RenderProjectOptions,
-): Promise<void> {
-  const toPath = expandOperationPath(operation.to, options);
-  const to = resolveContainedPath(options.targetRoot, toPath);
-  const texts = await Promise.all(
+): Promise<readonly LoadedTextFragment[]> {
+  return Promise.all(
     operation.fragments.map(async (fragment) => {
       const fromPath = expandTemplatePath(
         fragment.from,
@@ -495,14 +499,81 @@ async function renderWriteTextFromFragments(
       );
       const from = resolveTemplateSource(fragment.source, fromPath);
 
-      return readFile(from, "utf8");
+      return { from: fromPath, text: await readFile(from, "utf8") };
     }),
   );
+}
+
+async function validateDevelopmentContainerDockerfileOperation(
+  operation: WriteTextFromFragmentsOperation,
+  fragments: readonly LoadedTextFragment[],
+): Promise<void> {
+  if (operation.validation !== "development-container-dockerfile") {
+    return;
+  }
+  const [baseFragment, ...optionalFragments] = fragments;
+  if (baseFragment === undefined) {
+    throw new Error(
+      "Development Container Dockerfile requires a base fragment.",
+    );
+  }
+  const { validateDevelopmentContainerDockerfileFragments } =
+    await import("./development-container-tool-layer.ts");
+  validateDevelopmentContainerDockerfileFragments({
+    baseFragment: {
+      identity: baseFragment.from,
+      from: baseFragment.from,
+      text: baseFragment.text,
+    },
+    fragments: optionalFragments.map((fragment) => ({
+      identity: fragment.from,
+      from: fragment.from,
+      text: fragment.text,
+    })),
+  });
+}
+
+async function preflightDevelopmentContainerDockerfiles(
+  options: RenderProjectOptions,
+): Promise<
+  ReadonlyMap<WriteTextFromFragmentsOperation, readonly LoadedTextFragment[]>
+> {
+  const loadedFragments = new Map<
+    WriteTextFromFragmentsOperation,
+    readonly LoadedTextFragment[]
+  >();
+
+  for (const operation of options.operations) {
+    if (
+      operation.kind !== "writeTextFromFragments" ||
+      operation.validation !== "development-container-dockerfile"
+    ) {
+      continue;
+    }
+
+    const fragments = await loadTextFragments(operation, options);
+    await validateDevelopmentContainerDockerfileOperation(operation, fragments);
+    loadedFragments.set(operation, fragments);
+  }
+
+  return loadedFragments;
+}
+
+async function renderWriteTextFromFragments(
+  operation: WriteTextFromFragmentsOperation,
+  options: RenderProjectOptions,
+  preloadedFragments?: readonly LoadedTextFragment[],
+): Promise<void> {
+  const toPath = expandOperationPath(operation.to, options);
+  const to = resolveContainedPath(options.targetRoot, toPath);
+  const fragments =
+    preloadedFragments ?? (await loadTextFragments(operation, options));
+  await validateDevelopmentContainerDockerfileOperation(operation, fragments);
 
   await mkdir(path.dirname(to), { recursive: true });
   await writeGeneratedFile(
     to,
-    texts.map((text) => text.trimEnd()).join("\n\n") + "\n",
+    fragments.map(({ text }) => text.trimEnd()).join("\n\n") + "\n",
     operation.overwrite ?? false,
   );
 }
@@ -775,6 +846,9 @@ async function writeGeneratedFile(
 export async function renderProject(
   options: RenderProjectOptions,
 ): Promise<void> {
+  const preloadedDevelopmentContainerDockerfiles =
+    await preflightDevelopmentContainerDockerfiles(options);
+
   for (const operation of options.operations) {
     if (operation.kind === "copyFile") {
       await renderCopyFile(operation, options);
@@ -802,7 +876,11 @@ export async function renderProject(
     }
 
     if (operation.kind === "writeTextFromFragments") {
-      await renderWriteTextFromFragments(operation, options);
+      await renderWriteTextFromFragments(
+        operation,
+        options,
+        preloadedDevelopmentContainerDockerfiles.get(operation),
+      );
       continue;
     }
 

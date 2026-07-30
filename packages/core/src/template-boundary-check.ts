@@ -788,10 +788,47 @@ function isDevelopmentContainerPlanValue(expression: ts.Expression): boolean {
   return isPropertyAccess(expression, "developmentContainer", "devcontainer");
 }
 
+function isDevelopmentContainerToolLayerMergeValue(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !(
+      hasExactKeys(value, ["build"]) || hasExactKeys(value, ["build", "mounts"])
+    ) ||
+    !isRecord(value.build) ||
+    !hasExactKeys(value.build, ["args"]) ||
+    !isRecord(value.build.args) ||
+    !Object.values(value.build.args).every(
+      (argument) => typeof argument === "string",
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    value.mounts === undefined ||
+    (Array.isArray(value.mounts) &&
+      value.mounts.every(
+        (mount) =>
+          isRecord(mount) &&
+          hasExactKeys(mount, ["type", "source", "target"]) &&
+          (mount.type === "bind" || mount.type === "volume") &&
+          typeof mount.source === "string" &&
+          typeof mount.target === "string",
+      ))
+  );
+}
+
 function isAllowedStructuralMachineDeclaration(
   sourceFile: ts.SourceFile,
   operation: InlineProtectedOperation,
 ): boolean {
+  if (
+    operation.kind === "mergeJson" &&
+    operation.to === ".devcontainer/devcontainer.json"
+  ) {
+    return isDevelopmentContainerToolLayerMergeValue(operation.value);
+  }
+
   if (operation.kind !== "writeJson") {
     return false;
   }

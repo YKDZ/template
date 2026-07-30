@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 
+import type { DevelopmentContainerToolLayer } from "#template-core/development-container-tool-layer";
 import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
@@ -13,6 +14,8 @@ import type {
 import type { PackageDefinition } from "#template-core/project-blueprint-v2";
 import type { RenderOperation } from "#template-core/renderer";
 
+import { browserTestDevelopmentContainerToolLayer } from "../shared/development-container.ts";
+import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { vueTypecheckRunnerSourceOperation } from "../shared/vue.ts";
 import { templateSources } from "../template-sources.ts";
 
@@ -51,6 +54,55 @@ function foundation(): PackageContribution["foundation"] {
       interval: "weekly",
     },
     workspacePackageGlobs: ["apps/*", "packages/*"],
+  };
+}
+
+function shellCheckDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
+  return {
+    identity: "shellcheck",
+    dockerfile: {
+      source: templateSources.vikeApp,
+      from: "devcontainer/shellcheck.Dockerfile",
+    },
+    requires: ["node-pnpm"],
+    probes: [
+      { identity: "shellcheck", command: "shellcheck", args: ["--version"] },
+    ],
+  };
+}
+
+function dockerClientDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
+  return {
+    identity: "docker-client",
+    dockerfile: {
+      source: templateSources.vikeApp,
+      from: "devcontainer/docker-client.Dockerfile",
+    },
+    requires: ["node-pnpm"],
+    mounts: [
+      {
+        identity: "docker-socket",
+        type: "bind",
+        source: "/var/run/docker.sock",
+        target: "/var/run/docker.sock",
+      },
+    ],
+    probes: [
+      {
+        identity: "docker-cli",
+        command: "docker",
+        args: ["--version"],
+        failureMessage:
+          "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
+      },
+      {
+        identity: "docker-daemon",
+        command: "docker",
+        args: ["version"],
+        failureMessage:
+          "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
+      },
+    ],
   };
 }
 
@@ -112,15 +164,32 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
 }
 
 function copyOperations(
+  context: GenerationContext,
   packagePath: string,
   sourceFiles: readonly string[],
 ): RenderOperation[] {
-  return sourceFiles.map((from) => ({
-    kind: "copyFile" as const,
-    source: templateSources.vikeApp,
-    from,
-    to: `${packagePath}/${from.replace(/^(?:web|db|db-migrations)\//, "")}`,
-  }));
+  const policyConfigs = new Set([
+    "web/tsconfig.app.json",
+    "web/tsconfig.node.json",
+    "db/tsconfig.json",
+    "db-migrations/tsconfig.json",
+  ]);
+  return sourceFiles.map((from) => {
+    const to = `${packagePath}/${from.replace(/^(?:web|db|db-migrations)\//, "")}`;
+    return policyConfigs.has(from)
+      ? typescriptConfigSourceOperation({
+          context,
+          source: templateSources.vikeApp,
+          from,
+          to,
+        })
+      : {
+          kind: "copyFile" as const,
+          source: templateSources.vikeApp,
+          from,
+          to,
+        };
+  });
 }
 
 function webContribution(context: GenerationContext): PackageContribution {
@@ -159,7 +228,7 @@ function webContribution(context: GenerationContext): PackageContribution {
       value: {},
       multilineArrays: ["files"],
     },
-    ...copyOperations(web.path, sourceFiles),
+    ...copyOperations(context, web.path, sourceFiles),
     {
       kind: "writeTextTemplate",
       source: templateSources.vikeApp,
@@ -287,7 +356,14 @@ function webContribution(context: GenerationContext): PackageContribution {
       shellCheckEnvironmentNeed(owner),
     ],
     deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
-    foundation: foundation(),
+    foundation: {
+      ...foundation(),
+      developmentContainerToolLayers: [
+        browserTestDevelopmentContainerToolLayer(),
+        shellCheckDevelopmentContainerToolLayer(),
+        dockerClientDevelopmentContainerToolLayer(),
+      ],
+    },
   };
 }
 
@@ -346,7 +422,7 @@ function databaseContribution(context: GenerationContext): PackageContribution {
     },
     operations: [
       { kind: "writeJson", to: `${db.path}/package.json`, value: {} },
-      ...copyOperations(db.path, sourceFiles),
+      ...copyOperations(context, db.path, sourceFiles),
     ],
     environmentNeeds: [],
     foundation: foundation(),
@@ -393,7 +469,7 @@ function migrationsContribution(
         value: {},
         multilineArrays: ["files"],
       },
-      ...copyOperations(migrations.path, sourceFiles),
+      ...copyOperations(context, migrations.path, sourceFiles),
     ],
     environmentNeeds: [],
     foundation: foundation(),

@@ -10,6 +10,7 @@ CONTEXT.md
 .project-kit/
 .fixture-evidence/
 .fixture-evidence-activity/
+.fixture-native-cache/
 .pnpm-store/
 .turbo/
 packages/**/.turbo/

@@ -46,7 +46,7 @@ describe("Template Repository native task model", () => {
     const scripts = manifest.scripts;
 
     expect(scripts.check).toBe(
-      "turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+      "pnpm run build && turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     );
     expect(scripts.fix).toBe(
       "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
@@ -147,13 +147,22 @@ describe("Template Repository native task model", () => {
     ]) {
       expect(tasks[task]?.cache, `${task} cache`).toBe(false);
       expect(tasks[task]?.passThroughEnv).toEqual([
+        "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
+        "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
         "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
         "TEMPLATE_FIXTURE_EVIDENCE_DIR",
         "TEMPLATE_FIXTURE_EVIDENCE_READ",
         "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
         "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
         "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
         "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+        "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+        "TEMPLATE_FIXTURE_WORKSPACE_DIR",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+        "TEMPLATE_FIXTURE_TURBO_TEAM",
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
       ]);
     }
     expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");

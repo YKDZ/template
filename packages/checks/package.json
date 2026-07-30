@@ -51,6 +51,7 @@
     "yaml": "catalog:"
   },
   "devDependencies": {
+    "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/template-builtin-presets-source": "link:../builtin-presets",
     "@ykdz/template-core-source": "link:../core",
