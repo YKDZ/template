@@ -4,14 +4,16 @@ import {
   appendFile,
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   readlink,
   rename,
+  rm,
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { availableParallelism } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import path from "node:path";
 
 import { execa } from "execa";
@@ -19,7 +21,11 @@ import { execa } from "execa";
 export type FixtureCommandRunner = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd: string; readonly stdio?: "inherit" },
+  options: {
+    readonly cwd: string;
+    readonly stdio?: "inherit";
+    readonly env?: NodeJS.ProcessEnv;
+  },
 ) => Promise<unknown>;
 
 export type DevelopmentContainerFixtureProbe = {
@@ -223,13 +229,6 @@ export function createDevelopmentContainerFixtureSession(options: {
     const value = environment[name];
     return value === undefined || value.length === 0 ? [] : [value];
   });
-  const run: FixtureCommandRunner = async (command, args, runOptions) => {
-    try {
-      return await rawRun(command, args, runOptions);
-    } catch (error) {
-      throw redactCommandError(error, secretValues);
-    }
-  };
   const config = path.join(
     options.projectDir,
     ".devcontainer",
@@ -241,6 +240,30 @@ export function createDevelopmentContainerFixtureSession(options: {
     .digest("hex");
   const idLabel = `com.ykdz.template.fixture.project=${projectIdentity}`;
   const identityArgs = ["--id-label", idLabel] as const;
+  let devcontainerTempDirectory: string | undefined;
+  const ensureDevcontainerTempDirectory = async (): Promise<string> => {
+    devcontainerTempDirectory ??= await mkdtemp(
+      path.join(tmpdir(), `template-devcontainer-${projectIdentity}-`),
+    );
+    return devcontainerTempDirectory;
+  };
+  const run: FixtureCommandRunner = async (command, args, runOptions) => {
+    try {
+      const commandOptions =
+        command === "devcontainer"
+          ? {
+              ...runOptions,
+              env: {
+                ...runOptions.env,
+                TMPDIR: await ensureDevcontainerTempDirectory(),
+              },
+            }
+          : runOptions;
+      return await rawRun(command, args, commandOptions);
+    } catch (error) {
+      throw redactCommandError(error, secretValues);
+    }
+  };
   const remoteEnvironmentArgs = turboCacheEnvironmentNames.flatMap((name) => {
     const value =
       environment[name] ??
@@ -523,11 +546,26 @@ export function createDevelopmentContainerFixtureSession(options: {
   const close = async (): Promise<void> => {
     if (closed) return;
     closed = true;
+    const cleanupErrors: unknown[] = [];
+    const cleanupDevcontainerTempDirectory = async (): Promise<void> => {
+      if (devcontainerTempDirectory === undefined) return;
+      try {
+        await rm(devcontainerTempDirectory, { recursive: true, force: true });
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    };
     if (!upAttempted) {
+      await cleanupDevcontainerTempDirectory();
       releaseSession?.();
+      if (cleanupErrors.length > 0) {
+        throw new AggregateError(
+          cleanupErrors,
+          "Development Container Fixture cleanup failed",
+        );
+      }
       return;
     }
-    const cleanupErrors: unknown[] = [];
     const restoreUid = process.getuid?.();
     const restoreGid = process.getgid?.();
     if (upSucceeded && restoreUid !== undefined && restoreGid !== undefined) {
@@ -594,6 +632,7 @@ export function createDevelopmentContainerFixtureSession(options: {
         }
       }
     }
+    await cleanupDevcontainerTempDirectory();
     releaseSession?.();
     if (cleanupErrors.length > 0) {
       throw new AggregateError(
@@ -1012,7 +1051,11 @@ export function createFixtureEvidenceScheduler(
 function defaultCommandRunner(
   command: string,
   args: readonly string[],
-  options: { readonly cwd: string; readonly stdio?: "inherit" },
+  options: {
+    readonly cwd: string;
+    readonly stdio?: "inherit";
+    readonly env?: NodeJS.ProcessEnv;
+  },
 ): Promise<unknown> {
   return execa(command, [...args], options);
 }

@@ -36,6 +36,7 @@ type Command = {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
 };
 
 function fixtureIdLabel(projectDir: string): string {
@@ -361,6 +362,63 @@ describe("Development Container Fixture Executor", () => {
           (args.includes("prune") || args.includes(identityCache)),
       ),
     ).toBe(false);
+  });
+
+  it("isolates Dev Container CLI temporary directories per fixture session", async () => {
+    const projectDirs = [
+      path.resolve("/fixture/devcontainer-temp-a"),
+      path.resolve("/fixture/devcontainer-temp-b"),
+    ];
+    const calls: Command[] = [];
+    const sessions = projectDirs.map((projectDir) =>
+      createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        run: async (command, args, options) => {
+          calls.push({
+            command,
+            args,
+            cwd: options.cwd,
+            ...(options.env === undefined ? {} : { env: options.env }),
+          });
+          if (command === "docker" && args[0] === "ps") {
+            return { stdout: "" };
+          }
+          return {};
+        },
+      }),
+    );
+
+    await Promise.all(
+      sessions.map(
+        async (session, index) =>
+          await session.execute(
+            async (run) =>
+              await run("pnpm", ["run", "check"], {
+                cwd: projectDirs[index]!,
+              }),
+          ),
+      ),
+    );
+
+    const upTempDirectories = calls
+      .filter(
+        ({ command, args }) => command === "devcontainer" && args[0] === "up",
+      )
+      .map(({ env }) => env?.TMPDIR);
+
+    expect(upTempDirectories).toHaveLength(2);
+    expect(new Set(upTempDirectories)).toHaveLength(2);
+    expect(upTempDirectories).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          `template-devcontainer-${fixtureProjectIdentity(projectDirs[0]!)}-`,
+        ),
+        expect.stringContaining(
+          `template-devcontainer-${fixtureProjectIdentity(projectDirs[1]!)}-`,
+        ),
+      ]),
+    );
   });
 
   it("binds only dependency-download caches into the Development Container", async () => {
