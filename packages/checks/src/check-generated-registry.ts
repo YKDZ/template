@@ -63,6 +63,13 @@ type GeneratedScenarioSet =
   | "focused"
   | "deployment";
 
+const defaultRepositoryRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+);
+
 /** Source-only repository check API; intentionally absent from package exports. */
 type GeneratedScenario = {
   readonly id: string;
@@ -152,7 +159,10 @@ const fixtureEnvironment = {
   workspaceDirectory: "TEMPLATE_FIXTURE_WORKSPACE_DIR",
 } as const;
 
-const defaultFixtureWorkspaceDirectory = ".fixture-workspace";
+const defaultFixtureWorkspaceDirectory = path.join(
+  defaultRepositoryRoot,
+  ".fixture-workspace",
+);
 
 const fixtureTurboEnvironment = [
   ["TURBO_TEAM", "TEMPLATE_FIXTURE_TURBO_TEAM"],

@@ -363,6 +363,7 @@ export function createDevelopmentContainerFixtureSession(options: {
   let startup: Promise<void> | undefined;
   let reservation: Promise<void> | undefined;
   let upAttempted = false;
+  let upSucceeded = false;
   let closed = false;
   let releaseSession: (() => void) | undefined;
   let dependencyCacheOverridePath: string | undefined;
@@ -483,6 +484,7 @@ export function createDevelopmentContainerFixtureSession(options: {
         up,
       );
     }
+    upSucceeded = true;
     for (const probe of options.probes) {
       try {
         await exec(probe.command, probe.args ?? []);
@@ -526,6 +528,27 @@ export function createDevelopmentContainerFixtureSession(options: {
       return;
     }
     const cleanupErrors: unknown[] = [];
+    const restoreUid = process.getuid?.();
+    const restoreGid = process.getgid?.();
+    if (upSucceeded && restoreUid !== undefined && restoreGid !== undefined) {
+      try {
+        await run(
+          "devcontainer",
+          [
+            "exec",
+            ...workspaceArgs,
+            ...identityArgs,
+            "chown",
+            "-R",
+            `${restoreUid}:${restoreGid}`,
+            ".",
+          ],
+          { cwd: options.projectDir },
+        );
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
     try {
       const result = await run(
         "docker",

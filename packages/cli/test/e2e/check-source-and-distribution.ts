@@ -17,6 +17,11 @@ const workspace = await mkdtemp(
 const repositoryRoot = path.join(workspace, "repository");
 const ignoredTopLevelPaths = new Set([
   ".git",
+  ".fixture-evidence",
+  ".fixture-evidence-activity",
+  ".fixture-native-cache",
+  ".fixture-workspace",
+  ".pnpm-store",
   ".scratch",
   ".turbo",
   "node_modules",

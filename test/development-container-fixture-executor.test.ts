@@ -296,6 +296,21 @@ describe("Development Container Fixture Executor", () => {
         cwd: projectDir,
       },
       {
+        command: "devcontainer",
+        args: [
+          "exec",
+          "--workspace-folder",
+          projectDir,
+          "--id-label",
+          idLabel,
+          "chown",
+          "-R",
+          `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+          ".",
+        ],
+        cwd: projectDir,
+      },
+      {
         command: "docker",
         args: ["ps", "-aq", "--filter", `label=${idLabel}`],
         cwd: projectDir,

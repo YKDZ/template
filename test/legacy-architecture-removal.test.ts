@@ -325,9 +325,12 @@ describe("Legacy Architecture Removal Check", () => {
         mkdir(path.join(root, ".fixture-evidence/activity"), {
           recursive: true,
         }),
-        mkdir(path.join(root, ".fixture-workspace/template-generated-check-x"), {
-          recursive: true,
-        }),
+        mkdir(
+          path.join(root, ".fixture-workspace/template-generated-check-x"),
+          {
+            recursive: true,
+          },
+        ),
       ]);
       await Promise.all([
         writeFile(
