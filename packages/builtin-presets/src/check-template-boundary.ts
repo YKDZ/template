@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 import {
   checkTemplateSourceBoundary,
   checkTemplateSourceContexts,
@@ -12,11 +13,24 @@ import { deriveVerificationPlans } from "./registry-checks.ts";
 
 /** Checks every real registry initialization and Package Addition plan. */
 export async function checkBuiltInPresetTemplateBoundary(): Promise<void> {
+  const verificationPlans = deriveVerificationPlans();
   const result = await checkTemplateSourceBoundary({
     templateSourceContexts: await checkTemplateSourceContexts([
       ...builtInPresetTemplateSourceContexts(),
     ]),
-    projections: deriveVerificationPlans().flatMap(({ definition, plan }) => {
+    protectedWorkflowPlans: verificationPlans.map(
+      ({ definition, diagnosticArtifactDeclarations, plan }) => ({
+        name: `${definition.metadata.name}:${plan.planningContribution}`,
+        definitionName: definition.metadata.name,
+        planningContribution: plan.planningContribution,
+        sourceFilePath: plan.plannerSourceFile,
+        generatedPath: ".github/workflows/check.yml" as const,
+        blueprint: plan.blueprint,
+        diagnosticArtifactDeclarations,
+        operations: plan.operations,
+      }),
+    ),
+    projections: verificationPlans.flatMap(({ definition, plan }) => {
       const operationsByPlanner = new Map<
         string,
         GeneratedRepositoryPlan["operations"][number][]

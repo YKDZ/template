@@ -391,7 +391,22 @@ export function validatePlanDependencyCatalog(
 export type VerificationPlan = {
   readonly definition: BuiltInPresetDefinition;
   readonly plan: GeneratedRepositoryPlan;
+  /**
+   * Raw Package Contribution facts captured independently for the Template
+   * Boundary Check. They are intentionally not part of a generated plan.
+   */
+  readonly diagnosticArtifactDeclarations: readonly unknown[];
 };
+
+function diagnosticArtifactDeclarations(
+  contributions: readonly {
+    readonly ciDiagnosticArtifacts?: readonly unknown[];
+  }[],
+): readonly unknown[] {
+  return contributions.flatMap(
+    (contribution) => contribution.ciDiagnosticArtifacts ?? [],
+  );
+}
 
 /**
  * The plan set consumed by source, dependency, boundary, and publication
@@ -412,14 +427,19 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
         definition: scenario.base,
         context,
       });
+      const initialContributions =
+        scenario.base.planInitializationContributions?.(context) ?? [
+          scenario.base.planInitialization(context),
+        ];
       const plans: VerificationPlan[] = [
-        { definition: scenario.base, plan: initialization },
+        {
+          definition: scenario.base,
+          plan: initialization,
+          diagnosticArtifactDeclarations:
+            diagnosticArtifactDeclarations(initialContributions),
+        },
       ];
       if (scenario.addition) {
-        const initialContributions =
-          scenario.base.planInitializationContributions?.(context) ?? [
-            scenario.base.planInitialization(context),
-          ];
         for (const contribution of initialContributions) {
           const manifestPath = path.join(
             context.targetDir,
@@ -444,14 +464,39 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
           mkdirSync(path.dirname(metadataFile), { recursive: true });
           writeFileSync(metadataFile, JSON.stringify(operation.value));
         }
+        const packageLeafName = `verification-${scenario.addition.metadata.name}`;
+        const packagePath = scenario.addition.defaultPackagePath?.({
+          context,
+          packageLeafName,
+        });
+        if (packagePath === undefined) {
+          throw new Error(
+            `Package Addition Definition ${scenario.addition.metadata.name} must own a default Package Path`,
+          );
+        }
+        if (scenario.addition.planPackageAddition === undefined) {
+          throw new Error(
+            `Package Addition Definition ${scenario.addition.metadata.name} must provide a Package Addition planner`,
+          );
+        }
+        const additionContribution = scenario.addition.planPackageAddition({
+          context,
+          packageLeafName,
+          packagePath,
+        });
         plans.push({
           definition: scenario.addition,
           plan: planGeneratedRepositoryPackageAddition({
             definition: scenario.addition,
             context,
             blueprint: initialization.blueprint,
-            packageLeafName: `verification-${scenario.addition.metadata.name}`,
+            packageLeafName,
+            packagePath,
           }),
+          diagnosticArtifactDeclarations: diagnosticArtifactDeclarations([
+            ...initialContributions,
+            additionContribution,
+          ]),
         });
       }
       return plans;

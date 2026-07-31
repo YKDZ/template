@@ -163,6 +163,12 @@ function webContribution(context: GenerationContext): PackageContribution {
     }),
     operations,
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
+    ciDiagnosticArtifacts: [
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+    ],
     foundation: {
       ...packageFoundation(),
       developmentContainerToolLayers:

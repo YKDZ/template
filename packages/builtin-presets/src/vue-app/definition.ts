@@ -66,6 +66,12 @@ function appContribution(options: {
     }),
     operations,
     environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
+    ciDiagnosticArtifacts: [
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+    ],
     foundation: {
       toolchains: {},
       editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],

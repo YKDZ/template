@@ -1,3 +1,7 @@
+import {
+  assertCiDiagnosticArtifactDeclaration,
+  type CiDiagnosticArtifactDeclaration,
+} from "./ci-diagnostic-artifact.ts";
 import type { DevelopmentContainerToolLayer } from "./development-container-tool-layer.ts";
 import type { EditorCustomizationCapability } from "./editor-customization.ts";
 import type {
@@ -58,6 +62,8 @@ export type PackageContribution = {
   /** Typed requirements consumed by the Foundation for coordinated root outputs. */
   readonly foundation: FoundationContribution;
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
+  /** Closed native CI evidence owned by this Package Boundary. */
+  readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
   /** Requirements prepared only by a focused deployment entrypoint. */
   readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
 };
@@ -90,6 +96,14 @@ export function assertPackageContribution(
     throw new Error(
       `${owner}${rule}; ${contribution.definition.path} attempted ${target}`,
     );
+  }
+  for (const artifact of contribution.ciDiagnosticArtifacts ?? []) {
+    const declaration = assertCiDiagnosticArtifactDeclaration(artifact);
+    if (declaration.owner.path !== contribution.definition.path) {
+      throw new Error(
+        `CI Diagnostic Artifact owner must match its Package Contribution: ${contribution.definition.path}`,
+      );
+    }
   }
   return contribution;
 }

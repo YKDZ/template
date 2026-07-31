@@ -14,6 +14,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { execa } from "execa";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 
@@ -312,6 +313,319 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   expect(retiredBuild.exitCode).not.toBe(0);
 }
 
+function configProperty(
+  object: ts.ObjectLiteralExpression,
+  name: string,
+): ts.Expression | undefined {
+  return object.properties.flatMap((member) =>
+    ts.isPropertyAssignment(member) &&
+    ts.isIdentifier(member.name) &&
+    member.name.text === name
+      ? [member.initializer]
+      : [],
+  )[0];
+}
+
+async function expectPackedPlaywrightConfig(
+  projectDir: string,
+  requiresDiagnostics: boolean,
+): Promise<void> {
+  const config = (await generatedTextFiles(projectDir)).find(({ path: file }) =>
+    file.endsWith("playwright.config.ts"),
+  );
+  expect(config === undefined).toBe(!requiresDiagnostics);
+  if (config === undefined) return;
+
+  const source = ts.createSourceFile(
+    config.path,
+    config.source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let options: ts.ObjectLiteralExpression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "defineConfig" &&
+      node.arguments[0] !== undefined &&
+      ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      options = node.arguments[0];
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  expect(options).toBeDefined();
+  if (options === undefined) return;
+  const loadedOptions = options as ts.ObjectLiteralExpression;
+  const use = configProperty(loadedOptions, "use");
+  const reporter = configProperty(loadedOptions, "reporter");
+  expect(use !== undefined && ts.isObjectLiteralExpression(use)).toBe(true);
+  expect(reporter !== undefined && ts.isArrayLiteralExpression(reporter)).toBe(
+    true,
+  );
+  if (
+    use === undefined ||
+    !ts.isObjectLiteralExpression(use) ||
+    reporter === undefined ||
+    !ts.isArrayLiteralExpression(reporter)
+  ) {
+    return;
+  }
+  const trace = configProperty(use, "trace");
+  expect(trace !== undefined && ts.isStringLiteral(trace) && trace.text).toBe(
+    "retain-on-failure",
+  );
+  expect(
+    reporter.elements.map((entry) =>
+      ts.isArrayLiteralExpression(entry) &&
+      entry.elements[0] !== undefined &&
+      ts.isStringLiteral(entry.elements[0])
+        ? entry.elements[0].text
+        : undefined,
+    ),
+  ).toEqual(["list", "html"]);
+  expect(configProperty(loadedOptions, "retries")).toBeUndefined();
+  expect(configProperty(use, "video")).toBeUndefined();
+}
+
+async function expectPackedHardenedRootCheckWorkflow(
+  projectDir: string,
+  requiresDiagnostics?: boolean,
+): Promise<void> {
+  const source = await readFile(
+    path.join(projectDir, ".github/workflows/check.yml"),
+    "utf8",
+  );
+  const workflow = parseYaml(source) as {
+    readonly name: string;
+    readonly on: {
+      readonly pull_request: null;
+      readonly push: { readonly branches: readonly string[] };
+    };
+    readonly permissions: { readonly contents: string };
+    readonly concurrency: {
+      readonly group: string;
+      readonly "cancel-in-progress": boolean;
+    };
+    readonly jobs: {
+      readonly check: {
+        readonly name: string;
+        readonly "runs-on": string;
+        readonly "timeout-minutes": number | string;
+        readonly permissions?: unknown;
+        readonly strategy?: {
+          readonly "fail-fast": boolean;
+          readonly matrix: {
+            readonly include: readonly {
+              readonly capability: string;
+              readonly job_name: string;
+              readonly task_entrypoint: string;
+              readonly timeout_minutes: number;
+              readonly requires_docker: boolean;
+            }[];
+          };
+        };
+        readonly steps: readonly {
+          readonly name?: string;
+          readonly uses?: string;
+          readonly run?: string;
+          readonly if?: string;
+          readonly with?: Record<string, unknown>;
+        }[];
+      };
+    };
+  };
+  const rootCheck = workflow.jobs.check;
+  expect(workflow.name).toBe("Check");
+  expect(workflow.on).toEqual({
+    pull_request: null,
+    push: { branches: ["main"] },
+  });
+  expect(workflow.permissions).toEqual({ contents: "read" });
+  expect(workflow.concurrency).toEqual({
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": true,
+  });
+  expect(Object.keys(workflow.jobs)).toEqual(["check"]);
+  expect(rootCheck.permissions).toBeUndefined();
+
+  const deploymentWorkflow = rootCheck.strategy !== undefined;
+  expect(rootCheck).toMatchObject(
+    deploymentWorkflow
+      ? {
+          name: "${{ matrix.job_name }}",
+          "runs-on": "ubuntu-latest",
+          "timeout-minutes": "${{ matrix.timeout_minutes }}",
+        }
+      : {
+          name: "Root Check",
+          "runs-on": "ubuntu-latest",
+          "timeout-minutes": 30,
+        },
+  );
+  expect(Object.keys(rootCheck).toSorted()).toEqual(
+    deploymentWorkflow
+      ? ["name", "runs-on", "steps", "strategy", "timeout-minutes"]
+      : ["name", "runs-on", "steps", "timeout-minutes"],
+  );
+  if (deploymentWorkflow) {
+    expect(rootCheck.strategy).toEqual({
+      "fail-fast": false,
+      matrix: {
+        include: [
+          {
+            capability: "root",
+            job_name: "Root Check",
+            task_entrypoint: "pnpm run check",
+            timeout_minutes: 30,
+            requires_docker: false,
+          },
+          {
+            capability: "deployment",
+            job_name: "Deployment Check",
+            task_entrypoint: "pnpm run check:deployment",
+            timeout_minutes: 45,
+            requires_docker: true,
+          },
+        ],
+      },
+    });
+  }
+  const expectedSteps = [
+    {
+      name: "Checkout source",
+      uses: "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+      with: { "persist-credentials": false, "fetch-depth": 1 },
+    },
+    {
+      name: "Set up Node.js",
+      uses: "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
+      with: { "node-version-file": "package.json" },
+    },
+    {
+      name: "Set up pnpm",
+      uses: "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+      with: { cache: true },
+    },
+    ...(deploymentWorkflow
+      ? [
+          {
+            name: "Set up Docker Buildx",
+            uses: "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            if: "matrix.requires_docker",
+          },
+        ]
+      : []),
+    { name: "Install dependencies", run: "pnpm install --frozen-lockfile" },
+    {
+      name: deploymentWorkflow ? "Run selected Check" : "Run Root Check",
+      run: deploymentWorkflow
+        ? "${{ matrix.task_entrypoint }}"
+        : "pnpm run check",
+    },
+  ];
+  expect(rootCheck.steps.slice(0, expectedSteps.length)).toEqual(expectedSteps);
+  const stage = rootCheck.steps[expectedSteps.length];
+  const diagnostic = rootCheck.steps[expectedSteps.length + 1];
+  if (requiresDiagnostics !== undefined) {
+    expect(diagnostic !== undefined).toBe(requiresDiagnostics);
+  }
+  if (diagnostic !== undefined) {
+    expect(stage).toMatchObject({
+      name: "Stage Root Check diagnostics",
+      if: deploymentWorkflow
+        ? "failure() && matrix.capability == 'root'"
+        : "failure()",
+      run: expect.stringContaining(".template-ci-diagnostics"),
+    });
+    expect(diagnostic).toMatchObject({
+      name: "Upload Root Check diagnostics",
+      if: deploymentWorkflow
+        ? "failure() && matrix.capability == 'root'"
+        : "failure()",
+      uses: "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+      with: {
+        name: "root-check-diagnostics",
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+      },
+    });
+    expect(diagnostic?.with?.path).toBe(".template-ci-diagnostics");
+  }
+
+  const actionVersions = [
+    ["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"],
+    ["actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444", "v5"],
+    ["pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320", "v4.4.0"],
+    ...(deploymentWorkflow
+      ? [
+          [
+            "docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+            "v3",
+          ],
+        ]
+      : []),
+    ...(diagnostic === undefined
+      ? []
+      : [
+          [
+            "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+            "v4",
+          ],
+        ]),
+  ];
+  for (const [action, version] of actionVersions) {
+    expect(source).toContain(`uses: ${action} # ${version}`);
+  }
+}
+
+function initializationRequiresDiagnostics(definitionName: string): boolean {
+  return (
+    initializationDiagnosticPlan(definitionName).ciDiagnosticArtifacts.length >
+    0
+  );
+}
+
+function initializationDiagnosticPlan(definitionName: string) {
+  const definition = builtInPresetRegistry.require(definitionName);
+  return planGeneratedRepositoryInitialization({
+    definition,
+    context: createGenerationContext({
+      targetDir: path.join(
+        "generated-repository",
+        "packed-diagnostic-expectation",
+        definitionName,
+      ),
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    }),
+  });
+}
+
+function archiveAdditionRequiresDiagnostics(definitionName: string): boolean {
+  const definition = builtInPresetRegistry.require(definitionName);
+  const initialPlan = initializationDiagnosticPlan(definitionName);
+  if (definition.planPackageAddition === undefined) {
+    return initialPlan.ciDiagnosticArtifacts.length > 0;
+  }
+  return (
+    initialPlan.ciDiagnosticArtifacts.length > 0 ||
+    (definition.planPackageAddition({
+      context: createGenerationContext({
+        targetDir: path.join(
+          "generated-repository",
+          "packed-diagnostic-addition-expectation",
+          definitionName,
+        ),
+        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      }),
+      packageLeafName: "archive-addition",
+      packagePath: "packages/archive-addition",
+    }).ciDiagnosticArtifacts?.length ?? 0) > 0
+  );
+}
+
 describe("packed public CLI consumer", () => {
   it("runs the archive alone: import, help, every initialization, and package addition", async () => {
     const workspace = await mkdtemp(
@@ -528,6 +842,22 @@ describe("packed public CLI consumer", () => {
         await expectNativeTaskModel(
           path.join(consumer, "generated", definition.name),
         );
+        const generatedProject = path.join(
+          consumer,
+          "generated",
+          definition.name,
+        );
+        const requiresDiagnostics = initializationRequiresDiagnostics(
+          definition.name,
+        );
+        await expectPackedHardenedRootCheckWorkflow(
+          generatedProject,
+          requiresDiagnostics,
+        );
+        await expectPackedPlaywrightConfig(
+          generatedProject,
+          requiresDiagnostics,
+        );
       }
       const expectedAddableDefinitions = builtInPresetRegistry
         .all()
@@ -561,6 +891,22 @@ describe("packed public CLI consumer", () => {
           completedAdditions.push(candidate.name);
           await expectNativeTaskModel(
             path.join(consumer, "generated", candidate.name),
+          );
+          const generatedProject = path.join(
+            consumer,
+            "generated",
+            candidate.name,
+          );
+          const requiresDiagnostics = archiveAdditionRequiresDiagnostics(
+            candidate.name,
+          );
+          await expectPackedHardenedRootCheckWorkflow(
+            generatedProject,
+            requiresDiagnostics,
+          );
+          await expectPackedPlaywrightConfig(
+            generatedProject,
+            requiresDiagnostics,
           );
         }
       }
@@ -813,6 +1159,7 @@ describe("packed public CLI consumer", () => {
 
       await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
       await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });
+      await expectPackedHardenedRootCheckWorkflow(rustAdditionTarget);
 
       const cliAdditionDefinition =
         addableDefinitionWithPackageRole("cli-tool");
@@ -869,6 +1216,7 @@ describe("packed public CLI consumer", () => {
         );
       };
       await addLinkedCli();
+      await expectPackedHardenedRootCheckWorkflow(cliTarget);
       const linkedProviderManifest = JSON.parse(
         await readFile(
           path.join(cliTarget, "packages/default-command/package.json"),
@@ -896,6 +1244,7 @@ describe("packed public CLI consumer", () => {
       ).resolves.toBe("workspace:*");
       const linkedCliSnapshot = await workspaceByteSnapshot(cliTarget);
       await addLinkedCli();
+      await expectPackedHardenedRootCheckWorkflow(cliTarget);
       expect(await workspaceByteSnapshot(cliTarget)).toEqual(linkedCliSnapshot);
 
       const previewBaseDefinition =

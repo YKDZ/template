@@ -3,6 +3,8 @@ export type CliJourneyMode = "source" | "distribution" | "packed";
 export type CliJourneyCommand = {
   readonly name: string;
   readonly args: readonly string[];
+  /** Runs a prepared consumer command instead of the CLI under journey test. */
+  readonly executable?: string | undefined;
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
   prepare?(context: CliJourneyContext): Promise<void>;

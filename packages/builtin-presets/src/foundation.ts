@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { composeCiDiagnosticArtifacts } from "#template-core/ci-diagnostic-artifact";
+import type { CiDiagnosticArtifactDeclaration } from "#template-core/ci-diagnostic-artifact";
 import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
@@ -51,6 +53,7 @@ import {
 } from "#template-core/project-blueprint-v2";
 import type { DependencyMaintenancePolicy } from "#template-core/project-github";
 import {
+  projectCheckWorkflowTemplateSource,
   projectCheckWorkflowTemplateReplacements,
   projectDependabotTemplateReplacements,
 } from "#template-core/project-github";
@@ -129,6 +132,7 @@ export type GeneratedRepositoryPlan = {
   };
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
+  readonly ciDiagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
   /** Structured manifests used to derive the generated Dependency Catalog. */
   readonly manifests: readonly Readonly<Record<string, unknown>>[];
   readonly dependencyCatalog: Readonly<Record<string, string>>;
@@ -1171,16 +1175,38 @@ function foundationPlan(options: {
       typeof (scripts as Record<string, unknown>).deployment === "string"
     );
   });
-  const packagePaths = contributions.map(
+  const contributionPackagePaths = contributions.map(
     (contribution) => contribution.definition.path,
   );
-  if (new Set(packagePaths).size !== packagePaths.length)
+  if (
+    new Set(contributionPackagePaths).size !== contributionPackagePaths.length
+  )
     throw new Error("Package Contributions must have unique Package Paths");
+  const blueprintPackagePaths = options.blueprint.packages.map(
+    (definition) => definition.path,
+  );
+  if (
+    contributionPackagePaths.length !== blueprintPackagePaths.length ||
+    contributionPackagePaths.some(
+      (packagePath) => !blueprintPackagePaths.includes(packagePath),
+    )
+  ) {
+    throw new Error(
+      "Package Contributions must exactly match Project Blueprint Package Paths",
+    );
+  }
   const packageNames = contributions.map(
     (contribution) => contribution.definition.name,
   );
   if (new Set(packageNames).size !== packageNames.length)
     throw new Error("Package Contributions must have unique package names");
+  const ciDiagnosticArtifactDeclarations = contributions.flatMap(
+    (contribution) => contribution.ciDiagnosticArtifacts ?? [],
+  );
+  const ciDiagnosticArtifacts = composeCiDiagnosticArtifacts({
+    packagePaths: blueprintPackagePaths,
+    declarations: ciDiagnosticArtifactDeclarations,
+  });
   assertCompatibleRustToolchainFacts(contributions);
   const contributedToolLayers = contributions.flatMap(
     (contribution) =>
@@ -1292,16 +1318,30 @@ function foundationPlan(options: {
             ].join("\n"),
     },
   };
-  const workflowOperation: RenderOperation = {
-    kind: "writeTextTemplate",
-    source: templateSources.foundation,
-    from: ".github/workflows/check.dynamic.template",
-    to: ".github/workflows/check.yml",
-    replacements: projectCheckWorkflowTemplateReplacements({
-      deploymentEnvironmentNeeds,
-      hasDeploymentTask,
-    }),
-  };
+  const workflowTemplateSource = projectCheckWorkflowTemplateSource({
+    packagePaths: blueprintPackagePaths,
+    deploymentEnvironmentNeeds,
+    hasDeploymentTask,
+    diagnosticArtifacts: ciDiagnosticArtifacts,
+  });
+  const workflowOperation: RenderOperation =
+    ciDiagnosticArtifacts.length === 0
+      ? {
+          kind: "copyFile",
+          source: templateSources.foundation,
+          from: workflowTemplateSource,
+          to: ".github/workflows/check.yml",
+        }
+      : {
+          kind: "writeTextTemplate",
+          source: templateSources.foundation,
+          from: workflowTemplateSource,
+          to: ".github/workflows/check.yml",
+          replacements: projectCheckWorkflowTemplateReplacements({
+            packagePaths: blueprintPackagePaths,
+            diagnosticArtifacts: ciDiagnosticArtifacts,
+          }),
+        };
   const workflowOperations: RenderOperation[] = [
     workflowOperation,
     {
@@ -1530,6 +1570,7 @@ function foundationPlan(options: {
     },
     environmentNeeds,
     deploymentEnvironmentNeeds,
+    ciDiagnosticArtifacts,
     manifests: [...contributions.map((item) => item.manifest), rootManifest],
     dependencyCatalog,
     dependencyMaintenancePolicy,

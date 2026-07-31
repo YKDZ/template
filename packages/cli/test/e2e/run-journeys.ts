@@ -104,8 +104,10 @@ async function runCommand(options: {
   const target = invocation(options.mode, options.packedBin);
   return await new Promise((resolve, reject) => {
     const child = spawn(
-      target.executable,
-      [...target.prefix, ...options.command.args],
+      options.command.executable ?? target.executable,
+      options.command.executable === undefined
+        ? [...target.prefix, ...options.command.args]
+        : options.command.args,
       {
         cwd: options.command.cwd ?? options.cwd,
         env: { ...process.env, ...options.command.env },

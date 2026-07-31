@@ -20,8 +20,10 @@ export default defineConfig({
   testDir: "./test/e2e",
   use: {
     baseURL: webBaseUrl,
+    trace: "retain-on-failure",
     ...devices["Desktop Chrome"],
   },
+  reporter: [["list"], ["html"]],
   webServer: [
     {
       command: `PORT=${apiPort} pnpm --dir ../api run start`,

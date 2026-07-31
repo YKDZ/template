@@ -3,6 +3,7 @@ import path from "node:path";
 
 import ts from "typescript";
 
+import type { ProjectBlueprintV2 } from "./project-blueprint-v2.ts";
 import { resolveTemplateSource, type RenderOperation } from "./renderer.ts";
 
 export type TemplateBoundaryViolation = {
@@ -44,6 +45,19 @@ export type CheckTemplateSourceBoundaryOptions = {
   readonly projections: readonly TemplateBoundaryCheckProjection[];
   readonly templateSourceContexts?: readonly TemplateSourceContext[];
   readonly manifestReferencedSourceFiles?: readonly string[];
+  /** Complete Built-in plans whose Foundation workflow is a protected output. */
+  readonly protectedWorkflowPlans?: readonly {
+    readonly name: string;
+    readonly sourceFilePath: string;
+    readonly definitionName?: string;
+    readonly planningContribution?: string;
+    readonly generatedPath: ".github/workflows/check.yml";
+    /** The original Blueprint, before Foundation composes workflow facts. */
+    readonly blueprint: ProjectBlueprintV2;
+    /** Raw Package Contribution declarations, not the composed plan field. */
+    readonly diagnosticArtifactDeclarations: readonly unknown[];
+    readonly operations: readonly RenderOperation[];
+  }[];
 };
 
 type InlineProtectedOperation = Extract<
@@ -963,15 +977,244 @@ function pushSourceBackedOperationViolations(options: {
   }
 }
 
+const workflowTemplateVariants = new Map<
+  string,
+  {
+    readonly operationKind: "copyFile" | "writeTextTemplate";
+    readonly replacementKeys: readonly string[];
+  }
+>([
+  [
+    ".github/workflows/check.yml",
+    { operationKind: "copyFile", replacementKeys: [] },
+  ],
+  [
+    ".github/workflows/check-deployment.yml",
+    { operationKind: "copyFile", replacementKeys: [] },
+  ],
+  [
+    ".github/workflows/check-diagnostics.yml",
+    {
+      operationKind: "writeTextTemplate",
+      replacementKeys: ["DIAGNOSTIC_OWNER_PATHS"],
+    },
+  ],
+  [
+    ".github/workflows/check-deployment-diagnostics.yml",
+    {
+      operationKind: "writeTextTemplate",
+      replacementKeys: ["DIAGNOSTIC_OWNER_PATHS"],
+    },
+  ],
+]);
+
+function hasExactReplacementKeys(
+  replacements: Record<string, string>,
+  expectedKeys: readonly string[],
+): boolean {
+  const keys = Object.keys(replacements).toSorted();
+  const expected = [...expectedKeys].toSorted();
+
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index])
+  );
+}
+
+const reservedWorkspaceCollections = new Set([
+  ".git",
+  ".github",
+  ".devcontainer",
+  ".template",
+  "node_modules",
+  "dist",
+  "target",
+]);
+
+function isSafePackageBoundaryPath(value: string): boolean {
+  return (
+    /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u.test(value) &&
+    !reservedWorkspaceCollections.has(value.split("/", 1)[0]!)
+  );
+}
+
+/**
+ * Independent oracle for the Foundation workflow's limited substitution.
+ * It deliberately consumes raw Blueprint and Package Contribution facts rather
+ * than the production CI artifact composer or its composed plan output.
+ */
+function expectedDiagnosticOwnerPaths(options: {
+  readonly blueprint: ProjectBlueprintV2;
+  readonly diagnosticArtifactDeclarations: readonly unknown[];
+}): { readonly valid: boolean; readonly value: string } {
+  const blueprintPackagePaths = options.blueprint.packages.map(
+    (packageDefinition) => packageDefinition.path,
+  );
+  if (!blueprintPackagePaths.every(isSafePackageBoundaryPath)) {
+    return { valid: false, value: "" };
+  }
+
+  const blueprintOwners = new Set(blueprintPackagePaths);
+  const owners = new Set<string>();
+  for (const declaration of options.diagnosticArtifactDeclarations) {
+    if (
+      !isRecord(declaration) ||
+      !hasExactKeys(declaration, ["kind", "owner"])
+    ) {
+      return { valid: false, value: "" };
+    }
+    if (declaration.kind !== "playwright" || !isRecord(declaration.owner)) {
+      return { valid: false, value: "" };
+    }
+    if (!hasExactKeys(declaration.owner, ["kind", "path"])) {
+      return { valid: false, value: "" };
+    }
+    const ownerPath = declaration.owner.path;
+    if (
+      declaration.owner.kind !== "package-boundary" ||
+      typeof ownerPath !== "string" ||
+      !isSafePackageBoundaryPath(ownerPath) ||
+      !blueprintOwners.has(ownerPath)
+    ) {
+      return { valid: false, value: "" };
+    }
+    owners.add(ownerPath);
+  }
+
+  return {
+    valid: true,
+    value: [...owners].toSorted().join("\n            "),
+  };
+}
+
+function sourceFileForWorkflowOperation(options: {
+  readonly operation: RenderOperation | undefined;
+  readonly fallback: string;
+}): string {
+  return options.operation?.provenance?.plannerSourceFile ?? options.fallback;
+}
+
+function findWorkflowOperationOwners(
+  sourceFile: ts.SourceFile,
+  operation: RenderOperation | undefined,
+): readonly string[] {
+  if (operation === undefined) return ["<unknown>"];
+  const targetPath = operationTarget(operation);
+  if (targetPath === undefined) return ["<unknown>"];
+  const expectedTargetPath = targetPath;
+  const operationKind = operation.kind;
+  const owners = new Set<string>();
+
+  function visit(node: ts.Node): void {
+    if (ts.isObjectLiteralExpression(node)) {
+      if (
+        propertyStringValue(node, "kind") === operationKind &&
+        propertyPathMatches(node, "to", expectedTargetPath)
+      ) {
+        owners.add(owningFunctionName(node));
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return owners.size === 0 ? ["<unknown>"] : [...owners];
+}
+
+async function protectedWorkflowProjectionViolations(
+  plans: NonNullable<
+    CheckTemplateSourceBoundaryOptions["protectedWorkflowPlans"]
+  >,
+): Promise<readonly TemplateBoundaryViolation[]> {
+  const violations: TemplateBoundaryViolation[] = [];
+
+  for (const plan of plans) {
+    const matchingOperations = plan.operations.filter(
+      (operation) => operationTarget(operation) === plan.generatedPath,
+    );
+    const operation = matchingOperations[0];
+    const sourceFilePath = sourceFileForWorkflowOperation({
+      operation,
+      fallback: plan.sourceFilePath,
+    });
+    const sourceText = await readFile(sourceFilePath, "utf8");
+    const sourceFile = ts.createSourceFile(
+      sourceFilePath,
+      sourceText,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const expectedDiagnosticOwners = expectedDiagnosticOwnerPaths(plan);
+    const variant =
+      operation !== undefined &&
+      (operation.kind === "copyFile" || operation.kind === "writeTextTemplate")
+        ? workflowTemplateVariants.get(operation.from)
+        : undefined;
+    const replacementValid =
+      operation?.kind === "writeTextTemplate" &&
+      hasExactReplacementKeys(operation.replacements, [
+        "DIAGNOSTIC_OWNER_PATHS",
+      ]) &&
+      operation.replacements.DIAGNOSTIC_OWNER_PATHS ===
+        expectedDiagnosticOwners.value;
+    const sourceBackedExactlyOnce =
+      matchingOperations.length === 1 &&
+      operation !== undefined &&
+      (operation.kind === "copyFile" || operation.kind === "writeTextTemplate");
+    const diagnosticsExpected = expectedDiagnosticOwners.value !== "";
+    const operationValid =
+      expectedDiagnosticOwners.valid &&
+      sourceBackedExactlyOnce &&
+      variant !== undefined &&
+      operation?.kind === variant.operationKind &&
+      (operation.kind === "copyFile"
+        ? variant.replacementKeys.length === 0 && !diagnosticsExpected
+        : variant.replacementKeys.length === 1 &&
+          diagnosticsExpected &&
+          replacementValid);
+
+    if (operationValid) continue;
+
+    for (const owningFunction of findWorkflowOperationOwners(
+      sourceFile,
+      operation,
+    )) {
+      violations.push({
+        preset: plan.name,
+        generatedPath: plan.generatedPath,
+        owningFunction,
+        operationKind: operation?.kind ?? "writeTextTemplate",
+        sourceFilePath,
+        ...(plan.definitionName === undefined
+          ? {}
+          : { definitionName: plan.definitionName }),
+        ...(plan.planningContribution === undefined
+          ? {}
+          : { planningContribution: plan.planningContribution }),
+        ownershipRule:
+          "Foundation workflow projections require exactly one source-backed template operation with closed diagnostic owner facts",
+      });
+    }
+  }
+
+  return violations;
+}
+
 export async function checkTemplateSourceBoundary({
   projections,
   templateSourceContexts = [],
   manifestReferencedSourceFiles = [],
+  protectedWorkflowPlans = [],
 }: CheckTemplateSourceBoundaryOptions): Promise<TemplateBoundaryCheckResult> {
   const manifestReferencedSourceFileSet = new Set(
     manifestReferencedSourceFiles.map((sourceFile) => path.resolve(sourceFile)),
   );
   const violations: TemplateBoundaryViolation[] = [];
+
+  violations.push(
+    ...(await protectedWorkflowProjectionViolations(protectedWorkflowPlans)),
+  );
 
   for (const projection of projections) {
     const sourceText = await readFile(projection.sourceFilePath, "utf8");

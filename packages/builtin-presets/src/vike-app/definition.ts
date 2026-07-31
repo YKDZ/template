@@ -355,6 +355,7 @@ function webContribution(context: GenerationContext): PackageContribution {
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
       shellCheckEnvironmentNeed(owner),
     ],
+    ciDiagnosticArtifacts: [{ kind: "playwright", owner }],
     deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
     foundation: {
       ...foundation(),

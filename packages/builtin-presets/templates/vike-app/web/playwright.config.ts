@@ -60,6 +60,7 @@ export default defineConfig({
     baseURL: previewUrl,
     trace: "retain-on-failure",
   },
+  reporter: [["list"], ["html"]],
   ...(externalServiceUrl
     ? {}
     : {

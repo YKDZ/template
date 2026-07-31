@@ -464,9 +464,21 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       path.join(targetDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    expect(checkWorkflow).toContain("check: [root, deployment]");
-    expect(checkWorkflow).toContain("uses: docker/setup-buildx-action@v3");
-    expect(checkWorkflow).toContain("if: matrix.check == 'deployment'");
+    expect(checkWorkflow).toContain("capability: deployment");
+    expect(checkWorkflow).toContain("job_name: Deployment Check");
+    expect(checkWorkflow).toContain("timeout_minutes: 45");
+    expect(checkWorkflow).toContain(
+      "uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3",
+    );
+    expect(checkWorkflow).toContain("if: matrix.requires_docker");
+    expect(checkWorkflow).toContain("name: Stage Root Check diagnostics");
+    expect(checkWorkflow).toContain(
+      "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+    );
+    expect(checkWorkflow).toContain(
+      "for diagnostic_directory in test-results playwright-report; do",
+    );
+    expect(checkWorkflow).toContain("path: .template-ci-diagnostics");
     expect(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
     ).toMatchObject({

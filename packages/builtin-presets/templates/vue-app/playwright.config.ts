@@ -17,8 +17,9 @@ export default defineConfig({
   testDir: "./test/e2e",
   use: {
     baseURL: previewUrl,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
+  reporter: [["list"], ["html"]],
   webServer: {
     command: `pnpm run preview --host 127.0.0.1 --port ${previewPort}`,
     reuseExistingServer: !process.env.CI,

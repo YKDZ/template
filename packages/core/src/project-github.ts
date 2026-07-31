@@ -1,18 +1,59 @@
+import {
+  composeCiDiagnosticArtifacts,
+  type CiDiagnosticArtifactDeclaration,
+} from "./ci-diagnostic-artifact.ts";
 import type { DeploymentEnvironmentNeed } from "./module-graph.ts";
 
 export type CiCapability = {
   readonly workflowName: "Check";
   readonly jobName: "check";
+  readonly jobDisplayName: "Root Check";
   readonly runner: "ubuntu-latest";
+  readonly timeoutMinutes: 30;
 };
 
 export type CiEnvironmentPreparation = {
   readonly nodeFromPackageMetadata: boolean;
+  readonly packageManagerFromPackageMetadata: boolean;
+  readonly pnpmStoreCache: boolean;
 };
 
 export type PnpmTaskLayer = {
-  readonly installCommand: "pnpm install";
+  readonly installCommand: "pnpm install --frozen-lockfile";
   readonly checkCommand: "pnpm run check";
+};
+
+export type CiCheckMatrixEntry = {
+  readonly capability: "root" | "deployment";
+  readonly jobDisplayName: "Root Check" | "Deployment Check";
+  readonly taskEntrypoint: "pnpm run check" | "pnpm run check:deployment";
+  readonly timeoutMinutes: 30 | 45;
+  readonly requiresDocker: boolean;
+};
+
+export type ProjectCheckWorkflowPlan = {
+  readonly workflowName: "Check";
+  readonly triggers: {
+    readonly pullRequest: true;
+    readonly pushBranches: readonly ["main"];
+  };
+  readonly permissions: { readonly contents: "read" };
+  readonly concurrency: {
+    readonly group: "${{ github.workflow }}-${{ github.ref }}";
+    readonly cancelInProgress: true;
+  };
+  readonly rootCheck: CiCapability;
+  readonly matrix:
+    | {
+        readonly failFast: false;
+        readonly include: readonly CiCheckMatrixEntry[];
+      }
+    | undefined;
+  readonly environmentPreparation: CiEnvironmentPreparation;
+  readonly taskLayer: PnpmTaskLayer;
+  /** Actual Package Boundaries allowed to own retained native diagnostics. */
+  readonly packagePaths: readonly string[];
+  readonly diagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
 };
 
 export type DependencyEcosystem =
@@ -35,7 +76,13 @@ export type DependencyMaintenancePolicy = {
   readonly interval: "weekly";
 };
 
-type ProjectCheckWorkflowOptions = {
+export type ProjectCheckWorkflowDiagnosticOptions = {
+  /** Package Paths from the real Project Blueprint or Package Contributions. */
+  readonly packagePaths: readonly string[];
+  readonly diagnosticArtifacts?: readonly unknown[] | undefined;
+};
+
+type ProjectCheckWorkflowOptions = ProjectCheckWorkflowDiagnosticOptions & {
   readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
   readonly hasDeploymentTask?: boolean | undefined;
   readonly capability?: CiCapability | undefined;
@@ -45,23 +92,38 @@ type ProjectCheckWorkflowOptions = {
   readonly taskLayer?: PnpmTaskLayer | undefined;
 };
 
+function validatedDiagnosticArtifacts(options: {
+  readonly packagePaths: readonly string[];
+  readonly artifacts: readonly unknown[];
+}): readonly CiDiagnosticArtifactDeclaration[] {
+  return composeCiDiagnosticArtifacts({
+    packagePaths: options.packagePaths,
+    declarations: options.artifacts,
+  });
+}
+
 const defaultCiCapability: CiCapability = {
   workflowName: "Check",
   jobName: "check",
+  jobDisplayName: "Root Check",
   runner: "ubuntu-latest",
+  timeoutMinutes: 30,
 };
 
 const pnpmTaskLayer: PnpmTaskLayer = {
-  installCommand: "pnpm install",
+  installCommand: "pnpm install --frozen-lockfile",
   checkCommand: "pnpm run check",
 };
 
-export function projectCheckWorkflow(
+/** Capability facts for the Foundation-owned GitHub Actions Template Source. */
+export function projectCheckWorkflowPlan(
   options: ProjectCheckWorkflowOptions,
-): string {
+): ProjectCheckWorkflowPlan {
   const capability = options.capability ?? defaultCiCapability;
   const environmentPreparation: CiEnvironmentPreparation = {
     nodeFromPackageMetadata: true,
+    packageManagerFromPackageMetadata: true,
+    pnpmStoreCache: true,
     ...options.environmentPreparation,
   };
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
@@ -69,80 +131,97 @@ export function projectCheckWorkflow(
   const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
     (need) => need.kind === "docker-engine",
   );
-  const lines = [
-    `name: ${capability.workflowName}`,
-    "",
-    "on:",
-    "  pull_request:",
-    "  push:",
-    "    branches:",
-    "      - main",
-    "",
-    "jobs:",
-    `  ${capability.jobName}:`,
-    `    runs-on: ${capability.runner}`,
-    ...(hasDeploymentTask
-      ? ["    strategy:", "      matrix:", "        check: [root, deployment]"]
-      : []),
-    "    steps:",
-    "      - uses: actions/checkout@v7",
-  ];
-
-  if (environmentPreparation.nodeFromPackageMetadata) {
-    lines.push(
-      "      - uses: actions/setup-node@v7",
-      "        with:",
-      "          node-version-file: package.json",
-      "      - run: corepack enable",
-    );
+  if (hasDeploymentTask && !needsDocker) {
+    throw new Error("Deployment Check requires a Docker environment need");
   }
-
-  if (hasDeploymentTask && needsDocker) {
-    lines.push(
-      "      - uses: docker/setup-buildx-action@v3",
-      "        if: matrix.check == 'deployment'",
-    );
-  }
-
-  lines.push(`      - run: ${taskLayer.installCommand}`);
-  lines.push(`      - run: ${taskLayer.checkCommand}`);
-  if (hasDeploymentTask) {
-    lines.push("        if: matrix.check == 'root'");
-  }
-  if (hasDeploymentTask) {
-    lines.push(
-      "      - run: pnpm run check:deployment",
-      "        if: matrix.check == 'deployment'",
-    );
-  }
-  lines.push("");
-
-  return lines.join("\n");
+  const packagePaths = [...options.packagePaths];
+  const diagnosticArtifacts = validatedDiagnosticArtifacts({
+    packagePaths,
+    artifacts: options.diagnosticArtifacts ?? [],
+  });
+  return {
+    workflowName: capability.workflowName,
+    triggers: { pullRequest: true, pushBranches: ["main"] },
+    permissions: { contents: "read" },
+    concurrency: {
+      group: "${{ github.workflow }}-${{ github.ref }}",
+      cancelInProgress: true,
+    },
+    rootCheck: capability,
+    matrix: hasDeploymentTask
+      ? {
+          failFast: false,
+          include: [
+            {
+              capability: "root",
+              jobDisplayName: capability.jobDisplayName,
+              taskEntrypoint: taskLayer.checkCommand,
+              timeoutMinutes: capability.timeoutMinutes,
+              requiresDocker: false,
+            },
+            {
+              capability: "deployment",
+              jobDisplayName: "Deployment Check",
+              taskEntrypoint: "pnpm run check:deployment",
+              timeoutMinutes: 45,
+              requiresDocker: true,
+            },
+          ],
+        }
+      : undefined,
+    environmentPreparation,
+    taskLayer,
+    packagePaths,
+    diagnosticArtifacts,
+  };
 }
 
-/** Limited substitutions for the Foundation-owned workflow Template Source. */
-export function projectCheckWorkflowTemplateReplacements(options: {
-  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
-  readonly hasDeploymentTask?: boolean | undefined;
-}): Record<string, string> {
+/** Selects a complete Foundation-owned workflow Template Source. */
+export function projectCheckWorkflowTemplateSource(
+  options: ProjectCheckWorkflowDiagnosticOptions & {
+    readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
+    readonly hasDeploymentTask?: boolean | undefined;
+  },
+):
+  | ".github/workflows/check.yml"
+  | ".github/workflows/check-diagnostics.yml"
+  | ".github/workflows/check-deployment.yml"
+  | ".github/workflows/check-deployment-diagnostics.yml" {
   const hasDeploymentTask = options.hasDeploymentTask === true;
   const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
     (need) => need.kind === "docker-engine",
   );
+  if (hasDeploymentTask && !needsDocker) {
+    throw new Error("Deployment Check requires a Docker environment need");
+  }
+  const hasDiagnostics =
+    validatedDiagnosticArtifacts({
+      packagePaths: options.packagePaths,
+      artifacts: options.diagnosticArtifacts ?? [],
+    }).length > 0;
+  if (hasDeploymentTask) {
+    return hasDiagnostics
+      ? ".github/workflows/check-deployment-diagnostics.yml"
+      : ".github/workflows/check-deployment.yml";
+  }
+  return hasDiagnostics
+    ? ".github/workflows/check-diagnostics.yml"
+    : ".github/workflows/check.yml";
+}
+
+/** Limited, validated facts for static Foundation diagnostic staging. */
+export function projectCheckWorkflowTemplateReplacements(
+  options: ProjectCheckWorkflowDiagnosticOptions,
+): Record<string, string> {
+  const declarations = validatedDiagnosticArtifacts({
+    packagePaths: options.packagePaths,
+    artifacts: options.diagnosticArtifacts ?? [],
+  });
+  if (declarations.length === 0) return {};
   return {
-    DEPLOYMENT_MATRIX: hasDeploymentTask
-      ? "\n    strategy:\n      matrix:\n        check: [root, deployment]"
-      : "",
-    DEPLOYMENT_DOCKER_PREPARATION:
-      hasDeploymentTask && needsDocker
-        ? "\n      - uses: docker/setup-buildx-action@v3\n        if: matrix.check == 'deployment'"
-        : "",
-    ROOT_CHECK_CONDITION: hasDeploymentTask
-      ? "\n        if: matrix.check == 'root'"
-      : "",
-    DEPLOYMENT_CHECK: hasDeploymentTask
-      ? "\n      - run: pnpm run check:deployment\n        if: matrix.check == 'deployment'"
-      : "",
+    DIAGNOSTIC_OWNER_PATHS: declarations
+      .map((declaration) => declaration.owner.path)
+      .join("\n            "),
   };
 }
 
