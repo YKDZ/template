@@ -218,7 +218,9 @@ describe("Built-in Preset GitHub YAML checker", () => {
     const source = await renderedWorkflow(plan);
     const template = await readFile(source.sourcePath, "utf8");
     const replacement = projectCheckWorkflowTemplateReplacements({
-      packagePaths: plan.blueprint.packages.map((definition) => definition.path),
+      packagePaths: plan.blueprint.packages.map(
+        (definition) => definition.path,
+      ),
       diagnosticArtifacts: plan.ciDiagnosticArtifacts,
     }).DIAGNOSTIC_OWNER_PATHS;
     if (replacement === undefined) {
