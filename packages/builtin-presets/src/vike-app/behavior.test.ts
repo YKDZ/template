@@ -294,6 +294,75 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     ).toMatchObject({
       exports: { "./types": { types: "./src/types.d.ts" } },
     });
+    const webManifest = JSON.parse(
+      await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
+    ) as { readonly scripts: Readonly<Record<string, string>> };
+    expect(webManifest.scripts).toMatchObject({
+      dev: "vike dev",
+      preview: "vike preview",
+      "test:e2e": "playwright test",
+    });
+    const dbManifest = JSON.parse(
+      await readFile(path.join(targetDir, "packages/db/package.json"), "utf8"),
+    ) as {
+      readonly exports: Readonly<Record<string, unknown>>;
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    expect(dbManifest.scripts.test).toBe(
+      "vitest run --reporter=agent --silent=passed-only",
+    );
+    expect(dbManifest.scripts["db:seed:example"]).toBe(
+      "node --conditions=source scripts/seed-example.ts",
+    );
+    const migrationsManifest = JSON.parse(
+      await readFile(
+        path.join(targetDir, "packages/db-migrations/package.json"),
+        "utf8",
+      ),
+    ) as { readonly scripts: Readonly<Record<string, string>> };
+    expect(migrationsManifest.scripts["db:push"]).toBe(
+      "DATABASE_PACKAGE_NAME=@demo/db drizzle-kit push",
+    );
+    expect(migrationsManifest.scripts).not.toHaveProperty("db:prepare:dev");
+    expect(migrationsManifest.scripts).not.toHaveProperty("db:prepare:test");
+    for (const configPath of [
+      "apps/web/playwright.config.ts",
+      "apps/web/vite.config.ts",
+      "apps/web/test/playwright-teardown.ts",
+      "packages/db/vitest.config.ts",
+      "packages/db/test/global-setup.ts",
+    ]) {
+      await expect(
+        stat(path.join(targetDir, configPath)),
+      ).resolves.toBeDefined();
+    }
+    for (const removedPath of [
+      "apps/web/scripts/run-playwright.ts",
+      "packages/db-migrations/scripts/prepare-database.ts",
+    ]) {
+      await expect(
+        stat(path.join(targetDir, removedPath)),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    const playwrightConfig = await readFile(
+      path.join(targetDir, "apps/web/playwright.config.ts"),
+      "utf8",
+    );
+    expect(playwrightConfig).toContain("availablePort");
+    expect(playwrightConfig).toContain("db:push");
+    expect(playwrightConfig).toContain("node dist/server/index.mjs");
+    expect(playwrightConfig).toContain("globalTeardown");
+    const viteConfig = await readFile(
+      path.join(targetDir, "apps/web/vite.config.ts"),
+      "utf8",
+    );
+    expect(viteConfig).toContain("database-preparation");
+    expect(viteConfig).toContain("db:seed:example");
+    const drizzleConfig = await readFile(
+      path.join(targetDir, "packages/db-migrations/drizzle.config.ts"),
+      "utf8",
+    );
+    expect(drizzleConfig).toContain("mkdirSync");
     expect(
       await readFile(
         path.join(targetDir, "apps/web/pages/index/+Page.vue"),

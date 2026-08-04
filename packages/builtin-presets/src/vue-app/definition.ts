@@ -42,7 +42,6 @@ function appContribution(options: {
     "vite.config.ts",
     "vitest.config.ts",
     "turbo.json",
-    "scripts/run-playwright.ts",
     "src/App.vue",
     "test/e2e/app.spec.ts",
   ] as const;

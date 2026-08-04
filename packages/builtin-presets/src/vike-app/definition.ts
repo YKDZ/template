@@ -107,22 +107,20 @@ function dockerClientDevelopmentContainerToolLayer(): DevelopmentContainerToolLa
 }
 
 function webScripts(): Record<string, string> {
-  const prepareDatabase =
-    "DATABASE_FILE=../../apps/web/data/app.sqlite pnpm --dir ../../packages/db-migrations run db:prepare:dev";
   return {
     build: "vike build",
     deployment:
       "node --conditions=source scripts/check-standalone-deployment.ts",
-    dev: `${prepareDatabase} && vike dev`,
+    dev: "vike dev",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
     "lint:fix":
       "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
-    preview: `${prepareDatabase} && vike preview`,
+    preview: "vike preview",
     start: "node ./dist/server/index.mjs",
     test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
-    "test:e2e": "node --conditions=source scripts/run-playwright.ts",
+    "test:e2e": "playwright test",
     typecheck:
       "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
@@ -136,7 +134,7 @@ function databaseScripts(): Record<string, string> {
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
-    test: 'DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" pnpm --dir ../db-migrations run db:prepare:test && DATABASE_FILE="$(pwd)/node_modules/.tmp/test.sqlite" vitest run --reporter=agent --silent=passed-only; status=$?; rm -f ./node_modules/.tmp/test.sqlite; exit $status',
+    test: "vitest run --reporter=agent --silent=passed-only",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -149,11 +147,7 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
     "db:generate": withDatabasePackage("drizzle-kit generate"),
     "db:migrate": withDatabasePackage("drizzle-kit migrate"),
     "db:prepare:deploy": "pnpm run db:migrate",
-    "db:prepare:dev": `DATABASE_PACKAGE_NAME=${databasePackageName} node --conditions=source scripts/prepare-database.ts dev`,
-    "db:prepare:test": `DATABASE_PACKAGE_NAME=${databasePackageName} node --conditions=source scripts/prepare-database.ts test`,
-    "db:push": withDatabasePackage(
-      "mkdir -p data node_modules/.tmp && drizzle-kit push",
-    ),
+    "db:push": withDatabasePackage("drizzle-kit push"),
     "db:studio": withDatabasePackage("drizzle-kit studio"),
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
@@ -209,8 +203,8 @@ function webContribution(context: GenerationContext): PackageContribution {
     "web/playwright.config.ts",
     "web/scripts/check-standalone-deployment.ts",
     "web/scripts/container-entrypoint.sh",
-    "web/scripts/run-playwright.ts",
     "web/server/api.ts",
+    "web/test/playwright-teardown.ts",
     "web/test/e2e/app.spec.ts",
     "web/turbo.json",
     "web/types/env.d.ts",
@@ -375,6 +369,8 @@ function databaseContribution(context: GenerationContext): PackageContribution {
     "db/tsconfig.json",
     "db/tsconfig.build.json",
     "db/scripts/seed-example.ts",
+    "db/vitest.config.ts",
+    "db/test/global-setup.ts",
     "db/src/db.ts",
     "db/src/index.ts",
     "db/src/queries/todos.ts",
@@ -440,7 +436,6 @@ function migrationsContribution(
     "db-migrations/tsconfig.build.json",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
-    "db-migrations/scripts/prepare-database.ts",
     "db-migrations/turbo.json",
   ] as const;
   return {

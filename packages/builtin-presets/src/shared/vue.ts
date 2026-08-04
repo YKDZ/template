@@ -41,7 +41,7 @@ export function vueApplicationScripts(): Record<string, string> {
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
     preview: "vite preview",
     test: "vitest run --reporter=agent --silent=passed-only",
-    "test:e2e": "node --conditions=source scripts/run-playwright.ts",
+    "test:e2e": "playwright test",
   };
 }
 

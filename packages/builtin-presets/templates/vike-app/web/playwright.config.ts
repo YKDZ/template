@@ -1,6 +1,18 @@
+import { execFileSync } from "node:child_process";
+import { rmSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseUrlName = "PLAYWRIGHT_EXTERNAL_BASE_URL";
+const externalReadinessTimeoutMs = 30_000;
+const webRoot = path.dirname(fileURLToPath(import.meta.url));
+const migrationsRoot = path.resolve(webRoot, "../../packages/db-migrations");
+const databaseFile = path.join(webRoot, "node_modules/.tmp/e2e.sqlite");
+const stateFile = path.join(webRoot, "node_modules/.tmp/playwright-port");
 
 function externalBaseUrl(): string | undefined {
   if (!Object.hasOwn(process.env, externalBaseUrlName)) {
@@ -26,31 +38,98 @@ function externalBaseUrl(): string | undefined {
   return url.toString();
 }
 
-function requiredPort(name: string): number {
-  return Number(requiredEnv(name));
+async function availablePort(): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+
+      if (typeof address !== "object" || address === null) {
+        server.close(() => {
+          reject(new Error("Could not allocate a Playwright web port"));
+        });
+        return;
+      }
+
+      const port = String(address.port);
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve(port);
+      });
+    });
+  });
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
+async function awaitExternalService(baseUrl: string): Promise<void> {
+  const deadline = Date.now() + externalReadinessTimeoutMs;
 
-  if (!value) {
-    throw new Error(`${name} must be set by scripts/run-playwright.ts`);
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(baseUrl, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // The externally managed service may still be starting.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 
-  return value;
+  throw new Error(
+    `External Playwright service at ${baseUrl} was not ready within ${externalReadinessTimeoutMs}ms`,
+  );
+}
+
+async function sharedPort(envName: string): Promise<{
+  readonly port: string;
+  readonly prepared: boolean;
+}> {
+  const envPort = process.env[envName];
+  if (envPort !== undefined) {
+    return { port: envPort, prepared: false };
+  }
+  try {
+    return { port: await readFile(stateFile, "utf8"), prepared: false };
+  } catch {
+    const port = await availablePort();
+    await mkdir(path.dirname(stateFile), { recursive: true });
+    await writeFile(stateFile, port, "utf8");
+    return { port, prepared: true };
+  }
+}
+
+function prepareLocalDatabase(): void {
+  rmSync(databaseFile, { force: true });
+  execFileSync("pnpm", ["run", "db:push"], {
+    cwd: migrationsRoot,
+    env: { ...process.env, DATABASE_FILE: databaseFile },
+    stdio: "inherit",
+  });
 }
 
 const externalServiceUrl = externalBaseUrl();
-const previewPort = externalServiceUrl
-  ? undefined
-  : requiredPort("PLAYWRIGHT_WEB_PORT");
-const previewUrl = externalServiceUrl ?? `http://127.0.0.1:${previewPort}`;
-const databaseFile = externalServiceUrl
-  ? undefined
-  : requiredEnv("DATABASE_FILE");
+let previewUrl: string;
 
-function shellValue(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
+if (externalServiceUrl === undefined) {
+  const { port, prepared } = await sharedPort("PLAYWRIGHT_WEB_PORT");
+  previewUrl = `http://127.0.0.1:${port}`;
+  process.env.DATABASE_FILE = databaseFile;
+  process.env.PORT = port;
+  if (prepared) {
+    prepareLocalDatabase();
+  }
+} else {
+  previewUrl = externalServiceUrl;
+  await awaitExternalService(externalServiceUrl);
 }
 
 export default defineConfig({
@@ -61,16 +140,17 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   reporter: [["list"], ["html"]],
-  ...(externalServiceUrl
-    ? {}
-    : {
+  globalTeardown: "./test/playwright-teardown.ts",
+  ...(externalServiceUrl === undefined
+    ? {
         webServer: {
-          command: `DATABASE_FILE=${shellValue(databaseFile!)} pnpm --dir ../../packages/db-migrations run db:prepare:test && PORT=${previewPort} node dist/server/index.mjs`,
+          command: "node dist/server/index.mjs",
           reuseExistingServer: !process.env.CI,
           timeout: 60_000,
           url: previewUrl,
         },
-      }),
+      }
+    : {}),
   projects: [
     {
       name: "chromium",

@@ -6,5 +6,6 @@ target/
 coverage/
 .env
 .template/
+data/
 playwright-report/
 test-results/

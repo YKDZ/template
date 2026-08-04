@@ -138,7 +138,6 @@ function webContribution(context: GenerationContext): PackageContribution {
     "vite.config.ts",
     "vitest.config.ts",
     "turbo.json",
-    "scripts/run-playwright.ts",
     "src/api.ts",
     "src/App.vue",
     "test/e2e/app.spec.ts",
