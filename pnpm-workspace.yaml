@@ -43,7 +43,7 @@ catalog:
   semver: ^7.8.5
   "@types/semver": ^7.7.1
   pinia: ^4.0.2
-  srvx: ^0.12.1
+  srvx: ^0.12.5
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
   turbo: 2.10.5
