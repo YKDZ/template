@@ -55,7 +55,7 @@ catalog:
   vike-vue: ^0.9.12
   vitest: ^4.1.10
   vue: ^3.5.39
-  vue-tsc: ^3.3.6
+  vue-tsc: ^3.3.9
   yaml: ^2.9.0
 
 catalogs:
