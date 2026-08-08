@@ -3,6 +3,24 @@ import type { DevelopmentContainerToolLayer } from "#template-core/development-c
 
 import { templateSources } from "../template-sources.ts";
 
+export function githubCliDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
+  return {
+    identity: "github-cli",
+    dockerfile: {
+      source: templateSources.sharedDevcontainer,
+      from: "github-cli.Dockerfile",
+    },
+    requires: ["node-pnpm"],
+    probes: [
+      {
+        identity: "github-cli",
+        command: "gh",
+        args: ["--version"],
+      },
+    ],
+  };
+}
+
 export function browserTestDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
   const playwrightTestVersion =
     loadTemplateDependencyCatalog()["@playwright/test"];

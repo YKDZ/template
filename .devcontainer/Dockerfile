@@ -29,6 +29,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         docker-buildx-plugin \
         docker-ce-cli \
+        gh \
+    && rm -rf /var/lib/apt/lists/* \
     && git lfs install --system \
     && install -d -m 0755 "$COREPACK_HOME" "$PNPM_HOME" \
     && corepack enable --install-directory "$PNPM_HOME" \

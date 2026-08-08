@@ -90,6 +90,7 @@ async function generatedTaskIds(root: string): Promise<readonly string[]> {
 
 const requiredCapabilityProbeIdentities = new Set([
   "cargo",
+  "github-cli",
   "playwright",
   "shellcheck",
 ]);

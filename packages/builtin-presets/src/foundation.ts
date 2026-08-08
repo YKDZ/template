@@ -71,6 +71,7 @@ import {
 } from "#template-core/renderer";
 
 import { rustBinDefinition } from "./rust-bin/definition.ts";
+import { githubCliDevelopmentContainerToolLayer } from "./shared/development-container.ts";
 import {
   typescriptConfigContribution,
   typescriptConfigPackageDefinition,
@@ -866,7 +867,7 @@ function contributedDevcontainerComposition(options: {
         },
       ],
     },
-    layers: options.layers,
+    layers: [githubCliDevelopmentContainerToolLayer(), ...options.layers],
   });
 
   return {

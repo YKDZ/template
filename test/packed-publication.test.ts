@@ -1433,12 +1433,15 @@ describe("packed public CLI consumer", () => {
         ".devcontainer/Dockerfile",
       );
       const dockerfile = await readFile(dockerfilePath, "utf8");
-      expect(dockerfile).toContain("ARG RUST_TOOLCHAIN");
+      const baseToolLayerTail =
+        '    && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"';
+      const baseToolLayerBoundary = `${baseToolLayerTail}\n\n`;
+      expect(dockerfile).toContain(baseToolLayerBoundary);
       await writeFile(
         dockerfilePath,
         dockerfile.replace(
-          "ARG RUST_TOOLCHAIN",
-          "# incompatible insertion\nARG RUST_TOOLCHAIN",
+          baseToolLayerBoundary,
+          `${baseToolLayerBoundary}# incompatible insertion\n`,
         ),
       );
       const textBefore = await workspaceByteSnapshot(previewTarget);

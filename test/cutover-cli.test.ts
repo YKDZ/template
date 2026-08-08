@@ -367,9 +367,16 @@ describe("cut-over CLI", () => {
     );
     const dockerfilePath = path.join(target, ".devcontainer/Dockerfile");
     const originalDockerfile = await readFile(dockerfilePath, "utf8");
+    const baseToolLayerTail =
+      '    && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"';
+    const baseToolLayerBoundary = `${baseToolLayerTail}\n\n`;
+    expect(originalDockerfile).toContain(baseToolLayerBoundary);
     await writeFile(
       dockerfilePath,
-      `${originalDockerfile}\n# incompatible user insertion\n`,
+      originalDockerfile.replace(
+        baseToolLayerBoundary,
+        `${baseToolLayerBoundary}# incompatible user insertion\n`,
+      ),
     );
     const command = [
       "--conditions=source",
@@ -395,9 +402,7 @@ describe("cut-over CLI", () => {
     expect(conflict.stderr).toContain(".devcontainer/Dockerfile (text)");
     expect(conflict.stderr).toContain("Region:");
     expect(conflict.stderr).toContain("Before:");
-    expect(conflict.stderr).toContain(
-      "Current: \n# incompatible user insertion",
-    );
+    expect(conflict.stderr).toContain("Current: # incompatible user insertion");
     expect(conflict.stderr).toContain("After:");
     expect(await workspaceSnapshot(target)).toEqual(before);
 

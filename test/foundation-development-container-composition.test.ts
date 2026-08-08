@@ -113,6 +113,96 @@ function fixtureContribution(options: {
 }
 
 describe("Foundation Development Container composition", () => {
+  it("plans GitHub CLI as a default source-backed Tool Layer", () => {
+    for (const definition of builtInPresetRegistry.all()) {
+      const plan = planGeneratedRepositoryInitialization({
+        definition,
+        context: createGenerationContext({
+          targetDir: path.join("/tmp", definition.metadata.name),
+          scope: "example",
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+          },
+        }),
+      });
+
+      expect(
+        plan.developmentContainer.toolLayers.find(
+          (layer) => layer.identity === "github-cli",
+        ),
+      ).toMatchObject({
+        kind: "optional",
+        dockerfile: { from: "github-cli.Dockerfile" },
+        requires: ["node-pnpm"],
+        probes: [
+          {
+            identity: "github-cli",
+            command: "gh",
+            args: ["--version"],
+          },
+        ],
+      });
+    }
+  });
+
+  it("renders the official stable GitHub CLI package without credential automation", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-foundation-github-cli-"),
+    );
+
+    try {
+      for (const definition of builtInPresetRegistry.all()) {
+        const targetDir = path.join(workspace, definition.metadata.name);
+        const plan = planGeneratedRepositoryInitialization({
+          definition,
+          context: createGenerationContext({
+            targetDir,
+            scope: "example",
+            toolchain: {
+              nodeLtsMajor: "24",
+              packageManagerPin: "pnpm@11.11.0",
+            },
+          }),
+        });
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...plan.operations],
+        });
+
+        const dockerfile = await readFile(
+          path.join(targetDir, ".devcontainer/Dockerfile"),
+          "utf8",
+        );
+        const devcontainer = await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        );
+
+        expect(dockerfile).toContain(
+          "https://cli.github.com/packages stable main",
+        );
+        expect(dockerfile).toContain(
+          "apt-get install -y --no-install-recommends gh",
+        );
+        expect(`${dockerfile}\n${devcontainer}`).not.toMatch(
+          /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/u,
+        );
+        expect(plan.nextStepInstructions).not.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              display: expect.stringMatching(
+                /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/iu,
+              ),
+            }),
+          ]),
+        );
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("keeps every generated pnpm store in a persistent volume outside the workspace", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-pnpm-store-"),
