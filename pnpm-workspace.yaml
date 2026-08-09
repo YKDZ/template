@@ -23,7 +23,7 @@ overrides:
 catalog:
   "@devcontainers/cli": 0.88.0
   "@hono/node-server": ^2.0.12
-  "@playwright/test": ^1.61.1
+  "@playwright/test": ^1.62.1
   "@tailwindcss/vite": ^4.3.3
   "@types/node": ^24.13.3
   "@types/web-bluetooth": ^0.0.21
@@ -43,19 +43,19 @@ catalog:
   semver: ^7.8.5
   "@types/semver": ^7.7.1
   pinia: ^4.0.2
-  srvx: ^0.12.1
+  srvx: ^0.12.5
   tailwindcss: ^4.3.2
   telefunc: ^0.2.22
   turbo: 2.10.5
   typescript: npm:@typescript/typescript6@^6.0.2
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
-  vite: ^8.1.5
+  vite: ^8.2.0
   vike: ^0.4.260
   vike-vue: ^0.9.12
   vitest: ^4.1.10
-  vue: ^3.5.39
-  vue-tsc: ^3.3.6
+  vue: ^3.5.40
+  vue-tsc: ^3.3.9
   yaml: ^2.9.0
 
 catalogs:

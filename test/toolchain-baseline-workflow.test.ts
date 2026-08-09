@@ -35,6 +35,11 @@ describe("Toolchain Baseline scheduled workflow", () => {
     expect(workflow.jobs.check.steps.map((step) => step.run)).toContain(
       "pnpm run update:toolchain",
     );
+    expect(
+      workflow.jobs.check.steps.find(
+        (step) => step.name === "Resolve updater toolchain",
+      )?.run,
+    ).toBe('pnpm run resolve:toolchain:update >> "$GITHUB_OUTPUT"');
     const names = workflow.jobs.check.steps.map((step) => step.name);
     expect(names.indexOf("Resolve updater toolchain")).toBeLessThan(
       names.indexOf("Set up resolved Node.js"),

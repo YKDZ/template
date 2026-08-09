@@ -38,7 +38,7 @@ jobs:
 
       - name: Resolve updater toolchain
         id: desired-toolchain
-        run: node packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs >> "$GITHUB_OUTPUT"
+        run: pnpm run resolve:toolchain:update >> "$GITHUB_OUTPUT"
 
       - name: Set up resolved Node.js
         uses: actions/setup-node@v7

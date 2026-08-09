@@ -64,7 +64,7 @@ describe("Fixture Verification Evidence check workflow", () => {
     };
 
     expect(
-      steps.find((step) => step.uses === "docker/setup-buildx-action@v3"),
+      steps.find((step) => step.uses === "docker/setup-buildx-action@v4"),
     ).toBeDefined();
     expect(workspace.catalog["@devcontainers/cli"]).toBe("0.88.0");
     expect(checksManifest.devDependencies["@devcontainers/cli"]).toBe(

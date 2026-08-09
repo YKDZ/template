@@ -40,7 +40,7 @@ export type OnlineToolchainResolutionContractResult = {
 
 const bundledFallbackToolchain = {
   nodeLtsMajor: nodeLtsMajor("24"),
-  packageManagerPin: packageManagerPin("11.11.0"),
+  packageManagerPin: packageManagerPin("11.20.0"),
 };
 
 type NodeRelease = {

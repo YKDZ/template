@@ -1,4 +1,17 @@
+import { readFile } from "node:fs/promises";
+
 import { resolveToolchainVersions } from "#template-core/toolchain-resolution";
+
+async function repositoryToolchainBaseline() {
+  const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+    engines: { node: string };
+    packageManager: `pnpm@${string}`;
+  };
+  return {
+    nodeLtsMajor: manifest.engines.node.match(/^>=(\d+)\.0\.0$/)?.[1],
+    packageManagerPin: manifest.packageManager,
+  };
+}
 
 const nodeReleaseIndex = [
   { version: "v24.11.0", lts: "Krypton" },
@@ -165,6 +178,7 @@ describe("toolchain version resolution", () => {
   );
 
   it("falls back to bundled toolchain metadata with visible diagnostics when online source access fails", async () => {
+    const baseline = await repositoryToolchainBaseline();
     const result = await resolveToolchainVersions({
       source: "online",
       fetchJson: async () => {
@@ -173,8 +187,8 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("bundled-fallback");
-    expect(result.nodeLtsMajor.value).toBe("24");
-    expect(result.packageManagerPin.value).toBe("pnpm@11.11.0");
+    expect(result.nodeLtsMajor.value).toBe(baseline.nodeLtsMajor);
+    expect(result.packageManagerPin.value).toBe(baseline.packageManagerPin);
     expect(result.diagnostics).toEqual([
       expect.stringContaining("Using bundled fallback toolchain metadata"),
     ]);
@@ -182,6 +196,7 @@ describe("toolchain version resolution", () => {
   });
 
   it("uses bundled fallback metadata without source access for deterministic local generation", async () => {
+    const baseline = await repositoryToolchainBaseline();
     const result = await resolveToolchainVersions({
       source: "bundled-fallback",
       fetchJson: async () => {
@@ -190,8 +205,8 @@ describe("toolchain version resolution", () => {
     });
 
     expect(result.source).toBe("bundled-fallback");
-    expect(result.nodeLtsMajor.value).toBe("24");
-    expect(result.packageManagerPin.value).toBe("pnpm@11.11.0");
+    expect(result.nodeLtsMajor.value).toBe(baseline.nodeLtsMajor);
+    expect(result.packageManagerPin.value).toBe(baseline.packageManagerPin);
     expect(result.diagnostics).toEqual([]);
   });
 });
