@@ -50,8 +50,8 @@ catalogs:
       specifier: 1.0.0-rc.4
       version: 1.0.0-rc.4
     execa:
-      specifier: ^10.0.0
-      version: 10.0.0
+      specifier: ^10.0.1
+      version: 10.0.1
     hono:
       specifier: ^4.12.31
       version: 4.12.32
@@ -151,7 +151,7 @@ importers:
         version: file:packages/shared(@typescript/typescript6@6.0.2)
       execa:
         specifier: 'catalog:'
-        version: 10.0.0
+        version: 10.0.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -230,7 +230,7 @@ importers:
         version: 1.0.0-rc.4(valibot@1.4.2(@typescript/typescript6@6.0.2))
       execa:
         specifier: 'catalog:'
-        version: 10.0.0
+        version: 10.0.1
       hono:
         specifier: 'catalog:'
         version: 4.12.32
@@ -287,7 +287,7 @@ importers:
         version: file:packages/core(@typescript/typescript6@6.0.2)
       execa:
         specifier: 'catalog:'
-        version: 10.0.0
+        version: 10.0.1
       yaml:
         specifier: 'catalog:'
         version: 2.9.0
@@ -355,7 +355,7 @@ importers:
         version: link:../core
       execa:
         specifier: 'catalog:'
-        version: 10.0.0
+        version: 10.0.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -392,7 +392,7 @@ importers:
         version: 7.7.1
       execa:
         specifier: 'catalog:'
-        version: 10.0.0
+        version: 10.0.1
       oxfmt:
         specifier: 'catalog:'
         version: 0.58.0
@@ -2225,8 +2225,8 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
-  execa@10.0.0:
-    resolution: {integrity: sha512-Cxl6MKxB1dr1H0FHmiizJ+lavKF7pV+fcDZFyqMB8d5m7qUPm/OtZYcD5vPWePKxSnTQ57KuBd9mtdZ3oNCvyQ==}
+  execa@10.0.1:
+    resolution: {integrity: sha512-ge98qjkRK4IB7tL7Ju/6qmm5LHoH1eEMt5FNZrz3f4UIYhF28lggX20z3FaX1sgc67msLEn0N0BscOs29iuwyw==}
     engines: {node: '>=22'}
 
   expect-type@1.4.0:
@@ -3069,10 +3069,10 @@ snapshots:
       '@babel/helper-compilation-targets': 7.29.7
       '@babel/helper-module-transforms': 7.29.7(@babel/core@7.29.7)
       '@babel/helpers': 7.29.7
-      '@babel/parser': 7.29.7
+      '@babel/parser': 7.29.8
       '@babel/template': 7.29.7
       '@babel/traverse': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/types': 7.29.8
       '@jridgewell/remapping': 2.3.5
       convert-source-map: 2.0.0
       debug: 4.4.3
@@ -3084,8 +3084,8 @@ snapshots:
 
   '@babel/generator@7.29.7':
     dependencies:
-      '@babel/parser': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/parser': 7.29.8
+      '@babel/types': 7.29.8
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
       jsesc: 3.1.0
@@ -3103,7 +3103,7 @@ snapshots:
   '@babel/helper-module-imports@7.29.7':
     dependencies:
       '@babel/traverse': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/types': 7.29.8
     transitivePeerDependencies:
       - supports-color
 
@@ -3125,7 +3125,7 @@ snapshots:
   '@babel/helpers@7.29.7':
     dependencies:
       '@babel/template': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/types': 7.29.8
 
   '@babel/parser@7.29.7':
     dependencies:
@@ -3138,17 +3138,17 @@ snapshots:
   '@babel/template@7.29.7':
     dependencies:
       '@babel/code-frame': 7.29.7
-      '@babel/parser': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/parser': 7.29.8
+      '@babel/types': 7.29.8
 
   '@babel/traverse@7.29.7':
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/generator': 7.29.7
       '@babel/helper-globals': 7.29.7
-      '@babel/parser': 7.29.7
+      '@babel/parser': 7.29.8
       '@babel/template': 7.29.7
-      '@babel/types': 7.29.7
+      '@babel/types': 7.29.8
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
@@ -4153,7 +4153,7 @@ snapshots:
     dependencies:
       '@ykdz/template-builtin-presets': file:packages/builtin-presets(@typescript/typescript6@6.0.2)
       '@ykdz/template-core': file:packages/core(@typescript/typescript6@6.0.2)
-      execa: 10.0.0
+      execa: 10.0.1
       yaml: 2.9.0
     transitivePeerDependencies:
       - typescript
@@ -4327,7 +4327,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
-  execa@10.0.0:
+  execa@10.0.1:
     dependencies:
       '@sindresorhus/merge-streams': 4.0.0
       figures: 6.1.0
@@ -4336,7 +4336,6 @@ snapshots:
       is-plain-obj: 4.1.0
       is-stream: 4.0.1
       npm-run-path: 6.0.0
-      path-key: 4.0.0
       pretty-ms: 9.3.0
       signal-exit: 4.1.0
       strip-final-newline: 4.0.0

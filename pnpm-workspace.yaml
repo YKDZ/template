@@ -34,7 +34,7 @@ catalog:
   commander: ^15.0.0
   drizzle-kit: 1.0.0-rc.4
   drizzle-orm: 1.0.0-rc.4
-  execa: ^10.0.0
+  execa: ^10.0.1
   hono: ^4.12.31
   node-diff3: ^3.2.1
   oxfmt: ^0.58.0
