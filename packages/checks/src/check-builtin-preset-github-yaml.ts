@@ -21,12 +21,12 @@ type WorkflowOracle = {
   readonly diagnosticOwnerPaths: readonly string[];
 };
 
-function hasExactObjectKeys(
+function hasExactKeys(
   value: Record<string, unknown>,
-  keys: readonly string[],
+  expectedKeys: readonly string[],
 ): boolean {
   const actual = Object.keys(value).toSorted();
-  const expected = [...keys].toSorted();
+  const expected = [...expectedKeys].toSorted();
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])
@@ -43,10 +43,7 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
       typeof declaration !== "object" ||
       declaration === null ||
       Array.isArray(declaration) ||
-      !hasExactObjectKeys(declaration as Record<string, unknown>, [
-        "kind",
-        "owner",
-      ])
+      !hasExactKeys(declaration as Record<string, unknown>, ["kind", "owner"])
     ) {
       throw new Error(
         "CI Diagnostic Artifact declarations may contain only kind and owner",
@@ -58,7 +55,7 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
       typeof owner !== "object" ||
       owner === null ||
       Array.isArray(owner) ||
-      !hasExactObjectKeys(owner as Record<string, unknown>, ["kind", "path"])
+      !hasExactKeys(owner as Record<string, unknown>, ["kind", "path"])
     ) {
       throw new Error(
         "CI Diagnostic Artifact requires a Package Boundary owner",
@@ -331,17 +328,6 @@ function assertDiagnosticSteps(
 
 function isParsedObject(value: unknown): value is ParsedObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactKeys(
-  value: ParsedObject,
-  expectedKeys: readonly string[],
-): boolean {
-  const actualKeys = Object.keys(value).toSorted();
-  return (
-    actualKeys.length === expectedKeys.length &&
-    actualKeys.every((key, index) => key === expectedKeys.toSorted()[index])
-  );
 }
 
 function hasPinnedActionReleaseLine(
