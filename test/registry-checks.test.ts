@@ -28,7 +28,7 @@ import {
   validatePlanDependencyCatalog,
   validatePlanPublicationSources,
   validatePlanSources,
-} from "../packages/builtin-presets/src/registry-checks.ts";
+} from "../packages/checks/src/registry-checks.ts";
 
 const rustPresetName = ["rust", "bin"].join("-");
 

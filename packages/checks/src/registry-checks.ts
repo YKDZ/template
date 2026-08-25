@@ -4,25 +4,26 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  builtInPresetRegistry,
+  createGenerationContext,
+  planGeneratedRepositoryInitialization,
+  planGeneratedRepositoryPackageAddition,
+  resolveBuiltInTemplateSource,
+  templateSources,
+  type BuiltInPresetDefinition,
+  type GeneratedRepositoryPlan,
+  type PackageContribution,
+} from "#template-builtin-presets";
+import {
   collectGeneratedManifestCatalogReferences,
   selectTemplateDependencyCatalogEntries,
 } from "#template-core/dependency-catalog";
-import type { BuiltInPresetDefinition } from "#template-core/preset-definition";
 import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
 } from "#template-core/project-linking-v2";
 import type { RenderOperation } from "#template-core/renderer";
-
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-  planGeneratedRepositoryPackageAddition,
-  resolveBuiltInTemplateSource,
-  type GeneratedRepositoryPlan,
-} from "./foundation.ts";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
 export type GeneratedScenario = {
@@ -32,6 +33,68 @@ export type GeneratedScenario = {
   readonly addition?: BuiltInPresetDefinition;
   readonly linkFrom?: readonly string[];
 };
+
+export type BuiltInPresetTemplateSourceCheckContext = {
+  readonly definition: BuiltInPresetDefinition;
+  readonly contribution: PackageContribution;
+  readonly plan: GeneratedRepositoryPlan;
+};
+
+/** Registry-derived Template Source roots checked independently of plans. */
+export function builtInPresetTemplateSourceContexts(): readonly {
+  readonly name: string;
+  readonly root: string;
+}[] {
+  return [
+    ...builtInPresetRegistry.all().map((definition) => ({
+      name: definition.metadata.name,
+      root: resolveBuiltInTemplateSource(definition.source, "."),
+    })),
+    {
+      name: "foundation",
+      root: resolveBuiltInTemplateSource(templateSources.foundation, "."),
+    },
+    {
+      name: "shared-devcontainer",
+      root: resolveBuiltInTemplateSource(
+        templateSources.sharedDevcontainer,
+        ".",
+      ),
+    },
+    {
+      name: "shared-oxc",
+      root: resolveBuiltInTemplateSource(templateSources.sharedOxc, "."),
+    },
+    {
+      name: "shared-vue",
+      root: resolveBuiltInTemplateSource(templateSources.vue, "."),
+    },
+  ];
+}
+
+/** Derives direct Template Source checks from real initial contributions. */
+export function builtInPresetTemplateSourceCheckContexts(): readonly BuiltInPresetTemplateSourceCheckContext[] {
+  return builtInPresetRegistry.all().flatMap((definition) => {
+    const context = createGenerationContext({
+      targetDir: path.join(
+        "generated-repository",
+        "template-source",
+        definition.metadata.name,
+      ),
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+    const plan = planGeneratedRepositoryInitialization({ definition, context });
+    const contributions = definition.planInitializationContributions?.(
+      context,
+    ) ?? [definition.planInitialization(context)];
+
+    return contributions.map((contribution) => ({
+      definition,
+      contribution,
+      plan,
+    }));
+  });
+}
 
 function scenarioId(...parts: readonly string[]): string {
   return parts.join("--");

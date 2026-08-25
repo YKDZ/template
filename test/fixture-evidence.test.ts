@@ -35,10 +35,6 @@ import {
   type TemplateSourceHandle,
 } from "#template-core/renderer";
 
-import {
-  validatePlanDependencyCatalog,
-  validatePlanSources,
-} from "../packages/builtin-presets/src/registry-checks.ts";
 import { findFixtureEvidenceArchitectureFindings } from "../packages/checks/src/check-fixture-evidence-architecture.ts";
 import {
   fixtureContainerEnvironmentFromEnvironment,
@@ -76,6 +72,10 @@ import {
   type FixtureEvidenceStorage,
   writeGeneratedRepositoryTree,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
+import {
+  validatePlanDependencyCatalog,
+  validatePlanSources,
+} from "../packages/checks/src/registry-checks.ts";
 
 async function temporaryRepository(prefix: string): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), prefix));
@@ -4973,7 +4973,7 @@ describe("Fixture Verification Evidence", () => {
       await writeFile(
         pnpmPath,
         `#!${process.execPath}
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeSync } from "node:fs";
 import path from "node:path";
 
 const commandArgs = process.argv.slice(2);
@@ -5005,7 +5005,7 @@ if (commandArgs.includes("--dry-run=json")) {
           });
         }
   }
-  process.stdout.write(JSON.stringify({ tasks }));
+  writeSync(1, JSON.stringify({ tasks }));
 }
 
 if (commandArgs.includes("build") && commandArgs.includes("--force")) {
@@ -5025,7 +5025,7 @@ if (commandArgs.includes("build") && commandArgs.includes("--force")) {
       await writeFile(
         nodePath,
         `#!${process.execPath}
-import { appendFileSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, readFileSync, readdirSync, writeSync } from "node:fs";
 import path from "node:path";
 
 appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["node", ...process.argv.slice(2)]) + "\\n");
@@ -5045,7 +5045,7 @@ const visit = (directory) => {
 };
 visit(path.resolve(process.cwd(), "../.."));
 if (marker === undefined) throw new Error("focused marker was not materialized");
-process.stdout.write(marker + "\\n");
+writeSync(1, marker + "\\n");
 `,
       );
       await writeFile(
@@ -5058,7 +5058,7 @@ appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...pro
       await writeFile(
         devcontainerPath,
         `#!${process.execPath}
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -5084,9 +5084,9 @@ const forwards =
       (commandArgs[0] === "exec" && commandArgs[1] === "turbo")));
 if (!forwards) process.exit(0);
 const result = spawnSync(command, commandArgs, { cwd, encoding: "utf8" });
-process.stdout.write(result.stdout ?? "");
-process.stderr.write(result.stderr ?? "");
-process.exit(result.status ?? 1);
+writeSync(1, result.stdout ?? "");
+writeSync(2, result.stderr ?? "");
+process.exitCode = result.status ?? 1;
 `,
       );
       await Promise.all([

@@ -18,3 +18,4 @@ packages/**/.turbo/
 coverage
 target
 .template-boundary-check
+skills-lock.json

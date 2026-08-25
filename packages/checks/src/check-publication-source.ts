@@ -2,16 +2,21 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+
+import {
+  resolveBuiltInTemplateSource,
+  templateSources,
+} from "#template-builtin-presets";
 
 import { validatePlanPublicationSources } from "./registry-checks.ts";
 
 /** Packs the Built-in Presets package and verifies plan-referenced source ships. */
 export async function checkPresetPublicationSources(): Promise<void> {
   const packageRoot = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
+    resolveBuiltInTemplateSource(templateSources.foundation, "."),
+    "..",
     "..",
   );
   const destination = await mkdtemp(

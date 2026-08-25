@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
 import {
   checkTemplateSourceBoundary,
   checkTemplateSourceContexts,
@@ -7,9 +8,8 @@ import {
 
 import {
   builtInPresetTemplateSourceContexts,
-  type GeneratedRepositoryPlan,
-} from "./foundation.ts";
-import { deriveVerificationPlans } from "./registry-checks.ts";
+  deriveVerificationPlans,
+} from "./registry-checks.ts";
 
 /** Checks every real registry initialization and Package Addition plan. */
 export async function checkBuiltInPresetTemplateBoundary(): Promise<void> {

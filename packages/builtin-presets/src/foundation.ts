@@ -23,20 +23,14 @@ import {
 import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
+  EnvironmentNeedsMetadata,
 } from "#template-core/module-graph";
 import {
-  checkEnvironmentNeedFact,
-  checkEnvironmentNeedFromFact,
-  deploymentEnvironmentNeedFact,
-  deploymentEnvironmentNeedFromFact,
+  normalizeEnvironmentNeeds,
+  parseEnvironmentNeedsMetadata,
   renderDeploymentCheckCommand,
   renderFixCommand,
   renderRootCheckCommand,
-} from "#template-core/module-graph";
-import type {
-  CheckEnvironmentNeedFact,
-  ComponentOwner,
-  DeploymentEnvironmentNeedFact,
 } from "#template-core/module-graph";
 import {
   assertPackageContribution,
@@ -149,12 +143,6 @@ export type GeneratedRepositoryPackageAdditionPlan = GeneratedRepositoryPlan & {
   };
 };
 
-type PersistedEnvironmentNeeds = {
-  readonly schemaVersion: 1;
-  readonly check: readonly CheckEnvironmentNeedFact[];
-  readonly deployment: readonly DeploymentEnvironmentNeedFact[];
-};
-
 const environmentNeedsPath = ".template/environment-needs.json";
 
 const packageManifestKeyOrder = [
@@ -178,13 +166,6 @@ const packageManifestKeyOrder = [
   "packageManager",
 ] as const;
 const packageConditionKeyOrder = ["source", "types", "default"] as const;
-
-/** One independently checkable initial Package Contribution and its real plan. */
-export type BuiltInPresetTemplateSourceCheckContext = {
-  readonly definition: BuiltInPresetDefinition;
-  readonly contribution: PackageContribution;
-  readonly plan: GeneratedRepositoryPlan;
-};
 
 /**
  * The Foundation persists the non-rendering half of every Package
@@ -240,65 +221,6 @@ export const builtInPresetRegistry = new PresetRegistry([
   vueHonoAppDefinition,
   vikeAppDefinition,
 ]);
-
-/** Registry-derived Template Source roots checked independently of render plans. */
-export function builtInPresetTemplateSourceContexts(): readonly {
-  readonly name: string;
-  readonly root: string;
-}[] {
-  return [
-    ...builtInPresetRegistry.all().map((definition) => ({
-      name: definition.metadata.name,
-      root: resolveBuiltInTemplateSource(definition.source, "."),
-    })),
-    {
-      name: "foundation",
-      root: resolveBuiltInTemplateSource(templateSources.foundation, "."),
-    },
-    {
-      name: "shared-devcontainer",
-      root: resolveBuiltInTemplateSource(
-        templateSources.sharedDevcontainer,
-        ".",
-      ),
-    },
-    {
-      name: "shared-oxc",
-      root: resolveBuiltInTemplateSource(templateSources.sharedOxc, "."),
-    },
-    {
-      name: "shared-vue",
-      root: resolveBuiltInTemplateSource(templateSources.vue, "."),
-    },
-  ];
-}
-
-/**
- * Derives direct Template Source checks from every registered Definition's
- * actual initial contributions, without maintaining a second Preset catalog.
- */
-export function builtInPresetTemplateSourceCheckContexts(): readonly BuiltInPresetTemplateSourceCheckContext[] {
-  return builtInPresetRegistry.all().flatMap((definition) => {
-    const context = createGenerationContext({
-      targetDir: path.join(
-        "generated-repository",
-        "template-source",
-        definition.metadata.name,
-      ),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-    });
-    const plan = planGeneratedRepositoryInitialization({ definition, context });
-    const contributions = definition.planInitializationContributions?.(
-      context,
-    ) ?? [definition.planInitialization(context)];
-
-    return contributions.map((contribution) => ({
-      definition,
-      contribution,
-      plan,
-    }));
-  });
-}
 
 export function createGenerationContext(options: {
   readonly targetDir: string;
@@ -513,87 +435,9 @@ function assertGenerationRecordFoundationConsistency(options: {
   }
 }
 
-function environmentNeedOwner(value: unknown): ComponentOwner | undefined {
-  if (!isRecord(value)) return undefined;
-  if (value.kind === "workspace-orchestration" && value.path === ".") {
-    return { kind: "workspace-orchestration", path: "." };
-  }
-  if (value.kind === "package-boundary" && typeof value.path === "string") {
-    return { kind: "package-boundary", path: value.path };
-  }
-  return undefined;
-}
-
-function assertEnvironmentNeedFactKeys(
-  value: Record<string, unknown>,
-  allowedKeys: readonly string[],
-  context: string,
-): void {
-  for (const key of Object.keys(value)) {
-    if (!allowedKeys.includes(key)) {
-      throw new Error(
-        `Package Addition Environment Need ${context} contains unknown field: ${key}`,
-      );
-    }
-  }
-}
-
-function persistedCheckEnvironmentNeedFact(
-  value: unknown,
-  index: number,
-): CheckEnvironmentNeedFact | undefined {
-  if (!isRecord(value)) return undefined;
-  const context = `check[${index}]`;
-  switch (value.kind) {
-    case "playwright-browser-assets":
-      assertEnvironmentNeedFactKeys(
-        value,
-        ["kind", "browser", "owner"],
-        context,
-      );
-      break;
-    case "shellcheck-command":
-      assertEnvironmentNeedFactKeys(value, ["kind", "owner"], context);
-      break;
-    case "rust-toolchain":
-      assertEnvironmentNeedFactKeys(
-        value,
-        ["kind", "owner", "toolchain"],
-        context,
-      );
-      break;
-    default:
-      return undefined;
-  }
-  if (isRecord(value.owner)) {
-    assertEnvironmentNeedFactKeys(
-      value.owner,
-      ["kind", "path"],
-      `${context}.owner`,
-    );
-  }
-  const owner = environmentNeedOwner(value.owner);
-  if (owner === undefined) return undefined;
-  switch (value.kind) {
-    case "playwright-browser-assets":
-      return value.browser === "chromium"
-        ? { kind: value.kind, browser: value.browser, owner }
-        : undefined;
-    case "shellcheck-command":
-      return { kind: value.kind, owner };
-    case "rust-toolchain":
-      return value.toolchain === "stable"
-        ? { kind: value.kind, toolchain: value.toolchain, owner }
-        : undefined;
-    default:
-      return undefined;
-  }
-}
-
-function readPersistedEnvironmentNeeds(targetDir: string): {
-  readonly check: readonly CheckEnvironmentNeed[];
-  readonly deployment: readonly DeploymentEnvironmentNeed[];
-} {
+function readPersistedEnvironmentNeeds(
+  targetDir: string,
+): EnvironmentNeedsMetadata {
   const filePath = path.join(targetDir, environmentNeedsPath);
   if (!existsSync(filePath)) {
     throw new Error(
@@ -608,60 +452,14 @@ function readPersistedEnvironmentNeeds(targetDir: string): {
       `Package Addition requires valid Check Environment Need facts: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  if (isRecord(value)) {
-    for (const key of Object.keys(value)) {
-      if (!["schemaVersion", "check", "deployment"].includes(key)) {
-        throw new Error(
-          `Package Addition Environment Need facts contain unknown field: ${key}`,
-        );
-      }
-    }
-  }
-  if (
-    !isRecord(value) ||
-    value.schemaVersion !== 1 ||
-    !Array.isArray(value.check) ||
-    !Array.isArray(value.deployment)
-  ) {
+  try {
+    return parseEnvironmentNeedsMetadata(value);
+  } catch (error) {
     throw new Error(
-      `Package Addition requires valid Check Environment Need facts in ${environmentNeedsPath}`,
+      `Package Addition requires valid Environment Need metadata in ${environmentNeedsPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
-  const check = value.check.map(persistedCheckEnvironmentNeedFact);
-  if (check.some((fact) => fact === undefined)) {
-    throw new Error(
-      `Package Addition requires supported Check Environment Need facts in ${environmentNeedsPath}`,
-    );
-  }
-  if (
-    value.deployment.some((fact, index) => {
-      if (!isRecord(fact) || fact.kind !== "docker-engine") return true;
-      assertEnvironmentNeedFactKeys(fact, ["kind"], `deployment[${index}]`);
-      return false;
-    })
-  ) {
-    throw new Error(
-      `Package Addition requires supported deployment Environment Need facts in ${environmentNeedsPath}`,
-    );
-  }
-  return {
-    check: (check as CheckEnvironmentNeedFact[]).map(
-      checkEnvironmentNeedFromFact,
-    ),
-    deployment: value.deployment.map((fact) =>
-      deploymentEnvironmentNeedFromFact(fact as DeploymentEnvironmentNeedFact),
-    ),
-  };
-}
-
-function uniqueEnvironmentNeeds<T>(needs: readonly T[]): readonly T[] {
-  const seen = new Set<string>();
-  return needs.filter((need) => {
-    const key = JSON.stringify(need);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function readExistingPackageAdditionState(options: {
@@ -757,28 +555,20 @@ function readExistingPackageAdditionState(options: {
     }
     manifestTruthByPackagePath.set(expectedDefinition.path, manifest);
   }
-  const reconstructedCheckFacts = uniqueEnvironmentNeeds(
-    contributions.flatMap((contribution) => contribution.environmentNeeds),
-  ).map(checkEnvironmentNeedFact);
-  const reconstructedDeploymentFacts = uniqueEnvironmentNeeds(
-    contributions.flatMap(
+  const reconstructedEnvironmentNeeds = normalizeEnvironmentNeeds({
+    check: contributions.flatMap(
+      (contribution) => contribution.environmentNeeds,
+    ),
+    deployment: contributions.flatMap(
       (contribution) => contribution.deploymentEnvironmentNeeds ?? [],
     ),
-  ).map(deploymentEnvironmentNeedFact);
-  const persistedCheckFacts = persistedEnvironmentNeeds.check.map(
-    checkEnvironmentNeedFact,
-  );
-  const persistedDeploymentFacts = persistedEnvironmentNeeds.deployment.map(
-    deploymentEnvironmentNeedFact,
-  );
+  });
   if (
-    JSON.stringify(reconstructedCheckFacts) !==
-      JSON.stringify(persistedCheckFacts) ||
-    JSON.stringify(reconstructedDeploymentFacts) !==
-      JSON.stringify(persistedDeploymentFacts)
+    JSON.stringify(reconstructedEnvironmentNeeds) !==
+    JSON.stringify(persistedEnvironmentNeeds)
   ) {
     throw new Error(
-      "Package Addition requires persisted Environment Need facts to match the reproducible Project Projection",
+      "Package Addition requires persisted Environment Needs to match the reproducible Project Projection",
     );
   }
   return {
@@ -1156,18 +946,15 @@ function foundationPlan(options: {
       },
     ],
   };
-  const environmentNeeds = uniqueEnvironmentNeeds(
-    contributions.flatMap((item) => item.environmentNeeds),
-  );
-  const deploymentEnvironmentNeeds = uniqueEnvironmentNeeds([
-    ...(options.existingDeploymentEnvironmentNeeds ?? []),
-    ...contributions.flatMap((item) => item.deploymentEnvironmentNeeds ?? []),
-  ]);
-  const persistedEnvironmentNeeds: PersistedEnvironmentNeeds = {
-    schemaVersion: 1,
-    check: environmentNeeds.map(checkEnvironmentNeedFact),
-    deployment: deploymentEnvironmentNeeds.map(deploymentEnvironmentNeedFact),
-  };
+  const persistedEnvironmentNeeds = normalizeEnvironmentNeeds({
+    check: contributions.flatMap((item) => item.environmentNeeds),
+    deployment: [
+      ...(options.existingDeploymentEnvironmentNeeds ?? []),
+      ...contributions.flatMap((item) => item.deploymentEnvironmentNeeds ?? []),
+    ],
+  });
+  const environmentNeeds = persistedEnvironmentNeeds.check;
+  const deploymentEnvironmentNeeds = persistedEnvironmentNeeds.deployment;
   const hasDeploymentTask = contributions.some((contribution) => {
     const scripts = contribution.manifest.scripts;
     return (

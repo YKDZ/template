@@ -130,48 +130,30 @@ export type ProjectProjectionAction = {
 
 export type MaterializeProjectProjectionOptions = {
   readonly operations: readonly RenderOperation[];
-  readonly variables?: Readonly<Record<string, string>>;
   readonly reconciliation?: readonly ProjectProjectionReconciliation[];
 };
 
-function expandTemplatePath(
-  templatePath: string,
-  variables: Readonly<Record<string, string>>,
-): string {
-  return templatePath.replaceAll(
-    /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/gu,
-    (_placeholder, name: string) => {
-      const value = variables[name];
-      if (!value) throw new Error(`Missing renderer variable: ${name}`);
-      if (!/^[A-Za-z0-9._-]+$/u.test(value)) {
-        throw new Error(
-          `Renderer variable ${name} is not safe for a path segment`,
-        );
-      }
-      return value;
-    },
-  );
-}
-
-function normalizedOutputPath(
-  operation: RenderOperation,
-  variables: Readonly<Record<string, string>>,
-): string {
+function normalizedOutputPath(operation: RenderOperation): string {
   const operationPath =
     operation.kind === "setExecutable" || operation.kind === "replaceAnchors"
       ? operation.path
       : operation.to;
-  const expanded = expandTemplatePath(operationPath, variables);
-  if (path.isAbsolute(expanded)) {
-    throw new Error(`Project Projection paths must be relative: ${expanded}`);
+  if (path.isAbsolute(operationPath)) {
+    throw new Error(
+      `Project Projection paths must be relative: ${operationPath}`,
+    );
   }
-  const normalized = path.posix.normalize(expanded.split(path.sep).join("/"));
+  const normalized = path.posix.normalize(
+    operationPath.split(path.sep).join("/"),
+  );
   if (
     normalized === "." ||
     normalized === ".." ||
     normalized.startsWith("../")
   ) {
-    throw new Error(`Project Projection path escapes its root: ${expanded}`);
+    throw new Error(
+      `Project Projection path escapes its root: ${operationPath}`,
+    );
   }
   return normalized;
 }
@@ -1554,12 +1536,11 @@ export const reconcileAndApplyProjectProjections =
 export async function materializeProjectProjection(
   options: MaterializeProjectProjectionOptions,
 ): Promise<ProjectProjection> {
-  const variables = options.variables ?? {};
   const finalPaths = new Set<string>();
   const contentPaths = new Set<string>();
   const policies = new Map<string, ProjectProjectionReconciliation>();
   for (const operation of options.operations) {
-    const outputPath = normalizedOutputPath(operation, variables);
+    const outputPath = normalizedOutputPath(operation);
     finalPaths.add(outputPath);
     if (operation.kind === "setExecutable") {
       if (!contentPaths.has(outputPath)) {
@@ -1598,7 +1579,6 @@ export async function materializeProjectProjection(
   try {
     await renderProject({
       targetRoot,
-      variables: { ...variables },
       operations: [...options.operations],
     });
     const entries = await Promise.all(

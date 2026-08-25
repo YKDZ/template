@@ -6,14 +6,14 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
+import { resolveBuiltInTemplateSource } from "#template-builtin-presets";
 import { renderNewProject } from "#template-core/renderer";
 import type { TemplateSourceHandle } from "#template-core/renderer";
 
 import {
   builtInPresetTemplateSourceCheckContexts,
-  resolveBuiltInTemplateSource,
   type BuiltInPresetTemplateSourceCheckContext,
-} from "./foundation.ts";
+} from "./registry-checks.ts";
 
 const formattedTemplateSourceFile = /\.(?:[cm]?[jt]sx?|vue|json|html|css)$/u;
 const lintedTemplateSourceFile = /\.(?:[cm]?[jt]sx?|vue)$/u;

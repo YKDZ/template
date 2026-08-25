@@ -14,7 +14,6 @@ import path from "node:path";
 
 import {
   builtInPresetRegistry,
-  builtInPresetTemplateSourceCheckContexts,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
@@ -26,11 +25,6 @@ import { describe, expect, it } from "vitest";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import { renderNewProject } from "#template-core/renderer";
 
-import {
-  deriveFixtureMatrix,
-  deriveInitializationScenarios,
-  deriveVerificationPlans,
-} from "../registry-checks.ts";
 import { tsCliDefinition } from "./definition.ts";
 
 async function renderInstalledGeneratedRepository(prefix: string): Promise<{
@@ -148,17 +142,6 @@ describe("ts-cli Preset Definition behavior", () => {
     expect(builtInPresetRegistry.require("ts-cli").metadata).toEqual(
       tsCliDefinition.metadata,
     );
-    expect(
-      deriveInitializationScenarios().map(
-        (scenario) => scenario.base.metadata.name,
-      ),
-    ).toContain("ts-cli");
-    expect(
-      deriveFixtureMatrix().flatMap((scenario) => [
-        scenario.base.metadata.name,
-        scenario.addition?.metadata.name,
-      ]),
-    ).toContain("ts-cli");
   });
 
   it("adds a CLI Tool Package at default and explicit two-segment paths", () => {
@@ -388,28 +371,6 @@ describe("ts-cli Preset Definition behavior", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   }, 180_000);
-
-  it("derives source and boundary plans from the registry", () => {
-    expect(
-      builtInPresetTemplateSourceCheckContexts().filter(
-        (context) => context.definition.metadata.name === "ts-cli",
-      ),
-    ).toEqual([
-      expect.objectContaining({
-        contribution: expect.objectContaining({
-          definition: expect.objectContaining({ role: "cli-tool" }),
-        }),
-        plan: expect.objectContaining({ definitionName: "ts-cli" }),
-      }),
-    ]);
-    const verificationPlans = deriveVerificationPlans().filter(
-      ({ definition }) => definition.metadata.name === "ts-cli",
-    );
-    expect(verificationPlans.length).toBeGreaterThan(0);
-    expect(
-      verificationPlans.every(({ plan }) => plan.definitionName === "ts-cli"),
-    ).toBe(true);
-  });
 
   it("appears in the public CLI Preset Catalog without exporting planner internals", async () => {
     const publicApi = await import("../index.ts");

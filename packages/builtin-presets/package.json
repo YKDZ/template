@@ -4,11 +4,7 @@
   "private": true,
   "files": [
     "dist",
-    "templates",
-    "!dist/src/check-*.js",
-    "!dist/src/check-*.d.ts",
-    "!dist/src/registry-checks.js",
-    "!dist/src/registry-checks.d.ts"
+    "templates"
   ],
   "type": "module",
   "imports": {
@@ -27,8 +23,6 @@
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:templates": "node --conditions=source src/check-template-source.ts && node --conditions=source src/check-registry-contract.ts && node --conditions=source src/check-publication-source.ts",
-    "check:templates:boundary": "node --conditions=source src/check-template-boundary.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates .",

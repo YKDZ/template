@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -8,16 +9,11 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-  resolveBuiltInTemplateSource,
   type GeneratedRepositoryPlan,
 } from "#template-builtin-presets";
-import { projectCheckWorkflowTemplateReplacements } from "#template-core/project-github";
+import { renderNewProject } from "#template-core/renderer";
 
-import {
-  assertWorkflowContract,
-  renderTemplate,
-  sourceForGithubTemplate,
-} from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
+import { assertWorkflowContract } from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {
   const definition = builtInPresetRegistry.all().find((candidate) => {
@@ -53,36 +49,20 @@ async function renderedWorkflow(plan: GeneratedRepositoryPlan): Promise<{
   readonly sourcePath: string;
   readonly source: string;
 }> {
-  const operation = plan.operations.find(
-    (
-      candidate,
-    ): candidate is Extract<
-      GeneratedRepositoryPlan["operations"][number],
-      { kind: "copyFile" | "writeTextTemplate" }
-    > =>
-      (candidate.kind === "copyFile" ||
-        candidate.kind === "writeTextTemplate") &&
-      candidate.to === ".github/workflows/check.yml",
-  );
-  if (operation?.source === undefined) {
-    throw new Error(
-      "Expected a Foundation-owned Check workflow Template Source",
-    );
+  const workspace = await mkdtemp(path.join(tmpdir(), "template-workflow-"));
+  try {
+    await renderNewProject({
+      targetRoot: workspace,
+      operations: [...plan.operations],
+    });
+    const sourcePath = ".github/workflows/check.yml";
+    return {
+      sourcePath,
+      source: await readFile(path.join(workspace, sourcePath), "utf8"),
+    };
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
   }
-  const sourcePath = resolveBuiltInTemplateSource(
-    operation.source,
-    operation.from,
-  );
-  const template = await readFile(sourcePath, "utf8");
-  const replacements =
-    operation.kind === "writeTextTemplate" ? operation.replacements : {};
-  return {
-    sourcePath,
-    source: template.replaceAll(
-      /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/gu,
-      (_placeholder, name: string) => replacements[name] ?? "",
-    ),
-  };
 }
 
 async function rootOnlyWorkflowSource(): Promise<string> {
@@ -171,75 +151,6 @@ async function expectRootOnlyWorkflowRejected(source: string): Promise<void> {
 }
 
 describe("Built-in Preset GitHub YAML checker", () => {
-  it("requires exactly one Foundation workflow operation", () => {
-    const plan = rootOnlyPlan();
-    const workflow = plan.operations.find(
-      (
-        candidate,
-      ): candidate is Extract<
-        GeneratedRepositoryPlan["operations"][number],
-        { kind: "copyFile" | "writeTextTemplate" }
-      > =>
-        (candidate.kind === "copyFile" ||
-          candidate.kind === "writeTextTemplate") &&
-        candidate.to === ".github/workflows/check.yml",
-    );
-    if (workflow === undefined) {
-      throw new Error("Expected a Foundation workflow operation");
-    }
-
-    expect(() =>
-      sourceForGithubTemplate(
-        {
-          ...plan,
-          operations: [...plan.operations, { ...workflow, overwrite: true }],
-        },
-        "workflow",
-      ),
-    ).toThrow("exactly one Foundation-composed .github/workflows/check.yml");
-    expect(() =>
-      sourceForGithubTemplate(
-        {
-          ...plan,
-          operations: plan.operations.filter(
-            (candidate) =>
-              candidate.kind === "setExecutable" ||
-              candidate.kind === "replaceAnchors" ||
-              candidate.to !== ".github/workflows/check.yml",
-          ),
-        },
-        "workflow",
-      ),
-    ).toThrow("exactly one Foundation-composed .github/workflows/check.yml");
-  });
-
-  it("requires each workflow template placeholder exactly once", async () => {
-    const plan = deploymentPlan();
-    const source = await renderedWorkflow(plan);
-    const template = await readFile(source.sourcePath, "utf8");
-    const replacement = projectCheckWorkflowTemplateReplacements({
-      packagePaths: plan.blueprint.packages.map(
-        (definition) => definition.path,
-      ),
-      diagnosticArtifacts: plan.ciDiagnosticArtifacts,
-    }).DIAGNOSTIC_OWNER_PATHS;
-    if (replacement === undefined) {
-      throw new Error("Expected a diagnostic workflow replacement");
-    }
-
-    expect(() =>
-      renderTemplate(`${template}\n# {{DIAGNOSTIC_OWNER_PATHS}}\n`, {
-        DIAGNOSTIC_OWNER_PATHS: replacement,
-      }),
-    ).toThrow("must occur exactly once");
-    expect(() => renderTemplate("{{UNKNOWN}}", {})).toThrow(
-      "Unexpected Template Source placeholder: UNKNOWN",
-    );
-    expect(() => renderTemplate("no placeholders", { KNOWN: "value" })).toThrow(
-      "Missing Template Source placeholder: KNOWN",
-    );
-  });
-
   it("rejects root-only workflows with extra jobs or job-level permissions", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
@@ -443,18 +354,9 @@ describe("Built-in Preset GitHub YAML checker", () => {
         owner: { kind: "package-boundary" as const, path: "apps/web" },
       },
     ];
-    const packagePaths = plan.blueprint.packages.map(
-      (definition) => definition.path,
-    );
     const source = baseline.source.replace(
-      projectCheckWorkflowTemplateReplacements({
-        packagePaths,
-        diagnosticArtifacts: plan.ciDiagnosticArtifacts,
-      }).DIAGNOSTIC_OWNER_PATHS!,
-      projectCheckWorkflowTemplateReplacements({
-        packagePaths: [...packagePaths, "apps/admin"],
-        diagnosticArtifacts: declarations,
-      }).DIAGNOSTIC_OWNER_PATHS!,
+      "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+      "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
     );
     const multipleOwnersPlan = {
       ...plan,

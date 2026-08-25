@@ -1,7 +1,5 @@
 export {
   builtInPresetRegistry,
-  builtInPresetTemplateSourceCheckContexts,
-  builtInPresetTemplateSourceContexts,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
@@ -11,7 +9,6 @@ export {
 export { templateSources } from "./template-sources.ts";
 export type {
   BuiltInPresetDefinition,
-  BuiltInPresetTemplateSourceCheckContext,
   GeneratedRepositoryPlan,
   PackageContribution,
   ProjectBlueprintV2,

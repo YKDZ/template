@@ -1,130 +1,119 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { parseDocument } from "yaml";
 
 import {
-  builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-  resolveBuiltInTemplateSource,
+  planGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
 } from "#template-builtin-presets";
-import {
-  projectCheckWorkflowPlan,
-  projectCheckWorkflowTemplateReplacements,
-  projectDependabotConfig,
-} from "#template-core/project-github";
+import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
+import { renderNewProject } from "#template-core/renderer";
 
-type GithubTemplateKind = "workflow" | "dependabot";
-type SourceBackedOperation = Extract<
-  GeneratedRepositoryPlan["operations"][number],
-  { kind: "copyFile" | "writeTextTemplate" }
->;
+import { deriveFixtureMatrix } from "./registry-checks.ts";
 
-function isGithubTemplateOperation(
-  operation: GeneratedRepositoryPlan["operations"][number],
-  generatedPath: string,
-): operation is SourceBackedOperation {
+type WorkflowOracle = {
+  readonly deployment: boolean;
+  readonly diagnosticOwnerPaths: readonly string[];
+};
+
+function hasExactObjectKeys(
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  const actual = Object.keys(value).toSorted();
+  const expected = [...keys].toSorted();
   return (
-    (operation.kind === "copyFile" || operation.kind === "writeTextTemplate") &&
-    operation.to === generatedPath
+    actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index])
   );
 }
 
-export function sourceForGithubTemplate(
-  plan: GeneratedRepositoryPlan,
-  kind: GithubTemplateKind,
-): {
-  readonly filePath: string;
-  readonly replacements: Record<string, string>;
-} {
-  const generatedPath =
-    kind === "workflow"
-      ? ".github/workflows/check.yml"
-      : ".github/dependabot.yml";
-  const operations = plan.operations.filter(
-    (candidate) => "to" in candidate && candidate.to === generatedPath,
+function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
+  const packagePaths = new Set(
+    plan.blueprint.packages.map((definition) => definition.path),
   );
-
-  if (operations.length !== 1) {
-    throw new Error(
-      `${plan.definitionName}: expected exactly one Foundation-composed ${generatedPath} Template Source, found ${operations.length}`,
-    );
-  }
-  const operation = operations[0]!;
-  if (!isGithubTemplateOperation(operation, generatedPath)) {
-    throw new Error(
-      `${plan.definitionName}: Foundation ${generatedPath} must use a source-backed Template Source operation`,
-    );
-  }
-
-  return {
-    filePath:
-      operation.source === undefined
-        ? (() => {
-            throw new Error(
-              `${plan.definitionName}: Foundation ${generatedPath} is missing its owned Template Source handle`,
-            );
-          })()
-        : resolveBuiltInTemplateSource(operation.source, operation.from),
-    replacements:
-      operation.kind === "writeTextTemplate" ? operation.replacements : {},
-  };
-}
-
-export function renderTemplate(
-  source: string,
-  replacements: Record<string, string>,
-): string {
-  const occurrences = new Map<string, number>();
-  const rendered = source.replaceAll(
-    /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g,
-    (_placeholder, name: string) => {
-      const count = occurrences.get(name) ?? 0;
-      occurrences.set(name, count + 1);
-      const replacement = replacements[name];
-      if (replacement === undefined) return _placeholder;
-      return replacement;
-    },
-  );
-
-  for (const name of Object.keys(replacements)) {
-    const count = occurrences.get(name) ?? 0;
-    if (count === 0) {
-      throw new Error(`Missing Template Source placeholder: ${name}`);
-    }
-    if (count !== 1) {
+  const diagnosticOwnerPaths = new Set<string>();
+  for (const declaration of plan.ciDiagnosticArtifacts) {
+    if (
+      typeof declaration !== "object" ||
+      declaration === null ||
+      Array.isArray(declaration) ||
+      !hasExactObjectKeys(declaration as Record<string, unknown>, [
+        "kind",
+        "owner",
+      ])
+    ) {
       throw new Error(
-        `Template Source placeholder ${name} must occur exactly once`,
+        "CI Diagnostic Artifact declarations may contain only kind and owner",
       );
     }
-  }
-
-  for (const name of occurrences.keys()) {
-    if (!Object.hasOwn(replacements, name)) {
-      throw new Error(`Unexpected Template Source placeholder: ${name}`);
-    }
-  }
-
-  return rendered;
-}
-
-function projectWorkflowPlan(plan: GeneratedRepositoryPlan) {
-  return projectCheckWorkflowPlan({
-    packagePaths: plan.blueprint.packages.map((definition) => definition.path),
-    deploymentEnvironmentNeeds: [...plan.deploymentEnvironmentNeeds],
-    diagnosticArtifacts: [...plan.ciDiagnosticArtifacts],
-    hasDeploymentTask: plan.manifests.some((manifest) => {
-      const scripts = manifest.scripts;
-      return (
-        typeof scripts === "object" &&
-        scripts !== null &&
-        typeof (scripts as Record<string, unknown>).deployment === "string"
+    const owner = (declaration as { readonly owner?: unknown }).owner;
+    if (
+      declaration.kind !== "playwright" ||
+      typeof owner !== "object" ||
+      owner === null ||
+      Array.isArray(owner) ||
+      !hasExactObjectKeys(owner as Record<string, unknown>, ["kind", "path"])
+    ) {
+      throw new Error(
+        "CI Diagnostic Artifact requires a Package Boundary owner",
       );
-    }),
+    }
+    const ownerPath = owner as {
+      readonly kind?: unknown;
+      readonly path?: unknown;
+    };
+    if (
+      ownerPath.kind !== "package-boundary" ||
+      typeof ownerPath.path !== "string" ||
+      !/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u.test(ownerPath.path) ||
+      [
+        ".git",
+        ".github",
+        ".devcontainer",
+        ".template",
+        "node_modules",
+        "dist",
+        "target",
+      ].includes(ownerPath.path.split("/", 1)[0]!)
+    ) {
+      throw new Error(
+        "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
+      );
+    }
+    if (!packagePaths.has(ownerPath.path)) {
+      throw new Error(
+        `CI Diagnostic Artifact owner is not a declared Package Boundary: ${ownerPath.path}`,
+      );
+    }
+    diagnosticOwnerPaths.add(ownerPath.path);
+  }
+
+  const deployment = plan.manifests.some((manifest) => {
+    const scripts = manifest.scripts;
+    return (
+      typeof scripts === "object" &&
+      scripts !== null &&
+      typeof (scripts as Record<string, unknown>).deployment === "string"
+    );
   });
+  if (
+    deployment &&
+    !plan.deploymentEnvironmentNeeds.some(
+      (need) => need.kind === "docker-engine",
+    )
+  ) {
+    throw new Error("Deployment Check requires a Docker Environment Need");
+  }
+  return {
+    deployment,
+    diagnosticOwnerPaths: [...diagnosticOwnerPaths].toSorted(),
+  };
 }
 
 type ParsedWorkflow = {
@@ -200,7 +189,7 @@ const actionContracts: ReadonlyMap<
 ] as const);
 
 function diagnosticStepContracts(
-  expected: ReturnType<typeof projectWorkflowPlan>,
+  oracle: WorkflowOracle,
   deploymentMatrix: boolean,
 ):
   | {
@@ -208,26 +197,16 @@ function diagnosticStepContracts(
       readonly upload: ParsedObject;
     }
   | undefined {
-  if (expected.diagnosticArtifacts.length === 0) return undefined;
+  if (oracle.diagnosticOwnerPaths.length === 0) return undefined;
   const condition = deploymentMatrix
     ? "failure() && matrix.capability == 'root'"
     : "failure()";
-  const replacements = projectCheckWorkflowTemplateReplacements({
-    packagePaths: expected.packagePaths,
-    diagnosticArtifacts: expected.diagnosticArtifacts,
-  });
-  const ownerPaths = replacements.DIAGNOSTIC_OWNER_PATHS;
-  if (ownerPaths === undefined) {
-    throw new Error(
-      "Diagnostic workflow is missing its validated native owner facts",
-    );
-  }
   return {
     stage: {
       name: "Stage Root Check diagnostics",
       if: condition,
       env: {
-        DIAGNOSTIC_OWNER_PATHS: ownerPaths.replaceAll(/^ {12}/gmu, ""),
+        DIAGNOSTIC_OWNER_PATHS: oracle.diagnosticOwnerPaths.join("\n"),
       },
       run: [
         "rm -rf .template-ci-diagnostics",
@@ -264,10 +243,10 @@ function assertDiagnosticSteps(
   source: string,
   stageStep: unknown,
   uploadStep: unknown,
-  expected: ReturnType<typeof projectWorkflowPlan>,
+  oracle: WorkflowOracle,
   deploymentMatrix: boolean,
 ): void {
-  const contract = diagnosticStepContracts(expected, deploymentMatrix);
+  const contract = diagnosticStepContracts(oracle, deploymentMatrix);
   if (contract === undefined) return;
   if (
     !isParsedObject(stageStep) ||
@@ -346,7 +325,7 @@ function assertRootOnlyWorkflowContract(
   plan: GeneratedRepositoryPlan,
   source: string,
   workflow: ParsedWorkflow,
-  expected: ReturnType<typeof projectWorkflowPlan>,
+  oracle: WorkflowOracle,
 ): void {
   if (
     !isParsedObject(workflow.jobs) ||
@@ -365,7 +344,7 @@ function assertRootOnlyWorkflowContract(
       `${plan.definitionName}: Root Check job has unexpected fields or permissions`,
     );
   }
-  const diagnostic = diagnosticStepContracts(expected, false);
+  const diagnostic = diagnosticStepContracts(oracle, false);
   if (
     !Array.isArray(job.steps) ||
     job.steps.length !== 5 + (diagnostic === undefined ? 0 : 2)
@@ -391,8 +370,8 @@ function assertRootOnlyWorkflowContract(
     }
   }
   const runStepContracts = [
-    { name: "Install dependencies", run: expected.taskLayer.installCommand },
-    { name: "Run Root Check", run: expected.taskLayer.checkCommand },
+    { name: "Install dependencies", run: "pnpm install --frozen-lockfile" },
+    { name: "Run Root Check", run: "pnpm run check" },
   ] as const;
   for (const [index, contract] of runStepContracts.entries()) {
     const step = job.steps[rootOnlyStepContracts.length + index];
@@ -412,7 +391,7 @@ function assertRootOnlyWorkflowContract(
     source,
     job.steps[5],
     job.steps[6],
-    expected,
+    oracle,
     false,
   );
 }
@@ -421,10 +400,10 @@ function assertDeploymentWorkflowContract(
   plan: GeneratedRepositoryPlan,
   source: string,
   workflow: ParsedWorkflow,
-  expected: ReturnType<typeof projectWorkflowPlan>,
+  oracle: WorkflowOracle,
 ): void {
   if (
-    expected.matrix === undefined ||
+    !oracle.deployment ||
     !isParsedObject(workflow.jobs) ||
     !hasExactKeys(workflow.jobs, ["check"])
   ) {
@@ -443,7 +422,7 @@ function assertDeploymentWorkflowContract(
       "steps",
     ]) ||
     job.name !== "${{ matrix.job_name }}" ||
-    job["runs-on"] !== expected.rootCheck.runner ||
+    job["runs-on"] !== "ubuntu-latest" ||
     job["timeout-minutes"] !== "${{ matrix.timeout_minutes }}"
   ) {
     throw new Error(
@@ -453,7 +432,7 @@ function assertDeploymentWorkflowContract(
   if (
     !isParsedObject(job.strategy) ||
     !hasExactKeys(job.strategy, ["fail-fast", "matrix"]) ||
-    job.strategy["fail-fast"] !== expected.matrix.failFast ||
+    job.strategy["fail-fast"] !== false ||
     !isParsedObject(job.strategy.matrix) ||
     !hasExactKeys(job.strategy.matrix, ["include"]) ||
     !Array.isArray(job.strategy.matrix.include)
@@ -462,13 +441,22 @@ function assertDeploymentWorkflowContract(
       `${plan.definitionName}: Deployment matrix must use explicit non-fail-fast include entries`,
     );
   }
-  const expectedInclude = expected.matrix.include.map((entry) => ({
-    capability: entry.capability,
-    job_name: entry.jobDisplayName,
-    task_entrypoint: entry.taskEntrypoint,
-    timeout_minutes: entry.timeoutMinutes,
-    requires_docker: entry.requiresDocker,
-  }));
+  const expectedInclude = [
+    {
+      capability: "root",
+      job_name: "Root Check",
+      task_entrypoint: "pnpm run check",
+      timeout_minutes: 30,
+      requires_docker: false,
+    },
+    {
+      capability: "deployment",
+      job_name: "Deployment Check",
+      task_entrypoint: "pnpm run check:deployment",
+      timeout_minutes: 45,
+      requires_docker: true,
+    },
+  ];
   if (
     JSON.stringify(job.strategy.matrix.include) !==
     JSON.stringify(expectedInclude)
@@ -477,7 +465,7 @@ function assertDeploymentWorkflowContract(
       `${plan.definitionName}: Deployment matrix include entries diverge from its capability plan`,
     );
   }
-  const diagnostic = diagnosticStepContracts(expected, true);
+  const diagnostic = diagnosticStepContracts(oracle, true);
   if (
     !Array.isArray(job.steps) ||
     job.steps.length !== 6 + (diagnostic === undefined ? 0 : 2)
@@ -521,7 +509,7 @@ function assertDeploymentWorkflowContract(
     !isParsedObject(install) ||
     !hasExactKeys(install, ["name", "run"]) ||
     install.name !== "Install dependencies" ||
-    install.run !== expected.taskLayer.installCommand ||
+    install.run !== "pnpm install --frozen-lockfile" ||
     !isParsedObject(selectedCheck) ||
     !hasExactKeys(selectedCheck, ["name", "run"]) ||
     selectedCheck.name !== "Run selected Check" ||
@@ -531,16 +519,21 @@ function assertDeploymentWorkflowContract(
       `${plan.definitionName}: Deployment matrix must install and invoke its selected task in each leg`,
     );
   }
-  assertDiagnosticSteps(plan, source, steps[6], steps[7], expected, true);
+  assertDiagnosticSteps(plan, source, steps[6], steps[7], oracle, true);
 }
 
 export function assertWorkflowContract(
   plan: GeneratedRepositoryPlan,
-  sourcePath: string,
+  generatedPath: string,
   source: string,
   workflow: ParsedWorkflow,
 ): void {
-  const expected = projectWorkflowPlan(plan);
+  const oracle = workflowOracle(plan);
+  if (generatedPath !== ".github/workflows/check.yml") {
+    throw new Error(
+      `${plan.definitionName}: Check workflow has unexpected generated path ${generatedPath}`,
+    );
+  }
   if (
     !isParsedObject(workflow) ||
     !hasExactKeys(workflow, [
@@ -564,11 +557,11 @@ export function assertWorkflowContract(
     throw new Error(`${plan.definitionName}: Root Check has no steps`);
   }
   if (
-    workflow.name !== expected.workflowName ||
+    workflow.name !== "Check" ||
     JSON.stringify(workflow.on) !==
       JSON.stringify({
         pull_request: null,
-        push: { branches: expected.triggers.pushBranches },
+        push: { branches: ["main"] },
       })
   ) {
     throw new Error(
@@ -577,7 +570,7 @@ export function assertWorkflowContract(
   }
   if (
     JSON.stringify(workflow.permissions) !==
-    JSON.stringify(expected.permissions)
+    JSON.stringify({ contents: "read" })
   ) {
     throw new Error(
       `${plan.definitionName}: Check permissions are not contents-read`,
@@ -586,16 +579,16 @@ export function assertWorkflowContract(
   if (
     JSON.stringify(workflow.concurrency) !==
     JSON.stringify({
-      group: expected.concurrency.group,
-      "cancel-in-progress": expected.concurrency.cancelInProgress,
+      group: "${{ github.workflow }}-${{ github.ref }}",
+      "cancel-in-progress": true,
     })
   ) {
     throw new Error(
       `${plan.definitionName}: Check concurrency is not same-ref cancellation`,
     );
   }
-  if (expected.matrix !== undefined) {
-    assertDeploymentWorkflowContract(plan, source, workflow, expected);
+  if (oracle.deployment) {
+    assertDeploymentWorkflowContract(plan, source, workflow, oracle);
     if (
       !plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")
     ) {
@@ -603,34 +596,19 @@ export function assertWorkflowContract(
         `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
       );
     }
-    if (!sourcePath.includes("/templates/foundation/.github/workflows/")) {
-      throw new Error(
-        `${plan.definitionName}: Check workflow is not Foundation Template Source`,
-      );
-    }
     return;
   }
   if (
-    job?.name !== expected.rootCheck.jobDisplayName ||
-    job["runs-on"] !== expected.rootCheck.runner ||
-    job["timeout-minutes"] !== expected.rootCheck.timeoutMinutes
+    job?.name !== "Root Check" ||
+    job["runs-on"] !== "ubuntu-latest" ||
+    job["timeout-minutes"] !== 30
   ) {
     throw new Error(
       `${plan.definitionName}: Root Check identity is not stable`,
     );
   }
 
-  const hasDeploymentTask = plan.manifests.some((manifest) => {
-    const scripts = manifest.scripts;
-    return (
-      typeof scripts === "object" &&
-      scripts !== null &&
-      typeof (scripts as Record<string, unknown>).deployment === "string"
-    );
-  });
-  if (!hasDeploymentTask) {
-    assertRootOnlyWorkflowContract(plan, source, workflow, expected);
-  }
+  assertRootOnlyWorkflowContract(plan, source, workflow, oracle);
 
   const parsedSteps = (steps as unknown[]).map((step) => {
     if (!isParsedObject(step)) {
@@ -703,8 +681,8 @@ export function assertWorkflowContract(
     JSON.stringify(node?.with) !==
       JSON.stringify({ "node-version-file": "package.json" }) ||
     JSON.stringify(pnpm?.with) !== JSON.stringify({ cache: true }) ||
-    install?.run !== expected.taskLayer.installCommand ||
-    rootCheck?.run !== expected.taskLayer.checkCommand
+    install?.run !== "pnpm install --frozen-lockfile" ||
+    rootCheck?.run !== "pnpm run check"
   ) {
     throw new Error(
       `${plan.definitionName}: Root Check environment preparation diverges from its capability plan`,
@@ -716,10 +694,10 @@ export function assertWorkflowContract(
   if (
     commands.some(
       (command) =>
-        command !== expected.taskLayer.installCommand &&
-        command !== expected.taskLayer.checkCommand &&
+        command !== "pnpm install --frozen-lockfile" &&
+        command !== "pnpm run check" &&
         command !== "pnpm run check:deployment" &&
-        command !== diagnosticStepContracts(expected, false)?.stage.run,
+        command !== diagnosticStepContracts(oracle, false)?.stage.run,
     )
   ) {
     throw new Error(
@@ -731,49 +709,245 @@ export function assertWorkflowContract(
       `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
     );
   }
-  if (!sourcePath.includes("/templates/foundation/.github/workflows/")) {
+}
+
+function expectedDependabotUpdate(
+  ecosystem: string,
+  directory: string,
+): ParsedObject {
+  const update: ParsedObject = {
+    "package-ecosystem": ecosystem,
+    directory,
+    schedule: { interval: "weekly" },
+  };
+  if (ecosystem === "npm") {
+    update.groups = {
+      drizzle: { patterns: ["drizzle-*", "drizzle-orm"] },
+    };
+    update.ignore = [
+      {
+        "dependency-name": "@types/node",
+        "update-types": ["version-update:semver-major"],
+      },
+      {
+        "dependency-name": "pnpm",
+        "update-types": [
+          "version-update:semver-major",
+          "version-update:semver-minor",
+          "version-update:semver-patch",
+        ],
+      },
+    ];
+  }
+  if (ecosystem === "docker" && directory === "/.devcontainer") {
+    update.ignore = [
+      {
+        "dependency-name": "mcr.microsoft.com/devcontainers/typescript-node",
+        "update-types": ["version-update:semver-major"],
+      },
+    ];
+  }
+  return update;
+}
+
+function dependabotOracle(
+  plan: GeneratedRepositoryPlan,
+): readonly ParsedObject[] {
+  const manifestByName = new Map(
+    plan.manifests.flatMap((manifest) =>
+      typeof manifest.name === "string" ? [[manifest.name, manifest]] : [],
+    ),
+  );
+  const deploymentDirectories = plan.blueprint.packages.flatMap(
+    (definition) => {
+      const scripts = manifestByName.get(definition.name)?.scripts;
+      return typeof scripts === "object" &&
+        scripts !== null &&
+        typeof (scripts as Record<string, unknown>).deployment === "string"
+        ? [`/${definition.path}`]
+        : [];
+    },
+  );
+  const cargoDirectories = plan.blueprint.packages.flatMap((definition) =>
+    definition.role === "native-package" ? [`/${definition.path}`] : [],
+  );
+  return [
+    expectedDependabotUpdate("npm", "/"),
+    expectedDependabotUpdate("github-actions", "/"),
+    expectedDependabotUpdate("docker", "/.devcontainer"),
+    ...deploymentDirectories.map((directory) =>
+      expectedDependabotUpdate("docker", directory),
+    ),
+    ...cargoDirectories.map((directory) =>
+      expectedDependabotUpdate("cargo", directory),
+    ),
+    ...(cargoDirectories.length === 0
+      ? []
+      : [expectedDependabotUpdate("rust-toolchain", "/")]),
+  ];
+}
+
+export function assertDependabotContract(
+  plan: GeneratedRepositoryPlan,
+  generatedPath: string,
+  parsed: unknown,
+): void {
+  if (generatedPath !== ".github/dependabot.yml") {
     throw new Error(
-      `${plan.definitionName}: Check workflow is not Foundation Template Source`,
+      `${plan.definitionName}: Dependabot has unexpected generated path ${generatedPath}`,
+    );
+  }
+  if (
+    !isParsedObject(parsed) ||
+    !hasExactKeys(parsed, ["version", "updates"]) ||
+    parsed.version !== 2 ||
+    !Array.isArray(parsed.updates) ||
+    JSON.stringify(parsed.updates) !== JSON.stringify(dependabotOracle(plan))
+  ) {
+    throw new Error(
+      `${plan.definitionName}: generated Dependabot configuration diverges from the independent repository policy oracle`,
     );
   }
 }
 
-export async function checkBuiltInPresetGithubYaml(): Promise<void> {
-  for (const definition of builtInPresetRegistry.all()) {
-    const plan = planGeneratedRepositoryInitialization({
-      definition,
-      context: createGenerationContext({
-        targetDir: path.join("generated-repository", definition.metadata.name),
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-      }),
-    });
+type PolicyOrigin = {
+  readonly presets: readonly string[];
+  readonly generationPath: "initialization" | "package-addition";
+  readonly generatedPath: string;
+};
 
-    for (const kind of ["workflow", "dependabot"] as const) {
-      const source = sourceForGithubTemplate(plan, kind);
-      const rendered = renderTemplate(
-        await readFile(source.filePath, "utf8"),
-        source.replacements,
-      );
-      const document = parseDocument(rendered);
+type PolicyInput = {
+  readonly kind: "workflow" | "dependabot";
+  readonly content: string;
+  readonly plan: GeneratedRepositoryPlan;
+  readonly oracleIdentity: string;
+  readonly origins: PolicyOrigin[];
+};
+
+function policyOracleIdentity(
+  kind: PolicyInput["kind"],
+  plan: GeneratedRepositoryPlan,
+): string {
+  return JSON.stringify(
+    kind === "workflow" ? workflowOracle(plan) : dependabotOracle(plan),
+  );
+}
+
+async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
+  const byIdentity = new Map<string, PolicyInput>();
+  for (const scenario of deriveFixtureMatrix()) {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-github-policy-"),
+    );
+    const projectDir = path.join(workspace, scenario.id);
+    try {
+      const context = createGenerationContext({
+        targetDir: projectDir,
+        scope: "github-policy",
+        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: scenario.base,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: projectDir,
+        operations: [...initialization.operations],
+      });
+      let plan: GeneratedRepositoryPlan = initialization;
+      if (scenario.addition !== undefined) {
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: scenario.addition,
+          context,
+          blueprint: initialization.blueprint,
+          packageLeafName: `policy-${scenario.addition.metadata.name}`,
+        });
+        const result = await reconcileAndApplyProjectProjections({
+          targetRoot: projectDir,
+          ...addition.projectProjections,
+        });
+        if (!result.ok) {
+          throw new Error(
+            `${scenario.id}: GitHub policy projection conflicted: ${JSON.stringify(result.conflicts)}`,
+          );
+        }
+        plan = addition;
+      }
+      const generationPath =
+        scenario.addition === undefined
+          ? ("initialization" as const)
+          : ("package-addition" as const);
+      const presets = [
+        scenario.base.metadata.name,
+        ...(scenario.addition === undefined
+          ? []
+          : [scenario.addition.metadata.name]),
+      ];
+      for (const kind of ["workflow", "dependabot"] as const) {
+        const generatedPath =
+          kind === "workflow"
+            ? ".github/workflows/check.yml"
+            : ".github/dependabot.yml";
+        const content = await readFile(
+          path.join(projectDir, generatedPath),
+          "utf8",
+        );
+        const identity = `${kind}\u0000${content}`;
+        const oracleIdentity = policyOracleIdentity(kind, plan);
+        const origin = { presets, generationPath, generatedPath };
+        const existing = byIdentity.get(identity);
+        if (existing === undefined) {
+          byIdentity.set(identity, {
+            kind,
+            content,
+            plan,
+            oracleIdentity,
+            origins: [origin],
+          });
+        } else {
+          if (existing.oracleIdentity !== oracleIdentity) {
+            throw new Error(
+              `Identical ${kind} final content was reached from incompatible policy facts: ${JSON.stringify([...existing.origins, origin])}`,
+            );
+          }
+          existing.origins.push(origin);
+        }
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }
+  return [...byIdentity.values()];
+}
+
+export async function checkBuiltInPresetGithubYaml(): Promise<void> {
+  for (const input of await finalPolicyInputs()) {
+    try {
+      const document = parseDocument(input.content);
       if (document.errors.length > 0 || document.warnings.length > 0) {
         throw new Error(
-          `${definition.metadata.name}: invalid ${kind} Template Source ${source.filePath}: ${[...document.errors, ...document.warnings].map((error) => error.message).join("; ")}`,
+          `invalid generated ${input.kind} YAML: ${[...document.errors, ...document.warnings].map((error) => error.message).join("; ")}`,
         );
       }
-      if (kind === "workflow") {
+      if (input.kind === "workflow") {
         assertWorkflowContract(
-          plan,
-          source.filePath,
-          rendered,
+          input.plan,
+          ".github/workflows/check.yml",
+          input.content,
           document.toJS() as ParsedWorkflow,
         );
-      } else if (
-        rendered !== projectDependabotConfig(plan.dependencyMaintenancePolicy)
-      ) {
-        throw new Error(
-          `${definition.metadata.name}: Dependabot Template Source diverges from its Foundation plan`,
+      } else {
+        assertDependabotContract(
+          input.plan,
+          ".github/dependabot.yml",
+          document.toJS(),
         );
       }
+    } catch (error) {
+      throw new Error(
+        `${input.kind} policy failed for ${input.origins.map((origin) => `${origin.presets.join("+")}:${origin.generationPath}:${origin.generatedPath}`).join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
     }
   }
 }

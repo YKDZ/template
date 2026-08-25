@@ -1014,7 +1014,7 @@ describe("Non-Destructive Package Addition", () => {
           packageLeafName: "utilities",
         }),
       ).toThrow(
-        "Package Addition Environment Need facts contain unknown field: inferredFromWorkspace",
+        "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: $ contains unknown field: inferredFromWorkspace",
       );
       await expect(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
@@ -1070,7 +1070,7 @@ describe("Non-Destructive Package Addition", () => {
           packageLeafName: "utilities",
         }),
       ).toThrow(
-        "Package Addition Environment Need check[0] contains unknown field: inferredFromTaskGraph",
+        "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: check[0] contains unknown field: inferredFromTaskGraph",
       );
       await expect(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
@@ -1148,7 +1148,9 @@ describe("Non-Destructive Package Addition", () => {
           deployment: [],
         }),
       );
-      expect(plan).toThrow("requires supported Check Environment Need facts");
+      expect(plan).toThrow(
+        "requires valid Environment Need metadata in .template/environment-needs.json: check[0] has unsupported kind: inferred-task",
+      );
       await writeFile(environmentPath, environment);
 
       expect(plan).not.toThrow();

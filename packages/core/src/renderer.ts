@@ -16,8 +16,6 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-type RenderVariables = Record<string, string>;
-
 export type RenderOperationProvenance = {
   readonly definitionName: string;
   readonly plannerSourceFile: string;
@@ -159,33 +157,8 @@ export type RenderOperation =
 
 export type RenderProjectOptions = {
   targetRoot: string;
-  variables?: RenderVariables | undefined;
   operations: RenderOperation[];
 };
-
-function expandTemplatePath(
-  templatePath: string,
-  variables: RenderVariables,
-): string {
-  return templatePath.replaceAll(
-    /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g,
-    (_, name: string) => {
-      const value = variables[name];
-
-      if (!value) {
-        throw new Error(`Missing renderer variable: ${name}`);
-      }
-
-      if (!/^[A-Za-z0-9._-]+$/.test(value)) {
-        throw new Error(
-          `Renderer variable ${name} is not safe for a path segment`,
-        );
-      }
-
-      return value;
-    },
-  );
-}
 
 function resolveContainedPath(root: string, relativePath: string): string {
   if (path.isAbsolute(relativePath)) {
@@ -205,26 +178,12 @@ function resolveContainedPath(root: string, relativePath: string): string {
   return resolvedPath;
 }
 
-function expandOperationPath(
-  relativePath: string,
-  options: RenderProjectOptions,
-): string {
-  return expandTemplatePath(relativePath, options.variables ?? {});
-}
-
 async function renderCopyFile(
   operation: CopyFileOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const variables = options.variables ?? {};
-  const from = resolveTemplateSource(
-    operation.source,
-    expandTemplatePath(operation.from, variables),
-  );
-  const to = resolveContainedPath(
-    options.targetRoot,
-    expandTemplatePath(operation.to, variables),
-  );
+  const from = resolveTemplateSource(operation.source, operation.from);
+  const to = resolveContainedPath(options.targetRoot, operation.to);
   const sourceMode = (await stat(from)).mode;
 
   await mkdir(path.dirname(to), { recursive: true });
@@ -390,7 +349,7 @@ async function renderWriteJson(
 ): Promise<void> {
   await writeJsonFile(
     options.targetRoot,
-    expandOperationPath(operation.to, options),
+    operation.to,
     operation.value,
     operation.multilineArrays,
     operation.keyOrder,
@@ -406,7 +365,7 @@ async function renderMergeJson(
   await mergeJsonIntoFile({
     options,
     patch: operation.value,
-    toPath: expandOperationPath(operation.to, options),
+    toPath: operation.to,
     multilineArrays: operation.multilineArrays,
     keyOrder: operation.keyOrder,
     nestedKeyOrder: operation.nestedKeyOrder,
@@ -417,11 +376,7 @@ async function renderMergeJsonTemplate(
   operation: MergeJsonTemplateOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const variables = options.variables ?? {};
-  const sourcePath = resolveTemplateSource(
-    operation.source,
-    expandTemplatePath(operation.from, variables),
-  );
+  const sourcePath = resolveTemplateSource(operation.source, operation.from);
   let patch: unknown;
   try {
     patch = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
@@ -434,7 +389,7 @@ async function renderMergeJsonTemplate(
   await mergeJsonIntoFile({
     options,
     patch,
-    toPath: expandOperationPath(operation.to, options),
+    toPath: operation.to,
     multilineArrays: operation.multilineArrays,
     keyOrder: operation.keyOrder,
     nestedKeyOrder: operation.nestedKeyOrder,
@@ -475,8 +430,7 @@ async function renderWriteText(
   operation: WriteTextOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const toPath = expandOperationPath(operation.to, options);
-  const to = resolveContainedPath(options.targetRoot, toPath);
+  const to = resolveContainedPath(options.targetRoot, operation.to);
 
   await mkdir(path.dirname(to), { recursive: true });
   await writeGeneratedFile(to, operation.text);
@@ -489,17 +443,12 @@ type LoadedTextFragment = {
 
 async function loadTextFragments(
   operation: WriteTextFromFragmentsOperation,
-  options: RenderProjectOptions,
 ): Promise<readonly LoadedTextFragment[]> {
   return Promise.all(
     operation.fragments.map(async (fragment) => {
-      const fromPath = expandTemplatePath(
-        fragment.from,
-        options.variables ?? {},
-      );
-      const from = resolveTemplateSource(fragment.source, fromPath);
+      const from = resolveTemplateSource(fragment.source, fragment.from);
 
-      return { from: fromPath, text: await readFile(from, "utf8") };
+      return { from: fragment.from, text: await readFile(from, "utf8") };
     }),
   );
 }
@@ -551,7 +500,7 @@ async function preflightDevelopmentContainerDockerfiles(
       continue;
     }
 
-    const fragments = await loadTextFragments(operation, options);
+    const fragments = await loadTextFragments(operation);
     await validateDevelopmentContainerDockerfileOperation(operation, fragments);
     loadedFragments.set(operation, fragments);
   }
@@ -564,10 +513,8 @@ async function renderWriteTextFromFragments(
   options: RenderProjectOptions,
   preloadedFragments?: readonly LoadedTextFragment[],
 ): Promise<void> {
-  const toPath = expandOperationPath(operation.to, options);
-  const to = resolveContainedPath(options.targetRoot, toPath);
-  const fragments =
-    preloadedFragments ?? (await loadTextFragments(operation, options));
+  const to = resolveContainedPath(options.targetRoot, operation.to);
+  const fragments = preloadedFragments ?? (await loadTextFragments(operation));
   await validateDevelopmentContainerDockerfileOperation(operation, fragments);
 
   await mkdir(path.dirname(to), { recursive: true });
@@ -610,12 +557,8 @@ async function renderWriteTextTemplate(
   operation: WriteTextTemplateOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const toPath = expandOperationPath(operation.to, options);
-  const from = resolveTemplateSource(
-    operation.source,
-    expandTemplatePath(operation.from, options.variables ?? {}),
-  );
-  const to = resolveContainedPath(options.targetRoot, toPath);
+  const from = resolveTemplateSource(operation.source, operation.from);
+  const to = resolveContainedPath(options.targetRoot, operation.to);
   const sourceText = await readFile(from, "utf8");
 
   await mkdir(path.dirname(to), { recursive: true });
@@ -630,10 +573,7 @@ async function renderSetExecutable(
   operation: SetExecutableOperation,
   options: RenderProjectOptions,
 ): Promise<void> {
-  const filePath = resolveContainedPath(
-    options.targetRoot,
-    expandOperationPath(operation.path, options),
-  );
+  const filePath = resolveContainedPath(options.targetRoot, operation.path);
   const currentMode = (await stat(filePath)).mode;
   const executeBits = 0o111;
   const mode = operation.executable
@@ -747,10 +687,7 @@ async function renderReplaceAnchors(
     throw new Error("Checked Transform Anchor only supports TypeScript");
   }
 
-  const filePath = resolveContainedPath(
-    options.targetRoot,
-    expandOperationPath(operation.path, options),
-  );
+  const filePath = resolveContainedPath(options.targetRoot, operation.path);
   const sourceText = await readFile(filePath, "utf8");
   const ranges = await findTypeScriptAnchorRanges(sourceText);
 

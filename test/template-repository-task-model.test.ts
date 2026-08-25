@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 type Manifest = {
+  readonly packageManager?: string;
   readonly scripts: Record<string, string>;
 };
 
@@ -29,6 +30,14 @@ async function readJson<T>(file: string): Promise<T> {
 }
 
 describe("Template Repository native task model", () => {
+  it("keeps the Package Manager Pin consumable by repository automation", async () => {
+    const manifest = await readJson<Manifest>("package.json");
+    const pnpm = await execa("pnpm", ["--version"], { reject: true });
+
+    expect(manifest.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
+    expect(manifest.packageManager).toBe(`pnpm@${pnpm.stdout.trim()}`);
+  });
+
   it("executes builds when injected workspace packages must be synchronized", async () => {
     const workspace = parse(
       await readFile("pnpm-workspace.yaml", "utf8"),
@@ -213,7 +222,7 @@ describe("Template Repository native task model", () => {
     expect(taskIds.some((taskId) => taskId.includes("transit"))).toBe(false);
   });
 
-  it("discovers independently owned template checks without package aggregation", async () => {
+  it("keeps registry and Template Source checks under the checks owner", async () => {
     const [checks, builtInPresets] = await Promise.all([
       readJson<Manifest>("packages/checks/package.json"),
       readJson<Manifest>("packages/builtin-presets/package.json"),
@@ -222,9 +231,8 @@ describe("Template Repository native task model", () => {
     expect(checks.scripts["check:templates"]).not.toContain(
       "@ykdz/template-builtin-presets",
     );
-    expect(builtInPresets.scripts["check:templates"]).not.toContain(
-      "check:templates:boundary",
-    );
+    expect(builtInPresets.scripts["check:templates"]).toBeUndefined();
+    expect(builtInPresets.scripts["check:templates:boundary"]).toBeUndefined();
 
     const result = await execa(
       "pnpm",
@@ -232,20 +240,22 @@ describe("Template Repository native task model", () => {
       { reject: true },
     );
     const actionGraph = JSON.parse(result.stdout) as {
-      readonly tasks: readonly { readonly taskId: string }[];
+      readonly tasks: readonly {
+        readonly command: string;
+        readonly taskId: string;
+      }[];
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
+    const executableTemplateChecks = actionGraph.tasks.filter(
+      ({ command, taskId }) =>
+        taskId.endsWith("#check:templates") && command !== "<NONEXISTENT>",
+    );
 
-    expect(
-      taskIds.filter(
-        (task) => task === "@ykdz/template-checks#check:templates",
-      ),
-    ).toHaveLength(1);
-    expect(
-      taskIds.filter(
-        (task) => task === "@ykdz/template-builtin-presets#check:templates",
-      ),
-    ).toHaveLength(1);
+    expect(executableTemplateChecks).toEqual([
+      expect.objectContaining({
+        taskId: "@ykdz/template-checks#check:templates",
+      }),
+    ]);
     expect(taskIds).not.toContain(
       "@ykdz/template-builtin-presets#check:templates:boundary",
     );

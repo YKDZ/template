@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
@@ -10,7 +10,6 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
-  type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
 } from "#template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
@@ -54,6 +53,15 @@ import {
   type FixtureEvidenceSchedulingOptions,
   type FixtureEvidenceStorage,
 } from "./fixture-evidence/kernel/index.ts";
+import {
+  deriveFixtureMatrix,
+  deriveFocusedProjectLinkScenarios,
+  deriveInitializationScenarios,
+  validateGeneratedDevelopmentContainerProjection,
+  validatePlanDependencyCatalog,
+  validatePlanSources,
+  type GeneratedScenario,
+} from "./registry-checks.ts";
 
 export { assertGeneratedTaskDiscovery } from "./fixture-evidence/gates/root-quality/index.ts";
 
@@ -69,44 +77,6 @@ const defaultRepositoryRoot = path.resolve(
   "..",
   "..",
 );
-
-/** Source-only repository check API; intentionally absent from package exports. */
-type GeneratedScenario = {
-  readonly id: string;
-  readonly label: string;
-  readonly base: BuiltInPresetDefinition;
-  readonly addition?: BuiltInPresetDefinition;
-  readonly linkFrom?: readonly string[];
-};
-
-type RegistryChecks = {
-  readonly deriveFixtureMatrix: () => readonly GeneratedScenario[];
-  readonly deriveFocusedProjectLinkScenarios: () => readonly GeneratedScenario[];
-  readonly deriveInitializationScenarios: () => readonly GeneratedScenario[];
-  readonly validatePlanDependencyCatalog: (
-    plan: GeneratedRepositoryPlan,
-  ) => void;
-  readonly validateGeneratedDevelopmentContainerProjection: (options: {
-    readonly plan: GeneratedRepositoryPlan;
-    readonly projectDir: string;
-  }) => Promise<void>;
-  readonly validatePlanSources: (options: {
-    readonly definition: BuiltInPresetDefinition;
-    readonly plan: GeneratedRepositoryPlan;
-  }) => Promise<unknown>;
-};
-
-async function sourceOnlyRegistryChecks(): Promise<RegistryChecks> {
-  const sourcePath = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "..",
-    "..",
-    "builtin-presets",
-    "src",
-    "registry-checks.ts",
-  );
-  return (await import(pathToFileURL(sourcePath).href)) as RegistryChecks;
-}
 
 export type GeneratedScenarioRunOptions = {
   readonly workspace: string;
@@ -322,16 +292,15 @@ function fixtureEvidenceFromEnvironment(
 export async function generatedScenariosFor(
   set: GeneratedScenarioSet,
 ): Promise<readonly GeneratedScenario[]> {
-  const checks = await sourceOnlyRegistryChecks();
   switch (set) {
     case "init":
-      return checks.deriveInitializationScenarios();
+      return deriveInitializationScenarios();
     case "package-addition-matrix":
-      return checks.deriveFixtureMatrix();
+      return deriveFixtureMatrix();
     case "focused":
-      return checks.deriveFocusedProjectLinkScenarios();
+      return deriveFocusedProjectLinkScenarios();
     case "deployment":
-      return checks.deriveFixtureMatrix();
+      return deriveFixtureMatrix();
   }
 }
 
@@ -352,7 +321,6 @@ async function runScenario(
   scenario: GeneratedScenario,
   options: GeneratedScenarioRunOptions,
   mode: GeneratedScenarioSet,
-  checks: RegistryChecks,
   evidenceScheduler?: FixtureEvidenceScheduler,
 ): Promise<"completed" | "not-applicable"> {
   const run =
@@ -368,11 +336,11 @@ async function runScenario(
     definition: scenario.base,
     context,
   });
-  await checks.validatePlanSources({
+  await validatePlanSources({
     definition: scenario.base,
     plan: initialization,
   });
-  checks.validatePlanDependencyCatalog(initialization);
+  validatePlanDependencyCatalog(initialization);
   await renderNewProject({
     targetRoot: projectDir,
     operations: [...initialization.operations],
@@ -412,11 +380,11 @@ async function runScenario(
         : { linkFrom: scenario.linkFrom }),
     });
     finalPlan = additionPlan;
-    await checks.validatePlanSources({
+    await validatePlanSources({
       definition: scenario.addition,
       plan: additionPlan,
     });
-    checks.validatePlanDependencyCatalog(additionPlan);
+    validatePlanDependencyCatalog(additionPlan);
     const result = await reconcileAndApplyProjectProjections({
       targetRoot: projectDir,
       ...additionPlan.projectProjections,
@@ -428,7 +396,7 @@ async function runScenario(
     }
   }
 
-  await checks.validateGeneratedDevelopmentContainerProjection({
+  await validateGeneratedDevelopmentContainerProjection({
     plan: finalPlan,
     projectDir,
   });
@@ -627,7 +595,6 @@ export async function runGeneratedScenarioSet(
   set: GeneratedScenarioSet,
   options: GeneratedScenarioRunOptions,
 ): Promise<void> {
-  const checks = await sourceOnlyRegistryChecks();
   const scenarios = await generatedScenariosFor(set);
   const activity = options.evidence?.activity;
   const invocation = activity?.ledger.invocation({
@@ -683,7 +650,6 @@ export async function runGeneratedScenarioSet(
         scenario,
         scenarioOptions,
         set,
-        checks,
         scheduler,
       );
       await recordActivity({
