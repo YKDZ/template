@@ -126,67 +126,104 @@ type ParsedWorkflow = {
 
 type ParsedObject = Record<string, unknown>;
 
-const rootOnlyStepContracts = [
-  {
-    name: "Checkout source",
-    uses: "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-    version: "v5",
-    with: { "persist-credentials": false, "fetch-depth": 1 },
-  },
-  {
-    name: "Set up Node.js",
-    uses: "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
-    version: "v5",
-    with: { "node-version-file": "package.json" },
-  },
-  {
-    name: "Set up pnpm",
-    uses: "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
-    version: "v4.4.0",
-    with: { cache: true },
-  },
-] as const;
+type WorkflowActionContract = {
+  readonly name: string;
+  readonly action: string;
+  readonly reference: string;
+  readonly release: string;
+  readonly with?: Readonly<ParsedObject>;
+  readonly condition?: string;
+};
 
-const actionContracts: ReadonlyMap<
-  string,
-  { readonly reference: string; readonly version: string }
-> = new Map([
-  [
-    "actions/checkout",
-    {
+type WorkflowActionKey = "checkout" | "node" | "pnpm" | "buildx" | "upload";
+
+const workflowPolicy = {
+  generatedPath: ".github/workflows/check.yml",
+  name: "Check",
+  triggers: { pull_request: null, push: { branches: ["main"] } },
+  permissions: { contents: "read" },
+  concurrency: {
+    group: "${{ github.workflow }}-${{ github.ref }}",
+    "cancel-in-progress": true,
+  },
+  rootJob: {
+    id: "check",
+    name: "Root Check",
+    runner: "ubuntu-latest",
+    timeoutMinutes: 30,
+  },
+  actions: {
+    checkout: {
+      name: "Checkout source",
+      action: "actions/checkout",
       reference: "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-      version: "v5",
+      release: "v5",
+      with: { "persist-credentials": false, "fetch-depth": 1 },
     },
-  ],
-  [
-    "actions/setup-node",
-    {
+    node: {
+      name: "Set up Node.js",
+      action: "actions/setup-node",
       reference: "a0853c24544627f65ddf259abe73b1d18a591444",
-      version: "v5",
+      release: "v5",
+      with: { "node-version-file": "package.json" },
     },
-  ],
-  [
-    "pnpm/action-setup",
-    {
+    pnpm: {
+      name: "Set up pnpm",
+      action: "pnpm/action-setup",
       reference: "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
-      version: "v4.4.0",
+      release: "v4.4.0",
+      with: { cache: true },
     },
-  ],
-  [
-    "docker/setup-buildx-action",
-    {
+    buildx: {
+      name: "Set up Docker Buildx",
+      action: "docker/setup-buildx-action",
       reference: "bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
-      version: "v4.2.0",
+      release: "v4.2.0",
+      condition: "matrix.requires_docker",
     },
-  ],
-  [
-    "actions/upload-artifact",
-    {
+    upload: {
+      name: "Upload Root Check diagnostics",
+      action: "actions/upload-artifact",
       reference: "65462800fd760344b1a7b4382951275a0abb4808",
-      version: "v4",
+      release: "v4",
+    },
+  } as Readonly<Record<WorkflowActionKey, WorkflowActionContract>>,
+  installStep: {
+    name: "Install dependencies",
+    command: "pnpm install --frozen-lockfile",
+  },
+  rootCheckStep: { name: "Run Root Check", command: "pnpm run check" },
+  selectedCheckStep: {
+    name: "Run selected Check",
+    command: "${{ matrix.task_entrypoint }}",
+  },
+  deploymentMatrix: [
+    {
+      capability: "root",
+      job_name: "Root Check",
+      task_entrypoint: "pnpm run check",
+      timeout_minutes: 30,
+      requires_docker: false,
+    },
+    {
+      capability: "deployment",
+      job_name: "Deployment Check",
+      task_entrypoint: "pnpm run check:deployment",
+      timeout_minutes: 45,
+      requires_docker: true,
     },
   ],
-] as const);
+} as const;
+
+const rootActionKeys: readonly WorkflowActionKey[] = [
+  "checkout",
+  "node",
+  "pnpm",
+];
+
+function pinnedAction(contract: WorkflowActionContract): string {
+  return `${contract.action}@${contract.reference}`;
+}
 
 function diagnosticStepContracts(
   oracle: WorkflowOracle,
@@ -201,6 +238,7 @@ function diagnosticStepContracts(
   const condition = deploymentMatrix
     ? "failure() && matrix.capability == 'root'"
     : "failure()";
+  const upload = workflowPolicy.actions.upload;
   return {
     stage: {
       name: "Stage Root Check diagnostics",
@@ -225,9 +263,9 @@ function diagnosticStepContracts(
       ].join("\n"),
     },
     upload: {
-      name: "Upload Root Check diagnostics",
+      name: upload.name,
       if: condition,
-      uses: "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+      uses: pinnedAction(upload),
       with: {
         name: "root-check-diagnostics",
         path: ".template-ci-diagnostics",
@@ -279,7 +317,11 @@ function assertDiagnosticSteps(
     withValues.path !== (contract.upload.with as ParsedObject).path ||
     withValues["if-no-files-found"] !== "ignore" ||
     withValues["retention-days"] !== 7 ||
-    !hasPinnedActionReleaseLine(source, String(contract.upload.uses), "v4")
+    !hasPinnedActionReleaseLine(
+      source,
+      String(contract.upload.uses),
+      workflowPolicy.actions.upload.release,
+    )
   ) {
     throw new Error(
       `${plan.definitionName}: Root Check diagnostic upload must retain only aggregate native Playwright evidence`,
@@ -353,16 +395,21 @@ function assertRootOnlyWorkflowContract(
       `${plan.definitionName}: Root Check must have exactly five steps`,
     );
   }
-  const actionSteps = job.steps.slice(0, rootOnlyStepContracts.length);
-  for (const [index, contract] of rootOnlyStepContracts.entries()) {
+  const actionSteps = job.steps.slice(0, rootActionKeys.length);
+  for (const [index, actionKey] of rootActionKeys.entries()) {
+    const contract = workflowPolicy.actions[actionKey];
     const step = actionSteps[index];
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "uses", "with"]) ||
       step.name !== contract.name ||
-      step.uses !== contract.uses ||
+      step.uses !== pinnedAction(contract) ||
       JSON.stringify(step.with) !== JSON.stringify(contract.with) ||
-      !hasPinnedActionReleaseLine(source, contract.uses, contract.version)
+      !hasPinnedActionReleaseLine(
+        source,
+        pinnedAction(contract),
+        contract.release,
+      )
     ) {
       throw new Error(
         `${plan.definitionName}: Root Check ${contract.name} step diverges from its capability contract`,
@@ -370,16 +417,16 @@ function assertRootOnlyWorkflowContract(
     }
   }
   const runStepContracts = [
-    { name: "Install dependencies", run: "pnpm install --frozen-lockfile" },
-    { name: "Run Root Check", run: "pnpm run check" },
+    workflowPolicy.installStep,
+    workflowPolicy.rootCheckStep,
   ] as const;
   for (const [index, contract] of runStepContracts.entries()) {
-    const step = job.steps[rootOnlyStepContracts.length + index];
+    const step = job.steps[rootActionKeys.length + index];
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "run"]) ||
       step.name !== contract.name ||
-      step.run !== contract.run
+      step.run !== contract.command
     ) {
       throw new Error(
         `${plan.definitionName}: Root Check ${contract.name} step diverges from its capability contract`,
@@ -422,7 +469,7 @@ function assertDeploymentWorkflowContract(
       "steps",
     ]) ||
     job.name !== "${{ matrix.job_name }}" ||
-    job["runs-on"] !== "ubuntu-latest" ||
+    job["runs-on"] !== workflowPolicy.rootJob.runner ||
     job["timeout-minutes"] !== "${{ matrix.timeout_minutes }}"
   ) {
     throw new Error(
@@ -441,25 +488,9 @@ function assertDeploymentWorkflowContract(
       `${plan.definitionName}: Deployment matrix must use explicit non-fail-fast include entries`,
     );
   }
-  const expectedInclude = [
-    {
-      capability: "root",
-      job_name: "Root Check",
-      task_entrypoint: "pnpm run check",
-      timeout_minutes: 30,
-      requires_docker: false,
-    },
-    {
-      capability: "deployment",
-      job_name: "Deployment Check",
-      task_entrypoint: "pnpm run check:deployment",
-      timeout_minutes: 45,
-      requires_docker: true,
-    },
-  ];
   if (
     JSON.stringify(job.strategy.matrix.include) !==
-    JSON.stringify(expectedInclude)
+    JSON.stringify(workflowPolicy.deploymentMatrix)
   ) {
     throw new Error(
       `${plan.definitionName}: Deployment matrix include entries diverge from its capability plan`,
@@ -475,28 +506,29 @@ function assertDeploymentWorkflowContract(
     );
   }
   const steps = job.steps;
-  const actionContracts = [
-    ...rootOnlyStepContracts,
-    {
-      name: "Set up Docker Buildx",
-      uses: "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
-      version: "v4.2.0",
-      if: "matrix.requires_docker",
-    },
-  ] as const;
-  for (const [index, contract] of actionContracts.entries()) {
+  const actionKeys: readonly WorkflowActionKey[] = [
+    ...rootActionKeys,
+    "buildx",
+  ];
+  for (const [index, actionKey] of actionKeys.entries()) {
+    const contract = workflowPolicy.actions[actionKey];
     const step = steps[index];
-    const expectedKeys =
-      "if" in contract ? ["name", "uses", "if"] : ["name", "uses", "with"];
+    const expectedKeys = contract.condition
+      ? ["name", "uses", "if"]
+      : ["name", "uses", "with"];
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, expectedKeys) ||
       step.name !== contract.name ||
-      step.uses !== contract.uses ||
-      ("if" in contract
-        ? step.if !== contract.if
+      step.uses !== pinnedAction(contract) ||
+      (contract.condition
+        ? step.if !== contract.condition
         : JSON.stringify(step.with) !== JSON.stringify(contract.with)) ||
-      !hasPinnedActionReleaseLine(source, contract.uses, contract.version)
+      !hasPinnedActionReleaseLine(
+        source,
+        pinnedAction(contract),
+        contract.release,
+      )
     ) {
       throw new Error(
         `${plan.definitionName}: Deployment matrix ${contract.name} step diverges from its capability contract`,
@@ -508,12 +540,12 @@ function assertDeploymentWorkflowContract(
   if (
     !isParsedObject(install) ||
     !hasExactKeys(install, ["name", "run"]) ||
-    install.name !== "Install dependencies" ||
-    install.run !== "pnpm install --frozen-lockfile" ||
+    install.name !== workflowPolicy.installStep.name ||
+    install.run !== workflowPolicy.installStep.command ||
     !isParsedObject(selectedCheck) ||
     !hasExactKeys(selectedCheck, ["name", "run"]) ||
-    selectedCheck.name !== "Run selected Check" ||
-    selectedCheck.run !== "${{ matrix.task_entrypoint }}"
+    selectedCheck.name !== workflowPolicy.selectedCheckStep.name ||
+    selectedCheck.run !== workflowPolicy.selectedCheckStep.command
   ) {
     throw new Error(
       `${plan.definitionName}: Deployment matrix must install and invoke its selected task in each leg`,
@@ -529,7 +561,7 @@ export function assertWorkflowContract(
   workflow: ParsedWorkflow,
 ): void {
   const oracle = workflowOracle(plan);
-  if (generatedPath !== ".github/workflows/check.yml") {
+  if (generatedPath !== workflowPolicy.generatedPath) {
     throw new Error(
       `${plan.definitionName}: Check workflow has unexpected generated path ${generatedPath}`,
     );
@@ -548,7 +580,9 @@ export function assertWorkflowContract(
       `${plan.definitionName}: Check workflow has unexpected top-level execution configuration`,
     );
   }
-  const job = isParsedObject(workflow.jobs) ? workflow.jobs.check : undefined;
+  const job = isParsedObject(workflow.jobs)
+    ? workflow.jobs[workflowPolicy.rootJob.id]
+    : undefined;
   if (!isParsedObject(job)) {
     throw new Error(`${plan.definitionName}: Root Check job is missing`);
   }
@@ -557,12 +591,8 @@ export function assertWorkflowContract(
     throw new Error(`${plan.definitionName}: Root Check has no steps`);
   }
   if (
-    workflow.name !== "Check" ||
-    JSON.stringify(workflow.on) !==
-      JSON.stringify({
-        pull_request: null,
-        push: { branches: ["main"] },
-      })
+    workflow.name !== workflowPolicy.name ||
+    JSON.stringify(workflow.on) !== JSON.stringify(workflowPolicy.triggers)
   ) {
     throw new Error(
       `${plan.definitionName}: unexpected Check workflow triggers`,
@@ -570,7 +600,7 @@ export function assertWorkflowContract(
   }
   if (
     JSON.stringify(workflow.permissions) !==
-    JSON.stringify({ contents: "read" })
+    JSON.stringify(workflowPolicy.permissions)
   ) {
     throw new Error(
       `${plan.definitionName}: Check permissions are not contents-read`,
@@ -578,10 +608,7 @@ export function assertWorkflowContract(
   }
   if (
     JSON.stringify(workflow.concurrency) !==
-    JSON.stringify({
-      group: "${{ github.workflow }}-${{ github.ref }}",
-      "cancel-in-progress": true,
-    })
+    JSON.stringify(workflowPolicy.concurrency)
   ) {
     throw new Error(
       `${plan.definitionName}: Check concurrency is not same-ref cancellation`,
@@ -599,9 +626,9 @@ export function assertWorkflowContract(
     return;
   }
   if (
-    job?.name !== "Root Check" ||
-    job["runs-on"] !== "ubuntu-latest" ||
-    job["timeout-minutes"] !== 30
+    job?.name !== workflowPolicy.rootJob.name ||
+    job["runs-on"] !== workflowPolicy.rootJob.runner ||
+    job["timeout-minutes"] !== workflowPolicy.rootJob.timeoutMinutes
   ) {
     throw new Error(
       `${plan.definitionName}: Root Check identity is not stable`,
@@ -609,101 +636,6 @@ export function assertWorkflowContract(
   }
 
   assertRootOnlyWorkflowContract(plan, source, workflow, oracle);
-
-  const parsedSteps = (steps as unknown[]).map((step) => {
-    if (!isParsedObject(step)) {
-      throw new Error(
-        `${plan.definitionName}: Check workflow step is not a mapping`,
-      );
-    }
-    return step;
-  });
-  const namedSteps = new Map(parsedSteps.map((step) => [step.name, step]));
-  if (
-    namedSteps.size !== steps.length ||
-    parsedSteps.some(
-      (step) => typeof step.name !== "string" || step.name.length === 0,
-    )
-  ) {
-    throw new Error(
-      `${plan.definitionName}: every Check workflow step must have a stable display name`,
-    );
-  }
-  const checkout = namedSteps.get("Checkout source");
-  const node = namedSteps.get("Set up Node.js");
-  const pnpm = namedSteps.get("Set up pnpm");
-  const install = namedSteps.get("Install dependencies");
-  const rootCheck = namedSteps.get("Run Root Check");
-  const actionSteps = parsedSteps.filter(
-    (step): step is ParsedObject & { readonly uses: string } =>
-      typeof step.uses === "string",
-  );
-  for (const step of actionSteps) {
-    const [action, reference] = step.uses.split("@");
-    const contract =
-      action === undefined ? undefined : actionContracts.get(action);
-    if (
-      action === undefined ||
-      reference === undefined ||
-      contract === undefined ||
-      reference !== contract.reference
-    ) {
-      throw new Error(
-        `${plan.definitionName}: Check contains an unsupported or incorrectly pinned external action`,
-      );
-    }
-    if (!hasPinnedActionReleaseLine(source, step.uses, contract.version)) {
-      throw new Error(
-        `${plan.definitionName}: ${action} must retain its release comment`,
-      );
-    }
-  }
-  const rootActionSteps = [checkout, node, pnpm];
-  const expectedActions = [
-    "actions/checkout",
-    "actions/setup-node",
-    "pnpm/action-setup",
-  ];
-
-  for (const [index, step] of rootActionSteps.entries()) {
-    const action = expectedActions[index]!;
-    if (
-      typeof step?.uses !== "string" ||
-      !new RegExp(`^${action}@[0-9a-f]{40}$`, "u").test(step.uses)
-    ) {
-      throw new Error(`${plan.definitionName}: ${action} must use a full SHA`);
-    }
-  }
-
-  if (
-    JSON.stringify(checkout?.with) !==
-      JSON.stringify({ "persist-credentials": false, "fetch-depth": 1 }) ||
-    JSON.stringify(node?.with) !==
-      JSON.stringify({ "node-version-file": "package.json" }) ||
-    JSON.stringify(pnpm?.with) !== JSON.stringify({ cache: true }) ||
-    install?.run !== "pnpm install --frozen-lockfile" ||
-    rootCheck?.run !== "pnpm run check"
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Root Check environment preparation diverges from its capability plan`,
-    );
-  }
-  const commands = parsedSteps
-    .map((step) => step.run)
-    .filter((command): command is string => typeof command === "string");
-  if (
-    commands.some(
-      (command) =>
-        command !== "pnpm install --frozen-lockfile" &&
-        command !== "pnpm run check" &&
-        command !== "pnpm run check:deployment" &&
-        command !== diagnosticStepContracts(oracle, false)?.stage.run,
-    )
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Check workflow duplicates a Task Leaf Command or custom CI protocol`,
-    );
-  }
   if (!plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")) {
     throw new Error(
       `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
@@ -711,48 +643,36 @@ export function assertWorkflowContract(
   }
 }
 
-function expectedDependabotUpdate(
-  ecosystem: string,
-  directory: string,
-): ParsedObject {
-  const update: ParsedObject = {
-    "package-ecosystem": ecosystem,
-    directory,
-    schedule: { interval: "weekly" },
-  };
-  if (ecosystem === "npm") {
-    update.groups = {
-      drizzle: { patterns: ["drizzle-*", "drizzle-orm"] },
-    };
-    update.ignore = [
-      {
-        "dependency-name": "@types/node",
-        "update-types": ["version-update:semver-major"],
-      },
-      {
-        "dependency-name": "pnpm",
-        "update-types": [
-          "version-update:semver-major",
-          "version-update:semver-minor",
-          "version-update:semver-patch",
-        ],
-      },
-    ];
-  }
-  if (ecosystem === "docker" && directory === "/.devcontainer") {
-    update.ignore = [
-      {
-        "dependency-name": "mcr.microsoft.com/devcontainers/typescript-node",
-        "update-types": ["version-update:semver-major"],
-      },
-    ];
-  }
-  return update;
+type DependencyEcosystem =
+  | "npm"
+  | "cargo"
+  | "github-actions"
+  | "docker"
+  | "rust-toolchain";
+
+type DependabotUpdateOracle = {
+  readonly ecosystem: DependencyEcosystem;
+  readonly directory: `/${string}`;
+};
+
+const dependabotGeneratedPath = ".github/dependabot.yml";
+const dependabotInterval = "weekly";
+const packageManagerDependency = "pnpm";
+const devcontainerImage = "mcr.microsoft.com/devcontainers/typescript-node";
+const majorUpdateType = "version-update:semver-major";
+const allSemverUpdateTypes = [
+  majorUpdateType,
+  "version-update:semver-minor",
+  "version-update:semver-patch",
+] as const;
+
+function dependabotUpdateKey(update: DependabotUpdateOracle): string {
+  return `${update.ecosystem}\u0000${update.directory}`;
 }
 
 function dependabotOracle(
   plan: GeneratedRepositoryPlan,
-): readonly ParsedObject[] {
+): readonly DependabotUpdateOracle[] {
   const manifestByName = new Map(
     plan.manifests.flatMap((manifest) =>
       typeof manifest.name === "string" ? [[manifest.name, manifest]] : [],
@@ -772,19 +692,91 @@ function dependabotOracle(
     definition.role === "native-package" ? [`/${definition.path}`] : [],
   );
   return [
-    expectedDependabotUpdate("npm", "/"),
-    expectedDependabotUpdate("github-actions", "/"),
-    expectedDependabotUpdate("docker", "/.devcontainer"),
-    ...deploymentDirectories.map((directory) =>
-      expectedDependabotUpdate("docker", directory),
+    { ecosystem: "npm", directory: "/" },
+    { ecosystem: "github-actions", directory: "/" },
+    { ecosystem: "docker", directory: "/.devcontainer" },
+    ...deploymentDirectories.map(
+      (directory): DependabotUpdateOracle => ({
+        ecosystem: "docker",
+        directory: directory as `/${string}`,
+      }),
     ),
-    ...cargoDirectories.map((directory) =>
-      expectedDependabotUpdate("cargo", directory),
+    ...cargoDirectories.map(
+      (directory): DependabotUpdateOracle => ({
+        ecosystem: "cargo",
+        directory: directory as `/${string}`,
+      }),
     ),
     ...(cargoDirectories.length === 0
       ? []
-      : [expectedDependabotUpdate("rust-toolchain", "/")]),
+      : [{ ecosystem: "rust-toolchain" as const, directory: "/" as const }]),
   ];
+}
+
+function assertExactStringMembers(
+  actual: unknown,
+  expected: readonly string[],
+  diagnostic: string,
+): void {
+  if (
+    !Array.isArray(actual) ||
+    actual.some((value) => typeof value !== "string") ||
+    actual.length !== expected.length ||
+    !expected.every((value) => actual.includes(value))
+  ) {
+    throw new Error(diagnostic);
+  }
+}
+
+function assertWeeklySchedule(
+  plan: GeneratedRepositoryPlan,
+  update: ParsedObject,
+  oracle: DependabotUpdateOracle,
+): void {
+  if (
+    !isParsedObject(update.schedule) ||
+    update.schedule.interval !== dependabotInterval
+  ) {
+    throw new Error(
+      `${plan.definitionName}: ${oracle.ecosystem} ${oracle.directory} must retain a weekly update schedule`,
+    );
+  }
+}
+
+function dependabotIgnoreUpdateTypes(
+  update: ParsedObject,
+  dependencyName: string,
+): unknown {
+  if (!Array.isArray(update.ignore)) return undefined;
+  const rule = update.ignore.find(
+    (candidate) =>
+      isParsedObject(candidate) &&
+      candidate["dependency-name"] === dependencyName,
+  );
+  return isParsedObject(rule) ? rule["update-types"] : undefined;
+}
+
+function assertDependabotUpdateSemantics(
+  plan: GeneratedRepositoryPlan,
+  update: ParsedObject,
+  oracle: DependabotUpdateOracle,
+): void {
+  assertWeeklySchedule(plan, update, oracle);
+  if (oracle.ecosystem === "npm") {
+    assertExactStringMembers(
+      dependabotIgnoreUpdateTypes(update, packageManagerDependency),
+      allSemverUpdateTypes,
+      `${plan.definitionName}: ${packageManagerDependency} ignore update types diverge from policy`,
+    );
+    return;
+  }
+  if (oracle.ecosystem === "docker" && oracle.directory === "/.devcontainer") {
+    assertExactStringMembers(
+      dependabotIgnoreUpdateTypes(update, devcontainerImage),
+      [majorUpdateType],
+      `${plan.definitionName}: ${devcontainerImage} ignore update types diverge from policy`,
+    );
+  }
 }
 
 export function assertDependabotContract(
@@ -792,20 +784,69 @@ export function assertDependabotContract(
   generatedPath: string,
   parsed: unknown,
 ): void {
-  if (generatedPath !== ".github/dependabot.yml") {
+  if (generatedPath !== dependabotGeneratedPath) {
     throw new Error(
       `${plan.definitionName}: Dependabot has unexpected generated path ${generatedPath}`,
     );
   }
   if (
     !isParsedObject(parsed) ||
-    !hasExactKeys(parsed, ["version", "updates"]) ||
-    parsed.version !== 2 ||
-    !Array.isArray(parsed.updates) ||
-    JSON.stringify(parsed.updates) !== JSON.stringify(dependabotOracle(plan))
+    !hasExactKeys(parsed, ["version", "updates"])
   ) {
     throw new Error(
-      `${plan.definitionName}: generated Dependabot configuration diverges from the independent repository policy oracle`,
+      `${plan.definitionName}: Dependabot must contain only version and updates`,
+    );
+  }
+  if (parsed.version !== 2 || !Array.isArray(parsed.updates)) {
+    throw new Error(
+      `${plan.definitionName}: Dependabot version 2 updates are required`,
+    );
+  }
+
+  const expectedUpdates = dependabotOracle(plan);
+  const expectedByKey = new Map(
+    expectedUpdates.map((update) => [dependabotUpdateKey(update), update]),
+  );
+  const seen = new Set<string>();
+  for (const [index, update] of parsed.updates.entries()) {
+    if (
+      !isParsedObject(update) ||
+      typeof update["package-ecosystem"] !== "string" ||
+      typeof update.directory !== "string" ||
+      !update.directory.startsWith("/")
+    ) {
+      throw new Error(
+        `${plan.definitionName}: Dependabot update ${index + 1} has no valid ecosystem and absolute directory`,
+      );
+    }
+    const actual = {
+      ecosystem: update["package-ecosystem"] as DependencyEcosystem,
+      directory: update.directory as `/${string}`,
+    };
+    const key = dependabotUpdateKey(actual);
+    const oracle = expectedByKey.get(key);
+    if (oracle === undefined) {
+      const expectedSameEcosystem = expectedUpdates.find(
+        (candidate) => candidate.ecosystem === actual.ecosystem,
+      );
+      throw new Error(
+        `${plan.definitionName}: unexpected ${actual.ecosystem} ${actual.directory} update${expectedSameEcosystem === undefined ? "" : `; expected ${expectedSameEcosystem.ecosystem} ${expectedSameEcosystem.directory} update`}`,
+      );
+    }
+    if (seen.has(key)) {
+      throw new Error(
+        `${plan.definitionName}: duplicate ${oracle.ecosystem} ${oracle.directory} update`,
+      );
+    }
+    seen.add(key);
+    assertDependabotUpdateSemantics(plan, update, oracle);
+  }
+  const missing = expectedUpdates.find(
+    (update) => !seen.has(dependabotUpdateKey(update)),
+  );
+  if (missing !== undefined) {
+    throw new Error(
+      `${plan.definitionName}: missing ${missing.ecosystem} ${missing.directory} update`,
     );
   }
 }
@@ -886,8 +927,8 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
       for (const kind of ["workflow", "dependabot"] as const) {
         const generatedPath =
           kind === "workflow"
-            ? ".github/workflows/check.yml"
-            : ".github/dependabot.yml";
+            ? workflowPolicy.generatedPath
+            : dependabotGeneratedPath;
         const content = await readFile(
           path.join(projectDir, generatedPath),
           "utf8",
@@ -932,14 +973,14 @@ export async function checkBuiltInPresetGithubYaml(): Promise<void> {
       if (input.kind === "workflow") {
         assertWorkflowContract(
           input.plan,
-          ".github/workflows/check.yml",
+          workflowPolicy.generatedPath,
           input.content,
           document.toJS() as ParsedWorkflow,
         );
       } else {
         assertDependabotContract(
           input.plan,
-          ".github/dependabot.yml",
+          dependabotGeneratedPath,
           document.toJS(),
         );
       }

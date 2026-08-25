@@ -13,7 +13,10 @@ import {
 } from "#template-builtin-presets";
 import { renderNewProject } from "#template-core/renderer";
 
-import { assertWorkflowContract } from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
+import {
+  assertDependabotContract,
+  assertWorkflowContract,
+} from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {
   const definition = builtInPresetRegistry.all().find((candidate) => {
@@ -45,7 +48,10 @@ function rootOnlyPlan(): GeneratedRepositoryPlan {
   });
 }
 
-async function renderedWorkflow(plan: GeneratedRepositoryPlan): Promise<{
+async function renderedGithubSource(
+  plan: GeneratedRepositoryPlan,
+  sourcePath: ".github/dependabot.yml" | ".github/workflows/check.yml",
+): Promise<{
   readonly sourcePath: string;
   readonly source: string;
 }> {
@@ -55,7 +61,6 @@ async function renderedWorkflow(plan: GeneratedRepositoryPlan): Promise<{
       targetRoot: workspace,
       operations: [...plan.operations],
     });
-    const sourcePath = ".github/workflows/check.yml";
     return {
       sourcePath,
       source: await readFile(path.join(workspace, sourcePath), "utf8"),
@@ -63,6 +68,20 @@ async function renderedWorkflow(plan: GeneratedRepositoryPlan): Promise<{
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+async function renderedWorkflow(plan: GeneratedRepositoryPlan): Promise<{
+  readonly sourcePath: string;
+  readonly source: string;
+}> {
+  return renderedGithubSource(plan, ".github/workflows/check.yml");
+}
+
+async function renderedDependabot(plan: GeneratedRepositoryPlan): Promise<{
+  readonly sourcePath: string;
+  readonly source: string;
+}> {
+  return renderedGithubSource(plan, ".github/dependabot.yml");
 }
 
 async function rootOnlyWorkflowSource(): Promise<string> {
@@ -151,6 +170,48 @@ async function expectRootOnlyWorkflowRejected(source: string): Promise<void> {
 }
 
 describe("Built-in Preset GitHub YAML checker", () => {
+  it("rejects damaged Dependabot update, ignore, and directory semantics from a real generated file", async () => {
+    const plan = rootOnlyPlan();
+    const baseline = await renderedDependabot(plan);
+    expect(() =>
+      assertDependabotContract(
+        plan,
+        baseline.sourcePath,
+        parse(baseline.source),
+      ),
+    ).not.toThrow();
+
+    const mutations = [
+      {
+        source: baseline.source.replace("interval: weekly", "interval: daily"),
+        diagnostic: /npm.*weekly update schedule/u,
+      },
+      {
+        source: baseline.source.replace(
+          "version-update:semver-patch",
+          "version-update:semver-major",
+        ),
+        diagnostic: /pnpm.*update types/u,
+      },
+      {
+        source: baseline.source.replace(
+          "directory: /.devcontainer",
+          "directory: /containers",
+        ),
+        diagnostic: /docker.*\.devcontainer.*update/u,
+      },
+    ];
+    for (const mutation of mutations) {
+      expect(() =>
+        assertDependabotContract(
+          plan,
+          baseline.sourcePath,
+          parse(mutation.source),
+        ),
+      ).toThrow(mutation.diagnostic);
+    }
+  });
+
   it("rejects root-only workflows with extra jobs or job-level permissions", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
