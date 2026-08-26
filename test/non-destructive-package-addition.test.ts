@@ -1062,7 +1062,7 @@ describe("Non-Destructive Package Addition", () => {
           packageLeafName: "utilities",
         }),
       ).toThrow(
-        "Package Addition Generation Record contains unknown field: historicalFiles",
+        /^Generation Record contains unknown field: historicalFiles; historicalFiles: contains unknown Generation Record field$/u,
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -1280,15 +1280,14 @@ describe("Non-Destructive Package Addition", () => {
       context,
       "shared-library",
     );
-    const conflictingDefinition = builtInPresetRegistry
-      .all()
-      .find(
-        (candidate) =>
-          candidate.metadata.name !== definition.metadata.name &&
-          candidate
-            .blueprint(context)
-            .packages.some((item) => item.role === "native-package"),
-      );
+    const conflictingDefinition = builtInPresetRegistry.all().find(
+      (candidate) =>
+        candidate.metadata.name !== definition.metadata.name &&
+        planGeneratedRepositoryInitialization({
+          definition: candidate,
+          context,
+        }).blueprint.packages.some((item) => item.role === "native-package"),
+    );
     if (conflictingDefinition === undefined) {
       throw new Error(
         "Expected an incompatible initial Definition for Generation Record validation",

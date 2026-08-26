@@ -518,7 +518,7 @@ const migrationsReplayAdapter = definePackageContributionReplayAdapter({
     migrationsContribution(context, replayDefinitions(initialPackages)),
 });
 
-export const vikeAppDefinition: BuiltInPresetDefinition = {
+export const vikeAppDefinition = {
   metadata: {
     name: "vike-app",
     title: "Vike app",
@@ -556,4 +556,4 @@ export const vikeAppDefinition: BuiltInPresetDefinition = {
       migrationsReplayAdapter.identify(migrationsContribution(context)),
     ];
   },
-};
+} satisfies BuiltInPresetDefinition;

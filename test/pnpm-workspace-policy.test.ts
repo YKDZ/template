@@ -12,7 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
 
-import { builtInPresetRegistry } from "#template-builtin-presets";
+import {
+  builtInPresetRegistry,
+  planGeneratedRepositoryInitialization,
+} from "#template-builtin-presets";
 import { renderGeneratedPnpmWorkspaceYaml } from "#template-core/dependency-catalog";
 import type { GenerationContext } from "#template-core/preset-definition";
 
@@ -24,9 +27,10 @@ const repoRoot = path.resolve(
 
 function definitionForPnpmPolicy(context: GenerationContext) {
   const definition = builtInPresetRegistry.all().find((candidate) => {
-    const contributions = candidate.planInitializationContributions?.(
+    const contributions = planGeneratedRepositoryInitialization({
+      definition: candidate,
       context,
-    ) ?? [candidate.planInitialization(context)];
+    }).packageContributions;
     return contributions.every(
       (contribution) => contribution.foundation.toolchains.rust === undefined,
     );
@@ -135,9 +139,10 @@ describe("pnpm Workspace Policy", () => {
       toolchain: { nodeLtsMajor: "24", packageManagerPin },
     } satisfies GenerationContext;
     const definition = definitionForPnpmPolicy(context);
-    const contributions = definition.planInitializationContributions?.(
+    const contributions = planGeneratedRepositoryInitialization({
+      definition,
       context,
-    ) ?? [definition.planInitialization(context)];
+    }).packageContributions;
 
     expect(
       contributions.every(

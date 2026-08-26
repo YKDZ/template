@@ -27,6 +27,11 @@ const toolchain = {
   packageManagerPin: "pnpm@11.21.0",
 } as const;
 
+type FixedTopologyDefinition = Exclude<
+  BuiltInPresetDefinition,
+  { readonly initialPrimaryPackage: object }
+>;
+
 function requireSharedLibraryAdditionDefinition(
   context: BuiltInGenerationContext,
 ) {
@@ -47,7 +52,11 @@ function requireSharedLibraryAdditionDefinition(
 function requireMultiPackageDefinition(context: BuiltInGenerationContext) {
   const definition = builtInPresetRegistry
     .all()
-    .find((candidate) => candidate.blueprint(context).packages.length > 2);
+    .find(
+      (candidate): candidate is FixedTopologyDefinition =>
+        candidate.initialPrimaryPackage === undefined &&
+        candidate.blueprint(context).packages.length > 2,
+    );
   if (definition === undefined) {
     throw new Error("Expected a multi-Package Definition");
   }
@@ -352,10 +361,13 @@ describe("Local Template Metadata", () => {
     async (role) => {
       const initialized = await initializedRepository((context) => {
         const definition = builtInPresetRegistry.all().find((candidate) => {
-          const blueprint = candidate.blueprint(context);
+          const contributions = planGeneratedRepositoryInitialization({
+            definition: candidate,
+            context,
+          }).packageContributions;
           return (
-            blueprint.packages.length === 1 &&
-            blueprint.packages[0]?.role === role
+            contributions.length === 1 &&
+            contributions[0]?.definition.role === role
           );
         });
         if (definition === undefined) {
@@ -363,8 +375,14 @@ describe("Local Template Metadata", () => {
         }
         return definition;
       });
+      if (initialized.definition.initialPrimaryPackage === undefined) {
+        throw new Error(`Expected configurable ${role} Definition`);
+      }
       const defaultReplay = vi
-        .spyOn(initialized.definition, "planInitialization")
+        .spyOn(
+          initialized.definition.initialPrimaryPackage,
+          "planInitialContribution",
+        )
         .mockImplementation(() => {
           throw new Error("current Preset default must not be replayed");
         });
@@ -390,7 +408,11 @@ describe("Local Template Metadata", () => {
     const initialized = await initializedRepository((context) => {
       const definition = builtInPresetRegistry
         .all()
-        .find((candidate) => candidate.blueprint(context).packages.length > 2);
+        .find(
+          (candidate) =>
+            candidate.initialPrimaryPackage === undefined &&
+            candidate.blueprint(context).packages.length > 2,
+        );
       if (definition === undefined) {
         throw new Error("Expected a multi-Package Definition");
       }
@@ -779,7 +801,11 @@ describe("Local Template Metadata", () => {
     const initialized = await initializedRepository((context) => {
       const definition = builtInPresetRegistry
         .all()
-        .find((candidate) => candidate.blueprint(context).packages.length > 2);
+        .find(
+          (candidate) =>
+            candidate.initialPrimaryPackage === undefined &&
+            candidate.blueprint(context).packages.length > 2,
+        );
       if (definition === undefined)
         throw new Error("Expected multi-Package Definition");
       return definition;

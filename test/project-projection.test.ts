@@ -17,13 +17,21 @@ import {
   materializeProjectProjection,
   reconcileAndApplyProjectProjections,
   reconcileProjectProjections,
+  validateProjectProjectionPlan,
   type CurrentProjectProjectionEntry,
   type ProjectProjection,
   type ProjectProjectionEntry,
 } from "#template-core/project-projection";
+import {
+  createTemplateSourceHandle,
+  type RenderOperation,
+} from "#template-core/renderer";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
+const planTemplateSource = createTemplateSourceHandle(
+  "/tmp/project-projection-plan-source",
+);
 
 function textEntry(
   projectionPath: string,
@@ -58,6 +66,126 @@ function structuredProjection(
 }
 
 describe("Project Projection materialization", () => {
+  it("rejects merging JSON into known non-JSON text during plan preflight", () => {
+    expect(
+      validateProjectProjectionPlan({
+        operations: [
+          {
+            kind: "writeText",
+            to: "config.json",
+            text: "not json\n",
+          },
+          {
+            kind: "mergeJson",
+            to: "config.json",
+            value: { enabled: true },
+          },
+        ],
+      }),
+    ).toContain(
+      "Project Projection mergeJson requires JSON-compatible content: config.json follows writeText",
+    );
+  });
+
+  it("rejects overwriting content after a transform during plan preflight", () => {
+    expect(
+      validateProjectProjectionPlan({
+        operations: [
+          {
+            kind: "writeText",
+            to: "src/main.ts",
+            text: "// @template:start entry\nold\n// @template:end entry\n",
+          },
+          {
+            kind: "replaceAnchors",
+            path: "src/main.ts",
+            language: "typescript",
+            replacements: { entry: "new" },
+          },
+          {
+            kind: "writeJson",
+            to: "src/main.ts",
+            value: { discarded: true },
+            overwrite: true,
+          },
+        ],
+      }),
+    ).toContain(
+      "Project Projection writeJson may not overwrite content after replaceAnchors: src/main.ts",
+    );
+  });
+
+  it("rejects applying a text transform to known JSON content", () => {
+    expect(
+      validateProjectProjectionPlan({
+        operations: [
+          {
+            kind: "writeJson",
+            to: "src/main.ts",
+            value: { entry: "old" },
+          },
+          {
+            kind: "replaceAnchors",
+            path: "src/main.ts",
+            language: "typescript",
+            replacements: { entry: "new" },
+          },
+        ],
+      }),
+    ).toContain(
+      "Project Projection replaceAnchors requires text-compatible content: src/main.ts follows writeJson",
+    );
+  });
+
+  it.each([
+    {
+      sequence: "writeJson to mergeJson",
+      operations: [
+        { kind: "writeJson", to: "config.json", value: { first: true } },
+        { kind: "mergeJson", to: "config.json", value: { second: true } },
+      ],
+    },
+    {
+      sequence: "copyFile to mergeJson",
+      operations: [
+        {
+          kind: "copyFile",
+          source: planTemplateSource,
+          from: "config.json",
+          to: "config.json",
+        },
+        { kind: "mergeJson", to: "config.json", value: { second: true } },
+      ],
+    },
+    {
+      sequence: "copyFile to replaceAnchors to setExecutable",
+      operations: [
+        {
+          kind: "copyFile",
+          source: planTemplateSource,
+          from: "main.ts",
+          to: "src/main.ts",
+        },
+        {
+          kind: "replaceAnchors",
+          path: "src/main.ts",
+          language: "typescript",
+          replacements: { entry: "new" },
+        },
+        {
+          kind: "setExecutable",
+          path: "src/main.ts",
+          executable: true,
+        },
+      ],
+    },
+  ] satisfies readonly {
+    readonly sequence: string;
+    readonly operations: readonly RenderOperation[];
+  }[])("accepts the legal $sequence sequence", ({ operations }) => {
+    expect(validateProjectProjectionPlan({ operations })).toEqual([]);
+  });
+
   it("materializes planner-owned text at any safe projection path", async () => {
     await expect(
       materializeProjectProjection({

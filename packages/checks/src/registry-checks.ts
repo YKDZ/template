@@ -85,9 +85,7 @@ export function builtInPresetTemplateSourceCheckContexts(): readonly BuiltInPres
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({ definition, context });
-    const contributions = definition.planInitializationContributions?.(
-      context,
-    ) ?? [definition.planInitialization(context)];
+    const contributions = plan.packageContributions;
 
     return contributions.map((contribution) => ({
       definition,
@@ -170,9 +168,10 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
     };
     return addable.flatMap((addition) => {
       const { id, context } = scenarioContext(addition);
-      const contribution =
-        base.planInitializationContributions?.(context)[0] ??
-        base.planInitialization(context);
+      const contribution = planGeneratedRepositoryInitialization({
+        definition: base,
+        context,
+      }).packageContributions[0];
       if (
         contribution === undefined ||
         !canConsumeNodePackageNameImport(contribution)
@@ -491,10 +490,7 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
         definition: scenario.base,
         context,
       });
-      const initialContributions =
-        scenario.base.planInitializationContributions?.(context) ?? [
-          scenario.base.planInitialization(context),
-        ];
+      const initialContributions = initialization.packageContributions;
       const plans: VerificationPlan[] = [
         {
           definition: scenario.base,

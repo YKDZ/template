@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   builtInPresetRegistry,
   createGenerationContext,
+  planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
 import {
   canConsumeNodePackageNameImport,
@@ -40,9 +41,10 @@ function requireLinkableAddition(): {
       packagePath,
     });
     if (!canProvideSourceConditionPackageNameImport(provider)) continue;
-    const consumers = definition.planInitializationContributions?.(context) ?? [
-      definition.planInitialization(context),
-    ];
+    const consumers = planGeneratedRepositoryInitialization({
+      definition,
+      context,
+    }).packageContributions;
     const consumer = consumers.find(
       (candidate) =>
         canConsumeNodePackageNameImport(candidate) &&

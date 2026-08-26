@@ -195,7 +195,7 @@ const webReplayAdapter = definePackageContributionReplayAdapter({
     webContribution(context, packageDefinition),
 });
 
-export const vueHonoAppDefinition: BuiltInPresetDefinition = {
+export const vueHonoAppDefinition = {
   metadata: {
     name: "vue-hono-app",
     title: "Vue Hono app",
@@ -228,5 +228,5 @@ export const vueHonoAppDefinition: BuiltInPresetDefinition = {
       webReplayAdapter.identify(webContribution(context)),
     ];
   },
-};
+} satisfies BuiltInPresetDefinition;
 import { fileURLToPath } from "node:url";

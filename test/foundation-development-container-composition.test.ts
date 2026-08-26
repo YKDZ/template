@@ -33,11 +33,10 @@ function builtInContributions(
   definition: BuiltInPresetDefinition,
   context: ReturnType<typeof createGenerationContext>,
 ): readonly PlannedPackageContribution[] {
-  return (
-    definition.planInitializationContributions?.(context) ?? [
-      definition.planInitialization(context),
-    ]
-  );
+  return planGeneratedRepositoryInitialization({
+    definition,
+    context,
+  }).packageContributions;
 }
 
 function requireBuiltInDefinition(

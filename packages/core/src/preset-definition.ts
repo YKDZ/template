@@ -1,6 +1,7 @@
 import type { PackageContribution } from "./package-contribution.ts";
 import type {
   PackageDefinition,
+  PackageRole,
   ProjectBlueprintDraft,
 } from "./project-blueprint.ts";
 import type { TemplateSourceHandle } from "./renderer.ts";
@@ -62,8 +63,23 @@ export function definePackageContributionReplayAdapter(options: {
   };
 }
 
-/** A side-effect-free Built-in Preset planner. */
-export type BuiltInPresetDefinition = {
+export type ResolvedPrimaryPackageIdentity = {
+  readonly leafName: string;
+  readonly definition: PackageDefinition;
+};
+
+/** Optional behavior owned only by Presets with a configurable initial package. */
+export type InitialPrimaryPackageCapability = {
+  readonly defaultLeafName: string;
+  readonly role: PackageRole;
+  defaultPackagePath(options: { readonly packageLeafName: string }): string;
+  planInitialContribution(options: {
+    readonly context: GenerationContext;
+    readonly resolvedPackageIdentity: ResolvedPrimaryPackageIdentity;
+  }): PlannedPackageContribution;
+};
+
+type BuiltInPresetDefinitionBase = {
   readonly metadata: {
     readonly name: string;
     readonly title: string;
@@ -75,15 +91,6 @@ export type BuiltInPresetDefinition = {
   readonly plannerSourceFile: string;
   /** Stable semantics used to replay persisted Package Definitions. */
   readonly packageContributionReplayAdapters: readonly PackageContributionReplayAdapter[];
-  blueprint(context: GenerationContext): ProjectBlueprintDraft;
-  planInitialization(context: GenerationContext): PlannedPackageContribution;
-  /**
-   * Multi-package Definitions expose their complete owned topology directly,
-   * while single-package Definitions keep the compact tracer interface.
-   */
-  planInitializationContributions?(
-    context: GenerationContext,
-  ): readonly PlannedPackageContribution[];
   /** Package layout is Preset-owned even when callers omit --path. */
   defaultPackagePath?(options: {
     readonly context: GenerationContext;
@@ -95,3 +102,26 @@ export type BuiltInPresetDefinition = {
     readonly packagePath: string;
   }): PlannedPackageContribution;
 };
+
+type ConfigurablePrimaryPackagePresetDefinition =
+  BuiltInPresetDefinitionBase & {
+    readonly initialPrimaryPackage: InitialPrimaryPackageCapability;
+    readonly blueprint?: never;
+    readonly planInitialization?: never;
+    readonly planInitializationContributions?: never;
+  };
+
+type FixedTopologyPresetDefinition = BuiltInPresetDefinitionBase & {
+  readonly initialPrimaryPackage?: never;
+  blueprint(context: GenerationContext): ProjectBlueprintDraft;
+  planInitialization(context: GenerationContext): PlannedPackageContribution;
+  /** Multi-package Definitions expose their complete owned topology directly. */
+  planInitializationContributions?(
+    context: GenerationContext,
+  ): readonly PlannedPackageContribution[];
+};
+
+/** A side-effect-free Built-in Preset planner. */
+export type BuiltInPresetDefinition =
+  | ConfigurablePrimaryPackagePresetDefinition
+  | FixedTopologyPresetDefinition;

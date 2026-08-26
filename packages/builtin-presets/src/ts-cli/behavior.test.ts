@@ -54,12 +54,13 @@ async function renderInstalledGeneratedRepository(prefix: string): Promise<{
   return {
     workspace,
     targetDir,
-    packageRoot: path.join(targetDir, "packages/demo-cli"),
+    packageRoot: path.join(targetDir, "packages/cli"),
   };
 }
 
 describe("ts-cli Preset Definition behavior", () => {
   it("plans the registered publishable CLI Tool Package", () => {
+    expect(tsCliDefinition.initialPrimaryPackage.defaultLeafName).toBe("cli");
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "demo-cli"),
       defaultPackageScope: "demo",
@@ -68,23 +69,34 @@ describe("ts-cli Preset Definition behavior", () => {
         packageManagerPin: "pnpm@11.11.0",
       },
     });
-    const contribution = tsCliDefinition.planInitialization(context);
+    const contribution =
+      tsCliDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "cli",
+          definition: {
+            name: "@demo/cli",
+            path: "packages/cli",
+            role: "cli-tool",
+          },
+        },
+      });
 
     expect(resolveBuiltInTemplateSource(tsCliDefinition.source, ".")).toMatch(
       /templates[\\/]ts-cli$/,
     );
     expect(contribution.definition).toEqual({
-      name: "@demo/demo-cli",
-      path: "packages/demo-cli",
+      name: "@demo/cli",
+      path: "packages/cli",
       role: "cli-tool",
     });
     expect(contribution.manifest).toMatchObject({
-      name: "@demo/demo-cli",
+      name: "@demo/cli",
       version: "0.0.0",
       publishConfig: { access: "public" },
       files: ["dist"],
       type: "module",
-      bin: { "demo-cli": "./dist/cli.js" },
+      bin: { cli: "./dist/cli.js" },
       exports: {
         ".": {
           source: "./src/main.ts",
@@ -116,20 +128,20 @@ describe("ts-cli Preset Definition behavior", () => {
           kind: "copyFile",
           source: tsCliDefinition.source,
           from: "src/cli.ts",
-          to: "packages/demo-cli/src/cli.ts",
+          to: "packages/cli/src/cli.ts",
         },
         {
           kind: "copyFile",
           source: tsCliDefinition.source,
           from: "src/main.ts",
-          to: "packages/demo-cli/src/main.ts",
+          to: "packages/cli/src/main.ts",
         },
         {
           kind: "replaceAnchors",
-          path: "packages/demo-cli/src/main.ts",
+          path: "packages/cli/src/main.ts",
           language: "typescript",
           replacements: {
-            "cli-command-name": 'const commandName = "demo-cli";',
+            "cli-command-name": 'const commandName = "cli";',
           },
         },
       ]),
@@ -261,7 +273,7 @@ describe("ts-cli Preset Definition behavior", () => {
         }
       ).tasks;
       const consumerBuild = tasks.find(
-        ({ taskId }) => taskId === "@demo/consumer#build",
+        ({ taskId }) => taskId === "@demo/cli#build",
       );
       expect(consumerBuild?.dependencies).toContain("@demo/provider#build");
       expect(consumerBuild?.command).toBe(
@@ -504,7 +516,7 @@ describe("ts-cli Preset Definition behavior", () => {
           "run",
           "test",
           "test:e2e",
-          "--filter=@demo/demo-cli",
+          "--filter=@demo/cli",
           "--dry-run=json",
         ],
         { cwd: project.targetDir },
@@ -518,17 +530,16 @@ describe("ts-cli Preset Definition behavior", () => {
         }
       ).tasks;
       expect(
-        tasks.find(({ taskId }) => taskId === "@demo/demo-cli#test")
-          ?.dependencies,
-      ).not.toContain("@demo/demo-cli#build");
+        tasks.find(({ taskId }) => taskId === "@demo/cli#test")?.dependencies,
+      ).not.toContain("@demo/cli#build");
       expect(
-        tasks.find(({ taskId }) => taskId === "@demo/demo-cli#test:e2e")
+        tasks.find(({ taskId }) => taskId === "@demo/cli#test:e2e")
           ?.dependencies,
-      ).toContain("@demo/demo-cli#build");
+      ).toContain("@demo/cli#build");
 
       await execa(
         "pnpm",
-        ["exec", "turbo", "run", "build", "--filter=@demo/demo-cli", "--force"],
+        ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
         { cwd: project.targetDir },
       );
       await expect(
@@ -664,7 +675,7 @@ describe("ts-cli Preset Definition behavior", () => {
         version: "0.0.0",
         publishConfig: { access: "public" },
         files: ["dist"],
-        bin: { "demo-cli": "./dist/cli.js" },
+        bin: { cli: "./dist/cli.js" },
         exports: {
           ".": {
             source: "./src/main.ts",
@@ -694,7 +705,7 @@ describe("ts-cli Preset Definition behavior", () => {
         `${JSON.stringify({ name: "consumer", private: true })}\n`,
       );
       await execa("pnpm", ["install", archivePath], { cwd: consumerRoot });
-      const binPath = path.join(consumerRoot, "node_modules/.bin/demo-cli");
+      const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
       await expect(stat(binPath)).resolves.toMatchObject({
         mode: expect.any(Number),
       });

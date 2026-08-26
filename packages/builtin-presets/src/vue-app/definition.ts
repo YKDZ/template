@@ -99,7 +99,7 @@ const appReplayAdapter = definePackageContributionReplayAdapter({
     }),
 });
 
-export const vueAppDefinition: BuiltInPresetDefinition = {
+export const vueAppDefinition = {
   metadata: {
     name: "vue-app",
     title: "Vue app",
@@ -138,5 +138,5 @@ export const vueAppDefinition: BuiltInPresetDefinition = {
       appContribution({ context, packageLeafName, packagePath }),
     );
   },
-};
+} satisfies BuiltInPresetDefinition;
 import { fileURLToPath } from "node:url";

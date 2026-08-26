@@ -12,6 +12,10 @@ import type { RenderOperation } from "#template-core/renderer";
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";
 
+function packagePathForLeaf(packageLeafName: string): string {
+  return `packages/${packageLeafName}`;
+}
+
 function packageScripts(): Record<string, string> {
   return {
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
@@ -188,7 +192,7 @@ const cliReplayAdapter = definePackageContributionReplayAdapter({
     }),
 });
 
-export const tsCliDefinition: BuiltInPresetDefinition = {
+export const tsCliDefinition = {
   metadata: {
     name: "ts-cli",
     title: "TypeScript CLI",
@@ -197,33 +201,28 @@ export const tsCliDefinition: BuiltInPresetDefinition = {
   source: templateSources.tsCli,
   plannerSourceFile: fileURLToPath(import.meta.url),
   packageContributionReplayAdapters: [cliReplayAdapter],
-  blueprint(context) {
-    return {
-      schemaVersion: 3,
-      packages: [
+  initialPrimaryPackage: {
+    defaultLeafName: "cli",
+    role: "cli-tool",
+    defaultPackagePath: ({ packageLeafName }) =>
+      packagePathForLeaf(packageLeafName),
+    planInitialContribution({ context, resolvedPackageIdentity }) {
+      return cliReplayAdapter.identify(
         cliContribution({
           context,
-          packageLeafName: context.repositoryName,
-          packagePath: `packages/${context.repositoryName}`,
-        }).definition,
-      ],
-    };
-  },
-  planInitialization(context) {
-    return cliReplayAdapter.identify(
-      cliContribution({
-        context,
-        packageLeafName: context.repositoryName,
-        packagePath: `packages/${context.repositoryName}`,
-      }),
-    );
+          packageLeafName: resolvedPackageIdentity.leafName,
+          packagePath: resolvedPackageIdentity.definition.path,
+          packageDefinition: resolvedPackageIdentity.definition,
+        }),
+      );
+    },
   },
   defaultPackagePath({ packageLeafName }) {
-    return `packages/${packageLeafName}`;
+    return packagePathForLeaf(packageLeafName);
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
     return cliReplayAdapter.identify(
       cliContribution({ context, packageLeafName, packagePath }),
     );
   },
-};
+} satisfies BuiltInPresetDefinition;

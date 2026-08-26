@@ -12,6 +12,10 @@ import type { RenderOperation } from "#template-core/renderer";
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";
 
+function packagePathForLeaf(packageLeafName: string): string {
+  return `packages/${packageLeafName}`;
+}
+
 function packageScripts(): Record<string, string> {
   return {
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
@@ -127,7 +131,7 @@ const libraryReplayAdapter = definePackageContributionReplayAdapter({
     }),
 });
 
-export const tsLibDefinition: BuiltInPresetDefinition = {
+export const tsLibDefinition = {
   metadata: {
     name: "ts-lib",
     title: "TypeScript library",
@@ -136,33 +140,28 @@ export const tsLibDefinition: BuiltInPresetDefinition = {
   source: templateSources.tsLib,
   plannerSourceFile: fileURLToPath(import.meta.url),
   packageContributionReplayAdapters: [libraryReplayAdapter],
-  blueprint(context) {
-    return {
-      schemaVersion: 3,
-      packages: [
+  initialPrimaryPackage: {
+    defaultLeafName: "lib",
+    role: "shared-library",
+    defaultPackagePath: ({ packageLeafName }) =>
+      packagePathForLeaf(packageLeafName),
+    planInitialContribution({ context, resolvedPackageIdentity }) {
+      return libraryReplayAdapter.identify(
         libraryContribution({
           context,
-          packageLeafName: context.repositoryName,
-          packagePath: `packages/${context.repositoryName}`,
-        }).definition,
-      ],
-    };
-  },
-  planInitialization(context) {
-    return libraryReplayAdapter.identify(
-      libraryContribution({
-        context,
-        packageLeafName: context.repositoryName,
-        packagePath: `packages/${context.repositoryName}`,
-      }),
-    );
+          packageLeafName: resolvedPackageIdentity.leafName,
+          packagePath: resolvedPackageIdentity.definition.path,
+          packageDefinition: resolvedPackageIdentity.definition,
+        }),
+      );
+    },
   },
   defaultPackagePath({ packageLeafName }) {
-    return `packages/${packageLeafName}`;
+    return packagePathForLeaf(packageLeafName);
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
     return libraryReplayAdapter.identify(
       libraryContribution({ context, packageLeafName, packagePath }),
     );
   },
-};
+} satisfies BuiltInPresetDefinition;

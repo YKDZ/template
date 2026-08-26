@@ -43,10 +43,13 @@ import type {
   InitialPackageDefinitionLookup,
   PackageContributionReplayAdapter,
   PlannedPackageContribution,
+  ResolvedPrimaryPackageIdentity,
 } from "#template-core/preset-definition";
 import {
   assertProjectBlueprint,
   assertProjectBlueprintDraft,
+  isValidNewNpmPackageName,
+  validateNewPackagePath,
   validateProjectBlueprint as validateCoreProjectBlueprint,
   type PackageDefinition,
   type PackageDefinitionId,
@@ -66,6 +69,7 @@ import type {
   ProjectProjectionReconciliation,
   StructuredIdentitySetPolicy,
 } from "#template-core/project-projection";
+import { validateProjectProjectionPlan } from "#template-core/project-projection";
 import type { RenderOperation } from "#template-core/renderer";
 import {
   resolveTemplateSource,
@@ -73,6 +77,7 @@ import {
 } from "#template-core/renderer";
 
 import {
+  isValidDefaultPackageScope,
   parseGenerationRecord,
   type GeneratedPackagePlanningRecord,
   type GenerationRecord,
@@ -115,6 +120,8 @@ export type GeneratedRepositoryPlan = {
   readonly planningContribution: "planInitialization" | "planPackageAddition";
   readonly blueprint: ProjectBlueprint;
   readonly generationRecord: GenerationRecord;
+  /** Resolved Preset contributions consumed by Blueprint and projections. */
+  readonly packageContributions: readonly PlannedPackageContribution[];
   readonly operations: readonly RenderOperation[];
   readonly reconciliation: readonly ProjectProjectionReconciliation[];
   readonly developmentContainer: {
@@ -1214,7 +1221,7 @@ function foundationPlan(options: {
     );
   });
   const contributions = [configContribution, ...packageContributions];
-  const generationRecord: GenerationRecord = options.generationRecord ?? {
+  const candidateRecord: GenerationRecord = options.generationRecord ?? {
     schemaVersion: 2,
     repositoryName: options.context.repositoryName,
     defaultPackageScope: options.context.defaultPackageScope,
@@ -1256,6 +1263,7 @@ function foundationPlan(options: {
       },
     ],
   };
+  const generationRecord = parseGenerationRecord(candidateRecord);
   const persistedEnvironmentNeeds = normalizeEnvironmentNeeds({
     check: contributions.flatMap((item) => item.environmentNeeds),
     deployment: [
@@ -1678,6 +1686,7 @@ function foundationPlan(options: {
         : "planInitialization",
     blueprint: options.blueprint,
     generationRecord,
+    packageContributions,
     operations,
     reconciliation,
     developmentContainer: {
@@ -1700,28 +1709,138 @@ function foundationPlan(options: {
   };
 }
 
-export function planGeneratedRepositoryInitialization(options: {
+type PreparedPresetInitialization = {
+  readonly presetBlueprint: ReturnType<typeof assertProjectBlueprintDraft>;
+  readonly contributions: readonly PlannedPackageContribution[];
+  readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
+};
+
+type ConfigurablePrimaryPackageDefinition = Extract<
+  BuiltInPresetDefinition,
+  { readonly initialPrimaryPackage: object }
+>;
+
+function hasConfigurablePrimaryPackage(
+  definition: BuiltInPresetDefinition,
+): definition is ConfigurablePrimaryPackageDefinition {
+  return definition.initialPrimaryPackage !== undefined;
+}
+
+export type InitializationIdentityOverrides = {
+  readonly name?: string;
+  readonly path?: string;
+  readonly scope?: string;
+};
+
+export type ResolvedInitialization = {
+  readonly preset: string;
+  readonly topology: "configurable-primary-package" | "fixed";
+  readonly packages: readonly {
+    readonly name: string;
+    readonly path: string;
+  }[];
+  readonly scope: string;
+};
+
+function errorDiagnostics(error: unknown): readonly string[] {
+  return (error instanceof Error ? error.message : String(error))
+    .split("\n")
+    .filter((diagnostic) => diagnostic.length > 0);
+}
+
+function preparePresetInitialization(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
-}): GeneratedRepositoryPlan {
-  const presetBlueprint = assertProjectBlueprintDraft(
-    options.definition.blueprint(options.context),
-  );
-  const configDefinition = typescriptConfigPackageDefinition(options.context);
-  if (
-    presetBlueprint.packages.some(
-      (definition) =>
-        definition.name === configDefinition.name ||
-        definition.path === configDefinition.path,
-    )
-  ) {
-    throw new Error(
-      "Preset Blueprint must not redefine the Foundation TypeScript configuration Package Definition",
-    );
+  readonly overrides?: Pick<InitializationIdentityOverrides, "name" | "path">;
+}): PreparedPresetInitialization {
+  if (!hasConfigurablePrimaryPackage(options.definition)) {
+    const diagnostics: string[] = [];
+    let presetBlueprint: PreparedPresetInitialization["presetBlueprint"];
+    let contributions: readonly PlannedPackageContribution[] | undefined;
+    try {
+      presetBlueprint = assertProjectBlueprintDraft(
+        options.definition.blueprint(options.context),
+      );
+    } catch (error) {
+      diagnostics.push(...errorDiagnostics(error));
+    }
+    try {
+      contributions = options.definition.planInitializationContributions?.(
+        options.context,
+      ) ?? [options.definition.planInitialization(options.context)];
+    } catch (error) {
+      diagnostics.push(...errorDiagnostics(error));
+    }
+    if (diagnostics.length > 0) throw new Error(diagnostics.join("\n"));
+    return {
+      presetBlueprint: presetBlueprint!,
+      contributions: contributions!,
+    };
   }
-  const contributions = options.definition.planInitializationContributions?.(
-    options.context,
-  ) ?? [options.definition.planInitialization(options.context)];
+  const capability = options.definition.initialPrimaryPackage;
+  const leafName = options.overrides?.name ?? capability.defaultLeafName;
+  const resolvedPackageIdentity: ResolvedPrimaryPackageIdentity = {
+    leafName,
+    definition: {
+      name: `@${options.context.defaultPackageScope}/${leafName}`,
+      path:
+        options.overrides?.path ??
+        capability.defaultPackagePath({ packageLeafName: leafName }),
+      role: capability.role,
+    },
+  };
+  const diagnostics: string[] = [];
+  let presetBlueprint: PreparedPresetInitialization["presetBlueprint"];
+  let contribution: PlannedPackageContribution | undefined;
+  try {
+    presetBlueprint = assertProjectBlueprintDraft({
+      schemaVersion: 3,
+      packages: [resolvedPackageIdentity.definition],
+    });
+  } catch (error) {
+    diagnostics.push(...errorDiagnostics(error));
+  }
+  try {
+    contribution = capability.planInitialContribution({
+      context: options.context,
+      resolvedPackageIdentity,
+    });
+  } catch (error) {
+    diagnostics.push(...errorDiagnostics(error));
+  }
+  if (diagnostics.length > 0) throw new Error(diagnostics.join("\n"));
+  return {
+    presetBlueprint: presetBlueprint!,
+    contributions: [contribution!],
+    resolvedPackageIdentity,
+  };
+}
+
+function planPreparedRepositoryInitialization(options: {
+  readonly definition: BuiltInPresetDefinition;
+  readonly context: BuiltInGenerationContext;
+  readonly presetBlueprint: ReturnType<typeof assertProjectBlueprintDraft>;
+  readonly contributions: readonly PlannedPackageContribution[];
+}): GeneratedRepositoryPlan {
+  const { presetBlueprint, contributions } = options;
+  const configDefinition = typescriptConfigPackageDefinition(options.context);
+  const foundationIdentityDiagnostics = presetBlueprint.packages.flatMap(
+    (definition) => [
+      ...(definition.name === configDefinition.name
+        ? [
+            `Initial package name ${definition.name} conflicts with Foundation package ${configDefinition.name}`,
+          ]
+        : []),
+      ...(definition.path === configDefinition.path
+        ? [
+            `Initial Package Path ${definition.path} conflicts with Foundation Package Path ${configDefinition.path}`,
+          ]
+        : []),
+    ],
+  );
+  if (foundationIdentityDiagnostics.length > 0) {
+    throw new Error(foundationIdentityDiagnostics.join("\n"));
+  }
   const occupiedIds = new Set<PackageDefinitionId>();
   const blueprint: ProjectBlueprint = {
     ...presetBlueprint,
@@ -1770,6 +1889,238 @@ export function planGeneratedRepositoryInitialization(options: {
     contributions,
     mode: "initialization",
   });
+}
+
+function assertPreflightedInitializationPlan(
+  plan: GeneratedRepositoryPlan,
+): GeneratedRepositoryPlan {
+  const projectionDiagnostics = validateProjectProjectionPlan({
+    operations: plan.operations,
+    reconciliation: plan.reconciliation,
+  });
+  if (projectionDiagnostics.length > 0) {
+    throw new Error(projectionDiagnostics.join("\n"));
+  }
+  return plan;
+}
+
+export function planGeneratedRepositoryInitialization(options: {
+  readonly definition: BuiltInPresetDefinition;
+  readonly context: BuiltInGenerationContext;
+}): GeneratedRepositoryPlan {
+  const prepared = preparePresetInitialization(options);
+  return assertPreflightedInitializationPlan(
+    planPreparedRepositoryInitialization({
+      definition: options.definition,
+      context: options.context,
+      presetBlueprint: prepared.presetBlueprint,
+      contributions: prepared.contributions,
+    }),
+  );
+}
+
+export function prepareGeneratedRepositoryInitialization(options: {
+  readonly definition: BuiltInPresetDefinition;
+  readonly targetDir: string;
+  readonly toolchain: BuiltInGenerationContext["toolchain"];
+  readonly overrides?: InitializationIdentityOverrides;
+}): {
+  readonly context: BuiltInGenerationContext;
+  readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
+  readonly resolved: ResolvedInitialization;
+  readonly plan: GeneratedRepositoryPlan;
+} {
+  const diagnostics: string[] = [];
+  const appendDiagnostics = (error: unknown): void => {
+    diagnostics.push(...errorDiagnostics(error));
+  };
+  const scopeOverride = options.overrides?.scope;
+  const normalizedScope =
+    scopeOverride?.startsWith("@") === true
+      ? scopeOverride.slice(1)
+      : scopeOverride;
+  const nameOverride = options.overrides?.name;
+  const pathOverride = options.overrides?.path;
+  const repositoryName = path.basename(path.resolve(options.targetDir));
+  const configurablePrimaryPackage =
+    options.definition.initialPrimaryPackage !== undefined;
+  if (
+    !configurablePrimaryPackage &&
+    (nameOverride !== undefined || pathOverride !== undefined)
+  ) {
+    diagnostics.push(
+      `Built-in Preset ${options.definition.metadata.name} has fixed initial package topology and does not accept --name or --path`,
+    );
+  }
+  let validNameOverride =
+    nameOverride !== undefined &&
+    isValidNewNpmPackageName(`@x/${nameOverride}`);
+  if (nameOverride !== undefined && !validNameOverride) {
+    diagnostics.push("--name must be an unscoped package leaf name");
+  }
+  let validPathOverride = pathOverride !== undefined;
+  if (pathOverride !== undefined) {
+    const pathValidation = validateNewPackagePath(pathOverride);
+    if (!pathValidation.hasValidShape) {
+      diagnostics.push("--path must be exactly two safe path segments");
+      validPathOverride = false;
+    }
+    if (pathValidation.reservedWorkspaceCollection !== undefined) {
+      diagnostics.push(
+        `--path ${pathOverride} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
+      );
+      validPathOverride = false;
+    }
+  }
+  let validScopeOverride =
+    normalizedScope !== undefined &&
+    scopeOverride === scopeOverride?.trim() &&
+    isValidDefaultPackageScope(normalizedScope) &&
+    isValidNewNpmPackageName(`@${normalizedScope}/typescript-config`);
+  if (normalizedScope !== undefined && !validScopeOverride) {
+    diagnostics.push("--scope must be a valid npm scope without whitespace");
+  }
+  let validRepositoryScope =
+    isValidDefaultPackageScope(repositoryName) &&
+    isValidNewNpmPackageName(`@${repositoryName}/typescript-config`);
+  if (normalizedScope === undefined && !validRepositoryScope) {
+    diagnostics.push(
+      `Repository Identity ${repositoryName} is not a valid default package scope; pass --scope with a valid npm scope`,
+    );
+  }
+
+  const resolvedScope = validScopeOverride
+    ? (normalizedScope ?? "repository")
+    : validRepositoryScope
+      ? repositoryName
+      : "repository";
+  const resolvedLeaf =
+    configurablePrimaryPackage &&
+    nameOverride !== undefined &&
+    validNameOverride
+      ? nameOverride
+      : configurablePrimaryPackage
+        ? options.definition.initialPrimaryPackage?.defaultLeafName
+        : undefined;
+  if (
+    resolvedLeaf !== undefined &&
+    !isValidNewNpmPackageName(`@${resolvedScope}/${resolvedLeaf}`)
+  ) {
+    if (nameOverride !== undefined) {
+      validNameOverride = false;
+      diagnostics.push("--name must be an unscoped package leaf name");
+    } else if (scopeOverride !== undefined) {
+      validScopeOverride = false;
+      diagnostics.push("--scope must be a valid npm scope without whitespace");
+    } else {
+      validRepositoryScope = false;
+      diagnostics.push(
+        `Repository Identity ${repositoryName} is not a valid default package scope; pass --scope with a valid npm scope`,
+      );
+    }
+  }
+
+  const context = createGenerationContext({
+    targetDir: options.targetDir,
+    defaultPackageScope: validScopeOverride
+      ? (normalizedScope ?? "repository")
+      : validRepositoryScope
+        ? repositoryName
+        : "repository",
+    toolchain: options.toolchain,
+  });
+  const safeNameOverride =
+    configurablePrimaryPackage && nameOverride !== undefined
+      ? validNameOverride
+        ? nameOverride
+        : "x"
+      : undefined;
+  let safeDerivedPathOverride: string | undefined;
+  const initialPrimaryPackage = options.definition.initialPrimaryPackage;
+  if (initialPrimaryPackage !== undefined && pathOverride === undefined) {
+    const safeLeafName =
+      safeNameOverride ?? initialPrimaryPackage.defaultLeafName;
+    const derivedPackagePath = initialPrimaryPackage.defaultPackagePath({
+      packageLeafName: safeLeafName,
+    });
+    const derivedPathValidation = validateNewPackagePath(derivedPackagePath);
+    if (
+      !derivedPathValidation.hasValidShape ||
+      derivedPathValidation.reservedWorkspaceCollection !== undefined
+    ) {
+      diagnostics.push(
+        `Preset-derived Package Path ${derivedPackagePath} is unsafe; pass --path with exactly two safe path segments`,
+      );
+      safeDerivedPathOverride = "packages/invalid";
+    }
+  }
+  const safeIdentityOverrides: Pick<
+    InitializationIdentityOverrides,
+    "name" | "path"
+  > = {
+    ...(safeNameOverride === undefined ? {} : { name: safeNameOverride }),
+    ...(configurablePrimaryPackage && pathOverride !== undefined
+      ? { path: validPathOverride ? pathOverride : "packages/invalid" }
+      : safeDerivedPathOverride === undefined
+        ? {}
+        : { path: safeDerivedPathOverride }),
+  };
+  let prepared: PreparedPresetInitialization | undefined;
+  try {
+    prepared = preparePresetInitialization({
+      definition: options.definition,
+      context,
+      ...(Object.keys(safeIdentityOverrides).length === 0
+        ? {}
+        : { overrides: safeIdentityOverrides }),
+    });
+  } catch (error) {
+    appendDiagnostics(error);
+  }
+  let plan: GeneratedRepositoryPlan | undefined;
+  if (prepared !== undefined) {
+    try {
+      plan = planPreparedRepositoryInitialization({
+        definition: options.definition,
+        context,
+        presetBlueprint: prepared.presetBlueprint,
+        contributions: prepared.contributions,
+      });
+    } catch (error) {
+      appendDiagnostics(error);
+    }
+  }
+  if (plan !== undefined) {
+    diagnostics.push(
+      ...validateProjectProjectionPlan({
+        operations: plan.operations,
+        reconciliation: plan.reconciliation,
+      }),
+    );
+  }
+  if (diagnostics.length > 0) throw new Error(diagnostics.join("\n"));
+  if (prepared === undefined || plan === undefined) {
+    throw new Error("Initialization preparation did not produce a plan");
+  }
+  return {
+    context,
+    resolved: {
+      preset: options.definition.metadata.name,
+      topology:
+        prepared.resolvedPackageIdentity === undefined
+          ? "fixed"
+          : "configurable-primary-package",
+      packages: prepared.presetBlueprint.packages.map(({ name, path }) => ({
+        name,
+        path,
+      })),
+      scope: context.defaultPackageScope,
+    },
+    ...(prepared.resolvedPackageIdentity === undefined
+      ? {}
+      : { resolvedPackageIdentity: prepared.resolvedPackageIdentity }),
+    plan,
+  };
 }
 
 export function planGeneratedRepositoryPackageAddition(options: {

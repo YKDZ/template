@@ -13,14 +13,32 @@ const fallbackEnvironment = {
 function requireAddablePresetName(): string {
   const definition = builtInPresetRegistry
     .all()
-    .find((candidate) => candidate.planPackageAddition !== undefined);
+    .find(
+      (candidate) =>
+        candidate.planPackageAddition !== undefined &&
+        candidate.initialPrimaryPackage !== undefined,
+    );
   if (definition === undefined) {
     throw new Error("init journey requires an addable Preset");
   }
   return definition.metadata.name;
 }
 
+function requireFixedTopologyPresetName(): string {
+  const definition = builtInPresetRegistry
+    .all()
+    .find((candidate) => candidate.initialPrimaryPackage === undefined);
+  if (definition === undefined) {
+    throw new Error("init journey requires a fixed-topology Preset");
+  }
+  return definition.metadata.name;
+}
+
 const addablePresetName = requireAddablePresetName();
+const configurableDefinition = builtInPresetRegistry.require(addablePresetName);
+const defaultLeafName =
+  configurableDefinition.initialPrimaryPackage!.defaultLeafName;
+const fixedTopologyPresetName = requireFixedTopologyPresetName();
 
 const journey: CliJourney = {
   name: "init",
@@ -37,14 +55,44 @@ const journey: CliJourney = {
           addablePresetName,
           "--scope",
           "@acme",
+          "--name",
+          "runner",
+          "--path",
+          "tools/release",
           "--dry-run",
           "--json",
         ],
         env: fallbackEnvironment,
       },
       {
+        name: "fixed-topology identity override rejection",
+        args: [
+          "init",
+          "fixed-rejected",
+          "--preset",
+          fixedTopologyPresetName,
+          "--name",
+          "renamed",
+          "--yes",
+        ],
+        env: fallbackEnvironment,
+      },
+      {
         name: "non-interactive rejection",
         args: ["init", "rejected", "--preset", addablePresetName],
+        env: fallbackEnvironment,
+      },
+      {
+        name: "invalid durable scope rejection",
+        args: [
+          "init",
+          "invalid-scope",
+          "--preset",
+          addablePresetName,
+          "--scope",
+          ".bad",
+          "--yes",
+        ],
         env: fallbackEnvironment,
       },
       {
@@ -75,6 +123,12 @@ const journey: CliJourney = {
     assert.equal(preview.command, "init");
     assert.equal(preview.dryRun, true);
     assert.equal(preview.targetDir, "preview");
+    assert.deepEqual(preview.resolved, {
+      preset: addablePresetName,
+      topology: "configurable-primary-package",
+      packages: [{ name: "@acme/runner", path: "tools/release" }],
+      scope: "acme",
+    });
     assert.deepEqual(preview.followUpDocument, {
       enabled: true,
       path: "TODO.md",
@@ -86,26 +140,47 @@ const journey: CliJourney = {
     assert.equal(results[1]?.exitCode, 1);
     assert.match(
       results[1]?.stderr ?? "",
+      /fixed initial package topology and does not accept --name or --path/u,
+    );
+    await assert.rejects(stat(path.join(context.workDir, "fixed-rejected")), {
+      code: "ENOENT",
+    });
+
+    assert.equal(results[2]?.exitCode, 1);
+    assert.match(
+      results[2]?.stderr ?? "",
       /Non-interactive init requires --yes/u,
     );
 
-    assert.equal(results[2]?.exitCode, 0);
-    assert.deepEqual(JSON.parse(results[2]?.stdout ?? "").followUpDocument, {
+    assert.equal(results[3]?.exitCode, 1);
+    assert.match(
+      results[3]?.stderr ?? "",
+      /--scope must be a valid npm scope without whitespace/u,
+    );
+    await assert.rejects(stat(path.join(context.workDir, "invalid-scope")), {
+      code: "ENOENT",
+    });
+
+    assert.equal(results[4]?.exitCode, 0);
+    assert.deepEqual(JSON.parse(results[4]?.stdout ?? "").followUpDocument, {
       enabled: false,
     });
     assert.match(
       await readFile(
-        path.join(context.workDir, "project/packages/project/package.json"),
+        path.join(
+          context.workDir,
+          `project/packages/${defaultLeafName}/package.json`,
+        ),
         "utf8",
       ),
-      /"name": "@acme\/project"/u,
+      new RegExp(`"name": "@acme/${defaultLeafName}"`, "u"),
     );
     await assert.rejects(stat(path.join(context.workDir, "project/TODO.md")), {
       code: "ENOENT",
     });
 
-    assert.equal(results[3]?.exitCode, 1);
-    assert.match(results[3]?.stderr ?? "", /Target directory is not empty/u);
+    assert.equal(results[5]?.exitCode, 1);
+    assert.match(results[5]?.stderr ?? "", /Target directory is not empty/u);
   },
 };
 

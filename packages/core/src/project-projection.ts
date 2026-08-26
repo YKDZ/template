@@ -178,6 +178,131 @@ function operationDriver(
   }
 }
 
+/** Pure structural preflight for a renderer-facing Project Projection plan. */
+export function validateProjectProjectionPlan(
+  options: MaterializeProjectProjectionOptions,
+): readonly string[] {
+  const diagnostics: string[] = [];
+  const contentKindByPath = new Map<string, RenderOperation["kind"]>();
+  const contentTypeByPath = new Map<string, "json" | "text" | "unknown">();
+  const transformationKindByPath = new Map<
+    string,
+    "replaceAnchors" | "setExecutable"
+  >();
+  const finalPaths = new Set<string>();
+  for (const operation of options.operations) {
+    let outputPath: string;
+    try {
+      outputPath = normalizedOutputPath(operation);
+    } catch (error) {
+      diagnostics.push(error instanceof Error ? error.message : String(error));
+      continue;
+    }
+    finalPaths.add(outputPath);
+    const precedingKind = contentKindByPath.get(outputPath);
+    if (
+      operation.kind === "setExecutable" ||
+      operation.kind === "replaceAnchors"
+    ) {
+      if (precedingKind === undefined) {
+        diagnostics.push(
+          `Project Projection ${operation.kind} requires a preceding content-producing operation: ${outputPath}`,
+        );
+      }
+      const hasCompatibleContent =
+        operation.kind !== "replaceAnchors" ||
+        contentTypeByPath.get(outputPath) !== "json";
+      if (!hasCompatibleContent) {
+        diagnostics.push(
+          `Project Projection replaceAnchors requires text-compatible content: ${outputPath} follows ${precedingKind}`,
+        );
+      }
+      if (precedingKind !== undefined && hasCompatibleContent) {
+        if (operation.kind === "replaceAnchors") {
+          contentTypeByPath.set(outputPath, "text");
+        }
+        transformationKindByPath.set(outputPath, operation.kind);
+      }
+      continue;
+    }
+    if (
+      operation.kind === "mergeJson" ||
+      operation.kind === "mergeJsonTemplate"
+    ) {
+      const transformationKind = transformationKindByPath.get(outputPath);
+      if (transformationKind !== undefined) {
+        diagnostics.push(
+          `Project Projection ${operation.kind} may not overwrite content after ${transformationKind}: ${outputPath}`,
+        );
+      }
+      if (contentTypeByPath.get(outputPath) === "text") {
+        diagnostics.push(
+          `Project Projection ${operation.kind} requires JSON-compatible content: ${outputPath} follows ${precedingKind}`,
+        );
+      }
+      if (precedingKind === undefined) {
+        contentKindByPath.set(outputPath, operation.kind);
+      }
+      contentTypeByPath.set(outputPath, "json");
+      transformationKindByPath.delete(outputPath);
+      continue;
+    }
+    const overwrite = "overwrite" in operation && operation.overwrite;
+    const transformationKind = transformationKindByPath.get(outputPath);
+    if (overwrite && transformationKind !== undefined) {
+      diagnostics.push(
+        `Project Projection ${operation.kind} may not overwrite content after ${transformationKind}: ${outputPath}`,
+      );
+    }
+    if (precedingKind !== undefined && !overwrite) {
+      diagnostics.push(
+        `Project Projection collision at ${outputPath}: ${operation.kind} follows ${precedingKind} without overwrite`,
+      );
+    }
+    contentKindByPath.set(outputPath, operation.kind);
+    if (operation.kind === "writeJson") {
+      contentTypeByPath.set(outputPath, "json");
+    } else if (operation.kind === "writeText") {
+      try {
+        JSON.parse(operation.text);
+        contentTypeByPath.set(outputPath, "json");
+      } catch {
+        contentTypeByPath.set(outputPath, "text");
+      }
+    } else {
+      contentTypeByPath.set(outputPath, "unknown");
+    }
+    transformationKindByPath.delete(outputPath);
+  }
+
+  const orderedPaths = [...finalPaths].toSorted();
+  for (const candidate of orderedPaths) {
+    const ancestor = orderedPaths.find(
+      (other) => other !== candidate && candidate.startsWith(`${other}/`),
+    );
+    if (ancestor !== undefined) {
+      diagnostics.push(
+        `Project Projection path collision: file ${ancestor} is an ancestor of ${candidate}`,
+      );
+    }
+  }
+
+  const reconciliationPaths = new Set<string>();
+  for (const reconciliation of options.reconciliation ?? []) {
+    if (reconciliationPaths.has(reconciliation.path)) {
+      diagnostics.push(
+        `Project Projection reconciliation paths must be unique: ${reconciliation.path}`,
+      );
+    } else if (!finalPaths.has(reconciliation.path)) {
+      diagnostics.push(
+        `Project Projection reconciliation references an unknown path: ${reconciliation.path}`,
+      );
+    }
+    reconciliationPaths.add(reconciliation.path);
+  }
+  return diagnostics;
+}
+
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return (
     left.byteLength === right.byteLength &&
@@ -1536,6 +1661,10 @@ export const reconcileAndApplyProjectProjections =
 export async function materializeProjectProjection(
   options: MaterializeProjectProjectionOptions,
 ): Promise<ProjectProjection> {
+  const planDiagnostics = validateProjectProjectionPlan(options);
+  if (planDiagnostics.length > 0) {
+    throw new Error(planDiagnostics.join("\n"));
+  }
   const finalPaths = new Set<string>();
   const contentPaths = new Set<string>();
   const policies = new Map<string, ProjectProjectionReconciliation>();

@@ -28,6 +28,11 @@ export type GenerationRecord = {
   readonly packages: readonly GeneratedPackagePlanningRecord[];
 };
 
+/** Canonical durable Generation Record contract for a default npm scope. */
+export function isValidDefaultPackageScope(value: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]*$/.test(value);
+}
+
 function strictObjectMessage(
   issue: v.StrictObjectIssue,
   objectMessage: string,
@@ -141,7 +146,7 @@ function structuralError(
   issues: readonly v.InferIssue<typeof generationRecordSchema>[],
 ): Error {
   return new Error(
-    `Package Addition Generation Record ${issues
+    `Generation Record ${issues
       .map((issue) => {
         const path = issuePath(issue);
         const last = issue.path?.at(-1);
@@ -192,7 +197,7 @@ export function parseGenerationRecord(value: unknown): GenerationRecord {
   ) {
     issues.push("repositoryName must be a non-empty string");
   }
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(record.defaultPackageScope)) {
+  if (!isValidDefaultPackageScope(record.defaultPackageScope)) {
     issues.push("defaultPackageScope must be a valid npm scope");
   }
   if (record.preset.length === 0 || record.preset !== record.preset.trim()) {
@@ -233,7 +238,7 @@ export function parseGenerationRecord(value: unknown): GenerationRecord {
     issues.push("packages packageDefinitionId must be unique");
   }
   if (issues.length > 0) {
-    throw new Error(`Package Addition Generation Record ${issues.join("; ")}`);
+    throw new Error(`Generation Record ${issues.join("; ")}`);
   }
   return record;
 }

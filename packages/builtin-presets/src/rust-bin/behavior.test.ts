@@ -18,6 +18,7 @@ import { rustBinDefinition } from "./definition.ts";
 
 describe("rust-bin Built-in Preset Definition behavior", () => {
   it("adds worker as @scope/worker with matching Cargo name and default path", () => {
+    expect(rustBinDefinition.initialPrimaryPackage.defaultLeafName).toBe("app");
     const context = {
       targetDir: "/tmp/demo",
       repositoryName: "demo",
@@ -65,11 +66,22 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
-    const initialization = rustBinDefinition.planInitialization(context);
+    const initialization =
+      rustBinDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "app",
+          definition: {
+            name: "@scope/app",
+            path: "packages/app",
+            role: "native-package",
+          },
+        },
+      });
     const addition = rustBinDefinition.planPackageAddition?.({
       context,
-      packageLeafName: "worker",
-      packagePath: "packages/worker",
+      packageLeafName: "app",
+      packagePath: "packages/app",
     });
 
     expect(addition).toEqual(initialization);
@@ -86,7 +98,18 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
 
-    const contribution = rustBinDefinition.planInitialization(context);
+    const contribution =
+      rustBinDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "app",
+          definition: {
+            name: "@demo/app",
+            path: "packages/app",
+            role: "native-package",
+          },
+        },
+      });
 
     expect(rustBinDefinition.metadata).toEqual({
       name: "rust-bin",
@@ -95,12 +118,12 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "Rust native binary workspace with rustfmt, clippy, and cargo tests.",
     });
     expect(contribution.definition).toEqual({
-      name: "@demo/demo-rust",
-      path: "packages/demo-rust",
+      name: "@demo/app",
+      path: "packages/app",
       role: "native-package",
     });
     expect(contribution.manifest).toMatchObject({
-      name: "@demo/demo-rust",
+      name: "@demo/app",
       scripts: {
         "format:check": "cargo fmt --all -- --check",
         lint: "cargo clippy --workspace --all-targets -- -D warnings",
@@ -112,12 +135,12 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         expect.objectContaining({
           kind: "copyFile",
           from: "src/main.rs",
-          to: "packages/demo-rust/src/main.rs",
+          to: "packages/app/src/main.rs",
         }),
         expect.objectContaining({
           kind: "copyFile",
           from: "rustfmt.toml",
-          to: "packages/demo-rust/rustfmt.toml",
+          to: "packages/app/rustfmt.toml",
         }),
       ]),
     );
@@ -142,7 +165,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
   });
 
   it("declares its source-backed Rust Development Container Tool Layer", () => {
-    const contribution = rustBinDefinition.planInitialization({
+    const context = {
       targetDir: "/tmp/demo-rust",
       repositoryName: "demo-rust",
       defaultPackageScope: "demo",
@@ -150,7 +173,19 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         typescriptConfiguration: { name: "@demo/typescript-config" },
       },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-    });
+    };
+    const contribution =
+      rustBinDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "app",
+          definition: {
+            name: "@demo/app",
+            path: "packages/app",
+            role: "native-package",
+          },
+        },
+      });
     const [layer] =
       contribution.foundation.developmentContainerToolLayers ?? [];
 
@@ -205,7 +240,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       targetRoot: targetDir,
       operations: [...plan.operations],
     });
-    const artifactPath = "packages/demo-rust/target/debug/demo-rust";
+    const artifactPath = "packages/app/target/debug/app";
     await mkdir(path.join(targetDir, path.dirname(artifactPath)), {
       recursive: true,
     });
@@ -243,11 +278,8 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     });
 
     expect(
-      await readFile(
-        path.join(targetDir, "packages/demo-rust/Cargo.toml"),
-        "utf8",
-      ),
-    ).toContain('name = "demo-rust"');
+      await readFile(path.join(targetDir, "packages/app/Cargo.toml"), "utf8"),
+    ).toContain('name = "app"');
     expect(
       await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
     ).toContain('channel = "stable"');
@@ -317,7 +349,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     ).toContain(".pnpm-store/");
     expect(
       await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8"),
-    ).toContain('directory: "/packages/demo-rust"');
+    ).toContain('directory: "/packages/app"');
     expect(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
     ).toMatchObject({
@@ -381,9 +413,9 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "//#format:check",
         "//#lint",
         "//#typecheck",
-        "@demo/demo-rust#format:check",
-        "@demo/demo-rust#lint",
-        "@demo/demo-rust#test",
+        "@demo/app#format:check",
+        "@demo/app#lint",
+        "@demo/app#test",
         "@demo/discovered#lint",
         "@demo/discovered#build",
         "@demo/discovered#test",
@@ -481,7 +513,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       '{"name":"root-owned","image":"node:24"}\n',
     );
     await writeFile(
-      path.join(targetDir, "packages/demo-rust/package.json"),
+      path.join(targetDir, "packages/app/package.json"),
       '{"name":"@demo/package-pollution"}\n',
     );
     await execa("pnpm", ["install"], { cwd: targetDir });
@@ -496,7 +528,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(rootFormat.exitCode).not.toBe(0);
     expect(output).toContain("TODO.md");
     expect(output).toContain(".devcontainer/devcontainer.json");
-    expect(output).not.toContain("packages/demo-rust/package.json");
+    expect(output).not.toContain("packages/app/package.json");
 
     await execa(
       "pnpm",
@@ -507,7 +539,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       await readFile(path.join(targetDir, "TODO.md"), "utf8"),
     ).not.toContain("-   text");
     await expect(
-      readFile(path.join(targetDir, "packages/demo-rust/package.json"), "utf8"),
+      readFile(path.join(targetDir, "packages/app/package.json"), "utf8"),
     ).resolves.toBe('{"name":"@demo/package-pollution"}\n');
   }, 180_000);
 });

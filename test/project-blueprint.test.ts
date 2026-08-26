@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertProjectBlueprintDraft,
+  isValidNewNpmPackageName,
+  validateNewPackagePath,
   validateProjectBlueprint,
 } from "../packages/core/src/project-blueprint.ts";
 
@@ -22,6 +24,18 @@ function blueprintWithPackage(name: string) {
 }
 
 describe("Project Blueprint v3 Package Definitions", () => {
+  it("exposes the canonical npm package-name length boundary", () => {
+    expect(isValidNewNpmPackageName("a".repeat(214))).toBe(true);
+    expect(isValidNewNpmPackageName("a".repeat(215))).toBe(false);
+    expect(isValidNewNpmPackageName(`@s/${"a".repeat(211)}`)).toBe(true);
+    expect(isValidNewNpmPackageName(`@s/${"a".repeat(212)}`)).toBe(false);
+  });
+
+  it("distinguishes a reserved unscoped name from its valid scoped form", () => {
+    expect(isValidNewNpmPackageName("http")).toBe(false);
+    expect(isValidNewNpmPackageName("@acme/http")).toBe(true);
+  });
+
   it.each([
     "some-package",
     "example.com",
@@ -190,6 +204,19 @@ describe("Project Blueprint v3 Package Definitions", () => {
 });
 
 describe("Project Blueprint v3 Package Paths", () => {
+  it("exposes canonical Package Path shape and reservation facts", () => {
+    expect(validateNewPackagePath("packages/tool")).toEqual({
+      hasValidShape: true,
+    });
+    expect(validateNewPackagePath("packages/nested/tool")).toEqual({
+      hasValidShape: false,
+    });
+    expect(validateNewPackagePath(".git/tool")).toEqual({
+      hasValidShape: false,
+      reservedWorkspaceCollection: ".git",
+    });
+  });
+
   it.each([
     ".git",
     ".github",

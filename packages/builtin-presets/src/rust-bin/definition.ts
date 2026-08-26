@@ -12,15 +12,8 @@ import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 
-function cargoPackageName(repositoryName: string): string {
-  const slug = repositoryName
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return slug || "rust-bin";
+function packagePathForLeaf(packageLeafName: string): string {
+  return `packages/${packageLeafName}`;
 }
 
 function packageScripts(): Record<string, string> {
@@ -163,7 +156,7 @@ const binaryReplayAdapter = definePackageContributionReplayAdapter({
     }),
 });
 
-export const rustBinDefinition: BuiltInPresetDefinition = {
+export const rustBinDefinition = {
   metadata: {
     name: "rust-bin",
     title: "Rust binary",
@@ -173,35 +166,28 @@ export const rustBinDefinition: BuiltInPresetDefinition = {
   source: templateSources.rustBin,
   plannerSourceFile: fileURLToPath(import.meta.url),
   packageContributionReplayAdapters: [binaryReplayAdapter],
-  blueprint(context) {
-    const packageLeafName = cargoPackageName(context.repositoryName);
-    return {
-      schemaVersion: 3,
-      packages: [
+  initialPrimaryPackage: {
+    defaultLeafName: "app",
+    role: "native-package",
+    defaultPackagePath: ({ packageLeafName }) =>
+      packagePathForLeaf(packageLeafName),
+    planInitialContribution({ context, resolvedPackageIdentity }) {
+      return binaryReplayAdapter.identify(
         rustContribution({
           context,
-          packageLeafName,
-          packagePath: `packages/${packageLeafName}`,
-        }).definition,
-      ],
-    };
-  },
-  planInitialization(context) {
-    const packageLeafName = cargoPackageName(context.repositoryName);
-    return binaryReplayAdapter.identify(
-      rustContribution({
-        context,
-        packageLeafName,
-        packagePath: `packages/${packageLeafName}`,
-      }),
-    );
+          packageLeafName: resolvedPackageIdentity.leafName,
+          packagePath: resolvedPackageIdentity.definition.path,
+          packageDefinition: resolvedPackageIdentity.definition,
+        }),
+      );
+    },
   },
   defaultPackagePath({ packageLeafName }) {
-    return `packages/${packageLeafName}`;
+    return packagePathForLeaf(packageLeafName);
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
     return binaryReplayAdapter.identify(
       rustContribution({ context, packageLeafName, packagePath }),
     );
   },
-};
+} satisfies BuiltInPresetDefinition;

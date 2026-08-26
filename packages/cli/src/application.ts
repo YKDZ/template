@@ -3,15 +3,15 @@ import path from "node:path";
 
 import {
   builtInPresetRegistry,
-  createGenerationContext,
   loadLocalTemplateMetadata,
-  planGeneratedRepositoryInitialization,
+  prepareGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
   templateSources,
 } from "#template-builtin-presets";
 import { validateProjectBlueprint } from "#template-core/project-blueprint";
 import {
   reconcileAndApplyProjectProjections,
+  materializeProjectProjection,
   type ProjectProjectionAction,
   type ProjectProjectionConflict,
 } from "#template-core/project-projection";
@@ -47,6 +47,8 @@ export type InitCommandOptions = {
   readonly dryRun: boolean;
   readonly json: boolean;
   readonly todo: boolean;
+  readonly name?: string;
+  readonly path?: string;
   readonly scope?: string;
 };
 
@@ -92,14 +94,6 @@ type PackageAdditionCliResult =
       readonly actions: readonly [];
       readonly conflicts: readonly PackageAdditionCliConflict[];
     };
-
-export function normalizeNpmScope(value: string): string {
-  const scope = value.startsWith("@") ? value.slice(1) : value;
-  if (value !== value.trim() || !/^[a-z0-9][a-z0-9._-]*$/.test(scope)) {
-    throw new Error("--scope must be a valid npm scope without whitespace");
-  }
-  return scope;
-}
 
 export function formatPresetCatalog(): string {
   return [
@@ -237,21 +231,61 @@ export async function runInit(
 ): Promise<string> {
   const definition = builtInPresetRegistry.require(options.preset);
   const toolchain = await resolveToolchain(runtime.env);
-  const context = createGenerationContext({
+  const preparation = prepareGeneratedRepositoryInitialization({
+    definition,
     targetDir: path.resolve(runtime.cwd, options.dir),
-    ...(options.scope
-      ? { defaultPackageScope: normalizeNpmScope(options.scope) }
-      : {}),
     toolchain: {
       nodeLtsMajor: toolchain.nodeLtsMajor.value,
       packageManagerPin: toolchain.packageManagerPin.value,
     },
+    ...((options.name ?? options.path ?? options.scope) === undefined
+      ? {}
+      : {
+          overrides: {
+            ...(options.name === undefined ? {} : { name: options.name }),
+            ...(options.path === undefined ? {} : { path: options.path }),
+            ...(options.scope === undefined ? {} : { scope: options.scope }),
+          },
+        }),
   });
-  const plan = planGeneratedRepositoryInitialization({ definition, context });
+  const { plan, resolved } = preparation;
+  const resolvedPackageRows: readonly (readonly [string, string])[] = [
+    ["Name", resolved.packages.map(({ name }) => name).join(", ")],
+    [
+      "Path",
+      resolved.packages.map(({ path: packagePath }) => packagePath).join(", "),
+    ],
+  ];
+  const operations = [
+    ...plan.operations,
+    ...(options.todo
+      ? [
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.foundation,
+            from: "TODO.md.template",
+            to: "TODO.md",
+            replacements: {
+              NEXT_STEPS: plan.nextStepInstructions
+                .map(
+                  (instruction, index) =>
+                    `${index + 1}. \`${instruction.display}\``,
+                )
+                .join("\n"),
+            },
+          },
+        ]
+      : []),
+  ];
+  await materializeProjectProjection({
+    operations,
+    reconciliation: plan.reconciliation,
+  });
   const output = {
     command: "init",
     dryRun: options.dryRun,
     targetDir: options.dir,
+    resolved,
     blueprint: plan.blueprint,
     generationRecord: plan.generationRecord,
     toolchain: toolchainReport(toolchain),
@@ -276,6 +310,9 @@ export async function runInit(
         "Planned project",
         "",
         ...formatRows([
+          ["Preset", resolved.preset],
+          ...resolvedPackageRows,
+          ["Scope", resolved.scope],
           ["Target", options.dir],
           ["Packages", String(plan.blueprint.packages.length)],
         ]),
@@ -288,34 +325,16 @@ export async function runInit(
 
   await renderNewProject({
     targetRoot: path.resolve(runtime.cwd, options.dir),
-    operations: [
-      ...plan.operations,
-      ...(options.todo
-        ? [
-            {
-              kind: "writeTextTemplate" as const,
-              source: templateSources.foundation,
-              from: "TODO.md.template",
-              to: "TODO.md",
-              replacements: {
-                NEXT_STEPS: plan.nextStepInstructions
-                  .map(
-                    (instruction, index) =>
-                      `${index + 1}. \`${instruction.display}\``,
-                  )
-                  .join("\n"),
-              },
-            },
-          ]
-        : []),
-    ],
+    operations,
   });
   if (options.json) return JSON.stringify(output, null, 2);
   return [
     "Initialized project",
     "",
     ...formatRows([
-      ["Preset", definition.metadata.name],
+      ["Preset", resolved.preset],
+      ...resolvedPackageRows,
+      ["Scope", resolved.scope],
       ["Target", options.dir],
     ]),
     "",

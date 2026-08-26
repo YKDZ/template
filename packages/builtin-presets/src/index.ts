@@ -2,6 +2,7 @@ export {
   builtInPresetRegistry,
   createGenerationContext,
   loadLocalTemplateMetadata,
+  prepareGeneratedRepositoryInitialization,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
@@ -15,4 +16,6 @@ export type {
   ProjectBlueprint,
   BuiltInGenerationContext,
   LocalTemplateMetadata,
+  InitializationIdentityOverrides,
+  ResolvedInitialization,
 } from "./foundation.ts";

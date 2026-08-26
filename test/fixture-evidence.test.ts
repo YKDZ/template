@@ -3481,20 +3481,19 @@ describe("Fixture Verification Evidence", () => {
         rendered.plan.blueprint.packageLinkIntents!.find(
           (intent) =>
             intent.consumerPackagePath === consumerPackagePath &&
-            !scenario.base
-              .blueprint(
-                createGenerationContext({
-                  targetDir: path.join(workspace, scenario.id),
-                  defaultPackageScope: "focused",
-                  toolchain: {
-                    nodeLtsMajor: "24",
-                    packageManagerPin: "pnpm@11.11.0",
-                  },
-                }),
-              )
-              .packages.some(
-                (definition) => definition.path === intent.providerPackagePath,
-              ),
+            !planGeneratedRepositoryInitialization({
+              definition: scenario.base,
+              context: createGenerationContext({
+                targetDir: path.join(workspace, scenario.id),
+                defaultPackageScope: "focused",
+                toolchain: {
+                  nodeLtsMajor: "24",
+                  packageManagerPin: "pnpm@11.11.0",
+                },
+              }),
+            }).blueprint.packages.some(
+              (definition) => definition.path === intent.providerPackagePath,
+            ),
         )!.providerPackagePath;
       const input = {
         plan: rendered.plan,
@@ -3538,20 +3537,19 @@ describe("Fixture Verification Evidence", () => {
       const expectedIntent = rendered.plan.blueprint.packageLinkIntents?.find(
         (intent) =>
           intent.consumerPackagePath === consumerPackagePath &&
-          !scenario.base
-            .blueprint(
-              createGenerationContext({
-                targetDir: path.join(workspace, scenario.id),
-                defaultPackageScope: "fixture",
-                toolchain: {
-                  nodeLtsMajor: "24",
-                  packageManagerPin: "pnpm@11.11.0",
-                },
-              }),
-            )
-            .packages.some(
-              (definition) => definition.path === intent.providerPackagePath,
-            ),
+          !planGeneratedRepositoryInitialization({
+            definition: scenario.base,
+            context: createGenerationContext({
+              targetDir: path.join(workspace, scenario.id),
+              defaultPackageScope: "fixture",
+              toolchain: {
+                nodeLtsMajor: "24",
+                packageManagerPin: "pnpm@11.11.0",
+              },
+            }),
+          }).blueprint.packages.some(
+            (definition) => definition.path === intent.providerPackagePath,
+          ),
       );
       expect(expectedIntent).toBeDefined();
       const finalPlan = {

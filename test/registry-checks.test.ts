@@ -42,9 +42,10 @@ describe("Preset Registry generated scenarios", () => {
         defaultPackageScope: "explicit-typescript-config",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       });
-      const contributions = definition.planInitializationContributions?.(
+      const contributions = planGeneratedRepositoryInitialization({
+        definition,
         context,
-      ) ?? [definition.planInitialization(context)];
+      }).packageContributions;
       for (const contribution of contributions) {
         const writesTypeScriptConfig = contribution.operations.some(
           (operation) =>
@@ -100,7 +101,12 @@ describe("Preset Registry generated scenarios", () => {
         targetDir: path.join("generated-repository", scenario.id),
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       });
-      expect(scenario.base.blueprint(context).schemaVersion).toBe(3);
+      expect(
+        planGeneratedRepositoryInitialization({
+          definition: scenario.base,
+          context,
+        }).blueprint.schemaVersion,
+      ).toBe(3);
     }
   });
 
@@ -515,7 +521,10 @@ describe("Preset Registry generated scenarios", () => {
       `${definition.metadata.name}: ${definition.plannerSourceFile} references missing Template Source`,
     );
 
-    const contribution = definition.planInitialization(context);
+    const contribution = planGeneratedRepositoryInitialization({
+      definition,
+      context,
+    }).packageContributions[0]!;
     expect(() =>
       assertPackageContribution(
         {
@@ -530,7 +539,7 @@ describe("Preset Registry generated scenarios", () => {
         },
       ),
     ).toThrow(
-      `${definition.metadata.name}: planInitialization Package Contribution may not write a sibling Package Boundary; packages/provenance attempted apps/sibling/package.json`,
+      `${definition.metadata.name}: planInitialization Package Contribution may not write a sibling Package Boundary; ${contribution.definition.path} attempted apps/sibling/package.json`,
     );
     expect(() =>
       assertPackageContribution(
@@ -544,7 +553,7 @@ describe("Preset Registry generated scenarios", () => {
         },
       ),
     ).toThrow(
-      `${definition.metadata.name}: planPackageAddition Package Contribution may not write a coordinated root output; packages/provenance attempted turbo.json`,
+      `${definition.metadata.name}: planPackageAddition Package Contribution may not write a coordinated root output; ${contribution.definition.path} attempted turbo.json`,
     );
   });
 });

@@ -921,9 +921,10 @@ describe("packed public CLI consumer", () => {
             packageManagerPin: "pnpm@11.11.0",
           },
         });
-        const contributions = definition.planInitializationContributions?.(
+        const contributions = planGeneratedRepositoryInitialization({
+          definition,
           context,
-        ) ?? [definition.planInitialization(context)];
+        }).packageContributions;
         return contributions.every(
           (contribution) =>
             contribution.foundation.toolchains.rust === undefined,

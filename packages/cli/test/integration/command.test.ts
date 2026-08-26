@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
   builtInPresetRegistry,
   createGenerationContext,
+  planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
 import {
   canConsumeNodePackageNameImport,
@@ -47,9 +48,10 @@ function requireLinkableAddablePreset(): {
       packagePath,
     });
     if (!canProvideSourceConditionPackageNameImport(provider)) continue;
-    const consumers = definition.planInitializationContributions?.(context) ?? [
-      definition.planInitialization(context),
-    ];
+    const consumers = planGeneratedRepositoryInitialization({
+      definition,
+      context,
+    }).packageContributions;
     const consumer = consumers.find(
       (candidate) =>
         canConsumeNodePackageNameImport(candidate) &&
@@ -248,6 +250,8 @@ describe("template CLI command control", () => {
     await expect(runCli(output.runtime)).resolves.toBe(0);
     expect(output.stdout()).toContain("Usage: template init [options] <dir>");
     expect(output.stdout()).toContain("--preset <name>");
+    expect(output.stdout()).toContain("--name <name>");
+    expect(output.stdout()).toContain("--path <path>");
     expect(output.stdout()).toContain("--scope <name>");
     expect(output.stdout()).toContain("-y, --yes");
     expect(output.stdout()).toContain("--dry-run");
@@ -310,10 +314,56 @@ describe("template CLI command control", () => {
     await expect(runCli(runtime)).resolves.toBe(1);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toContain("Planned project");
+    expect(requests[0]).toContain("Preset:");
+    expect(requests[0]).toContain("Name:");
+    expect(requests[0]).toContain("Path:");
+    expect(requests[0]).toContain("Scope:");
     expect(requests[0]).toContain("Generate this project? [y/N]");
     expect(output.stdout()).toBe("");
     expect(output.stderr()).toContain("Error: Init cancelled");
     await expect(stat(path.join(workspace, "demo"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("aggregates invalid init identity overrides with zero target writes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-invalid-init-identity-"),
+    );
+    const output = testRuntime([
+      "init",
+      "invalid",
+      "--preset",
+      builtInPresetRegistry
+        .all()
+        .find((definition) => definition.initialPrimaryPackage !== undefined)!
+        .metadata.name,
+      "--name",
+      "@acme/invalid",
+      "--path",
+      ".git/invalid/source",
+      "--scope",
+      "Bad Scope",
+      "--yes",
+    ]);
+
+    await expect(
+      runCli({
+        ...output.runtime,
+        cwd: workspace,
+        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
+      }),
+    ).resolves.toBe(1);
+    expect(output.stderr()).toContain(
+      "--name must be an unscoped package leaf name",
+    );
+    expect(output.stderr()).toContain(
+      "--path must be exactly two safe path segments",
+    );
+    expect(output.stderr()).toContain(
+      "--scope must be a valid npm scope without whitespace",
+    );
+    await expect(stat(path.join(workspace, "invalid"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -336,6 +386,11 @@ describe("template CLI command control", () => {
         env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
+    expect(initOutput.stdout()).toContain("Initialized project");
+    expect(initOutput.stdout()).toContain("Preset:");
+    expect(initOutput.stdout()).toContain("Name:");
+    expect(initOutput.stdout()).toContain("Path:");
+    expect(initOutput.stdout()).toContain("Scope:");
 
     const target = path.join(workspace, "demo");
     const output = testRuntime([

@@ -133,7 +133,8 @@ const projectBlueprintSchema = v.strictObject(
       : "Local Template Metadata must be an object",
 );
 
-function isValidNewNpmPackageName(value: string): boolean {
+/** Canonical npm package-name predicate shared by Blueprint and input preparation. */
+export function isValidNewNpmPackageName(value: string): boolean {
   if (
     value.length === 0 ||
     value.length > 214 ||
@@ -164,6 +165,24 @@ function isValidNewNpmPackageName(value: string): boolean {
     encodeURIComponent(leaf) === leaf &&
     (scope === undefined || encodeURIComponent(scope) === scope)
   );
+}
+
+export type NewPackagePathValidation = {
+  readonly hasValidShape: boolean;
+  readonly reservedWorkspaceCollection?: string;
+};
+
+/** Canonical Package Path facts shared by Blueprint and input preparation. */
+export function validateNewPackagePath(
+  value: string,
+): NewPackagePathValidation {
+  const workspaceCollection = value.split("/", 1)[0]!;
+  return {
+    hasValidShape: packagePath.test(value),
+    ...(reservedWorkspaceCollections.has(workspaceCollection)
+      ? { reservedWorkspaceCollection: workspaceCollection }
+      : {}),
+  };
 }
 
 function blueprintIssuePath(issue: v.BaseIssue<unknown>): string {
@@ -217,9 +236,7 @@ function validateBlueprintTopologySemantics(
   const issues: BlueprintValidationIssue[] = [];
   for (const [index, definition] of blueprint.packages.entries()) {
     const itemPath = `.packages[${index}]`;
-    const workspaceCollection = definition.path.split("/", 1)[0]!;
-    const usesReservedWorkspaceCollection =
-      reservedWorkspaceCollections.has(workspaceCollection);
+    const pathValidation = validateNewPackagePath(definition.path);
     if (!isValidNewNpmPackageName(definition.name)) {
       issues.push({
         path: `${itemPath}.name`,
@@ -227,12 +244,12 @@ function validateBlueprintTopologySemantics(
           "Package name must be a valid npm package name for new packages",
       });
     }
-    if (usesReservedWorkspaceCollection) {
+    if (pathValidation.reservedWorkspaceCollection !== undefined) {
       issues.push({
         path: `${itemPath}.path`,
-        message: `Package Path ${definition.path} uses reserved workspace collection ${workspaceCollection}`,
+        message: `Package Path ${definition.path} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
       });
-    } else if (!packagePath.test(definition.path)) {
+    } else if (!pathValidation.hasValidShape) {
       issues.push({
         path: `${itemPath}.path`,
         message: "Package Path must be exactly two safe path segments",

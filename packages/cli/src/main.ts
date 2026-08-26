@@ -76,9 +76,19 @@ export function createCliCommand(runtime: CliRuntime): Command {
 
   command
     .command("init <dir>")
-    .description("Initialize a repository.")
+    .description(
+      "Resolve a Preset, initial package name and path, and package scope before initialization.",
+    )
     .requiredOption("--preset <name>", "Project preset to generate")
-    .option("--scope <name>", "Package scope for workspace package names")
+    .option(
+      "--name <name>",
+      "Unscoped leaf name when the Preset supports Primary Package Identity overrides",
+    )
+    .option(
+      "--path <path>",
+      "Two-segment path when the Preset supports Primary Package Identity overrides",
+    )
+    .option("--scope <name>", "Resolved default package scope")
     .option("-y, --yes", "Accept defaults for non-interactive generation")
     .option("--dry-run", "Print the planned generation without writing files")
     .option("--json", "Print machine-readable output")
@@ -89,6 +99,8 @@ export function createCliCommand(runtime: CliRuntime): Command {
         options: {
           readonly preset: string;
           readonly scope?: string;
+          readonly name?: string;
+          readonly path?: string;
           readonly yes?: boolean;
           readonly dryRun?: boolean;
           readonly json?: boolean;
@@ -102,6 +114,8 @@ export function createCliCommand(runtime: CliRuntime): Command {
           dryRun: Boolean(options.dryRun),
           json: Boolean(options.json),
           todo: options.todo,
+          ...(options.name === undefined ? {} : { name: options.name }),
+          ...(options.path === undefined ? {} : { path: options.path }),
           ...(options.scope === undefined ? {} : { scope: options.scope }),
         };
         runtime.streams.stdout.write(

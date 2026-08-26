@@ -19,6 +19,7 @@ import {
   planGeneratedRepositoryInitialization,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
+  type BuiltInPresetDefinition,
 } from "#template-builtin-presets";
 import {
   materializeProjectProjection,
@@ -27,6 +28,10 @@ import {
 import { renderNewProject } from "#template-core/renderer";
 
 describe("Built-in Preset Package Addition universality", () => {
+  type FixedTopologyDefinition = Exclude<
+    BuiltInPresetDefinition,
+    { readonly initialPrimaryPackage: object }
+  >;
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
 
   function firstAddableDefinition() {
@@ -124,7 +129,16 @@ describe("Built-in Preset Package Addition universality", () => {
       defaultPackageScope: "demo",
       toolchain,
     });
-    const definition = firstAddableDefinition();
+    const definition = builtInPresetRegistry
+      .all()
+      .find(
+        (candidate): candidate is FixedTopologyDefinition =>
+          candidate.initialPrimaryPackage === undefined &&
+          candidate.planPackageAddition !== undefined,
+      );
+    if (definition === undefined) {
+      throw new Error("Expected an addable fixed-topology Definition");
+    }
     const invalidInitializationDefinition = {
       ...definition,
       blueprint(planningContext: Parameters<typeof definition.blueprint>[0]) {
@@ -452,7 +466,10 @@ describe("Built-in Preset Package Addition universality", () => {
         path.join(context.targetDir, ".github/dependabot.yml"),
         "utf8",
       );
-      expect(dependabot).toContain('directory: "/packages/demo"');
+      const initialRustPackagePath = initialization.blueprint.packages.find(
+        (definition) => definition.role === "native-package",
+      )!.path;
+      expect(dependabot).toContain(`directory: "/${initialRustPackagePath}"`);
       expect(dependabot).toContain('directory: "/packages/worker"');
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -580,13 +597,16 @@ describe("Built-in Preset Package Addition universality", () => {
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry
-        .all()
-        .find((definition) =>
-          definition
-            .planInitialization(context)
-            .environmentNeeds.some((need) => need.kind === "rust-toolchain"),
-        )!,
+      definition: builtInPresetRegistry.all().find((definition) =>
+        planGeneratedRepositoryInitialization({
+          definition,
+          context,
+        }).packageContributions.some((contribution) =>
+          contribution.environmentNeeds.some(
+            (need) => need.kind === "rust-toolchain",
+          ),
+        ),
+      )!,
       context,
     });
 

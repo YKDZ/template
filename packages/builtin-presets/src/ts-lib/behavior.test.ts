@@ -23,6 +23,7 @@ import { tsLibDefinition } from "./definition.ts";
 
 describe("ts-lib Built-in Preset Definition behavior", () => {
   it("owns conventional task scripts without a package check registration", () => {
+    expect(tsLibDefinition.initialPrimaryPackage.defaultLeafName).toBe("lib");
     const context = {
       targetDir: "/tmp/demo-library",
       repositoryName: "demo-library",
@@ -32,14 +33,25 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
-    const contribution = tsLibDefinition.planInitialization(context);
+    const contribution =
+      tsLibDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "lib",
+          definition: {
+            name: "@demo/lib",
+            path: "packages/lib",
+            role: "shared-library",
+          },
+        },
+      });
 
     expect(resolveBuiltInTemplateSource(tsLibDefinition.source, ".")).toMatch(
       /templates[\\/]ts-lib$/,
     );
     expect(contribution.definition).toEqual({
-      name: "@demo/demo-library",
-      path: "packages/demo-library",
+      name: "@demo/lib",
+      path: "packages/lib",
       role: "shared-library",
     });
     expect(contribution.manifest).toMatchObject({
@@ -82,13 +94,13 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "turbo.json",
-      to: "packages/demo-library/turbo.json",
+      to: "packages/lib/turbo.json",
     });
     expect(contribution.operations).toContainEqual({
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "tsconfig.build.json",
-      to: "packages/demo-library/tsconfig.build.json",
+      to: "packages/lib/tsconfig.build.json",
     });
 
     const plan = planGeneratedRepositoryInitialization({
@@ -156,10 +168,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       operations: [...initialization.operations],
     });
     expect(
-      await readFile(
-        path.join(targetDir, "packages/demo-lib/src/index.ts"),
-        "utf8",
-      ),
+      await readFile(path.join(targetDir, "packages/lib/src/index.ts"), "utf8"),
     ).toContain("export");
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
@@ -497,10 +506,10 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
         }
       ).tasks;
       const consumerBuild = tasks.find(
-        ({ taskId }) => taskId === "@demo/consumer#build",
+        ({ taskId }) => taskId === "@demo/lib#build",
       );
       const consumerTypecheck = tasks.find(
-        ({ taskId }) => taskId === "@demo/consumer#typecheck",
+        ({ taskId }) => taskId === "@demo/lib#typecheck",
       );
       expect(consumerBuild?.dependencies).toContain("@demo/provider#build");
       expect(consumerTypecheck?.dependencies).toContain(
