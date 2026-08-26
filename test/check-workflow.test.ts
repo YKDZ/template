@@ -15,6 +15,8 @@ type WorkflowStep = {
 
 type CheckWorkflow = {
   readonly on: {
+    readonly pull_request: Record<string, never> | null;
+    readonly push: { readonly branches: readonly string[] };
     readonly workflow_call: {
       readonly secrets: Record<string, { readonly required: boolean }>;
     };
@@ -49,6 +51,13 @@ type ReleaseWorkflow = {
 };
 
 describe("Fixture Verification Evidence check workflow", () => {
+  it("checks every pull request while avoiding duplicate branch-push checks outside main", async () => {
+    const workflow = await checkWorkflow();
+
+    expect(workflow.on.pull_request).toBeNull();
+    expect(workflow.on.push).toEqual({ branches: ["main"] });
+  });
+
   it("validates fixture prerequisites before running container-backed gates", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const prerequisites = steps.find(
