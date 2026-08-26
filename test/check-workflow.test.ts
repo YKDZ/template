@@ -76,46 +76,107 @@ describe("Fixture Verification Evidence check workflow", () => {
 
     const eventTable = [
       {
+        caller: "direct Check",
         event: "pull_request",
         ref: "refs/pull/17/merge",
         runId: "101",
+        workflow: "Check",
       },
       {
+        caller: "direct Check",
         event: "pull_request",
         ref: "refs/pull/18/merge",
         runId: "102",
+        workflow: "Check",
       },
-      { event: "push", ref: "refs/heads/main", runId: "103" },
-      { event: "workflow_dispatch", ref: "refs/heads/main", runId: "104" },
-      { event: "workflow_call", ref: "refs/heads/main", runId: "105" },
+      {
+        caller: "direct Check",
+        event: "push",
+        ref: "refs/heads/main",
+        runId: "103",
+        workflow: "Check",
+      },
+      {
+        caller: "direct Check",
+        event: "workflow_dispatch",
+        ref: "refs/heads/main",
+        runId: "104",
+        workflow: "Check",
+      },
+      {
+        caller: "reusable Release",
+        event: "release",
+        ref: "refs/tags/v1.0.0",
+        runId: "105",
+        workflow: "Release",
+      },
+      {
+        caller: "reusable Release",
+        event: "workflow_dispatch",
+        ref: "refs/heads/main",
+        runId: "106",
+        workflow: "Release",
+      },
+      {
+        caller: "reusable PR Check",
+        event: "pull_request",
+        ref: "refs/pull/19/merge",
+        runId: "107",
+        workflow: "PR Check",
+      },
     ] as const;
     expect(
-      eventTable.map(({ event, ref, runId }) => ({
+      eventTable.map(({ caller, event, ref, runId, workflow }) => ({
+        caller,
         event,
-        group: event === "pull_request" ? `Check-${ref}` : `Check-${runId}`,
+        group:
+          event === "pull_request"
+            ? `${workflow}-${ref}`
+            : `${workflow}-${runId}`,
         cancelInProgress: event === "pull_request",
       })),
     ).toEqual([
       {
+        caller: "direct Check",
         event: "pull_request",
         group: "Check-refs/pull/17/merge",
         cancelInProgress: true,
       },
       {
+        caller: "direct Check",
         event: "pull_request",
         group: "Check-refs/pull/18/merge",
         cancelInProgress: true,
       },
-      { event: "push", group: "Check-103", cancelInProgress: false },
       {
+        caller: "direct Check",
+        event: "push",
+        group: "Check-103",
+        cancelInProgress: false,
+      },
+      {
+        caller: "direct Check",
         event: "workflow_dispatch",
         group: "Check-104",
         cancelInProgress: false,
       },
       {
-        event: "workflow_call",
-        group: "Check-105",
+        caller: "reusable Release",
+        event: "release",
+        group: "Release-105",
         cancelInProgress: false,
+      },
+      {
+        caller: "reusable Release",
+        event: "workflow_dispatch",
+        group: "Release-106",
+        cancelInProgress: false,
+      },
+      {
+        caller: "reusable PR Check",
+        event: "pull_request",
+        group: "PR Check-refs/pull/19/merge",
+        cancelInProgress: true,
       },
     ]);
   });
