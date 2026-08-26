@@ -1,6 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
     "outDir": "dist",
     "rootDir": "../..",
     "types": ["node"]
@@ -8,6 +10,7 @@
   "include": [
     "src/**/*.ts",
     "vitest.config.ts",
+    "templates/foundation/.pnpmfile.mjs",
     "templates/foundation/scripts/check-boundaries.ts",
     "templates/foundation/scripts/run-root-owned-task.ts"
   ]

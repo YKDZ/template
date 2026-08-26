@@ -162,6 +162,73 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     },
   );
 
+  it.each(["root", "package"] as const)(
+    "rejects a private %s manifest version before container-backed fixture gates",
+    async (manifestOwner) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "fixture-private-manifest-version-"),
+      );
+
+      try {
+        await expect(
+          runGeneratedScenarioSet("init", {
+            workspace,
+            run: async (command, args, options) => {
+              if (command !== "git") {
+                throw new Error(
+                  `Container-backed fixture command started before manifest policy validation: ${command}`,
+                );
+              }
+              const result = await execa(command, [...args], options);
+              if (args[0] !== "init") return result;
+
+              const manifestPaths = ["package.json"];
+              if (manifestOwner === "package") {
+                const blueprint = JSON.parse(
+                  await readFile(
+                    path.join(options.cwd, ".template/blueprint.json"),
+                    "utf8",
+                  ),
+                ) as {
+                  packages: readonly { readonly path: string }[];
+                };
+                manifestPaths.splice(
+                  0,
+                  1,
+                  ...blueprint.packages.map(
+                    (definition) => `${definition.path}/package.json`,
+                  ),
+                );
+              }
+
+              for (const manifestPath of manifestPaths) {
+                const filePath = path.join(options.cwd, manifestPath);
+                const manifest = JSON.parse(
+                  await readFile(filePath, "utf8"),
+                ) as Record<string, unknown>;
+                if (manifest.private !== true) continue;
+                await writeFile(
+                  filePath,
+                  `${JSON.stringify({ ...manifest, version: "0.0.0" }, null, 2)}\n`,
+                );
+                return result;
+              }
+              throw new Error(
+                `Expected a private ${manifestOwner} manifest in ${options.cwd}`,
+              );
+            },
+          }),
+        ).rejects.toThrow(
+          manifestOwner === "root"
+            ? "Generated Repository private Node manifest package.json must not declare version"
+            : /Generated Repository private Node manifest packages\/.+\/package\.json must not declare version/u,
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("consumes manifest-derived provider source and distribution exports by package name", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "focused-provider-probe-"));
     const consumerPackagePath = "apps/unusual-consumer";

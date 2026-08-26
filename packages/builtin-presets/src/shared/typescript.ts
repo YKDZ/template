@@ -57,7 +57,6 @@ export function typescriptConfigContribution(
     exposure: { exports: {}, imports: {} },
     manifest: {
       name: definition.name,
-      version: "0.0.0",
       private: true,
       files: ["base.json"],
       scripts: {

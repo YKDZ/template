@@ -88,7 +88,6 @@ function libraryContribution(options: {
     exposure,
     manifest: {
       name: definition.name,
-      version: "0.0.0",
       private: true,
       type: "module",
       ...exposure,

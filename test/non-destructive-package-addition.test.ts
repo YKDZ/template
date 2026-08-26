@@ -1,4 +1,5 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -10,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -85,6 +87,137 @@ async function workspaceByteSnapshot(
 }
 
 describe("Non-Destructive Package Addition", () => {
+  it("adds the checked packing hook when a pre-hook private repository gains a public package", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-packing-hook-"),
+    );
+    const targetDir = path.join(workspace, "project");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+      },
+    });
+    const privateBaseDefinition = builtInPresetRegistry
+      .all()
+      .find((definition) => {
+        const initialization = planGeneratedRepositoryInitialization({
+          definition,
+          context,
+        });
+        return initialization.manifests.every(
+          (manifest) => manifest.private === true,
+        );
+      });
+    if (privateBaseDefinition === undefined) {
+      throw new Error("Expected a private Built-in Preset base repository");
+    }
+    const publicDefinition = requireAddableDefinitionForRole(
+      context,
+      "cli-tool",
+    );
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: privateBaseDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      await expect(
+        stat(path.join(targetDir, ".pnpmfile.mjs")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(
+        readFile(path.join(targetDir, "tsconfig.json"), "utf8").then((source) =>
+          JSON.parse(source),
+        ),
+      ).resolves.not.toMatchObject({
+        compilerOptions: { allowJs: true, checkJs: true },
+        include: expect.arrayContaining([".pnpmfile.mjs"]),
+      });
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: publicDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+        packageLeafName: "release",
+      });
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.actions).toEqual(
+        expect.arrayContaining([
+          { path: ".pnpmfile.mjs", driver: "text", action: "create" },
+          { path: "tsconfig.json", driver: "structured", action: "update" },
+        ]),
+      );
+      const addedPackage = addition.blueprint.packages.find(
+        (definition) => definition.role === "cli-tool",
+      );
+      expect(addedPackage).toBeDefined();
+      const sourceManifest = JSON.parse(
+        await readFile(
+          path.join(targetDir, addedPackage!.path, "package.json"),
+          "utf8",
+        ),
+      ) as Record<string, unknown>;
+      const localDevelopmentDependency = Object.entries(
+        (sourceManifest.devDependencies ?? {}) as Record<string, unknown>,
+      ).find(([, specifier]) =>
+        typeof specifier === "string" ? specifier.startsWith("link:") : false,
+      );
+      expect(localDevelopmentDependency).toBeDefined();
+      const provider = addition.blueprint.packages.find(
+        (definition) => definition.name === localDevelopmentDependency![0],
+      );
+      expect(provider).toBeDefined();
+      expect(
+        path.posix.normalize(
+          path.posix.join(
+            addedPackage!.path,
+            (localDevelopmentDependency![1] as string).slice("link:".length),
+          ),
+        ),
+      ).toBe(provider!.path);
+      await expect(
+        readFile(path.join(targetDir, "tsconfig.json"), "utf8").then((source) =>
+          JSON.parse(source),
+        ),
+      ).resolves.toMatchObject({
+        compilerOptions: { allowJs: true, checkJs: true },
+        include: expect.arrayContaining([".pnpmfile.mjs"]),
+      });
+
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      const packDestination = path.join(workspace, "packs");
+      await mkdir(packDestination);
+      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
+        cwd: path.join(targetDir, addedPackage!.path),
+      });
+      const archives = (await readdir(packDestination)).filter((file) =>
+        file.endsWith(".tgz"),
+      );
+      expect(archives).toHaveLength(1);
+      const packedManifest = await execa("tar", [
+        "-xOf",
+        path.join(packDestination, archives[0]!),
+        "package/package.json",
+      ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
+      expect(packedManifest).not.toHaveProperty("devDependencies");
+      expect(JSON.stringify(packedManifest)).not.toContain("link:");
+      expect(JSON.stringify(packedManifest)).not.toContain("workspace:");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it("reconciles the complete Foundation delta while preserving unrelated customization", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-complete-foundation-addition-"),

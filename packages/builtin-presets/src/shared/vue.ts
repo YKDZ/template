@@ -99,7 +99,6 @@ export function vueApplicationManifest(options: {
 }): PackageContribution["manifest"] {
   return {
     name: options.definition.name,
-    version: "0.0.0",
     private: true,
     type: "module",
     ...vueApplicationExposure,

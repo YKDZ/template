@@ -623,6 +623,17 @@ describe("ts-cli Preset Definition behavior", () => {
         recursive: true,
         force: true,
       });
+      const sourceManifest = JSON.parse(
+        await readFile(path.join(project.packageRoot, "package.json"), "utf8"),
+      ) as Record<string, unknown>;
+      expect(sourceManifest).toMatchObject({
+        devDependencies: {
+          "@demo/typescript-config": "link:../typescript-config",
+        },
+      });
+      await expect(
+        readFile(path.join(project.targetDir, ".pnpmfile.mjs"), "utf8"),
+      ).resolves.toContain("beforePacking");
       const packDestination = path.join(project.workspace, "packs");
       await mkdir(packDestination);
       await execa("pnpm", ["pack", "--pack-destination", packDestination], {
@@ -644,11 +655,12 @@ describe("ts-cli Preset Definition behavior", () => {
         "package/dist/main.js",
         "package/package.json",
       ]);
-      expect(
-        await execa("tar", ["-xOf", archivePath, "package/package.json"]).then(
-          ({ stdout }) => JSON.parse(stdout) as unknown,
-        ),
-      ).toMatchObject({
+      const packedManifest = await execa("tar", [
+        "-xOf",
+        archivePath,
+        "package/package.json",
+      ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
+      expect(packedManifest).toMatchObject({
         version: "0.0.0",
         publishConfig: { access: "public" },
         files: ["dist"],
@@ -661,6 +673,9 @@ describe("ts-cli Preset Definition behavior", () => {
           },
         },
       });
+      expect(packedManifest).not.toHaveProperty("devDependencies");
+      expect(JSON.stringify(packedManifest)).not.toContain("link:");
+      expect(JSON.stringify(packedManifest)).not.toContain("workspace:");
       expect(
         await execa("tar", ["-xOf", archivePath, "package/dist/cli.js"]).then(
           ({ stdout }) => stdout,

@@ -1104,6 +1104,22 @@ function composeDependencyMaintenancePolicy(
   };
 }
 
+function localTypescriptConfigurationSpecifier(options: {
+  readonly consumerPackagePath: string;
+  readonly configurationPackagePath: string;
+}): string {
+  const relativePackagePath = path.posix.relative(
+    options.consumerPackagePath,
+    options.configurationPackagePath,
+  );
+  if (relativePackagePath.length === 0) {
+    throw new Error(
+      "TypeScript Configuration Package must have a distinct Package Path",
+    );
+  }
+  return `link:${relativePackagePath}`;
+}
+
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -1168,6 +1184,14 @@ function foundationPlan(options: {
     )
       ? "dependencies"
       : "devDependencies";
+    const dependencySpecifier =
+      dependencyField === "devDependencies" &&
+      contribution.manifest.private !== true
+        ? localTypescriptConfigurationSpecifier({
+            consumerPackagePath: contribution.definition.path,
+            configurationPackagePath: configDefinition.path,
+          })
+        : "workspace:*";
     const existingDependencies = contribution.manifest[dependencyField];
     return {
       ...contribution,
@@ -1175,10 +1199,19 @@ function foundationPlan(options: {
         ...contribution.manifest,
         [dependencyField]: {
           ...(isRecord(existingDependencies) ? existingDependencies : {}),
-          [configPackageName]: "workspace:*",
+          [configPackageName]: dependencySpecifier,
         },
       },
     };
+  });
+  const requiresPackingHook = packageContributions.some((contribution) => {
+    if (contribution.manifest.private === true) return false;
+    const developmentDependencies = contribution.manifest.devDependencies;
+    return (
+      isRecord(developmentDependencies) &&
+      typeof developmentDependencies[configPackageName] === "string" &&
+      developmentDependencies[configPackageName].startsWith("link:")
+    );
   });
   const contributions = [configContribution, ...packageContributions];
   const generationRecord: GenerationRecord = options.generationRecord ?? {
@@ -1310,7 +1343,6 @@ function foundationPlan(options: {
     composeDependencyMaintenancePolicy(contributions);
   const rootManifest = {
     name: options.context.repositoryName,
-    version: "0.0.0",
     private: true,
     type: "module",
     scripts: {
@@ -1430,6 +1462,16 @@ function foundationPlan(options: {
       nestedKeyOrder: packageConditionKeyOrder,
     },
     workspaceOperation,
+    ...(requiresPackingHook
+      ? [
+          {
+            kind: "copyFile" as const,
+            source: templateSources.foundation,
+            from: ".pnpmfile.mjs",
+            to: ".pnpmfile.mjs",
+          },
+        ]
+      : []),
     {
       kind: "copyFile",
       source: templateSources.foundation,
@@ -1468,6 +1510,16 @@ function foundationPlan(options: {
       from: "tsconfig.json",
       to: "tsconfig.json",
     },
+    ...(requiresPackingHook
+      ? [
+          {
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.foundation,
+            from: "tsconfig.packing-hook.json",
+            to: "tsconfig.json",
+          },
+        ]
+      : []),
     {
       kind: "copyFile",
       source: templateSources.sharedOxc,
@@ -1596,6 +1648,7 @@ function foundationPlan(options: {
     ),
   ];
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
+    { path: "tsconfig.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
     {
       path: ".devcontainer/devcontainer.json",

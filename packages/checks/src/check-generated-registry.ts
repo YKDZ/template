@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -396,6 +396,11 @@ async function runScenario(
     }
   }
 
+  await assertGeneratedManifestPublicationPolicy({
+    plan: finalPlan,
+    projectDir,
+  });
+
   await validateGeneratedDevelopmentContainerProjection({
     plan: finalPlan,
     projectDir,
@@ -580,6 +585,34 @@ async function runScenario(
     }
     return "completed";
   });
+}
+
+async function assertGeneratedManifestPublicationPolicy(options: {
+  readonly plan: GeneratedRepositoryPlan;
+  readonly projectDir: string;
+}): Promise<void> {
+  const manifestPaths = [
+    "package.json",
+    ...options.plan.blueprint.packages.map(
+      (definition) => `${definition.path}/package.json`,
+    ),
+  ];
+  for (const manifestPath of manifestPaths) {
+    const manifest = JSON.parse(
+      await readFile(path.join(options.projectDir, manifestPath), "utf8"),
+    ) as unknown;
+    if (
+      typeof manifest === "object" &&
+      manifest !== null &&
+      !Array.isArray(manifest) &&
+      (manifest as Record<string, unknown>).private === true &&
+      Object.hasOwn(manifest, "version")
+    ) {
+      throw new Error(
+        `Generated Repository private Node manifest ${manifestPath} must not declare version`,
+      );
+    }
+  }
 }
 
 async function prepareGeneratedRepositoryForContainerWrites(

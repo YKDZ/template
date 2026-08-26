@@ -83,7 +83,6 @@ function rustContribution(options: {
     exposure: { exports: {}, imports: {} },
     manifest: {
       name: definition.name,
-      version: "0.0.0",
       private: true,
       scripts: packageScripts(),
       engines: { node: options.context.toolchain.nodeLtsMajor },

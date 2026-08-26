@@ -329,7 +329,6 @@ function webContribution(
     },
     manifest: {
       name: web.name,
-      version: "0.0.0",
       private: true,
       type: "module",
       files: ["dist"],
@@ -431,7 +430,6 @@ function databaseContribution(
     exposure,
     manifest: {
       name: db.name,
-      version: "0.0.0",
       private: true,
       type: "module",
       ...exposure,
@@ -474,7 +472,6 @@ function migrationsContribution(
     exposure: { exports: {}, imports: {} },
     manifest: {
       name: migrations.name,
-      version: "0.0.0",
       private: true,
       type: "module",
       files: ["drizzle.config.ts", "drizzle/migrations"],
