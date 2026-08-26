@@ -10,13 +10,18 @@ type WorkflowStep = {
   readonly env?: Record<string, string>;
   readonly run?: string;
   readonly uses?: string;
-  readonly with?: Record<string, string>;
+  readonly with?: Record<string, boolean | number | string>;
 };
 
 type CheckWorkflow = {
+  readonly concurrency: {
+    readonly group: string;
+    readonly "cancel-in-progress": string;
+  };
   readonly on: {
     readonly pull_request: Record<string, never> | null;
     readonly push: { readonly branches: readonly string[] };
+    readonly workflow_dispatch: null;
     readonly workflow_call: {
       readonly secrets: Record<string, { readonly required: boolean }>;
     };
@@ -25,6 +30,7 @@ type CheckWorkflow = {
     readonly check: {
       readonly env?: Record<string, string>;
       readonly steps: readonly WorkflowStep[];
+      readonly "timeout-minutes": number;
     };
   };
 };
@@ -56,6 +62,68 @@ describe("Fixture Verification Evidence check workflow", () => {
 
     expect(workflow.on.pull_request).toBeNull();
     expect(workflow.on.push).toEqual({ branches: ["main"] });
+    expect(workflow.on.workflow_dispatch).toBeNull();
+  });
+
+  it("cancels only stale checks for the same pull request", async () => {
+    const workflow = await checkWorkflow();
+
+    expect(workflow.concurrency).toEqual({
+      group:
+        "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
+      "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+    });
+
+    const eventTable = [
+      {
+        event: "pull_request",
+        ref: "refs/pull/17/merge",
+        runId: "101",
+      },
+      {
+        event: "pull_request",
+        ref: "refs/pull/18/merge",
+        runId: "102",
+      },
+      { event: "push", ref: "refs/heads/main", runId: "103" },
+      { event: "workflow_dispatch", ref: "refs/heads/main", runId: "104" },
+      { event: "workflow_call", ref: "refs/heads/main", runId: "105" },
+    ] as const;
+    expect(
+      eventTable.map(({ event, ref, runId }) => ({
+        event,
+        group: event === "pull_request" ? `Check-${ref}` : `Check-${runId}`,
+        cancelInProgress: event === "pull_request",
+      })),
+    ).toEqual([
+      {
+        event: "pull_request",
+        group: "Check-refs/pull/17/merge",
+        cancelInProgress: true,
+      },
+      {
+        event: "pull_request",
+        group: "Check-refs/pull/18/merge",
+        cancelInProgress: true,
+      },
+      { event: "push", group: "Check-103", cancelInProgress: false },
+      {
+        event: "workflow_dispatch",
+        group: "Check-104",
+        cancelInProgress: false,
+      },
+      {
+        event: "workflow_call",
+        group: "Check-105",
+        cancelInProgress: false,
+      },
+    ]);
+  });
+
+  it("bounds the observed cold Check runtime with a 120 minute timeout", async () => {
+    const job = (await checkWorkflow()).jobs.check;
+
+    expect(job["timeout-minutes"]).toBe(120);
   });
 
   it("validates fixture prerequisites before running container-backed gates", async () => {
@@ -225,6 +293,30 @@ describe("Fixture Verification Evidence check workflow", () => {
       name: "Check Fixture Evidence Health",
       if: "always()",
       run: "pnpm --filter @ykdz/template-checks run check:evidence-health",
+    });
+  });
+
+  it("always preserves the current run activity after Evidence Health", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const healthIndex = steps.findIndex(
+      (step) => step.id === "fixture-evidence-health",
+    );
+    const uploadIndex = steps.findIndex(
+      (step) => step.name === "Upload Fixture Evidence Activity",
+    );
+
+    expect(uploadIndex).toBe(healthIndex + 1);
+    expect(steps[uploadIndex]).toEqual({
+      name: "Upload Fixture Evidence Activity",
+      if: "always()",
+      uses: "actions/upload-artifact@v7",
+      with: {
+        name: "fixture-evidence-activity-${{ github.run_id }}-${{ github.run_attempt }}",
+        path: ".fixture-evidence-activity/activity.jsonl",
+        "include-hidden-files": true,
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+      },
     });
   });
 

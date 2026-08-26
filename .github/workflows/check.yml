@@ -16,10 +16,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     name: Check package and fixture matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     env:
       TEMPLATE_FIXTURE_EVIDENCE_DIR: ${{ github.workspace }}/.fixture-evidence
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
@@ -133,6 +138,16 @@ jobs:
         id: fixture-evidence-health
         if: always()
         run: pnpm --filter @ykdz/template-checks run check:evidence-health
+
+      - name: Upload Fixture Evidence Activity
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fixture-evidence-activity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .fixture-evidence-activity/activity.jsonl
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Save BuildKit cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
