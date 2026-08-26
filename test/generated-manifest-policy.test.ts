@@ -20,7 +20,7 @@ const toolchain = {
 } as const;
 
 describe("Generated Repository Node manifest publication policy", () => {
-  it("keeps versions only on public packages across every initialization Preset", () => {
+  it("omits versions from every initially private package", () => {
     const publicManifestNames = new Set<string>();
     for (const definition of builtInPresetRegistry.all()) {
       const repositoryName = `manifest-policy-${definition.metadata.name}`;
@@ -52,9 +52,6 @@ describe("Generated Repository Node manifest publication policy", () => {
         );
         publicManifestNames.add(manifest.name as string);
       }
-      const cliDefinition = plan.blueprint.packages.find(
-        (packageDefinition) => packageDefinition.role === "cli-tool",
-      );
       const foundationRecord = plan.generationRecord.packages.find(
         (record) => record.planningContribution === "foundationPlan",
       );
@@ -130,28 +127,10 @@ describe("Generated Repository Node manifest publication policy", () => {
           (operation) => "to" in operation && operation.to === "tsconfig.json",
         ),
       ).toHaveLength(requiresPackingHook ? 2 : 1);
-      if (cliDefinition !== undefined) {
-        const publicCliManifest = plan.manifests.find(
-          (manifest) => manifest.name === cliDefinition.name,
-        );
-        const localDevelopmentDependency = Object.entries(
-          (publicCliManifest?.devDependencies ?? {}) as Record<string, unknown>,
-        ).find(([, specifier]) =>
-          typeof specifier === "string" ? specifier.startsWith("link:") : false,
-        );
-        expect(localDevelopmentDependency).toBeDefined();
-        const localProviderManifest = plan.manifests.find(
-          (manifest) => manifest.name === localDevelopmentDependency![0],
-        );
-        expect(localProviderManifest).toEqual(
-          expect.objectContaining({ private: true }),
-        );
-        expect(localProviderManifest).not.toHaveProperty("version");
-      }
       expect(plan.generationRecord.templateVersion).toBe("0.0.0");
     }
 
-    expect(publicManifestNames.size).toBeGreaterThan(0);
+    expect(publicManifestNames).toEqual(new Set());
   });
 
   it("preserves the policy in every complete Package Addition after projection", async () => {

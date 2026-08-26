@@ -44,22 +44,7 @@ function cliContribution(options: {
     path: options.packagePath,
     role: "cli-tool",
   };
-  const exposure = {
-    exports: {
-      ".": {
-        source: "./src/main.ts",
-        types: "./dist/main.d.ts",
-        default: "./dist/main.js",
-      },
-    },
-    imports: {
-      "#main": {
-        source: "./src/main.ts",
-        types: "./src/main.ts",
-        default: "./dist/main.js",
-      },
-    },
-  };
+  const exposure = { exports: {}, imports: {} };
   const operations: RenderOperation[] = [
     {
       kind: "writeJson",
@@ -94,16 +79,14 @@ function cliContribution(options: {
     {
       kind: "copyFile",
       source: templateSources.tsCli,
-      from: "src/main.ts",
-      to: `${definition.path}/src/main.ts`,
+      from: "src/cli-command-identity.ts",
+      to: `${definition.path}/src/cli-command-identity.ts`,
     },
     {
-      kind: "replaceAnchors",
-      path: `${definition.path}/src/main.ts`,
-      language: "typescript",
-      replacements: {
-        "cli-command-name": `const commandName = ${JSON.stringify(options.packageLeafName)};`,
-      },
+      kind: "copyFile",
+      source: templateSources.tsCli,
+      from: "src/main.ts",
+      to: `${definition.path}/src/main.ts`,
     },
     {
       kind: "copyFile",
@@ -114,16 +97,14 @@ function cliContribution(options: {
     {
       kind: "copyFile",
       source: templateSources.tsCli,
-      from: "test/integration/command.test.ts",
-      to: `${definition.path}/test/integration/command.test.ts`,
+      from: "test/unit/cli-command-identity.test.ts",
+      to: `${definition.path}/test/unit/cli-command-identity.test.ts`,
     },
     {
-      kind: "replaceAnchors",
-      path: `${definition.path}/test/integration/command.test.ts`,
-      language: "typescript",
-      replacements: {
-        "cli-test-command-name": `commandName = ${JSON.stringify(options.packageLeafName)};`,
-      },
+      kind: "copyFile",
+      source: templateSources.tsCli,
+      from: "test/integration/command.test.ts",
+      to: `${definition.path}/test/integration/command.test.ts`,
     },
     {
       kind: "copyFile",
@@ -149,12 +130,10 @@ function cliContribution(options: {
     exposure,
     manifest: {
       name: definition.name,
-      version: "0.0.0",
-      publishConfig: { access: "public" },
+      private: true,
       files: ["dist"],
       type: "module",
       bin: { [options.packageLeafName]: "./dist/cli.js" },
-      ...exposure,
       scripts: packageScripts(),
       dependencies: { commander: "catalog:" },
       devDependencies: {
@@ -196,7 +175,7 @@ export const tsCliDefinition = {
   metadata: {
     name: "ts-cli",
     title: "TypeScript CLI",
-    description: "Publishable TypeScript command-line package.",
+    description: "TypeScript command-line package.",
   },
   source: templateSources.tsCli,
   plannerSourceFile: fileURLToPath(import.meta.url),

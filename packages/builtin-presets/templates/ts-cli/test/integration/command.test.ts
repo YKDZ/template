@@ -1,14 +1,15 @@
+import { createRequire } from "node:module";
+
 import { describe, expect, it } from "vitest";
 
+import { cliCommandIdentity } from "../../src/cli-command-identity.ts";
 import { runCli, type CliRuntime } from "../../src/main.ts";
 
-let commandName = "demo-cli";
-// @template-anchor cli-test-command-name
+const require = createRequire(import.meta.url);
+const packageManifest = require("../../package.json") as unknown;
+const identity = cliCommandIdentity(packageManifest);
 
-function testRuntime(
-  args: readonly string[],
-  version = "1.2.3",
-): {
+function testRuntime(args: readonly string[]): {
   readonly runtime: CliRuntime;
   readonly stdout: () => string;
   readonly stderr: () => string;
@@ -17,7 +18,7 @@ function testRuntime(
   let stderr = "";
   return {
     runtime: {
-      argv: ["node", commandName, ...args],
+      argv: ["node", identity.commandName, ...args],
       streams: {
         stdin: {},
         stdout: { write: (chunk) => (stdout += chunk) },
@@ -26,7 +27,7 @@ function testRuntime(
       cwd: "/workspace",
       env: { MODE: "test" },
       tty: { stdin: false, stdout: false, stderr: false },
-      version,
+      identity,
     },
     stdout: () => stdout,
     stderr: () => stderr,
@@ -42,11 +43,11 @@ describe("CLI command control", () => {
     expect(output.stderr()).toBe("");
   });
 
-  it("renders the injected package version", async () => {
-    const output = testRuntime(["--version"], "9.8.7");
+  it("renders the version derived from the package manifest", async () => {
+    const output = testRuntime(["--version"]);
 
     await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toBe("9.8.7\n");
+    expect(output.stdout()).toBe(`${identity.version}\n`);
     expect(output.stderr()).toBe("");
   });
 
@@ -55,7 +56,7 @@ describe("CLI command control", () => {
 
     await expect(runCli(output.runtime)).resolves.toBe(0);
     expect(output.stdout()).toContain(
-      `Usage: ${commandName} [options] [command]`,
+      `Usage: ${identity.commandName} [options] [command]`,
     );
     expect(output.stdout()).toContain("greet <name>");
     expect(output.stderr()).toBe("");
@@ -69,7 +70,7 @@ describe("CLI command control", () => {
     expect(output.stderr()).toContain(
       "error: missing required argument 'name'",
     );
-    expect(output.stderr()).toContain(`Usage: ${commandName} greet`);
+    expect(output.stderr()).toContain(`Usage: ${identity.commandName} greet`);
   });
 
   it("adapts business validation into a testable command error", async () => {

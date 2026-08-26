@@ -18,6 +18,24 @@ const operationPath = (operation: RenderOperation): string => {
   return "";
 };
 
+const reservedSystemToolNames = new Set([
+  "bash",
+  "bun",
+  "cmd",
+  "corepack",
+  "deno",
+  "git",
+  "node",
+  "npm",
+  "npx",
+  "pnpm",
+  "powershell",
+  "pwsh",
+  "sh",
+  "yarn",
+  "zsh",
+]);
+
 export type FoundationContribution = {
   /** Toolchains the Foundation must install and project into coordinated root files. */
   readonly toolchains: {
@@ -71,6 +89,84 @@ export type PackageContribution = {
   /** Requirements prepared only by a focused deployment entrypoint. */
   readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
 };
+
+/** Validates the portable executable name promised by a CLI Package Boundary. */
+export function validateCliCommandName(
+  commandName: string,
+  occupiedCommandNames: readonly string[] = [],
+): string {
+  if (/[/\\]/u.test(commandName)) {
+    throw new Error(
+      `CLI command name must not be a path; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (/\p{White_Space}/u.test(commandName)) {
+    throw new Error(
+      `CLI command name must not contain whitespace; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (/\p{Control}/u.test(commandName)) {
+    throw new Error(
+      `CLI command name must not contain a control character; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (commandName.startsWith("-")) {
+    throw new Error(
+      `CLI command name must not have a leading hyphen; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(commandName)) {
+    throw new Error(
+      `CLI command name must use lowercase ASCII letters, digits, and single hyphens; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (reservedSystemToolNames.has(commandName)) {
+    throw new Error(
+      `CLI command name is a reserved system tool; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  if (occupiedCommandNames.includes(commandName)) {
+    throw new Error(
+      `CLI command name is already used by another workspace package; received ${JSON.stringify(commandName)}`,
+    );
+  }
+  return commandName;
+}
+
+function manifestBinEntries(
+  contribution: PackageContribution,
+): readonly [string, unknown][] {
+  const bin = contribution.manifest.bin;
+  if (typeof bin !== "object" || bin === null || Array.isArray(bin)) {
+    return [];
+  }
+  return Object.entries(bin);
+}
+
+/** Validates command portability and uniqueness across one complete plan. */
+export function assertPackageContributionCommandNames(
+  contributions: readonly PackageContribution[],
+): readonly PackageContribution[] {
+  const commandOwner = new Map<string, string>();
+  for (const contribution of contributions) {
+    const entries = manifestBinEntries(contribution);
+    for (const [commandName] of entries) {
+      const existingOwner = commandOwner.get(commandName);
+      try {
+        validateCliCommandName(commandName, [...commandOwner.keys()]);
+      } catch (error) {
+        if (existingOwner !== undefined) {
+          throw new Error(
+            `CLI command name ${JSON.stringify(commandName)} from ${contribution.definition.name} is already used by ${existingOwner}`,
+          );
+        }
+        throw error;
+      }
+      commandOwner.set(commandName, contribution.definition.name);
+    }
+  }
+  return contributions;
+}
 
 export function assertPackageContribution(
   contribution: PackageContribution,

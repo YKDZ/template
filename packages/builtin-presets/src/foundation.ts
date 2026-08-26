@@ -35,6 +35,7 @@ import {
 } from "#template-core/module-graph";
 import {
   assertPackageContribution,
+  assertPackageContributionCommandNames,
   type PackageContribution,
 } from "#template-core/package-contribution";
 import type {
@@ -1221,6 +1222,7 @@ function foundationPlan(options: {
     );
   });
   const contributions = [configContribution, ...packageContributions];
+  assertPackageContributionCommandNames(contributions);
   const candidateRecord: GenerationRecord = options.generationRecord ?? {
     schemaVersion: 2,
     repositoryName: options.context.repositoryName,

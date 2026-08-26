@@ -1,9 +1,7 @@
 import {
-  lstat,
   mkdir,
   mkdtemp,
   readFile,
-  readlink,
   readdir,
   rm,
   stat,
@@ -16,14 +14,12 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryPackageAddition,
+  prepareGeneratedRepositoryInitialization,
   resolveBuiltInTemplateSource,
 } from "@ykdz/template-builtin-presets";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import { renderNewProject } from "#template-core/renderer";
 
 import { tsCliDefinition } from "./definition.ts";
@@ -59,7 +55,7 @@ async function renderInstalledGeneratedRepository(prefix: string): Promise<{
 }
 
 describe("ts-cli Preset Definition behavior", () => {
-  it("plans the registered publishable CLI Tool Package", () => {
+  it("plans the registered unpublished CLI Tool Package boundary", () => {
     expect(tsCliDefinition.initialPrimaryPackage.defaultLeafName).toBe("cli");
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "demo-cli"),
@@ -92,25 +88,10 @@ describe("ts-cli Preset Definition behavior", () => {
     });
     expect(contribution.manifest).toMatchObject({
       name: "@demo/cli",
-      version: "0.0.0",
-      publishConfig: { access: "public" },
+      private: true,
       files: ["dist"],
       type: "module",
       bin: { cli: "./dist/cli.js" },
-      exports: {
-        ".": {
-          source: "./src/main.ts",
-          types: "./dist/main.d.ts",
-          default: "./dist/main.js",
-        },
-      },
-      imports: {
-        "#main": {
-          source: "./src/main.ts",
-          types: "./src/main.ts",
-          default: "./dist/main.js",
-        },
-      },
       dependencies: { commander: "catalog:" },
       engines: { node: ">=24" },
       scripts: {
@@ -122,6 +103,17 @@ describe("ts-cli Preset Definition behavior", () => {
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
+    expect(contribution.exposure).toEqual({ exports: {}, imports: {} });
+    for (const publicProgrammaticField of [
+      "main",
+      "types",
+      "exports",
+      "imports",
+      "publishConfig",
+      "version",
+    ]) {
+      expect(contribution.manifest).not.toHaveProperty(publicProgrammaticField);
+    }
     expect(contribution.operations).toEqual(
       expect.arrayContaining([
         {
@@ -133,17 +125,20 @@ describe("ts-cli Preset Definition behavior", () => {
         {
           kind: "copyFile",
           source: tsCliDefinition.source,
+          from: "src/cli-command-identity.ts",
+          to: "packages/cli/src/cli-command-identity.ts",
+        },
+        {
+          kind: "copyFile",
+          source: tsCliDefinition.source,
           from: "src/main.ts",
           to: "packages/cli/src/main.ts",
         },
-        {
-          kind: "replaceAnchors",
-          path: "packages/cli/src/main.ts",
-          language: "typescript",
-          replacements: {
-            "cli-command-name": 'const commandName = "cli";',
-          },
-        },
+      ]),
+    );
+    expect(contribution.operations).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "replaceAnchors" }),
       ]),
     );
 
@@ -186,204 +181,44 @@ describe("ts-cli Preset Definition behavior", () => {
     });
   });
 
-  it("links a CLI Tool consumer to a CLI Tool provider across source and distribution modes", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-cli-project-link-"),
-    );
-    const targetDir = path.join(workspace, "consumer");
+  it("derives the CLI consumer engine from the Generation Context", () => {
     const context = createGenerationContext({
-      targetDir,
+      targetDir: path.join("generated-repository", "future-cli"),
       defaultPackageScope: "demo",
       toolchain: {
-        nodeLtsMajor: "24",
+        nodeLtsMajor: "26",
         packageManagerPin: "pnpm@11.11.0",
       },
     });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const consumerPath = initialization.blueprint.packages[0]!.path;
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsCliDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "provider",
-        linkFrom: [consumerPath],
-      });
-      await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.projectProjections,
-      });
-      await execa("pnpm", ["install"], { cwd: targetDir });
-
-      const consumerRoot = path.join(targetDir, consumerPath);
-      await writeFile(
-        path.join(consumerRoot, "src/observe-provider.ts"),
-        [
-          'import { greet } from "@demo/provider";',
-          "",
-          'console.log(greet("Ada").message);',
-          "",
-        ].join("\n"),
-      );
-      const runSource = async (): Promise<string> =>
-        await execa(
-          "node",
-          ["--conditions=source", "src/observe-provider.ts"],
-          { cwd: consumerRoot },
-        ).then(({ stdout }) => stdout);
-
-      await expect(runSource()).resolves.toBe("Hello, Ada");
-      const providerEntry = path.join(
-        targetDir,
-        "packages/provider/src/main.ts",
-      );
-      await writeFile(
-        providerEntry,
-        (await readFile(providerEntry, "utf8")).replace(
-          "Hello,",
-          "Source changed:",
-        ),
-      );
-      await expect(runSource()).resolves.toBe("Source changed: Ada");
-
-      await expect(
-        execa("pnpm", ["--filter", `./${consumerPath}`, "run", "build"], {
-          cwd: targetDir,
-        }),
-      ).rejects.toThrow();
-      const dryRun = await execa(
-        "pnpm",
-        ["exec", "turbo", "run", "build", "--dry-run=json"],
-        { cwd: targetDir },
-      );
-      const tasks = (
-        JSON.parse(dryRun.stdout) as {
-          tasks: readonly {
-            taskId: string;
-            command: string;
-            dependencies: readonly string[];
-          }[];
-        }
-      ).tasks;
-      const consumerBuild = tasks.find(
-        ({ taskId }) => taskId === "@demo/cli#build",
-      );
-      expect(consumerBuild?.dependencies).toContain("@demo/provider#build");
-      expect(consumerBuild?.command).toBe(
-        "tsc -p tsconfig.build.json --pretty false",
-      );
-      expect(consumerBuild?.command).not.toMatch(/pnpm|turbo/u);
-
-      await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
-        cwd: targetDir,
-      });
-      await expect(
-        readFile(
-          path.join(targetDir, "packages/provider/dist/main.d.ts"),
-          "utf8",
-        ),
-      ).resolves.toContain("declare function greet");
-      await rm(path.join(targetDir, "packages/provider/src"), {
-        recursive: true,
-        force: true,
-      });
-      await expect(
-        execa("node", ["dist/observe-provider.js"], {
-          cwd: consumerRoot,
-        }).then(({ stdout }) => stdout),
-      ).resolves.toBe("Source changed: Ada");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
-
-  it("runs a linked CLI bin after its first install and build without reinstalling on POSIX", async (context) => {
-    if (process.platform === "win32") {
-      context.skip();
-      return;
-    }
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-cli-future-bin-"),
-    );
-    const targetDir = path.join(workspace, "consumer");
-    const generationContext = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
-      },
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: generationContext,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const consumerPath = initialization.blueprint.packages[0]!.path;
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsCliDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(
-          generationContext.targetDir,
-        ),
-        packageLeafName: "provider",
-        linkFrom: [consumerPath],
-      });
-      await expect(
-        reconcileAndApplyProjectProjections({
-          targetRoot: targetDir,
-          ...addition.projectProjections,
-        }),
-      ).resolves.toMatchObject({ ok: true });
-
-      const providerRoot = path.join(targetDir, "packages/provider");
-      await expect(stat(path.join(providerRoot, "dist"))).rejects.toMatchObject(
-        {
-          code: "ENOENT",
+    const contribution =
+      tsCliDefinition.initialPrimaryPackage.planInitialContribution({
+        context,
+        resolvedPackageIdentity: {
+          leafName: "cli",
+          definition: {
+            name: "@demo/cli",
+            path: "packages/cli",
+            role: "cli-tool",
+          },
         },
-      );
-      await execa("pnpm", ["install"], { cwd: targetDir });
+      });
 
-      const binPath = path.join(
-        targetDir,
-        consumerPath,
-        "node_modules/.bin/provider",
-      );
-      expect((await lstat(binPath)).isSymbolicLink()).toBe(true);
-      expect(await readlink(binPath)).toContain(
-        path.join("@demo", "provider", "dist", "cli.js"),
-      );
-      await expect(stat(path.join(providerRoot, "dist"))).rejects.toMatchObject(
-        {
-          code: "ENOENT",
+    expect(contribution.manifest.engines).toEqual({ node: ">=26" });
+  });
+
+  it("rejects a reserved command identity before initialization writes", () => {
+    expect(() =>
+      prepareGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        targetDir: path.join("generated-repository", "demo-cli"),
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
         },
-      );
-
-      await execa(
-        "pnpm",
-        ["exec", "turbo", "run", "build", "--filter=@demo/provider", "--force"],
-        { cwd: targetDir },
-      );
-      await expect(
-        execa(binPath, ["greet", "Ada"], { cwd: targetDir }).then(
-          ({ stdout }) => stdout,
-        ),
-      ).resolves.toBe("Hello, Ada");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
+        overrides: { name: "node" },
+      }),
+    ).toThrow('CLI command name is a reserved system tool; received "node"');
+  });
 
   it("appears in the public CLI Preset Catalog without exporting planner internals", async () => {
     const publicApi = await import("../index.ts");
@@ -404,7 +239,7 @@ describe("ts-cli Preset Definition behavior", () => {
     expect(result.stdout).toMatch(/\bts-cli\b/u);
   });
 
-  it("runs greet business tests from TypeScript source without a build", async () => {
+  it("runs identity and greet unit tests from TypeScript source without a build", async () => {
     const project = await renderInstalledGeneratedRepository(
       "template-ts-cli-unit-",
     );
@@ -415,14 +250,7 @@ describe("ts-cli Preset Definition behavior", () => {
       ).rejects.toMatchObject({ code: "ENOENT" });
       await execa(
         "pnpm",
-        [
-          "--dir",
-          project.packageRoot,
-          "exec",
-          "vitest",
-          "run",
-          "test/unit/greet.test.ts",
-        ],
+        ["--dir", project.packageRoot, "exec", "vitest", "run", "test/unit"],
         { cwd: project.targetDir },
       );
       await expect(
@@ -472,15 +300,33 @@ describe("ts-cli Preset Definition behavior", () => {
       const manifest = JSON.parse(
         await readFile(manifestPath, "utf8"),
       ) as Record<string, unknown>;
+      await expect(
+        execa("node", ["--conditions=source", "src/cli.ts", "--version"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toBe("unpublished");
       await writeFile(
         manifestPath,
-        `${JSON.stringify({ ...manifest, version: "7.8.9" }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            ...manifest,
+            version: "7.8.9",
+            bin: { release: "./dist/cli.js" },
+          },
+          null,
+          2,
+        )}\n`,
       );
       await expect(
         execa("node", ["--conditions=source", "src/cli.ts", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
       ).resolves.toBe("7.8.9");
+      await expect(
+        execa("node", ["--conditions=source", "src/cli.ts", "--help"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toContain("Usage: release [options] [command]");
       await expect(
         readFile(
           path.join(project.packageRoot, "test/e2e/run-journeys.ts"),
@@ -543,11 +389,39 @@ describe("ts-cli Preset Definition behavior", () => {
         { cwd: project.targetDir },
       );
       await expect(
-        readFile(path.join(project.packageRoot, "dist/main.d.ts"), "utf8"),
-      ).resolves.toContain("export declare function greet");
-      await expect(
         readFile(path.join(project.packageRoot, "dist/cli.js"), "utf8"),
       ).resolves.toMatch(/^#!\/usr\/bin\/env node/u);
+      await expect(
+        execa("node", ["dist/cli.js", "--version"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toBe("unpublished");
+      const manifestPath = path.join(project.packageRoot, "package.json");
+      const manifest = JSON.parse(
+        await readFile(manifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(
+          {
+            ...manifest,
+            version: "4.5.6",
+            bin: { deliver: "./dist/cli.js" },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      await expect(
+        execa("node", ["dist/cli.js", "--version"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toBe("4.5.6");
+      await expect(
+        execa("node", ["dist/cli.js", "--help"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toContain("Usage: deliver [options] [command]");
 
       const result = await execa("pnpm", ["run", "test:e2e"], {
         cwd: project.packageRoot,
@@ -624,9 +498,55 @@ describe("ts-cli Preset Definition behavior", () => {
     }
   }, 180_000);
 
-  it("packs, installs, and runs every packed journey through the bin shim", async () => {
+  it("installs the compiled CLI bin into a workspace consumer without a package version", async () => {
     const project = await renderInstalledGeneratedRepository(
-      "template-ts-cli-packed-e2e-",
+      "template-ts-cli-workspace-bin-",
+    );
+
+    try {
+      const consumerRoot = path.join(project.targetDir, "packages/consumer");
+      await mkdir(consumerRoot);
+      await writeFile(
+        path.join(consumerRoot, "package.json"),
+        `${JSON.stringify(
+          {
+            name: "@demo/consumer",
+            private: true,
+            dependencies: { "@demo/cli": "workspace:*" },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      await execa("pnpm", ["install"], { cwd: project.targetDir });
+      await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
+        { cwd: project.targetDir },
+      );
+
+      const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
+      await expect(stat(binPath)).resolves.toMatchObject({
+        mode: expect.any(Number),
+      });
+      await expect(
+        execa(binPath, ["--version"], { cwd: consumerRoot }).then(
+          ({ stdout }) => stdout,
+        ),
+      ).resolves.toBe("unpublished");
+      await expect(
+        execa(binPath, ["greet", "Ada"], { cwd: consumerRoot }).then(
+          ({ stdout }) => stdout,
+        ),
+      ).resolves.toBe("Hello, Ada");
+    } finally {
+      await rm(project.workspace, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("refuses to pack the unpublished CLI without injecting a version", async () => {
+    const project = await renderInstalledGeneratedRepository(
+      "template-ts-cli-unpublished-pack-",
     );
 
     try {
@@ -634,87 +554,59 @@ describe("ts-cli Preset Definition behavior", () => {
         recursive: true,
         force: true,
       });
-      const sourceManifest = JSON.parse(
-        await readFile(path.join(project.packageRoot, "package.json"), "utf8"),
-      ) as Record<string, unknown>;
+      const sourceManifestPath = path.join(project.packageRoot, "package.json");
+      const sourceManifestBytes = await readFile(sourceManifestPath, "utf8");
+      const sourceManifest = JSON.parse(sourceManifestBytes) as Record<
+        string,
+        unknown
+      >;
       expect(sourceManifest).toMatchObject({
+        private: true,
+        bin: { cli: "./dist/cli.js" },
         devDependencies: {
-          "@demo/typescript-config": "link:../typescript-config",
+          "@demo/typescript-config": "workspace:*",
         },
       });
+      expect(sourceManifest).not.toHaveProperty("version");
       await expect(
-        readFile(path.join(project.targetDir, ".pnpmfile.mjs"), "utf8"),
-      ).resolves.toContain("beforePacking");
+        stat(path.join(project.targetDir, ".pnpmfile.mjs")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+
       const packDestination = path.join(project.workspace, "packs");
       await mkdir(packDestination);
-      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
-        cwd: project.packageRoot,
-      });
-      const archives = (await readdir(packDestination)).filter((file) =>
-        file.endsWith(".tgz"),
+      const pack = await execa(
+        "pnpm",
+        ["pack", "--pack-destination", packDestination],
+        { cwd: project.packageRoot, reject: false },
       );
-      expect(archives).toHaveLength(1);
-      const archivePath = path.join(packDestination, archives[0]!);
-      const packedPaths = (await execa("tar", ["-tf", archivePath])).stdout
-        .split("\n")
-        .filter(Boolean)
-        .toSorted();
-      expect(packedPaths).toEqual([
-        "package/dist/cli.d.ts",
-        "package/dist/cli.js",
-        "package/dist/main.d.ts",
-        "package/dist/main.js",
-        "package/package.json",
-      ]);
-      const packedManifest = await execa("tar", [
-        "-xOf",
-        archivePath,
-        "package/package.json",
-      ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
-      expect(packedManifest).toMatchObject({
-        version: "0.0.0",
-        publishConfig: { access: "public" },
-        files: ["dist"],
-        bin: { cli: "./dist/cli.js" },
-        exports: {
-          ".": {
-            source: "./src/main.ts",
-            types: "./dist/main.d.ts",
-            default: "./dist/main.js",
-          },
-        },
-      });
-      expect(packedManifest).not.toHaveProperty("devDependencies");
-      expect(JSON.stringify(packedManifest)).not.toContain("link:");
-      expect(JSON.stringify(packedManifest)).not.toContain("workspace:");
+      expect(pack.exitCode).toBe(1);
+      expect(pack.stdout).toContain("ERR_PNPM_PACKAGE_VERSION_NOT_FOUND");
+      await expect(readFile(sourceManifestPath, "utf8")).resolves.toBe(
+        sourceManifestBytes,
+      );
+      expect(await readdir(packDestination)).toEqual([]);
+      await expect(
+        readFile(path.join(project.packageRoot, "dist/cli.js"), "utf8"),
+      ).resolves.toMatch(/^#!\/usr\/bin\/env node/u);
       expect(
-        await execa("tar", ["-xOf", archivePath, "package/dist/cli.js"]).then(
-          ({ stdout }) => stdout,
-        ),
-      ).toMatch(/^#!\/usr\/bin\/env node/u);
-      expect(
-        await execa("tar", ["-tvf", archivePath, "package/dist/cli.js"]).then(
-          ({ stdout }) => stdout,
-        ),
-      ).toMatch(/^-rwx/u);
-
-      const consumerRoot = path.join(project.workspace, "consumer");
-      await mkdir(consumerRoot);
-      await writeFile(
-        path.join(consumerRoot, "package.json"),
-        `${JSON.stringify({ name: "consumer", private: true })}\n`,
-      );
-      await execa("pnpm", ["install", archivePath], { cwd: consumerRoot });
-      const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
-      await expect(stat(binPath)).resolves.toMatchObject({
-        mode: expect.any(Number),
-      });
-      const packed = await execa(
-        "node",
-        ["--conditions=source", "test/e2e/run-journeys.ts", "packed", binPath],
-        { cwd: project.packageRoot },
-      );
-      expect(packed.stdout).toBe("packed:greet:passed");
+        (await stat(path.join(project.packageRoot, "dist/cli.js"))).mode &
+          0o111,
+      ).not.toBe(0);
+      await expect(
+        execa("node", ["dist/cli.js", "--version"], {
+          cwd: project.packageRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toBe("unpublished");
+      for (const absentField of [
+        "version",
+        "main",
+        "types",
+        "exports",
+        "imports",
+        "publishConfig",
+      ]) {
+        expect(sourceManifest).not.toHaveProperty(absentField);
+      }
     } finally {
       await rm(project.workspace, { recursive: true, force: true });
     }

@@ -1174,27 +1174,15 @@ describe("packed public CLI consumer", () => {
           path.join(cliTarget, "packages/archive-addition/package.json"),
           "utf8",
         ),
-      ) as { readonly bin?: Readonly<Record<string, string>> };
+      ) as Record<string, unknown>;
       expect(explicitCliManifest.bin).toEqual({
         "archive-addition": "./dist/cli.js",
       });
-      const cliBlueprint = JSON.parse(
-        await readFile(
-          path.join(cliTarget, ".template/blueprint.json"),
-          "utf8",
-        ),
-      ) as {
-        readonly packages: readonly {
-          readonly path: string;
-          readonly role: PackageRole;
-        }[];
-      };
-      const cliConsumerPath = cliBlueprint.packages.find(
-        (pkg) =>
-          pkg.role === "cli-tool" && pkg.path !== "packages/archive-addition",
-      )?.path;
-      expect(cliConsumerPath).toBeDefined();
-      const addLinkedCli = async (): Promise<void> => {
+      expect(explicitCliManifest).toMatchObject({ private: true });
+      expect(explicitCliManifest).not.toHaveProperty("version");
+      expect(explicitCliManifest).not.toHaveProperty("exports");
+      expect(explicitCliManifest).not.toHaveProperty("imports");
+      const addSecondCli = async (): Promise<void> => {
         await execa(
           installedBin,
           [
@@ -1204,8 +1192,6 @@ describe("packed public CLI consumer", () => {
             cliAdditionDefinition.metadata.name,
             "--name",
             "default-command",
-            "--link-from",
-            cliConsumerPath!,
           ],
           {
             cwd: cliTarget,
@@ -1216,9 +1202,9 @@ describe("packed public CLI consumer", () => {
           },
         );
       };
-      await addLinkedCli();
+      await addSecondCli();
       await expectPackedHardenedRootCheckWorkflow(cliTarget);
-      const linkedProviderManifest = JSON.parse(
+      const secondCliManifest = JSON.parse(
         await readFile(
           path.join(cliTarget, "packages/default-command/package.json"),
           "utf8",
@@ -1227,26 +1213,17 @@ describe("packed public CLI consumer", () => {
         readonly name: string;
         readonly bin: Readonly<Record<string, string>>;
       };
-      expect(linkedProviderManifest.bin).toEqual({
+      expect(secondCliManifest.bin).toEqual({
         "default-command": "./dist/cli.js",
       });
-      await expect(
-        readFile(
-          path.join(cliTarget, cliConsumerPath!, "package.json"),
-          "utf8",
-        ).then(
-          (source) =>
-            (
-              JSON.parse(source) as {
-                dependencies: Readonly<Record<string, string>>;
-              }
-            ).dependencies[linkedProviderManifest.name],
-        ),
-      ).resolves.toBe("workspace:*");
-      const linkedCliSnapshot = await workspaceByteSnapshot(cliTarget);
-      await addLinkedCli();
+      expect(secondCliManifest).toMatchObject({ private: true });
+      expect(secondCliManifest).not.toHaveProperty("version");
+      expect(secondCliManifest).not.toHaveProperty("exports");
+      expect(secondCliManifest).not.toHaveProperty("imports");
+      const secondCliSnapshot = await workspaceByteSnapshot(cliTarget);
+      await addSecondCli();
       await expectPackedHardenedRootCheckWorkflow(cliTarget);
-      expect(await workspaceByteSnapshot(cliTarget)).toEqual(linkedCliSnapshot);
+      expect(await workspaceByteSnapshot(cliTarget)).toEqual(secondCliSnapshot);
 
       const previewBaseDefinition =
         definitionWithInitialPackageRole("shared-library");

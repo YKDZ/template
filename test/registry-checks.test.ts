@@ -199,7 +199,7 @@ describe("Preset Registry generated scenarios", () => {
               packageLeafName: `focused-${scenario.addition!.metadata.name}`,
             }),
         );
-        expect(["shared-library", "cli-tool"]).toContain(provider?.role);
+        expect(provider?.role).toBe("shared-library");
         providerRoles.add(provider!.role);
         expect(addition.blueprint.packageLinkIntents).toEqual(
           expect.arrayContaining([
@@ -227,7 +227,7 @@ describe("Preset Registry generated scenarios", () => {
         );
       }
       expect(consumerRoles).toContain("cli-tool");
-      expect(providerRoles).toContain("cli-tool");
+      expect(providerRoles).toEqual(new Set(["shared-library"]));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

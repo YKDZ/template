@@ -1,6 +1,7 @@
 import { Command, CommanderError } from "commander";
 
-// @template-anchor cli-command-name
+import type { CliCommandIdentity } from "./cli-command-identity.ts";
+
 export type Greeting = {
   readonly message: string;
 };
@@ -19,7 +20,7 @@ export type CliRuntime = {
     readonly stdout: boolean;
     readonly stderr: boolean;
   };
-  readonly version: string;
+  readonly identity: CliCommandIdentity;
 };
 
 export function greet(name: string): Greeting {
@@ -36,9 +37,9 @@ function errorMessage(error: unknown): string {
 
 export function createCliCommand(runtime: CliRuntime): Command {
   const command = new Command()
-    .name(commandName)
+    .name(runtime.identity.commandName)
     .description("A TypeScript command-line tool.")
-    .version(runtime.version)
+    .version(runtime.identity.version)
     .configureOutput({
       writeOut: (text) => runtime.streams.stdout.write(text),
       writeErr: (text) => runtime.streams.stderr.write(text),

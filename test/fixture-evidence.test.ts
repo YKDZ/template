@@ -3206,6 +3206,7 @@ describe("Fixture Verification Evidence", () => {
       "deployment",
     ] as const;
     const maxActiveInstalls = new Map<(typeof sets)[number], number>();
+    const expectedMaxActiveInstalls = new Map<(typeof sets)[number], number>();
     try {
       for (const scenarioSet of sets) {
         const installs = createBlockedConcurrencyProbe();
@@ -3250,15 +3251,37 @@ describe("Fixture Verification Evidence", () => {
             return {};
           },
         });
+        const scenarios = await generatedScenariosFor(scenarioSet);
+        const browserConstrained = scenarios.filter((scenario) => {
+          const plan = planGeneratedRepositoryInitialization({
+            definition: scenario.base,
+            context: createGenerationContext({
+              targetDir: path.join(root, scenarioSet, scenario.id),
+              defaultPackageScope: "fixture",
+              toolchain: {
+                nodeLtsMajor: "24",
+                packageManagerPin: "pnpm@11.11.0",
+              },
+            }),
+          });
+          return generatedRootQualityExecutionResources(plan).includes(
+            "browser",
+          );
+        }).length;
+        const ordinaryOnly = scenarios.length - browserConstrained;
         const expected =
           scenarioSet === "deployment"
             ? 1
-            : Math.min(4, (await generatedScenariosFor(scenarioSet)).length);
+            : Math.min(4, ordinaryOnly + Math.min(browserConstrained, 1));
+        expectedMaxActiveInstalls.set(scenarioSet, expected);
         let observationFailure: unknown;
         try {
           await vi.waitFor(
             () => {
-              expect(installs.active()).toBe(expected);
+              expect({ scenarioSet, active: installs.active() }).toEqual({
+                scenarioSet,
+                active: expected,
+              });
             },
             { timeout: 30_000 },
           );
@@ -3272,14 +3295,7 @@ describe("Fixture Verification Evidence", () => {
         maxActiveInstalls.set(scenarioSet, installs.maximum());
       }
 
-      expect(maxActiveInstalls).toEqual(
-        new Map([
-          ["init", 4],
-          ["package-addition-matrix", 4],
-          ["focused", 4],
-          ["deployment", 1],
-        ]),
-      );
+      expect(maxActiveInstalls).toEqual(expectedMaxActiveInstalls);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

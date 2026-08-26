@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
 
-import { runCli, type CliRuntime } from "#main";
+import { cliCommandIdentity } from "./cli-command-identity.ts";
+import { runCli, type CliRuntime } from "./main.ts";
 
 const require = createRequire(import.meta.url);
-const packageManifest = require("../package.json") as { version: string };
+const packageManifest = require("../package.json") as unknown;
 
 const runtime: CliRuntime = {
   argv: process.argv,
@@ -20,7 +21,7 @@ const runtime: CliRuntime = {
     stdout: Boolean(process.stdout.isTTY),
     stderr: Boolean(process.stderr.isTTY),
   },
-  version: packageManifest.version,
+  identity: cliCommandIdentity(packageManifest),
 };
 
 process.exitCode = await runCli(runtime);

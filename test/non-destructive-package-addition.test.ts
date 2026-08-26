@@ -114,10 +114,26 @@ describe("Non-Destructive Package Addition", () => {
     if (privateBaseDefinition === undefined) {
       throw new Error("Expected a private Built-in Preset base repository");
     }
-    const publicDefinition = requireAddableDefinitionForRole(
+    const privateLibraryDefinition = requireAddableDefinitionForRole(
       context,
-      "cli-tool",
+      "shared-library",
     );
+    const publicDefinition: BuiltInPresetDefinition = {
+      ...privateLibraryDefinition,
+      metadata: {
+        ...privateLibraryDefinition.metadata,
+        name: "synthetic-public-library",
+      },
+      planPackageAddition(options) {
+        const contribution =
+          privateLibraryDefinition.planPackageAddition!(options);
+        const { private: _private, ...privateManifest } = contribution.manifest;
+        return {
+          ...contribution,
+          manifest: { ...privateManifest, version: "1.0.0" },
+        };
+      },
+    };
 
     try {
       const initialization = planGeneratedRepositoryInitialization({
@@ -159,7 +175,7 @@ describe("Non-Destructive Package Addition", () => {
         ]),
       );
       const addedPackage = addition.blueprint.packages.find(
-        (definition) => definition.role === "cli-tool",
+        (definition) => definition.path === "packages/release",
       );
       expect(addedPackage).toBeDefined();
       const sourceManifest = JSON.parse(
