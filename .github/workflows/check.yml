@@ -47,7 +47,7 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Restore BuildKit cache
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/buildkit
@@ -57,7 +57,7 @@ jobs:
             fixture-buildkit-${{ runner.os }}-
 
       - name: Restore pnpm downloads cache
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/pnpm
@@ -67,7 +67,7 @@ jobs:
             fixture-pnpm-downloads-${{ runner.os }}-
 
       - name: Restore Cargo downloads cache
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/cargo

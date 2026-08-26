@@ -255,10 +255,10 @@ describe("Fixture Verification Evidence check workflow", () => {
     });
   });
 
-  it("persists isolated native caches only for trusted healthy fixture work", async () => {
+  it("restores native caches for pull requests and saves only trusted healthy fixture work", async () => {
     const job = (await checkWorkflow()).jobs.check;
-    const trustedRead =
-      "(github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)";
+    const pullRequestOrTrustedRead =
+      "github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)";
     const trustedHealthyWrite =
       "always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'";
     const caches = [
@@ -290,7 +290,7 @@ describe("Fixture Verification Evidence check workflow", () => {
       );
 
       expect(restore).toMatchObject({
-        if: trustedRead,
+        if: pullRequestOrTrustedRead,
         uses: "actions/cache/restore@v6",
         with: { path: cache.path },
       });
