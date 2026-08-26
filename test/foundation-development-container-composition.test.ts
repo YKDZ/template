@@ -8,11 +8,17 @@ import {
   createGenerationContext,
   builtInPresetRegistry,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
 } from "#template-builtin-presets";
 import type { DevelopmentContainerToolLayer } from "#template-core/development-container-tool-layer";
 import type { PackageContribution } from "#template-core/package-contribution";
+import {
+  definePackageContributionReplayAdapter,
+  type PackageContributionReplayAdapter,
+  type PlannedPackageContribution,
+} from "#template-core/preset-definition";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import {
   createTemplateSourceHandle,
@@ -26,7 +32,7 @@ const fixtureSource = createTemplateSourceHandle(
 function builtInContributions(
   definition: BuiltInPresetDefinition,
   context: ReturnType<typeof createGenerationContext>,
-): readonly PackageContribution[] {
+): readonly PlannedPackageContribution[] {
   return (
     definition.planInitializationContributions?.(context) ?? [
       definition.planInitialization(context),
@@ -55,7 +61,7 @@ function requireBuiltInDefinition(
 function requireBuiltInContribution(
   context: ReturnType<typeof createGenerationContext>,
   predicate: (contribution: PackageContribution) => boolean,
-): PackageContribution {
+): PlannedPackageContribution {
   const contribution = builtInPresetRegistry
     .all()
     .flatMap((definition) => builtInContributions(definition, context))
@@ -66,6 +72,17 @@ function requireBuiltInContribution(
     );
   }
   return contribution;
+}
+
+function fixtureReplayAdapter(
+  identity: string,
+): PackageContributionReplayAdapter {
+  return definePackageContributionReplayAdapter({
+    identity,
+    replay: () => {
+      throw new Error(`Fixture replay is not exercised for ${identity}`);
+    },
+  });
 }
 
 function fixtureContribution(options: {
@@ -119,7 +136,7 @@ describe("Foundation Development Container composition", () => {
         definition,
         context: createGenerationContext({
           targetDir: path.join("/tmp", definition.metadata.name),
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -158,7 +175,7 @@ describe("Foundation Development Container composition", () => {
           definition,
           context: createGenerationContext({
             targetDir,
-            scope: "example",
+            defaultPackageScope: "example",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
@@ -213,7 +230,7 @@ describe("Foundation Development Container composition", () => {
         const targetDir = path.join(workspace, definition.metadata.name);
         const context = createGenerationContext({
           targetDir,
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -264,7 +281,7 @@ describe("Foundation Development Container composition", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
-        scope: "example",
+        defaultPackageScope: "example",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -313,7 +330,7 @@ describe("Foundation Development Container composition", () => {
         const targetDir = path.join(workspace, definition.metadata.name);
         const context = createGenerationContext({
           targetDir,
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -357,7 +374,7 @@ describe("Foundation Development Container composition", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
-        scope: "example",
+        defaultPackageScope: "example",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -383,7 +400,7 @@ describe("Foundation Development Container composition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "example",
+      defaultPackageScope: "example",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -398,6 +415,8 @@ describe("Foundation Development Container composition", () => {
         (need) => need.kind === "playwright-browser-assets",
       ),
     );
+    const rustReplayAdapter = fixtureReplayAdapter(rust.definition.path);
+    const browserReplayAdapter = fixtureReplayAdapter(browser.definition.path);
     const definition: BuiltInPresetDefinition = {
       metadata: {
         name: "rust-browser-fixture",
@@ -406,12 +425,22 @@ describe("Foundation Development Container composition", () => {
       },
       source: fixtureSource,
       plannerSourceFile: import.meta.filename,
+      packageContributionReplayAdapters: [
+        rustReplayAdapter,
+        browserReplayAdapter,
+      ],
       blueprint: () => ({
-        schemaVersion: 2,
+        schemaVersion: 3,
         packages: [rust.definition, browser.definition],
       }),
-      planInitialization: () => rust,
-      planInitializationContributions: () => [rust, browser],
+      planInitialization: () => ({
+        ...rust,
+        planningIdentity: rustReplayAdapter.identity,
+      }),
+      planInitializationContributions: () => [
+        { ...rust, planningIdentity: rustReplayAdapter.identity },
+        { ...browser, planningIdentity: browserReplayAdapter.identity },
+      ],
     };
 
     try {
@@ -449,7 +478,7 @@ describe("Foundation Development Container composition", () => {
         const targetDir = path.join(workspace, definition.metadata.name);
         const context = createGenerationContext({
           targetDir,
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -519,7 +548,7 @@ describe("Foundation Development Container composition", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
-        scope: "example",
+        defaultPackageScope: "example",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -566,12 +595,13 @@ describe("Foundation Development Container composition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "example",
+      defaultPackageScope: "example",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
       },
     });
+    const replayAdapter = fixtureReplayAdapter("fixture");
     const definition: BuiltInPresetDefinition = {
       metadata: {
         name: "fixture",
@@ -580,8 +610,9 @@ describe("Foundation Development Container composition", () => {
       },
       source: fixtureSource,
       plannerSourceFile: import.meta.filename,
+      packageContributionReplayAdapters: [replayAdapter],
       blueprint: () => ({
-        schemaVersion: 2,
+        schemaVersion: 3,
         packages: [
           {
             name: "@example/fixture",
@@ -591,6 +622,7 @@ describe("Foundation Development Container composition", () => {
         ],
       }),
       planInitialization: () => ({
+        planningIdentity: replayAdapter.identity,
         definition: {
           name: "@example/fixture",
           path: "packages/fixture",
@@ -719,7 +751,7 @@ describe("Foundation Development Container composition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "example",
+      defaultPackageScope: "example",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -734,6 +766,7 @@ describe("Foundation Development Container composition", () => {
               0) === 0,
         ),
     );
+    const additionReplayAdapter = fixtureReplayAdapter("fixture-addition");
     const addedDefinition: BuiltInPresetDefinition = {
       metadata: {
         name: "fixture-addition",
@@ -742,11 +775,13 @@ describe("Foundation Development Container composition", () => {
       },
       source: fixtureSource,
       plannerSourceFile: import.meta.filename,
-      blueprint: () => ({ schemaVersion: 2, packages: [] }),
+      packageContributionReplayAdapters: [additionReplayAdapter],
+      blueprint: () => ({ schemaVersion: 3, packages: [] }),
       planInitialization: () => {
         throw new Error("Fixture Addition is addition-only");
       },
       planPackageAddition: ({ packageLeafName, packagePath }) => ({
+        planningIdentity: additionReplayAdapter.identity,
         definition: {
           name: `@example/${packageLeafName}`,
           path: packagePath,
@@ -854,8 +889,7 @@ describe("Foundation Development Container composition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: addedDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "native",
         packagePath: "packages/native",
       });
@@ -963,21 +997,33 @@ describe("Foundation Development Container composition", () => {
 
     const definition = (
       contributions: readonly PackageContribution[],
-    ): BuiltInPresetDefinition => ({
-      metadata: {
-        name: "fixture-order",
-        title: "Fixture Order",
-        description: "Contribution order fixture",
-      },
-      source: fixtureSource,
-      plannerSourceFile: import.meta.filename,
-      blueprint: () => ({
-        schemaVersion: 2,
-        packages: [alpha.definition, omega.definition],
-      }),
-      planInitialization: () => contributions[0]!,
-      planInitializationContributions: () => contributions,
-    });
+    ): BuiltInPresetDefinition => {
+      const adapters = contributions.map((contribution) =>
+        fixtureReplayAdapter(contribution.definition.path),
+      );
+      const identify = (
+        contribution: PackageContribution,
+      ): PlannedPackageContribution => ({
+        ...contribution,
+        planningIdentity: contribution.definition.path,
+      });
+      return {
+        metadata: {
+          name: "fixture-order",
+          title: "Fixture Order",
+          description: "Contribution order fixture",
+        },
+        source: fixtureSource,
+        plannerSourceFile: import.meta.filename,
+        packageContributionReplayAdapters: adapters,
+        blueprint: () => ({
+          schemaVersion: 3,
+          packages: [alpha.definition, omega.definition],
+        }),
+        planInitialization: () => identify(contributions[0]!),
+        planInitializationContributions: () => contributions.map(identify),
+      };
+    };
     const outputs: {
       readonly dockerfile: string;
       readonly devcontainer: unknown;
@@ -991,7 +1037,7 @@ describe("Foundation Development Container composition", () => {
         const targetDir = path.join(workspace, directory);
         const context = createGenerationContext({
           targetDir,
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -1036,7 +1082,7 @@ describe("Foundation Development Container composition", () => {
     }[] = [];
     const selectionContext = createGenerationContext({
       targetDir: path.join(workspace, "selection"),
-      scope: "example",
+      defaultPackageScope: "example",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -1084,7 +1130,7 @@ describe("Foundation Development Container composition", () => {
         const targetDir = path.join(workspace, directory);
         const context = createGenerationContext({
           targetDir,
-          scope: "example",
+          defaultPackageScope: "example",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -1108,8 +1154,7 @@ describe("Foundation Development Container composition", () => {
         }
         const addition = planGeneratedRepositoryPackageAddition({
           definition: addedDefinition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName,
           packagePath,
         });

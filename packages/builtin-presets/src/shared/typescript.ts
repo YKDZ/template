@@ -1,6 +1,9 @@
 import type { PackageContribution } from "#template-core/package-contribution";
-import type { GenerationContext } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import {
+  definePackageContributionReplayAdapter,
+  type GenerationContext,
+} from "#template-core/preset-definition";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type {
   RenderOperation,
   TemplateSourceHandle,
@@ -8,10 +11,12 @@ import type {
 
 import { templateSources } from "../template-sources.ts";
 
+const typescriptConfigPackageReplacement = "TYPESCRIPT_CONFIG_PACKAGE";
+
 export function typescriptConfigPackageName(
   context: GenerationContext,
 ): string {
-  return `@${context.scope}/typescript-config`;
+  return context.foundationPackages.typescriptConfiguration.name;
 }
 
 export function typescriptConfigPackageDefinition(
@@ -36,15 +41,17 @@ export function typescriptConfigSourceOperation(options: {
     from: options.from,
     to: options.to,
     replacements: {
-      TYPESCRIPT_CONFIG_PACKAGE: typescriptConfigPackageName(options.context),
+      [typescriptConfigPackageReplacement]: typescriptConfigPackageName(
+        options.context,
+      ),
     },
   };
 }
 
 export function typescriptConfigContribution(
   context: GenerationContext,
+  definition = typescriptConfigPackageDefinition(context),
 ): PackageContribution {
-  const definition = typescriptConfigPackageDefinition(context);
   return {
     definition,
     exposure: { exports: {}, imports: {} },
@@ -92,3 +99,10 @@ export function typescriptConfigContribution(
     },
   };
 }
+
+export const typescriptConfigReplayAdapter =
+  definePackageContributionReplayAdapter({
+    identity: "typescript-config",
+    replay: ({ context, packageDefinition }) =>
+      typescriptConfigContribution(context, packageDefinition),
+  });

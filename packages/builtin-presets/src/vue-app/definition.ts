@@ -1,9 +1,10 @@
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import {
@@ -28,9 +29,10 @@ function appContribution(options: {
   readonly context: GenerationContext;
   readonly packageLeafName: string;
   readonly packagePath: string;
+  readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${options.context.scope}/${options.packageLeafName}`,
+  const definition: PackageDefinition = options.packageDefinition ?? {
+    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
     path: options.packagePath,
     role: "runtime-service",
   };
@@ -74,16 +76,28 @@ function appContribution(options: {
     foundation: {
       toolchains: {},
       editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+      typescriptConfigurationPackage: { dependency: "required" },
       dependencyMaintenance: {
         ecosystems: ["npm", "github-actions", "docker"],
         interval: "weekly",
       },
-      workspacePackageGlobs: [`${options.packagePath.split("/")[0]}/*`],
+      workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
       developmentContainerToolLayers:
         vueApplicationDevelopmentContainerToolLayers(),
     },
   };
 }
+
+const appReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "app",
+  replay: ({ context, packageDefinition, packageLeafName }) =>
+    appContribution({
+      context,
+      packageLeafName,
+      packagePath: packageDefinition.path,
+      packageDefinition,
+    }),
+});
 
 export const vueAppDefinition: BuiltInPresetDefinition = {
   metadata: {
@@ -94,9 +108,10 @@ export const vueAppDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.vueApp,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [appReplayAdapter],
   blueprint(context) {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         appContribution({
           context,
@@ -107,17 +122,21 @@ export const vueAppDefinition: BuiltInPresetDefinition = {
     };
   },
   planInitialization(context) {
-    return appContribution({
-      context,
-      packageLeafName: "web",
-      packagePath: "apps/web",
-    });
+    return appReplayAdapter.identify(
+      appContribution({
+        context,
+        packageLeafName: "web",
+        packagePath: "apps/web",
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `apps/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return appContribution({ context, packageLeafName, packagePath });
+    return appReplayAdapter.identify(
+      appContribution({ context, packageLeafName, packagePath }),
+    );
   },
 };
 import { fileURLToPath } from "node:url";

@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
   templateSources,
@@ -24,8 +25,11 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
   it("owns conventional task scripts without a package check registration", () => {
     const context = {
       targetDir: "/tmp/demo-library",
-      projectName: "demo-library",
-      scope: "demo",
+      repositoryName: "demo-library",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
     const contribution = tsLibDefinition.planInitialization(context);
@@ -131,7 +135,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -187,8 +191,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
 
     const addition = planGeneratedRepositoryPackageAddition({
       definition: tsLibDefinition,
-      context,
-      blueprint: initialization.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "utilities",
     });
     expect(addition.operations).toContainEqual(
@@ -237,8 +240,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
 
     const secondAddition = planGeneratedRepositoryPackageAddition({
       definition: tsLibDefinition,
-      context,
-      blueprint: addition.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "models",
     });
     await reconcileAndApplyProjectProjections({
@@ -256,7 +258,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "consumer");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -272,8 +274,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       const consumerPackagePath = initialization.blueprint.packages[0]!.path;
       const addition = planGeneratedRepositoryPackageAddition({
         definition: tsLibDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "provider",
         linkFrom: [consumerPackagePath],
       });
@@ -352,7 +353,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "library");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -408,7 +409,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "consumer");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -424,8 +425,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       const consumerPackagePath = initialization.blueprint.packages[0]!.path;
       const addition = planGeneratedRepositoryPackageAddition({
         definition: tsLibDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "provider",
         linkFrom: [consumerPackagePath],
       });
@@ -545,7 +545,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -629,7 +629,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       definition: tsLibDefinition,
       context: createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });

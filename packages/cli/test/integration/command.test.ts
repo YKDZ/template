@@ -31,7 +31,7 @@ function requireLinkableAddablePreset(): {
 } {
   const context = createGenerationContext({
     targetDir: "demo",
-    scope: "acme",
+    defaultPackageScope: "acme",
     toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
   });
   for (const definition of builtInPresetRegistry.all()) {
@@ -170,10 +170,11 @@ describe("template CLI command control", () => {
     await writeFile(
       blueprintPath,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         packages: [
           {
             name: "@demo/library",
+            packageDefinitionId: `package-${"1".repeat(64)}`,
             path: "packages/library",
             role: "shared-library",
           },
@@ -278,7 +279,7 @@ describe("template CLI command control", () => {
       command: "init",
       dryRun: true,
       targetDir: "demo",
-      blueprint: { schemaVersion: 2 },
+      blueprint: { schemaVersion: 3 },
       followUpDocument: { enabled: true, path: "TODO.md" },
     });
     expect(output.stderr()).toBe("");

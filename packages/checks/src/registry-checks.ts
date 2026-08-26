@@ -7,6 +7,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
   templateSources,
@@ -513,6 +514,7 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
           writeFileSync(manifestPath, JSON.stringify(contribution.manifest));
         }
         for (const metadataPath of [
+          ".template/blueprint.json",
           ".template/environment-needs.json",
           ".template/generation.json",
         ]) {
@@ -551,8 +553,7 @@ export function deriveVerificationPlans(): readonly VerificationPlan[] {
           definition: scenario.addition,
           plan: planGeneratedRepositoryPackageAddition({
             definition: scenario.addition,
-            context,
-            blueprint: initialization.blueprint,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName,
             packagePath,
           }),

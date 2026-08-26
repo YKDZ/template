@@ -8,6 +8,7 @@ import { parseDocument } from "yaml";
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
 } from "#template-builtin-presets";
@@ -870,7 +871,7 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
     try {
       const context = createGenerationContext({
         targetDir: projectDir,
-        scope: "github-policy",
+        defaultPackageScope: "github-policy",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       });
       const initialization = planGeneratedRepositoryInitialization({
@@ -885,8 +886,7 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
       if (scenario.addition !== undefined) {
         const addition = planGeneratedRepositoryPackageAddition({
           definition: scenario.addition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: `policy-${scenario.addition.metadata.name}`,
         });
         const result = await reconcileAndApplyProjectProjections({

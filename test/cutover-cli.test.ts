@@ -3,6 +3,7 @@ import {
   readFile,
   readdir,
   readlink,
+  rename,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,13 +13,16 @@ import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 import { builtInPresetRegistry } from "#template-builtin-presets";
-import type { PackageRole } from "#template-core/project-blueprint-v2";
+import type { PackageRole } from "#template-core/project-blueprint";
 
 function requireAddableDefinitionForRole(targetDir: string, role: PackageRole) {
   const context = {
     targetDir,
-    projectName: path.basename(targetDir),
-    scope: "acme",
+    repositoryName: path.basename(targetDir),
+    defaultPackageScope: "acme",
+    foundationPackages: {
+      typescriptConfiguration: { name: "@acme/typescript-config" },
+    },
     toolchain: {
       nodeLtsMajor: "24",
       packageManagerPin: "pnpm@11.11.0",
@@ -105,6 +109,244 @@ describe("cut-over CLI", () => {
     await expect(
       readFile(path.join(target, "packages/second/package.json"), "utf8"),
     ).resolves.toContain('"name": "@acme/second"');
+  });
+
+  it("adds from persisted repository identity and default scope after the directory is renamed", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-renamed-repository-"),
+    );
+    const original = path.join(workspace, "recorded-repository");
+    const renamed = path.join(workspace, "different-directory-name");
+    const cli = path.resolve("packages/cli/src/cli.ts");
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "init",
+        original,
+        "--preset",
+        addablePreset.metadata.name,
+        "--scope",
+        "persisted-scope",
+        "--yes",
+      ],
+      { env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" } },
+    );
+    await rename(original, renamed);
+
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "add",
+        "package",
+        "--preset",
+        addablePreset.metadata.name,
+        "--name",
+        "after-rename",
+      ],
+      {
+        cwd: renamed,
+        env: {
+          TEMPLATE_TOOLCHAIN_RESOLUTION: "online",
+          TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: "http://127.0.0.1:1",
+          TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: "http://127.0.0.1:1",
+        },
+      },
+    );
+
+    const generation = JSON.parse(
+      await readFile(path.join(renamed, ".template/generation.json"), "utf8"),
+    ) as Record<string, unknown>;
+    expect(generation).toMatchObject({
+      schemaVersion: 2,
+      repositoryName: "recorded-repository",
+      defaultPackageScope: "persisted-scope",
+    });
+    await expect(
+      readFile(
+        path.join(renamed, "packages/after-rename/package.json"),
+        "utf8",
+      ),
+    ).resolves.toContain('"name": "@persisted-scope/after-rename"');
+  });
+
+  it("rejects an old Generation Record before planning and leaves the repository byte-identical", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-old-generation-record-"),
+    );
+    const target = path.join(workspace, "project");
+    const cli = path.resolve("packages/cli/src/cli.ts");
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "init",
+        target,
+        "--preset",
+        addablePreset.metadata.name,
+        "--scope",
+        "acme",
+        "--yes",
+      ],
+      { env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" } },
+    );
+    const generationPath = path.join(target, ".template/generation.json");
+    const generation = JSON.parse(
+      await readFile(generationPath, "utf8"),
+    ) as Record<string, unknown>;
+    await writeFile(
+      generationPath,
+      `${JSON.stringify({ ...generation, schemaVersion: 1 }, null, 2)}\n`,
+    );
+    const before = await workspaceSnapshot(target);
+
+    const result = await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "add",
+        "package",
+        "--preset",
+        addablePreset.metadata.name,
+        "--name",
+        "blocked",
+      ],
+      { cwd: target, reject: false },
+    );
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Unsupported Generation Record schema version 1; expected 2",
+    );
+    expect(await workspaceSnapshot(target)).toEqual(before);
+  });
+
+  it("uses controlled Local Template Metadata changes instead of preset or cwd identity for the next add", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-add-metadata-source-of-truth-"),
+    );
+    const target = path.join(workspace, "repository-identity");
+    const cli = path.resolve("packages/cli/src/cli.ts");
+    const persistedPackagePreset = requireAddableDefinitionForRole(
+      target,
+      "shared-library",
+    );
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "init",
+        target,
+        "--preset",
+        persistedPackagePreset.metadata.name,
+        "--scope",
+        "persisted-scope",
+        "--yes",
+      ],
+      { env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" } },
+    );
+    const blueprintPath = path.join(target, ".template/blueprint.json");
+    const generationPath = path.join(target, ".template/generation.json");
+    const blueprint = JSON.parse(await readFile(blueprintPath, "utf8")) as {
+      packages: { name: string; path: string; role: string }[];
+    } & Record<string, unknown>;
+    const primary = blueprint.packages.find(
+      (definition) => definition.path !== "packages/typescript-config",
+    )!;
+    const persistedPrimary = {
+      ...primary,
+      name: "public-library",
+      path: "packages/public-library",
+    };
+    await rename(
+      path.join(target, primary.path),
+      path.join(target, persistedPrimary.path),
+    );
+    const manifestPath = path.join(
+      target,
+      persistedPrimary.path,
+      "package.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify(
+        { ...manifest, name: persistedPrimary.name, private: false },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      blueprintPath,
+      `${JSON.stringify(
+        {
+          ...blueprint,
+          packages: blueprint.packages.map((definition) =>
+            definition.path === primary.path ? persistedPrimary : definition,
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+      packages: { path: string }[];
+    } & Record<string, unknown>;
+    await writeFile(
+      generationPath,
+      `${JSON.stringify(
+        {
+          ...generation,
+          packages: generation.packages.map((record) =>
+            record.path === primary.path
+              ? { ...record, path: persistedPrimary.path }
+              : record,
+          ),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await execa(
+      "node",
+      [
+        "--conditions=source",
+        cli,
+        "add",
+        "package",
+        "--preset",
+        persistedPackagePreset.metadata.name,
+        "--name",
+        "utilities",
+      ],
+      { cwd: target },
+    );
+
+    const persistedBlueprint = JSON.parse(
+      await readFile(blueprintPath, "utf8"),
+    ) as { packages: { name: string; path: string }[] };
+    expect(persistedBlueprint.packages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining(persistedPrimary),
+        expect.objectContaining({
+          name: "@persisted-scope/utilities",
+          path: "packages/utilities",
+        }),
+      ]),
+    );
+    await expect(readFile(manifestPath, "utf8")).resolves.toContain(
+      '"name": "public-library"',
+    );
   });
 
   it("previews only Addition Delta actions as JSON without writing the workspace", async () => {
@@ -523,7 +765,7 @@ describe("cut-over CLI", () => {
     expect(help.stdout).not.toContain("preset validate");
   });
 
-  it("plans and persists registry-owned Blueprint v2 metadata without Preset identity", async () => {
+  it("plans and persists registry-owned Blueprint v3 metadata without Preset identity", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cutover-"));
     const target = path.join(workspace, "library");
     const command = ["--conditions=source", "packages/cli/src/cli.ts"];
@@ -543,8 +785,13 @@ describe("cut-over CLI", () => {
     );
     const planned: unknown = JSON.parse(dryRun.stdout);
     expect(planned).toMatchObject({
-      blueprint: { schemaVersion: 2 },
-      generationRecord: { preset: preset.metadata.name },
+      blueprint: { schemaVersion: 3 },
+      generationRecord: {
+        schemaVersion: 2,
+        repositoryName: "library",
+        defaultPackageScope: "library",
+        preset: preset.metadata.name,
+      },
     });
     expect(JSON.stringify(planned)).not.toContain('"blueprint":{"preset"');
 
@@ -558,7 +805,7 @@ describe("cut-over CLI", () => {
     const blueprint = JSON.parse(
       await readFile(path.join(target, ".template/blueprint.json"), "utf8"),
     ) as Record<string, unknown>;
-    expect(blueprint).toMatchObject({ schemaVersion: 2 });
+    expect(blueprint).toMatchObject({ schemaVersion: 3 });
     expect(blueprint).not.toHaveProperty("preset");
     expect(blueprint).not.toHaveProperty("features");
   });

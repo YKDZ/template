@@ -16,12 +16,14 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
 } from "#template-builtin-presets";
 import { dockerEngineEnvironmentNeed } from "#template-core/module-graph";
 import type { PackageContribution } from "#template-core/package-contribution";
+import { definePackageContributionReplayAdapter } from "#template-core/preset-definition";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import {
   createTemplateSourceHandle,
@@ -53,13 +55,17 @@ async function snapshot(
 }
 
 function context(targetDir: string): BuiltInGenerationContext {
-  return createGenerationContext({ targetDir, scope: "demo", toolchain });
+  return createGenerationContext({
+    targetDir,
+    defaultPackageScope: "demo",
+    toolchain,
+  });
 }
 
 function diagnosticAddition(): BuiltInPresetDefinition {
   const context = createGenerationContext({
     targetDir: "generated-repository/diagnostic-addition-capability",
-    scope: "demo",
+    defaultPackageScope: "demo",
     toolchain,
   });
   const definition = builtInPresetRegistry.all().find((candidate) => {
@@ -88,7 +94,7 @@ function diagnosticAddition(): BuiltInPresetDefinition {
 function baseDefinition(): BuiltInPresetDefinition {
   const context = createGenerationContext({
     targetDir: "generated-repository/no-diagnostic-base",
-    scope: "demo",
+    defaultPackageScope: "demo",
     toolchain,
   });
   const definition = builtInPresetRegistry.all().find(
@@ -111,7 +117,7 @@ function diagnosticDeploymentContribution(options: {
   readonly packageLeafName: string;
   readonly packagePath: string;
 }): PackageContribution {
-  const name = `@${options.context.scope}/${options.packageLeafName}`;
+  const name = `@${options.context.defaultPackageScope}/${options.packageLeafName}`;
   const owner = {
     kind: "package-boundary" as const,
     path: options.packagePath,
@@ -145,6 +151,23 @@ function diagnosticDeploymentContribution(options: {
   };
 }
 
+const diagnosticDeploymentReplayAdapter =
+  definePackageContributionReplayAdapter({
+    identity: "diagnostic-deployment",
+    replay: ({ context, packageDefinition, packageLeafName }) => {
+      const contribution = diagnosticDeploymentContribution({
+        context,
+        packageLeafName,
+        packagePath: packageDefinition.path,
+      });
+      return {
+        ...contribution,
+        definition: packageDefinition,
+        manifest: { ...contribution.manifest, name: packageDefinition.name },
+      };
+    },
+  });
+
 const diagnosticDeploymentAddition: BuiltInPresetDefinition = {
   metadata: {
     name: "synthetic-diagnostic-deployment-addition",
@@ -153,9 +176,10 @@ const diagnosticDeploymentAddition: BuiltInPresetDefinition = {
   },
   source,
   plannerSourceFile: import.meta.filename,
+  packageContributionReplayAdapters: [diagnosticDeploymentReplayAdapter],
   blueprint(generationContext) {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         diagnosticDeploymentContribution({
           context: generationContext,
@@ -166,11 +190,13 @@ const diagnosticDeploymentAddition: BuiltInPresetDefinition = {
     };
   },
   planInitialization(generationContext) {
-    return diagnosticDeploymentContribution({
-      context: generationContext,
-      packageLeafName: "deployment",
-      packagePath: "services/deployment",
-    });
+    return diagnosticDeploymentReplayAdapter.identify(
+      diagnosticDeploymentContribution({
+        context: generationContext,
+        packageLeafName: "deployment",
+        packagePath: "services/deployment",
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `services/${packageLeafName}`;
@@ -180,11 +206,13 @@ const diagnosticDeploymentAddition: BuiltInPresetDefinition = {
     packageLeafName,
     packagePath,
   }) {
-    return diagnosticDeploymentContribution({
-      context: generationContext,
-      packageLeafName,
-      packagePath,
-    });
+    return diagnosticDeploymentReplayAdapter.identify(
+      diagnosticDeploymentContribution({
+        context: generationContext,
+        packageLeafName,
+        packagePath,
+      }),
+    );
   },
 };
 
@@ -198,7 +226,7 @@ async function initializedBase(targetDir: string) {
     targetRoot: targetDir,
     operations: [...initialization.operations],
   });
-  return { generationContext, initialization };
+  return { generationContext };
 }
 
 describe("diagnostic Package Addition", () => {
@@ -208,8 +236,7 @@ describe("diagnostic Package Addition", () => {
     );
     const targetDir = path.join(workspace, "project");
     try {
-      const { generationContext, initialization } =
-        await initializedBase(targetDir);
+      const { generationContext } = await initializedBase(targetDir);
       const workflowPath = path.join(targetDir, ".github/workflows/check.yml");
       await writeFile(
         workflowPath,
@@ -217,8 +244,9 @@ describe("diagnostic Package Addition", () => {
       );
       const first = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
-        context: generationContext,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "web",
         packagePath: "apps/web",
       });
@@ -262,8 +290,9 @@ describe("diagnostic Package Addition", () => {
 
       const second = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
-        context: generationContext,
-        blueprint: first.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "admin",
         packagePath: "apps/admin",
       });
@@ -287,8 +316,9 @@ describe("diagnostic Package Addition", () => {
 
       const repeated = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
-        context: generationContext,
-        blueprint: second.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "admin",
         packagePath: "apps/admin",
       });
@@ -325,14 +355,13 @@ describe("diagnostic Package Addition", () => {
         ["admin", "web"],
       ] as const) {
         const targetDir = path.join(workspace, names.join("-"));
-        const { generationContext, initialization } =
-          await initializedBase(targetDir);
-        let blueprint = initialization.blueprint;
+        const { generationContext } = await initializedBase(targetDir);
         for (const name of names) {
           const addition = planGeneratedRepositoryPackageAddition({
             definition: diagnosticAddition(),
-            context: generationContext,
-            blueprint,
+            localTemplateMetadata: loadLocalTemplateMetadata(
+              generationContext.targetDir,
+            ),
             packageLeafName: name,
             packagePath: `apps/${name}`,
           });
@@ -342,7 +371,6 @@ describe("diagnostic Package Addition", () => {
               ...addition.projectProjections,
             }),
           ).toMatchObject({ ok: true });
-          blueprint = addition.blueprint;
         }
         rendered.push(
           await readFile(
@@ -354,15 +382,15 @@ describe("diagnostic Package Addition", () => {
       expect(rendered[0]).toBe(rendered[1]);
 
       const targetDir = path.join(workspace, "no-diagnostic");
-      const { generationContext, initialization } =
-        await initializedBase(targetDir);
+      const { generationContext } = await initializedBase(targetDir);
       const workflowPath = path.join(targetDir, ".github/workflows/check.yml");
       await rm(workflowPath);
       await mkdir(workflowPath);
       const addition = planGeneratedRepositoryPackageAddition({
         definition: baseDefinition(),
-        context: generationContext,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "utility",
         packagePath: "packages/utility",
       });
@@ -386,8 +414,7 @@ describe("diagnostic Package Addition", () => {
     );
     const targetDir = path.join(workspace, "project");
     try {
-      const { generationContext, initialization } =
-        await initializedBase(targetDir);
+      const { generationContext } = await initializedBase(targetDir);
       const workflowPath = path.join(targetDir, ".github/workflows/check.yml");
       await writeFile(
         workflowPath,
@@ -399,8 +426,9 @@ describe("diagnostic Package Addition", () => {
       const before = await snapshot(targetDir);
       const conflict = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
-        context: generationContext,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "web",
         packagePath: "apps/web",
       });
@@ -429,8 +457,9 @@ describe("diagnostic Package Addition", () => {
       );
       const combined = planGeneratedRepositoryPackageAddition({
         definition: diagnosticDeploymentAddition,
-        context: generationContext,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "deployment",
         packagePath: "services/deployment",
       });

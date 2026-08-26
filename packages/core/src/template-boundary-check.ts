@@ -3,7 +3,7 @@ import path from "node:path";
 
 import ts from "typescript";
 
-import type { ProjectBlueprintV2 } from "./project-blueprint-v2.ts";
+import type { ProjectBlueprint } from "./project-blueprint.ts";
 import { resolveTemplateSource, type RenderOperation } from "./renderer.ts";
 
 export type TemplateBoundaryViolation = {
@@ -53,7 +53,7 @@ export type CheckTemplateSourceBoundaryOptions = {
     readonly planningContribution?: string;
     readonly generatedPath: ".github/workflows/check.yml";
     /** The original Blueprint, before Foundation composes workflow facts. */
-    readonly blueprint: ProjectBlueprintV2;
+    readonly blueprint: ProjectBlueprint;
     /** Raw Package Contribution declarations, not the composed plan field. */
     readonly diagnosticArtifactDeclarations: readonly unknown[];
     readonly operations: readonly RenderOperation[];
@@ -1044,7 +1044,7 @@ function isSafePackageBoundaryPath(value: string): boolean {
  * than the production CI artifact composer or its composed plan output.
  */
 function expectedDiagnosticOwnerPaths(options: {
-  readonly blueprint: ProjectBlueprintV2;
+  readonly blueprint: ProjectBlueprint;
   readonly diagnosticArtifactDeclarations: readonly unknown[];
 }): { readonly valid: boolean; readonly value: string } {
   const blueprintPackagePaths = options.blueprint.packages.map(

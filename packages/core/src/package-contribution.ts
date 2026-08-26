@@ -8,7 +8,7 @@ import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
 } from "./module-graph.ts";
-import type { PackageDefinition } from "./project-blueprint-v2.ts";
+import type { PackageDefinition } from "./project-blueprint.ts";
 import type { DependencyMaintenancePolicy } from "./project-github.ts";
 import type { RenderOperation, TemplateSourceHandle } from "./renderer.ts";
 
@@ -30,6 +30,10 @@ export type FoundationContribution = {
   readonly editorCapabilities: readonly EditorCustomizationCapability[];
   /** Ecosystems and paths whose maintenance belongs in the coordinated root policy. */
   readonly dependencyMaintenance: DependencyMaintenancePolicy;
+  /** Explicit dependency on the Foundation-owned TypeScript policy Package. */
+  readonly typescriptConfigurationPackage?: {
+    readonly dependency: "required";
+  };
   /** Workspace membership patterns contributed by package boundaries. */
   readonly workspacePackageGlobs?: readonly string[];
   /** Dependency Catalog entries required by package-owned manifests. */

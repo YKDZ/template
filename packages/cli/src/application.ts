@@ -4,15 +4,12 @@ import path from "node:path";
 import {
   builtInPresetRegistry,
   createGenerationContext,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
   templateSources,
 } from "#template-builtin-presets";
-import {
-  assertProjectBlueprintV2,
-  validateProjectBlueprintV2,
-  type ProjectBlueprintV2,
-} from "#template-core/project-blueprint-v2";
+import { validateProjectBlueprint } from "#template-core/project-blueprint";
 import {
   reconcileAndApplyProjectProjections,
   type ProjectProjectionAction,
@@ -216,21 +213,6 @@ export function renderPackageAdditionResult(
   ].join("\n");
 }
 
-async function readBlueprint(filePath: string): Promise<ProjectBlueprintV2> {
-  const value: unknown = JSON.parse(await readFile(filePath, "utf8"));
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "schemaVersion" in value &&
-    value.schemaVersion === 1
-  ) {
-    throw new Error(
-      "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
-    );
-  }
-  return assertProjectBlueprintV2(value);
-}
-
 export async function validateBlueprintFile(
   filePath: string,
   runtime: ApplicationRuntime,
@@ -238,17 +220,7 @@ export async function validateBlueprintFile(
   const value: unknown = JSON.parse(
     await readFile(path.resolve(runtime.cwd, filePath), "utf8"),
   );
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "schemaVersion" in value &&
-    value.schemaVersion === 1
-  ) {
-    throw new Error(
-      "Unsupported Local Template Metadata: Blueprint version 1 is not supported",
-    );
-  }
-  const result = validateProjectBlueprintV2(value);
+  const result = validateProjectBlueprint(value);
   if (!result.ok) {
     throw new Error(
       result.issues
@@ -259,25 +231,6 @@ export async function validateBlueprintFile(
   return "Blueprint is valid";
 }
 
-function deriveExistingPackageScope(blueprint: ProjectBlueprintV2): string {
-  const scopes = new Set<string>();
-  for (const definition of blueprint.packages) {
-    const match = definition.name.match(/^@([^/]+)\//);
-    if (!match?.[1]) {
-      throw new Error(
-        `Package Addition requires a scoped Package Definition: ${definition.name}`,
-      );
-    }
-    scopes.add(match[1]);
-  }
-  if (scopes.size !== 1) {
-    throw new Error(
-      `Package Addition requires exactly one existing npm scope; found ${[...scopes].join(", ") || "none"}`,
-    );
-  }
-  return [...scopes][0]!;
-}
-
 export async function runInit(
   options: InitCommandOptions,
   runtime: ApplicationRuntime,
@@ -286,7 +239,9 @@ export async function runInit(
   const toolchain = await resolveToolchain(runtime.env);
   const context = createGenerationContext({
     targetDir: path.resolve(runtime.cwd, options.dir),
-    ...(options.scope ? { scope: normalizeNpmScope(options.scope) } : {}),
+    ...(options.scope
+      ? { defaultPackageScope: normalizeNpmScope(options.scope) }
+      : {}),
     toolchain: {
       nodeLtsMajor: toolchain.nodeLtsMajor.value,
       packageManagerPin: toolchain.packageManagerPin.value,
@@ -376,23 +331,11 @@ export async function runAddPackage(
   options: AddPackageCommandOptions,
   runtime: ApplicationRuntime,
 ): Promise<ApplicationCommandResult> {
-  const blueprint = await readBlueprint(
-    path.join(runtime.cwd, ".template/blueprint.json"),
-  );
-  const toolchain = await resolveToolchain(runtime.env);
+  const localTemplateMetadata = loadLocalTemplateMetadata(runtime.cwd);
   const definition = builtInPresetRegistry.require(options.preset);
-  const context = createGenerationContext({
-    targetDir: runtime.cwd,
-    scope: deriveExistingPackageScope(blueprint),
-    toolchain: {
-      nodeLtsMajor: toolchain.nodeLtsMajor.value,
-      packageManagerPin: toolchain.packageManagerPin.value,
-    },
-  });
   const plan = planGeneratedRepositoryPackageAddition({
     definition,
-    context,
-    blueprint,
+    localTemplateMetadata,
     packageLeafName: options.name,
     ...(options.path ? { packagePath: options.path } : {}),
     ...(options.linkFrom.length > 0 ? { linkFrom: options.linkFrom } : {}),

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,12 +40,19 @@ import {
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
+  InitialPackageDefinitionLookup,
+  PackageContributionReplayAdapter,
+  PlannedPackageContribution,
 } from "#template-core/preset-definition";
 import {
-  assertProjectBlueprintV2,
-  validateProjectBlueprintV2 as validateCoreProjectBlueprintV2,
-  type ProjectBlueprintV2,
-} from "#template-core/project-blueprint-v2";
+  assertProjectBlueprint,
+  assertProjectBlueprintDraft,
+  validateProjectBlueprint as validateCoreProjectBlueprint,
+  type PackageDefinition,
+  type PackageDefinitionId,
+  type PersistedPackageDefinition,
+  type ProjectBlueprint,
+} from "#template-core/project-blueprint";
 import type { DependencyMaintenancePolicy } from "#template-core/project-github";
 import {
   projectCheckWorkflowTemplateSource,
@@ -64,12 +72,17 @@ import {
   type TemplateSourceHandle,
 } from "#template-core/renderer";
 
+import {
+  parseGenerationRecord,
+  type GeneratedPackagePlanningRecord,
+  type GenerationRecord,
+} from "./generation-record.ts";
 import { rustBinDefinition } from "./rust-bin/definition.ts";
 import { githubCliDevelopmentContainerToolLayer } from "./shared/development-container.ts";
 import {
   typescriptConfigContribution,
   typescriptConfigPackageDefinition,
-  typescriptConfigPackageName,
+  typescriptConfigReplayAdapter,
 } from "./shared/typescript.ts";
 import { vuePnpmDependencyOverrides } from "./shared/vue.ts";
 import { templateSources } from "./template-sources.ts";
@@ -81,10 +94,12 @@ import { vueHonoAppDefinition } from "./vue-hono-app/definition.ts";
 
 export type {
   PackageDefinition,
+  PackageDefinitionId,
   PackageLinkIntent,
   PackageRole,
-  ProjectBlueprintV2,
-} from "#template-core/project-blueprint-v2";
+  PersistedPackageDefinition,
+  ProjectBlueprint,
+} from "#template-core/project-blueprint";
 export type { PackageContribution } from "#template-core/package-contribution";
 
 export type BuiltInGenerationContext = GenerationContext;
@@ -94,28 +109,11 @@ export type NextStepInstruction = {
   readonly display: string;
 };
 
-type GeneratedPackagePlanningRecord = {
-  readonly path: string;
-  readonly definitionName: string;
-  readonly planningContribution:
-    | "foundationPlan"
-    | "planInitialization"
-    | "planPackageAddition";
-};
-
-type GenerationRecord = {
-  readonly schemaVersion: 1;
-  readonly preset: string;
-  readonly templateVersion: "0.0.0";
-  readonly toolchain: BuiltInGenerationContext["toolchain"];
-  readonly packages: readonly GeneratedPackagePlanningRecord[];
-};
-
 export type GeneratedRepositoryPlan = {
   readonly definitionName: string;
   readonly plannerSourceFile: string;
   readonly planningContribution: "planInitialization" | "planPackageAddition";
-  readonly blueprint: ProjectBlueprintV2;
+  readonly blueprint: ProjectBlueprint;
   readonly generationRecord: GenerationRecord;
   readonly operations: readonly RenderOperation[];
   readonly reconciliation: readonly ProjectProjectionReconciliation[];
@@ -133,6 +131,21 @@ export type GeneratedRepositoryPlan = {
   readonly dependencyCatalog: Readonly<Record<string, string>>;
   readonly dependencyMaintenancePolicy: DependencyMaintenancePolicy;
   readonly nextStepInstructions: readonly NextStepInstruction[];
+};
+
+const localTemplateMetadataStateKey: unique symbol = Symbol(
+  "localTemplateMetadataState",
+);
+
+export type LocalTemplateMetadata = {
+  readonly blueprint: ProjectBlueprint;
+  readonly context: BuiltInGenerationContext;
+  /** Opaque Foundation-owned facts; callers pass the whole metadata value. */
+  readonly [localTemplateMetadataStateKey]: {
+    readonly generationRecord: GenerationRecord;
+    readonly foundationContribution: PlannedPackageContribution;
+    readonly packageContributions: readonly PlannedPackageContribution[];
+  };
 };
 
 export type GeneratedRepositoryPackageAdditionPlan = GeneratedRepositoryPlan & {
@@ -181,8 +194,8 @@ export function resolveBuiltInTemplateSource(
   return resolveTemplateSource(source, relativePath);
 }
 
-export function validateProjectBlueprintV2(value: unknown) {
-  return validateCoreProjectBlueprintV2(value);
+export function validateProjectBlueprint(value: unknown) {
+  return validateCoreProjectBlueprint(value);
 }
 
 class PresetRegistry {
@@ -196,6 +209,21 @@ class PresetRegistry {
       throw new Error(
         "Preset Registry requires unique non-empty Definition names",
       );
+    }
+    for (const definition of definitions) {
+      const adapterIdentities =
+        definition.packageContributionReplayAdapters.map(
+          (adapter) => adapter.identity,
+        );
+      if (
+        adapterIdentities.length === 0 ||
+        adapterIdentities.some((identity) => identity.length === 0) ||
+        new Set(adapterIdentities).size !== adapterIdentities.length
+      ) {
+        throw new Error(
+          `Built-in Preset ${definition.metadata.name} requires unique non-empty Package Contribution replay adapters`,
+        );
+      }
     }
     this.#definitions = [...definitions].toSorted((left, right) =>
       left.metadata.name.localeCompare(right.metadata.name),
@@ -224,14 +252,20 @@ export const builtInPresetRegistry = new PresetRegistry([
 
 export function createGenerationContext(options: {
   readonly targetDir: string;
-  readonly scope?: string;
+  readonly defaultPackageScope?: string;
   readonly toolchain: BuiltInGenerationContext["toolchain"];
 }): BuiltInGenerationContext {
-  const projectName = path.basename(path.resolve(options.targetDir));
+  const repositoryName = path.basename(path.resolve(options.targetDir));
+  const defaultPackageScope = options.defaultPackageScope ?? repositoryName;
   return {
     targetDir: options.targetDir,
-    projectName,
-    scope: options.scope ?? projectName,
+    repositoryName,
+    defaultPackageScope,
+    foundationPackages: {
+      typescriptConfiguration: {
+        name: `@${defaultPackageScope}/typescript-config`,
+      },
+    },
     toolchain: options.toolchain,
   };
 }
@@ -240,155 +274,178 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function readGenerationRecord(options: {
-  readonly context: BuiltInGenerationContext;
-  readonly blueprint: ProjectBlueprintV2;
-}): GenerationRecord {
-  const generationPath = path.join(
-    options.context.targetDir,
-    ".template/generation.json",
-  );
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(generationPath, "utf8"));
-  } catch (error) {
-    throw new Error(
-      `Package Addition requires valid Generation Record facts: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (isRecord(value)) {
-    for (const key of Object.keys(value)) {
-      if (
-        ![
-          "schemaVersion",
-          "preset",
-          "templateVersion",
-          "toolchain",
-          "packages",
-        ].includes(key)
-      ) {
-        throw new Error(
-          `Package Addition Generation Record contains unknown field: ${key}`,
-        );
-      }
-    }
-    if (isRecord(value.toolchain)) {
-      for (const key of Object.keys(value.toolchain)) {
-        if (!["nodeLtsMajor", "packageManagerPin"].includes(key)) {
-          throw new Error(
-            `Package Addition Generation Record toolchain contains unknown field: ${key}`,
-          );
-        }
-      }
-    }
-  }
-  if (
-    !isRecord(value) ||
-    value.schemaVersion !== 1 ||
-    typeof value.preset !== "string" ||
-    value.templateVersion !== "0.0.0" ||
-    !isRecord(value.toolchain) ||
-    typeof value.toolchain.nodeLtsMajor !== "string" ||
-    typeof value.toolchain.packageManagerPin !== "string" ||
-    !Array.isArray(value.packages)
-  ) {
-    throw new Error(
-      "Package Addition requires a supported Generation Record in .template/generation.json",
-    );
-  }
-  const packages: GeneratedPackagePlanningRecord[] = [];
-  for (const [index, item] of value.packages.entries()) {
-    if (isRecord(item)) {
-      for (const key of Object.keys(item)) {
-        if (!["path", "definitionName", "planningContribution"].includes(key)) {
-          throw new Error(
-            `Package Addition Generation Record packages[${index}] contains unknown field: ${key}`,
-          );
-        }
-      }
-    }
-    if (
-      !isRecord(item) ||
-      typeof item.path !== "string" ||
-      typeof item.definitionName !== "string" ||
-      !["foundationPlan", "planInitialization", "planPackageAddition"].includes(
-        String(item.planningContribution),
-      )
-    ) {
-      throw new Error(
-        `Package Addition requires valid package planning facts at .template/generation.json packages[${index}]`,
-      );
-    }
-    packages.push(item as GeneratedPackagePlanningRecord);
-  }
-  const blueprintPaths = options.blueprint.packages
-    .map((definition) => definition.path)
-    .toSorted();
-  const recordedPaths = packages.map((item) => item.path).toSorted();
-  if (
-    JSON.stringify(blueprintPaths) !== JSON.stringify(recordedPaths) ||
-    new Set(recordedPaths).size !== recordedPaths.length
-  ) {
-    throw new Error(
-      "Package Addition requires Generation Record packages to match the current Project Blueprint",
-    );
-  }
-  const generationRecord: GenerationRecord = {
-    schemaVersion: 1,
-    preset: value.preset,
-    templateVersion: value.templateVersion,
-    toolchain: {
-      nodeLtsMajor: value.toolchain.nodeLtsMajor,
-      packageManagerPin: value.toolchain.packageManagerPin,
-    },
-    packages,
-  };
-  assertGenerationRecordFoundationConsistency({
-    context: options.context,
-    blueprint: options.blueprint,
-    generationRecord,
-  });
-  return generationRecord;
+type PackageCreationProvenance = Pick<
+  GeneratedPackagePlanningRecord,
+  "definitionName" | "planningContribution" | "contributionIdentity"
+>;
+
+const packageDefinitionIdDomain = "ykdz.template.package-definition-id.v1";
+
+function packageDefinitionIdDigest(value: unknown): PackageDefinitionId {
+  return `package-${createHash("sha256")
+    .update(JSON.stringify(value))
+    .digest("hex")}`;
 }
 
-function assertGenerationRecordFoundationConsistency(options: {
-  readonly context: BuiltInGenerationContext;
-  readonly blueprint: ProjectBlueprintV2;
+function allocatePackageDefinitionId(options: {
+  readonly definition: PackageDefinition;
+  readonly provenance: PackageCreationProvenance;
+  readonly occupiedIds: ReadonlySet<PackageDefinitionId>;
+}): PackageDefinitionId {
+  const creationFacts = {
+    domain: packageDefinitionIdDomain,
+    definition: {
+      name: options.definition.name,
+      path: options.definition.path,
+      role: options.definition.role,
+    },
+    provenance: {
+      definitionName: options.provenance.definitionName,
+      planningContribution: options.provenance.planningContribution,
+      contributionIdentity: options.provenance.contributionIdentity,
+    },
+  };
+  let nonce = 0;
+  while (true) {
+    const candidate = packageDefinitionIdDigest(
+      nonce === 0
+        ? creationFacts
+        : {
+            creationFacts,
+            occupiedIds: [...options.occupiedIds].toSorted(),
+            nonce,
+          },
+    );
+    if (!options.occupiedIds.has(candidate)) return candidate;
+    nonce += 1;
+  }
+}
+
+function persistPackageDefinition(options: {
+  readonly definition: PackageDefinition;
+  readonly provenance: PackageCreationProvenance;
+  readonly occupiedIds: Set<PackageDefinitionId>;
+}): PersistedPackageDefinition {
+  const packageDefinitionId = allocatePackageDefinitionId(options);
+  options.occupiedIds.add(packageDefinitionId);
+  return { ...options.definition, packageDefinitionId };
+}
+
+function readGenerationRecord(options: {
+  readonly repositoryRoot: string;
+}): GenerationRecord {
+  const generationPath = path.join(
+    options.repositoryRoot,
+    ".template/generation.json",
+  );
+  return parseGenerationRecord(
+    readJsonFile(generationPath, "Generation Record facts"),
+  );
+}
+
+function readJsonFile(filePath: string, label: string): unknown {
+  try {
+    return JSON.parse(readFileSync(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Package Addition requires valid ${label}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+type FoundationTypeScriptConfigurationPackageFact = {
+  readonly record: GeneratedPackagePlanningRecord;
+  readonly definition: PackageDefinition;
+};
+
+type PreparedPackageReplay = {
+  readonly record: GeneratedPackagePlanningRecord;
+  readonly definition: PackageDefinition;
+  readonly owner: string;
+  readonly adapter: PackageContributionReplayAdapter;
+  readonly initialPackages: InitialPackageDefinitionLookup;
+  readonly kind: "foundation" | "package";
+};
+
+type LocalTemplateMetadataPreflight = {
+  readonly foundationPackage: FoundationTypeScriptConfigurationPackageFact;
+  readonly replays: readonly PreparedPackageReplay[];
+};
+
+function barePackageDefinition(
+  definition: PersistedPackageDefinition,
+): PackageDefinition {
+  return {
+    name: definition.name,
+    path: definition.path,
+    role: definition.role,
+  };
+}
+
+function preflightLocalTemplateMetadata(options: {
+  readonly blueprint: ProjectBlueprint;
   readonly generationRecord: GenerationRecord;
-}): void {
-  const configDefinition = typescriptConfigPackageDefinition(options.context);
-  const foundationRecords = options.generationRecord.packages.filter(
-    (record) => record.planningContribution === "foundationPlan",
+}): LocalTemplateMetadataPreflight {
+  const definitionsById = new Map(
+    options.blueprint.packages.map((definition) => [
+      definition.packageDefinitionId,
+      definition,
+    ]),
   );
-  if (
-    foundationRecords.length !== 1 ||
-    foundationRecords[0]!.definitionName !== "foundation" ||
-    foundationRecords[0]!.path !== configDefinition.path
-  ) {
-    throw new Error(
-      "Package Addition Generation Record must contain exactly one Foundation TypeScript configuration provenance record",
-    );
-  }
-  const initialRecords = options.generationRecord.packages.filter(
-    (record) => record.planningContribution === "planInitialization",
+  const joinedPackages = options.generationRecord.packages.map((record) => {
+    const definition = definitionsById.get(record.packageDefinitionId);
+    if (definition === undefined) {
+      throw new Error(
+        `Generation Record Package Definition ID ${record.packageDefinitionId} has no matching Project Blueprint Package Definition`,
+      );
+    }
+    if (record.path !== definition.path) {
+      throw new Error(
+        `Generation Record path witness ${record.path} for Package Definition ID ${record.packageDefinitionId} conflicts with Project Blueprint path ${definition.path}`,
+      );
+    }
+    return { record, definition: barePackageDefinition(definition) };
+  });
+  const recordedIds = new Set(
+    options.generationRecord.packages.map(
+      (record) => record.packageDefinitionId,
+    ),
   );
-  if (initialRecords.length === 0) {
-    throw new Error(
-      `Package Addition Generation Record preset ${options.generationRecord.preset} has no initial Package provenance`,
-    );
-  }
-  const conflictingRecord = initialRecords.find(
-    (record) => record.definitionName !== options.generationRecord.preset,
+  const unrecordedDefinition = options.blueprint.packages.find(
+    (definition) => !recordedIds.has(definition.packageDefinitionId),
   );
-  if (conflictingRecord !== undefined) {
+  if (unrecordedDefinition !== undefined) {
     throw new Error(
-      `Package Addition Generation Record preset ${options.generationRecord.preset} conflicts with initial Package provenance ${conflictingRecord.definitionName} for Blueprint package ${conflictingRecord.path}`,
+      `Project Blueprint Package Definition ID ${unrecordedDefinition.packageDefinitionId} has no matching Generation Record provenance`,
     );
   }
 
-  let rootDefinition: BuiltInPresetDefinition;
+  const records = options.generationRecord.packages.filter(
+    (record) => record.planningContribution === "foundationPlan",
+  );
+  if (records.length !== 1) {
+    throw new Error(
+      `Package Addition requires exactly one Foundation Package Planning Provenance record; found ${records.length}`,
+    );
+  }
+  const record = records[0]!;
+  if (record.definitionName !== "foundation") {
+    throw new Error(
+      `Foundation Package Planning Provenance at ${record.path} must use definitionName foundation; received ${record.definitionName}`,
+    );
+  }
+  if (record.contributionIdentity !== typescriptConfigReplayAdapter.identity) {
+    throw new Error(
+      `Foundation TypeScript Configuration Package provenance must use contribution identity ${typescriptConfigReplayAdapter.identity}`,
+    );
+  }
+  const foundationPackage = joinedPackages.find(
+    (candidate) => candidate.record === record,
+  )!;
+
+  let initialDefinition: BuiltInPresetDefinition;
   try {
-    rootDefinition = builtInPresetRegistry.require(
+    initialDefinition = builtInPresetRegistry.require(
       options.generationRecord.preset,
     );
   } catch {
@@ -396,43 +453,264 @@ function assertGenerationRecordFoundationConsistency(options: {
       `Package Addition Generation Record preset ${options.generationRecord.preset} is not a registered Built-in Preset`,
     );
   }
-  const initialBlueprint = rootDefinition.blueprint(options.context);
-  assertProjectBlueprintV2(initialBlueprint);
-  const expectedPaths = initialBlueprint.packages
-    .map((definition) => definition.path)
-    .toSorted();
-  const recordedInitialPaths = initialRecords
-    .map((record) => record.path)
-    .toSorted();
-  if (JSON.stringify(recordedInitialPaths) !== JSON.stringify(expectedPaths)) {
+  const initialRecords = options.generationRecord.packages.filter(
+    (candidate) => candidate.planningContribution === "planInitialization",
+  );
+  if (initialRecords.length === 0) {
     throw new Error(
-      `Package Addition Generation Record preset ${options.generationRecord.preset} expects initial Blueprint packages ${expectedPaths.join(", ")}, but initial provenance records ${recordedInitialPaths.join(", ")}`,
+      `Package Addition Generation Record preset ${options.generationRecord.preset} has no initial Package provenance`,
     );
   }
-  for (const expectedDefinition of initialBlueprint.packages) {
-    const currentDefinition = options.blueprint.packages.find(
-      (definition) => definition.path === expectedDefinition.path,
+  const conflictingRecord = initialRecords.find(
+    (candidate) => candidate.definitionName !== options.generationRecord.preset,
+  );
+  if (conflictingRecord !== undefined) {
+    throw new Error(
+      `Package Addition Generation Record preset ${options.generationRecord.preset} conflicts with initial Package provenance ${conflictingRecord.definitionName} for Blueprint package ${conflictingRecord.path}`,
     );
+  }
+
+  const preparedWithoutInitialLookup = joinedPackages.map((candidate) => {
+    if (candidate.record === record) {
+      return {
+        ...candidate,
+        owner: "foundation",
+        adapter: typescriptConfigReplayAdapter,
+        kind: "foundation" as const,
+      };
+    }
+    let definition: BuiltInPresetDefinition;
+    try {
+      definition = builtInPresetRegistry.require(
+        candidate.record.definitionName,
+      );
+    } catch {
+      throw new Error(
+        `Package Addition Generation Record Package Planning Provenance references unknown Built-in Preset ${candidate.record.definitionName} for Blueprint package ${candidate.record.path}`,
+      );
+    }
     if (
-      currentDefinition === undefined ||
-      !packageDefinitionsEqual(currentDefinition, expectedDefinition)
+      candidate.record.planningContribution === "planPackageAddition" &&
+      definition.planPackageAddition === undefined
     ) {
       throw new Error(
-        `Package Addition Generation Record preset ${options.generationRecord.preset} cannot reproduce initial Blueprint Package Definition ${expectedDefinition.name} at ${expectedDefinition.path} (${expectedDefinition.role})`,
+        `Package Addition Generation Record Package Planning Provenance references unsupported Package Addition for Built-in Preset ${candidate.record.definitionName} at ${candidate.record.path}`,
+      );
+    }
+    return {
+      ...candidate,
+      owner: definition.metadata.name,
+      adapter: requireRecordReplayAdapter({
+        owner: definition.metadata.name,
+        adapters: definition.packageContributionReplayAdapters,
+        record: candidate.record,
+      }),
+      kind: "package" as const,
+    };
+  });
+
+  const initialPlanningKeys = initialRecords.map(
+    (candidate) =>
+      `${candidate.definitionName}:${candidate.contributionIdentity}`,
+  );
+  if (new Set(initialPlanningKeys).size !== initialPlanningKeys.length) {
+    throw new Error(
+      "Package Addition Generation Record contains duplicate initialization contribution identity",
+    );
+  }
+  for (const adapter of initialDefinition.packageContributionReplayAdapters) {
+    const matchingRecords = initialRecords.filter(
+      (candidate) => candidate.contributionIdentity === adapter.identity,
+    );
+    if (matchingRecords.length !== 1) {
+      throw new Error(
+        `${initialDefinition.metadata.name} requires exactly one initial ${adapter.identity} Package Contribution provenance record`,
       );
     }
   }
-  for (const expectedIntent of initialBlueprint.packageLinkIntents ?? []) {
-    if (
-      !(options.blueprint.packageLinkIntents ?? []).some((currentIntent) =>
-        packageLinkIntentsEqual(currentIntent, expectedIntent),
-      )
-    ) {
+  const initialDefinitions = new Map(
+    preparedWithoutInitialLookup.flatMap((candidate) =>
+      candidate.record.planningContribution === "planInitialization"
+        ? [[candidate.record.contributionIdentity, candidate.definition]]
+        : [],
+    ),
+  );
+  const initialPackages: InitialPackageDefinitionLookup = {
+    require(identity) {
+      const definition = initialDefinitions.get(identity);
+      if (definition === undefined) {
+        throw new Error(
+          `${initialDefinition.metadata.name} has no preflighted initial ${identity} Package Definition`,
+        );
+      }
+      return definition;
+    },
+  };
+  const noInitialPackages: InitialPackageDefinitionLookup = {
+    require(identity) {
       throw new Error(
-        `Package Addition Generation Record preset ${options.generationRecord.preset} cannot reproduce initial Blueprint Package Link Intent ${expectedIntent.consumerPackagePath} -> ${expectedIntent.providerPackagePath}`,
+        `Foundation replay adapter does not declare initial Package ${identity}`,
       );
+    },
+  };
+  return {
+    foundationPackage,
+    replays: preparedWithoutInitialLookup.map((candidate) => ({
+      ...candidate,
+      initialPackages:
+        candidate.kind === "foundation" ? noInitialPackages : initialPackages,
+    })),
+  };
+}
+
+export function loadLocalTemplateMetadata(
+  repositoryRoot: string,
+): LocalTemplateMetadata {
+  const resolvedRoot = path.resolve(repositoryRoot);
+  const blueprintPath = path.join(resolvedRoot, ".template/blueprint.json");
+  let blueprint: ProjectBlueprint;
+  try {
+    blueprint = assertProjectBlueprint(
+      readJsonFile(blueprintPath, "Project Blueprint facts"),
+    );
+  } catch (error) {
+    throw new Error(
+      `Package Addition requires a supported Project Blueprint in .template/blueprint.json: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const generationRecord = readGenerationRecord({
+    repositoryRoot: resolvedRoot,
+  });
+  const preflight = preflightLocalTemplateMetadata({
+    blueprint,
+    generationRecord,
+  });
+  const context = {
+    targetDir: resolvedRoot,
+    repositoryName: generationRecord.repositoryName,
+    defaultPackageScope: generationRecord.defaultPackageScope,
+    foundationPackages: {
+      typescriptConfiguration: {
+        name: preflight.foundationPackage.definition.name,
+      },
+    },
+    toolchain: generationRecord.toolchain,
+  };
+  const planningState = replayLocalTemplateMetadata({
+    context,
+    preflight,
+  });
+  return {
+    blueprint,
+    context,
+    [localTemplateMetadataStateKey]: { generationRecord, ...planningState },
+  };
+}
+
+function requireReplayAdapter(options: {
+  readonly owner: string;
+  readonly adapters: readonly PackageContributionReplayAdapter[];
+  readonly identity: string;
+}): PackageContributionReplayAdapter {
+  const adapter = options.adapters.find(
+    (candidate) => candidate.identity === options.identity,
+  );
+  if (adapter === undefined) {
+    throw new Error(
+      `unknown Package Contribution replay adapter ${options.identity}; expected ${options.adapters.map((candidate) => candidate.identity).join(", ")} for ${options.owner}`,
+    );
+  }
+  return adapter;
+}
+
+function requireRecordReplayAdapter(options: {
+  readonly owner: string;
+  readonly adapters: readonly PackageContributionReplayAdapter[];
+  readonly record: GeneratedPackagePlanningRecord;
+}): PackageContributionReplayAdapter {
+  try {
+    return requireReplayAdapter({
+      owner: options.owner,
+      adapters: options.adapters,
+      identity: options.record.contributionIdentity,
+    });
+  } catch (error) {
+    throw new Error(
+      `Package Planning Provenance ${options.owner}:${options.record.contributionIdentity} (${options.record.planningContribution}) at ${options.record.path} failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+function packageLeafName(packageDefinition: PackageDefinition): string {
+  return packageDefinition.name.slice(
+    packageDefinition.name.lastIndexOf("/") + 1,
+  );
+}
+
+function replayPersistedPackageContribution(options: {
+  readonly context: BuiltInGenerationContext;
+  readonly owner: string;
+  readonly adapter: PackageContributionReplayAdapter;
+  readonly record: GeneratedPackagePlanningRecord;
+  readonly packageDefinition: PackageDefinition;
+  readonly initialPackages: InitialPackageDefinitionLookup;
+}): PlannedPackageContribution {
+  let contribution: PackageContribution;
+  try {
+    contribution = options.adapter.replay({
+      context: options.context,
+      packageDefinition: options.packageDefinition,
+      packageLeafName: packageLeafName(options.packageDefinition),
+      initialPackages: options.initialPackages,
+    });
+  } catch (error) {
+    throw new Error(
+      `Package Planning Provenance ${options.owner}:${options.record.contributionIdentity} (${options.record.planningContribution}) at ${options.record.path} failed: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  if (
+    !packageDefinitionsEqual(contribution.definition, options.packageDefinition)
+  ) {
+    throw new Error(
+      `Package Planning Provenance ${options.owner}:${options.record.contributionIdentity} at ${options.record.path} expected ${options.packageDefinition.name} / ${options.packageDefinition.path} / ${options.packageDefinition.role}, received ${contribution.definition.name} / ${contribution.definition.path} / ${contribution.definition.role}`,
+    );
+  }
+  return options.adapter.identify(contribution);
+}
+
+function replayLocalTemplateMetadata(options: {
+  readonly context: BuiltInGenerationContext;
+  readonly preflight: LocalTemplateMetadataPreflight;
+}): {
+  readonly foundationContribution: PlannedPackageContribution;
+  readonly packageContributions: readonly PlannedPackageContribution[];
+} {
+  let foundationContribution: PlannedPackageContribution | undefined;
+  const packageContributions: PlannedPackageContribution[] = [];
+  for (const replay of options.preflight.replays) {
+    const contribution = replayPersistedPackageContribution({
+      context: options.context,
+      owner: replay.owner,
+      adapter: replay.adapter,
+      record: replay.record,
+      packageDefinition: replay.definition,
+      initialPackages: replay.initialPackages,
+    });
+    if (replay.kind === "foundation") {
+      foundationContribution = contribution;
+    } else {
+      packageContributions.push(contribution);
     }
   }
+  if (foundationContribution === undefined) {
+    throw new Error(
+      "Package Addition Generation Record is missing its validated Foundation contribution",
+    );
+  }
+  return { foundationContribution, packageContributions };
 }
 
 function readPersistedEnvironmentNeeds(
@@ -463,11 +741,11 @@ function readPersistedEnvironmentNeeds(
 }
 
 function readExistingPackageAdditionState(options: {
-  readonly context: BuiltInGenerationContext;
-  readonly blueprint: ProjectBlueprintV2;
+  readonly localTemplateMetadata: LocalTemplateMetadata;
   readonly manifestTruthPackagePaths?: readonly string[];
 }): {
-  readonly contributions: readonly PackageContribution[];
+  readonly foundationContribution: PlannedPackageContribution;
+  readonly contributions: readonly PlannedPackageContribution[];
   readonly manifestTruthByPackagePath: ReadonlyMap<
     string,
     Readonly<Record<string, unknown>>
@@ -475,59 +753,22 @@ function readExistingPackageAdditionState(options: {
   readonly deploymentEnvironmentNeeds: readonly DeploymentEnvironmentNeed[];
   readonly generationRecord: GenerationRecord;
 } {
-  const generationRecord = readGenerationRecord(options);
+  const { blueprint, context } = options.localTemplateMetadata;
+  const state = options.localTemplateMetadata[localTemplateMetadataStateKey];
+  const {
+    foundationContribution,
+    generationRecord,
+    packageContributions: contributions,
+  } = state;
   const persistedEnvironmentNeeds = readPersistedEnvironmentNeeds(
-    options.context.targetDir,
+    context.targetDir,
   );
   const manifestTruthByPackagePath = new Map<
     string,
     Readonly<Record<string, unknown>>
   >();
-  const contributions = generationRecord.packages.flatMap((record) => {
-    if (record.planningContribution === "foundationPlan") {
-      return [];
-    }
-    const expectedDefinition = options.blueprint.packages.find(
-      (definition) => definition.path === record.path,
-    )!;
-    const definition = builtInPresetRegistry.require(record.definitionName);
-    let candidates: readonly PackageContribution[];
-    if (record.planningContribution === "planInitialization") {
-      candidates = definition.planInitializationContributions?.(
-        options.context,
-      ) ?? [definition.planInitialization(options.context)];
-    } else {
-      if (definition.planPackageAddition === undefined) {
-        throw new Error(
-          `Generation Record Definition ${record.definitionName} no longer supports Package Addition`,
-        );
-      }
-      const packageLeafName = expectedDefinition.name.split("/")[1];
-      if (!packageLeafName) {
-        throw new Error(
-          `Generation Record package has an invalid name: ${expectedDefinition.name}`,
-        );
-      }
-      candidates = [
-        definition.planPackageAddition({
-          context: options.context,
-          packageLeafName,
-          packagePath: expectedDefinition.path,
-        }),
-      ];
-    }
-    const contribution = candidates.find((candidate) =>
-      packageDefinitionsEqual(candidate.definition, expectedDefinition),
-    );
-    if (contribution === undefined) {
-      throw new Error(
-        `Generation Record cannot reproduce Package Definition ${expectedDefinition.name} at ${expectedDefinition.path}`,
-      );
-    }
-    return [contribution];
-  });
   for (const packagePath of new Set(options.manifestTruthPackagePaths ?? [])) {
-    const expectedDefinition = options.blueprint.packages.find(
+    const expectedDefinition = blueprint.packages.find(
       (definition) => definition.path === packagePath,
     );
     if (expectedDefinition === undefined) {
@@ -536,7 +777,7 @@ function readExistingPackageAdditionState(options: {
       );
     }
     const manifestPath = path.join(
-      options.context.targetDir,
+      context.targetDir,
       packagePath,
       "package.json",
     );
@@ -556,10 +797,10 @@ function readExistingPackageAdditionState(options: {
     manifestTruthByPackagePath.set(expectedDefinition.path, manifest);
   }
   const reconstructedEnvironmentNeeds = normalizeEnvironmentNeeds({
-    check: contributions.flatMap(
+    check: [foundationContribution, ...contributions].flatMap(
       (contribution) => contribution.environmentNeeds,
     ),
-    deployment: contributions.flatMap(
+    deployment: [foundationContribution, ...contributions].flatMap(
       (contribution) => contribution.deploymentEnvironmentNeeds ?? [],
     ),
   });
@@ -572,6 +813,7 @@ function readExistingPackageAdditionState(options: {
     );
   }
   return {
+    foundationContribution,
     contributions,
     manifestTruthByPackagePath,
     deploymentEnvironmentNeeds: persistedEnvironmentNeeds.deployment,
@@ -580,8 +822,8 @@ function readExistingPackageAdditionState(options: {
 }
 
 function packageDefinitionsEqual(
-  left: ProjectBlueprintV2["packages"][number],
-  right: ProjectBlueprintV2["packages"][number],
+  left: PackageDefinition,
+  right: PackageDefinition,
 ): boolean {
   return (
     left.name === right.name &&
@@ -590,9 +832,24 @@ function packageDefinitionsEqual(
   );
 }
 
+function requirePersistedPackageDefinition(
+  blueprint: ProjectBlueprint,
+  definition: PackageDefinition,
+): PersistedPackageDefinition {
+  const persisted = blueprint.packages.find((candidate) =>
+    packageDefinitionsEqual(candidate, definition),
+  );
+  if (persisted === undefined) {
+    throw new Error(
+      `Project Blueprint has no persisted Package Definition for ${definition.name} at ${definition.path} (${definition.role})`,
+    );
+  }
+  return persisted;
+}
+
 function packageLinkIntentsEqual(
-  left: NonNullable<ProjectBlueprintV2["packageLinkIntents"]>[number],
-  right: NonNullable<ProjectBlueprintV2["packageLinkIntents"]>[number],
+  left: NonNullable<ProjectBlueprint["packageLinkIntents"]>[number],
+  right: NonNullable<ProjectBlueprint["packageLinkIntents"]>[number],
 ): boolean {
   return (
     left.consumerPackagePath === right.consumerPackagePath &&
@@ -668,7 +925,7 @@ function contributedDevcontainerComposition(options: {
         from: "devcontainer.json",
         to: ".devcontainer/devcontainer.json",
         replacements: {
-          PROJECT_NAME: options.context.projectName,
+          PROJECT_NAME: options.context.repositoryName,
           NODE_LTS_MAJOR: options.context.toolchain.nodeLtsMajor,
           PACKAGE_MANAGER_PIN: options.context.toolchain.packageManagerPin,
         },
@@ -850,8 +1107,10 @@ function composeDependencyMaintenancePolicy(
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
-  readonly blueprint: ProjectBlueprintV2;
-  readonly contributions: readonly PackageContribution[];
+  readonly blueprint: ProjectBlueprint;
+  /** Constructed once by init or validated once by the local metadata loader. */
+  readonly foundationContribution: PlannedPackageContribution;
+  readonly contributions: readonly PlannedPackageContribution[];
   /** Contributions whose package-owned operations are rendered in this pass. */
   readonly renderContributions?: readonly PackageContribution[];
   /** Focused deployment preparation recovered from durable Environment Need facts. */
@@ -864,16 +1123,13 @@ function foundationPlan(options: {
   readonly generationRecord?: GenerationRecord;
   readonly mode: "initialization" | "addition";
 }): GeneratedRepositoryPlan {
-  assertProjectBlueprintV2(options.blueprint);
-  const configDefinition = typescriptConfigPackageDefinition(options.context);
-  const persistedConfigDefinition = options.blueprint.packages.find(
-    (definition) =>
-      definition.name === configDefinition.name ||
-      definition.path === configDefinition.path,
-  );
+  assertProjectBlueprint(options.blueprint);
+  const configContribution = options.foundationContribution;
+  const configDefinition = configContribution.definition;
   if (
-    persistedConfigDefinition === undefined ||
-    !packageDefinitionsEqual(persistedConfigDefinition, configDefinition)
+    !options.blueprint.packages.some((definition) =>
+      packageDefinitionsEqual(definition, configDefinition),
+    )
   ) {
     throw new Error(
       "Project Blueprint must contain the Foundation TypeScript configuration Package Definition",
@@ -896,14 +1152,17 @@ function foundationPlan(options: {
           .map(([name]) => name),
     ),
   );
-  const configPackageName = typescriptConfigPackageName(options.context);
-  const packageContributions = options.contributions.map((contribution) => {
-    const ownsTypeScriptConfig = contribution.operations.some(
-      (operation) =>
-        "to" in operation &&
-        operation.to === `${contribution.definition.path}/tsconfig.json`,
+  const configPackageName =
+    options.context.foundationPackages.typescriptConfiguration.name;
+  if (configDefinition.name !== configPackageName) {
+    throw new Error(
+      `Generation Context TypeScript Configuration Package ${configPackageName} conflicts with Blueprint Package Definition ${configDefinition.name}`,
     );
-    if (!ownsTypeScriptConfig) return contribution;
+  }
+  const packageContributions = options.contributions.map((contribution) => {
+    if (contribution.foundation.typescriptConfigurationPackage === undefined) {
+      return contribution;
+    }
     const dependencyField = injectedProviderNames.has(
       contribution.definition.name,
     )
@@ -921,28 +1180,46 @@ function foundationPlan(options: {
       },
     };
   });
-  const configContribution = typescriptConfigContribution(options.context);
   const contributions = [configContribution, ...packageContributions];
   const generationRecord: GenerationRecord = options.generationRecord ?? {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    repositoryName: options.context.repositoryName,
+    defaultPackageScope: options.context.defaultPackageScope,
     preset: options.definition.metadata.name,
     templateVersion: "0.0.0",
     toolchain: options.context.toolchain,
     packages: [
       ...options.contributions.map(
-        (contribution): GeneratedPackagePlanningRecord => ({
-          path: contribution.definition.path,
-          definitionName: options.definition.metadata.name,
-          planningContribution:
+        (contribution): GeneratedPackagePlanningRecord => {
+          const planningContribution =
             options.mode === "initialization"
               ? "planInitialization"
-              : "planPackageAddition",
-        }),
+              : "planPackageAddition";
+          return {
+            packageDefinitionId: requirePersistedPackageDefinition(
+              options.blueprint,
+              contribution.definition,
+            ).packageDefinitionId,
+            path: contribution.definition.path,
+            definitionName: options.definition.metadata.name,
+            planningContribution,
+            contributionIdentity: requireReplayAdapter({
+              owner: options.definition.metadata.name,
+              adapters: options.definition.packageContributionReplayAdapters,
+              identity: contribution.planningIdentity,
+            }).identity,
+          };
+        },
       ),
       {
+        packageDefinitionId: requirePersistedPackageDefinition(
+          options.blueprint,
+          configDefinition,
+        ).packageDefinitionId,
         path: configDefinition.path,
         definitionName: "foundation",
         planningContribution: "foundationPlan",
+        contributionIdentity: typescriptConfigReplayAdapter.identity,
       },
     ],
   };
@@ -1032,7 +1309,7 @@ function foundationPlan(options: {
   const dependencyMaintenancePolicy =
     composeDependencyMaintenancePolicy(contributions);
   const rootManifest = {
-    name: options.context.projectName,
+    name: options.context.repositoryName,
     version: "0.0.0",
     private: true,
     type: "module",
@@ -1374,7 +1651,9 @@ export function planGeneratedRepositoryInitialization(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
 }): GeneratedRepositoryPlan {
-  const presetBlueprint = options.definition.blueprint(options.context);
+  const presetBlueprint = assertProjectBlueprintDraft(
+    options.definition.blueprint(options.context),
+  );
   const configDefinition = typescriptConfigPackageDefinition(options.context);
   if (
     presetBlueprint.packages.some(
@@ -1387,17 +1666,54 @@ export function planGeneratedRepositoryInitialization(options: {
       "Preset Blueprint must not redefine the Foundation TypeScript configuration Package Definition",
     );
   }
-  const blueprint: ProjectBlueprintV2 = {
-    ...presetBlueprint,
-    packages: [...presetBlueprint.packages, configDefinition],
-  };
   const contributions = options.definition.planInitializationContributions?.(
     options.context,
   ) ?? [options.definition.planInitialization(options.context)];
+  const occupiedIds = new Set<PackageDefinitionId>();
+  const blueprint: ProjectBlueprint = {
+    ...presetBlueprint,
+    packages: [
+      ...presetBlueprint.packages.map((definition) => {
+        const contribution = contributions.find((candidate) =>
+          packageDefinitionsEqual(candidate.definition, definition),
+        );
+        if (contribution === undefined) {
+          throw new Error(
+            `Preset Blueprint Package Definition ${definition.path} has no initialization Package Contribution`,
+          );
+        }
+        return persistPackageDefinition({
+          definition,
+          provenance: {
+            definitionName: options.definition.metadata.name,
+            planningContribution: "planInitialization",
+            contributionIdentity: requireReplayAdapter({
+              owner: options.definition.metadata.name,
+              adapters: options.definition.packageContributionReplayAdapters,
+              identity: contribution.planningIdentity,
+            }).identity,
+          },
+          occupiedIds,
+        });
+      }),
+      persistPackageDefinition({
+        definition: configDefinition,
+        provenance: {
+          definitionName: "foundation",
+          planningContribution: "foundationPlan",
+          contributionIdentity: typescriptConfigReplayAdapter.identity,
+        },
+        occupiedIds,
+      }),
+    ],
+  };
   return foundationPlan({
     definition: options.definition,
     context: options.context,
     blueprint,
+    foundationContribution: typescriptConfigReplayAdapter.identify(
+      typescriptConfigContribution(options.context, configDefinition),
+    ),
     contributions,
     mode: "initialization",
   });
@@ -1405,14 +1721,15 @@ export function planGeneratedRepositoryInitialization(options: {
 
 export function planGeneratedRepositoryPackageAddition(options: {
   readonly definition: BuiltInPresetDefinition;
-  readonly context: BuiltInGenerationContext;
-  readonly blueprint: ProjectBlueprintV2;
+  readonly localTemplateMetadata: LocalTemplateMetadata;
   readonly packageLeafName: string;
   readonly packagePath?: string;
   /** Existing consumers that explicitly import the newly added provider. */
   readonly linkFrom?: readonly string[];
 }): GeneratedRepositoryPackageAdditionPlan {
-  assertProjectBlueprintV2(options.blueprint);
+  const { blueprint: persistedBlueprint, context } =
+    options.localTemplateMetadata;
+  assertProjectBlueprint(persistedBlueprint);
   if (!options.definition.planPackageAddition)
     throw new Error(
       `Built-in Preset ${options.definition.metadata.name} does not support Package Addition`,
@@ -1420,7 +1737,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
   const packagePath =
     options.packagePath ??
     options.definition.defaultPackagePath?.({
-      context: options.context,
+      context,
       packageLeafName: options.packageLeafName,
     });
   if (packagePath === undefined) {
@@ -1429,7 +1746,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
     );
   }
   const contribution = options.definition.planPackageAddition({
-    context: options.context,
+    context,
     packageLeafName: options.packageLeafName,
     packagePath,
   });
@@ -1439,7 +1756,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
       providerPackagePath: contribution.definition.path,
     }),
   );
-  const conflictingPackage = options.blueprint.packages.find(
+  const conflictingPackage = persistedBlueprint.packages.find(
     (existing) =>
       existing.name === contribution.definition.name ||
       existing.path === contribution.definition.path,
@@ -1450,7 +1767,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
       contribution.definition,
     );
     const existingPackageLinkIntents =
-      options.blueprint.packageLinkIntents ?? [];
+      persistedBlueprint.packageLinkIntents ?? [];
     const missingPackageLinkIntent = requestedPackageLinkIntents.find(
       (requested) =>
         !existingPackageLinkIntents.some((existing) =>
@@ -1461,8 +1778,9 @@ export function planGeneratedRepositoryPackageAddition(options: {
       const existing = readExistingPackageAdditionState(options);
       const plan = foundationPlan({
         definition: options.definition,
-        context: options.context,
-        blueprint: options.blueprint,
+        context,
+        blueprint: persistedBlueprint,
+        foundationContribution: existing.foundationContribution,
         contributions: existing.contributions,
         renderContributions: [],
         existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
@@ -1471,8 +1789,9 @@ export function planGeneratedRepositoryPackageAddition(options: {
       });
       const currentProjection = foundationPlan({
         definition: options.definition,
-        context: options.context,
-        blueprint: options.blueprint,
+        context,
+        blueprint: persistedBlueprint,
+        foundationContribution: existing.foundationContribution,
         contributions: existing.contributions,
         existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
         generationRecord: existing.generationRecord,
@@ -1503,24 +1822,42 @@ export function planGeneratedRepositoryPackageAddition(options: {
       `Package Addition conflicts with existing Package Definition ${conflictingPackage.name} at ${conflictingPackage.path} (${conflictingPackage.role}); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
     );
   }
-  const blueprint: ProjectBlueprintV2 = {
-    ...options.blueprint,
-    packages: [...options.blueprint.packages, contribution.definition],
+  const contributionIdentity = requireReplayAdapter({
+    owner: options.definition.metadata.name,
+    adapters: options.definition.packageContributionReplayAdapters,
+    identity: contribution.planningIdentity,
+  }).identity;
+  const persistedContributionDefinition = persistPackageDefinition({
+    definition: contribution.definition,
+    provenance: {
+      definitionName: options.definition.metadata.name,
+      planningContribution: "planPackageAddition",
+      contributionIdentity,
+    },
+    occupiedIds: new Set(
+      persistedBlueprint.packages.map(
+        (definition) => definition.packageDefinitionId,
+      ),
+    ),
+  });
+  const blueprint: ProjectBlueprint = {
+    ...persistedBlueprint,
+    packages: [...persistedBlueprint.packages, persistedContributionDefinition],
     ...(requestedPackageLinkIntents.length > 0
       ? {
           packageLinkIntents: [
-            ...(options.blueprint.packageLinkIntents ?? []),
+            ...(persistedBlueprint.packageLinkIntents ?? []),
             ...requestedPackageLinkIntents,
           ],
         }
       : {}),
   };
-  assertProjectBlueprintV2(blueprint);
+  assertProjectBlueprint(blueprint);
   const manifestTruthPackagePaths =
     requestedPackageLinkIntents.length === 0
       ? []
       : [
-          ...(options.blueprint.packageLinkIntents ?? []).flatMap((intent) => [
+          ...(persistedBlueprint.packageLinkIntents ?? []).flatMap((intent) => [
             intent.consumerPackagePath,
             intent.providerPackagePath,
           ]),
@@ -1529,7 +1866,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
           ),
         ];
   const existing = readExistingPackageAdditionState({
-    ...options,
+    localTemplateMetadata: options.localTemplateMetadata,
     manifestTruthPackagePaths,
   });
   const generationRecord: GenerationRecord = {
@@ -1537,16 +1874,20 @@ export function planGeneratedRepositoryPackageAddition(options: {
     packages: [
       ...existing.generationRecord.packages,
       {
+        packageDefinitionId:
+          persistedContributionDefinition.packageDefinitionId,
         path: contribution.definition.path,
         definitionName: options.definition.metadata.name,
         planningContribution: "planPackageAddition",
+        contributionIdentity,
       },
     ],
   };
   const beforeProjection = foundationPlan({
     definition: options.definition,
-    context: options.context,
-    blueprint: options.blueprint,
+    context,
+    blueprint: persistedBlueprint,
+    foundationContribution: existing.foundationContribution,
     contributions: existing.contributions,
     existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
     generationRecord: existing.generationRecord,
@@ -1554,8 +1895,9 @@ export function planGeneratedRepositoryPackageAddition(options: {
   });
   const afterProjection = foundationPlan({
     definition: options.definition,
-    context: options.context,
+    context,
     blueprint,
+    foundationContribution: existing.foundationContribution,
     contributions: [...existing.contributions, contribution],
     existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
     ...(requestedPackageLinkIntents.length === 0
@@ -1568,8 +1910,9 @@ export function planGeneratedRepositoryPackageAddition(options: {
   });
   const plan = foundationPlan({
     definition: options.definition,
-    context: options.context,
+    context,
     blueprint,
+    foundationContribution: existing.foundationContribution,
     contributions: [...existing.contributions, contribution],
     renderContributions: [contribution],
     existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,

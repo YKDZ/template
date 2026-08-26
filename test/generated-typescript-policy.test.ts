@@ -96,7 +96,7 @@ describe("Generated Repository TypeScript policy", () => {
           definition,
           context: createGenerationContext({
             targetDir,
-            scope: "policy",
+            defaultPackageScope: "policy",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
@@ -117,11 +117,13 @@ describe("Generated Repository TypeScript policy", () => {
         expect(await readTsconfig(baselinePath)).toEqual({
           compilerOptions: policyOptions,
         });
-        expect(plan.blueprint.packages).toContainEqual({
-          name: configPackageName,
-          path: "packages/typescript-config",
-          role: "shared-library",
-        });
+        expect(plan.blueprint.packages).toContainEqual(
+          expect.objectContaining({
+            name: configPackageName,
+            path: "packages/typescript-config",
+            role: "shared-library",
+          }),
+        );
 
         for (const configPath of await tsconfigPaths(targetDir)) {
           const config = await readTsconfig(configPath);

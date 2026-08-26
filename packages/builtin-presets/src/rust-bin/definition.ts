@@ -2,17 +2,18 @@ import { fileURLToPath } from "node:url";
 
 import { rustToolchainEnvironmentNeed } from "#template-core/module-graph";
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 
-function cargoPackageName(projectName: string): string {
-  const slug = projectName
+function cargoPackageName(repositoryName: string): string {
+  const slug = repositoryName
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -35,9 +36,10 @@ function rustContribution(options: {
   readonly context: GenerationContext;
   readonly packageLeafName: string;
   readonly packagePath: string;
+  readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${options.context.scope}/${options.packageLeafName}`,
+  const definition: PackageDefinition = options.packageDefinition ?? {
+    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
     path: options.packagePath,
     role: "native-package",
   };
@@ -151,6 +153,17 @@ function rustContribution(options: {
   };
 }
 
+const binaryReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "binary",
+  replay: ({ context, packageDefinition, packageLeafName }) =>
+    rustContribution({
+      context,
+      packageLeafName,
+      packagePath: packageDefinition.path,
+      packageDefinition,
+    }),
+});
+
 export const rustBinDefinition: BuiltInPresetDefinition = {
   metadata: {
     name: "rust-bin",
@@ -160,10 +173,11 @@ export const rustBinDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.rustBin,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [binaryReplayAdapter],
   blueprint(context) {
-    const packageLeafName = cargoPackageName(context.projectName);
+    const packageLeafName = cargoPackageName(context.repositoryName);
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         rustContribution({
           context,
@@ -174,17 +188,21 @@ export const rustBinDefinition: BuiltInPresetDefinition = {
     };
   },
   planInitialization(context) {
-    const packageLeafName = cargoPackageName(context.projectName);
-    return rustContribution({
-      context,
-      packageLeafName,
-      packagePath: `packages/${packageLeafName}`,
-    });
+    const packageLeafName = cargoPackageName(context.repositoryName);
+    return binaryReplayAdapter.identify(
+      rustContribution({
+        context,
+        packageLeafName,
+        packagePath: `packages/${packageLeafName}`,
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `packages/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return rustContribution({ context, packageLeafName, packagePath });
+    return binaryReplayAdapter.identify(
+      rustContribution({ context, packageLeafName, packagePath }),
+    );
   },
 };

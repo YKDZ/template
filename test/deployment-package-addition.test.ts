@@ -16,12 +16,14 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
 } from "#template-builtin-presets";
 import { dockerEngineEnvironmentNeed } from "#template-core/module-graph";
 import type { PackageContribution } from "#template-core/package-contribution";
+import { definePackageContributionReplayAdapter } from "#template-core/preset-definition";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import {
   createTemplateSourceHandle,
@@ -69,7 +71,7 @@ function syntheticDeploymentContribution(options: {
   readonly packageLeafName: string;
   readonly packagePath: string;
 }): PackageContribution {
-  const name = `@${options.context.scope}/${options.packageLeafName}`;
+  const name = `@${options.context.defaultPackageScope}/${options.packageLeafName}`;
   return {
     definition: {
       name,
@@ -103,6 +105,24 @@ function syntheticDeploymentContribution(options: {
   };
 }
 
+const syntheticDeploymentReplayAdapter = definePackageContributionReplayAdapter(
+  {
+    identity: "deployment",
+    replay: ({ context, packageDefinition, packageLeafName }) => {
+      const contribution = syntheticDeploymentContribution({
+        context,
+        packageLeafName,
+        packagePath: packageDefinition.path,
+      });
+      return {
+        ...contribution,
+        definition: packageDefinition,
+        manifest: { ...contribution.manifest, name: packageDefinition.name },
+      };
+    },
+  },
+);
+
 const syntheticDeploymentAddition: BuiltInPresetDefinition = {
   metadata: {
     name: "synthetic-deployment-addition",
@@ -111,9 +131,10 @@ const syntheticDeploymentAddition: BuiltInPresetDefinition = {
   },
   source: syntheticSource,
   plannerSourceFile: import.meta.filename,
+  packageContributionReplayAdapters: [syntheticDeploymentReplayAdapter],
   blueprint(context) {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         syntheticDeploymentContribution({
           context,
@@ -124,21 +145,25 @@ const syntheticDeploymentAddition: BuiltInPresetDefinition = {
     };
   },
   planInitialization(context) {
-    return syntheticDeploymentContribution({
-      context,
-      packageLeafName: "deployment",
-      packagePath: "services/deployment",
-    });
+    return syntheticDeploymentReplayAdapter.identify(
+      syntheticDeploymentContribution({
+        context,
+        packageLeafName: "deployment",
+        packagePath: "services/deployment",
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `services/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return syntheticDeploymentContribution({
-      context,
-      packageLeafName,
-      packagePath,
-    });
+    return syntheticDeploymentReplayAdapter.identify(
+      syntheticDeploymentContribution({
+        context,
+        packageLeafName,
+        packagePath,
+      }),
+    );
   },
 };
 
@@ -180,7 +205,7 @@ describe("Deployment-changing Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const definition = requireRootOnlyAddableDefinition(context);
@@ -202,8 +227,7 @@ describe("Deployment-changing Package Addition", () => {
 
       const additionOptions = {
         definition: syntheticDeploymentAddition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "deployment",
         packagePath: "services/deployment",
       };
@@ -289,7 +313,7 @@ describe("Deployment-changing Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const definition = requireRootOnlyAddableDefinition(context);
@@ -314,8 +338,7 @@ describe("Deployment-changing Package Addition", () => {
       const before = await workspaceSnapshot(targetDir);
       const addition = planGeneratedRepositoryPackageAddition({
         definition: syntheticDeploymentAddition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "deployment",
         packagePath: "services/deployment",
       });

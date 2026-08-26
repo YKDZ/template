@@ -1,16 +1,18 @@
 export {
   builtInPresetRegistry,
   createGenerationContext,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
-  validateProjectBlueprintV2,
+  validateProjectBlueprint,
 } from "./foundation.ts";
 export { templateSources } from "./template-sources.ts";
 export type {
   BuiltInPresetDefinition,
   GeneratedRepositoryPlan,
   PackageContribution,
-  ProjectBlueprintV2,
+  ProjectBlueprint,
   BuiltInGenerationContext,
+  LocalTemplateMetadata,
 } from "./foundation.ts";

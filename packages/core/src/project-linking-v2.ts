@@ -1,9 +1,9 @@
 import type { PackageContribution } from "./package-contribution.ts";
 import {
-  assertProjectBlueprintV2,
+  assertProjectBlueprint,
   type PackageRole,
-  type ProjectBlueprintV2,
-} from "./project-blueprint-v2.ts";
+  type ProjectBlueprint,
+} from "./project-blueprint.ts";
 
 type PackageManifest = Readonly<Record<string, unknown>>;
 
@@ -150,11 +150,11 @@ function exposesImportablePackageRoot(manifest: PackageManifest): boolean {
  * string resource protocol is involved.
  */
 export function planExplicitProjectLinks(options: {
-  readonly blueprint: ProjectBlueprintV2;
+  readonly blueprint: ProjectBlueprint;
   readonly contributions: readonly PackageContribution[];
   readonly manifestTruthByPackagePath?: ReadonlyMap<string, PackageManifest>;
 }): ExplicitProjectLinkPlan {
-  const blueprint = assertProjectBlueprintV2(options.blueprint);
+  const blueprint = assertProjectBlueprint(options.blueprint);
   const contributionsByPath = new Map(
     options.contributions.map((contribution) => [
       contribution.definition.path,

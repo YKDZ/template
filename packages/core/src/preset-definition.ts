@@ -1,17 +1,66 @@
 import type { PackageContribution } from "./package-contribution.ts";
-import type { ProjectBlueprintV2 } from "./project-blueprint-v2.ts";
+import type {
+  PackageDefinition,
+  ProjectBlueprintDraft,
+} from "./project-blueprint.ts";
 import type { TemplateSourceHandle } from "./renderer.ts";
 
 /** Stable, preset-agnostic input supplied after toolchain resolution. */
 export type GenerationContext = {
   readonly targetDir: string;
-  readonly projectName: string;
-  readonly scope: string;
+  readonly repositoryName: string;
+  readonly defaultPackageScope: string;
+  readonly foundationPackages: {
+    readonly typescriptConfiguration: {
+      readonly name: string;
+    };
+  };
   readonly toolchain: {
     readonly nodeLtsMajor: string;
     readonly packageManagerPin: string;
   };
 };
+
+/** An in-memory plan tagged with the stable adapter that can replay it. */
+export type PlannedPackageContribution = PackageContribution & {
+  readonly planningIdentity: string;
+};
+
+/** Narrow access to initial sibling packages, keyed by stable adapter identity. */
+export type InitialPackageDefinitionLookup = {
+  require(identity: string): PackageDefinition;
+};
+
+export type PackageContributionReplayAdapter = {
+  readonly identity: string;
+  identify(contribution: PackageContribution): PlannedPackageContribution;
+  replay(options: {
+    readonly context: GenerationContext;
+    readonly packageDefinition: PackageDefinition;
+    readonly packageLeafName: string;
+    readonly initialPackages: InitialPackageDefinitionLookup;
+  }): PackageContribution;
+};
+
+/**
+ * Declares one stable replay semantic. Persisted provenance selection and
+ * diagnostics stay with the Foundation instead of leaking into Presets.
+ */
+export function definePackageContributionReplayAdapter(options: {
+  readonly identity: string;
+  readonly replay: PackageContributionReplayAdapter["replay"];
+}): PackageContributionReplayAdapter {
+  if (options.identity.length === 0) {
+    throw new Error("Package Contribution replay adapter identity is required");
+  }
+  return {
+    identity: options.identity,
+    identify(contribution) {
+      return { ...contribution, planningIdentity: options.identity };
+    },
+    replay: options.replay,
+  };
+}
 
 /** A side-effect-free Built-in Preset planner. */
 export type BuiltInPresetDefinition = {
@@ -24,15 +73,17 @@ export type BuiltInPresetDefinition = {
   readonly source: TemplateSourceHandle;
   /** The owned planner source inspected by the Template Boundary Check. */
   readonly plannerSourceFile: string;
-  blueprint(context: GenerationContext): ProjectBlueprintV2;
-  planInitialization(context: GenerationContext): PackageContribution;
+  /** Stable semantics used to replay persisted Package Definitions. */
+  readonly packageContributionReplayAdapters: readonly PackageContributionReplayAdapter[];
+  blueprint(context: GenerationContext): ProjectBlueprintDraft;
+  planInitialization(context: GenerationContext): PlannedPackageContribution;
   /**
    * Multi-package Definitions expose their complete owned topology directly,
    * while single-package Definitions keep the compact tracer interface.
    */
   planInitializationContributions?(
     context: GenerationContext,
-  ): readonly PackageContribution[];
+  ): readonly PlannedPackageContribution[];
   /** Package layout is Preset-owned even when callers omit --path. */
   defaultPackagePath?(options: {
     readonly context: GenerationContext;
@@ -42,5 +93,5 @@ export type BuiltInPresetDefinition = {
     readonly context: GenerationContext;
     readonly packageLeafName: string;
     readonly packagePath: string;
-  }): PackageContribution;
+  }): PlannedPackageContribution;
 };

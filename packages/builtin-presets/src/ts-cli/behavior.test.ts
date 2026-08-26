@@ -16,6 +16,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
 } from "@ykdz/template-builtin-presets";
@@ -38,7 +39,7 @@ async function renderInstalledGeneratedRepository(prefix: string): Promise<{
     definition: tsCliDefinition,
     context: createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -61,7 +62,7 @@ describe("ts-cli Preset Definition behavior", () => {
   it("plans the registered publishable CLI Tool Package", () => {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "demo-cli"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -147,7 +148,7 @@ describe("ts-cli Preset Definition behavior", () => {
   it("adds a CLI Tool Package at default and explicit two-segment paths", () => {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "demo-workspace"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -180,7 +181,7 @@ describe("ts-cli Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "consumer");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -199,8 +200,7 @@ describe("ts-cli Preset Definition behavior", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       const addition = planGeneratedRepositoryPackageAddition({
         definition: tsCliDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "provider",
         linkFrom: [consumerPath],
       });
@@ -303,7 +303,7 @@ describe("ts-cli Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "consumer");
     const generationContext = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -322,8 +322,9 @@ describe("ts-cli Preset Definition behavior", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       const addition = planGeneratedRepositoryPackageAddition({
         definition: tsCliDefinition,
-        context: generationContext,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          generationContext.targetDir,
+        ),
         packageLeafName: "provider",
         linkFrom: [consumerPath],
       });

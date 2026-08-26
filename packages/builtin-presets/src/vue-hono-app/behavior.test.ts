@@ -27,7 +27,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -44,7 +44,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       .find((layer) => layer.identity === "browser-test");
 
     expect(plan.blueprint).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         { name: "@demo/api", path: "apps/api", role: "runtime-service" },
         { name: "@demo/web", path: "apps/web", role: "runtime-service" },
@@ -254,7 +254,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const plan = planGeneratedRepositoryInitialization({

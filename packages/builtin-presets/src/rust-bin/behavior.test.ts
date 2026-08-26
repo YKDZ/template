@@ -20,8 +20,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
   it("adds worker as @scope/worker with matching Cargo name and default path", () => {
     const context = {
       targetDir: "/tmp/demo",
-      projectName: "demo",
-      scope: "scope",
+      repositoryName: "demo",
+      defaultPackageScope: "scope",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@scope/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
     const packagePath = rustBinDefinition.defaultPackagePath?.({
@@ -55,8 +58,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
   it("keeps initialization and Package Addition Rust contributions aligned", () => {
     const context = {
       targetDir: "/tmp/worker",
-      projectName: "worker",
-      scope: "scope",
+      repositoryName: "worker",
+      defaultPackageScope: "scope",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@scope/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
     const initialization = rustBinDefinition.planInitialization(context);
@@ -72,8 +78,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
   it("owns a native package contribution with conventional scripts, fixes, and toolchain maintenance", () => {
     const context = {
       targetDir: "/tmp/Demo Rust!",
-      projectName: "Demo Rust!",
-      scope: "demo",
+      repositoryName: "Demo Rust!",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     };
 
@@ -135,8 +144,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
   it("declares its source-backed Rust Development Container Tool Layer", () => {
     const contribution = rustBinDefinition.planInitialization({
       targetDir: "/tmp/demo-rust",
-      projectName: "demo-rust",
-      scope: "demo",
+      repositoryName: "demo-rust",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const [layer] =
@@ -182,7 +194,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -214,7 +226,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -400,7 +412,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({
@@ -452,7 +464,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const plan = planGeneratedRepositoryInitialization({

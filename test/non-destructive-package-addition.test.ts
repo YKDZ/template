@@ -16,14 +16,12 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
 } from "#template-builtin-presets";
-import {
-  assertProjectBlueprintV2,
-  type PackageRole,
-} from "#template-core/project-blueprint-v2";
+import { type PackageRole } from "#template-core/project-blueprint";
 import {
   materializeProjectProjection,
   reconcileAndApplyProjectProjections,
@@ -94,7 +92,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -170,8 +168,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
         packagePath: "services/dashboard",
         linkFrom: [consumerPath],
@@ -265,7 +262,7 @@ describe("Non-Destructive Package Addition", () => {
           "utf8",
         ).then((source) => JSON.parse(source)),
       ).resolves.toMatchObject({
-        schemaVersion: 1,
+        schemaVersion: 2,
         packages: [
           expect.objectContaining({ path: consumerPath }),
           expect.objectContaining({ path: "packages/typescript-config" }),
@@ -284,7 +281,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -314,8 +311,7 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition: additionDefinition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "dashboard",
           packagePath: "services/dashboard",
           linkFrom: [consumerPath],
@@ -336,7 +332,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -359,8 +355,7 @@ describe("Non-Destructive Package Addition", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       const firstAddition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "provider",
         linkFrom: [consumerPath],
       });
@@ -387,8 +382,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const secondAddition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: firstAddition.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "next-provider",
         linkFrom: [consumerPath],
       });
@@ -446,7 +440,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -485,8 +479,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "ordinary",
       });
       const result = await reconcileAndApplyProjectProjections({
@@ -524,7 +517,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -554,8 +547,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "ordinary",
       });
       const result = await reconcileAndApplyProjectProjections({
@@ -589,7 +581,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -630,8 +622,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       const result = await reconcileAndApplyProjectProjections({
@@ -666,7 +657,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -699,8 +690,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       const result = await reconcileAndApplyProjectProjections({
@@ -722,18 +712,9 @@ describe("Non-Destructive Package Addition", () => {
         tasks: { "user:report": { cache: false } },
       });
 
-      const blueprint = assertProjectBlueprintV2(
-        JSON.parse(
-          await readFile(
-            path.join(targetDir, ".template/blueprint.json"),
-            "utf8",
-          ),
-        ),
-      );
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
-        context,
-        blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       await expect(
@@ -756,7 +737,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -787,8 +768,7 @@ describe("Non-Destructive Package Addition", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "utilities",
         packagePath: "services/utilities",
       });
@@ -823,18 +803,9 @@ describe("Non-Destructive Package Addition", () => {
       expect(workspaceManifest).toContain("  - services/*");
       expect(workspaceManifest).toContain("# private workspace policy");
 
-      const blueprint = assertProjectBlueprintV2(
-        JSON.parse(
-          await readFile(
-            path.join(targetDir, ".template/blueprint.json"),
-            "utf8",
-          ),
-        ),
-      );
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "utilities",
         packagePath: "services/utilities",
       });
@@ -862,7 +833,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -884,8 +855,7 @@ describe("Non-Destructive Package Addition", () => {
       });
       const addition = planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "utilities",
       });
       const generationPath = path.join(targetDir, ".template/generation.json");
@@ -923,7 +893,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -955,8 +925,7 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         }),
       ).toThrow(
@@ -974,7 +943,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -1009,8 +978,7 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         }),
       ).toThrow(
@@ -1031,7 +999,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -1065,8 +1033,7 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         }),
       ).toThrow(
@@ -1087,7 +1054,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -1117,8 +1084,7 @@ describe("Non-Destructive Package Addition", () => {
       const plan = () =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         });
 
@@ -1130,10 +1096,12 @@ describe("Non-Destructive Package Addition", () => {
         generationPath,
         JSON.stringify({
           ...(JSON.parse(generation) as Record<string, unknown>),
-          schemaVersion: 2,
+          schemaVersion: 3,
         }),
       );
-      expect(plan).toThrow("requires a supported Generation Record");
+      expect(plan).toThrow(
+        "Unsupported Generation Record schema version 3; expected 2",
+      );
       await writeFile(generationPath, generation);
 
       await rm(environmentPath);
@@ -1169,7 +1137,7 @@ describe("Non-Destructive Package Addition", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
@@ -1193,9 +1161,6 @@ describe("Non-Destructive Package Addition", () => {
         "Expected an incompatible initial Definition for Generation Record validation",
       );
     }
-    const conflictingPackage =
-      conflictingDefinition.blueprint(context).packages[0]!;
-
     try {
       const initialization = planGeneratedRepositoryInitialization({
         definition,
@@ -1220,8 +1185,7 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         }),
       ).toThrow(
@@ -1245,12 +1209,11 @@ describe("Non-Destructive Package Addition", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "utilities",
         }),
       ).toThrow(
-        `Package Addition Generation Record preset ${conflictingDefinition.metadata.name} cannot reproduce initial Blueprint Package Definition ${conflictingPackage.name} at ${conflictingPackage.path} (${conflictingPackage.role})`,
+        `Package Planning Provenance ${conflictingDefinition.metadata.name}:library (planInitialization) at ${initialization.blueprint.packages[0]!.path} failed: unknown Package Contribution replay adapter library; expected binary for ${conflictingDefinition.metadata.name}`,
       );
       await expect(
         readFile(path.join(targetDir, "packages/utilities/package.json")),

@@ -56,7 +56,7 @@ async function renderDeploymentWorkflow(): Promise<DeploymentWorkflow> {
         definition: candidate,
         context: createGenerationContext({
           targetDir: targetRoot,
-          scope: "demo",
+          defaultPackageScope: "demo",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -86,7 +86,7 @@ async function renderDeploymentWorkflow(): Promise<DeploymentWorkflow> {
       definition,
       context: createGenerationContext({
         targetDir: targetRoot,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });

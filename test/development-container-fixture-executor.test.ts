@@ -104,7 +104,7 @@ function registryCapabilityProbes(root: string) {
           definition,
           context: createGenerationContext({
             targetDir: path.join(root, `probe-${definition.metadata.name}`),
-            scope: "fixture",
+            defaultPackageScope: "fixture",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
@@ -707,7 +707,7 @@ describe("Development Container Fixture Executor", () => {
       definition: builtInPresetRegistry.all()[0]!,
       context: createGenerationContext({
         targetDir: projectDir,
-        scope: "fixture",
+        defaultPackageScope: "fixture",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -768,7 +768,7 @@ describe("Development Container Fixture Executor", () => {
       definition: builtInPresetRegistry.all()[0]!,
       context: createGenerationContext({
         targetDir: projectDir,
-        scope: "fixture",
+        defaultPackageScope: "fixture",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",

@@ -17,6 +17,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
 } from "#template-builtin-presets";
 import {
@@ -41,7 +42,7 @@ describe("Built-in Preset Package Addition universality", () => {
   function rustAddableDefinition() {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "rust-addition-selection"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const packageLeafName = "rust-probe";
@@ -68,7 +69,7 @@ describe("Built-in Preset Package Addition universality", () => {
   function definitionWithPackagePath(packagePath: string) {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "package-path-selection"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const definition = builtInPresetRegistry.all().find((candidate) =>
@@ -94,7 +95,7 @@ describe("Built-in Preset Package Addition universality", () => {
             "generated-repository",
             definition.metadata.name,
           ),
-          scope: "demo",
+          defaultPackageScope: "demo",
           toolchain,
         }),
       });
@@ -114,10 +115,13 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("rejects reserved workspace collections from initialization and explicit Package Addition planning", () => {
+  it("rejects reserved workspace collections from initialization and explicit Package Addition planning", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-reserved-package-path-"),
+    );
     const context = createGenerationContext({
-      targetDir: path.join("generated-repository", "reserved-package-path"),
-      scope: "demo",
+      targetDir: path.join(workspace, "generated-repository"),
+      defaultPackageScope: "demo",
       toolchain,
     });
     const definition = firstAddableDefinition();
@@ -147,11 +151,14 @@ describe("Built-in Preset Package Addition universality", () => {
       definition,
       context,
     });
+    await renderNewProject({
+      targetRoot: context.targetDir,
+      operations: [...initialization.operations],
+    });
     expect(() =>
       planGeneratedRepositoryPackageAddition({
         definition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "evil",
         packagePath: "target/evil",
       }),
@@ -174,7 +181,7 @@ describe("Built-in Preset Package Addition universality", () => {
         const targetDir = path.join(workspace, baseDefinition.metadata.name);
         const context = createGenerationContext({
           targetDir,
-          scope: "demo",
+          defaultPackageScope: "demo",
           toolchain,
         });
         const initialization = planGeneratedRepositoryInitialization({
@@ -188,8 +195,7 @@ describe("Built-in Preset Package Addition universality", () => {
           });
           const addition = planGeneratedRepositoryPackageAddition({
             definition: additionDefinition,
-            context,
-            blueprint: initialization.blueprint,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName: `durable-${additionDefinition.metadata.name}`,
           });
           const [initializationProjection, preAdditionProjection] =
@@ -264,7 +270,7 @@ describe("Built-in Preset Package Addition universality", () => {
       );
       const context = createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain,
       });
       const initialization = planGeneratedRepositoryInitialization({
@@ -277,13 +283,11 @@ describe("Built-in Preset Package Addition universality", () => {
           operations: [...initialization.operations],
         });
 
-        let currentBlueprint = initialization.blueprint;
         for (const additionDefinition of addableDefinitions) {
           const packageLeafName = `${additionDefinition.metadata.name}-addition`;
           const addition = planGeneratedRepositoryPackageAddition({
             definition: additionDefinition,
-            context,
-            blueprint: currentBlueprint,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName,
           });
           const addedDefinition = addition.blueprint.packages.find(
@@ -308,7 +312,6 @@ describe("Built-in Preset Package Addition universality", () => {
             targetRoot: targetDir,
             ...addition.projectProjections,
           });
-          currentBlueprint = addition.blueprint;
         }
       } finally {
         await rm(path.dirname(targetDir), { recursive: true, force: true });
@@ -322,7 +325,7 @@ describe("Built-in Preset Package Addition universality", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, "demo"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const rustDefinition = rustAddableDefinition();
@@ -367,8 +370,7 @@ describe("Built-in Preset Package Addition universality", () => {
       expect(() =>
         planGeneratedRepositoryPackageAddition({
           definition: conflictingDefinition,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "worker",
         }),
       ).toThrow("Foundation requires compatible Rust toolchain facts");
@@ -392,7 +394,7 @@ describe("Built-in Preset Package Addition universality", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, "demo"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const rustDefinition = rustAddableDefinition();
@@ -408,8 +410,7 @@ describe("Built-in Preset Package Addition universality", () => {
       });
       const addition = planGeneratedRepositoryPackageAddition({
         definition: rustDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "worker",
       });
       await reconcileAndApplyProjectProjections({
@@ -465,7 +466,7 @@ describe("Built-in Preset Package Addition universality", () => {
     const targetDir = path.join(workspace, "demo");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const base = firstAddableDefinition();
@@ -490,8 +491,7 @@ describe("Built-in Preset Package Addition universality", () => {
 
       const packageAddition = planGeneratedRepositoryPackageAddition({
         definition: addition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "natural",
       });
       await reconcileAndApplyProjectProjections({
@@ -512,8 +512,7 @@ describe("Built-in Preset Package Addition universality", () => {
 
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition: addition,
-        context,
-        blueprint: packageAddition.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "natural-repeat",
       });
       await reconcileAndApplyProjectProjections({
@@ -577,7 +576,7 @@ describe("Built-in Preset Package Addition universality", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, "rust-vue"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -609,8 +608,7 @@ describe("Built-in Preset Package Addition universality", () => {
                 (need) => need.kind === "playwright-browser-assets",
               ) ?? false,
         )!,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "web",
       });
       await reconcileAndApplyProjectProjections({
@@ -644,7 +642,7 @@ describe("Built-in Preset Package Addition universality", () => {
     const targetDir = path.join(workspace, "digital");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -675,8 +673,7 @@ describe("Built-in Preset Package Addition universality", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: firstAddableDefinition(),
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "domain",
         packagePath: "packages/domain",
       });
@@ -730,7 +727,7 @@ describe("Built-in Preset Package Addition universality", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, "explicit-needs"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const base = builtInPresetRegistry.all().find((candidate) => {
@@ -791,8 +788,7 @@ describe("Built-in Preset Package Addition universality", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: base,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "another-library",
       });
 
@@ -818,7 +814,7 @@ describe("Built-in Preset Package Addition universality", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, "custom-package-root"),
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const base = firstAddableDefinition();
@@ -833,8 +829,7 @@ describe("Built-in Preset Package Addition universality", () => {
       });
       const addition = planGeneratedRepositoryPackageAddition({
         definition: base,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "custom",
         packagePath: "services/custom",
       });

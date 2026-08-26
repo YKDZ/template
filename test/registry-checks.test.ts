@@ -8,6 +8,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
 } from "#template-builtin-presets";
@@ -33,6 +34,35 @@ import {
 const rustPresetName = ["rust", "bin"].join("-");
 
 describe("Preset Registry generated scenarios", () => {
+  it("makes every real TypeScript config dependency an explicit Package Contribution fact", () => {
+    let declaredTypeScriptPackageCount = 0;
+    for (const definition of builtInPresetRegistry.all()) {
+      const context = createGenerationContext({
+        targetDir: path.join("generated-repository", definition.metadata.name),
+        defaultPackageScope: "explicit-typescript-config",
+        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      });
+      const contributions = definition.planInitializationContributions?.(
+        context,
+      ) ?? [definition.planInitialization(context)];
+      for (const contribution of contributions) {
+        const writesTypeScriptConfig = contribution.operations.some(
+          (operation) =>
+            "to" in operation &&
+            operation.to === `${contribution.definition.path}/tsconfig.json`,
+        );
+        expect(
+          contribution.foundation.typescriptConfigurationPackage,
+          `${definition.metadata.name}:${contribution.definition.path}`,
+        ).toEqual(
+          writesTypeScriptConfig ? { dependency: "required" } : undefined,
+        );
+        if (writesTypeScriptConfig) declaredTypeScriptPackageCount += 1;
+      }
+    }
+    expect(declaredTypeScriptPackageCount).toBeGreaterThan(0);
+  });
+
   it("derives one initialization scenario per Definition and the complete addition matrix", () => {
     const definitions = builtInPresetRegistry.all();
     const initialization = deriveInitializationScenarios();
@@ -70,7 +100,7 @@ describe("Preset Registry generated scenarios", () => {
         targetDir: path.join("generated-repository", scenario.id),
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       });
-      expect(scenario.base.blueprint(context).schemaVersion).toBe(2);
+      expect(scenario.base.blueprint(context).schemaVersion).toBe(3);
     }
   });
 
@@ -126,7 +156,7 @@ describe("Preset Registry generated scenarios", () => {
 
         const context = createGenerationContext({
           targetDir: path.join(workspace, scenario.id),
-          scope: "focused",
+          defaultPackageScope: "focused",
           toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
         });
         expect(path.dirname(context.targetDir)).toBe(workspace);
@@ -140,8 +170,7 @@ describe("Preset Registry generated scenarios", () => {
         });
         const addition = planGeneratedRepositoryPackageAddition({
           definition: scenario.addition!,
-          context,
-          blueprint: initialization.blueprint,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: `focused-${scenario.addition!.metadata.name}`,
           linkFrom: scenario.linkFrom!,
         });
@@ -200,7 +229,7 @@ describe("Preset Registry generated scenarios", () => {
     );
     const context = createGenerationContext({
       targetDir: path.join(workspace, scenario.id),
-      scope: "focused",
+      defaultPackageScope: "focused",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const packageLeafName = `focused-${scenario.addition!.metadata.name}`;
@@ -216,8 +245,7 @@ describe("Preset Registry generated scenarios", () => {
       });
       const addition = planGeneratedRepositoryPackageAddition({
         definition: scenario.addition!,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName,
         linkFrom: scenario.linkFrom!,
       });
@@ -227,24 +255,26 @@ describe("Preset Registry generated scenarios", () => {
       });
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition: scenario.addition!,
-        context,
-        blueprint: addition.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName,
         linkFrom: scenario.linkFrom!,
       });
 
-      expect(repeatedAddition.blueprint).toBe(addition.blueprint);
+      expect(repeatedAddition.blueprint).toEqual(addition.blueprint);
       expect(repeatedAddition.operations).toEqual([]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects mismatched Package Definition and Link Intent occupancy", () => {
+  it("rejects mismatched Package Definition and Link Intent occupancy", async () => {
     const scenario = deriveFocusedProjectLinkScenarios()[0]!;
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-occupied-addition-"),
+    );
     const context = createGenerationContext({
-      targetDir: path.join("generated-repository", scenario.id),
-      scope: "focused",
+      targetDir: path.join(workspace, scenario.id),
+      defaultPackageScope: "focused",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const packageLeafName = `focused-${scenario.addition!.metadata.name}`;
@@ -261,40 +291,67 @@ describe("Preset Registry generated scenarios", () => {
       definition: scenario.base,
       context,
     });
-    const occupiedBlueprint = {
-      ...initialization.blueprint,
-      packages: [...initialization.blueprint.packages, contribution.definition],
-    };
-
-    expect(() =>
-      planGeneratedRepositoryPackageAddition({
+    try {
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const occupied = planGeneratedRepositoryPackageAddition({
         definition: scenario.addition!,
-        context,
-        blueprint: {
-          ...occupiedBlueprint,
-          packages: occupiedBlueprint.packages.map((definition) =>
-            definition.path === contribution.definition.path
-              ? { ...definition, role: "native-package" as const }
-              : definition,
-          ),
-        },
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName,
-      }),
-    ).toThrow(
-      `existing Package Definition ${contribution.definition.name} at ${contribution.definition.path} (native-package); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
-    );
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: context.targetDir,
+        ...occupied.projectProjections,
+      });
+      const blueprintPath = path.join(
+        context.targetDir,
+        ".template/blueprint.json",
+      );
+      await writeFile(
+        blueprintPath,
+        `${JSON.stringify(
+          {
+            ...occupied.blueprint,
+            packages: occupied.blueprint.packages.map((definition) =>
+              definition.path === contribution.definition.path
+                ? { ...definition, role: "native-package" as const }
+                : definition,
+            ),
+          },
+          null,
+          2,
+        )}\n`,
+      );
 
-    expect(() =>
-      planGeneratedRepositoryPackageAddition({
-        definition: scenario.addition!,
-        context,
-        blueprint: occupiedBlueprint,
-        packageLeafName,
-        linkFrom: scenario.linkFrom!,
-      }),
-    ).toThrow(
-      `requested Package Link Intent ${scenario.linkFrom![0]} -> ${contribution.definition.path} does not already exist`,
-    );
+      expect(() =>
+        planGeneratedRepositoryPackageAddition({
+          definition: scenario.addition!,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName,
+        }),
+      ).toThrow(
+        `Package Addition conflicts with existing Package Definition ${contribution.definition.name} at ${contribution.definition.path} (native-package); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
+      );
+
+      await writeFile(
+        blueprintPath,
+        `${JSON.stringify(occupied.blueprint, null, 2)}\n`,
+      );
+      expect(() =>
+        planGeneratedRepositoryPackageAddition({
+          definition: scenario.addition!,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName,
+          linkFrom: scenario.linkFrom!,
+        }),
+      ).toThrow(
+        `requested Package Link Intent ${scenario.linkFrom![0]} -> ${contribution.definition.path} does not already exist`,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("exposes focused links and Docker-required deployment as distinct runnable check modes", async () => {
@@ -351,7 +408,7 @@ describe("Preset Registry generated scenarios", () => {
     }
     const context = createGenerationContext({
       targetDir: path.join(workspace, "generated"),
-      scope: "fixture",
+      defaultPackageScope: "fixture",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
 
@@ -366,8 +423,7 @@ describe("Preset Registry generated scenarios", () => {
       });
       const addition = planGeneratedRepositoryPackageAddition({
         definition: rustDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "worker",
       });
       const result = await reconcileAndApplyProjectProjections({

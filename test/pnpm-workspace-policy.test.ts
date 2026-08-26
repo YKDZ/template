@@ -58,8 +58,11 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
   };
   const context = {
     targetDir: projectDir,
-    projectName: "demo-lib",
-    scope: "demo-lib",
+    repositoryName: "demo-lib",
+    defaultPackageScope: "demo-lib",
+    foundationPackages: {
+      typescriptConfiguration: { name: "@demo-lib/typescript-config" },
+    },
     toolchain: { nodeLtsMajor: "24", packageManagerPin },
   } satisfies GenerationContext;
 
@@ -122,8 +125,13 @@ describe("pnpm Workspace Policy", () => {
   it("selects a Node-only Definition by contribution semantics", () => {
     const context = {
       targetDir: "/tmp/pnpm-policy-definition",
-      projectName: "pnpm-policy-definition",
-      scope: "pnpm-policy-definition",
+      repositoryName: "pnpm-policy-definition",
+      defaultPackageScope: "pnpm-policy-definition",
+      foundationPackages: {
+        typescriptConfiguration: {
+          name: "@pnpm-policy-definition/typescript-config",
+        },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin },
     } satisfies GenerationContext;
     const definition = definitionForPnpmPolicy(context);

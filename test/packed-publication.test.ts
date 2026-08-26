@@ -23,7 +23,7 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "#template-builtin-presets";
-import type { PackageRole } from "#template-core/project-blueprint-v2";
+import type { PackageRole } from "#template-core/project-blueprint";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
 
@@ -133,7 +133,7 @@ function definitionWithPackagePath(packagePath: string) {
       definition: candidate,
       context: createGenerationContext({
         targetDir: path.join("generated-repository", "package-path-selection"),
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -165,7 +165,7 @@ function definitionWithInitialPackageRole(role: PackageRole) {
       definition: candidate,
       context: createGenerationContext({
         targetDir: path.join("generated-repository", "role-selection"),
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -182,7 +182,7 @@ function definitionWithInitialPackageRole(role: PackageRole) {
 function addableDefinitionWithPackageRole(role: PackageRole) {
   const context = createGenerationContext({
     targetDir: path.join("generated-repository", "addition-role-selection"),
-    scope: "demo",
+    defaultPackageScope: "demo",
     toolchain: {
       nodeLtsMajor: "24",
       packageManagerPin: "pnpm@11.11.0",

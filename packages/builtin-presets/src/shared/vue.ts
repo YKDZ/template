@@ -1,7 +1,7 @@
 import { playwrightBrowserAssetsEnvironmentNeed } from "#template-core/module-graph";
 import type { PackageContribution } from "#template-core/package-contribution";
 import type { GenerationContext } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";

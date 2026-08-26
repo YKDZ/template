@@ -5,10 +5,26 @@ import path from "node:path";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import type {
+  PackageDefinition,
+  PackageDefinitionId,
+  PersistedPackageDefinition,
+} from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 import { checkTemplateSourceBoundary } from "#template-core/template-boundary-check";
 
 const workflowPath = ".github/workflows/check.yml";
+
+function persistedDefinition(
+  hexDigit: string,
+  definition: PackageDefinition,
+): PersistedPackageDefinition {
+  return {
+    ...definition,
+    packageDefinitionId:
+      `package-${hexDigit.repeat(64)}` as PackageDefinitionId,
+  };
+}
 
 function workflowOperation(
   replacements: Record<string, string> = {},
@@ -76,13 +92,13 @@ describe("Template Source Boundary", () => {
               sourceFilePath,
               generatedPath: workflowPath,
               blueprint: {
-                schemaVersion: 2,
+                schemaVersion: 3,
                 packages: [
-                  {
+                  persistedDefinition("1", {
                     name: "@example/web",
                     path: "apps/web",
                     role: "runtime-service",
-                  },
+                  }),
                 ],
               },
               diagnosticArtifactDeclarations: [declaration],
@@ -126,18 +142,18 @@ describe("Template Source Boundary", () => {
             sourceFilePath,
             generatedPath: workflowPath,
             blueprint: {
-              schemaVersion: 2,
+              schemaVersion: 3,
               packages: [
-                {
+                persistedDefinition("1", {
                   name: "@example/admin",
                   path: "apps/admin",
                   role: "runtime-service",
-                },
-                {
+                }),
+                persistedDefinition("2", {
                   name: "@example/web",
                   path: "apps/web",
                   role: "runtime-service",
-                },
+                }),
               ],
             },
             diagnosticArtifactDeclarations: [
@@ -217,13 +233,13 @@ describe("Template Source Boundary", () => {
             sourceFilePath,
             generatedPath: workflowPath,
             blueprint: {
-              schemaVersion: 2,
+              schemaVersion: 3,
               packages: [
-                {
+                persistedDefinition("1", {
                   name: "@example/web",
                   path: "apps/web",
                   role: "runtime-service",
-                },
+                }),
               ],
             },
             diagnosticArtifactDeclarations: [
@@ -276,13 +292,13 @@ describe("Template Source Boundary", () => {
             sourceFilePath,
             generatedPath: workflowPath,
             blueprint: {
-              schemaVersion: 2,
+              schemaVersion: 3,
               packages: [
-                {
+                persistedDefinition("1", {
                   name: "@example/web",
                   path: "apps/web",
                   role: "runtime-service",
-                },
+                }),
               ],
             },
             diagnosticArtifactDeclarations: [

@@ -21,6 +21,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   resolveBuiltInTemplateSource,
   type BuiltInPresetDefinition,
@@ -422,17 +423,19 @@ function replaceTemplateSource(options: {
   return options.operation;
 }
 
-function replaceContributionTemplateSource(options: {
-  readonly contribution: PackageContribution;
+function replaceContributionTemplateSource<
+  Contribution extends PackageContribution,
+>(options: {
+  readonly contribution: Contribution;
   readonly from: TemplateSourceHandle;
   readonly to: TemplateSourceHandle;
-}): PackageContribution {
+}): Contribution {
   return {
     ...options.contribution,
     operations: options.contribution.operations.map((operation) =>
       replaceTemplateSource({ operation, from: options.from, to: options.to }),
     ),
-  };
+  } as Contribution;
 }
 
 async function renderMatrixScenario(options: {
@@ -446,7 +449,7 @@ async function renderMatrixScenario(options: {
   const projectDir = path.join(options.workspace, options.scenario.id);
   const context = createGenerationContext({
     targetDir: projectDir,
-    scope: "fixture",
+    defaultPackageScope: "fixture",
     toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
   });
   const initialization = planGeneratedRepositoryInitialization({
@@ -470,8 +473,7 @@ async function renderMatrixScenario(options: {
   if (addition !== undefined) {
     const additionPlan = planGeneratedRepositoryPackageAddition({
       definition: addition,
-      context,
-      blueprint: initialization.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: `fixture-${addition.metadata.name}`,
       ...(options.scenario.linkFrom === undefined
         ? {}
@@ -2147,7 +2149,7 @@ describe("Fixture Verification Evidence", () => {
           definition: scenario.base,
           context: createGenerationContext({
             targetDir: path.join("/tmp/resource-classification", scenario.id),
-            scope: "fixture",
+            defaultPackageScope: "fixture",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
@@ -3405,7 +3407,7 @@ describe("Fixture Verification Evidence", () => {
       definition,
       context: createGenerationContext({
         targetDir: "/different/temporary/paths/do-not-identify-contracts",
-        scope: "fixture",
+        defaultPackageScope: "fixture",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
@@ -3483,7 +3485,7 @@ describe("Fixture Verification Evidence", () => {
               .blueprint(
                 createGenerationContext({
                   targetDir: path.join(workspace, scenario.id),
-                  scope: "focused",
+                  defaultPackageScope: "focused",
                   toolchain: {
                     nodeLtsMajor: "24",
                     packageManagerPin: "pnpm@11.11.0",
@@ -3540,7 +3542,7 @@ describe("Fixture Verification Evidence", () => {
             .blueprint(
               createGenerationContext({
                 targetDir: path.join(workspace, scenario.id),
-                scope: "fixture",
+                defaultPackageScope: "fixture",
                 toolchain: {
                   nodeLtsMajor: "24",
                   packageManagerPin: "pnpm@11.11.0",
@@ -3560,6 +3562,7 @@ describe("Fixture Verification Evidence", () => {
             ...rendered.plan.blueprint.packages,
             {
               name: "@fixture/addition-helper",
+              packageDefinitionId: `package-${"f".repeat(64)}` as const,
               path: "packages/addition-helper",
               role: "shared-library" as const,
             },
@@ -3573,7 +3576,7 @@ describe("Fixture Verification Evidence", () => {
             definition: scenario.base,
             context: createGenerationContext({
               targetDir: path.join(workspace, "initial"),
-              scope: "fixture",
+              defaultPackageScope: "fixture",
               toolchain: {
                 nodeLtsMajor: "24",
                 packageManagerPin: "pnpm@11.11.0",
@@ -4729,7 +4732,7 @@ describe("Fixture Verification Evidence", () => {
         if (addition?.planPackageAddition === undefined) return false;
         const context = createGenerationContext({
           targetDir: path.join(root, "candidate"),
-          scope: "fixture",
+          defaultPackageScope: "fixture",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -4761,7 +4764,7 @@ describe("Fixture Verification Evidence", () => {
       await cp(sourceRoot, changedSourceRoot, { recursive: true });
       const sampleContext = createGenerationContext({
         targetDir: path.join(root, "sample"),
-        scope: "fixture",
+        defaultPackageScope: "fixture",
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",

@@ -6,6 +6,7 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
 import { execa } from "execa";
@@ -28,8 +29,11 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     );
     const contribution = vueAppDefinition.planInitialization({
       targetDir: "/tmp/demo-vue",
-      projectName: "demo-vue",
-      scope: "demo",
+      repositoryName: "demo-vue",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain,
     });
 
@@ -65,8 +69,11 @@ describe("vue-app Built-in Preset Definition behavior", () => {
   it("declares the shared source-backed browser-test Tool Layer", () => {
     const contribution = vueAppDefinition.planInitialization({
       targetDir: "/tmp/demo-vue",
-      projectName: "demo-vue",
-      scope: "demo",
+      repositoryName: "demo-vue",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain,
     });
     const [layer] =
@@ -116,7 +123,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -202,8 +209,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
     const defaultAddition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
-      context,
-      blueprint: initialization.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "admin",
     });
     await reconcileAndApplyProjectProjections({
@@ -212,8 +218,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     });
     const explicitAddition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
-      context,
-      blueprint: defaultAddition.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "portal",
       packagePath: "products/portal",
     });
@@ -224,12 +229,16 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
     expect(explicitAddition.blueprint.packages).toEqual(
       expect.arrayContaining([
-        { name: "@demo/admin", path: "apps/admin", role: "runtime-service" },
-        {
+        expect.objectContaining({
+          name: "@demo/admin",
+          path: "apps/admin",
+          role: "runtime-service",
+        }),
+        expect.objectContaining({
           name: "@demo/portal",
           path: "products/portal",
           role: "runtime-service",
-        },
+        }),
       ]),
     );
     expect(
@@ -254,7 +263,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     );
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -268,17 +277,18 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
     const addition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
-      context,
-      blueprint: initialization.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "admin",
       linkFrom: ["apps/web"],
     });
 
-    expect(addition.blueprint.packages).toContainEqual({
-      name: "@demo/admin",
-      path: "apps/admin",
-      role: "runtime-service",
-    });
+    expect(addition.blueprint.packages).toContainEqual(
+      expect.objectContaining({
+        name: "@demo/admin",
+        path: "apps/admin",
+        role: "runtime-service",
+      }),
+    );
     expect(addition.blueprint.packageLinkIntents).toContainEqual({
       consumerPackagePath: "apps/web",
       providerPackagePath: "apps/admin",
@@ -323,7 +333,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const baseDefinition = builtInPresetRegistry.require("ts-lib");
@@ -346,8 +356,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: vueAppDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       const result = await reconcileAndApplyProjectProjections({
@@ -369,8 +378,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
       const repeated = planGeneratedRepositoryPackageAddition({
         definition: vueAppDefinition,
-        context,
-        blueprint: addition.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       await expect(
@@ -391,7 +399,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     const targetDir = path.join(workspace, "project");
     const context = createGenerationContext({
       targetDir,
-      scope: "demo",
+      defaultPackageScope: "demo",
       toolchain,
     });
     const baseDefinition = builtInPresetRegistry.require("ts-lib");
@@ -416,8 +424,7 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: vueAppDefinition,
-        context,
-        blueprint: initialization.blueprint,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
       const result = await reconcileAndApplyProjectProjections({

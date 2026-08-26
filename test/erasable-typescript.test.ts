@@ -129,7 +129,7 @@ describe("Erasable TypeScript enforcement", () => {
             definition,
             context: createGenerationContext({
               targetDir,
-              scope: "erasable",
+              defaultPackageScope: "erasable",
               toolchain: {
                 nodeLtsMajor: "24",
                 packageManagerPin: "pnpm@11.11.0",
@@ -280,7 +280,7 @@ describe("Erasable TypeScript enforcement", () => {
               "source-condition",
               definition.metadata.name,
             ),
-            scope: "source-condition",
+            defaultPackageScope: "source-condition",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
@@ -334,7 +334,7 @@ describe("Erasable TypeScript enforcement", () => {
               "manifest-truth",
               definition.metadata.name,
             ),
-            scope: "manifest-truth",
+            defaultPackageScope: "manifest-truth",
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",

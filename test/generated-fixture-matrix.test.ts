@@ -37,7 +37,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     definition,
     context: createGenerationContext({
       targetDir: path.join("generated-repository", "fixture-dry-run"),
-      scope: "fixture",
+      defaultPackageScope: "fixture",
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     }),
   });

@@ -7,11 +7,13 @@ import {
   shellCheckEnvironmentNeed,
 } from "#template-core/module-graph";
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
+  type InitialPackageDefinitionLookup,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { browserTestDevelopmentContainerToolLayer } from "../shared/development-container.ts";
@@ -19,41 +21,63 @@ import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { vueTypecheckRunnerSourceOperation } from "../shared/vue.ts";
 import { templateSources } from "../template-sources.ts";
 
-function definitions(context: GenerationContext): {
+type VikePackageDefinitions = {
   readonly web: PackageDefinition;
   readonly db: PackageDefinition;
   readonly migrations: PackageDefinition;
-} {
+};
+
+function definitions(context: GenerationContext): VikePackageDefinitions {
   return {
     web: {
-      name: `@${context.scope}/web`,
+      name: `@${context.defaultPackageScope}/web`,
       path: "apps/web",
       role: "runtime-service",
     },
     db: {
-      name: `@${context.scope}/db`,
+      name: `@${context.defaultPackageScope}/db`,
       path: "packages/db",
       role: "shared-library",
     },
     migrations: {
-      name: `@${context.scope}/db-migrations`,
+      name: `@${context.defaultPackageScope}/db-migrations`,
       path: "packages/db-migrations",
       role: "shared-library",
     },
   };
 }
 
-function foundation(): PackageContribution["foundation"] {
+function replayDefinitions(
+  initialPackages: InitialPackageDefinitionLookup,
+): VikePackageDefinitions {
+  return {
+    web: initialPackages.require("web"),
+    db: initialPackages.require("database"),
+    migrations: initialPackages.require("migrations"),
+  };
+}
+
+function foundation(
+  packageDefinitions: VikePackageDefinitions,
+): PackageContribution["foundation"] {
+  const workspacePackageGlobs = [
+    ...new Set(
+      Object.values(packageDefinitions).map(
+        (definition) => `${definition.path.split("/")[0]}/*`,
+      ),
+    ),
+  ];
   return {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    typescriptConfigurationPackage: { dependency: "required" },
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
       directories: { npm: "/", docker: "/.devcontainer" },
-      extraDirectories: { docker: ["/apps/web"] },
+      extraDirectories: { docker: [`/${packageDefinitions.web.path}`] },
       interval: "weekly",
     },
-    workspacePackageGlobs: ["apps/*", "packages/*"],
+    workspacePackageGlobs,
   };
 }
 
@@ -186,8 +210,11 @@ function copyOperations(
   });
 }
 
-function webContribution(context: GenerationContext): PackageContribution {
-  const { web, db } = definitions(context);
+function webContribution(
+  context: GenerationContext,
+  packageDefinitions = definitions(context),
+): PackageContribution {
+  const { web, db, migrations } = packageDefinitions;
   const sourceFiles = [
     "web/+server.ts",
     "web/.env.example",
@@ -231,8 +258,8 @@ function webContribution(context: GenerationContext): PackageContribution {
       replacements: {
         NODE_VERSION: context.toolchain.nodeLtsMajor,
         PACKAGE_MANAGER_PIN: context.toolchain.packageManagerPin,
-        DB_PACKAGE_NAME: definitions(context).db.name,
-        DB_MIGRATIONS_PACKAGE_NAME: definitions(context).migrations.name,
+        DB_PACKAGE_NAME: db.name,
+        DB_MIGRATIONS_PACKAGE_NAME: migrations.name,
         WEB_PACKAGE_NAME: web.name,
       },
     },
@@ -352,7 +379,7 @@ function webContribution(context: GenerationContext): PackageContribution {
     ciDiagnosticArtifacts: [{ kind: "playwright", owner }],
     deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
     foundation: {
-      ...foundation(),
+      ...foundation(packageDefinitions),
       developmentContainerToolLayers: [
         browserTestDevelopmentContainerToolLayer(),
         shellCheckDevelopmentContainerToolLayer(),
@@ -362,8 +389,11 @@ function webContribution(context: GenerationContext): PackageContribution {
   };
 }
 
-function databaseContribution(context: GenerationContext): PackageContribution {
-  const { db } = definitions(context);
+function databaseContribution(
+  context: GenerationContext,
+  packageDefinitions = definitions(context),
+): PackageContribution {
+  const { db } = packageDefinitions;
   const sourceFiles = [
     "db/turbo.json",
     "db/tsconfig.json",
@@ -422,14 +452,15 @@ function databaseContribution(context: GenerationContext): PackageContribution {
       ...copyOperations(context, db.path, sourceFiles),
     ],
     environmentNeeds: [],
-    foundation: foundation(),
+    foundation: foundation(packageDefinitions),
   };
 }
 
 function migrationsContribution(
   context: GenerationContext,
+  packageDefinitions = definitions(context),
 ): PackageContribution {
-  const { db, migrations } = definitions(context);
+  const { db, migrations } = packageDefinitions;
   const sourceFiles = [
     "db-migrations/drizzle.config.ts",
     "db-migrations/tsconfig.json",
@@ -468,9 +499,27 @@ function migrationsContribution(
       ...copyOperations(context, migrations.path, sourceFiles),
     ],
     environmentNeeds: [],
-    foundation: foundation(),
+    foundation: foundation(packageDefinitions),
   };
 }
+
+const webReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "web",
+  replay: ({ context, initialPackages }) =>
+    webContribution(context, replayDefinitions(initialPackages)),
+});
+
+const databaseReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "database",
+  replay: ({ context, initialPackages }) =>
+    databaseContribution(context, replayDefinitions(initialPackages)),
+});
+
+const migrationsReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "migrations",
+  replay: ({ context, initialPackages }) =>
+    migrationsContribution(context, replayDefinitions(initialPackages)),
+});
 
 export const vikeAppDefinition: BuiltInPresetDefinition = {
   metadata: {
@@ -481,10 +530,15 @@ export const vikeAppDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.vikeApp,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [
+    webReplayAdapter,
+    databaseReplayAdapter,
+    migrationsReplayAdapter,
+  ],
   blueprint(context) {
     const { web, db, migrations } = definitions(context);
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [web, db, migrations],
       packageLinkIntents: [
         { consumerPackagePath: web.path, providerPackagePath: db.path },
@@ -495,12 +549,14 @@ export const vikeAppDefinition: BuiltInPresetDefinition = {
       ],
     };
   },
-  planInitialization: webContribution,
+  planInitialization(context) {
+    return webReplayAdapter.identify(webContribution(context));
+  },
   planInitializationContributions(context) {
     return [
-      webContribution(context),
-      databaseContribution(context),
-      migrationsContribution(context),
+      webReplayAdapter.identify(webContribution(context)),
+      databaseReplayAdapter.identify(databaseContribution(context)),
+      migrationsReplayAdapter.identify(migrationsContribution(context)),
     ];
   },
 };

@@ -52,8 +52,11 @@ describe("vike-app Built-in Preset Definition behavior", () => {
   it("declares its browser, ShellCheck, and Docker Client Tool Layers", () => {
     const contribution = vikeAppDefinition.planInitialization({
       targetDir: "/tmp/demo-vike",
-      projectName: "demo-vike",
-      scope: "demo",
+      repositoryName: "demo-vike",
+      defaultPackageScope: "demo",
+      foundationPackages: {
+        typescriptConfiguration: { name: "@demo/typescript-config" },
+      },
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
     const layers = contribution.foundation.developmentContainerToolLayers ?? [];
@@ -141,7 +144,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       definition: builtInPresetRegistry.require("vike-app"),
       context: createGenerationContext({
         targetDir: "/tmp/vike-template-source",
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
@@ -177,7 +180,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       definition: builtInPresetRegistry.require("vike-app"),
       context: createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
@@ -213,13 +216,13 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       definition,
       context: createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
 
     expect(plan.blueprint).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         { name: "@demo/web", path: "apps/web", role: "runtime-service" },
         { name: "@demo/db", path: "packages/db", role: "shared-library" },
@@ -570,7 +573,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       definition: builtInPresetRegistry.require("vike-app"),
       context: createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
@@ -669,7 +672,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
       definition: builtInPresetRegistry.require("vike-app"),
       context: createGenerationContext({
         targetDir,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });

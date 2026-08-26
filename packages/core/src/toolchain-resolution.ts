@@ -148,8 +148,16 @@ function fallbackResult(diagnostics: string[]): ResolvedToolchainVersions {
   };
 }
 
+export function isValidNodeLtsMajor(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+export function isValidPackageManagerPin(value: string): boolean {
+  return /^pnpm@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
 function nodeLtsMajor(value: string): NodeLtsMajor {
-  if (!/^\d+$/.test(value)) {
+  if (!isValidNodeLtsMajor(value)) {
     throw new Error(`Invalid Node LTS major: ${value}`);
   }
 
@@ -157,7 +165,7 @@ function nodeLtsMajor(value: string): NodeLtsMajor {
 }
 
 function packageManagerPin(version: string): PackageManagerPin {
-  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+  if (!isValidPackageManagerPin(`pnpm@${version}`)) {
     throw new Error(`Invalid pnpm version: ${version}`);
   }
 

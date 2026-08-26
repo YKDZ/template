@@ -24,7 +24,7 @@ function requireLinkableAddition(): {
 } {
   const context = createGenerationContext({
     targetDir: "project",
-    scope: "acme",
+    defaultPackageScope: "acme",
     toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
   });
   for (const definition of builtInPresetRegistry.all()) {

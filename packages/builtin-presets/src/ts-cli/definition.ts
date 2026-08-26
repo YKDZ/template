@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
@@ -32,9 +33,10 @@ function cliContribution(options: {
   readonly context: GenerationContext;
   readonly packageLeafName: string;
   readonly packagePath: string;
+  readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${options.context.scope}/${options.packageLeafName}`,
+  const definition: PackageDefinition = options.packageDefinition ?? {
+    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
     path: options.packagePath,
     role: "cli-tool",
   };
@@ -166,6 +168,7 @@ function cliContribution(options: {
     foundation: {
       toolchains: {},
       editorCapabilities: ["oxc-format-lint"],
+      typescriptConfigurationPackage: { dependency: "required" },
       dependencyMaintenance: {
         ecosystems: ["npm", "github-actions", "docker"],
         interval: "weekly",
@@ -173,6 +176,17 @@ function cliContribution(options: {
     },
   };
 }
+
+const cliReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "cli",
+  replay: ({ context, packageDefinition, packageLeafName }) =>
+    cliContribution({
+      context,
+      packageLeafName,
+      packagePath: packageDefinition.path,
+      packageDefinition,
+    }),
+});
 
 export const tsCliDefinition: BuiltInPresetDefinition = {
   metadata: {
@@ -182,29 +196,34 @@ export const tsCliDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.tsCli,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [cliReplayAdapter],
   blueprint(context) {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         cliContribution({
           context,
-          packageLeafName: context.projectName,
-          packagePath: `packages/${context.projectName}`,
+          packageLeafName: context.repositoryName,
+          packagePath: `packages/${context.repositoryName}`,
         }).definition,
       ],
     };
   },
   planInitialization(context) {
-    return cliContribution({
-      context,
-      packageLeafName: context.projectName,
-      packagePath: `packages/${context.projectName}`,
-    });
+    return cliReplayAdapter.identify(
+      cliContribution({
+        context,
+        packageLeafName: context.repositoryName,
+        packagePath: `packages/${context.repositoryName}`,
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `packages/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return cliContribution({ context, packageLeafName, packagePath });
+    return cliReplayAdapter.identify(
+      cliContribution({ context, packageLeafName, packagePath }),
+    );
   },
 };

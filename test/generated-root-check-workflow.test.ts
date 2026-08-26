@@ -54,7 +54,7 @@ async function renderRootCheckWorkflow(): Promise<{
         definition: candidate,
         context: createGenerationContext({
           targetDir: targetRoot,
-          scope: "demo",
+          defaultPackageScope: "demo",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
@@ -77,7 +77,7 @@ async function renderRootCheckWorkflow(): Promise<{
       definition,
       context: createGenerationContext({
         targetDir: targetRoot,
-        scope: "demo",
+        defaultPackageScope: "demo",
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });

@@ -12,10 +12,11 @@ const journey: CliJourney = {
       writeFile(
         path.join(context.workDir, "valid-blueprint.json"),
         JSON.stringify({
-          schemaVersion: 2,
+          schemaVersion: 3,
           packages: [
             {
               name: "@demo/library",
+              packageDefinitionId: `package-${"1".repeat(64)}`,
               path: "packages/library",
               role: "shared-library",
             },
@@ -55,10 +56,7 @@ const journey: CliJourney = {
     });
     assert.equal(results[2]?.exitCode, 1);
     assert.equal(results[2]?.stdout, "");
-    assert.match(
-      results[2]?.stderr ?? "",
-      /Blueprint version 1 is not supported/u,
-    );
+    assert.match(results[2]?.stderr ?? "", /schema version 1; expected 3/u);
   },
 };
 

@@ -9,6 +9,7 @@ import { execa } from "execa";
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
 } from "#template-builtin-presets";
@@ -329,7 +330,7 @@ async function runScenario(
   const projectDir = path.join(options.workspace, scenario.id);
   const context = createGenerationContext({
     targetDir: projectDir,
-    scope: "fixture",
+    defaultPackageScope: "fixture",
     toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
   });
   const initialization = planGeneratedRepositoryInitialization({
@@ -372,8 +373,7 @@ async function runScenario(
   if (scenario.addition !== undefined) {
     const additionPlan = planGeneratedRepositoryPackageAddition({
       definition: scenario.addition,
-      context,
-      blueprint: initialization.blueprint,
+      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: `fixture-${scenario.addition.metadata.name}`,
       ...(scenario.linkFrom === undefined
         ? {}

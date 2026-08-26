@@ -1,9 +1,10 @@
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
@@ -39,24 +40,29 @@ function webScripts(): Record<string, string> {
   };
 }
 
-function packageFoundation(): PackageContribution["foundation"] {
+function packageFoundation(
+  packagePath: string,
+): PackageContribution["foundation"] {
   return {
     toolchains: {},
     editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    typescriptConfigurationPackage: { dependency: "required" },
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
       interval: "weekly",
     },
-    workspacePackageGlobs: ["apps/*"],
+    workspacePackageGlobs: [`${packagePath.split("/")[0]}/*`],
   };
 }
 
-function apiContribution(context: GenerationContext): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${context.scope}/api`,
+function apiContribution(
+  context: GenerationContext,
+  definition: PackageDefinition = {
+    name: `@${context.defaultPackageScope}/api`,
     path: "apps/api",
     role: "runtime-service",
-  };
+  },
+): PackageContribution {
   const exposure = {
     exports: {
       ".": { default: "./dist/index.js", types: "./dist/index.d.ts" },
@@ -120,16 +126,18 @@ function apiContribution(context: GenerationContext): PackageContribution {
     },
     operations,
     environmentNeeds: [],
-    foundation: packageFoundation(),
+    foundation: packageFoundation(definition.path),
   };
 }
 
-function webContribution(context: GenerationContext): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${context.scope}/web`,
+function webContribution(
+  context: GenerationContext,
+  definition: PackageDefinition = {
+    name: `@${context.defaultPackageScope}/web`,
     path: "apps/web",
     role: "runtime-service",
-  };
+  },
+): PackageContribution {
   const exposure = vueApplicationExposure;
   const localSourceFiles = [
     "env.d.ts",
@@ -169,12 +177,24 @@ function webContribution(context: GenerationContext): PackageContribution {
       },
     ],
     foundation: {
-      ...packageFoundation(),
+      ...packageFoundation(definition.path),
       developmentContainerToolLayers:
         vueApplicationDevelopmentContainerToolLayers(),
     },
   };
 }
+
+const apiReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "api",
+  replay: ({ context, packageDefinition }) =>
+    apiContribution(context, packageDefinition),
+});
+
+const webReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "web",
+  replay: ({ context, packageDefinition }) =>
+    webContribution(context, packageDefinition),
+});
 
 export const vueHonoAppDefinition: BuiltInPresetDefinition = {
   metadata: {
@@ -185,11 +205,12 @@ export const vueHonoAppDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.vueHonoApp,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [apiReplayAdapter, webReplayAdapter],
   blueprint(context) {
     const api = apiContribution(context);
     const web = webContribution(context);
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [api.definition, web.definition],
       packageLinkIntents: [
         {
@@ -200,10 +221,13 @@ export const vueHonoAppDefinition: BuiltInPresetDefinition = {
     };
   },
   planInitialization(context) {
-    return apiContribution(context);
+    return apiReplayAdapter.identify(apiContribution(context));
   },
   planInitializationContributions(context) {
-    return [apiContribution(context), webContribution(context)];
+    return [
+      apiReplayAdapter.identify(apiContribution(context)),
+      webReplayAdapter.identify(webContribution(context)),
+    ];
   },
 };
 import { fileURLToPath } from "node:url";

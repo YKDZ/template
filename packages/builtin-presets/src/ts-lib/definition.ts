@@ -1,11 +1,12 @@
 import { fileURLToPath } from "node:url";
 
 import type { PackageContribution } from "#template-core/package-contribution";
-import type {
-  BuiltInPresetDefinition,
-  GenerationContext,
+import {
+  definePackageContributionReplayAdapter,
+  type BuiltInPresetDefinition,
+  type GenerationContext,
 } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint-v2";
+import type { PackageDefinition } from "#template-core/project-blueprint";
 import type { RenderOperation } from "#template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
@@ -26,9 +27,10 @@ function libraryContribution(options: {
   readonly context: GenerationContext;
   readonly packageLeafName: string;
   readonly packagePath: string;
+  readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
-  const definition: PackageDefinition = {
-    name: `@${options.context.scope}/${options.packageLeafName}`,
+  const definition: PackageDefinition = options.packageDefinition ?? {
+    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
     path: options.packagePath,
     role: "shared-library",
   };
@@ -106,6 +108,7 @@ function libraryContribution(options: {
     foundation: {
       toolchains: {},
       editorCapabilities: ["oxc-format-lint"],
+      typescriptConfigurationPackage: { dependency: "required" },
       dependencyMaintenance: {
         ecosystems: ["npm", "github-actions", "docker"],
         interval: "weekly",
@@ -113,6 +116,17 @@ function libraryContribution(options: {
     },
   };
 }
+
+const libraryReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "library",
+  replay: ({ context, packageDefinition, packageLeafName }) =>
+    libraryContribution({
+      context,
+      packageLeafName,
+      packagePath: packageDefinition.path,
+      packageDefinition,
+    }),
+});
 
 export const tsLibDefinition: BuiltInPresetDefinition = {
   metadata: {
@@ -122,29 +136,34 @@ export const tsLibDefinition: BuiltInPresetDefinition = {
   },
   source: templateSources.tsLib,
   plannerSourceFile: fileURLToPath(import.meta.url),
+  packageContributionReplayAdapters: [libraryReplayAdapter],
   blueprint(context) {
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       packages: [
         libraryContribution({
           context,
-          packageLeafName: context.projectName,
-          packagePath: `packages/${context.projectName}`,
+          packageLeafName: context.repositoryName,
+          packagePath: `packages/${context.repositoryName}`,
         }).definition,
       ],
     };
   },
   planInitialization(context) {
-    return libraryContribution({
-      context,
-      packageLeafName: context.projectName,
-      packagePath: `packages/${context.projectName}`,
-    });
+    return libraryReplayAdapter.identify(
+      libraryContribution({
+        context,
+        packageLeafName: context.repositoryName,
+        packagePath: `packages/${context.repositoryName}`,
+      }),
+    );
   },
   defaultPackagePath({ packageLeafName }) {
     return `packages/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return libraryContribution({ context, packageLeafName, packagePath });
+    return libraryReplayAdapter.identify(
+      libraryContribution({ context, packageLeafName, packagePath }),
+    );
   },
 };

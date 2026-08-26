@@ -73,7 +73,7 @@ function diagnosticScenario(): {
 } {
   const context = createGenerationContext({
     targetDir: "project",
-    scope: "acme",
+    defaultPackageScope: "acme",
     toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
   });
   const base = builtInPresetRegistry

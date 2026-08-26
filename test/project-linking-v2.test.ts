@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { PackageContribution } from "#template-core/package-contribution";
 import type {
   PackageDefinition,
-  ProjectBlueprintV2,
-} from "#template-core/project-blueprint-v2";
+  PackageDefinitionId,
+  PersistedPackageDefinition,
+  ProjectBlueprint,
+} from "#template-core/project-blueprint";
 import { planExplicitProjectLinks } from "#template-core/project-linking-v2";
 
 function contribution(
@@ -37,6 +39,17 @@ function contribution(
   };
 }
 
+function persistedDefinition(
+  hexDigit: string,
+  definition: PackageDefinition,
+): PersistedPackageDefinition {
+  return {
+    ...definition,
+    packageDefinitionId:
+      `package-${hexDigit.repeat(64)}` as PackageDefinitionId,
+  };
+}
+
 describe("Project Linking", () => {
   it("rejects a native consumer before planning and lists valid Package Paths", () => {
     const nativeDefinition: PackageDefinition = {
@@ -54,9 +67,13 @@ describe("Project Linking", () => {
       path: "packages/provider",
       role: "shared-library",
     };
-    const blueprint: ProjectBlueprintV2 = {
-      schemaVersion: 2,
-      packages: [nativeDefinition, runtimeDefinition, providerDefinition],
+    const blueprint: ProjectBlueprint = {
+      schemaVersion: 3,
+      packages: [
+        persistedDefinition("1", nativeDefinition),
+        persistedDefinition("2", runtimeDefinition),
+        persistedDefinition("3", providerDefinition),
+      ],
       packageLinkIntents: [
         {
           consumerPackagePath: nativeDefinition.path,
@@ -104,8 +121,11 @@ describe("Project Linking", () => {
     };
     const plan = planExplicitProjectLinks({
       blueprint: {
-        schemaVersion: 2,
-        packages: [consumerDefinition, providerDefinition],
+        schemaVersion: 3,
+        packages: [
+          persistedDefinition("1", consumerDefinition),
+          persistedDefinition("2", providerDefinition),
+        ],
         packageLinkIntents: [
           {
             consumerPackagePath: consumerDefinition.path,
@@ -151,8 +171,11 @@ describe("Project Linking", () => {
     };
     const plan = planExplicitProjectLinks({
       blueprint: {
-        schemaVersion: 2,
-        packages: [consumerDefinition, providerDefinition],
+        schemaVersion: 3,
+        packages: [
+          persistedDefinition("1", consumerDefinition),
+          persistedDefinition("2", providerDefinition),
+        ],
         packageLinkIntents: [
           {
             consumerPackagePath: consumerDefinition.path,
@@ -197,8 +220,11 @@ describe("Project Linking", () => {
     };
     const plan = planExplicitProjectLinks({
       blueprint: {
-        schemaVersion: 2,
-        packages: [consumerDefinition, providerDefinition],
+        schemaVersion: 3,
+        packages: [
+          persistedDefinition("1", consumerDefinition),
+          persistedDefinition("2", providerDefinition),
+        ],
         packageLinkIntents: [
           {
             consumerPackagePath: consumerDefinition.path,
@@ -243,8 +269,11 @@ describe("Project Linking", () => {
     };
     const plan = planExplicitProjectLinks({
       blueprint: {
-        schemaVersion: 2,
-        packages: [consumerDefinition, providerDefinition],
+        schemaVersion: 3,
+        packages: [
+          persistedDefinition("1", consumerDefinition),
+          persistedDefinition("2", providerDefinition),
+        ],
         packageLinkIntents: [
           {
             consumerPackagePath: consumerDefinition.path,
@@ -318,8 +347,11 @@ describe("Project Linking", () => {
     };
     const plan = planExplicitProjectLinks({
       blueprint: {
-        schemaVersion: 2,
-        packages: [consumerDefinition, providerDefinition],
+        schemaVersion: 3,
+        packages: [
+          persistedDefinition("1", consumerDefinition),
+          persistedDefinition("2", providerDefinition),
+        ],
         packageLinkIntents: [
           {
             consumerPackagePath: consumerDefinition.path,
@@ -364,8 +396,11 @@ describe("Project Linking", () => {
     expect(() =>
       planExplicitProjectLinks({
         blueprint: {
-          schemaVersion: 2,
-          packages: [consumerDefinition, providerDefinition],
+          schemaVersion: 3,
+          packages: [
+            persistedDefinition("1", consumerDefinition),
+            persistedDefinition("2", providerDefinition),
+          ],
           packageLinkIntents: [
             {
               consumerPackagePath: consumerDefinition.path,
