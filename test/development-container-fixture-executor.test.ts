@@ -30,6 +30,7 @@ import {
   deriveDevelopmentContainerBuildIdentity,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
+  formatFixtureEvidenceHealthReport,
   runFixtureEvidenceGate,
   type FixtureCommandRunner,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
@@ -570,7 +571,10 @@ describe("Development Container Fixture Executor", () => {
           ],
         })}\n`,
       );
-      const cacheActivity: string[] = [];
+      const cacheActivity: Array<{
+        readonly cache: string;
+        readonly outcome: string;
+      }> = [];
       const session = createDevelopmentContainerFixtureSession({
         projectDir,
         probes: [],
@@ -587,7 +591,7 @@ describe("Development Container Fixture Executor", () => {
           TURBO_TOKEN: "fixture-token",
         },
         recordActivity: (event) => {
-          if (event.type === "cache") cacheActivity.push(event.cache);
+          if (event.type === "cache") cacheActivity.push(event);
         },
         run: async (command, args) => {
           if (command === "docker" && args[0] === "ps") {
@@ -601,8 +605,33 @@ describe("Development Container Fixture Executor", () => {
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       );
 
-      expect(new Set(cacheActivity)).toEqual(
-        new Set(["buildkit", "pnpm-downloads", "cargo-downloads", "turbo"]),
+      expect(cacheActivity).toEqual(
+        expect.arrayContaining([
+          {
+            type: "cache",
+            cache: "buildkit",
+            outcome: "configured",
+            at: expect.any(String),
+          },
+          {
+            type: "cache",
+            cache: "pnpm-downloads",
+            outcome: "mounted",
+            at: expect.any(String),
+          },
+          {
+            type: "cache",
+            cache: "cargo-downloads",
+            outcome: "mounted",
+            at: expect.any(String),
+          },
+          {
+            type: "cache",
+            cache: "turbo",
+            outcome: "configured",
+            at: expect.any(String),
+          },
+        ]),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1084,6 +1113,13 @@ describe("Development Container Fixture Executor", () => {
       expect(
         report.failures.find((entry) => entry.code === "failed-retry")?.detail,
       ).toMatch(/First failure:.*registry-1\.docker\.io.*Retry failure:/u);
+      expect(formatFixtureEvidenceHealthReport(report)).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(
+            /failure code=failed-retry .*scenario=retry-final-failure .*Fixture retry for container-preparation failed after docker-registry-transport-transient.*Retry failure:/u,
+          ),
+        ]),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1763,10 +1799,16 @@ describe("Development Container Fixture Executor", () => {
       "/tmp/template-development-container-registry-cleanup-failure-test",
     );
     await rm(workspace, { recursive: true, force: true });
+    const reports: string[] = [];
 
     try {
       const failure: unknown = await runGeneratedScenarioSet("init", {
         workspace,
+        reporter: {
+          info: (message) => {
+            reports.push(message);
+          },
+        },
         run: async (command, args, options) => {
           if (command === "git") {
             return await execa(command, [...args], options);
@@ -1793,6 +1835,13 @@ describe("Development Container Fixture Executor", () => {
         "fixture cleanup daemon stopped",
       );
       expect((failure as AggregateError).errors).toHaveLength(2);
+      expect(reports).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(
+            /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u,
+          ),
+        ]),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -52,10 +52,8 @@ export type DevelopmentContainerFixtureDependencyCaches = {
 
 export type DevelopmentContainerFixtureCacheActivity = {
   readonly type: "cache";
-  readonly cache: FixtureEvidenceCacheKind;
-  readonly outcome: FixtureEvidenceCacheOutcome;
   readonly at: string;
-};
+} & FixtureEvidenceCacheFact;
 
 export type DevelopmentContainerFixturePhase =
   | "container-preparation"
@@ -449,13 +447,11 @@ export function createDevelopmentContainerFixtureSession(options: {
           `type=local,dest=${path.join(options.build.cacheDirectory, options.build.identity)},mode=max`,
         ];
   const recordCacheActivity = async (
-    cache: FixtureEvidenceCacheKind,
-    outcome: FixtureEvidenceCacheOutcome,
+    fact: FixtureEvidenceCacheFact,
   ): Promise<void> => {
     await options.recordActivity?.({
       type: "cache",
-      cache,
-      outcome,
+      ...fact,
       at: clock().toISOString(),
     });
   };
@@ -566,7 +562,7 @@ export function createDevelopmentContainerFixtureSession(options: {
   const createDependencyCacheOverride = async (): Promise<
     | {
         readonly path: string;
-        readonly caches: readonly FixtureEvidenceCacheKind[];
+        readonly caches: readonly ("pnpm-downloads" | "cargo-downloads")[];
       }
     | undefined
   > => {
@@ -706,7 +702,7 @@ export function createDevelopmentContainerFixtureSession(options: {
           args[1] === "check:deployment")) ||
         (args[0] === "exec" && args[1] === "turbo"))
     ) {
-      await recordCacheActivity("turbo", "configured");
+      await recordCacheActivity({ cache: "turbo", outcome: "configured" });
     }
     return await run(
       "devcontainer",
@@ -785,7 +781,10 @@ export function createDevelopmentContainerFixtureSession(options: {
         if (options.build === undefined) {
           await upWithRetry();
         } else {
-          await recordCacheActivity("buildkit", "configured");
+          await recordCacheActivity({
+            cache: "buildkit",
+            outcome: "configured",
+          });
           await runDevelopmentContainerBuildFlight(
             `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
             upWithRetry,
@@ -798,7 +797,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       }
       upSucceeded = true;
       for (const cache of dependencyCacheOverride?.caches ?? []) {
-        await recordCacheActivity(cache, "mounted");
+        await recordCacheActivity({ cache, outcome: "mounted" });
       }
       for (const probe of options.probes) {
         try {
@@ -1106,16 +1105,21 @@ export type FixtureEvidenceLifecycleEvent =
       readonly error?: string;
     };
 
-export type FixtureEvidenceCacheKind =
-  | "buildkit"
-  | "pnpm-downloads"
-  | "cargo-downloads"
-  | "turbo";
-
-export type FixtureEvidenceCacheOutcome = "configured" | "mounted";
+export type FixtureEvidenceCacheFact =
+  | {
+      readonly cache: "buildkit" | "turbo";
+      readonly outcome: "configured";
+    }
+  | {
+      readonly cache: "pnpm-downloads" | "cargo-downloads";
+      readonly outcome: "mounted";
+    };
 
 export type FixtureEvidenceCacheActivityKey =
-  `${FixtureEvidenceCacheKind}:${FixtureEvidenceCacheOutcome}`;
+  | "buildkit:configured"
+  | "turbo:configured"
+  | "pnpm-downloads:mounted"
+  | "cargo-downloads:mounted";
 
 export type FixtureEvidencePhase =
   | "scheduler-queue"
@@ -1179,13 +1183,11 @@ export type FixtureEvidenceScenarioActivityEvent =
   | FixtureEvidenceLifecycleEvent
   | FixtureEvidencePhaseActivity
   | FixtureEvidenceRetryActivity
-  | {
+  | ({
       readonly type: "cache";
-      readonly cache: FixtureEvidenceCacheKind;
       readonly scenario: FixtureEvidenceScenarioDiagnostics;
       readonly at: string;
-      readonly outcome: FixtureEvidenceCacheOutcome;
-    };
+    } & FixtureEvidenceCacheFact);
 
 export type FixtureEvidenceInvocationEvent =
   | FixtureEvidenceScenarioActivityEvent
@@ -1592,21 +1594,23 @@ function isFixtureEvidenceGate(value: unknown): value is FixtureEvidenceGate {
   return fixtureEvidenceGates.some((gate) => gate === value);
 }
 
-function isFixtureEvidenceCacheKind(
-  value: unknown,
-): value is FixtureEvidenceCacheKind {
-  return (
-    value === "buildkit" ||
-    value === "pnpm-downloads" ||
-    value === "cargo-downloads" ||
-    value === "turbo"
-  );
-}
-
-function isFixtureEvidenceCacheOutcome(
-  value: unknown,
-): value is FixtureEvidenceCacheOutcome {
-  return value === "configured" || value === "mounted";
+function fixtureEvidenceCacheActivityKey(
+  cache: unknown,
+  outcome: unknown,
+): FixtureEvidenceCacheActivityKey | undefined {
+  if (outcome === "configured" && cache === "buildkit") {
+    return "buildkit:configured";
+  }
+  if (outcome === "configured" && cache === "turbo") {
+    return "turbo:configured";
+  }
+  if (outcome === "mounted" && cache === "pnpm-downloads") {
+    return "pnpm-downloads:mounted";
+  }
+  if (outcome === "mounted" && cache === "cargo-downloads") {
+    return "cargo-downloads:mounted";
+  }
+  return undefined;
 }
 
 function parseFixtureEvidenceRecord(value: unknown): FixtureEvidenceRecord {
@@ -1843,9 +1847,8 @@ function parseFixtureEvidenceInvocationEvent(
     parseScenarioDiagnostics(value.scenario);
     if (
       !hasExactKeys(value, ["type", "cache", "scenario", "at", "outcome"]) ||
-      !isFixtureEvidenceCacheKind(value.cache) ||
       !isIsoTimestamp(value.at) ||
-      !isFixtureEvidenceCacheOutcome(value.outcome)
+      fixtureEvidenceCacheActivityKey(value.cache, value.outcome) === undefined
     ) {
       throw new Error("invalid Fixture Evidence cache activity");
     }
@@ -2429,6 +2432,178 @@ export async function checkFixtureEvidenceHealth(options: {
         }
       }
 
+      type ExecutionActivity = Extract<
+        FixtureEvidenceLifecycleEvent,
+        { readonly type: "execution" }
+      >;
+      type StartedExecutionActivity = ExecutionActivity & {
+        readonly outcome: "started";
+      };
+      type SuccessfulExecutionActivity = ExecutionActivity & {
+        readonly outcome: "succeeded";
+      };
+      type SuccessfulPhaseActivity = Extract<
+        FixtureEvidencePhaseActivity,
+        { readonly outcome: "succeeded" }
+      >;
+      const successfulPhases = phaseEvents.filter(
+        (event): event is SuccessfulPhaseActivity =>
+          event.outcome === "succeeded",
+      );
+      const executionEvents = lifecycle.filter(
+        (event): event is ExecutionActivity => event.type === "execution",
+      );
+      for (const key of new Set(executionEvents.map(fixtureActivityGateKey))) {
+        const events = executionEvents.filter(
+          (event) => fixtureActivityGateKey(event) === key,
+        );
+        const executionStarts = events.filter(
+          (event): event is StartedExecutionActivity =>
+            event.outcome === "started",
+        );
+        const executionTerminals = events.filter(
+          (event) => event.outcome !== "started",
+        );
+        const representative = events[0]!;
+        if (
+          executionStarts.length !== 1 ||
+          executionTerminals.length !== 1 ||
+          eventIndex(executionStarts[0]!) >= eventIndex(executionTerminals[0]!)
+        ) {
+          failures.push({
+            code: "invalid-phase-lifecycle",
+            scenarioSet,
+            invocationId,
+            scenarioId: representative.scenario.id,
+            gate: representative.gate,
+            identity: representative.identity,
+            detail: `Execution for ${representative.gate} must have exactly one ordered start and terminal event`,
+          });
+        }
+      }
+      const executionStartFor = (
+        execution: SuccessfulExecutionActivity,
+      ): StartedExecutionActivity | undefined => {
+        const events = executionEvents.filter(
+          (event) =>
+            fixtureActivityGateKey(event) === fixtureActivityGateKey(execution),
+        );
+        const starts = events.filter(
+          (event): event is StartedExecutionActivity =>
+            event.outcome === "started",
+        );
+        const terminals = events.filter((event) => event.outcome !== "started");
+        return starts.length === 1 &&
+          terminals.length === 1 &&
+          terminals[0] === execution &&
+          eventIndex(starts[0]!) < eventIndex(execution)
+          ? starts[0]
+          : undefined;
+      };
+      const semanticPhaseFor = (
+        execution: SuccessfulExecutionActivity,
+        executionStart: FixtureEvidenceLifecycleEvent,
+      ): SuccessfulPhaseActivity | undefined => {
+        const semantics = successfulPhases.filter(
+          (event) =>
+            event.phase === "semantic-gate" &&
+            event.scope === execution.gate &&
+            event.scenario.id === execution.scenario.id &&
+            eventIndex(event) > eventIndex(executionStart) &&
+            eventIndex(event) < eventIndex(execution),
+        );
+        return semantics.length === 1 ? semantics[0] : undefined;
+      };
+      const hasPreparationChainBetween = (
+        scenarioId: string,
+        afterIndex: number,
+        beforeIndex: number,
+      ): boolean =>
+        successfulPhases.some(
+          (sessionQueue) =>
+            sessionQueue.phase === "scheduler-queue" &&
+            sessionQueue.scope === "development-container-session" &&
+            sessionQueue.scenario.id === scenarioId &&
+            eventIndex(sessionQueue) > afterIndex &&
+            eventIndex(sessionQueue) < beforeIndex &&
+            successfulPhases.some(
+              (container) =>
+                container.phase === "container-preparation" &&
+                container.scope === "development-container-session" &&
+                container.scenario.id === scenarioId &&
+                eventIndex(container) > eventIndex(sessionQueue) &&
+                eventIndex(container) < beforeIndex &&
+                successfulPhases.some(
+                  (dependency) =>
+                    dependency.phase === "dependency-installation" &&
+                    dependency.scope === "development-container-session" &&
+                    dependency.scenario.id === scenarioId &&
+                    eventIndex(dependency) > eventIndex(container) &&
+                    eventIndex(dependency) < beforeIndex,
+                ),
+            ),
+        );
+      const successfulExecutionEvents = executionEvents.filter(
+        (event): event is SuccessfulExecutionActivity =>
+          event.outcome === "succeeded",
+      );
+      const firstSuccessfulExecutionByScenario = new Map<
+        string,
+        SuccessfulExecutionActivity
+      >();
+      for (const execution of successfulExecutionEvents) {
+        firstSuccessfulExecutionByScenario.set(
+          execution.scenario.id,
+          firstSuccessfulExecutionByScenario.get(execution.scenario.id) ??
+            execution,
+        );
+      }
+      for (const execution of successfulExecutionEvents) {
+        const executionStart = executionStartFor(execution);
+        const semantic =
+          executionStart === undefined
+            ? undefined
+            : semanticPhaseFor(execution, executionStart);
+        const missingFacts = [
+          ...(executionStart === undefined ? ["unique execution start"] : []),
+          ...(semantic === undefined ? ["successful semantic gate"] : []),
+          ...(semantic === undefined ||
+          !hasPreparationChainBetween(
+            execution.scenario.id,
+            firstSuccessfulExecutionByScenario.get(execution.scenario.id) ===
+              execution && executionStart !== undefined
+              ? eventIndex(executionStart)
+              : -1,
+            eventIndex(semantic),
+          )
+            ? ["ordered session queue/container/dependency preparation"]
+            : []),
+          ...(executionStart === undefined ||
+          semantic === undefined ||
+          !successfulPhases.some(
+            (queue) =>
+              queue.phase === "scheduler-queue" &&
+              queue.scope === execution.gate &&
+              queue.scenario.id === execution.scenario.id &&
+              eventIndex(queue) > eventIndex(executionStart) &&
+              eventIndex(queue) < eventIndex(semantic),
+          )
+            ? ["gate scheduler queue"]
+            : []),
+        ];
+        if (missingFacts.length > 0) {
+          failures.push({
+            code: "invalid-phase-lifecycle",
+            scenarioSet,
+            invocationId,
+            scenarioId: execution.scenario.id,
+            gate: execution.gate,
+            identity: execution.identity,
+            detail: `Successful execution for ${execution.gate} lacks causal activity: ${missingFacts.join(", ")}`,
+          });
+        }
+      }
+
       for (const scenarioId of expectedScenarioIds) {
         const events = retryEvents.filter(
           (event) => event.scenario.id === scenarioId,
@@ -2639,7 +2814,7 @@ export async function checkFixtureEvidenceHealth(options: {
         if (event.type !== "issuance" || event.outcome !== "issued") continue;
         const issuanceIndex = eventIndex(event);
         const successfulExecution = lifecycle.find(
-          (candidate) =>
+          (candidate): candidate is SuccessfulExecutionActivity =>
             candidate.type === "execution" &&
             candidate.outcome === "succeeded" &&
             candidate.scenario.id === event.scenario.id &&
@@ -2647,17 +2822,18 @@ export async function checkFixtureEvidenceHealth(options: {
             candidate.identity === event.identity &&
             eventIndex(candidate) < issuanceIndex,
         );
-        const successfulSemanticPhase = phaseEvents.find(
-          (candidate) =>
-            candidate.phase === "semantic-gate" &&
-            candidate.scope === event.gate &&
-            candidate.scenario.id === event.scenario.id &&
-            candidate.outcome === "succeeded" &&
-            eventIndex(candidate) < issuanceIndex,
-        );
+        const executionStart =
+          successfulExecution === undefined
+            ? undefined
+            : executionStartFor(successfulExecution);
+        const successfulSemanticPhase =
+          successfulExecution === undefined || executionStart === undefined
+            ? undefined
+            : semanticPhaseFor(successfulExecution, executionStart);
         if (
           successfulExecution === undefined ||
-          (phaseEvents.length > 0 && successfulSemanticPhase === undefined)
+          successfulSemanticPhase === undefined ||
+          eventIndex(successfulSemanticPhase) >= issuanceIndex
         ) {
           failures.push({
             code: "issuance-order",
@@ -2671,7 +2847,18 @@ export async function checkFixtureEvidenceHealth(options: {
         }
       }
       for (const event of cacheEvents) {
-        const key: FixtureEvidenceCacheActivityKey = `${event.cache}:${event.outcome}`;
+        const key = fixtureEvidenceCacheActivityKey(event.cache, event.outcome);
+        if (key === undefined) {
+          lifecycleErrors += 1;
+          failures.push({
+            code: "lifecycle-error",
+            scenarioSet,
+            invocationId,
+            scenarioId: event.scenario.id,
+            detail: `Invalid cache activity ${event.cache}:${event.outcome}`,
+          });
+          continue;
+        }
         cacheActivity[key] = (cacheActivity[key] ?? 0) + 1;
       }
       for (const record of invocationRecords) {
@@ -2773,7 +2960,26 @@ export function formatFixtureEvidenceHealthReport(
       .join(",");
     return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} phase-duration-ms=${phaseDurations || "none"} retries=${stage.retries} recoveries=${stage.recoveries} retry-duration-ms=${stage.retryDurationMilliseconds} cache-activity=${cacheActivity || "none"}`;
   });
-  return [...scenarioLines, ...stageLines];
+  const failureLines = report.failures.map((failure) => {
+    const fields = [
+      `code=${failure.code}`,
+      ...(failure.scenarioSet === undefined
+        ? []
+        : [`scenario-set=${failure.scenarioSet}`]),
+      ...(failure.invocationId === undefined
+        ? []
+        : [`invocation=${failure.invocationId}`]),
+      ...(failure.scenarioId === undefined
+        ? []
+        : [`scenario=${failure.scenarioId}`]),
+      ...(failure.gate === undefined ? [] : [`gate=${failure.gate}`]),
+      ...(failure.identity === undefined
+        ? []
+        : [`identity=${failure.identity}`]),
+    ];
+    return `[Fixture Evidence] failure ${fields.join(" ")} detail=${failure.detail}`;
+  });
+  return [...scenarioLines, ...stageLines, ...failureLines];
 }
 
 export class FileFixtureEvidenceStorage implements FixtureEvidenceStorage {
