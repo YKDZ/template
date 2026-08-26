@@ -102,7 +102,7 @@ describe("Fixture Verification Evidence check workflow", () => {
     ).toBe("always()");
   });
 
-  it("propagates one job-level evidence policy with publication limited to trusted main pushes", async () => {
+  it("enables job-local evidence while limiting publication to trusted main pushes", async () => {
     const workflow = await checkWorkflow();
     const job = workflow.jobs.check;
 
@@ -110,7 +110,7 @@ describe("Fixture Verification Evidence check workflow", () => {
       TEMPLATE_FIXTURE_EVIDENCE_DIR:
         "${{ github.workspace }}/.fixture-evidence",
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1",
-      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "0",
+      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1",
       TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR:
         "${{ github.workspace }}/.fixture-evidence-activity",
       TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "${{ github.run_id }}",
@@ -144,10 +144,7 @@ describe("Fixture Verification Evidence check workflow", () => {
       job.steps.find(
         (step) => step.name === "Enable trusted evidence publication",
       ),
-    ).toMatchObject({
-      if: "github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref",
-      run: 'echo "TEMPLATE_FIXTURE_EVIDENCE_WRITE=1" >> "$GITHUB_ENV"',
-    });
+    ).toBeUndefined();
   });
 
   it("shares signed Turbo cache only with trusted producers and read-only Release consumers", async () => {
