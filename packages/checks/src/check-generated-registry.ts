@@ -49,6 +49,10 @@ import {
   type DevelopmentContainerFixtureDependencyCaches,
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
+  type FixtureEvidenceGate,
+  type FixtureEvidencePhase,
+  type FixtureEvidencePhaseScope,
+  type FixtureEvidenceScenarioActivityEvent,
   type FixtureEvidenceScheduler,
   type FixtureEvidenceSchedulerFactory,
   type FixtureEvidenceSchedulingOptions,
@@ -71,6 +75,14 @@ type GeneratedScenarioSet =
   | "package-addition-matrix"
   | "focused"
   | "deployment";
+
+const scenarioSetReproductionCommands: Record<GeneratedScenarioSet, string> = {
+  init: "pnpm --filter @ykdz/template-checks check:generated",
+  "package-addition-matrix":
+    "pnpm --filter @ykdz/template-checks check:fixtures",
+  focused: "pnpm --filter @ykdz/template-checks check:focused",
+  deployment: "pnpm --filter @ykdz/template-checks check:deployment",
+};
 
 const defaultRepositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -106,6 +118,12 @@ export type GeneratedScenarioRunOptions = {
       readonly runAttempt: string;
     };
   };
+};
+
+type InternalGeneratedScenarioRunOptions = GeneratedScenarioRunOptions & {
+  readonly recordActivity?: (
+    event: FixtureEvidenceScenarioActivityEvent,
+  ) => void | Promise<void>;
 };
 
 export type GeneratedCommandRunner = (
@@ -320,7 +338,7 @@ function scenarioDiagnostics(scenario: GeneratedScenario) {
 
 async function runScenario(
   scenario: GeneratedScenario,
-  options: GeneratedScenarioRunOptions,
+  options: InternalGeneratedScenarioRunOptions,
   mode: GeneratedScenarioSet,
   evidenceScheduler?: FixtureEvidenceScheduler,
 ): Promise<"completed" | "not-applicable"> {
@@ -414,6 +432,58 @@ async function runScenario(
   }
 
   const diagnostics = scenarioDiagnostics(scenario);
+  const clock = options.evidence?.clock ?? (() => new Date());
+  type ActivePhase = {
+    readonly phase: FixtureEvidencePhase;
+    readonly scope: FixtureEvidencePhaseScope;
+    readonly startedAt: Date;
+    finished: boolean;
+  };
+  const startPhase = async (
+    phase: FixtureEvidencePhase,
+    scope: FixtureEvidencePhaseScope,
+  ): Promise<ActivePhase> => {
+    const startedAt = clock();
+    await options.recordActivity?.({
+      type: "phase",
+      phase,
+      scope,
+      scenario: diagnostics,
+      at: startedAt.toISOString(),
+      outcome: "started",
+    });
+    return { phase, scope, startedAt, finished: false };
+  };
+  const finishPhase = async (
+    active: ActivePhase,
+    result:
+      | { readonly outcome: "succeeded" }
+      | { readonly outcome: "failed"; readonly error: unknown },
+  ): Promise<void> => {
+    if (active.finished) return;
+    active.finished = true;
+    const finishedAt = clock();
+    const durationMilliseconds =
+      finishedAt.getTime() - active.startedAt.getTime();
+    if (durationMilliseconds < 0) {
+      throw new Error("Fixture activity clock moved backwards");
+    }
+    await options.recordActivity?.({
+      type: "phase",
+      phase: active.phase,
+      scope: active.scope,
+      scenario: diagnostics,
+      at: finishedAt.toISOString(),
+      durationMilliseconds,
+      ...(result.outcome === "succeeded"
+        ? { outcome: "succeeded" }
+        : {
+            outcome: "failed",
+            classification: "not-retryable",
+            error: failureMessage(result.error),
+          }),
+    });
+  };
   const buildIdentity = await deriveDevelopmentContainerBuildIdentity({
     projectDir,
   });
@@ -433,26 +503,42 @@ async function runScenario(
         path.join(options.workspace, ".buildkit-cache"),
     },
     environment: options.containerEnvironment ?? process.env,
+    ...(options.evidence?.clock === undefined
+      ? {}
+      : { clock: options.evidence.clock }),
     ...(options.dependencyCaches === undefined
       ? {}
       : { dependencyCaches: options.dependencyCaches }),
     ...(evidenceScheduler === undefined
       ? {}
       : {
-          acquireSession: async () =>
-            await evidenceScheduler.acquire(containerSessionResources),
+          acquireSession: async () => {
+            const queue = await startPhase(
+              "scheduler-queue",
+              "development-container-session",
+            );
+            try {
+              const release = await evidenceScheduler.acquire(
+                containerSessionResources,
+              );
+              await finishPhase(queue, { outcome: "succeeded" });
+              return release;
+            } catch (error) {
+              await finishPhase(queue, { outcome: "failed", error });
+              throw error;
+            }
+          },
         }),
-    recordCacheActivity: async (event) => {
-      const recordInvocationEvent = options.evidence?.recordLifecycle as
-        | ((event: FixtureEvidenceInvocationEvent) => void | Promise<void>)
-        | undefined;
-      await recordInvocationEvent?.({
-        type: "cache",
-        cache: event.cache,
-        scenario: diagnostics,
-        at: (options.evidence?.clock ?? (() => new Date()))().toISOString(),
-        outcome: "used",
-      });
+    recordActivity: async (event) => {
+      await options.recordActivity?.(
+        event.type === "cache"
+          ? { ...event, scenario: diagnostics }
+          : {
+              ...event,
+              scope: "development-container-session",
+              scenario: diagnostics,
+            },
+      );
     },
     run,
   });
@@ -461,24 +547,57 @@ async function runScenario(
       options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
     }
     const includeFix = true;
-    const executeRootQuality = async () => {
+    const executeSemanticGate = async (options: {
+      readonly gate: FixtureEvidenceGate;
+      readonly resources: Parameters<FixtureEvidenceScheduler["run"]>[0];
+      readonly execute: () => Promise<void>;
+    }): Promise<void> => {
       await containerSession.reserve();
-      const execute = async () => {
-        await executeGeneratedRootQuality({
-          plan: finalPlan,
-          projectDir,
-          fixtureWorkspace: options.workspace,
-          includeFix,
-          run: containerSession.run,
-          identityRun: run,
-        });
+      const semantic = async (): Promise<void> => {
+        await containerSession.prepare();
+        const phase = await startPhase("semantic-gate", options.gate);
+        try {
+          await options.execute();
+          await finishPhase(phase, { outcome: "succeeded" });
+        } catch (error) {
+          await finishPhase(phase, { outcome: "failed", error });
+          throw error;
+        }
       };
-      return evidenceScheduler === undefined
-        ? await execute()
-        : await evidenceScheduler.run(
-            generatedRootQualityExecutionResources(finalPlan),
-            execute,
-          );
+      if (evidenceScheduler === undefined) {
+        await semantic();
+        return;
+      }
+      const queue = await startPhase("scheduler-queue", options.gate);
+      let entered = false;
+      try {
+        await evidenceScheduler.run(options.resources, async () => {
+          entered = true;
+          await finishPhase(queue, { outcome: "succeeded" });
+          await semantic();
+        });
+      } catch (error) {
+        if (!entered) {
+          await finishPhase(queue, { outcome: "failed", error });
+        }
+        throw error;
+      }
+    };
+    const executeRootQuality = async () => {
+      await executeSemanticGate({
+        gate: "generated-root-quality",
+        resources: generatedRootQualityExecutionResources(finalPlan),
+        execute: async () => {
+          await executeGeneratedRootQuality({
+            plan: finalPlan,
+            projectDir,
+            fixtureWorkspace: options.workspace,
+            includeFix,
+            run: containerSession.run,
+            identityRun: run,
+          });
+        },
+      });
     };
 
     const evidenceOptions = {
@@ -541,20 +660,20 @@ async function runScenario(
             await deriveFocusedPackageLinkContractIdentity(focusedPlan),
           ...evidenceOptions,
           execute: async () => {
-            await containerSession.reserve();
-            const execute = async () => {
-              await executeFocusedPackageLink({
-                scenarioLabel: scenario.label,
-                projectDir,
-                fixtureWorkspace: options.workspace,
-                consumerPackagePath: focusedPlan.consumerPackagePath,
-                providerPackagePath: focusedPlan.providerPackagePath,
-                run: containerSession.run,
-              });
-            };
-            return evidenceScheduler === undefined
-              ? await execute()
-              : await evidenceScheduler.run([], execute);
+            await executeSemanticGate({
+              gate: "focused-package-link",
+              resources: [],
+              execute: async () => {
+                await executeFocusedPackageLink({
+                  scenarioLabel: scenario.label,
+                  projectDir,
+                  fixtureWorkspace: options.workspace,
+                  consumerPackagePath: focusedPlan.consumerPackagePath,
+                  providerPackagePath: focusedPlan.providerPackagePath,
+                  run: containerSession.run,
+                });
+              },
+            });
           },
         });
       }
@@ -567,18 +686,18 @@ async function runScenario(
             await deriveDeploymentQualityContractIdentity(deployment),
           ...evidenceOptions,
           execute: async () => {
-            await containerSession.reserve();
-            const execute = async () => {
-              await executeDeploymentQuality({
-                deployment,
-                projectDir,
-                fixtureWorkspace: options.workspace,
-                run: containerSession.run,
-              });
-            };
-            return evidenceScheduler === undefined
-              ? await execute()
-              : await evidenceScheduler.run([], execute);
+            await executeSemanticGate({
+              gate: "deployment-quality",
+              resources: [],
+              execute: async () => {
+                await executeDeploymentQuality({
+                  deployment,
+                  projectDir,
+                  fixtureWorkspace: options.workspace,
+                  run: containerSession.run,
+                });
+              },
+            });
           },
         });
       }
@@ -657,8 +776,9 @@ export async function runGeneratedScenarioSet(
     scenarios: scenarios.map(scenarioDiagnostics),
   });
   const callerRecordLifecycle = options.evidence?.recordLifecycle;
-  const scenarioOptions: GeneratedScenarioRunOptions = {
+  const scenarioOptions: InternalGeneratedScenarioRunOptions = {
     ...options,
+    recordActivity,
     ...(options.evidence === undefined
       ? {}
       : {
@@ -691,6 +811,9 @@ export async function runGeneratedScenarioSet(
         outcome,
       });
     } catch (error) {
+      options.reporter?.info?.(
+        `[Fixture Evidence] ${set} ${scenario.label} (${scenario.id}) failed: ${failureMessage(error)}. Reproduce the scenario set with ${scenarioSetReproductionCommands[set]}; generated artifact: ${path.join(options.workspace, scenario.id)}`,
+      );
       await recordActivity({
         type: "scenario",
         scenario: scenarioDiagnostics(scenario),

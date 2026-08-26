@@ -81,6 +81,11 @@ describe("Preset Registry generated scenarios", () => {
     expect(
       matrix.filter((scenario) => scenario.addition === undefined),
     ).toHaveLength(definitions.length);
+    expect(
+      matrix
+        .filter((scenario) => scenario.addition === undefined)
+        .map((scenario) => scenario.id),
+    ).toEqual(initialization.map((scenario) => scenario.id));
     const rustDefinition = definitions.find(
       (definition) => definition.metadata.name === rustPresetName,
     );

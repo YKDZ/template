@@ -25,9 +25,11 @@ import {
 } from "../packages/checks/src/check-generated-registry.ts";
 import { executeGeneratedRootQuality } from "../packages/checks/src/fixture-evidence/gates/root-quality/index.ts";
 import {
+  checkFixtureEvidenceHealth,
   createDevelopmentContainerFixtureSession,
   deriveDevelopmentContainerBuildIdentity,
   FileFixtureEvidenceActivityLedger,
+  FileFixtureEvidenceStorage,
   runFixtureEvidenceGate,
   type FixtureCommandRunner,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
@@ -36,7 +38,7 @@ type Command = {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly env?: NodeJS.ProcessEnv | undefined;
 };
 
 function fixtureIdLabel(projectDir: string): string {
@@ -584,8 +586,8 @@ describe("Development Container Fixture Executor", () => {
           TURBO_TEAM: "fixture-team",
           TURBO_TOKEN: "fixture-token",
         },
-        recordCacheActivity: (event) => {
-          cacheActivity.push(event.cache);
+        recordActivity: (event) => {
+          if (event.type === "cache") cacheActivity.push(event.cache);
         },
         run: async (command, args) => {
           if (command === "docker" && args[0] === "ps") {
@@ -602,6 +604,486 @@ describe("Development Container Fixture Executor", () => {
       expect(new Set(cacheActivity)).toEqual(
         new Set(["buildkit", "pnpm-downloads", "cargo-downloads", "turbo"]),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("records paired container preparation and dependency installation phases", async () => {
+    const projectDir = path.resolve("/fixture/phase-lifecycle");
+    const activity: Array<Record<string, unknown>> = [];
+    let milliseconds = 0;
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      clock: () => new Date(milliseconds++ * 10),
+      recordActivity: (event) => {
+        activity.push(event);
+      },
+      run: async (command, args) =>
+        command === "docker" && args[0] === "ps" ? { stdout: "" } : {},
+    });
+
+    await session.execute(
+      async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+    );
+
+    expect(activity.filter((event) => event.type === "phase")).toEqual([
+      {
+        type: "phase",
+        phase: "container-preparation",
+        at: "1970-01-01T00:00:00.000Z",
+        outcome: "started",
+      },
+      {
+        type: "phase",
+        phase: "container-preparation",
+        at: "1970-01-01T00:00:00.010Z",
+        outcome: "succeeded",
+        durationMilliseconds: 10,
+      },
+      {
+        type: "phase",
+        phase: "dependency-installation",
+        at: "1970-01-01T00:00:00.020Z",
+        outcome: "started",
+      },
+      {
+        type: "phase",
+        phase: "dependency-installation",
+        at: "1970-01-01T00:00:00.030Z",
+        outcome: "succeeded",
+        durationMilliseconds: 10,
+      },
+    ]);
+  });
+
+  it("retries one classified Docker registry transport failure with identical inputs", async () => {
+    const projectDir = path.resolve("/fixture/docker-registry-recovery");
+    const upCalls: Command[] = [];
+    const activity: Array<Record<string, unknown>> = [];
+    let milliseconds = 0;
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      clock: () => new Date(milliseconds++ * 10),
+      recordActivity: (event) => {
+        activity.push(event);
+      },
+      run: async (command, args, options) => {
+        if (command === "devcontainer" && args[0] === "up") {
+          upCalls.push({
+            command,
+            args: [...args],
+            cwd: options.cwd,
+            env: options.env,
+          });
+          if (upCalls.length === 1) {
+            throw new Error(
+              'failed to resolve source metadata for docker.io/library/node:24-bookworm-slim: Head "https://registry-1.docker.io/v2/library/node/manifests/24-bookworm-slim": dial tcp 34.194.164.123:443: i/o timeout',
+            );
+          }
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await session.execute(
+      async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+    );
+
+    expect(upCalls).toHaveLength(2);
+    expect(upCalls[1]).toEqual(upCalls[0]);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "phase" && event.phase === "container-preparation",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        outcome: "started",
+      }),
+      expect.objectContaining({
+        outcome: "succeeded",
+      }),
+    ]);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "retry" && event.phase === "container-preparation",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        outcome: "started",
+        classification: "docker-registry-transport-transient",
+        firstError: expect.stringContaining("registry-1.docker.io"),
+      }),
+      expect.objectContaining({ outcome: "recovered" }),
+    ]);
+  });
+
+  it("retries one npm registry transport failure found in command stderr", async () => {
+    const projectDir = path.resolve("/fixture/npm-registry-recovery");
+    const installCalls: Command[] = [];
+    const activity: Array<Record<string, unknown>> = [];
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      recordActivity: (event) => {
+        activity.push(event);
+      },
+      run: async (command, args, options) => {
+        if (command === "devcontainer" && args[0] === "exec") {
+          const nested = nestedDevcontainerCommand(args);
+          if (
+            nested.command === "pnpm" &&
+            nested.args[0] === "install" &&
+            nested.args.includes("--lockfile-only")
+          ) {
+            installCalls.push({
+              command,
+              args: [...args],
+              cwd: options.cwd,
+              env: options.env,
+            });
+            if (installCalls.length === 1) {
+              const failure = new Error("Command failed with exit code 1");
+              Object.assign(failure, {
+                stderr:
+                  "ERR_PNPM_META_FETCH_FAIL GET https://registry.npmjs.org/tinypool: read ECONNRESET",
+              });
+              throw failure;
+            }
+          }
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await session.execute(
+      async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+    );
+
+    expect(installCalls).toHaveLength(2);
+    expect(installCalls[1]).toEqual(installCalls[0]);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "phase" && event.phase === "dependency-installation",
+      ),
+    ).toEqual([
+      expect.objectContaining({ outcome: "started" }),
+      expect.objectContaining({ outcome: "succeeded" }),
+    ]);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "retry" && event.phase === "dependency-installation",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        outcome: "started",
+        classification: "npm-registry-transport-transient",
+        firstError: expect.stringContaining("registry.npmjs.org"),
+      }),
+      expect.objectContaining({ outcome: "recovered" }),
+    ]);
+  });
+
+  it.each([
+    [
+      "unknown registry host",
+      "GET https://registry.example.com/v2/library/node: read ECONNRESET",
+    ],
+    [
+      "deterministic Dockerfile failure",
+      "registry-1.docker.io returned Dockerfile parse error on line 4",
+    ],
+    [
+      "lookalike Docker registry host",
+      "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
+    ],
+    [
+      "unrelated transport marker on another line",
+      "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
+    ],
+  ])("does not retry a %s", async (_case, diagnostic) => {
+    const projectDir = path.resolve(
+      `/fixture/non-retryable-${_case.replaceAll(" ", "-")}`,
+    );
+    let upAttempts = 0;
+    const activity: Array<Record<string, unknown>> = [];
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      recordActivity: (event) => {
+        activity.push(event);
+      },
+      run: async (command, args) => {
+        if (command === "devcontainer" && args[0] === "up") {
+          upAttempts += 1;
+          throw new Error(diagnostic);
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await expect(
+      session.execute(
+        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+      ),
+    ).rejects.toThrow(diagnostic);
+
+    expect(upAttempts).toBe(1);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "phase" && event.phase === "container-preparation",
+      ),
+    ).toEqual([
+      expect.objectContaining({ outcome: "started" }),
+      expect.objectContaining({
+        outcome: "failed",
+        classification: "not-retryable",
+      }),
+    ]);
+  });
+
+  it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
+    const projectDir = path.resolve("/fixture/semantic-no-retry");
+    let semanticAttempts = 0;
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      run: async (command, args) => {
+        if (command === "devcontainer" && args[0] === "exec") {
+          const nested = nestedDevcontainerCommand(args);
+          if (
+            nested.command === "pnpm" &&
+            nested.args[0] === "run" &&
+            nested.args[1] === "check"
+          ) {
+            semanticAttempts += 1;
+            throw new Error(
+              "test assertion mentions https://registry.npmjs.org and ECONNRESET",
+            );
+          }
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await expect(
+      session.execute(
+        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+      ),
+    ).rejects.toThrow("test assertion mentions");
+    expect(semanticAttempts).toBe(1);
+  });
+
+  it("shares one retry budget across container and dependency preparation", async () => {
+    const projectDir = path.resolve("/fixture/single-retry-budget");
+    let upAttempts = 0;
+    let installAttempts = 0;
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      run: async (command, args) => {
+        if (command === "devcontainer" && args[0] === "up") {
+          upAttempts += 1;
+          if (upAttempts === 1) {
+            throw new Error(
+              "https://registry-1.docker.io/v2/library/node: i/o timeout",
+            );
+          }
+        }
+        if (command === "devcontainer" && args[0] === "exec") {
+          const nested = nestedDevcontainerCommand(args);
+          if (
+            nested.command === "pnpm" &&
+            nested.args[0] === "install" &&
+            nested.args.includes("--lockfile-only")
+          ) {
+            installAttempts += 1;
+            throw new Error(
+              "GET https://registry.npmjs.org/tinypool: read ECONNRESET",
+            );
+          }
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await expect(
+      session.execute(
+        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+      ),
+    ).rejects.toThrow("registry.npmjs.org");
+    expect({ upAttempts, installAttempts }).toEqual({
+      upAttempts: 2,
+      installAttempts: 1,
+    });
+  });
+
+  it("stops after one retry and preserves the first and final registry failures", async () => {
+    const projectDir = path.resolve("/fixture/docker-registry-final-failure");
+    let upAttempts = 0;
+    const activity: Array<Record<string, unknown>> = [];
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      recordActivity: (event) => {
+        activity.push(event);
+      },
+      run: async (command, args) => {
+        if (command === "devcontainer" && args[0] === "up") {
+          upAttempts += 1;
+          throw new Error(
+            `https://registry-1.docker.io/v2/library/node: i/o timeout attempt ${upAttempts}`,
+          );
+        }
+        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+      },
+    });
+
+    await expect(
+      session.execute(
+        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+      ),
+    ).rejects.toThrow(
+      /container-preparation failed after docker-registry-transport-transient retry.*First failure:.*attempt 1.*Retry failure:.*attempt 2/u,
+    );
+
+    expect(upAttempts).toBe(2);
+    expect(
+      activity.filter(
+        (event) =>
+          event.type === "retry" && event.phase === "container-preparation",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        outcome: "started",
+        firstError: expect.stringContaining("attempt 1"),
+      }),
+      expect.objectContaining({
+        outcome: "failed",
+        error: expect.stringContaining("attempt 2"),
+      }),
+    ]);
+    expect(activity).toContainEqual(
+      expect.objectContaining({
+        type: "phase",
+        phase: "container-preparation",
+        outcome: "failed",
+        classification: "docker-registry-transport-transient",
+      }),
+    );
+  });
+
+  it("keeps final retry failure unhealthy and issues no evidence", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "fixture-retry-health-"));
+    const projectDir = path.join(root, "project");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "retry-final-failure",
+      label: "retry final failure",
+      presetIdentities: ["fixture"],
+    };
+    const ledger = new FileFixtureEvidenceActivityLedger({
+      root: path.join(root, "activity"),
+      evidenceRoot,
+    });
+    const invocation = ledger.invocation({
+      runId: "retry-final-failure",
+      runAttempt: "1",
+      invocationId: "retry-final-failure",
+      scenarioSet: "init",
+      writeEnabled: true,
+    });
+    try {
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      const session = createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        recordActivity: async (event) => {
+          await invocation.record(
+            event.type === "cache"
+              ? { ...event, scenario }
+              : {
+                  ...event,
+                  scope: "development-container-session",
+                  scenario,
+                },
+          );
+        },
+        run: async (command, args) => {
+          if (command === "devcontainer" && args[0] === "up") {
+            throw new Error(
+              "https://registry-1.docker.io/v2/library/node: i/o timeout",
+            );
+          }
+          return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+        },
+      });
+      let failure: unknown;
+      try {
+        await runFixtureEvidenceGate({
+          gate: "generated-root-quality",
+          generatedContentIdentity: "1".repeat(40),
+          contractIdentity: "2".repeat(64),
+          scenario,
+          producerCommit: "test",
+          storage: new FileFixtureEvidenceStorage(evidenceRoot),
+          writeEnabled: true,
+          recordLifecycle: invocation.record,
+          execute: async () => {
+            await session.execute(
+              async (run) =>
+                await run("pnpm", ["run", "check"], { cwd: projectDir }),
+            );
+          },
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+
+      const records = await ledger.read();
+      expect(
+        records.filter((record) => record.event.type === "issuance"),
+      ).toEqual([]);
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "retry-final-failure",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      expect(report.healthy).toBe(false);
+      expect(report.failures).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "failed-retry" }),
+          expect.objectContaining({ code: "failed-phase" }),
+          expect.objectContaining({ code: "failed-execution" }),
+        ]),
+      );
+      expect(
+        report.failures.find((entry) => entry.code === "failed-retry")?.detail,
+      ).toMatch(/First failure:.*registry-1\.docker\.io.*Retry failure:/u);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -699,6 +1181,106 @@ describe("Development Container Fixture Executor", () => {
         cwd: projectDir,
       });
     }
+  });
+
+  it("shares a failed build flight retry across the same project and cleans by exact label", async () => {
+    const projectDir = path.resolve("/fixture/shared-build-retry");
+    const build = {
+      identity: "d".repeat(64),
+      cacheDirectory: path.resolve("/cache/template-buildkit"),
+    };
+    const calls: Command[] = [];
+    let upAttempts = 0;
+    let devcontainerVersionChecks = 0;
+    let releaseVersionChecks!: () => void;
+    const bothSessionsReachedStartup = new Promise<void>((resolve) => {
+      releaseVersionChecks = resolve;
+    });
+    const activities: Array<Array<Record<string, unknown>>> = [[], []];
+    const run: FixtureCommandRunner = async (command, args, options) => {
+      calls.push({
+        command,
+        args: [...args],
+        cwd: options.cwd,
+        env: options.env,
+      });
+      if (command === "devcontainer" && args[0] === "--version") {
+        devcontainerVersionChecks += 1;
+        if (devcontainerVersionChecks === 2) releaseVersionChecks();
+      }
+      if (command === "devcontainer" && args[0] === "up") {
+        upAttempts += 1;
+        if (upAttempts === 1) {
+          await bothSessionsReachedStartup;
+          throw new Error(
+            "https://registry-1.docker.io/v2/library/node: i/o timeout",
+          );
+        }
+      }
+      if (command === "docker" && args[0] === "ps") {
+        return { stdout: "partial-container\n" };
+      }
+      return {};
+    };
+    const sessions = activities.map((activity) =>
+      createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        build,
+        recordActivity: (event) => {
+          activity.push(event);
+        },
+        run,
+      }),
+    );
+
+    await Promise.all(
+      sessions.map(
+        async (session) =>
+          await session.execute(
+            async (sessionRun) =>
+              await sessionRun("pnpm", ["run", "check"], {
+                cwd: projectDir,
+              }),
+          ),
+      ),
+    );
+
+    expect(upAttempts).toBe(2);
+    expect(activities.flat().filter((event) => event.type === "retry")).toEqual(
+      [
+        expect.objectContaining({ outcome: "started" }),
+        expect.objectContaining({ outcome: "recovered" }),
+      ],
+    );
+    expect(
+      activities.map((activity) =>
+        activity.filter(
+          (event) =>
+            event.type === "phase" &&
+            event.phase === "container-preparation" &&
+            event.outcome === "succeeded",
+        ),
+      ),
+    ).toEqual([[expect.any(Object)], [expect.any(Object)]]);
+    const label = fixtureIdLabel(projectDir);
+    expect(
+      calls.filter(
+        ({ command, args }) => command === "docker" && args[0] === "ps",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        args: ["ps", "-aq", "--filter", `label=${label}`],
+      }),
+      expect.objectContaining({
+        args: ["ps", "-aq", "--filter", `label=${label}`],
+      }),
+    ]);
+    expect(
+      calls.filter(
+        ({ command, args }) => command === "docker" && args[0] === "rm",
+      ),
+    ).toHaveLength(2);
   });
 
   it("checks before Fix, compares tree identities, and checks again", async () => {
@@ -869,10 +1451,25 @@ describe("Development Container Fixture Executor", () => {
     );
     const calls: Command[] = [];
     await rm(workspace, { recursive: true, force: true });
+    const evidenceRoot = path.join(workspace, ".test-evidence");
+    const ledger = new FileFixtureEvidenceActivityLedger({
+      root: path.join(workspace, ".test-activity"),
+      evidenceRoot,
+    });
 
     try {
       await runGeneratedScenarioSet("init", {
         workspace,
+        evidence: {
+          storage: new FileFixtureEvidenceStorage(evidenceRoot),
+          readEnabled: false,
+          writeEnabled: false,
+          activity: {
+            ledger,
+            runId: "cold-registry-phases",
+            runAttempt: "1",
+          },
+        },
         run: async (command, args, options) => {
           calls.push({ command, args, cwd: options.cwd });
           if (command === "git") {
@@ -913,6 +1510,35 @@ describe("Development Container Fixture Executor", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("init")).length;
+      const records = await ledger.read();
+      const phases = records.flatMap((record) =>
+        record.event.type === "phase" ? [record.event] : [],
+      );
+      expect(
+        phases.filter((event) => event.outcome === "started"),
+      ).toHaveLength(scenarioCount * 5);
+      expect(
+        phases.filter((event) => event.outcome === "succeeded"),
+      ).toHaveLength(scenarioCount * 5);
+      expect(records.filter((record) => record.event.type === "retry")).toEqual(
+        [],
+      );
+      await expect(
+        checkFixtureEvidenceHealth({
+          ledger,
+          runId: "cold-registry-phases",
+          runAttempt: "1",
+          enabledScenarioSets: ["init"],
+        }),
+      ).resolves.toMatchObject({
+        healthy: true,
+        stages: [
+          expect.objectContaining({
+            retries: 0,
+            recoveries: 0,
+          }),
+        ],
+      });
       expect(
         calls.filter(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",

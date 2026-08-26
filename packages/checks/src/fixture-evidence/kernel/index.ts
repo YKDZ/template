@@ -37,6 +37,7 @@ export type DevelopmentContainerFixtureProbe = {
 
 export type DevelopmentContainerFixtureSession = {
   readonly reserve: () => Promise<void>;
+  readonly prepare: () => Promise<void>;
   readonly run: FixtureCommandRunner;
   readonly execute: <Result>(
     operation: (run: FixtureCommandRunner) => Promise<Result>,
@@ -50,8 +51,77 @@ export type DevelopmentContainerFixtureDependencyCaches = {
 };
 
 export type DevelopmentContainerFixtureCacheActivity = {
+  readonly type: "cache";
   readonly cache: FixtureEvidenceCacheKind;
+  readonly outcome: FixtureEvidenceCacheOutcome;
+  readonly at: string;
 };
+
+export type DevelopmentContainerFixturePhase =
+  | "container-preparation"
+  | "dependency-installation";
+
+export type FixtureExternalFailureClassification =
+  | "docker-registry-transport-transient"
+  | "npm-registry-transport-transient"
+  | "not-retryable";
+
+export type DevelopmentContainerFixturePhaseActivity =
+  | {
+      readonly type: "phase";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "started";
+    }
+  | {
+      readonly type: "phase";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "succeeded";
+      readonly durationMilliseconds: number;
+    }
+  | {
+      readonly type: "phase";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "failed";
+      readonly durationMilliseconds: number;
+      readonly classification: FixtureExternalFailureClassification;
+      readonly error: string;
+    };
+
+export type DevelopmentContainerFixtureRetryActivity =
+  | {
+      readonly type: "retry";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "started";
+      readonly classification: Exclude<
+        FixtureExternalFailureClassification,
+        "not-retryable"
+      >;
+      readonly firstError: string;
+    }
+  | {
+      readonly type: "retry";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "recovered";
+      readonly durationMilliseconds: number;
+    }
+  | {
+      readonly type: "retry";
+      readonly phase: DevelopmentContainerFixturePhase;
+      readonly at: string;
+      readonly outcome: "failed";
+      readonly durationMilliseconds: number;
+      readonly error: string;
+    };
+
+export type DevelopmentContainerFixtureActivity =
+  | DevelopmentContainerFixtureCacheActivity
+  | DevelopmentContainerFixturePhaseActivity
+  | DevelopmentContainerFixtureRetryActivity;
 
 const developmentContainerSharedPnpmStore = "/pnpm/store";
 const developmentContainerCargoRegistry = "/usr/local/cargo/registry";
@@ -96,7 +166,7 @@ function redactCommandError(
   }
   if (error instanceof Error) {
     const redacted = new Error(
-      redactSecretValues(error.message, secretValues),
+      redactSecretValues(commandErrorDiagnostic(error), secretValues),
       error.cause === undefined
         ? undefined
         : { cause: redactCommandError(error.cause, secretValues) },
@@ -107,6 +177,101 @@ function redactCommandError(
   return typeof error === "string"
     ? redactSecretValues(error, secretValues)
     : error;
+}
+
+function commandErrorDiagnostic(error: unknown, depth = 0): string {
+  if (depth > 4) return "unknown error";
+  if (error instanceof AggregateError) {
+    return [
+      error.message,
+      ...error.errors.map((nested) =>
+        commandErrorDiagnostic(nested, depth + 1),
+      ),
+      ...(error.cause === undefined
+        ? []
+        : [commandErrorDiagnostic(error.cause, depth + 1)]),
+    ]
+      .filter(
+        (value, index, values) =>
+          value.length > 0 && values.indexOf(value) === index,
+      )
+      .join("\n");
+  }
+  if (error instanceof Error || isRecord(error)) {
+    const record = error as unknown as Record<string, unknown>;
+    return [
+      error instanceof Error ? error.message : undefined,
+      typeof record.shortMessage === "string" ? record.shortMessage : undefined,
+      typeof record.stderr === "string" ? record.stderr : undefined,
+      typeof record.stdout === "string" ? record.stdout : undefined,
+      record.cause === undefined
+        ? undefined
+        : commandErrorDiagnostic(record.cause, depth + 1),
+    ]
+      .filter(
+        (value, index, values): value is string =>
+          typeof value === "string" &&
+          value.length > 0 &&
+          values.indexOf(value) === index,
+      )
+      .join("\n");
+  }
+  return errorMessage(error);
+}
+
+const registryTransportTransientMarkers = [
+  "econnreset",
+  "etimedout",
+  "eai_again",
+  "enetunreach",
+  "connection reset by peer",
+  "connection refused",
+  "i/o timeout",
+  "socket hang up",
+  "temporary failure in name resolution",
+  "tls handshake timeout",
+] as const;
+
+function classifyRegistryTransportFailure(
+  error: unknown,
+  registry: "docker" | "npm",
+): Exclude<FixtureExternalFailureClassification, "not-retryable"> | undefined {
+  const diagnostic = commandErrorDiagnostic(error).toLowerCase();
+  const hosts =
+    registry === "docker"
+      ? ["registry-1.docker.io", "auth.docker.io"]
+      : ["registry.npmjs.org"];
+  const isSupportedTransientLine = diagnostic.split(/\r?\n/u).some((line) =>
+    hosts.some((host) => {
+      const start = line.indexOf(host);
+      if (start < 0) return false;
+      const preceding = line[start - 1];
+      const following = line[start + host.length];
+      const hasHostBoundary =
+        (preceding === undefined || /[\s/"']/u.test(preceding)) &&
+        (following === undefined || /[\s/:"']/u.test(following));
+      return (
+        hasHostBoundary &&
+        registryTransportTransientMarkers.some((marker) =>
+          line.includes(marker),
+        )
+      );
+    }),
+  );
+  if (!isSupportedTransientLine) {
+    return undefined;
+  }
+  return registry === "docker"
+    ? "docker-registry-transport-transient"
+    : "npm-registry-transport-transient";
+}
+
+function elapsedMilliseconds(startedAt: Date, finishedAt: Date): number {
+  const duration = finishedAt.getTime() - startedAt.getTime();
+  if (duration < 0) {
+    throw new Error("Fixture activity clock moved backwards");
+  }
+  return duration;
 }
 
 async function runDevelopmentContainerBuildFlight(
@@ -215,16 +380,16 @@ export function createDevelopmentContainerFixtureSession(options: {
   readonly acquireSession?: (() => Promise<() => void>) | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly run?: FixtureCommandRunner;
-  readonly recordCacheActivity?:
-    | ((
-        event: DevelopmentContainerFixtureCacheActivity,
-      ) => void | Promise<void>)
+  readonly clock?: (() => Date) | undefined;
+  readonly recordActivity?:
+    | ((event: DevelopmentContainerFixtureActivity) => void | Promise<void>)
     | undefined;
 }): DevelopmentContainerFixtureSession {
   const rawRun =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
   const environment = options.environment ?? {};
+  const clock = options.clock ?? (() => new Date());
   const secretValues = turboCacheSecretEnvironmentNames.flatMap((name) => {
     const value = environment[name];
     return value === undefined || value.length === 0 ? [] : [value];
@@ -285,8 +450,118 @@ export function createDevelopmentContainerFixtureSession(options: {
         ];
   const recordCacheActivity = async (
     cache: FixtureEvidenceCacheKind,
+    outcome: FixtureEvidenceCacheOutcome,
   ): Promise<void> => {
-    await options.recordCacheActivity?.({ cache });
+    await options.recordActivity?.({
+      type: "cache",
+      cache,
+      outcome,
+      at: clock().toISOString(),
+    });
+  };
+  type PhaseAttempt = {
+    readonly phase: DevelopmentContainerFixturePhase;
+    readonly startedAt: Date;
+    finished: boolean;
+  };
+  const startPhase = async (
+    phase: DevelopmentContainerFixturePhase,
+  ): Promise<PhaseAttempt> => {
+    const startedAt = clock();
+    await options.recordActivity?.({
+      type: "phase",
+      phase,
+      at: startedAt.toISOString(),
+      outcome: "started",
+    });
+    return { phase, startedAt, finished: false };
+  };
+  const finishPhase = async (
+    phaseAttempt: PhaseAttempt,
+    result:
+      | { readonly outcome: "succeeded" }
+      | {
+          readonly outcome: "failed";
+          readonly classification: FixtureExternalFailureClassification;
+          readonly error: unknown;
+        },
+  ): Promise<void> => {
+    if (phaseAttempt.finished) return;
+    phaseAttempt.finished = true;
+    const finishedAt = clock();
+    await options.recordActivity?.({
+      type: "phase",
+      phase: phaseAttempt.phase,
+      at: finishedAt.toISOString(),
+      durationMilliseconds: elapsedMilliseconds(
+        phaseAttempt.startedAt,
+        finishedAt,
+      ),
+      ...(result.outcome === "succeeded"
+        ? { outcome: "succeeded" }
+        : {
+            outcome: "failed",
+            classification: result.classification,
+            error: errorMessage(result.error),
+          }),
+    });
+  };
+  const runWithExternalRetry = async <Result>(retryOptions: {
+    readonly phase: DevelopmentContainerFixturePhase;
+    readonly registry: "docker" | "npm";
+    readonly operation: () => Promise<Result>;
+  }): Promise<Result> => {
+    try {
+      return await retryOptions.operation();
+    } catch (firstError) {
+      const classification = classifyRegistryTransportFailure(
+        firstError,
+        retryOptions.registry,
+      );
+      if (classification === undefined || retryUsed) throw firstError;
+      retryUsed = true;
+      const retryStartedAt = clock();
+      await options.recordActivity?.({
+        type: "retry",
+        phase: retryOptions.phase,
+        at: retryStartedAt.toISOString(),
+        outcome: "started",
+        classification,
+        firstError: errorMessage(firstError),
+      });
+      try {
+        const result = await retryOptions.operation();
+        const retryFinishedAt = clock();
+        await options.recordActivity?.({
+          type: "retry",
+          phase: retryOptions.phase,
+          at: retryFinishedAt.toISOString(),
+          outcome: "recovered",
+          durationMilliseconds: elapsedMilliseconds(
+            retryStartedAt,
+            retryFinishedAt,
+          ),
+        });
+        return result;
+      } catch (retryError) {
+        const retryFinishedAt = clock();
+        await options.recordActivity?.({
+          type: "retry",
+          phase: retryOptions.phase,
+          at: retryFinishedAt.toISOString(),
+          outcome: "failed",
+          durationMilliseconds: elapsedMilliseconds(
+            retryStartedAt,
+            retryFinishedAt,
+          ),
+          error: errorMessage(retryError),
+        });
+        throw new Error(
+          `Fixture ${retryOptions.phase} failed after ${classification} retry. First failure: ${errorMessage(firstError)}. Retry failure: ${errorMessage(retryError)}`,
+          { cause: retryError },
+        );
+      }
+    }
   };
   const createDependencyCacheOverride = async (): Promise<
     | {
@@ -390,6 +665,7 @@ export function createDevelopmentContainerFixtureSession(options: {
   let closed = false;
   let releaseSession: (() => void) | undefined;
   let dependencyCacheOverridePath: string | undefined;
+  let retryUsed = false;
 
   const exec = async (
     command: string,
@@ -430,7 +706,7 @@ export function createDevelopmentContainerFixtureSession(options: {
           args[1] === "check:deployment")) ||
         (args[0] === "exec" && args[1] === "turbo"))
     ) {
-      await recordCacheActivity("turbo");
+      await recordCacheActivity("turbo", "configured");
     }
     return await run(
       "devcontainer",
@@ -459,74 +735,127 @@ export function createDevelopmentContainerFixtureSession(options: {
 
   const start = async (): Promise<void> => {
     await reserve();
+    const containerAttempt = await startPhase("container-preparation");
+    let containerFailureClassification: FixtureExternalFailureClassification =
+      "not-retryable";
     try {
-      await run("docker", ["version", "--format", "{{.Server.Version}}"], {
-        cwd: options.projectDir,
+      try {
+        await run("docker", ["version", "--format", "{{.Server.Version}}"], {
+          cwd: options.projectDir,
+        });
+      } catch (error) {
+        throw new Error(
+          `Docker is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+        );
+      }
+      try {
+        await run("devcontainer", ["--version"], { cwd: options.projectDir });
+      } catch (error) {
+        throw new Error(
+          `The pinned Dev Container CLI is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+        );
+      }
+      const dependencyCacheOverride = await createDependencyCacheOverride();
+      dependencyCacheOverridePath = dependencyCacheOverride?.path;
+      upAttempted = true;
+      const up = async () =>
+        await run(
+          "devcontainer",
+          [
+            "up",
+            ...workspaceArgs,
+            "--config",
+            config,
+            ...(dependencyCacheOverridePath === undefined
+              ? []
+              : ["--override-config", dependencyCacheOverridePath]),
+            "--no-lockfile",
+            ...identityArgs,
+            ...buildCacheArgs,
+          ],
+          { cwd: options.projectDir },
+        );
+      try {
+        const upWithRetry = async () =>
+          await runWithExternalRetry({
+            phase: "container-preparation",
+            registry: "docker",
+            operation: up,
+          });
+        if (options.build === undefined) {
+          await upWithRetry();
+        } else {
+          await recordCacheActivity("buildkit", "configured");
+          await runDevelopmentContainerBuildFlight(
+            `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
+            upWithRetry,
+          );
+        }
+      } catch (error) {
+        containerFailureClassification =
+          classifyRegistryTransportFailure(error, "docker") ?? "not-retryable";
+        throw error;
+      }
+      upSucceeded = true;
+      for (const cache of dependencyCacheOverride?.caches ?? []) {
+        await recordCacheActivity(cache, "mounted");
+      }
+      for (const probe of options.probes) {
+        try {
+          await exec(probe.command, probe.args ?? []);
+        } catch (error) {
+          throw new Error(
+            `Tool Layer capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
+          );
+        }
+      }
+      await finishPhase(containerAttempt, { outcome: "succeeded" });
+    } catch (error) {
+      await finishPhase(containerAttempt, {
+        outcome: "failed",
+        classification: containerFailureClassification,
+        error,
       });
-    } catch (error) {
-      throw new Error(
-        `Docker is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
-      );
+      throw error;
     }
+
+    const dependencyAttempt = await startPhase("dependency-installation");
+    let dependencyFailureClassification: FixtureExternalFailureClassification =
+      "not-retryable";
     try {
-      await run("devcontainer", ["--version"], { cwd: options.projectDir });
+      for (const command of fixtureDependencyInstallationPlan(
+        developmentContainerSharedPnpmStore,
+      ).commands) {
+        try {
+          const install = async () => await exec(command.command, command.args);
+          if (command.args.includes("--offline")) {
+            await install();
+          } else {
+            await runWithExternalRetry({
+              phase: "dependency-installation",
+              registry: "npm",
+              operation: install,
+            });
+          }
+        } catch (error) {
+          if (!command.args.includes("--offline")) {
+            dependencyFailureClassification =
+              classifyRegistryTransportFailure(error, "npm") ?? "not-retryable";
+          }
+          const failure = new Error(
+            `Dependency preparation failed during ${command.command} ${command.args[0]}: ${errorMessage(error)}`,
+          );
+          throw failure;
+        }
+      }
+      await finishPhase(dependencyAttempt, { outcome: "succeeded" });
     } catch (error) {
-      throw new Error(
-        `The pinned Dev Container CLI is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
-      );
-    }
-    const dependencyCacheOverride = await createDependencyCacheOverride();
-    dependencyCacheOverridePath = dependencyCacheOverride?.path;
-    for (const cache of dependencyCacheOverride?.caches ?? []) {
-      await recordCacheActivity(cache);
-    }
-    upAttempted = true;
-    const up = async () =>
-      await run(
-        "devcontainer",
-        [
-          "up",
-          ...workspaceArgs,
-          "--config",
-          config,
-          ...(dependencyCacheOverridePath === undefined
-            ? []
-            : ["--override-config", dependencyCacheOverridePath]),
-          "--no-lockfile",
-          ...identityArgs,
-          ...buildCacheArgs,
-        ],
-        { cwd: options.projectDir },
-      );
-    if (options.build === undefined) {
-      await up();
-    } else {
-      await recordCacheActivity("buildkit");
-      await runDevelopmentContainerBuildFlight(
-        `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
-        up,
-      );
-    }
-    upSucceeded = true;
-    for (const probe of options.probes) {
-      try {
-        await exec(probe.command, probe.args ?? []);
-      } catch (error) {
-        throw new Error(
-          `Tool Layer capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
-        );
-      }
-    }
-    for (const command of fixtureDependencyInstallationPlan(
-      developmentContainerSharedPnpmStore,
-    ).commands) {
-      try {
-        await exec(command.command, command.args);
-      } catch (error) {
-        throw new Error(
-          `Dependency preparation failed during ${command.command} ${command.args[0]}: ${errorMessage(error)}`,
-        );
-      }
+      await finishPhase(dependencyAttempt, {
+        outcome: "failed",
+        classification: dependencyFailureClassification,
+        error,
+      });
+      throw error;
     }
   };
 
@@ -538,9 +867,16 @@ export function createDevelopmentContainerFixtureSession(options: {
     if (closed) {
       throw new Error("Development Container Fixture session is closed");
     }
+    await prepare();
+    return await exec(command, args, runOptions);
+  };
+
+  const prepare = async (): Promise<void> => {
+    if (closed) {
+      throw new Error("Development Container Fixture session is closed");
+    }
     startup ??= start();
     await startup;
-    return await exec(command, args, runOptions);
   };
 
   const close = async (): Promise<void> => {
@@ -644,6 +980,7 @@ export function createDevelopmentContainerFixtureSession(options: {
 
   return {
     reserve,
+    prepare,
     run: sessionRun,
     execute: async <Result>(
       operation: (run: FixtureCommandRunner) => Promise<Result>,
@@ -775,15 +1112,83 @@ export type FixtureEvidenceCacheKind =
   | "cargo-downloads"
   | "turbo";
 
-export type FixtureEvidenceInvocationEvent =
+export type FixtureEvidenceCacheOutcome = "configured" | "mounted";
+
+export type FixtureEvidenceCacheActivityKey =
+  `${FixtureEvidenceCacheKind}:${FixtureEvidenceCacheOutcome}`;
+
+export type FixtureEvidencePhase =
+  | "scheduler-queue"
+  | "container-preparation"
+  | "dependency-installation"
+  | "semantic-gate";
+
+export type FixtureEvidencePhaseScope =
+  | "development-container-session"
+  | FixtureEvidenceGate;
+
+type FixtureEvidenceActivityScope = {
+  readonly scope: FixtureEvidencePhaseScope;
+};
+
+export type FixtureEvidencePhaseActivity = FixtureEvidenceActivityScope & {
+  readonly type: "phase";
+  readonly phase: FixtureEvidencePhase;
+  readonly scenario: FixtureEvidenceScenarioDiagnostics;
+  readonly at: string;
+} & (
+    | { readonly outcome: "started" }
+    | {
+        readonly outcome: "succeeded";
+        readonly durationMilliseconds: number;
+      }
+    | {
+        readonly outcome: "failed";
+        readonly durationMilliseconds: number;
+        readonly classification: FixtureExternalFailureClassification;
+        readonly error: string;
+      }
+  );
+
+export type FixtureEvidenceRetryActivity = FixtureEvidenceActivityScope & {
+  readonly type: "retry";
+  readonly phase: "container-preparation" | "dependency-installation";
+  readonly scenario: FixtureEvidenceScenarioDiagnostics;
+  readonly at: string;
+} & (
+    | {
+        readonly outcome: "started";
+        readonly classification: Exclude<
+          FixtureExternalFailureClassification,
+          "not-retryable"
+        >;
+        readonly firstError: string;
+      }
+    | {
+        readonly outcome: "recovered";
+        readonly durationMilliseconds: number;
+      }
+    | {
+        readonly outcome: "failed";
+        readonly durationMilliseconds: number;
+        readonly error: string;
+      }
+  );
+
+export type FixtureEvidenceScenarioActivityEvent =
   | FixtureEvidenceLifecycleEvent
+  | FixtureEvidencePhaseActivity
+  | FixtureEvidenceRetryActivity
   | {
       readonly type: "cache";
       readonly cache: FixtureEvidenceCacheKind;
       readonly scenario: FixtureEvidenceScenarioDiagnostics;
       readonly at: string;
-      readonly outcome: "used";
-    }
+      readonly outcome: FixtureEvidenceCacheOutcome;
+    };
+
+export type FixtureEvidenceInvocationEvent =
+  | FixtureEvidenceScenarioActivityEvent
   | {
       readonly type: "invocation";
       readonly outcome: "started";
@@ -817,7 +1222,7 @@ export type FixtureEvidenceInvocationEvent =
     };
 
 export type FixtureEvidenceActivityRecord = {
-  readonly schema: "fixture-evidence-activity/v1";
+  readonly schema: "fixture-evidence-activity/v2";
   readonly runId: string;
   readonly runAttempt: string;
   readonly invocationId: string;
@@ -848,6 +1253,11 @@ export type FixtureEvidenceHealthFailureCode =
   | "incomplete-invocation"
   | "incomplete-scenario"
   | "failed-execution"
+  | "failed-phase"
+  | "failed-retry"
+  | "invalid-phase-lifecycle"
+  | "invalid-retry-lifecycle"
+  | "issuance-order"
   | "lifecycle-error"
   | "missing-issuance"
   | "missing-scenario-set"
@@ -869,11 +1279,17 @@ export type FixtureEvidenceHealthStage = {
   readonly scenarios: number;
   readonly hits: number;
   readonly misses: Partial<Record<FixtureEvidenceMissReason, number>>;
-  readonly cacheActivity: Partial<Record<FixtureEvidenceCacheKind, number>>;
+  readonly cacheActivity: Partial<
+    Record<FixtureEvidenceCacheActivityKey, number>
+  >;
   readonly executions: number;
   readonly issuances: number;
   readonly lifecycleErrors: number;
   readonly durationMilliseconds: number;
+  readonly phaseDurations: Partial<Record<FixtureEvidencePhase, number>>;
+  readonly retries: number;
+  readonly recoveries: number;
+  readonly retryDurationMilliseconds: number;
 };
 
 export type FixtureEvidenceHealthScenario = {
@@ -1187,6 +1603,12 @@ function isFixtureEvidenceCacheKind(
   );
 }
 
+function isFixtureEvidenceCacheOutcome(
+  value: unknown,
+): value is FixtureEvidenceCacheOutcome {
+  return value === "configured" || value === "mounted";
+}
+
 function parseFixtureEvidenceRecord(value: unknown): FixtureEvidenceRecord {
   if (
     !isRecord(value) ||
@@ -1323,6 +1745,40 @@ function parseScenarioDiagnostics(
   return value as FixtureEvidenceScenarioDiagnostics;
 }
 
+function isFixtureEvidencePhase(value: unknown): value is FixtureEvidencePhase {
+  return (
+    value === "scheduler-queue" ||
+    value === "container-preparation" ||
+    value === "dependency-installation" ||
+    value === "semantic-gate"
+  );
+}
+
+function isFixtureExternalFailureClassification(
+  value: unknown,
+): value is FixtureExternalFailureClassification {
+  return (
+    value === "docker-registry-transport-transient" ||
+    value === "npm-registry-transport-transient" ||
+    value === "not-retryable"
+  );
+}
+
+function isDurationMilliseconds(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function fixtureActivityScopeKeys(
+  value: Record<string, unknown>,
+): readonly string[] {
+  if (
+    value.scope === "development-container-session" ||
+    isFixtureEvidenceGate(value.scope)
+  )
+    return ["scope"];
+  throw new Error("invalid Fixture Evidence activity scope");
+}
+
 function parseFixtureEvidenceInvocationEvent(
   value: unknown,
 ): FixtureEvidenceInvocationEvent {
@@ -1389,11 +1845,109 @@ function parseFixtureEvidenceInvocationEvent(
       !hasExactKeys(value, ["type", "cache", "scenario", "at", "outcome"]) ||
       !isFixtureEvidenceCacheKind(value.cache) ||
       !isIsoTimestamp(value.at) ||
-      value.outcome !== "used"
+      !isFixtureEvidenceCacheOutcome(value.outcome)
     ) {
       throw new Error("invalid Fixture Evidence cache activity");
     }
     return value as FixtureEvidenceInvocationEvent;
+  }
+  if (value.type === "phase") {
+    parseScenarioDiagnostics(value.scenario);
+    const scopeKeys = fixtureActivityScopeKeys(value);
+    if (
+      !isFixtureEvidencePhase(value.phase) ||
+      !isIsoTimestamp(value.at) ||
+      (value.phase === "semantic-gate" &&
+        !isFixtureEvidenceGate(value.scope)) ||
+      ((value.phase === "container-preparation" ||
+        value.phase === "dependency-installation") &&
+        value.scope !== "development-container-session")
+    ) {
+      throw new Error("invalid Fixture Evidence phase activity");
+    }
+    const commonKeys = [
+      "type",
+      "phase",
+      ...scopeKeys,
+      "scenario",
+      "at",
+      "outcome",
+    ];
+    if (value.outcome === "started" && hasExactKeys(value, commonKeys)) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    if (
+      value.outcome === "succeeded" &&
+      hasExactKeys(value, [...commonKeys, "durationMilliseconds"]) &&
+      isDurationMilliseconds(value.durationMilliseconds)
+    ) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    if (
+      value.outcome === "failed" &&
+      hasExactKeys(value, [
+        ...commonKeys,
+        "durationMilliseconds",
+        "classification",
+        "error",
+      ]) &&
+      isDurationMilliseconds(value.durationMilliseconds) &&
+      isFixtureExternalFailureClassification(value.classification) &&
+      (value.phase === "container-preparation"
+        ? value.classification !== "npm-registry-transport-transient"
+        : value.phase === "dependency-installation"
+          ? value.classification !== "docker-registry-transport-transient"
+          : value.classification === "not-retryable") &&
+      typeof value.error === "string"
+    ) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    throw new Error("invalid Fixture Evidence phase activity");
+  }
+  if (value.type === "retry") {
+    parseScenarioDiagnostics(value.scenario);
+    const scopeKeys = fixtureActivityScopeKeys(value);
+    if (
+      value.scope !== "development-container-session" ||
+      (value.phase !== "container-preparation" &&
+        value.phase !== "dependency-installation") ||
+      !isIsoTimestamp(value.at)
+    ) {
+      throw new Error("invalid Fixture Evidence retry activity");
+    }
+    const commonKeys = [
+      "type",
+      "phase",
+      ...scopeKeys,
+      "scenario",
+      "at",
+      "outcome",
+    ];
+    if (
+      value.outcome === "started" &&
+      hasExactKeys(value, [...commonKeys, "classification", "firstError"]) &&
+      (value.classification === "docker-registry-transport-transient" ||
+        value.classification === "npm-registry-transport-transient") &&
+      typeof value.firstError === "string"
+    ) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    if (
+      value.outcome === "recovered" &&
+      hasExactKeys(value, [...commonKeys, "durationMilliseconds"]) &&
+      isDurationMilliseconds(value.durationMilliseconds)
+    ) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    if (
+      value.outcome === "failed" &&
+      hasExactKeys(value, [...commonKeys, "durationMilliseconds", "error"]) &&
+      isDurationMilliseconds(value.durationMilliseconds) &&
+      typeof value.error === "string"
+    ) {
+      return value as FixtureEvidenceInvocationEvent;
+    }
+    throw new Error("invalid Fixture Evidence retry activity");
   }
   if (
     value.type !== "lookup" &&
@@ -1485,7 +2039,7 @@ function parseFixtureEvidenceActivityRecord(
       "recordedAt",
       "event",
     ]) ||
-    value.schema !== "fixture-evidence-activity/v1" ||
+    value.schema !== "fixture-evidence-activity/v2" ||
     typeof value.runId !== "string" ||
     value.runId.length === 0 ||
     typeof value.runAttempt !== "string" ||
@@ -1557,7 +2111,7 @@ export class FileFixtureEvidenceActivityLedger implements FixtureEvidenceActivit
     return {
       record: async (event) => {
         const record = parseFixtureEvidenceActivityRecord({
-          schema: "fixture-evidence-activity/v1",
+          schema: "fixture-evidence-activity/v2",
           runId: options.runId,
           runAttempt: options.runAttempt,
           invocationId: options.invocationId,
@@ -1661,10 +2215,16 @@ export async function checkFixtureEvidenceHealth(options: {
     const missCounts: Partial<Record<FixtureEvidenceMissReason, number>> = {};
     let scenarios = 0;
     let hits = 0;
-    const cacheActivity: Partial<Record<FixtureEvidenceCacheKind, number>> = {};
+    const cacheActivity: Partial<
+      Record<FixtureEvidenceCacheActivityKey, number>
+    > = {};
     let executions = 0;
     let issuances = 0;
     let lifecycleErrors = 0;
+    const phaseDurations: Partial<Record<FixtureEvidencePhase, number>> = {};
+    let retries = 0;
+    let recoveries = 0;
+    let retryDurationMilliseconds = 0;
 
     for (const invocationId of invocationIds) {
       const invocationRecords = stageRecords.filter(
@@ -1733,9 +2293,25 @@ export async function checkFixtureEvidenceHealth(options: {
       const cacheEvents = invocationRecords.flatMap((record) =>
         record.event.type === "cache" ? [record.event] : [],
       );
+      const phaseEvents = invocationRecords.flatMap((record) =>
+        record.event.type === "phase" ? [record.event] : [],
+      );
+      const retryEvents = invocationRecords.flatMap((record) =>
+        record.event.type === "retry" ? [record.event] : [],
+      );
       const expectedScenarioIds = new Set(
         expectedScenarios.map((scenario) => scenario.id),
       );
+      for (const result of scenarioResults) {
+        if (expectedScenarioIds.has(result.scenario.id)) continue;
+        failures.push({
+          code: "incomplete-scenario",
+          scenarioSet,
+          invocationId,
+          scenarioId: result.scenario.id,
+          detail: `Scenario result references undeclared scenario ${result.scenario.id}`,
+        });
+      }
       for (const event of lifecycle) {
         if (expectedScenarioIds.has(event.scenario.id)) continue;
         failures.push({
@@ -1755,6 +2331,179 @@ export async function checkFixtureEvidenceHealth(options: {
           scenarioId: event.scenario.id,
           detail: `Cache activity references undeclared scenario ${event.scenario.id}`,
         });
+      }
+      for (const event of [...phaseEvents, ...retryEvents]) {
+        if (expectedScenarioIds.has(event.scenario.id)) continue;
+        failures.push({
+          code: "incomplete-scenario",
+          scenarioSet,
+          invocationId,
+          scenarioId: event.scenario.id,
+          detail: `${event.type === "phase" ? "Phase" : "Retry"} activity references undeclared scenario ${event.scenario.id}`,
+        });
+      }
+
+      const activityGroupKey = (event: {
+        readonly scenario: FixtureEvidenceScenarioDiagnostics;
+        readonly phase: FixtureEvidencePhase;
+        readonly scope: FixtureEvidencePhaseScope;
+      }): string =>
+        [event.scenario.id, event.phase, event.scope].join("\u0000");
+      const eventIndex = (event: FixtureEvidenceInvocationEvent): number =>
+        invocationRecords.findIndex((record) => record.event === event);
+      const phaseTerminals = new Map<
+        string,
+        Array<
+          Extract<
+            FixtureEvidencePhaseActivity,
+            { outcome: "succeeded" | "failed" }
+          >
+        >
+      >();
+      for (const key of new Set(phaseEvents.map(activityGroupKey))) {
+        const events = phaseEvents.filter(
+          (event) => activityGroupKey(event) === key,
+        );
+        let active: Extract<
+          FixtureEvidencePhaseActivity,
+          { outcome: "started" }
+        > | null = null;
+        for (const event of events) {
+          if (event.outcome === "started") {
+            if (active !== null) {
+              failures.push({
+                code: "invalid-phase-lifecycle",
+                scenarioSet,
+                invocationId,
+                scenarioId: event.scenario.id,
+                detail: `Phase ${event.phase} (${event.scope}) started before its prior span finished`,
+              });
+            }
+            active = event;
+            continue;
+          }
+          if (active === null) {
+            failures.push({
+              code: "invalid-phase-lifecycle",
+              scenarioSet,
+              invocationId,
+              scenarioId: event.scenario.id,
+              detail: `Phase ${event.phase} (${event.scope}) finished without a start`,
+            });
+          } else {
+            const measured = Date.parse(event.at) - Date.parse(active.at);
+            if (measured < 0 || event.durationMilliseconds !== measured) {
+              failures.push({
+                code: "invalid-phase-lifecycle",
+                scenarioSet,
+                invocationId,
+                scenarioId: event.scenario.id,
+                detail: `Phase ${event.phase} (${event.scope}) duration ${event.durationMilliseconds} does not match its timestamps`,
+              });
+            }
+            active = null;
+          }
+          const terminals = phaseTerminals.get(key) ?? [];
+          terminals.push(event);
+          phaseTerminals.set(key, terminals);
+          phaseDurations[event.phase] =
+            (phaseDurations[event.phase] ?? 0) + event.durationMilliseconds;
+          if (event.outcome === "failed") {
+            failures.push({
+              code: "failed-phase",
+              scenarioSet,
+              invocationId,
+              scenarioId: event.scenario.id,
+              detail: `Fixture phase ${event.phase} (${event.scope}) failed as ${event.classification}: ${event.error}`,
+            });
+          }
+        }
+        if (active !== null) {
+          failures.push({
+            code: "invalid-phase-lifecycle",
+            scenarioSet,
+            invocationId,
+            scenarioId: active.scenario.id,
+            detail: `Phase ${active.phase} (${active.scope}) has no terminal event`,
+          });
+        }
+      }
+
+      for (const scenarioId of expectedScenarioIds) {
+        const events = retryEvents.filter(
+          (event) => event.scenario.id === scenarioId,
+        );
+        const starts = events.filter((event) => event.outcome === "started");
+        const terminals = events.filter((event) => event.outcome !== "started");
+        retries += starts.length;
+        recoveries += terminals.filter(
+          (event) => event.outcome === "recovered",
+        ).length;
+        retryDurationMilliseconds += terminals.reduce(
+          (duration, event) => duration + event.durationMilliseconds,
+          0,
+        );
+        if (starts.length > 1 || starts.length !== terminals.length) {
+          failures.push({
+            code: "invalid-retry-lifecycle",
+            scenarioSet,
+            invocationId,
+            scenarioId,
+            detail: `Scenario ${scenarioId} must have at most one retry start and one retry result`,
+          });
+        }
+        const start = starts[0];
+        const terminal = terminals[0];
+        if (start !== undefined && terminal !== undefined) {
+          const measured = Date.parse(terminal.at) - Date.parse(start.at);
+          if (
+            measured < 0 ||
+            eventIndex(terminal) <= eventIndex(start) ||
+            terminal.durationMilliseconds !== measured ||
+            start.phase !== terminal.phase ||
+            start.scope !== terminal.scope ||
+            (start.phase === "container-preparation" &&
+              start.classification !== "docker-registry-transport-transient") ||
+            (start.phase === "dependency-installation" &&
+              start.classification !== "npm-registry-transport-transient")
+          ) {
+            failures.push({
+              code: "invalid-retry-lifecycle",
+              scenarioSet,
+              invocationId,
+              scenarioId,
+              detail: `Scenario ${scenarioId} has an invalid ${start.phase} retry lifecycle`,
+            });
+          }
+          const enclosingTerminals =
+            phaseTerminals.get(activityGroupKey(start)) ?? [];
+          const expectedPhaseOutcome =
+            terminal.outcome === "recovered" ? "succeeded" : "failed";
+          if (
+            !enclosingTerminals.some(
+              (event) =>
+                event.outcome === expectedPhaseOutcome &&
+                eventIndex(event) > eventIndex(terminal),
+            )
+          ) {
+            failures.push({
+              code: "invalid-retry-lifecycle",
+              scenarioSet,
+              invocationId,
+              scenarioId,
+              detail: `${terminal.outcome === "recovered" ? "Recovered" : "Failed"} ${start.phase} retry has no ${expectedPhaseOutcome} enclosing phase`,
+            });
+          }
+          if (terminal.outcome === "failed") {
+            failures.push({
+              code: "failed-retry",
+              scenarioSet,
+              invocationId,
+              scenarioId,
+              detail: `Fixture retry for ${start.phase} failed after ${start.classification}. First failure: ${start.firstError}. Retry failure: ${terminal.error}`,
+            });
+          }
+        }
       }
       for (const scenario of expectedScenarios) {
         const result = scenarioResults.find(
@@ -1886,8 +2635,44 @@ export async function checkFixtureEvidenceHealth(options: {
           }
         }
       }
+      for (const event of lifecycle) {
+        if (event.type !== "issuance" || event.outcome !== "issued") continue;
+        const issuanceIndex = eventIndex(event);
+        const successfulExecution = lifecycle.find(
+          (candidate) =>
+            candidate.type === "execution" &&
+            candidate.outcome === "succeeded" &&
+            candidate.scenario.id === event.scenario.id &&
+            candidate.gate === event.gate &&
+            candidate.identity === event.identity &&
+            eventIndex(candidate) < issuanceIndex,
+        );
+        const successfulSemanticPhase = phaseEvents.find(
+          (candidate) =>
+            candidate.phase === "semantic-gate" &&
+            candidate.scope === event.gate &&
+            candidate.scenario.id === event.scenario.id &&
+            candidate.outcome === "succeeded" &&
+            eventIndex(candidate) < issuanceIndex,
+        );
+        if (
+          successfulExecution === undefined ||
+          (phaseEvents.length > 0 && successfulSemanticPhase === undefined)
+        ) {
+          failures.push({
+            code: "issuance-order",
+            scenarioSet,
+            invocationId,
+            scenarioId: event.scenario.id,
+            gate: event.gate,
+            identity: event.identity,
+            detail: `Evidence issuance for ${event.gate} preceded complete successful semantic execution`,
+          });
+        }
+      }
       for (const event of cacheEvents) {
-        cacheActivity[event.cache] = (cacheActivity[event.cache] ?? 0) + 1;
+        const key: FixtureEvidenceCacheActivityKey = `${event.cache}:${event.outcome}`;
+        cacheActivity[key] = (cacheActivity[key] ?? 0) + 1;
       }
       for (const record of invocationRecords) {
         if (record.event.type !== "lifecycle-error") continue;
@@ -1925,6 +2710,10 @@ export async function checkFixtureEvidenceHealth(options: {
       executions,
       issuances,
       lifecycleErrors,
+      phaseDurations,
+      retries,
+      recoveries,
+      retryDurationMilliseconds,
       durationMilliseconds:
         Math.max(
           ...stageRecords.map((record) => Date.parse(record.recordedAt)),
@@ -1964,18 +2753,25 @@ export function formatFixtureEvidenceHealthReport(
     const misses = Object.entries(stage.misses)
       .map(([reason, count]) => `${reason}=${count}`)
       .join(",");
-    const cacheActivity = [
-      "buildkit",
-      "pnpm-downloads",
-      "cargo-downloads",
-      "turbo",
-    ]
-      .map(
-        (cache) =>
-          `${cache}=${stage.cacheActivity[cache as FixtureEvidenceCacheKind] ?? 0}`,
+    const cacheActivity = Object.entries(stage.cacheActivity)
+      .filter((entry): entry is [FixtureEvidenceCacheActivityKey, number] =>
+        Number.isSafeInteger(entry[1]),
       )
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, count]) => `${key}=${count}`)
       .join(",");
-    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} cache-activity=${cacheActivity}`;
+    const phaseDurations = [
+      "scheduler-queue",
+      "container-preparation",
+      "dependency-installation",
+      "semantic-gate",
+    ]
+      .flatMap((phase) => {
+        const duration = stage.phaseDurations[phase as FixtureEvidencePhase];
+        return duration === undefined ? [] : [`${phase}=${duration}`];
+      })
+      .join(",");
+    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} phase-duration-ms=${phaseDurations || "none"} retries=${stage.retries} recoveries=${stage.recoveries} retry-duration-ms=${stage.retryDurationMilliseconds} cache-activity=${cacheActivity || "none"}`;
   });
   return [...scenarioLines, ...stageLines];
 }

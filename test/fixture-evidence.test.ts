@@ -502,6 +502,86 @@ async function renderMatrixScenario(options: {
 }
 
 describe("Fixture Verification Evidence", () => {
+  it("renders root and matrix initialization to the same canonical tree identity", async () => {
+    const root = await temporaryRepository("fixture-canonical-init-");
+    const storage = new FileFixtureEvidenceStorage(path.join(root, "evidence"));
+    let matrixHits = 0;
+    try {
+      const initialization = await generatedScenariosFor("init");
+      const matrixInitialization = (
+        await generatedScenariosFor("package-addition-matrix")
+      ).filter((scenario) => scenario.addition === undefined);
+
+      expect(matrixInitialization.map((scenario) => scenario.id)).toEqual(
+        initialization.map((scenario) => scenario.id),
+      );
+      for (const scenario of initialization) {
+        const matrixScenario = matrixInitialization.find(
+          (candidate) => candidate.id === scenario.id,
+        );
+        expect(matrixScenario).toBeDefined();
+        const rootProjection = await renderMatrixScenario({
+          scenario,
+          workspace: path.join(root, "root-init"),
+        });
+        const matrixProjection = await renderMatrixScenario({
+          scenario: matrixScenario!,
+          workspace: path.join(root, "matrix-init"),
+        });
+        expect(matrixProjection.generatedContentIdentity).toBe(
+          rootProjection.generatedContentIdentity,
+        );
+        const rootContract = await deriveGeneratedRootQualityContractIdentity(
+          rootProjection.plan,
+          { includeFix: true },
+        );
+        const matrixContract = await deriveGeneratedRootQualityContractIdentity(
+          matrixProjection.plan,
+          { includeFix: true },
+        );
+        expect(matrixContract).toBe(rootContract);
+        await runFixtureEvidenceGate({
+          gate: "generated-root-quality",
+          generatedContentIdentity: rootProjection.generatedContentIdentity,
+          contractIdentity: rootContract,
+          scenario: {
+            id: scenario.id,
+            label: scenario.label,
+            presetIdentities: [scenario.base.metadata.name],
+          },
+          producerCommit: "same-run",
+          storage,
+          writeEnabled: true,
+          execute: async () => undefined,
+        });
+        const matrixExecutor = vi.fn<() => Promise<void>>(
+          async () => undefined,
+        );
+        const matrixResult = await runFixtureEvidenceGate({
+          gate: "generated-root-quality",
+          generatedContentIdentity: matrixProjection.generatedContentIdentity,
+          contractIdentity: matrixContract,
+          scenario: {
+            id: matrixScenario!.id,
+            label: matrixScenario!.label,
+            presetIdentities: [matrixScenario!.base.metadata.name],
+          },
+          producerCommit: "same-run",
+          storage,
+          writeEnabled: true,
+          execute: matrixExecutor,
+        });
+        expect(matrixResult.status).toBe("hit");
+        expect(matrixExecutor).not.toHaveBeenCalled();
+        matrixHits += 1;
+      }
+      expect(matrixHits).toBe(initialization.length);
+      expect(matrixHits).toBe(6);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("accepts a complete writable miss only for its current run activity", async () => {
     const root = await temporaryRepository("fixture-evidence-activity-");
     const evidenceRoot = path.join(root, "evidence");
@@ -629,18 +709,18 @@ describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [scenario],
       });
-      for (const cache of [
-        "buildkit",
-        "pnpm-downloads",
-        "cargo-downloads",
-        "turbo",
+      for (const [cache, outcome] of [
+        ["buildkit", "configured"],
+        ["pnpm-downloads", "mounted"],
+        ["cargo-downloads", "mounted"],
+        ["turbo", "configured"],
       ] as const) {
         await invocation.record({
           type: "cache",
           cache,
           scenario,
           at: "2026-07-28T00:00:00.050Z",
-          outcome: "used",
+          outcome,
         });
       }
       await invocation.record({
@@ -673,18 +753,241 @@ describe("Fixture Verification Evidence", () => {
           expect.objectContaining({
             scenarioSet: "package-addition-matrix",
             cacheActivity: {
-              buildkit: 1,
-              "pnpm-downloads": 1,
-              "cargo-downloads": 1,
-              turbo: 1,
+              "buildkit:configured": 1,
+              "pnpm-downloads:mounted": 1,
+              "cargo-downloads:mounted": 1,
+              "turbo:configured": 1,
             },
             durationMilliseconds: 175,
           }),
         ],
       });
       expect(formatFixtureEvidenceHealthReport(report)).toContain(
-        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=1 misses=none executions=0 issuances=0 lifecycle-errors=0 duration-ms=175 cache-activity=buildkit=1,pnpm-downloads=1,cargo-downloads=1,turbo=1",
+        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=1 misses=none executions=0 issuances=0 lifecycle-errors=0 duration-ms=175 phase-duration-ms=none retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports paired phase duration and a recovered retry as healthy", async () => {
+    const root = await temporaryRepository("fixture-phase-activity-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "phase-recovery",
+      label: "phase recovery",
+      presetIdentities: ["fixture"],
+    };
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "phase-run",
+        runAttempt: "1",
+        invocationId: "phase-invocation",
+        scenarioSet: "init",
+        writeEnabled: false,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "scheduler-queue",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.000Z",
+        outcome: "started",
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "scheduler-queue",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.010Z",
+        outcome: "succeeded",
+        durationMilliseconds: 10,
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "container-preparation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.020Z",
+        outcome: "started",
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "container-preparation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.030Z",
+        outcome: "succeeded",
+        durationMilliseconds: 10,
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.040Z",
+        outcome: "started",
+      });
+      await invocation.record({
+        type: "retry",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.045Z",
+        outcome: "started",
+        classification: "npm-registry-transport-transient",
+        firstError: "GET https://registry.npmjs.org/tinypool: read ECONNRESET",
+      });
+      await invocation.record({
+        type: "retry",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.055Z",
+        outcome: "recovered",
+        durationMilliseconds: 10,
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: "2026-07-28T00:00:00.060Z",
+        outcome: "succeeded",
+        durationMilliseconds: 20,
+      });
+      await invocation.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity: "a".repeat(64),
+        scenario,
+        at: "2026-07-28T00:00:00.070Z",
+        outcome: "hit",
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({ type: "invocation", outcome: "completed" });
+
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "phase-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      expect(report).toMatchObject({
+        healthy: true,
+        stages: [
+          expect.objectContaining({
+            phaseDurations: {
+              "scheduler-queue": 10,
+              "container-preparation": 10,
+              "dependency-installation": 20,
+            },
+            retries: 1,
+            recoveries: 1,
+            retryDurationMilliseconds: 10,
+          }),
+        ],
+      });
+      expect(formatFixtureEvidenceHealthReport(report)).toContainEqual(
+        expect.stringContaining(
+          "phase-duration-ms=scheduler-queue=10,container-preparation=10,dependency-installation=20 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
+        ),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when issuance precedes successful semantic execution", async () => {
+    const root = await temporaryRepository("fixture-issuance-order-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "issuance-order",
+      label: "issuance order",
+      presetIdentities: ["fixture"],
+    };
+    const identity = "b".repeat(64);
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "issuance-order-run",
+        runAttempt: "1",
+        invocationId: "issuance-order",
+        scenarioSet: "init",
+        writeEnabled: true,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      await invocation.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: "2026-07-28T00:00:00.000Z",
+        outcome: "miss",
+        reason: "absent",
+      });
+      await invocation.record({
+        type: "execution",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: "2026-07-28T00:00:00.010Z",
+        outcome: "started",
+      });
+      await invocation.record({
+        type: "issuance",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: "2026-07-28T00:00:00.020Z",
+        outcome: "issued",
+      });
+      await invocation.record({
+        type: "execution",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: "2026-07-28T00:00:00.030Z",
+        outcome: "succeeded",
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({ type: "invocation", outcome: "completed" });
+
+      await expect(
+        checkFixtureEvidenceHealth({
+          ledger,
+          runId: "issuance-order-run",
+          runAttempt: "1",
+          enabledScenarioSets: ["init"],
+        }),
+      ).resolves.toMatchObject({
+        healthy: false,
+        failures: [expect.objectContaining({ code: "issuance-order" })],
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1492,11 +1795,24 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: sets,
       });
+      expect(coldHealth).toMatchObject({
+        healthy: true,
+        stages: expect.arrayContaining([
+          expect.objectContaining({
+            scenarioSet: "package-addition-matrix",
+            scenarios: 30,
+            hits: 6,
+            misses: { absent: 24 },
+            executions: 24,
+            issuances: 24,
+          }),
+        ]),
+      });
       expect(
         coldHealth.stages.some(
           (stage) =>
-            (stage.cacheActivity.buildkit ?? 0) > 0 &&
-            (stage.cacheActivity.turbo ?? 0) > 0,
+            (stage.cacheActivity["buildkit:configured"] ?? 0) > 0 &&
+            (stage.cacheActivity["turbo:configured"] ?? 0) > 0,
         ),
       ).toBe(true);
       await runComplete("complete-warm", path.join(root, "warm"), warmCommands);

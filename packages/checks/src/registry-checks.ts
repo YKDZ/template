@@ -99,13 +99,19 @@ function scenarioId(...parts: readonly string[]): string {
   return parts.join("--");
 }
 
-/** One production-equivalent initialization per complete registered Definition. */
-export function deriveInitializationScenarios(): readonly GeneratedScenario[] {
-  return builtInPresetRegistry.all().map((base) => ({
+function initializationScenario(
+  base: BuiltInPresetDefinition,
+): GeneratedScenario {
+  return {
     id: scenarioId("init", base.metadata.name),
     label: `initialize ${base.metadata.name}`,
     base,
-  }));
+  };
+}
+
+/** One production-equivalent initialization per complete registered Definition. */
+export function deriveInitializationScenarios(): readonly GeneratedScenario[] {
+  return builtInPresetRegistry.all().map(initializationScenario);
 }
 
 /**
@@ -119,11 +125,7 @@ export function deriveFixtureMatrix(): readonly GeneratedScenario[] {
   );
 
   return definitions.flatMap((base) => [
-    {
-      id: scenarioId("fixture", base.metadata.name, "init"),
-      label: `initialize ${base.metadata.name}`,
-      base,
-    },
+    initializationScenario(base),
     ...addable.map((addition) => ({
       id: scenarioId(
         "fixture",
