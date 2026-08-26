@@ -786,26 +786,35 @@ describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [scenario],
       });
-      for (const fact of [
-        { cache: "buildkit", outcome: "configured" },
-        { cache: "pnpm-downloads", outcome: "mounted" },
-        { cache: "cargo-downloads", outcome: "mounted" },
-        { cache: "turbo", outcome: "configured" },
-      ] as const) {
-        await invocation.record({
-          type: "cache",
-          ...fact,
-          scenario,
-          at: "2026-07-28T00:00:00.050Z",
-        });
-      }
-      await invocation.record({
-        type: "lookup",
-        gate: "generated-root-quality",
-        identity: "a".repeat(64),
+      const executePhases = createSuccessfulFixturePhaseExecutor({
+        record: invocation.record,
         scenario,
-        at: "2026-07-28T00:00:00.125Z",
-        outcome: "hit",
+      });
+      await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity: "a".repeat(40),
+        contractIdentity: "b".repeat(64),
+        scenario,
+        producerCommit: "test",
+        storage: new FileFixtureEvidenceStorage(evidenceRoot),
+        writeEnabled: true,
+        recordLifecycle: invocation.record,
+        execute: async () => {
+          for (const fact of [
+            { cache: "buildkit", outcome: "configured" },
+            { cache: "pnpm-downloads", outcome: "mounted" },
+            { cache: "cargo-downloads", outcome: "mounted" },
+            { cache: "turbo", outcome: "configured" },
+          ] as const) {
+            await invocation.record({
+              type: "cache",
+              ...fact,
+              scenario,
+              at: "2026-07-28T00:00:00.050Z",
+            });
+          }
+          await executePhases("generated-root-quality");
+        },
       });
       await invocation.record({
         type: "scenario",
@@ -834,12 +843,16 @@ describe("Fixture Verification Evidence", () => {
               "cargo-downloads:mounted": 1,
               "turbo:configured": 1,
             },
+            hits: 0,
+            misses: { absent: 1 },
+            executions: 1,
+            issuances: 1,
             durationMilliseconds: 175,
           }),
         ],
       });
       expect(formatFixtureEvidenceHealthReport(report)).toContain(
-        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=1 misses=none executions=0 issuances=0 lifecycle-errors=0 duration-ms=175 phase-duration-ms=none retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
+        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=0 misses=absent=1 executions=1 issuances=1 lifecycle-errors=0 duration-ms=175 phase-duration-ms=scheduler-queue=2,container-preparation=1,dependency-installation=1,semantic-gate=1 retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -864,90 +877,97 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         invocationId: "phase-invocation",
         scenarioSet: "init",
-        writeEnabled: false,
+        writeEnabled: true,
       });
       await invocation.record({
         type: "invocation",
         outcome: "started",
         scenarios: [scenario],
       });
-      await invocation.record({
-        type: "phase",
-        phase: "scheduler-queue",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.000Z",
-        outcome: "started",
-      });
-      await invocation.record({
-        type: "phase",
-        phase: "scheduler-queue",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.010Z",
-        outcome: "succeeded",
-        durationMilliseconds: 10,
-      });
-      await invocation.record({
-        type: "phase",
-        phase: "container-preparation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.020Z",
-        outcome: "started",
-      });
-      await invocation.record({
-        type: "phase",
-        phase: "container-preparation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.030Z",
-        outcome: "succeeded",
-        durationMilliseconds: 10,
-      });
-      await invocation.record({
-        type: "phase",
-        phase: "dependency-installation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.040Z",
-        outcome: "started",
-      });
-      await invocation.record({
-        type: "retry",
-        phase: "dependency-installation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.045Z",
-        outcome: "started",
-        classification: "npm-registry-transport-transient",
-        firstError: "GET https://registry.npmjs.org/tinypool: read ECONNRESET",
-      });
-      await invocation.record({
-        type: "retry",
-        phase: "dependency-installation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.055Z",
-        outcome: "recovered",
-        durationMilliseconds: 10,
-      });
-      await invocation.record({
-        type: "phase",
-        phase: "dependency-installation",
-        scope: "development-container-session",
-        scenario,
-        at: "2026-07-28T00:00:00.060Z",
-        outcome: "succeeded",
-        durationMilliseconds: 20,
-      });
-      await invocation.record({
-        type: "lookup",
+      await runFixtureEvidenceGate({
         gate: "generated-root-quality",
-        identity: "a".repeat(64),
+        generatedContentIdentity: "a".repeat(40),
+        contractIdentity: "b".repeat(64),
         scenario,
-        at: "2026-07-28T00:00:00.070Z",
-        outcome: "hit",
+        producerCommit: "test",
+        storage: new FileFixtureEvidenceStorage(evidenceRoot),
+        writeEnabled: true,
+        recordLifecycle: invocation.record,
+        execute: async () => {
+          for (const [phase, offsetMilliseconds] of [
+            ["scheduler-queue", 0],
+            ["container-preparation", 20],
+          ] as const) {
+            await invocation.record({
+              type: "phase",
+              phase,
+              scope: "development-container-session",
+              scenario,
+              at: new Date(offsetMilliseconds).toISOString(),
+              outcome: "started",
+            });
+            await invocation.record({
+              type: "phase",
+              phase,
+              scope: "development-container-session",
+              scenario,
+              at: new Date(offsetMilliseconds + 10).toISOString(),
+              outcome: "succeeded",
+              durationMilliseconds: 10,
+            });
+          }
+          await invocation.record({
+            type: "phase",
+            phase: "dependency-installation",
+            scope: "development-container-session",
+            scenario,
+            at: new Date(40).toISOString(),
+            outcome: "started",
+          });
+          await invocation.record({
+            type: "retry",
+            phase: "dependency-installation",
+            scope: "development-container-session",
+            scenario,
+            at: new Date(45).toISOString(),
+            outcome: "started",
+            classification: "npm-registry-transport-transient",
+            firstError:
+              "GET https://registry.npmjs.org/tinypool: read ECONNRESET",
+          });
+          await invocation.record({
+            type: "retry",
+            phase: "dependency-installation",
+            scope: "development-container-session",
+            scenario,
+            at: new Date(55).toISOString(),
+            outcome: "recovered",
+            durationMilliseconds: 10,
+          });
+          await invocation.record({
+            type: "phase",
+            phase: "dependency-installation",
+            scope: "development-container-session",
+            scenario,
+            at: new Date(60).toISOString(),
+            outcome: "succeeded",
+            durationMilliseconds: 20,
+          });
+          await recordSuccessfulFixturePhase({
+            record: invocation.record,
+            scenario,
+            phase: "scheduler-queue",
+            scope: "generated-root-quality",
+            offsetMilliseconds: 70,
+          });
+          await recordSuccessfulFixturePhase({
+            record: invocation.record,
+            scenario,
+            phase: "semantic-gate",
+            scope: "generated-root-quality",
+            offsetMilliseconds: 80,
+          });
+        },
       });
       await invocation.record({
         type: "scenario",
@@ -967,9 +987,10 @@ describe("Fixture Verification Evidence", () => {
         stages: [
           expect.objectContaining({
             phaseDurations: {
-              "scheduler-queue": 10,
+              "scheduler-queue": 11,
               "container-preparation": 10,
               "dependency-installation": 20,
+              "semantic-gate": 1,
             },
             retries: 1,
             recoveries: 1,
@@ -979,9 +1000,332 @@ describe("Fixture Verification Evidence", () => {
       });
       expect(formatFixtureEvidenceHealthReport(report)).toContainEqual(
         expect.stringContaining(
-          "phase-duration-ms=scheduler-queue=10,container-preparation=10,dependency-installation=20 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
+          "phase-duration-ms=scheduler-queue=11,container-preparation=10,dependency-installation=20,semantic-gate=1 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
         ),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when a cache hit carries preparation and retry activity", async () => {
+    const root = await temporaryRepository("fixture-hit-preparation-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "hit-preparation",
+      label: "hit preparation",
+      presetIdentities: ["fixture"],
+    };
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "hit-preparation-run",
+        runAttempt: "1",
+        invocationId: "hit-preparation",
+        scenarioSet: "init",
+        writeEnabled: false,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      await invocation.record({
+        type: "cache",
+        cache: "buildkit",
+        outcome: "configured",
+        scenario,
+        at: new Date(0).toISOString(),
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: new Date(0).toISOString(),
+        outcome: "started",
+      });
+      await invocation.record({
+        type: "retry",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: new Date(1).toISOString(),
+        outcome: "started",
+        classification: "npm-registry-transport-transient",
+        firstError: "GET https://registry.npmjs.org/pkg: read ECONNRESET",
+      });
+      await invocation.record({
+        type: "retry",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: new Date(2).toISOString(),
+        outcome: "recovered",
+        durationMilliseconds: 1,
+      });
+      await invocation.record({
+        type: "phase",
+        phase: "dependency-installation",
+        scope: "development-container-session",
+        scenario,
+        at: new Date(3).toISOString(),
+        outcome: "succeeded",
+        durationMilliseconds: 3,
+      });
+      await invocation.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity: "a".repeat(64),
+        scenario,
+        at: new Date(4).toISOString(),
+        outcome: "hit",
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({ type: "invocation", outcome: "completed" });
+
+      await expect(
+        checkFixtureEvidenceHealth({
+          ledger,
+          runId: "hit-preparation-run",
+          runAttempt: "1",
+          enabledScenarioSets: ["init"],
+        }),
+      ).resolves.toMatchObject({
+        healthy: false,
+        failures: expect.arrayContaining([
+          expect.objectContaining({
+            code: "invalid-phase-lifecycle",
+            scenarioId: scenario.id,
+          }),
+          expect.objectContaining({
+            code: "invalid-retry-lifecycle",
+            scenarioId: scenario.id,
+          }),
+          expect.objectContaining({
+            code: "lifecycle-error",
+            scenarioId: scenario.id,
+          }),
+        ]),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when successful gate spans remain outside a cold execution", async () => {
+    const root = await temporaryRepository("fixture-unused-gate-spans-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "unused-gate-spans",
+      label: "unused gate spans",
+      presetIdentities: ["fixture"],
+    };
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "unused-gate-spans-run",
+        runAttempt: "1",
+        invocationId: "unused-gate-spans",
+        scenarioSet: "init",
+        writeEnabled: true,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      const executePhases = createSuccessfulFixturePhaseExecutor({
+        record: invocation.record,
+        scenario,
+      });
+      await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity: "b".repeat(40),
+        contractIdentity: "c".repeat(64),
+        scenario,
+        producerCommit: "test",
+        storage: new FileFixtureEvidenceStorage(evidenceRoot),
+        writeEnabled: true,
+        recordLifecycle: invocation.record,
+        execute: async () => await executePhases("generated-root-quality"),
+      });
+      await recordSuccessfulFixturePhase({
+        record: invocation.record,
+        scenario,
+        phase: "scheduler-queue",
+        scope: "generated-root-quality",
+        offsetMilliseconds: 20,
+      });
+      await recordSuccessfulFixturePhase({
+        record: invocation.record,
+        scenario,
+        phase: "semantic-gate",
+        scope: "generated-root-quality",
+        offsetMilliseconds: 22,
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({ type: "invocation", outcome: "completed" });
+
+      await expect(
+        checkFixtureEvidenceHealth({
+          ledger,
+          runId: "unused-gate-spans-run",
+          runAttempt: "1",
+          enabledScenarioSets: ["init"],
+        }),
+      ).resolves.toMatchObject({
+        healthy: false,
+        failures: expect.arrayContaining([
+          expect.objectContaining({
+            code: "invalid-phase-lifecycle",
+            scenarioId: scenario.id,
+          }),
+        ]),
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when lookup causality has no matching execution", async () => {
+    const root = await temporaryRepository("fixture-lookup-causality-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "lookup-causality",
+      label: "lookup causality",
+      presetIdentities: ["fixture"],
+    };
+    const ledger = new FileFixtureEvidenceActivityLedger({
+      root: path.join(root, "activity"),
+      evidenceRoot,
+    });
+    try {
+      const afterExecution = ledger.invocation({
+        runId: "lookup-causality-run",
+        runAttempt: "1",
+        invocationId: "lookup-after-execution",
+        scenarioSet: "init",
+        writeEnabled: true,
+      });
+      await afterExecution.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      const identity = "d".repeat(64);
+      await afterExecution.record({
+        type: "execution",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: new Date(0).toISOString(),
+        outcome: "started",
+      });
+      await afterExecution.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: new Date(1).toISOString(),
+        outcome: "miss",
+        reason: "absent",
+      });
+      const executePhases = createSuccessfulFixturePhaseExecutor({
+        record: afterExecution.record,
+        scenario,
+      });
+      await executePhases("generated-root-quality");
+      await afterExecution.record({
+        type: "execution",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: new Date(20).toISOString(),
+        outcome: "succeeded",
+      });
+      await afterExecution.record({
+        type: "issuance",
+        gate: "generated-root-quality",
+        identity,
+        scenario,
+        at: new Date(21).toISOString(),
+        outcome: "issued",
+      });
+      await afterExecution.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await afterExecution.record({
+        type: "invocation",
+        outcome: "completed",
+      });
+
+      const withoutExecution = ledger.invocation({
+        runId: "lookup-causality-run",
+        runAttempt: "1",
+        invocationId: "miss-without-execution",
+        scenarioSet: "init",
+        writeEnabled: true,
+      });
+      await withoutExecution.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      await withoutExecution.record({
+        type: "lookup",
+        gate: "generated-root-quality",
+        identity: "e".repeat(64),
+        scenario,
+        at: new Date(0).toISOString(),
+        outcome: "miss",
+        reason: "absent",
+      });
+      await withoutExecution.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await withoutExecution.record({
+        type: "invocation",
+        outcome: "completed",
+      });
+
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "lookup-causality-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      expect(report).toMatchObject({
+        healthy: false,
+        failures: expect.arrayContaining([
+          expect.objectContaining({
+            code: "lifecycle-error",
+            invocationId: "lookup-after-execution",
+          }),
+          expect.objectContaining({
+            code: "lifecycle-error",
+            invocationId: "miss-without-execution",
+          }),
+        ]),
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

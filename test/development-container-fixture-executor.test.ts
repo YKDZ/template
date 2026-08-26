@@ -1110,6 +1110,11 @@ describe("Development Container Fixture Executor", () => {
           expect.objectContaining({ code: "failed-execution" }),
         ]),
       );
+      expect(report.failures).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "invalid-retry-lifecycle" }),
+        ]),
+      );
       expect(
         report.failures.find((entry) => entry.code === "failed-retry")?.detail,
       ).toMatch(/First failure:.*registry-1\.docker\.io.*Retry failure:/u);

@@ -2446,6 +2446,13 @@ export async function checkFixtureEvidenceHealth(options: {
       type SuccessfulExecutionActivity = ExecutionActivity & {
         readonly outcome: "succeeded";
       };
+      type TerminalExecutionActivity = ExecutionActivity & {
+        readonly outcome: "succeeded" | "failed";
+      };
+      type LookupActivity = Extract<
+        FixtureEvidenceLifecycleEvent,
+        { readonly type: "lookup" }
+      >;
       type SuccessfulPhaseSpan = PhaseSpan & {
         readonly terminal: Extract<
           FixtureEvidencePhaseActivity,
@@ -2461,8 +2468,17 @@ export async function checkFixtureEvidenceHealth(options: {
       const executionEvents = lifecycle.filter(
         (event): event is ExecutionActivity => event.type === "execution",
       );
-      for (const key of new Set(executionEvents.map(fixtureActivityGateKey))) {
+      const lookupEvents = lifecycle.filter(
+        (event): event is LookupActivity => event.type === "lookup",
+      );
+      const validExecutionLookupKeys = new Set<string>();
+      for (const key of new Set(
+        [...lookupEvents, ...executionEvents].map(fixtureActivityGateKey),
+      )) {
         const events = executionEvents.filter(
+          (event) => fixtureActivityGateKey(event) === key,
+        );
+        const matchingLookups = lookupEvents.filter(
           (event) => fixtureActivityGateKey(event) === key,
         );
         const executionStarts = events.filter(
@@ -2472,12 +2488,12 @@ export async function checkFixtureEvidenceHealth(options: {
         const executionTerminals = events.filter(
           (event) => event.outcome !== "started",
         );
-        const representative = events[0]!;
-        if (
-          executionStarts.length !== 1 ||
-          executionTerminals.length !== 1 ||
-          eventIndex(executionStarts[0]!) >= eventIndex(executionTerminals[0]!)
-        ) {
+        const representative = events[0] ?? matchingLookups[0]!;
+        const hasOrderedExecution =
+          executionStarts.length === 1 &&
+          executionTerminals.length === 1 &&
+          eventIndex(executionStarts[0]!) < eventIndex(executionTerminals[0]!);
+        if (events.length > 0 && !hasOrderedExecution) {
           failures.push({
             code: "invalid-phase-lifecycle",
             scenarioSet,
@@ -2488,9 +2504,50 @@ export async function checkFixtureEvidenceHealth(options: {
             detail: `Execution for ${representative.gate} must have exactly one ordered start and terminal event`,
           });
         }
+        const reportLookupCausalityFailure = (detail: string): void => {
+          lifecycleErrors += 1;
+          failures.push({
+            code: "lifecycle-error",
+            scenarioSet,
+            invocationId,
+            scenarioId: representative.scenario.id,
+            gate: representative.gate,
+            identity: representative.identity,
+            detail,
+          });
+        };
+        if (matchingLookups.length !== 1) {
+          reportLookupCausalityFailure(
+            `Activity for ${representative.gate} must have exactly one matching lookup`,
+          );
+          continue;
+        }
+        const lookup = matchingLookups[0]!;
+        if (lookup.outcome === "hit") {
+          if (events.length > 0) {
+            reportLookupCausalityFailure(
+              `Evidence hit for ${lookup.gate} must not have an execution`,
+            );
+          }
+          continue;
+        }
+        if (lookup.outcome === "miss" && !hasOrderedExecution) {
+          reportLookupCausalityFailure(
+            `Evidence miss for ${lookup.gate} must have exactly one ordered execution lifecycle`,
+          );
+          continue;
+        }
+        if (events.length === 0 || !hasOrderedExecution) continue;
+        if (eventIndex(lookup) >= eventIndex(executionStarts[0]!)) {
+          reportLookupCausalityFailure(
+            `Evidence lookup for ${lookup.gate} must precede its execution`,
+          );
+          continue;
+        }
+        validExecutionLookupKeys.add(key);
       }
       const executionStartFor = (
-        execution: SuccessfulExecutionActivity,
+        execution: TerminalExecutionActivity,
       ): StartedExecutionActivity | undefined => {
         const events = executionEvents.filter(
           (event) =>
@@ -2526,6 +2583,10 @@ export async function checkFixtureEvidenceHealth(options: {
         (event): event is SuccessfulExecutionActivity =>
           event.outcome === "succeeded",
       );
+      const failedExecutionEvents = executionEvents.filter(
+        (event): event is TerminalExecutionActivity =>
+          event.outcome === "failed",
+      );
       const firstSuccessfulExecutionByScenario = new Map<
         string,
         SuccessfulExecutionActivity
@@ -2537,11 +2598,12 @@ export async function checkFixtureEvidenceHealth(options: {
             execution,
         );
       }
-      const preparationDependencyByScenario = new Map<
-        string,
-        SuccessfulPhaseSpan
-      >();
-      const validPreparationScenarios = new Set<string>();
+      type SuccessfulPreparation = {
+        readonly sessionQueue: SuccessfulPhaseSpan;
+        readonly container: SuccessfulPhaseSpan;
+        readonly dependency: SuccessfulPhaseSpan;
+      };
+      const preparationByScenario = new Map<string, SuccessfulPreparation>();
       for (const [
         scenarioId,
         firstExecution,
@@ -2586,38 +2648,49 @@ export async function checkFixtureEvidenceHealth(options: {
           eventIndex(container.terminal) < eventIndex(dependency.start) &&
           eventIndex(dependency.terminal) < eventIndex(firstSemantic.start)
         ) {
-          validPreparationScenarios.add(scenarioId);
-          preparationDependencyByScenario.set(scenarioId, dependency);
+          preparationByScenario.set(scenarioId, {
+            sessionQueue,
+            container,
+            dependency,
+          });
         }
       }
+      const consumedSuccessfulPhaseSpans = new Set<PhaseSpan>();
       for (const execution of successfulExecutionEvents) {
         const executionStart = executionStartFor(execution);
         const semantic =
           executionStart === undefined
             ? undefined
             : semanticPhaseFor(execution, executionStart);
+        const preparation = preparationByScenario.get(execution.scenario.id);
+        const gateQueues =
+          executionStart === undefined || semantic === undefined
+            ? []
+            : successfulPhaseSpans.filter(
+                (span) =>
+                  span.terminal.phase === "scheduler-queue" &&
+                  span.terminal.scope === execution.gate &&
+                  span.terminal.scenario.id === execution.scenario.id &&
+                  eventIndex(span.start) > eventIndex(executionStart) &&
+                  eventIndex(span.terminal) < eventIndex(semantic.start),
+              );
         const missingFacts = [
           ...(executionStart === undefined ? ["unique execution start"] : []),
           ...(semantic === undefined ? ["successful semantic gate"] : []),
-          ...(!validPreparationScenarios.has(execution.scenario.id) ||
+          ...(preparation === undefined ||
           semantic === undefined ||
-          eventIndex(
-            preparationDependencyByScenario.get(execution.scenario.id)!
-              .terminal,
-          ) >= eventIndex(semantic.start)
+          eventIndex(preparation.dependency.terminal) >=
+            eventIndex(semantic.start)
             ? ["ordered session queue/container/dependency preparation"]
             : []),
-          ...(executionStart === undefined ||
-          semantic === undefined ||
-          successfulPhaseSpans.filter(
-            (span) =>
-              span.terminal.phase === "scheduler-queue" &&
-              span.terminal.scope === execution.gate &&
-              span.terminal.scenario.id === execution.scenario.id &&
-              eventIndex(span.start) > eventIndex(executionStart) &&
-              eventIndex(span.terminal) < eventIndex(semantic.start),
-          ).length !== 1
-            ? ["gate scheduler queue"]
+          ...(gateQueues.length !== 1 ? ["gate scheduler queue"] : []),
+          ...(semantic !== undefined &&
+          consumedSuccessfulPhaseSpans.has(semantic)
+            ? ["unique semantic gate ownership"]
+            : []),
+          ...(gateQueues[0] !== undefined &&
+          consumedSuccessfulPhaseSpans.has(gateQueues[0])
+            ? ["unique gate scheduler queue ownership"]
             : []),
         ];
         if (missingFacts.length > 0) {
@@ -2631,6 +2704,38 @@ export async function checkFixtureEvidenceHealth(options: {
             detail: `Successful execution for ${execution.gate} lacks causal activity: ${missingFacts.join(", ")}`,
           });
         }
+        if (
+          missingFacts.length > 0 ||
+          !validExecutionLookupKeys.has(fixtureActivityGateKey(execution)) ||
+          semantic === undefined ||
+          gateQueues[0] === undefined
+        ) {
+          continue;
+        }
+        if (
+          firstSuccessfulExecutionByScenario.get(execution.scenario.id) ===
+            execution &&
+          preparation !== undefined
+        ) {
+          consumedSuccessfulPhaseSpans.add(preparation.sessionQueue);
+          consumedSuccessfulPhaseSpans.add(preparation.container);
+          consumedSuccessfulPhaseSpans.add(preparation.dependency);
+        }
+        consumedSuccessfulPhaseSpans.add(gateQueues[0]);
+        consumedSuccessfulPhaseSpans.add(semantic);
+      }
+      for (const span of successfulPhaseSpans) {
+        if (consumedSuccessfulPhaseSpans.has(span)) continue;
+        failures.push({
+          code: "invalid-phase-lifecycle",
+          scenarioSet,
+          invocationId,
+          scenarioId: span.terminal.scenario.id,
+          ...(span.terminal.scope === "development-container-session"
+            ? {}
+            : { gate: span.terminal.scope }),
+          detail: `Successful phase ${span.terminal.phase} (${span.terminal.scope}) was not consumed by a cold execution`,
+        });
       }
 
       for (const scenarioId of expectedScenarioIds) {
@@ -2682,14 +2787,38 @@ export async function checkFixtureEvidenceHealth(options: {
           const enclosingSpans = phaseSpans.get(activityGroupKey(start)) ?? [];
           const expectedPhaseOutcome =
             terminal.outcome === "recovered" ? "succeeded" : "failed";
-          if (
-            enclosingSpans.filter(
-              (span) =>
-                span.terminal.outcome === expectedPhaseOutcome &&
-                eventIndex(span.start) < eventIndex(start) &&
-                eventIndex(span.terminal) > eventIndex(terminal),
-            ).length !== 1
-          ) {
+          const enclosingRetrySpans = enclosingSpans.filter(
+            (span) =>
+              span.terminal.outcome === expectedPhaseOutcome &&
+              eventIndex(span.start) < eventIndex(start) &&
+              eventIndex(span.terminal) > eventIndex(terminal),
+          );
+          const enclosingRetrySpan =
+            enclosingRetrySpans.length === 1
+              ? enclosingRetrySpans[0]
+              : undefined;
+          const retryHasOwner =
+            start.scope !== "development-container-session"
+              ? false
+              : terminal.outcome === "recovered"
+                ? enclosingRetrySpan?.terminal.outcome === "succeeded" &&
+                  consumedSuccessfulPhaseSpans.has(enclosingRetrySpan)
+                : enclosingRetrySpan?.terminal.outcome === "failed" &&
+                  failedExecutionEvents.filter((execution) => {
+                    const executionStart = executionStartFor(execution);
+                    return (
+                      execution.scenario.id === scenarioId &&
+                      validExecutionLookupKeys.has(
+                        fixtureActivityGateKey(execution),
+                      ) &&
+                      executionStart !== undefined &&
+                      eventIndex(executionStart) <
+                        eventIndex(enclosingRetrySpan.start) &&
+                      eventIndex(enclosingRetrySpan.terminal) <
+                        eventIndex(execution)
+                    );
+                  }).length === 1;
+          if (!retryHasOwner) {
             failures.push({
               code: "invalid-retry-lifecycle",
               scenarioSet,
@@ -2774,8 +2903,7 @@ export async function checkFixtureEvidenceHealth(options: {
           gates,
         });
       }
-      const lookups = lifecycle.filter((event) => event.type === "lookup");
-      if (lookups.length === 0) {
+      if (lookupEvents.length === 0) {
         failures.push({
           code: "no-lookup",
           scenarioSet,
@@ -2876,6 +3004,20 @@ export async function checkFixtureEvidenceHealth(options: {
         }
       }
       for (const event of cacheEvents) {
+        if (
+          !executionEvents.some(
+            (execution) => execution.scenario.id === event.scenario.id,
+          )
+        ) {
+          lifecycleErrors += 1;
+          failures.push({
+            code: "lifecycle-error",
+            scenarioSet,
+            invocationId,
+            scenarioId: event.scenario.id,
+            detail: `Cache activity ${event.cache}:${event.outcome} has no scenario execution lifecycle`,
+          });
+        }
         const key = fixtureEvidenceCacheActivityKey(event.cache, event.outcome);
         if (key === undefined) {
           lifecycleErrors += 1;
