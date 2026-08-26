@@ -723,6 +723,54 @@ describe("Non-Destructive Package Addition", () => {
     }
   });
 
+  it("fails closed when an explicitly linked consumer manifest is missing", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-missing-linked-manifest-"),
+    );
+    const targetDir = path.join(workspace, "project");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+      },
+    });
+    const definition = requireAddableDefinitionForRole(
+      context,
+      "shared-library",
+    );
+
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const consumerPath = initialization.blueprint.packages[0]!.path;
+      await unlink(path.join(targetDir, consumerPath, "package.json"));
+
+      expect(() =>
+        planGeneratedRepositoryPackageAddition({
+          definition,
+          localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+          packageLeafName: "provider",
+          linkFrom: [consumerPath],
+        }),
+      ).toThrow(
+        `Package Addition requires manifest truth for ${consumerPath}:`,
+      );
+      await expect(
+        stat(path.join(targetDir, "packages/provider")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("preserves Editor members and order while appending a new capability", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-identity-set-addition-"),

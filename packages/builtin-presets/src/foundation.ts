@@ -750,7 +750,7 @@ function readPersistedEnvironmentNeeds(
 
 function readExistingPackageAdditionState(options: {
   readonly localTemplateMetadata: LocalTemplateMetadata;
-  readonly manifestTruthPackagePaths?: readonly string[];
+  readonly requiredManifestTruthPackagePaths?: readonly string[];
 }): {
   readonly foundationContribution: PlannedPackageContribution;
   readonly contributions: readonly PlannedPackageContribution[];
@@ -775,20 +775,30 @@ function readExistingPackageAdditionState(options: {
     string,
     Readonly<Record<string, unknown>>
   >();
-  for (const packagePath of new Set(options.manifestTruthPackagePaths ?? [])) {
-    const expectedDefinition = blueprint.packages.find(
-      (definition) => definition.path === packagePath,
-    );
-    if (expectedDefinition === undefined) {
+  const requiredManifestTruthPackagePaths = new Set(
+    options.requiredManifestTruthPackagePaths ?? [],
+  );
+  for (const packagePath of requiredManifestTruthPackagePaths) {
+    if (
+      !blueprint.packages.some((definition) => definition.path === packagePath)
+    ) {
       throw new Error(
         `Package Addition requires manifest truth for unknown Package Path ${packagePath}`,
       );
     }
+  }
+  for (const expectedDefinition of blueprint.packages) {
     const manifestPath = path.join(
       context.targetDir,
-      packagePath,
+      expectedDefinition.path,
       "package.json",
     );
+    if (
+      !existsSync(manifestPath) &&
+      !requiredManifestTruthPackagePaths.has(expectedDefinition.path)
+    ) {
+      continue;
+    }
     let manifest: unknown;
     try {
       manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -1139,7 +1149,7 @@ function foundationPlan(options: {
   readonly renderContributions?: readonly PackageContribution[];
   /** Focused deployment preparation recovered from durable Environment Need facts. */
   readonly existingDeploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
-  /** Current manifests used only to decide explicitly requested links. */
+  /** Current manifests supply mutable package-owned facts such as commands and explicit links. */
   readonly manifestTruthByPackagePath?: ReadonlyMap<
     string,
     Readonly<Record<string, unknown>>
@@ -1222,7 +1232,16 @@ function foundationPlan(options: {
     );
   });
   const contributions = [configContribution, ...packageContributions];
-  assertPackageContributionCommandNames(contributions);
+  assertPackageContributionCommandNames(
+    contributions.map((contribution) => {
+      const manifest = options.manifestTruthByPackagePath?.get(
+        contribution.definition.path,
+      );
+      return manifest === undefined
+        ? contribution
+        : { ...contribution, manifest };
+    }),
+  );
   const candidateRecord: GenerationRecord = options.generationRecord ?? {
     schemaVersion: 2,
     repositoryName: options.context.repositoryName,
@@ -2190,6 +2209,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
         contributions: existing.contributions,
         renderContributions: [],
         existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
+        manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
         generationRecord: existing.generationRecord,
         mode: "addition",
       });
@@ -2259,7 +2279,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
       : {}),
   };
   assertProjectBlueprint(blueprint);
-  const manifestTruthPackagePaths =
+  const requiredManifestTruthPackagePaths =
     requestedPackageLinkIntents.length === 0
       ? []
       : [
@@ -2273,7 +2293,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
         ];
   const existing = readExistingPackageAdditionState({
     localTemplateMetadata: options.localTemplateMetadata,
-    manifestTruthPackagePaths,
+    requiredManifestTruthPackagePaths,
   });
   const generationRecord: GenerationRecord = {
     ...existing.generationRecord,
@@ -2306,11 +2326,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
     foundationContribution: existing.foundationContribution,
     contributions: [...existing.contributions, contribution],
     existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
-    ...(requestedPackageLinkIntents.length === 0
-      ? {}
-      : {
-          manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
-        }),
+    manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
     generationRecord,
     mode: "initialization",
   });
@@ -2322,11 +2338,7 @@ export function planGeneratedRepositoryPackageAddition(options: {
     contributions: [...existing.contributions, contribution],
     renderContributions: [contribution],
     existingDeploymentEnvironmentNeeds: existing.deploymentEnvironmentNeeds,
-    ...(requestedPackageLinkIntents.length === 0
-      ? {}
-      : {
-          manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
-        }),
+    manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
     generationRecord,
     mode: "addition",
   });

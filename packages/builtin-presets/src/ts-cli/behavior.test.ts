@@ -13,6 +13,8 @@ import path from "node:path";
 import {
   builtInPresetRegistry,
   createGenerationContext,
+  loadLocalTemplateMetadata,
+  planGeneratedRepositoryPackageAddition,
   planGeneratedRepositoryInitialization,
   prepareGeneratedRepositoryInitialization,
   resolveBuiltInTemplateSource,
@@ -218,6 +220,59 @@ describe("ts-cli Preset Definition behavior", () => {
         overrides: { name: "node" },
       }),
     ).toThrow('CLI command name is a reserved system tool; received "node"');
+  });
+
+  it("rejects an added command that conflicts with an existing manifest fact before writes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-ts-cli-command-conflict-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+      },
+    });
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const manifestPath = path.join(targetDir, "packages/cli/package.json");
+      const manifest = JSON.parse(
+        await readFile(manifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      await writeFile(
+        manifestPath,
+        `${JSON.stringify(
+          { ...manifest, bin: { release: "./dist/cli.js" } },
+          null,
+          2,
+        )}\n`,
+      );
+
+      expect(() =>
+        planGeneratedRepositoryPackageAddition({
+          definition: tsCliDefinition,
+          localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+          packageLeafName: "release",
+        }),
+      ).toThrow(
+        'CLI command name "release" from @demo/release is already used by @demo/cli',
+      );
+      await expect(
+        stat(path.join(targetDir, "packages/release")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("appears in the public CLI Preset Catalog without exporting planner internals", async () => {

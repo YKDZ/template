@@ -15,6 +15,22 @@ describe("CLI command identity", () => {
     { name: "uppercase ASCII", command: "Release", message: "lowercase ASCII" },
     { name: "non-ASCII", command: "发布", message: "lowercase ASCII" },
     { name: "system tool", command: "node", message: "reserved system tool" },
+    { name: "Windows device", command: "con", message: "reserved system tool" },
+    {
+      name: "Windows null device",
+      command: "nul",
+      message: "reserved system tool",
+    },
+    {
+      name: "Windows serial device",
+      command: "com1",
+      message: "reserved system tool",
+    },
+    {
+      name: "Windows printer device",
+      command: "lpt9",
+      message: "reserved system tool",
+    },
   ])("rejects an unsafe command name: $name", ({ command, message }) => {
     expect(() => validateCliCommandName(command)).toThrow(message);
   });

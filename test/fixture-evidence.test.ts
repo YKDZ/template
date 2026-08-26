@@ -3252,22 +3252,18 @@ describe("Fixture Verification Evidence", () => {
           },
         });
         const scenarios = await generatedScenariosFor(scenarioSet);
-        const browserConstrained = scenarios.filter((scenario) => {
-          const plan = planGeneratedRepositoryInitialization({
-            definition: scenario.base,
-            context: createGenerationContext({
-              targetDir: path.join(root, scenarioSet, scenario.id),
-              defaultPackageScope: "fixture",
-              toolchain: {
-                nodeLtsMajor: "24",
-                packageManagerPin: "pnpm@11.11.0",
-              },
-            }),
-          });
-          return generatedRootQualityExecutionResources(plan).includes(
-            "browser",
-          );
-        }).length;
+        const renderedScenarios = await Promise.all(
+          scenarios.map(
+            async (scenario) =>
+              await renderMatrixScenario({
+                scenario,
+                workspace: path.join(root, "resource-oracle", scenarioSet),
+              }),
+          ),
+        );
+        const browserConstrained = renderedScenarios.filter(({ plan }) =>
+          generatedRootQualityExecutionResources(plan).includes("browser"),
+        ).length;
         const ordinaryOnly = scenarios.length - browserConstrained;
         const expected =
           scenarioSet === "deployment"

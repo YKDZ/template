@@ -43,6 +43,10 @@ describe("CLI command contribution policy", () => {
     ["Release", "lowercase ASCII"],
     ["发布", "lowercase ASCII"],
     ["node", "reserved system tool"],
+    ["con", "reserved system tool"],
+    ["nul", "reserved system tool"],
+    ["com1", "reserved system tool"],
+    ["lpt9", "reserved system tool"],
   ])("rejects unsafe CLI command %j", (commandName, message) => {
     expect(() => validateCliCommandName(commandName)).toThrow(message);
   });
