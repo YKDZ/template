@@ -2354,23 +2354,24 @@ export async function checkFixtureEvidenceHealth(options: {
         [event.scenario.id, event.phase, event.scope].join("\u0000");
       const eventIndex = (event: FixtureEvidenceInvocationEvent): number =>
         invocationRecords.findIndex((record) => record.event === event);
-      const phaseTerminals = new Map<
-        string,
-        Array<
-          Extract<
-            FixtureEvidencePhaseActivity,
-            { outcome: "succeeded" | "failed" }
-          >
-        >
-      >();
+      type StartedPhaseActivity = Extract<
+        FixtureEvidencePhaseActivity,
+        { readonly outcome: "started" }
+      >;
+      type TerminalPhaseActivity = Extract<
+        FixtureEvidencePhaseActivity,
+        { readonly outcome: "succeeded" | "failed" }
+      >;
+      type PhaseSpan = {
+        readonly start: StartedPhaseActivity;
+        readonly terminal: TerminalPhaseActivity;
+      };
+      const phaseSpans = new Map<string, PhaseSpan[]>();
       for (const key of new Set(phaseEvents.map(activityGroupKey))) {
         const events = phaseEvents.filter(
           (event) => activityGroupKey(event) === key,
         );
-        let active: Extract<
-          FixtureEvidencePhaseActivity,
-          { outcome: "started" }
-        > | null = null;
+        let active: StartedPhaseActivity | null = null;
         for (const event of events) {
           if (event.outcome === "started") {
             if (active !== null) {
@@ -2381,6 +2382,8 @@ export async function checkFixtureEvidenceHealth(options: {
                 scenarioId: event.scenario.id,
                 detail: `Phase ${event.phase} (${event.scope}) started before its prior span finished`,
               });
+              active = null;
+              continue;
             }
             active = event;
             continue;
@@ -2403,14 +2406,15 @@ export async function checkFixtureEvidenceHealth(options: {
                 scenarioId: event.scenario.id,
                 detail: `Phase ${event.phase} (${event.scope}) duration ${event.durationMilliseconds} does not match its timestamps`,
               });
+            } else {
+              const spans = phaseSpans.get(key) ?? [];
+              spans.push({ start: active, terminal: event });
+              phaseSpans.set(key, spans);
+              phaseDurations[event.phase] =
+                (phaseDurations[event.phase] ?? 0) + event.durationMilliseconds;
             }
             active = null;
           }
-          const terminals = phaseTerminals.get(key) ?? [];
-          terminals.push(event);
-          phaseTerminals.set(key, terminals);
-          phaseDurations[event.phase] =
-            (phaseDurations[event.phase] ?? 0) + event.durationMilliseconds;
           if (event.outcome === "failed") {
             failures.push({
               code: "failed-phase",
@@ -2442,14 +2446,18 @@ export async function checkFixtureEvidenceHealth(options: {
       type SuccessfulExecutionActivity = ExecutionActivity & {
         readonly outcome: "succeeded";
       };
-      type SuccessfulPhaseActivity = Extract<
-        FixtureEvidencePhaseActivity,
-        { readonly outcome: "succeeded" }
-      >;
-      const successfulPhases = phaseEvents.filter(
-        (event): event is SuccessfulPhaseActivity =>
-          event.outcome === "succeeded",
-      );
+      type SuccessfulPhaseSpan = PhaseSpan & {
+        readonly terminal: Extract<
+          FixtureEvidencePhaseActivity,
+          { readonly outcome: "succeeded" }
+        >;
+      };
+      const successfulPhaseSpans = [...phaseSpans.values()]
+        .flat()
+        .filter(
+          (span): span is SuccessfulPhaseSpan =>
+            span.terminal.outcome === "succeeded",
+        );
       const executionEvents = lifecycle.filter(
         (event): event is ExecutionActivity => event.type === "execution",
       );
@@ -2503,46 +2511,17 @@ export async function checkFixtureEvidenceHealth(options: {
       const semanticPhaseFor = (
         execution: SuccessfulExecutionActivity,
         executionStart: FixtureEvidenceLifecycleEvent,
-      ): SuccessfulPhaseActivity | undefined => {
-        const semantics = successfulPhases.filter(
-          (event) =>
-            event.phase === "semantic-gate" &&
-            event.scope === execution.gate &&
-            event.scenario.id === execution.scenario.id &&
-            eventIndex(event) > eventIndex(executionStart) &&
-            eventIndex(event) < eventIndex(execution),
+      ): SuccessfulPhaseSpan | undefined => {
+        const semantics = successfulPhaseSpans.filter(
+          (span) =>
+            span.terminal.phase === "semantic-gate" &&
+            span.terminal.scope === execution.gate &&
+            span.terminal.scenario.id === execution.scenario.id &&
+            eventIndex(span.start) > eventIndex(executionStart) &&
+            eventIndex(span.terminal) < eventIndex(execution),
         );
         return semantics.length === 1 ? semantics[0] : undefined;
       };
-      const hasPreparationChainBetween = (
-        scenarioId: string,
-        afterIndex: number,
-        beforeIndex: number,
-      ): boolean =>
-        successfulPhases.some(
-          (sessionQueue) =>
-            sessionQueue.phase === "scheduler-queue" &&
-            sessionQueue.scope === "development-container-session" &&
-            sessionQueue.scenario.id === scenarioId &&
-            eventIndex(sessionQueue) > afterIndex &&
-            eventIndex(sessionQueue) < beforeIndex &&
-            successfulPhases.some(
-              (container) =>
-                container.phase === "container-preparation" &&
-                container.scope === "development-container-session" &&
-                container.scenario.id === scenarioId &&
-                eventIndex(container) > eventIndex(sessionQueue) &&
-                eventIndex(container) < beforeIndex &&
-                successfulPhases.some(
-                  (dependency) =>
-                    dependency.phase === "dependency-installation" &&
-                    dependency.scope === "development-container-session" &&
-                    dependency.scenario.id === scenarioId &&
-                    eventIndex(dependency) > eventIndex(container) &&
-                    eventIndex(dependency) < beforeIndex,
-                ),
-            ),
-        );
       const successfulExecutionEvents = executionEvents.filter(
         (event): event is SuccessfulExecutionActivity =>
           event.outcome === "succeeded",
@@ -2558,6 +2537,59 @@ export async function checkFixtureEvidenceHealth(options: {
             execution,
         );
       }
+      const preparationDependencyByScenario = new Map<
+        string,
+        SuccessfulPhaseSpan
+      >();
+      const validPreparationScenarios = new Set<string>();
+      for (const [
+        scenarioId,
+        firstExecution,
+      ] of firstSuccessfulExecutionByScenario) {
+        const firstExecutionStart = executionStartFor(firstExecution);
+        const firstSemantic =
+          firstExecutionStart === undefined
+            ? undefined
+            : semanticPhaseFor(firstExecution, firstExecutionStart);
+        const sessionQueues = successfulPhaseSpans.filter(
+          (span) =>
+            span.terminal.phase === "scheduler-queue" &&
+            span.terminal.scope === "development-container-session" &&
+            span.terminal.scenario.id === scenarioId,
+        );
+        const containers = successfulPhaseSpans.filter(
+          (span) =>
+            span.terminal.phase === "container-preparation" &&
+            span.terminal.scope === "development-container-session" &&
+            span.terminal.scenario.id === scenarioId,
+        );
+        const dependencies = successfulPhaseSpans.filter(
+          (span) =>
+            span.terminal.phase === "dependency-installation" &&
+            span.terminal.scope === "development-container-session" &&
+            span.terminal.scenario.id === scenarioId,
+        );
+        const sessionQueue = sessionQueues[0];
+        const container = containers[0];
+        const dependency = dependencies[0];
+        if (
+          firstExecutionStart !== undefined &&
+          firstSemantic !== undefined &&
+          sessionQueues.length === 1 &&
+          containers.length === 1 &&
+          dependencies.length === 1 &&
+          sessionQueue !== undefined &&
+          container !== undefined &&
+          dependency !== undefined &&
+          eventIndex(sessionQueue.start) > eventIndex(firstExecutionStart) &&
+          eventIndex(sessionQueue.terminal) < eventIndex(container.start) &&
+          eventIndex(container.terminal) < eventIndex(dependency.start) &&
+          eventIndex(dependency.terminal) < eventIndex(firstSemantic.start)
+        ) {
+          validPreparationScenarios.add(scenarioId);
+          preparationDependencyByScenario.set(scenarioId, dependency);
+        }
+      }
       for (const execution of successfulExecutionEvents) {
         const executionStart = executionStartFor(execution);
         const semantic =
@@ -2567,27 +2599,24 @@ export async function checkFixtureEvidenceHealth(options: {
         const missingFacts = [
           ...(executionStart === undefined ? ["unique execution start"] : []),
           ...(semantic === undefined ? ["successful semantic gate"] : []),
-          ...(semantic === undefined ||
-          !hasPreparationChainBetween(
-            execution.scenario.id,
-            firstSuccessfulExecutionByScenario.get(execution.scenario.id) ===
-              execution && executionStart !== undefined
-              ? eventIndex(executionStart)
-              : -1,
-            eventIndex(semantic),
-          )
+          ...(!validPreparationScenarios.has(execution.scenario.id) ||
+          semantic === undefined ||
+          eventIndex(
+            preparationDependencyByScenario.get(execution.scenario.id)!
+              .terminal,
+          ) >= eventIndex(semantic.start)
             ? ["ordered session queue/container/dependency preparation"]
             : []),
           ...(executionStart === undefined ||
           semantic === undefined ||
-          !successfulPhases.some(
-            (queue) =>
-              queue.phase === "scheduler-queue" &&
-              queue.scope === execution.gate &&
-              queue.scenario.id === execution.scenario.id &&
-              eventIndex(queue) > eventIndex(executionStart) &&
-              eventIndex(queue) < eventIndex(semantic),
-          )
+          successfulPhaseSpans.filter(
+            (span) =>
+              span.terminal.phase === "scheduler-queue" &&
+              span.terminal.scope === execution.gate &&
+              span.terminal.scenario.id === execution.scenario.id &&
+              eventIndex(span.start) > eventIndex(executionStart) &&
+              eventIndex(span.terminal) < eventIndex(semantic.start),
+          ).length !== 1
             ? ["gate scheduler queue"]
             : []),
         ];
@@ -2650,16 +2679,16 @@ export async function checkFixtureEvidenceHealth(options: {
               detail: `Scenario ${scenarioId} has an invalid ${start.phase} retry lifecycle`,
             });
           }
-          const enclosingTerminals =
-            phaseTerminals.get(activityGroupKey(start)) ?? [];
+          const enclosingSpans = phaseSpans.get(activityGroupKey(start)) ?? [];
           const expectedPhaseOutcome =
             terminal.outcome === "recovered" ? "succeeded" : "failed";
           if (
-            !enclosingTerminals.some(
-              (event) =>
-                event.outcome === expectedPhaseOutcome &&
-                eventIndex(event) > eventIndex(terminal),
-            )
+            enclosingSpans.filter(
+              (span) =>
+                span.terminal.outcome === expectedPhaseOutcome &&
+                eventIndex(span.start) < eventIndex(start) &&
+                eventIndex(span.terminal) > eventIndex(terminal),
+            ).length !== 1
           ) {
             failures.push({
               code: "invalid-retry-lifecycle",
@@ -2833,7 +2862,7 @@ export async function checkFixtureEvidenceHealth(options: {
         if (
           successfulExecution === undefined ||
           successfulSemanticPhase === undefined ||
-          eventIndex(successfulSemanticPhase) >= issuanceIndex
+          eventIndex(successfulSemanticPhase.terminal) >= issuanceIndex
         ) {
           failures.push({
             code: "issuance-order",
