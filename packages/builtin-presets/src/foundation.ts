@@ -165,6 +165,10 @@ export type GeneratedRepositoryPackageAdditionPlan = GeneratedRepositoryPlan & {
   };
 };
 
+export type PublicationSetupHandoff = null | {
+  readonly command: "./scripts/npm-publication-setup/setup.sh";
+};
+
 const environmentNeedsPath = ".template/environment-needs.json";
 
 const packageManifestKeyOrder = [
@@ -1728,6 +1732,50 @@ function foundationPlan(options: {
             from: "src/cli-command-identity.ts",
             to: "scripts/npm-publication/cli-command-identity.ts",
           },
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/setup.sh",
+            to: "scripts/npm-publication-setup/setup.sh",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
+          },
+          {
+            kind: "setExecutable" as const,
+            path: "scripts/npm-publication-setup/setup.sh",
+            executable: true,
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/README.md",
+            to: "scripts/npm-publication-setup/README.md",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/assets/LICENSE-MIT.txt",
+            to: "scripts/npm-publication-setup/assets/LICENSE-MIT.txt",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/assets/LICENSE-APACHE-2.0.txt",
+            to: "scripts/npm-publication-setup/assets/LICENSE-APACHE-2.0.txt",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/assets/README.md.template",
+            to: "scripts/npm-publication-setup/assets/README.md.template",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/assets/CHANGELOG.md.template",
+            to: "scripts/npm-publication-setup/assets/CHANGELOG.md.template",
+          },
         ]),
     {
       kind: "writeJson",
@@ -2112,6 +2160,7 @@ export function prepareGeneratedRepositoryInitialization(options: {
   readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
   readonly resolved: ResolvedInitialization;
   readonly plan: GeneratedRepositoryPlan;
+  readonly publicationSetup: PublicationSetupHandoff;
 } {
   const diagnostics: string[] = [];
   const appendDiagnostics = (error: unknown): void => {
@@ -2303,6 +2352,10 @@ export function prepareGeneratedRepositoryInitialization(options: {
       ? {}
       : { resolvedPackageIdentity: prepared.resolvedPackageIdentity }),
     plan,
+    publicationSetup:
+      publicCliCandidate(prepared.contributions) === undefined
+        ? null
+        : { command: "./scripts/npm-publication-setup/setup.sh" },
   };
 }
 

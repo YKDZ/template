@@ -5,6 +5,7 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -277,8 +278,106 @@ describe("ts-cli Preset Definition behavior", () => {
           from: "src/cli-command-identity.ts",
           to: "scripts/npm-publication/cli-command-identity.ts",
         }),
+        expect.objectContaining({
+          kind: "writeTextTemplate",
+          from: "publication-setup/setup.sh",
+          to: "scripts/npm-publication-setup/setup.sh",
+        }),
       ]),
     );
+  });
+
+  it("keeps the one-time publication setup handoff outside the generated plan", () => {
+    const preparation = prepareGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      targetDir: path.join("generated-repository", "demo-cli"),
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+
+    expect(preparation.publicationSetup).toEqual({
+      command: "./scripts/npm-publication-setup/setup.sh",
+    });
+    expect(preparation.plan.nextStepInstructions).toHaveLength(3);
+    expect(
+      preparation.plan.nextStepInstructions.map(({ display }) => display),
+    ).not.toContain("./scripts/npm-publication-setup/setup.sh");
+  });
+
+  it("serves the generated setup status through its only executable interface", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-setup-status-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    try {
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(targetDir, "node_modules"),
+        "dir",
+      );
+
+      const result = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--status", "--json"],
+        { cwd: targetDir, reject: false },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        schemaVersion: 1,
+        currentStage: { id: "configure-public-package", number: 2 },
+        observations: { packagePath: "packages/cli" },
+      });
+      expect(result.stderr).toBe("");
+
+      const configured = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "MIT",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
+        { cwd: targetDir, reject: false },
+      );
+      expect(configured.exitCode).toBe(3);
+      expect(configured.stdout).toContain(
+        "STAGE 2/4 Configure the public package",
+      );
+      const configuredManifest = JSON.parse(
+        await readFile(
+          path.join(targetDir, "packages/cli/package.json"),
+          "utf8",
+        ),
+      );
+      expect(configuredManifest).toMatchObject({
+        name: "@demo/ship",
+        version: "1.0.0",
+      });
+      expect(configuredManifest).not.toHaveProperty("private");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("fails closed when CLI replay identity conflicts with its planning phase", async () => {

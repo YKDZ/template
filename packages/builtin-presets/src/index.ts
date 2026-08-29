@@ -17,5 +17,6 @@ export type {
   BuiltInGenerationContext,
   LocalTemplateMetadata,
   InitializationIdentityOverrides,
+  PublicationSetupHandoff,
   ResolvedInitialization,
 } from "./foundation.ts";

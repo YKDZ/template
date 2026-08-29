@@ -248,7 +248,7 @@ export async function runInit(
           },
         }),
   });
-  const { plan, resolved } = preparation;
+  const { plan, resolved, publicationSetup } = preparation;
   const resolvedPackageRows: readonly (readonly [string, string])[] = [
     ["Name", resolved.packages.map(({ name }) => name).join(", ")],
     [
@@ -290,6 +290,7 @@ export async function runInit(
     generationRecord: plan.generationRecord,
     toolchain: toolchainReport(toolchain),
     nextSteps: plan.nextStepInstructions,
+    publicationSetup,
     followUpDocument: {
       enabled: options.todo,
       path: options.todo ? "TODO.md" : undefined,
@@ -343,6 +344,14 @@ export async function runInit(
     ...plan.nextStepInstructions.map(
       (instruction, index) => `  ${index + 1}. ${instruction.display}`,
     ),
+    ...(publicationSetup === null
+      ? []
+      : [
+          "",
+          "One-time npm publication setup",
+          "",
+          `  ${publicationSetup.command}`,
+        ]),
   ].join("\n");
 }
 
