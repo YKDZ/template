@@ -3,6 +3,7 @@
 /**
  * @typedef {object} ProjectManifest
  * @property {Record<string, string>} [devDependencies]
+ * @property {Record<string, string>} [scripts]
  */
 
 export const hooks = {
@@ -12,6 +13,7 @@ export const hooks = {
    */
   beforePacking(pkg) {
     delete pkg.devDependencies;
+    delete pkg.scripts;
     return pkg;
   },
 };

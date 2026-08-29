@@ -222,7 +222,9 @@ describe("ts-cli Preset Definition behavior", () => {
     });
     expect(rootManifest).toMatchObject({
       scripts: {
-        check: expect.stringContaining("publication:readiness"),
+        check: expect.stringContaining("publication:artifact"),
+        "publication:artifact":
+          "node --conditions=source scripts/npm-publication/check-artifact.ts",
         "publication:readiness":
           "node --conditions=source scripts/npm-publication/check-readiness.ts",
       },
@@ -231,8 +233,15 @@ describe("ts-cli Preset Definition behavior", () => {
         "@types/spdx-expression-parse": "catalog:",
         semver: "catalog:",
         "spdx-expression-parse": "catalog:",
+        npm: "catalog:",
+        tar: "catalog:",
       },
     });
+    const rootScripts = rootManifest?.scripts as Record<string, string>;
+    expect(rootScripts.check).toContain(
+      "build test:e2e --filter=!./packages/cli",
+    );
+    expect(rootScripts.check).not.toContain("publication:readiness --continue");
     expect(plan.operations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ to: ".pnpmfile.mjs" }),
@@ -247,6 +256,18 @@ describe("ts-cli Preset Definition behavior", () => {
         expect.objectContaining({
           from: "publication/readiness.ts",
           to: "scripts/npm-publication/readiness.ts",
+        }),
+        expect.objectContaining({
+          from: "publication/artifact.ts",
+          to: "scripts/npm-publication/artifact.ts",
+        }),
+        expect.objectContaining({
+          kind: "writeTextTemplate",
+          from: "publication/check-artifact.ts",
+          to: "scripts/npm-publication/check-artifact.ts",
+          replacements: {
+            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+          },
         }),
         expect.objectContaining({
           from: "publication/changelog.ts",
@@ -491,7 +512,10 @@ describe("ts-cli Preset Definition behavior", () => {
         cwd: project.targetDir,
         reject: false,
       });
-      expect(rootCheck.exitCode).toBe(0);
+      expect(
+        rootCheck.exitCode,
+        `${rootCheck.stdout}\n${rootCheck.stderr}`,
+      ).toBe(0);
 
       const baseline = await execa("pnpm", ["run", "publication:readiness"], {
         cwd: project.targetDir,

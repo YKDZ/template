@@ -279,6 +279,10 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
       await readFile(path.join(projectDir, "turbo.json"), "utf8"),
     ),
   });
+  const checkCommand = manifest.scripts.check;
+  if (checkCommand === undefined) {
+    throw new Error("Generated Repository root manifest must define check");
+  }
 
   expect(Object.keys(manifest.scripts)).not.toEqual(
     expect.arrayContaining([
@@ -287,11 +291,21 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
     ]),
   );
   for (const command of [
-    manifest.scripts.check,
     manifest.scripts.fix,
     manifest.scripts["check:deployment"],
   ]) {
     if (command !== undefined) expect(command).not.toContain("--filter");
+  }
+  if (manifest.scripts["publication:artifact"] === undefined) {
+    expect(checkCommand).not.toContain("--filter");
+  } else {
+    const publicationExclusions = checkCommand.match(
+      /--filter=!\.\/[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*/gu,
+    );
+    expect(publicationExclusions).toHaveLength(1);
+    expect(checkCommand.replace(publicationExclusions![0]!, "")).not.toContain(
+      "--filter",
+    );
   }
   expect(taskModel).not.toMatch(/(?:Check|Fix) (?:Component|Plan)/u);
   expect(taskModel).not.toMatch(/Deployment Check Component/u);
@@ -1155,7 +1169,10 @@ describe("packed public CLI consumer", () => {
         await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),
       ) as { readonly scripts: Readonly<Record<string, string>> };
       expect(rootManifestAfterRust.scripts.check).toContain(
-        "turbo run boundaries format:check lint typecheck build test test:e2e",
+        "turbo run boundaries format:check lint typecheck test",
+      );
+      expect(rootManifestAfterRust.scripts.check).toContain(
+        "turbo run build test:e2e --filter=!./packages/cli",
       );
 
       await execa("pnpm", ["install"], { cwd: rustAdditionTarget });

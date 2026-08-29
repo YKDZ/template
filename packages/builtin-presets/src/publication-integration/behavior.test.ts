@@ -1,6 +1,16 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import {
   createGenerationContext,
@@ -16,6 +26,9 @@ import { renderNewProject } from "#template-core/renderer";
 
 import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
+
+type ArtifactModule =
+  typeof import("../../templates/ts-cli/publication/artifact.ts");
 
 const mitLicense = `MIT License
 
@@ -148,6 +161,167 @@ async function requireReady(repositoryRoot: string): Promise<void> {
 }
 
 describe("ts-cli publication owner-fact integration", () => {
+  it("verifies the one packed artifact and records its installed CLI evidence", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-artifact-"),
+    );
+    const repositoryRoot = path.join(workspace, "recorded-repository");
+    const plan = planGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      context: createGenerationContext({
+        targetDir: repositoryRoot,
+        defaultPackageScope: "seed",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.21.0",
+        },
+      }),
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: repositoryRoot,
+        operations: [...plan.operations],
+      });
+      await execa("pnpm", ["install"], { cwd: repositoryRoot });
+      const artifactModule = (await import(
+        `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
+      )) as ArtifactModule;
+
+      const safeOutput = path.join(workspace, "safe-output");
+      await mkdir(safeOutput);
+      const safe = await artifactModule.verifyNpmPublicationArtifact({
+        repositoryRoot,
+        packagePath: "packages/cli",
+        outputDirectory: safeOutput,
+      });
+      expect(safe).toMatchObject({
+        kind: "blocked",
+        readiness: { mode: "safe-unconfigured" },
+      });
+      expect(await readdir(safeOutput)).toEqual([]);
+
+      const candidateManifestPath = path.join(
+        repositoryRoot,
+        "packages/cli/package.json",
+      );
+      const publicIntentManifest = JSON.parse(
+        await readFile(candidateManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      publicIntentManifest.version = "1.0.0";
+      await writeJson(candidateManifestPath, publicIntentManifest);
+      const publicIntentOutput = path.join(workspace, "public-intent-output");
+      await mkdir(publicIntentOutput);
+      const publicIntent = await artifactModule.verifyNpmPublicationArtifact({
+        repositoryRoot,
+        packagePath: "packages/cli",
+        outputDirectory: publicIntentOutput,
+      });
+      expect(publicIntent).toMatchObject({
+        kind: "blocked",
+        readiness: { mode: "public-intent" },
+      });
+      expect(await readdir(publicIntentOutput)).toEqual([]);
+
+      await configurePublicOwnerFacts({
+        repositoryRoot,
+        packageName: "@publisher/tool",
+      });
+      const sourceManifestPath = path.join(
+        repositoryRoot,
+        "packages/cli/package.json",
+      );
+      const sourceManifest = JSON.parse(
+        await readFile(sourceManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      const buildWitnessPath = path.join(workspace, "prepack-count.txt");
+      const scripts = sourceManifest.scripts as Record<string, string>;
+      scripts.prepack = `node -e "require('node:fs').appendFileSync(process.env.TEMPLATE_TEST_BUILD_WITNESS, 'build\\n')" && ${scripts.prepack}`;
+      await writeJson(sourceManifestPath, sourceManifest);
+
+      const outputDirectory = path.join(workspace, "verified-output");
+      await mkdir(outputDirectory);
+      const ambient = {
+        NPM_CONFIG_BIN_LINKS: process.env.NPM_CONFIG_BIN_LINKS,
+        npm_config_package_lock_only: process.env.npm_config_package_lock_only,
+        NPM_CONFIG_REGISTRY: process.env.NPM_CONFIG_REGISTRY,
+        TEMPLATE_TEST_BUILD_WITNESS: process.env.TEMPLATE_TEST_BUILD_WITNESS,
+      };
+      process.env.NPM_CONFIG_BIN_LINKS = "false";
+      process.env.npm_config_package_lock_only = "true";
+      process.env.NPM_CONFIG_REGISTRY = "https://invalid.example/";
+      process.env.TEMPLATE_TEST_BUILD_WITNESS = buildWitnessPath;
+      let verified;
+      try {
+        verified = await artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory,
+        });
+      } finally {
+        for (const [key, value] of Object.entries(ambient)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+
+      expect(verified).toMatchObject({
+        kind: "verified",
+        receipt: {
+          schemaVersion: 1,
+          publication: {
+            packageName: "@publisher/tool",
+            version: "1.0.0",
+            commandName: "ship",
+          },
+          files: [
+            { path: "package/CHANGELOG.md" },
+            { path: "package/LICENSE" },
+            { path: "package/README.md" },
+            { path: "package/dist/cli-command-identity.js" },
+            { path: "package/dist/cli.js" },
+            { path: "package/dist/main.js" },
+            { path: "package/package.json" },
+          ],
+          bin: {
+            path: "package/dist/cli.js",
+            shebang: "#!/usr/bin/env node",
+          },
+          smokes: [
+            { name: "runtime-import", stdout: "" },
+            { name: "help", stdout: expect.stringContaining("greet") },
+            { name: "version", stdout: "1.0.0\n" },
+            { name: "greet", stdout: "Hello, Ada Lovelace\n" },
+          ],
+        },
+      });
+      if (verified?.kind !== "verified")
+        throw new Error("Expected verified artifact");
+      const artifactBytes = await readFile(verified.artifactPath);
+      const digest = createHash("sha512").update(artifactBytes).digest();
+      expect(verified.receipt.artifact).toMatchObject({
+        size: artifactBytes.byteLength,
+        integrity: `sha512-${digest.toString("base64")}`,
+      });
+      expect(await readFile(verified.checksumPath, "utf8")).toBe(
+        `${digest.toString("hex")}  ${path.basename(verified.artifactPath)}\n`,
+      );
+      expect(JSON.parse(await readFile(verified.receiptPath, "utf8"))).toEqual(
+        verified.receipt,
+      );
+      expect(await readdir(outputDirectory)).toEqual(
+        [
+          "SHA512SUMS",
+          path.basename(verified.artifactPath),
+          "verified-publication-artifact.json",
+        ].toSorted(),
+      );
+      expect(await readFile(buildWitnessPath, "utf8")).toBe("build\n");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 240_000);
+
   it("keeps scoped and unscoped public identity ready across a later addition", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-owner-facts-"),
@@ -246,11 +420,32 @@ describe("ts-cli publication owner-fact integration", () => {
 
       await execa("pnpm", ["install"], { cwd: repositoryRoot });
       await requireReady(repositoryRoot);
+      const rootCandidateManifest = JSON.parse(
+        await readFile(publicManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      const rootCandidateScripts = rootCandidateManifest.scripts as Record<
+        string,
+        string
+      >;
+      rootCandidateScripts.prepack = `node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')" && ${rootCandidateScripts.prepack}`;
+      await writeJson(publicManifestPath, rootCandidateManifest);
       const rootCheck = await execa("pnpm", ["run", "check"], {
         cwd: repositoryRoot,
         reject: false,
       });
-      expect(rootCheck.exitCode).toBe(0);
+      expect(
+        rootCheck.exitCode,
+        `${rootCheck.stdout}\n${rootCheck.stderr}`,
+      ).toBe(0);
+      await expect(
+        stat(path.join(repositoryRoot, "packages/lib/dist/index.js")),
+      ).resolves.toMatchObject({ mode: expect.any(Number) });
+      await expect(
+        readFile(
+          path.join(repositoryRoot, "packages/cli/.build-witness"),
+          "utf8",
+        ),
+      ).resolves.toBe("build\n");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

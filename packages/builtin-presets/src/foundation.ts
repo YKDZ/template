@@ -32,6 +32,7 @@ import {
   renderDeploymentCheckCommand,
   renderFixCommand,
   renderRootCheckCommand,
+  renderTurboRunCommand,
 } from "#template-core/module-graph";
 import {
   assertPackageContribution,
@@ -1168,6 +1169,24 @@ function publicCliCandidate(
   return candidate;
 }
 
+function renderPublicationRootCheckCommand(
+  candidatePackagePath: string,
+): string {
+  return [
+    renderTurboRunCommand(
+      ["boundaries", "format:check", "lint", "typecheck", "test"],
+      [],
+      { continueAfterFailure: true, taskPrefix: true },
+    ),
+    renderTurboRunCommand(
+      ["build", "test:e2e"],
+      [`--filter=!./${candidatePackagePath}`],
+      { continueAfterFailure: true, taskPrefix: true },
+    ),
+    "pnpm run publication:artifact",
+  ].join(" && ");
+}
+
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -1409,13 +1428,17 @@ function foundationPlan(options: {
       check:
         publicationCandidate === undefined
           ? renderRootCheckCommand()
-          : renderRootCheckCommand(["publication:readiness"]),
+          : renderPublicationRootCheckCommand(
+              publicationCandidate.definition.path,
+            ),
       boundaries: "node --conditions=source scripts/check-boundaries.ts",
       ...(publicationCandidate === undefined
         ? {}
         : {
             "publication:readiness":
               "node --conditions=source scripts/npm-publication/check-readiness.ts",
+            "publication:artifact":
+              "node --conditions=source scripts/npm-publication/check-artifact.ts",
           }),
       ...(hasDeploymentTask
         ? { "check:deployment": renderDeploymentCheckCommand() }
@@ -1446,6 +1469,8 @@ function foundationPlan(options: {
         : {
             semver: "catalog:",
             "spdx-expression-parse": "catalog:",
+            npm: "catalog:",
+            tar: "catalog:",
           }),
       turbo: "catalog:",
       "typescript-7": "catalog:",
@@ -1647,6 +1672,21 @@ function foundationPlan(options: {
             source: templateSources.tsCli,
             from: "publication/readiness.ts",
             to: "scripts/npm-publication/readiness.ts",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication/artifact.ts",
+            to: "scripts/npm-publication/artifact.ts",
+          },
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication/check-artifact.ts",
+            to: "scripts/npm-publication/check-artifact.ts",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
           },
           {
             kind: "writeTextTemplate" as const,

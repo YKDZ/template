@@ -1,5 +1,6 @@
 {
   "tasks": {
+    "//#publication:artifact": { "cache": false },
     "//#publication:readiness": { "cache": false }
   }
 }
