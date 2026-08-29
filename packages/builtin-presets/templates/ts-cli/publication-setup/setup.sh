@@ -27,7 +27,10 @@ USAGE
 }
 
 diagnostic() {
-  local kind=$1 code=$2 observed=$3 expected=$4 next=$5
+  local kind=$1 code=$2 observed expected next
+  observed=$(sanitize "$3")
+  expected=$(sanitize "$4")
+  next=$(sanitize "$5")
   printf '%s %s\nObserved: %s\nExpected: %s\nNext action: %s\n' "$kind" "$code" "$observed" "$expected" "$next" >&2
 }
 
@@ -37,35 +40,67 @@ redact() {
   sed -E 's#(https?://)[^/@[:space:]]+@#\1[REDACTED]@#g; s#([Tt]oken|[Pp]assword|[Oo][Tt][Pp]|[Ss]ession|[Aa]uthorization)[=:][^[:space:]]+#\1=[REDACTED]#g; s#(Bearer|Basic)[[:space:]]+[^[:space:]]+#\1 [REDACTED]#g'
 }
 
+sanitize() {
+  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177' | redact
+}
+
+prompt_public_fact() {
+  local label=$1 variable=$2
+  printf '%s: ' "$label"
+  # shellcheck disable=SC2229
+  if ! IFS= read -r "$variable"; then
+    fail "ACTION REQUIRED" public-fact-required "end of input" "a complete public package fact" "Run with all public flags or enter the remaining facts interactively." 3
+  fi
+}
+
 require_value() {
   [ "$#" -eq 2 ] || fail ERROR publication-setup-usage "missing flag value" "a value for $1" "Run --help and provide public facts." 2
 }
 
+status_json_intent=false
+status_flag_seen=false
+json_flag_seen=false
+for argument in "$@"; do
+  [ "$argument" = "--status" ] && status_flag_seen=true
+  [ "$argument" = "--json" ] && json_flag_seen=true
+done
+[ "$status_flag_seen" = true ] && [ "$json_flag_seen" = true ] && status_json_intent=true
+
+status_usage_json() {
+  printf '%s\n' '{"schemaVersion":1,"currentStage":{"id":"check-prerequisites","number":1,"name":"Check prerequisites"},"observations":{"packagePath":null,"packageName":null,"commandName":null,"version":null,"repository":null,"readiness":"unavailable","git":{"workingTree":null,"currentBranch":null,"defaultBranch":null,"headMatchesRemoteDefault":null}},"blockers":[{"code":"publication-setup-usage","observed":"invalid status arguments","expected":"--status --json only","nextAction":"Run ./scripts/npm-publication-setup/setup.sh --status --json."}],"nextAction":{"kind":"run","command":"./scripts/npm-publication-setup/setup.sh"}}'
+  exit 2
+}
+
+usage_fail() {
+  if [ "$status_json_intent" = true ]; then status_usage_json; fi
+  fail "$@"
+}
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --help) [ "$#" -eq 1 ] || fail ERROR publication-setup-usage "--help with other arguments" "--help alone" "Run --help by itself." 2; usage; exit 0 ;;
+    --help) [ "$#" -eq 1 ] || usage_fail ERROR publication-setup-usage "--help with other arguments" "--help alone" "Run --help by itself." 2; usage; exit 0 ;;
     --status) mode="status"; status_requested=true ;;
     --json) json_requested=true ;;
     --non-interactive) non_interactive=true ;;
     --debug) debug=true ;;
     --package-name|--bin|--description|--license|--copyright-holder|--repository)
-      flag=$1; shift; [ "$#" -gt 0 ] || fail ERROR publication-setup-usage "missing value" "a value for $flag" "Run --help and provide public facts." 2
+      flag=$1; shift; [ "$#" -gt 0 ] || usage_fail ERROR publication-setup-usage "missing value" "a value for $flag" "Run --help and provide public facts." 2
       case "$flag" in
         --package-name) package_name=$1 ;; --bin) command_name=$1 ;; --description) description=$1 ;;
         --license) license=$1 ;; --copyright-holder) copyright_holder=$1 ;; --repository) repository=$1 ;;
       esac ;;
     --yes|--password|--otp|--token|--secret|--session|--release-date|--*)
-      fail ERROR publication-setup-usage "$1" "a supported public option" "Run --help; credentials and automatic acceptance are unsupported." 2 ;;
-    *) fail ERROR publication-setup-usage "$1" "no positional arguments" "Run --help." 2 ;;
+      usage_fail ERROR publication-setup-usage "$1" "a supported public option" "Run --help; credentials and automatic acceptance are unsupported." 2 ;;
+    *) usage_fail ERROR publication-setup-usage "$1" "no positional arguments" "Run --help." 2 ;;
   esac
   shift
 done
 
 if [ "$status_requested" != "$json_requested" ]; then
-  fail ERROR publication-setup-usage "--status and --json must be paired" "--status --json" "Run --status --json." 2
+  usage_fail ERROR publication-setup-usage "--status and --json must be paired" "--status --json" "Run --status --json." 2
 fi
 if [ "$json_requested" = true ] && [ "$mode" != "status" ]; then
-  fail ERROR publication-setup-usage "--json without --status" "--status --json" "Run --status --json." 2
+  usage_fail ERROR publication-setup-usage "--json without --status" "--status --json" "Run --status --json." 2
 fi
 
 if [ "$mode" = "status" ]; then
@@ -89,12 +124,12 @@ then
   existing_public=true
 fi
 if [ "$non_interactive" = false ] && [ "$existing_public" = false ]; then
-  [ -n "$package_name" ] || { printf 'Package name: '; read -r package_name || exit 3; }
-  [ -n "$command_name" ] || { printf 'Command name: '; read -r command_name || exit 3; }
-  [ -n "$description" ] || { printf 'Public description: '; read -r description || exit 3; }
-  [ -n "$license" ] || { printf 'SPDX license: '; read -r license || exit 3; }
-  [ -n "$copyright_holder" ] || { printf 'Copyright holder: '; read -r copyright_holder || exit 3; }
-  [ -n "$repository" ] || { printf 'Public GitHub repository: '; read -r repository || exit 3; }
+  [ -n "$package_name" ] || prompt_public_fact "Package name" package_name
+  [ -n "$command_name" ] || prompt_public_fact "Command name" command_name
+  [ -n "$description" ] || prompt_public_fact "Public description" description
+  [ -n "$license" ] || prompt_public_fact "SPDX license" license
+  [ -n "$copyright_holder" ] || prompt_public_fact "Copyright holder" copyright_holder
+  [ -n "$repository" ] || prompt_public_fact "Public GitHub repository" repository
 fi
 
 printf 'STAGE 2/4 Configure the public package\n'
@@ -148,21 +183,14 @@ cleanup_artifact_root() {
 }
 trap cleanup_artifact_root EXIT HUP INT TERM
 if [ "$debug" = true ]; then printf 'COMMAND %s\n' "pnpm run publication:artifact -- --output-directory [temporary]"; fi
-pnpm run publication:artifact -- --output-directory "$artifact_root" || fail ERROR artifact-verification-failed "publication artifact caller failed" "a verified Ticket 09 artifact" "Correct the reported artifact failure and retry." 5
+if ! pnpm run publication:artifact -- --output-directory "$artifact_root" >/dev/null 2>&1; then
+  fail ERROR artifact-verification-failed "publication artifact caller failed" "a verified Ticket 09 artifact" "Correct the reported artifact failure and retry." 5
+fi
 receipt=$(find "$artifact_root" -name verified-publication-artifact.json -type f -print -quit)
 [ -n "$receipt" ] || fail ERROR artifact-receipt-missing "no receipt" "verified artifact receipt" "Retry artifact verification." 5
-acceptance=$(node --input-type=module - "$receipt" <<'NODE'
-import { readFileSync } from "node:fs";
-const receipt = JSON.parse(readFileSync(process.argv[2], "utf8"));
-console.log(`Package: ${receipt.publication.packageName}@${receipt.publication.version}`);
-console.log(`Command: ${receipt.publication.commandName}`);
-for (const file of receipt.files) console.log(`File: ${file.path}`);
-console.log(`Integrity: ${receipt.artifact.integrity}`);
-console.log(`Checksum: ${receipt.artifact.checksumFile}`);
-for (const smoke of receipt.smokes) console.log(`Smoke: ${smoke.name}`);
-console.log(`ACCEPT ${receipt.publication.packageName}@${receipt.publication.version} ${receipt.artifact.integrity}`);
-NODE
-)
+if ! acceptance=$(RECEIPT_PATH="$receipt" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" receipt); then
+  fail ERROR artifact-receipt-invalid "receipt did not match the verified artifact schema" "a complete Ticket 09 verified artifact receipt" "Retry artifact verification." 5
+fi
 printf '%s\n' "$acceptance" | sed '$d'
 acceptance=$(printf '%s\n' "$acceptance" | tail -n 1)
 if [ "$non_interactive" = true ]; then fail "ACTION REQUIRED" artifact-acceptance-required "non-interactive mode cannot accept an artifact" "$acceptance" "Review the receipt and enter the exact acceptance interactively." 3; fi

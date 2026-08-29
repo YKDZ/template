@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import parseSpdxExpression from "spdx-expression-parse";
 
@@ -18,7 +19,16 @@ import { inspectNpmPublicationReadiness } from "../npm-publication/readiness.ts"
 
 const root = process.env.REPOSITORY_ROOT;
 const packagePath = "{{PUBLIC_CLI_PACKAGE_PATH}}";
-const oneLine = (value) => String(value ?? "").replaceAll(/[\r\n]+/gu, " ");
+const oneLine = (value) =>
+  String(value ?? "")
+    .replaceAll(/[\p{Cc}]/gu, "")
+    .replaceAll(/[\r\n]+/gu, " ")
+    .replace(/(https?:\/\/)[^/@\s]+@/gu, "$1[REDACTED]@")
+    .replace(
+      /([Tt]oken|[Pp]assword|[Oo][Tt][Pp]|[Ss]ession|[Aa]uthorization)[=:][^\s]+/gu,
+      "$1=[REDACTED]",
+    )
+    .replace(/(Bearer|Basic)\s+[^\s]+/gu, "$1 [REDACTED]");
 const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 
 function gitFacts() {
@@ -30,6 +40,7 @@ function gitFacts() {
   };
   let unavailable = false;
   let remote = null;
+  let detached = false;
   try {
     const run = (...args) =>
       execFileSync("git", args, {
@@ -38,8 +49,14 @@ function gitFacts() {
         stdio: ["ignore", "pipe", "ignore"],
       }).trim();
     facts.workingTree = run("status", "--porcelain") === "" ? "clean" : "dirty";
-    facts.currentBranch =
-      run("symbolic-ref", "--quiet", "--short", "HEAD") || null;
+    try {
+      facts.currentBranch =
+        run("symbolic-ref", "--quiet", "--short", "HEAD") || null;
+    } catch (error) {
+      if (error && typeof error === "object" && error.status === 1)
+        detached = true;
+      else throw error;
+    }
     remote = run("remote", "get-url", "origin");
     const remoteListing = run("ls-remote", "--symref", "origin", "HEAD").split(
       "\n",
@@ -56,7 +73,7 @@ function gitFacts() {
   } catch {
     unavailable = true;
   }
-  return { facts, unavailable, remote };
+  return { facts, unavailable, remote, detached };
 }
 
 async function status() {
@@ -93,7 +110,12 @@ async function status() {
       },
     ];
   }
-  const { facts: git, unavailable: gitUnavailable, remote } = gitFacts();
+  const {
+    facts: git,
+    unavailable: gitUnavailable,
+    remote,
+    detached,
+  } = gitFacts();
   if (readiness === "ready" && gitUnavailable) {
     statusExitCode = 5;
     blockers = [
@@ -119,6 +141,18 @@ async function status() {
         observed: oneLine(redactRemote(remote)),
         expected: "The public package owner GitHub repository",
         nextAction: "Correct the normal Git remote and retry.",
+      },
+    ];
+  }
+  if (readiness === "ready" && !gitUnavailable && detached) {
+    statusExitCode = 3;
+    blockers = [
+      ...blockers,
+      {
+        code: "git-handoff-required",
+        observed: "HEAD is detached",
+        expected: "A checked-out public default branch",
+        nextAction: "Complete the normal Git handoff and rerun setup.",
       },
     ];
   }
@@ -186,6 +220,7 @@ function canonicalGitHubRepository(value) {
       .replace(/^git\+/u, "")
       .replace(/^git@github\.com:/u, "https://github.com/");
     const url = new URL(candidate);
+    if (url.username.length > 0 || url.password.length > 0) return null;
     const pathname = url.pathname.replace(/^\//u, "").replace(/\.git$/u, "");
     return url.hostname.toLowerCase() === "github.com" &&
       /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(pathname)
@@ -227,6 +262,101 @@ function remoteMatchesOwner() {
   process.exitCode = remoteMatchesPublicOwner(process.env.REMOTE_URL) ? 0 : 1;
 }
 
+function receiptRecord(value, label) {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error(`${label} must be an object`);
+  return value;
+}
+
+function receiptString(value, label) {
+  if (typeof value !== "string" || value.length === 0)
+    throw new Error(`${label} must be a non-empty string`);
+  return value;
+}
+
+function receiptText(value, label) {
+  if (typeof value !== "string") throw new Error(`${label} must be a string`);
+  return value;
+}
+
+function receiptNumber(value, label) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+    throw new Error(`${label} must be a non-negative integer`);
+  return value;
+}
+
+function receiptLines() {
+  const receiptPath = process.env.RECEIPT_PATH;
+  if (!receiptPath) throw new Error("receipt path is unavailable");
+  const receipt = receiptRecord(
+    JSON.parse(readFileSync(receiptPath, "utf8")),
+    "receipt",
+  );
+  if (receipt.schemaVersion !== 1) throw new Error("receipt schema is invalid");
+  const artifact = receiptRecord(receipt.artifact, "artifact");
+  const publication = receiptRecord(receipt.publication, "publication");
+  const packedManifest = receiptRecord(
+    receipt.packedManifest,
+    "packed manifest",
+  );
+  const bin = receiptRecord(receipt.bin, "bin");
+  if (!Array.isArray(receipt.files) || !Array.isArray(receipt.smokes))
+    throw new Error("receipt files and smokes are required");
+  const packageName = receiptString(publication.packageName, "package name");
+  const version = receiptString(publication.version, "version");
+  const integrity = receiptString(artifact.integrity, "integrity");
+  const lines = [
+    `Package: ${oneLine(packageName)}@${oneLine(version)}`,
+    `Command: ${oneLine(receiptString(publication.commandName, "command"))}`,
+    `Repository: ${oneLine(receiptString(publication.repository, "repository"))}`,
+    `Release date: ${oneLine(receiptString(publication.releaseDate, "release date"))}`,
+    `Release notes: ${oneLine(receiptString(publication.releaseNotes, "release notes"))}`,
+    `Artifact: ${oneLine(receiptString(artifact.file, "artifact file"))} (${receiptNumber(artifact.size, "artifact size")} bytes)`,
+    `Integrity: ${oneLine(integrity)}`,
+    `Checksum: ${oneLine(receiptString(artifact.checksumFile, "checksum file"))}`,
+    `Packed manifest: ${oneLine(JSON.stringify(packedManifest))}`,
+  ];
+  const files = receipt.files.map((file) => {
+    const item = receiptRecord(file, "receipt file");
+    return {
+      path: receiptString(item.path, "receipt file path"),
+      mode: receiptNumber(item.mode, "receipt file mode"),
+      size: receiptNumber(item.size, "receipt file size"),
+    };
+  });
+  for (const file of [...files].toSorted((left, right) =>
+    left.path.localeCompare(right.path),
+  ))
+    lines.push(
+      `File: ${oneLine(file.path)} mode ${file.mode} size ${file.size}`,
+    );
+  lines.push(
+    `Bin: ${oneLine(receiptString(bin.path, "bin path"))} mode ${receiptNumber(bin.mode, "bin mode")}`,
+    `Bin shebang: ${oneLine(receiptString(bin.shebang, "bin shebang"))}`,
+  );
+  if (bin.posixExecutableChecked !== true)
+    throw new Error("bin executable evidence is invalid");
+  for (const smoke of receipt.smokes) {
+    const item = receiptRecord(smoke, "smoke");
+    if (!Array.isArray(item.args)) throw new Error("smoke args are invalid");
+    lines.push(
+      `Smoke: ${oneLine(receiptString(item.name, "smoke name"))} args ${oneLine(JSON.stringify(item.args))} stdout ${oneLine(receiptText(item.stdout, "smoke stdout"))}`,
+    );
+  }
+  lines.push(
+    `ACCEPT ${oneLine(packageName)}@${oneLine(version)} ${oneLine(integrity)}`,
+  );
+  return lines;
+}
+
+function printReceipt() {
+  try {
+    process.stdout.write(`${receiptLines().join("\n")}\n`);
+  } catch {
+    process.exitCode = 1;
+  }
+}
+
 function stop(code, observed, expected, next, exitCode = 4) {
   process.stderr.write(
     `${exitCode === 3 ? "ACTION REQUIRED" : "ERROR"} ${code}\nObserved: ${oneLine(observed)}\nExpected: ${oneLine(expected)}\nNext action: ${oneLine(next)}\n`,
@@ -260,8 +390,12 @@ async function configure() {
     path.join(packageRoot, "README.md"),
     path.join(packageRoot, "CHANGELOG.md"),
   ];
+  const beforeExists = new Map(files.map((file) => [file, existsSync(file)]));
   const before = new Map(
-    files.map((file) => [file, existsSync(file) ? readFileSync(file) : null]),
+    files.map((file) => [
+      file,
+      beforeExists.get(file) ? readFileSync(file) : null,
+    ]),
   );
   let manifest;
   let blueprint;
@@ -288,29 +422,37 @@ async function configure() {
     typeof manifest.repository === "object" && manifest.repository !== null
       ? manifest.repository.url?.replace(/^git\+/u, "").replace(/\.git$/u, "")
       : undefined;
+  const existingHolder = before
+    .get(files[2])
+    ?.toString()
+    .match(/^Copyright(?: \(c\))?\s+(.+)$/mu)?.[1];
   const facts = {
     name: input.packageName || manifest.name,
     command: input.commandName || Object.keys(manifest.bin ?? {})[0],
     description: input.description || manifest.description,
     license: input.license || manifest.license,
-    holder:
-      input.copyrightHolder ||
-      before
-        .get(files[2])
-        ?.toString()
-        .match(/^Copyright(?: \(c\))?\s+(.+)$/mu)?.[1],
+    holder: input.copyrightHolder || existingHolder,
     repository: input.repository || existingRepository,
   };
-  const explicitConflicts = [
-    ["package name", input.packageName, manifest.name],
+  const publicOwnerConflicts = [
     ["description", input.description, manifest.description],
     ["license", input.license, manifest.license],
     ["repository", input.repository, existingRepository],
+    ["copyright holder", input.copyrightHolder, existingHolder],
+  ].filter(
+    ([, supplied, existing]) => supplied && existing && supplied !== existing,
+  );
+  const publicManifestConflicts = [
+    ["package name", input.packageName, manifest.name],
     ["command", input.commandName, Object.keys(manifest.bin ?? {})[0]],
   ].filter(
     ([, supplied, existing]) =>
       !manifest.private && supplied && existing && supplied !== existing,
   );
+  const explicitConflicts = [
+    ...publicOwnerConflicts,
+    ...publicManifestConflicts,
+  ];
   if (explicitConflicts.length > 0) {
     const [field, supplied, existing] = explicitConflicts[0];
     stop(
@@ -320,23 +462,52 @@ async function configure() {
       "Use the existing public owner fact or resolve the conflict through normal review.",
     );
   }
+  const holderRequired =
+    facts.license === "MIT" || facts.license === "Apache-2.0";
   if (
-    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(facts.name) ||
-    !/^[a-z0-9][a-z0-9-]*$/u.test(facts.command) ||
-    !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(
-      facts.repository,
-    ) ||
+    !facts.name ||
+    !facts.command ||
     !facts.description?.trim() ||
     !facts.license?.trim() ||
-    !facts.holder?.trim()
+    !facts.repository ||
+    (holderRequired && !facts.holder?.trim())
   )
     stop(
       "public-fact-required",
-      "missing or invalid public fact",
+      "missing public fact",
       "six valid public facts",
       "Provide public flags or run interactively.",
       3,
     );
+  if (
+    !/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(facts.name) ||
+    !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(
+      facts.repository,
+    )
+  )
+    stop(
+      "public-fact-invalid",
+      "invalid package name or repository",
+      "a valid public npm package name and GitHub HTTPS repository",
+      "Correct the supplied public fact and retry.",
+      2,
+    );
+  try {
+    const identity = await import(
+      pathToFileURL(
+        path.join(root, packagePath, "src", "cli-command-identity.ts"),
+      ).href
+    );
+    identity.validateCliCommandName(facts.command);
+  } catch {
+    stop(
+      "public-fact-invalid",
+      "invalid command name",
+      "a portable unreserved CLI command name",
+      "Correct --bin and retry.",
+      2,
+    );
+  }
   try {
     parseSpdxExpression(facts.license);
   } catch {
@@ -485,6 +656,7 @@ async function configure() {
       );
     for (const [file, bytes] of before)
       if (
+        existsSync(file) !== beforeExists.get(file) ||
         Buffer.compare(
           existsSync(file) ? readFileSync(file) : Buffer.alloc(0),
           bytes ?? Buffer.alloc(0),
@@ -502,6 +674,24 @@ async function configure() {
         writeFileSync(temporary, bytes);
         renameSync(temporary, file);
       }
+    const actualReadiness = await inspectNpmPublicationReadiness({
+      repositoryRoot: root,
+      packagePath,
+    });
+    if (
+      actualReadiness.kind !== "ready" ||
+      actualReadiness.publication.packageName !== facts.name ||
+      actualReadiness.publication.commandName !== facts.command ||
+      actualReadiness.publication.repository !== `git+${facts.repository}.git`
+    )
+      stop(
+        "configuration-actual-readiness-blocked",
+        actualReadiness.kind === "ready"
+          ? "public identity did not match the applied plan"
+          : (actualReadiness.blockers[0]?.code ?? "blocked"),
+        "the Ticket 08 actual repository readiness result for this plan",
+        "Correct the owner facts through normal review and retry.",
+      );
   } finally {
     rmSync(overlay, { recursive: true, force: true });
   }
@@ -509,7 +699,9 @@ async function configure() {
 
 if (
   !root ||
-  !["status", "configure", "remote-matches-owner"].includes(process.argv[2])
+  !["status", "configure", "remote-matches-owner", "receipt"].includes(
+    process.argv[2],
+  )
 ) {
   process.stderr.write(
     "private setup bridge requires REPOSITORY_ROOT and a supported action\n",
@@ -517,6 +709,18 @@ if (
   process.exitCode = 5;
 } else {
   if (process.argv[2] === "status") await status();
-  else if (process.argv[2] === "configure") await configure();
+  else if (process.argv[2] === "configure") {
+    try {
+      await configure();
+    } catch {
+      stop(
+        "configuration-platform-failure",
+        "a local owner-file or temporary-directory operation failed",
+        "a readable and writable local repository",
+        "Correct the platform failure and retry.",
+        5,
+      );
+    }
+  } else if (process.argv[2] === "receipt") printReceipt();
   else remoteMatchesOwner();
 }
