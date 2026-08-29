@@ -162,6 +162,51 @@ async function requireReady(repositoryRoot: string): Promise<void> {
 }
 
 describe("ts-cli publication owner-fact integration", () => {
+  it("starts with a fix-stable publication projection", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-fix-stability-"),
+    );
+    const repositoryRoot = path.join(workspace, "generated-repository");
+    const plan = planGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      context: createGenerationContext({
+        targetDir: repositoryRoot,
+        defaultPackageScope: "seed",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.21.0",
+        },
+      }),
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: repositoryRoot,
+        operations: [...plan.operations],
+      });
+      await execa("git", ["init", "--quiet"], { cwd: repositoryRoot });
+      await execa("pnpm", ["install"], { cwd: repositoryRoot });
+      await execa("git", ["add", "--all", "--", "."], {
+        cwd: repositoryRoot,
+      });
+      const beforeFix = await execa("git", ["write-tree"], {
+        cwd: repositoryRoot,
+      });
+
+      await execa("pnpm", ["run", "fix"], { cwd: repositoryRoot });
+      await execa("git", ["add", "--all", "--", "."], {
+        cwd: repositoryRoot,
+      });
+      const afterFix = await execa("git", ["write-tree"], {
+        cwd: repositoryRoot,
+      });
+
+      expect(afterFix.stdout).toBe(beforeFix.stdout);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("verifies the one packed artifact and records its installed CLI evidence", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-artifact-"),

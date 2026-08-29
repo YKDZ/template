@@ -133,7 +133,7 @@ type LockedSemver = {
 };
 
 async function loadLockedSemver(): Promise<LockedSemver> {
-  return (await import("semver")) as unknown as LockedSemver;
+  return await import("semver");
 }
 
 function isStableSemver(semver: LockedSemver, value: string): boolean {
