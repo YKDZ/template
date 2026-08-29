@@ -239,7 +239,7 @@ function commandFailure(
 ): PublicationArtifactFailure {
   return failure(
     code,
-    `${result.stderr || result.stdout || `exit ${result.exitCode}`}`,
+    result.stderr || result.stdout || `exit ${result.exitCode}`,
     expected,
     nextAction,
     { executable, args, exitCode: result.exitCode },
