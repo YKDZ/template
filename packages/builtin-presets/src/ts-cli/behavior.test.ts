@@ -310,6 +310,23 @@ describe("ts-cli Preset Definition behavior", () => {
     ).not.toContain("./scripts/npm-publication-setup/setup.sh");
   });
 
+  it("does not expose a publication setup handoff for a non-candidate preset", () => {
+    const preparation = prepareGeneratedRepositoryInitialization({
+      definition: builtInPresetRegistry.require("ts-lib"),
+      targetDir: path.join("generated-repository", "demo-library"),
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    });
+
+    expect(preparation.publicationSetup).toBeNull();
+    expect(
+      preparation.plan.operations.some(
+        (operation) =>
+          "to" in operation &&
+          operation.to.startsWith("scripts/npm-publication-setup/"),
+      ),
+    ).toBe(false);
+  });
+
   it("serves the generated setup status through its only executable interface", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-setup-status-"),
@@ -405,7 +422,7 @@ describe("ts-cli Preset Definition behavior", () => {
           reject: false,
         },
       );
-      expect(partialInteractive.exitCode).toBe(3);
+      expect(partialInteractive.exitCode).toBe(5);
       expect(partialInteractive.stdout).toContain("Command name:");
       expect(partialInteractive.stdout).not.toContain("Package name:");
 
@@ -428,7 +445,10 @@ describe("ts-cli Preset Definition behavior", () => {
         ],
         { cwd: targetDir, reject: false },
       );
-      expect(configured.exitCode).toBe(3);
+      expect(
+        configured.exitCode,
+        `${configured.stdout}\n${configured.stderr}`,
+      ).toBe(5);
       expect(configured.stdout).toContain(
         "STAGE 2/4 Configure the public package",
       );
@@ -501,15 +521,17 @@ printf '%s\\n' "$*" >> ${JSON.stringify(gitLedger)}
 [ "${"${GIT_DOWN:-}"}" != true ] || exit 97
 case "$1" in
   status) exit 0 ;;
-  symbolic-ref) printf 'main\\n' ;;
+  symbolic-ref)
+    [ "${"${FAKE_BRANCH:-main}"}" != detached ] || exit 1
+    printf '%s\\n' "${"${FAKE_BRANCH:-main}"}" ;;
   remote) printf '%s\\n' "${"${FAKE_REMOTE:-https://github.com/demo/ship}"}" ;;
   ls-remote)
     if [ "$2" = --symref ]; then
-      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+      printf 'ref: refs/heads/%s\\tHEAD\\n%s\\tHEAD\\n' "${"${FAKE_DEFAULT_BRANCH:-main}"}" "${"${FAKE_REMOTE_HEAD:-0123456789012345678901234567890123456789}"}"
     else
-      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+      printf '%s\\trefs/heads/%s\\n' "${"${FAKE_REMOTE_HEAD:-0123456789012345678901234567890123456789}"}" "${"${FAKE_DEFAULT_BRANCH:-main}"}"
     fi ;;
-  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  rev-parse) printf '%s\\n' "${"${FAKE_LOCAL_HEAD:-0123456789012345678901234567890123456789}"}" ;;
   *) exit 97 ;;
 esac
 `,
@@ -580,6 +602,27 @@ JSON
       expect(output).toContain("npm-publication-setup-artifact.");
       await expect(stat(output)).rejects.toThrow();
 
+      for (const [, gitFacts] of [
+        ["feature branch", { FAKE_BRANCH: "feature" }],
+        ["detached HEAD", { FAKE_BRANCH: "detached" }],
+        [
+          "ahead local HEAD",
+          { FAKE_LOCAL_HEAD: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+        ],
+        [
+          "behind local HEAD",
+          { FAKE_REMOTE_HEAD: "ffffffffffffffffffffffffffffffffffffffff" },
+        ],
+      ] as const) {
+        const handoff = await execa(
+          "./scripts/npm-publication-setup/setup.sh",
+          ["--non-interactive"],
+          { cwd: targetDir, env: { ...env, ...gitFacts }, reject: false },
+        );
+        expect(handoff.exitCode).toBe(3);
+        expect(handoff.stderr).toContain("git-handoff-required");
+      }
+
       const nonInteractiveAcceptance = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--non-interactive"],
@@ -629,6 +672,26 @@ JSON
       expect(remoteMismatch.stderr).toContain("repository-remote-conflict");
       expect(remoteMismatch.stderr).not.toContain("credential");
 
+      const conflictStatus = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--status", "--json"],
+        {
+          cwd: targetDir,
+          env: {
+            ...env,
+            FAKE_REMOTE: "https://credential@github.com/demo/other",
+          },
+          reject: false,
+        },
+      );
+      expect(conflictStatus.exitCode).toBe(4);
+      expect(conflictStatus.stderr).toBe("");
+      expect(JSON.parse(conflictStatus.stdout)).toMatchObject({
+        blockers: [
+          expect.objectContaining({ code: "repository-remote-conflict" }),
+        ],
+      });
+
       const unavailableStatus = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
@@ -644,6 +707,230 @@ JSON
         schemaVersion: 1,
         blockers: [expect.objectContaining({ code: "git-status-unavailable" })],
       });
+
+      const unavailableGitHandoff = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        { cwd: targetDir, env: { ...env, GIT_DOWN: "true" }, reject: false },
+      );
+      expect(unavailableGitHandoff.exitCode).toBe(5);
+      expect(unavailableGitHandoff.stderr).toContain("git-read-unavailable");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("configures Apache-2.0 from the checked full license text", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-setup-apache-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    try {
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(targetDir, "node_modules"),
+        "dir",
+      );
+      const configured = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "Apache-2.0",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
+        { cwd: targetDir, reject: false },
+      );
+      expect(
+        configured.exitCode,
+        `${configured.stdout}\n${configured.stderr}`,
+      ).toBe(5);
+      const rootLicense = await readFile(
+        path.join(targetDir, "LICENSE"),
+        "utf8",
+      );
+      expect(rootLicense).toContain("Apache License");
+      expect(rootLicense).toContain("Copyright (c) Ada Lovelace");
+      expect(rootLicense).not.toContain("[name of copyright owner]");
+      expect(
+        await readFile(path.join(targetDir, "packages/cli/LICENSE"), "utf8"),
+      ).toBe(rootLicense);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a single-invocation owner preimage race before its writes", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-setup-preimage-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    try {
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(targetDir, "node_modules"),
+        "dir",
+      );
+      const manifestPath = path.join(targetDir, "packages/cli/package.json");
+      const blueprintPath = path.join(targetDir, ".template/blueprint.json");
+      const originalBlueprint = await readFile(blueprintPath, "utf8");
+      const preloader = path.join(workspace, "preimage-race.cjs");
+      await writeFile(
+        preloader,
+        `const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const original = fs.cpSync;
+fs.cpSync = (...args) => {
+  original(...args);
+  fs.writeFileSync(process.env.SETUP_RACE_FILE, '{"external":true}\\n');
+};
+syncBuiltinESMExports();
+`,
+      );
+      const raced = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "MIT",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            NODE_OPTIONS: `--require=${preloader}`,
+            SETUP_RACE_FILE: manifestPath,
+          },
+          reject: false,
+        },
+      );
+      expect(raced.exitCode).toBe(4);
+      expect(raced.stderr).toContain("configuration-preimage-changed");
+      expect(await readFile(manifestPath, "utf8")).toBe('{"external":true}\n');
+      expect(await readFile(blueprintPath, "utf8")).toBe(originalBlueprint);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("inherits an exact partial changelog date instead of recapturing UTC", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-setup-date-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    try {
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(targetDir, "node_modules"),
+        "dir",
+      );
+      const facts = [
+        "--package-name",
+        "@demo/ship",
+        "--bin",
+        "ship",
+        "--description",
+        "A focused command-line release tool.",
+        "--license",
+        "MIT",
+        "--copyright-holder",
+        "Ada Lovelace",
+        "--repository",
+        "https://github.com/demo/ship",
+        "--non-interactive",
+      ];
+      const initial = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        facts,
+        { cwd: targetDir, reject: false },
+      );
+      expect(initial.exitCode).toBe(5);
+      const changelogPath = path.join(targetDir, "packages/cli/CHANGELOG.md");
+      const initialChangelog = await readFile(changelogPath, "utf8");
+      const oldDate = "2020-02-29";
+      await writeFile(
+        changelogPath,
+        initialChangelog.replace(
+          /## \[1\.0\.0\] - \d{4}-\d{2}-\d{2}/u,
+          `## [1.0.0] - ${oldDate}`,
+        ),
+      );
+      const resumed = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        { cwd: targetDir, reject: false },
+      );
+      expect(resumed.exitCode).toBe(5);
+      expect(await readFile(changelogPath, "utf8")).toContain(
+        `## [1.0.0] - ${oldDate}`,
+      );
+      const validPartial = await readFile(changelogPath, "utf8");
+      await writeFile(
+        changelogPath,
+        validPartial.replace(oldDate, "2020-02-30"),
+      );
+      const invalidDate = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        { cwd: targetDir, reject: false },
+      );
+      expect(invalidDate.exitCode).toBe(4);
+      expect(invalidDate.stderr).toContain("owner-fact-conflict");
+      expect(await readFile(changelogPath, "utf8")).toContain("2020-02-30");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

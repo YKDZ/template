@@ -29,6 +29,7 @@ function gitFacts() {
     headMatchesRemoteDefault: null,
   };
   let unavailable = false;
+  let remote = null;
   try {
     const run = (...args) =>
       execFileSync("git", args, {
@@ -39,12 +40,15 @@ function gitFacts() {
     facts.workingTree = run("status", "--porcelain") === "" ? "clean" : "dirty";
     facts.currentBranch =
       run("symbolic-ref", "--quiet", "--short", "HEAD") || null;
-    const remote = run("ls-remote", "--symref", "origin", "HEAD").split("\n");
+    remote = run("remote", "get-url", "origin");
+    const remoteListing = run("ls-remote", "--symref", "origin", "HEAD").split(
+      "\n",
+    );
     facts.defaultBranch =
-      remote
+      remoteListing
         .find((line) => line.startsWith("ref: "))
         ?.match(/refs\/heads\/([^\t]+)/u)?.[1] ?? null;
-    const remoteHead = remote
+    const remoteHead = remoteListing
       .find((line) => /^[0-9a-f]{40}\s+HEAD$/u.test(line))
       ?.split(/\s+/u)[0];
     facts.headMatchesRemoteDefault =
@@ -52,7 +56,7 @@ function gitFacts() {
   } catch {
     unavailable = true;
   }
-  return { facts, unavailable };
+  return { facts, unavailable, remote };
 }
 
 async function status() {
@@ -89,7 +93,7 @@ async function status() {
       },
     ];
   }
-  const { facts: git, unavailable: gitUnavailable } = gitFacts();
+  const { facts: git, unavailable: gitUnavailable, remote } = gitFacts();
   if (readiness === "ready" && gitUnavailable) {
     statusExitCode = 5;
     blockers = [
@@ -99,6 +103,22 @@ async function status() {
         observed: "Git facts could not be read",
         expected: "Readable public Git default branch facts",
         nextAction: "Correct the Git or network failure and retry.",
+      },
+    ];
+  }
+  if (
+    readiness === "ready" &&
+    !gitUnavailable &&
+    !remoteMatchesPublicOwner(remote)
+  ) {
+    statusExitCode = 4;
+    blockers = [
+      ...blockers,
+      {
+        code: "repository-remote-conflict",
+        observed: oneLine(redactRemote(remote)),
+        expected: "The public package owner GitHub repository",
+        nextAction: "Correct the normal Git remote and retry.",
       },
     ];
   }
@@ -176,6 +196,13 @@ function canonicalGitHubRepository(value) {
   }
 }
 
+function redactRemote(value) {
+  return String(value ?? "").replace(
+    /(https?:\/\/)[^/@\s]+@/u,
+    "$1[REDACTED]@",
+  );
+}
+
 function repositoryOwner() {
   try {
     const manifest = JSON.parse(
@@ -191,13 +218,13 @@ function repositoryOwner() {
   }
 }
 
-function remoteMatchesOwner() {
+function remoteMatchesPublicOwner(remote) {
   const owner = repositoryOwner();
-  process.exitCode =
-    owner !== null &&
-    owner === canonicalGitHubRepository(process.env.REMOTE_URL)
-      ? 0
-      : 1;
+  return owner !== null && owner === canonicalGitHubRepository(remote);
+}
+
+function remoteMatchesOwner() {
+  process.exitCode = remoteMatchesPublicOwner(process.env.REMOTE_URL) ? 0 : 1;
 }
 
 function stop(code, observed, expected, next, exitCode = 4) {
@@ -209,6 +236,18 @@ function stop(code, observed, expected, next, exitCode = 4) {
 
 function placeholder(key) {
   return `{${"{"}${key}}}`;
+}
+
+function validGregorianDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (match === null) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
 }
 
 async function configure() {
@@ -326,8 +365,8 @@ async function configure() {
     );
   else if (facts.license === "Apache-2.0")
     licenseBytes = asset("LICENSE-APACHE-2.0.txt").replaceAll(
-      placeholder("COPYRIGHT_HOLDER"),
-      facts.holder,
+      "   Copyright [yyyy] [name of copyright owner]",
+      `Copyright (c) ${facts.holder}`,
     );
   else {
     if (!before.get(files[2]))
@@ -345,6 +384,7 @@ async function configure() {
   ].map((item) => item[1]);
   if (
     dates.length > 1 ||
+    dates.some((date) => !validGregorianDate(date)) ||
     (oldChangelog.includes("## [1.0.0]") && dates.length !== 1)
   )
     stop(

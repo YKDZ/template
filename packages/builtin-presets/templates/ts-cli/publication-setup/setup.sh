@@ -102,12 +102,36 @@ PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$descript
 configuration_status=$?
 [ "$configuration_status" -eq 0 ] || exit "$configuration_status"
 printf 'OK public-package-configured\nSTAGE 3/4 Commit the publication configuration\n'
-if [ -n "$(git status --porcelain 2>/dev/null)" ]; then fail "ACTION REQUIRED" git-handoff-required "publication configuration needs normal Git review" "a clean synchronized public default branch" "Use the normal review, commit, PR, and merge flow; then rerun setup." 3; fi
-branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
-remote=$(git remote get-url origin 2>/dev/null || true)
-remote_default=$(git ls-remote --symref origin HEAD 2>/dev/null | sed -n 's#ref: refs/heads/\([^[:space:]]*\).*#\1#p' | head -n 1)
-remote_head=$(git ls-remote origin "refs/heads/$remote_default" 2>/dev/null | awk 'NR==1 {print $1}')
-if [ "$branch" != "$remote_default" ] || [ -z "$remote_head" ] || [ "$(git rev-parse HEAD 2>/dev/null)" != "$remote_head" ]; then
+if ! working_tree=$(git status --porcelain 2>/dev/null); then
+  fail ERROR git-read-unavailable "working tree could not be read" "readable local Git facts" "Correct the Git or platform failure and retry." 5
+fi
+if [ -n "$working_tree" ]; then fail "ACTION REQUIRED" git-handoff-required "publication configuration needs normal Git review" "a clean synchronized public default branch" "Use the normal review, commit, PR, and merge flow; then rerun setup." 3; fi
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null)
+branch_status=$?
+if [ "$branch_status" -eq 1 ]; then
+  fail "ACTION REQUIRED" git-handoff-required "HEAD is detached" "a checked-out public default branch" "Complete the normal Git handoff and rerun setup." 3
+fi
+if [ "$branch_status" -ne 0 ]; then
+  fail ERROR git-read-unavailable "current branch could not be read" "readable local Git facts" "Correct the Git or platform failure and retry." 5
+fi
+if ! remote=$(git remote get-url origin 2>/dev/null); then
+  fail ERROR git-read-unavailable "origin could not be read" "a readable public origin" "Correct the Git or platform failure and retry." 5
+fi
+if ! remote_listing=$(git ls-remote --symref origin HEAD 2>/dev/null); then
+  fail ERROR git-read-unavailable "remote default branch could not be read" "a reachable public origin" "Correct the Git or network failure and retry." 5
+fi
+remote_default=$(printf '%s\n' "$remote_listing" | sed -n 's#ref: refs/heads/\([^[:space:]]*\).*#\1#p' | head -n 1)
+if [ -z "$remote_default" ]; then
+  fail "ACTION REQUIRED" git-handoff-required "remote default branch is unavailable" "a public default branch" "Complete the normal Git handoff and rerun setup." 3
+fi
+if ! remote_head=$(git ls-remote origin "refs/heads/$remote_default" 2>/dev/null); then
+  fail ERROR git-read-unavailable "remote default HEAD could not be read" "a reachable public origin" "Correct the Git or network failure and retry." 5
+fi
+remote_head=$(printf '%s\n' "$remote_head" | awk 'NR==1 {print $1}')
+if ! local_head=$(git rev-parse HEAD 2>/dev/null); then
+  fail ERROR git-read-unavailable "local HEAD could not be read" "a readable local HEAD" "Correct the Git or platform failure and retry." 5
+fi
+if [ "$branch" != "$remote_default" ] || [ -z "$remote_head" ] || [ "$local_head" != "$remote_head" ]; then
   fail "ACTION REQUIRED" git-handoff-required "branch or remote is not synchronized" "clean public default branch at its remote HEAD" "Complete the normal Git handoff and rerun setup." 3
 fi
 if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" remote-matches-owner; then
