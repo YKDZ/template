@@ -68,7 +68,8 @@
     "vite": "catalog:",
     "vitest": "catalog:",
     "vue": "catalog:",
-    "vue-tsc": "catalog:"
+    "vue-tsc": "catalog:",
+    "yaml": "catalog:"
   },
   "turbo": {
     "tags": [

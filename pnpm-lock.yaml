@@ -300,6 +300,9 @@ importers:
       vue-tsc:
         specifier: 'catalog:'
         version: 3.3.9(@typescript/typescript6@6.0.2)
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
 
   packages/checks:
     dependencies:
