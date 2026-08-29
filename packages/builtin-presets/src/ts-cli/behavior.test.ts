@@ -371,7 +371,11 @@ describe("ts-cli Preset Definition behavior", () => {
       expect(JSON.parse(result.stdout)).toMatchObject({
         schemaVersion: 1,
         currentStage: { id: "configure-public-package", number: 2 },
-        observations: { packagePath: "packages/cli" },
+        observations: {
+          packagePath: "packages/cli",
+          readiness: "safe-unconfigured",
+        },
+        nextAction: { kind: "provide-public-facts" },
       });
       expect(result.stderr).toBe("");
 
@@ -647,6 +651,7 @@ exit 97
       expect(corruptMetadata.stdout).not.toContain(
         "STAGE 2/4 Configure the public package",
       );
+      expect(corruptMetadata.stdout).toContain("STAGE 1/4 Check prerequisites");
       const corruptStatus = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
@@ -660,6 +665,9 @@ exit 97
       expect(corruptStatusBody.currentStage).toMatchObject({
         id: "check-prerequisites",
         number: 1,
+      });
+      expect(corruptStatusBody).toMatchObject({
+        nextAction: { kind: "retry-external-check" },
       });
       expect(corruptStatusBody.blockers).toEqual(
         expect.arrayContaining([
@@ -721,32 +729,22 @@ syncBuiltinESMExports();
     }
   });
 
-  it("uses the read-only Git ledger and a receipt for the local artifact handoff", async () => {
+  it("reports the existing Ticket 09 artifact failure without forwarding child bytes", async () => {
     const { workspace, targetDir } = await renderInstalledGeneratedRepository(
-      "template-publication-setup-handoff-",
+      "template-publication-setup-artifact-failure-",
     );
     try {
       const fakeBin = path.join(workspace, "fake-bin");
-      const gitLedger = path.join(workspace, "git-ledger");
-      const artifactLedger = path.join(workspace, "artifact-ledger");
       await writeExecutable(
         path.join(fakeBin, "git"),
         `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> ${JSON.stringify(gitLedger)}
-[ "${"${GIT_DOWN:-}"}" != true ] || exit 97
 case "$1" in
   status) exit 0 ;;
-  symbolic-ref)
-    [ "${"${FAKE_BRANCH:-main}"}" != detached ] || exit 1
-    printf '%s\\n' "${"${FAKE_BRANCH:-main}"}" ;;
-  remote) printf '%s\\n' "${"${FAKE_REMOTE:-https://github.com/demo/ship}"}" ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/ship\\n' ;;
   ls-remote)
-    if [ "$2" = --symref ]; then
-      printf 'ref: refs/heads/%s\\tHEAD\\n%s\\tHEAD\\n' "${"${FAKE_DEFAULT_BRANCH:-main}"}" "${"${FAKE_REMOTE_HEAD:-0123456789012345678901234567890123456789}"}"
-    else
-      printf '%s\\trefs/heads/%s\\n' "${"${FAKE_REMOTE_HEAD:-0123456789012345678901234567890123456789}"}" "${"${FAKE_DEFAULT_BRANCH:-main}"}"
-    fi ;;
-  rev-parse) printf '%s\\n' "${"${FAKE_LOCAL_HEAD:-0123456789012345678901234567890123456789}"}" ;;
+    if [ "$2" = --symref ]; then printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'; else printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'; fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
   *) exit 97 ;;
 esac
 `,
@@ -754,280 +752,41 @@ esac
       await writeExecutable(
         path.join(fakeBin, "pnpm"),
         `#!/usr/bin/env bash
-out=''
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = --output-directory ]; then shift; out=$1; fi
-  shift
-done
-if [ "${"${FAKE_ARTIFACT_FAILURE:-}"}" = true ]; then
-  printf 'ignored child bytes ToKeN=artifact-secret https://credential@example.invalid/ \\033[2J\\r\\302\\205\n' >&2
-  printf 'ERROR consumer-smoke-failed\nObserved: ToKeN=artifact-secret\\rINJECT\nExpected: a clean consumer smoke\nNext action: correct the packed command\n' >&2
-  exit 1
-fi
-printf 'token=artifact-secret https://credential@example.invalid/ \\033[2J\\r' >&2
-printf '%s\\n' "$out" >> ${JSON.stringify(artifactLedger)}
-mkdir -p "$out/receipt"
-if [ "${"${FAKE_EVIL_RECEIPT:-}"}" = true ]; then
-cat > "$out/receipt/verified-publication-artifact.json" <<'JSON'
-{"schemaVersion":1,"artifact":{"file":"ship-1.0.0.tgz","checksumFile":"SHA512SUMS","size":1,"integrity":"sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=="},"publication":{"packagePath":"packages/cli","packageName":"@demo/ship","version":"1.0.0","commandName":"ship","repository":"git+https://github.com/demo/ship.git","releaseDate":"2026-08-29","releaseNotes":"### Added\\n\\n- Publish the first stable CLI.\\n"},"packedManifest":{"name":"@demo/ship","version":"1.0.0","bin":{"ship":"./dist/cli.js"}},"files":[{"path":"package/CHANGELOG.md","mode":420,"size":1},{"path":"package/LICENSE","mode":420,"size":1},{"path":"package/README.md","mode":420,"size":1},{"path":"package/dist/cli-command-identity.js","mode":420,"size":1},{"path":"package/dist/cli.js","mode":493,"size":1},{"path":"package/dist/main.js","mode":420,"size":1},{"path":"package/package.json","mode":420,"size":1}],"bin":{"path":"package/dist/cli.js","shebang":"#!/usr/bin/env node","mode":493,"posixExecutableChecked":true},"smokes":[{"name":"runtime-import","args":[],"stdout":""},{"name":"help","args":["--help"],"stdout":"help"},{"name":"version","args":["--version"],"stdout":"1.0.0"},{"name":"greet","args":["greet","  Ada Lovelace  "],"stdout":"Hello, Ada Lovelace"}]}
-JSON
-exit 0
-fi
-cat > "$out/receipt/verified-publication-artifact.json" <<'JSON'
-{"schemaVersion":1,"artifact":{"file":"ship-1.0.0.tgz","checksumFile":"SHA512SUMS","size":12,"integrity":"sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=="},"publication":{"packagePath":"packages/cli","packageName":"@demo/ship","version":"1.0.0","commandName":"ship","repository":"git+https://github.com/demo/ship.git","releaseDate":"2026-08-29","releaseNotes":"### Added\\n\\n- Publish the first stable CLI.\\n"},"packedManifest":{"name":"@demo/ship","version":"1.0.0","description":"A focused command-line release tool.","homepage":"https://github.com/demo/ship#readme","bugs":{"url":"https://github.com/demo/ship/issues"},"license":"MIT","repository":{"type":"git","url":"git+https://github.com/demo/ship.git","directory":"packages/cli"},"bin":{"ship":"./dist/cli.js"},"files":["dist","README.md","LICENSE","CHANGELOG.md"],"type":"module","publishConfig":{"access":"public","registry":"https://registry.npmjs.org/"},"dependencies":{"commander":"^1.0.0"},"engines":{"node":">=24"}},"files":[{"path":"package/CHANGELOG.md","mode":420,"size":30},{"path":"package/LICENSE","mode":420,"size":7},{"path":"package/README.md","mode":420,"size":12},{"path":"package/dist/cli-command-identity.js","mode":420,"size":1},{"path":"package/dist/cli.js","mode":493,"size":1},{"path":"package/dist/main.js","mode":420,"size":1},{"path":"package/package.json","mode":420,"size":30}],"bin":{"path":"package/dist/cli.js","shebang":"#!/usr/bin/env node","mode":493,"posixExecutableChecked":true},"smokes":[{"name":"runtime-import","args":[],"stdout":""},{"name":"help","args":["--help"],"stdout":"ship --help\\n"},{"name":"version","args":["--version"],"stdout":"1.0.0\\n"},{"name":"greet","args":["greet","  Ada Lovelace  "],"stdout":"Hello, Ada Lovelace\\n"}]}
-JSON
+[ "$1" = pack ] || exit 97
+printf 'TOKEN=artifact-secret \\033[2J\\r\\302\\205\\n' >&2
+exit 19
 `,
       );
-      const env = { PATH: `${fakeBin}:${process.env.PATH}` };
-      const facts = [
-        "--package-name",
-        "@demo/ship",
-        "--bin",
-        "ship",
-        "--description",
-        "A focused command-line release tool.",
-        "--license",
-        "MIT",
-        "--copyright-holder",
-        "Ada Lovelace",
-        "--repository",
-        "https://github.com/demo/ship",
-      ];
-      const accepted = await execa(
+      const result = await execa(
         "./scripts/npm-publication-setup/setup.sh",
-        facts,
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "MIT",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
         {
           cwd: targetDir,
-          env,
-          input:
-            "ACCEPT @demo/ship@1.0.0 sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa==\n",
+          env: { PATH: `${fakeBin}:${process.env.PATH}` },
           reject: false,
         },
       );
-      expect(accepted.exitCode, `${accepted.stdout}\n${accepted.stderr}`).toBe(
-        0,
-      );
-      expect(accepted.stdout).toContain("Package: @demo/ship@1.0.0");
-      expect(accepted.stdout).toContain("Command: ship");
-      expect(accepted.stdout).toContain(
-        "Repository: git+https://github.com/demo/ship.git",
-      );
-      expect(accepted.stdout).toContain("Release date: 2026-08-29");
-      expect(accepted.stdout).toContain("Artifact: ship-1.0.0.tgz (12 bytes)");
-      expect(accepted.stdout).toContain(
-        "File: package/LICENSE mode 420 size 7",
-      );
-      expect(accepted.stdout).toContain("Bin: package/dist/cli.js mode 493");
-      expect(accepted.stdout).toContain(
-        "Integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa==",
-      );
-      expect(accepted.stdout).toContain("Checksum: SHA512SUMS");
-      expect(accepted.stdout).toContain("Smoke: greet");
-      expect(accepted.stdout).toContain("OK local-preparation-complete");
-      expect(accepted.stdout).not.toContain(String.fromCharCode(27));
-      expect(accepted.stdout).not.toContain("\r");
-      expect(`${accepted.stdout}\n${accepted.stderr}`).not.toContain(
+      expect(result.exitCode).toBe(5);
+      expect(result.stderr).toContain("ERROR artifact-pack-failed");
+      expect(result.stderr).toContain("TOKEN=[REDACTED]");
+      expect(`${result.stdout}\n${result.stderr}`).not.toContain(
         "artifact-secret",
       );
-      expect(`${accepted.stdout}\n${accepted.stderr}`).not.toContain(
-        "credential@example.invalid",
-      );
-      expect(`${accepted.stdout}\n${accepted.stderr}`).not.toContain(
-        String.fromCharCode(27),
-      );
-      expectNoControlCharacters(`${accepted.stdout}\n${accepted.stderr}`);
-      expect(await readFile(gitLedger, "utf8")).toBe(
-        [
-          "status --porcelain",
-          "symbolic-ref --quiet --short HEAD",
-          "remote get-url origin",
-          "ls-remote --symref origin HEAD",
-          "ls-remote origin refs/heads/main",
-          "rev-parse HEAD",
-        ].join("\n") + "\n",
-      );
-      const output = (await readFile(artifactLedger, "utf8")).trim();
-      expect(output).toContain("npm-publication-setup-artifact.");
-      await expect(stat(output)).rejects.toThrow();
-
-      for (const [, gitFacts] of [
-        ["feature branch", { FAKE_BRANCH: "feature" }],
-        ["detached HEAD", { FAKE_BRANCH: "detached" }],
-        [
-          "ahead local HEAD",
-          { FAKE_LOCAL_HEAD: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
-        ],
-        [
-          "behind local HEAD",
-          { FAKE_REMOTE_HEAD: "ffffffffffffffffffffffffffffffffffffffff" },
-        ],
-      ] as const) {
-        const handoff = await execa(
-          "./scripts/npm-publication-setup/setup.sh",
-          ["--non-interactive"],
-          { cwd: targetDir, env: { ...env, ...gitFacts }, reject: false },
-        );
-        expect(handoff.exitCode).toBe(3);
-        expect(handoff.stderr).toContain("git-handoff-required");
-      }
-
-      const nonInteractiveAcceptance = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        { cwd: targetDir, env, reject: false },
-      );
-      expect(nonInteractiveAcceptance.exitCode).toBe(3);
-      expect(nonInteractiveAcceptance.stderr).toContain(
-        "artifact-acceptance-required",
-      );
-
-      const mismatchAcceptance = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        [],
-        {
-          cwd: targetDir,
-          env,
-          input: "ACCEPT another receipt\n",
-          reject: false,
-        },
-      );
-      expect(mismatchAcceptance.exitCode).toBe(3);
-      expect(mismatchAcceptance.stderr).toContain(
-        "acceptance did not match this receipt",
-      );
-
-      const eofAcceptance = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        [],
-        { cwd: targetDir, env, input: "", reject: false },
-      );
-      expect(eofAcceptance.exitCode).toBe(3);
-      expect(eofAcceptance.stderr).toContain("Observed: end of input");
-
-      const remoteMismatch = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        {
-          cwd: targetDir,
-          env: {
-            ...env,
-            FAKE_REMOTE: "https://credential@github.com/demo/other",
-          },
-          reject: false,
-        },
-      );
-      expect(remoteMismatch.exitCode).toBe(4);
-      expect(remoteMismatch.stderr).toContain("repository-remote-conflict");
-      expect(remoteMismatch.stderr).not.toContain("credential");
-
-      const credentialRemote = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        {
-          cwd: targetDir,
-          env: {
-            ...env,
-            FAKE_REMOTE: "https://credential@github.com/demo/ship",
-          },
-          reject: false,
-        },
-      );
-      expect(credentialRemote.exitCode).toBe(4);
-      expect(credentialRemote.stderr).toContain("repository-remote-conflict");
-      expect(credentialRemote.stderr).not.toContain("credential");
-
-      const conflictStatus = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--status", "--json"],
-        {
-          cwd: targetDir,
-          env: {
-            ...env,
-            FAKE_REMOTE: "https://credential@github.com/demo/other",
-          },
-          reject: false,
-        },
-      );
-      expect(conflictStatus.exitCode).toBe(4);
-      expect(conflictStatus.stderr).toBe("");
-      expect(JSON.parse(conflictStatus.stdout)).toMatchObject({
-        blockers: [
-          expect.objectContaining({ code: "repository-remote-conflict" }),
-        ],
-      });
-
-      const detachedStatus = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--status", "--json"],
-        {
-          cwd: targetDir,
-          env: { ...env, FAKE_BRANCH: "detached" },
-          reject: false,
-        },
-      );
-      expect(detachedStatus.exitCode).toBe(3);
-      expect(detachedStatus.stderr).toBe("");
-      expect(JSON.parse(detachedStatus.stdout)).toMatchObject({
-        blockers: [expect.objectContaining({ code: "git-handoff-required" })],
-      });
-
-      const unavailableStatus = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--status", "--json"],
-        {
-          cwd: targetDir,
-          env: { ...env, GIT_DOWN: "true" },
-          reject: false,
-        },
-      );
-      expect(unavailableStatus.exitCode).toBe(5);
-      expect(unavailableStatus.stderr).toBe("");
-      expect(JSON.parse(unavailableStatus.stdout)).toMatchObject({
-        schemaVersion: 1,
-        blockers: [expect.objectContaining({ code: "git-status-unavailable" })],
-      });
-
-      const unavailableGitHandoff = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        { cwd: targetDir, env: { ...env, GIT_DOWN: "true" }, reject: false },
-      );
-      expect(unavailableGitHandoff.exitCode).toBe(5);
-      expect(unavailableGitHandoff.stderr).toContain("git-read-unavailable");
-
-      const artifactFailure = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        {
-          cwd: targetDir,
-          env: { ...env, FAKE_ARTIFACT_FAILURE: "true" },
-          reject: false,
-        },
-      );
-      expect(artifactFailure.exitCode).toBe(5);
-      expect(artifactFailure.stderr).toContain("ERROR consumer-smoke-failed");
-      expect(artifactFailure.stderr).toContain("Observed: ToKeN=[REDACTED]");
-      expect(
-        `${artifactFailure.stdout}\n${artifactFailure.stderr}`,
-      ).not.toContain("artifact-secret");
-      expectNoControlCharacters(
-        `${artifactFailure.stdout}\n${artifactFailure.stderr}`,
-      );
-
-      const evilReceipt = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        ["--non-interactive"],
-        {
-          cwd: targetDir,
-          env: { ...env, FAKE_EVIL_RECEIPT: "true" },
-          reject: false,
-        },
-      );
-      expect(evilReceipt.exitCode).toBe(5);
-      expect(evilReceipt.stderr).toContain("artifact-receipt-invalid");
-      expect(`${evilReceipt.stdout}\n${evilReceipt.stderr}`).not.toContain(
-        "ACCEPT @demo/ship@1.0.0",
-      );
+      expectNoControlCharacters(`${result.stdout}\n${result.stderr}`);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

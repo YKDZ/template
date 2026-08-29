@@ -114,10 +114,11 @@ fi
 
 cd "$repository_root" || fail ERROR repository-root "unreadable repository root" "the generated repository root" "Run setup from its generated directory." 5
 for command in bash node pnpm git; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
+printf 'STAGE 1/4 Check prerequisites\nCHECK local-toolchain\n'
 REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" preflight
 preflight_status=$?
 [ "$preflight_status" -eq 0 ] || exit "$preflight_status"
-printf 'STAGE 1/4 Check prerequisites\nCHECK local-toolchain\nOK prerequisites\n'
+printf 'OK prerequisites\n'
 
 existing_public=false
 if node --input-type=module - "$repository_root/$package_path/package.json" <<'NODE' >/dev/null 2>&1
@@ -178,38 +179,33 @@ fi
 printf 'OK git-handoff-complete\nSTAGE 4/4 Verify the first release artifact\n'
 artifact_parent=${TMPDIR:-/tmp}
 artifact_root=$(mktemp -d "$artifact_parent/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
-artifact_output=""
+artifact_cleaned=false
 cleanup_artifact_root() {
+  [ "$artifact_cleaned" = true ] && return 0
   case "$artifact_root" in
-    "$artifact_parent"/npm-publication-setup-artifact.*)
-      [ -d "$artifact_root" ] && rm -rf -- "$artifact_root"
-      ;;
+    "$artifact_parent"/npm-publication-setup-artifact.*) ;;
+    *) return 1 ;;
   esac
-  case "$artifact_output" in
-    "$artifact_parent"/npm-publication-setup-artifact-log.*)
-      [ -f "$artifact_output" ] && rm -f -- "$artifact_output"
-      ;;
-  esac
+  [ ! -d "$artifact_root" ] || rm -rf -- "$artifact_root" || return 1
+  artifact_cleaned=true
 }
-trap cleanup_artifact_root EXIT HUP INT TERM
-artifact_output=$(mktemp "$artifact_parent/npm-publication-setup-artifact-log.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
-if [ "$debug" = true ]; then printf 'COMMAND %s\n' "pnpm run publication:artifact -- --output-directory [temporary]"; fi
-pnpm run publication:artifact -- --output-directory "$artifact_root" >"$artifact_output" 2>&1
+cleanup_artifact_best_effort() {
+  cleanup_artifact_root >/dev/null 2>&1 || :
+}
+trap cleanup_artifact_best_effort EXIT HUP INT TERM
+if [ "$debug" = true ]; then printf 'COMMAND %s\n' "verifyNpmPublicationArtifact [temporary output]"; fi
+artifact_result=$(REPOSITORY_ROOT="$repository_root" ARTIFACT_OUTPUT_DIRECTORY="$artifact_root" node --conditions=source "$script_dir/bridge.mjs" artifact)
 artifact_status=$?
 if [ "$artifact_status" -ne 0 ]; then
-  ARTIFACT_OUTPUT_PATH="$artifact_output" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" artifact-diagnostic >&2
-  diagnostic_status=$?
-  if [ "$diagnostic_status" -eq 4 ] || [ "$diagnostic_status" -eq 5 ]; then exit "$diagnostic_status"; fi
-  fail ERROR artifact-verification-failed "publication artifact caller failed" "a verified Ticket 09 artifact" "Correct the reported artifact failure and retry." 5
+  printf '%s\n' "$artifact_result" >&2
+  exit "$artifact_status"
 fi
-receipt=$(find "$artifact_root" -name verified-publication-artifact.json -type f -print -quit)
-[ -n "$receipt" ] || fail ERROR artifact-receipt-missing "no receipt" "verified artifact receipt" "Retry artifact verification." 5
-if ! acceptance=$(RECEIPT_PATH="$receipt" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" receipt); then
-  fail ERROR artifact-receipt-invalid "receipt did not match the verified artifact schema" "a complete Ticket 09 verified artifact receipt" "Retry artifact verification." 5
-fi
-printf '%s\n' "$acceptance" | sed '$d'
-acceptance=$(printf '%s\n' "$acceptance" | tail -n 1)
+printf '%s\n' "$artifact_result" | sed '$d'
+acceptance=$(printf '%s\n' "$artifact_result" | tail -n 1)
 if [ "$non_interactive" = true ]; then fail "ACTION REQUIRED" artifact-acceptance-required "non-interactive mode cannot accept an artifact" "$acceptance" "Review the receipt and enter the exact acceptance interactively." 3; fi
 printf '%s\n' "$acceptance"; printf 'Acceptance: '; read -r entered || fail "ACTION REQUIRED" artifact-acceptance-required "end of input" "$acceptance" "Review the receipt and enter the exact acceptance." 3
 [ "$entered" = "$acceptance" ] || fail "ACTION REQUIRED" artifact-acceptance-required "acceptance did not match this receipt" "$acceptance" "Review the receipt and enter the exact acceptance." 3
+if ! cleanup_artifact_root; then
+  fail ERROR artifact-cleanup-failed "owned temporary artifact output could not be removed" "successful local artifact cleanup" "Correct temporary-directory permissions and retry." 5
+fi
 printf 'OK local-preparation-complete\nLocal preparation complete.\nNext action: Continue with npm authentication and the first manual publish in the next setup phase.\n'
