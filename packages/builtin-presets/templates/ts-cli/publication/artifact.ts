@@ -598,6 +598,13 @@ function quotedWindowsCommandArgument(value: string): string {
   return `"${value}"`;
 }
 
+function windowsEnvironmentReference(key: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) {
+    throw new Error("Windows command environment key is not safe");
+  }
+  return `"%${key}%"`;
+}
+
 function resolveWindowsExecutable(options: {
   readonly executable: string;
   readonly windowsExecutable?: string;
@@ -610,12 +617,7 @@ function resolveWindowsExecutable(options: {
     throw new Error("Windows command executable plan is ambiguous");
   }
   if (options.windowsExecutableEnvironmentKey !== undefined) {
-    if (
-      !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(options.windowsExecutableEnvironmentKey)
-    ) {
-      throw new Error("Windows command environment key is not safe");
-    }
-    return `"%${options.windowsExecutableEnvironmentKey}%"`;
+    return windowsEnvironmentReference(options.windowsExecutableEnvironmentKey);
   }
   return quotedWindowsCommandArgument(
     options.windowsExecutable ?? options.executable,
@@ -629,6 +631,11 @@ function planCommandProcessorInvocation(options: {
   readonly environment: NodeJS.ProcessEnv;
   readonly windowsExecutable?: string;
   readonly windowsExecutableEnvironmentKey?: string;
+  readonly windowsArgumentEnvironment?: {
+    readonly index: number;
+    readonly key: string;
+    readonly value: string;
+  };
 }): CommandPlan {
   if (options.platform !== "win32") {
     return {
@@ -645,16 +652,30 @@ function planCommandProcessorInvocation(options: {
     throw new Error("ComSpec must name the absolute Windows command processor");
   }
   const windowsExecutable = resolveWindowsExecutable(options);
-  const command = [
-    windowsExecutable,
-    ...options.args.map(quotedWindowsCommandArgument),
-  ].join(" ");
+  const commandEnvironment = { ...options.environment };
+  const windowsArguments = options.args.map((argument, index) => {
+    const replacement = options.windowsArgumentEnvironment;
+    if (replacement?.index !== index) {
+      return quotedWindowsCommandArgument(argument);
+    }
+    if (/["\0\r\n]/u.test(replacement.value)) {
+      throw new Error("Windows command environment value is not command-safe");
+    }
+    commandEnvironment[replacement.key] = replacement.value;
+    return windowsEnvironmentReference(replacement.key);
+  });
+  if (
+    options.windowsArgumentEnvironment !== undefined &&
+    (options.windowsArgumentEnvironment.index < 0 ||
+      options.windowsArgumentEnvironment.index >= options.args.length)
+  ) {
+    throw new Error("Windows command environment argument index is invalid");
+  }
+  const command = [windowsExecutable, ...windowsArguments].join(" ");
   return {
     executable: commandProcessor,
-    args: ["/d", "/s", "/c", `"${command}"`],
-    environment: {
-      ...options.environment,
-    },
+    args: ["/d", "/v:off", "/s", "/c", `"${command}"`],
+    environment: commandEnvironment,
   };
 }
 
@@ -700,6 +721,11 @@ export function planPnpmPackCommand(options: {
     args,
     environment: options.environment,
     windowsExecutable: "pnpm.cmd",
+    windowsArgumentEnvironment: {
+      index: 2,
+      key: "TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY",
+      value: options.packDirectory,
+    },
   });
 }
 

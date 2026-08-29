@@ -189,6 +189,7 @@ describe("verified publication artifact contracts", () => {
       executable: environment.ComSpec,
       args: [
         "/d",
+        "/v:off",
         "/s",
         "/c",
         '""%TEMPLATE_VERIFIED_PUBLICATION_BIN%" "--help""',
@@ -214,28 +215,36 @@ describe("verified publication artifact contracts", () => {
     expect(
       planPnpmPackCommand({
         platform: "win32",
-        packDirectory: String.raw`C:\temp\publication output`,
+        packDirectory: String.raw`C:\temp\%SystemRoot%\publication !output`,
         environment,
       }),
     ).toEqual({
       executable: environment.ComSpec,
       args: [
         "/d",
+        "/v:off",
         "/s",
         "/c",
-        '""pnpm.cmd" "pack" "--pack-destination" "C:\\temp\\publication output""',
+        '""pnpm.cmd" "pack" "--pack-destination" "%TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY%""',
       ],
-      environment,
+      environment: {
+        ...environment,
+        TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY: String.raw`C:\temp\%SystemRoot%\publication !output`,
+      },
     });
     expect(
       planPnpmPackCommand({
         platform: "linux",
-        packDirectory: "/tmp/publication-output",
+        packDirectory: "/tmp/publication-%SystemRoot%-! output",
         environment: { PATH: "/usr/bin" },
       }),
     ).toEqual({
       executable: "pnpm",
-      args: ["pack", "--pack-destination", "/tmp/publication-output"],
+      args: [
+        "pack",
+        "--pack-destination",
+        "/tmp/publication-%SystemRoot%-! output",
+      ],
       environment: { PATH: "/usr/bin" },
     });
   });
