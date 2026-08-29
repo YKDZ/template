@@ -1,0 +1,87 @@
+name: Publish verified npm artifact
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: npm-publication
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  verify:
+    name: Verify publication artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require the default branch dispatch
+        run: |
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test "$GITHUB_REF" = "refs/heads/$GITHUB_DEFAULT_BRANCH"
+          test -n "$GITHUB_SHA"
+        env:
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          cache: true
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Create publication staging directory
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-publication-artifact"
+          test -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"
+      - name: Run Root Check once
+        run: pnpm run check
+        env:
+          PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/npm-publication-artifact
+      - name: Upload verified npm artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-publication-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/npm-publication-artifact/*.tgz
+            ${{ runner.temp }}/npm-publication-artifact/SHA512SUMS
+            ${{ runner.temp }}/npm-publication-artifact/verified-publication-artifact.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish verified npm artifact
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Download verified npm artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/npm-publication-download
+      - name: Publish the verified tgz with OIDC
+        run: node --conditions=source scripts/npm-publication/publish.ts
+        env:
+          PUBLICATION_ARTIFACT_DIRECTORY: ${{ runner.temp }}/npm-publication-download

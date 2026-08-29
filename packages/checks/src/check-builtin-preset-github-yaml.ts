@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -123,6 +124,226 @@ type ParsedWorkflow = {
 };
 
 type ParsedObject = Record<string, unknown>;
+
+const publicationWorkflowPath = ".github/workflows/release.yml";
+
+function publicationAction(reference: string): string {
+  return reference;
+}
+
+/** Publication is a ts-cli capability, not part of ProjectCheckWorkflowPlan. */
+export function assertPublicationWorkflowContract(
+  plan: GeneratedRepositoryPlan,
+  source: string,
+  workflow: ParsedWorkflow,
+): void {
+  const candidate = plan.packageContributions.filter(
+    (contribution) =>
+      contribution.foundation.npmPublication?.kind === "public-cli-candidate",
+  );
+  if (candidate.length === 0) {
+    failPublicationWorkflow(
+      plan,
+      "non-candidate preset projected a release workflow",
+    );
+  }
+  if (
+    !isParsedObject(workflow) ||
+    !hasExactKeys(workflow, [
+      "name",
+      "on",
+      "permissions",
+      "concurrency",
+      "jobs",
+    ]) ||
+    workflow.name !== "Publish verified npm artifact" ||
+    !isParsedObject(workflow.on) ||
+    !hasExactKeys(workflow.on, ["workflow_dispatch"]) ||
+    workflow.on.workflow_dispatch !== null ||
+    !isParsedObject(workflow.permissions) ||
+    !hasExactKeys(workflow.permissions, []) ||
+    !isParsedObject(workflow.concurrency) ||
+    workflow.concurrency.group !== "npm-publication" ||
+    workflow.concurrency["cancel-in-progress"] !== false ||
+    workflow.concurrency.queue !== "max" ||
+    !isParsedObject(workflow.jobs) ||
+    !hasExactKeys(workflow.jobs, ["verify", "publish"])
+  ) {
+    failPublicationWorkflow(
+      plan,
+      "manual dispatch, empty permissions, or fixed concurrency diverges",
+    );
+  }
+  const verify = workflow.jobs.verify;
+  const publish = workflow.jobs.publish;
+  if (!isParsedObject(verify) || !isParsedObject(publish)) {
+    failPublicationWorkflow(plan, "verify and publish jobs are required");
+  }
+  assertPublicationJob(plan, verify, {
+    keys: ["name", "runs-on", "permissions", "steps"],
+    permissions: { contents: "read" },
+    needs: undefined,
+  });
+  assertPublicationJob(plan, publish, {
+    keys: ["name", "needs", "runs-on", "permissions", "steps"],
+    permissions: { contents: "read", "id-token": "write" },
+    needs: "verify",
+  });
+  assertPublicationVerifySteps(plan, verify.steps);
+  assertPublicationPublishSteps(plan, publish.steps);
+  for (const action of [
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+    "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+  ]) {
+    if (!source.includes(publicationAction(action))) {
+      failPublicationWorkflow(
+        plan,
+        `immutable action pin is missing: ${action}`,
+      );
+    }
+  }
+}
+
+function failPublicationWorkflow(
+  plan: GeneratedRepositoryPlan,
+  message: string,
+): never {
+  throw new Error(`${plan.definitionName}: publication workflow ${message}`);
+}
+
+function assertPublicationJob(
+  plan: GeneratedRepositoryPlan,
+  job: ParsedObject,
+  expected: {
+    readonly keys: readonly string[];
+    readonly permissions: Readonly<ParsedObject>;
+    readonly needs: string | undefined;
+  },
+): void {
+  if (
+    !hasExactKeys(job, expected.keys) ||
+    job["runs-on"] !== "ubuntu-latest" ||
+    JSON.stringify(job.permissions) !== JSON.stringify(expected.permissions) ||
+    job.needs !== expected.needs ||
+    !Array.isArray(job.steps)
+  ) {
+    failPublicationWorkflow(
+      plan,
+      "job permissions, ordering, or runner diverges",
+    );
+  }
+}
+
+function step(
+  plan: GeneratedRepositoryPlan,
+  value: unknown,
+  name: string,
+): ParsedObject {
+  if (!isParsedObject(value) || value.name !== name) {
+    failPublicationWorkflow(plan, `missing ${name} step`);
+  }
+  return value;
+}
+
+function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
+  const value_ = step(plan, value, "Set up Node.js");
+  if (
+    value_.uses !==
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" ||
+    !isParsedObject(value_.with) ||
+    !hasExactKeys(value_.with, ["node-version-file"]) ||
+    value_.with["node-version-file"] !== "package.json"
+  )
+    failPublicationWorkflow(plan, "Node setup must use package.json only");
+}
+
+function assertPublicationVerifySteps(
+  plan: GeneratedRepositoryPlan,
+  steps: unknown,
+): void {
+  if (!Array.isArray(steps) || steps.length !== 8) {
+    failPublicationWorkflow(
+      plan,
+      "verify must have the closed eight-step sequence",
+    );
+  }
+  const gate = step(plan, steps[0], "Require the default branch dispatch");
+  if (
+    typeof gate.run !== "string" ||
+    !gate.run.includes("workflow_dispatch") ||
+    !gate.run.includes("GITHUB_REF")
+  ) {
+    failPublicationWorkflow(
+      plan,
+      "verify must reject a non-default ref before checkout",
+    );
+  }
+  const checkout = step(plan, steps[1], "Checkout source");
+  if (
+    checkout.uses !==
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    !isParsedObject(checkout.with) ||
+    checkout.with.ref !== "${{ github.sha }}" ||
+    checkout.with["persist-credentials"] !== false
+  )
+    failPublicationWorkflow(
+      plan,
+      "verify checkout must be exact SHA without credentials",
+    );
+  assertNodeSetup(plan, steps[2]);
+  const install = step(plan, steps[4], "Install dependencies");
+  const check = step(plan, steps[6], "Run Root Check once");
+  const upload = step(plan, steps[7], "Upload verified npm artifact");
+  if (
+    install.run !== "pnpm install --frozen-lockfile" ||
+    check.run !== "pnpm run check" ||
+    !isParsedObject(check.env) ||
+    typeof check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !== "string" ||
+    upload.uses !==
+      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
+    !isParsedObject(upload.with) ||
+    upload.with.name !== "npm-publication-${{ github.run_id }}" ||
+    upload.with["if-no-files-found"] !== "error"
+  )
+    failPublicationWorkflow(
+      plan,
+      "verify must persist and upload the one Root Check artifact",
+    );
+}
+
+function assertPublicationPublishSteps(
+  plan: GeneratedRepositoryPlan,
+  steps: unknown,
+): void {
+  if (!Array.isArray(steps) || steps.length !== 4) {
+    failPublicationWorkflow(
+      plan,
+      "publish must have the closed four-step sequence",
+    );
+  }
+  const checkout = step(plan, steps[0], "Checkout source");
+  const download = step(plan, steps[2], "Download verified npm artifact");
+  const caller = step(plan, steps[3], "Publish the verified tgz with OIDC");
+  if (
+    checkout.uses !==
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    !isParsedObject(checkout.with) ||
+    checkout.with["persist-credentials"] !== false ||
+    download.uses !==
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
+    !isParsedObject(download.with) ||
+    download.with.name !== "npm-publication-${{ github.run_id }}" ||
+    caller.run !== "node --conditions=source scripts/npm-publication/publish.ts"
+  )
+    failPublicationWorkflow(
+      plan,
+      "publish must download the same artifact then invoke the direct caller",
+    );
+  assertNodeSetup(plan, steps[1]);
+}
 
 type WorkflowActionContract = {
   readonly name: string;
@@ -939,6 +1160,32 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
           }
           existing.origins.push(origin);
         }
+      }
+      const releasePath = path.join(projectDir, publicationWorkflowPath);
+      const releaseExists = existsSync(releasePath);
+      const hasPublicationCandidate = plan.packageContributions.some(
+        (contribution) =>
+          contribution.foundation.npmPublication?.kind ===
+          "public-cli-candidate",
+      );
+      if (releaseExists !== hasPublicationCandidate) {
+        throw new Error(
+          `${scenario.id}: publication workflow projection does not match the public CLI candidate capability`,
+        );
+      }
+      if (releaseExists) {
+        const content = await readFile(releasePath, "utf8");
+        const document = parseDocument(content);
+        if (document.errors.length > 0 || document.warnings.length > 0) {
+          throw new Error(
+            `${scenario.id}: invalid publication YAML: ${[...document.errors, ...document.warnings].map((error) => error.message).join("; ")}`,
+          );
+        }
+        assertPublicationWorkflowContract(
+          plan,
+          content,
+          document.toJS() as ParsedWorkflow,
+        );
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });

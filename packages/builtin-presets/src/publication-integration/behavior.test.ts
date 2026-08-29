@@ -185,6 +185,22 @@ describe("ts-cli publication owner-fact integration", () => {
         operations: [...plan.operations],
       });
       await execa("pnpm", ["install"], { cwd: repositoryRoot });
+      const rootManifest = JSON.parse(
+        await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+      ) as { readonly engines?: { readonly node?: unknown } };
+      const publicManifest = JSON.parse(
+        await readFile(
+          path.join(repositoryRoot, "packages/cli/package.json"),
+          "utf8",
+        ),
+      ) as { readonly engines?: { readonly node?: unknown } };
+      expect(rootManifest.engines?.node).toBe("24");
+      expect(publicManifest.engines?.node).toBe(">=24");
+      await expect(
+        execa("pnpm", ["exec", "npm", "--version"], {
+          cwd: repositoryRoot,
+        }),
+      ).resolves.toMatchObject({ stdout: "11.19.1" });
       const artifactModule = (await import(
         `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
       )) as ArtifactModule;
@@ -429,6 +445,23 @@ describe("ts-cli publication owner-fact integration", () => {
       expect(caller.exitCode).toBe(0);
       expect(caller.stdout).toContain("npm publication artifact: verified");
       expect(await readdir(callerOutput)).toHaveLength(3);
+
+      const workflowOutput = path.join(workspace, "workflow-output");
+      await mkdir(workflowOutput);
+      const workflowCaller = await execa(
+        "pnpm",
+        ["run", "publication:artifact"],
+        {
+          cwd: repositoryRoot,
+          env: {
+            ...process.env,
+            PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: workflowOutput,
+          },
+          reject: false,
+        },
+      );
+      expect(workflowCaller.exitCode).toBe(0);
+      expect(await readdir(workflowOutput)).toHaveLength(3);
 
       const invalidCaller = await execa(
         "pnpm",

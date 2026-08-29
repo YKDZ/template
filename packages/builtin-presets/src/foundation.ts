@@ -1547,6 +1547,16 @@ function foundationPlan(options: {
         };
   const workflowOperations: RenderOperation[] = [
     workflowOperation,
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication/release.yml",
+            to: ".github/workflows/release.yml",
+          },
+        ]),
     {
       kind: "writeTextTemplate" as const,
       source: templateSources.foundation,
@@ -1684,6 +1694,15 @@ function foundationPlan(options: {
             source: templateSources.tsCli,
             from: "publication/check-artifact.ts",
             to: "scripts/npm-publication/check-artifact.ts",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
+          },
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication/publish.ts",
+            to: "scripts/npm-publication/publish.ts",
             replacements: {
               PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
             },

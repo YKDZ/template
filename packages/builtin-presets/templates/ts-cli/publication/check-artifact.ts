@@ -14,28 +14,41 @@ function oneLine(value: string): string {
 const rawArguments = process.argv.slice(2);
 const arguments_ =
   rawArguments[0] === "--" ? rawArguments.slice(1) : rawArguments;
+const outputDirectoryFromEnvironment =
+  process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY;
 const explicitOutputDirectory =
   arguments_.length === 2 &&
   arguments_[0] === "--output-directory" &&
   arguments_[1]!.length > 0
     ? path.resolve(arguments_[1]!)
     : undefined;
+const environmentOutputDirectory =
+  outputDirectoryFromEnvironment === undefined
+    ? undefined
+    : outputDirectoryFromEnvironment.length === 0 ||
+        !path.isAbsolute(outputDirectoryFromEnvironment)
+      ? null
+      : outputDirectoryFromEnvironment;
 const validArguments =
-  arguments_.length === 0 || explicitOutputDirectory !== undefined;
+  (arguments_.length === 0 && environmentOutputDirectory !== null) ||
+  (explicitOutputDirectory !== undefined &&
+    environmentOutputDirectory === undefined);
 if (!validArguments) {
   console.error("ERROR publication-artifact-usage");
   console.error(`Observed: ${JSON.stringify(arguments_)}`);
   console.error(
-    "Expected: no arguments or --output-directory <existing-empty-directory>",
+    "Expected: no arguments, one absolute PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY, or --output-directory <existing-empty-directory>",
   );
   console.error(
     "Next action: Run without arguments for disposable verification, or pass one existing empty directory to retain the tgz, checksum, and receipt.",
   );
   process.exitCode = 2;
 } else {
-  const ownedTemporaryOutput = explicitOutputDirectory === undefined;
+  const configuredOutputDirectory =
+    explicitOutputDirectory ?? environmentOutputDirectory ?? undefined;
+  const ownedTemporaryOutput = configuredOutputDirectory === undefined;
   const outputDirectory =
-    explicitOutputDirectory ??
+    configuredOutputDirectory ??
     (await mkdtemp(path.join(tmpdir(), "npm-publication-artifact-")));
   try {
     const result = await verifyNpmPublicationArtifact({
