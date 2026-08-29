@@ -55,12 +55,18 @@ type Receipt = {
     readonly version: string;
     readonly commandName: string;
     readonly repository: string;
+    readonly releaseDate: string;
+    readonly releaseNotes: string;
   };
   readonly packedManifest: {
     readonly name: string;
     readonly version: string;
     readonly bin: Record<string, string>;
-    readonly repository: unknown;
+    readonly repository: {
+      readonly type: "git";
+      readonly url: string;
+      readonly directory: string;
+    };
   };
   readonly artifact: {
     readonly file: string;
@@ -68,7 +74,22 @@ type Receipt = {
     readonly integrity: string;
     readonly size: number;
   };
-  readonly files: readonly { readonly path: string }[];
+  readonly files: readonly {
+    readonly path: string;
+    readonly mode: number;
+    readonly size: number;
+  }[];
+  readonly bin: {
+    readonly path: "package/dist/cli.js";
+    readonly shebang: "#!/usr/bin/env node";
+    readonly mode: number;
+    readonly posixExecutableChecked: boolean;
+  };
+  readonly smokes: readonly {
+    readonly name: string;
+    readonly args: readonly string[];
+    readonly stdout: string;
+  }[];
 };
 
 function fail(code: string, message: string): never {
@@ -155,15 +176,29 @@ function stringValue(value: unknown, code: string): string {
   return value;
 }
 
-function repositoryName(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, key: string): boolean {
+  return typeof record[key] === "string";
+}
+
+function repositoryObject(
+  value: unknown,
+):
+  | { readonly type: string; readonly url: string; readonly directory: string }
+  | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  const record = value as Record<string, unknown>;
   if (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { url?: unknown }).url === "string"
+    typeof record.type !== "string" ||
+    typeof record.url !== "string" ||
+    typeof record.directory !== "string"
   )
-    return (value as { url: string }).url;
-  return undefined;
+    return undefined;
+  return { type: record.type, url: record.url, directory: record.directory };
 }
 
 function canonicalGithubRepository(value: string): string | undefined {
@@ -172,6 +207,78 @@ function canonicalGithubRepository(value: string): string | undefined {
       value,
     );
   return match?.[1];
+}
+
+function isReceipt(value: unknown): value is Receipt {
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  const publication = value.publication;
+  const packedManifest = value.packedManifest;
+  const artifact = value.artifact;
+  const bin = value.bin;
+  if (
+    !isRecord(publication) ||
+    !isRecord(packedManifest) ||
+    !isRecord(artifact) ||
+    !isRecord(bin) ||
+    !Array.isArray(value.files) ||
+    !Array.isArray(value.smokes)
+  )
+    return false;
+  const releaseDate = publication.releaseDate;
+  const releaseNotes = publication.releaseNotes;
+  if (
+    ![
+      "packageName",
+      "version",
+      "commandName",
+      "repository",
+      "releaseDate",
+      "releaseNotes",
+    ].every((key) => stringField(publication, key)) ||
+    typeof releaseDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(releaseDate) ||
+    typeof releaseNotes !== "string" ||
+    releaseNotes.trim().length === 0 ||
+    !stringField(packedManifest, "name") ||
+    !stringField(packedManifest, "version") ||
+    !isRecord(packedManifest.bin) ||
+    Object.values(packedManifest.bin).some(
+      (entry) => typeof entry !== "string",
+    ) ||
+    repositoryObject(packedManifest.repository) === undefined
+  )
+    return false;
+  const artifactSize = artifact.size;
+  if (
+    !safeBasename(artifact.file) ||
+    artifact.checksumFile !== "SHA512SUMS" ||
+    typeof artifact.integrity !== "string" ||
+    typeof artifactSize !== "number" ||
+    !Number.isSafeInteger(artifactSize) ||
+    artifactSize < 0 ||
+    value.files.length === 0 ||
+    value.files.some(
+      (file) =>
+        !isRecord(file) ||
+        typeof file.path !== "string" ||
+        !Number.isSafeInteger(file.mode) ||
+        !Number.isSafeInteger(file.size),
+    ) ||
+    typeof bin.path !== "string" ||
+    typeof bin.shebang !== "string" ||
+    !Number.isSafeInteger(bin.mode) ||
+    typeof bin.posixExecutableChecked !== "boolean" ||
+    value.smokes.some(
+      (smoke) =>
+        !isRecord(smoke) ||
+        typeof smoke.name !== "string" ||
+        !Array.isArray(smoke.args) ||
+        smoke.args.some((argument) => typeof argument !== "string") ||
+        typeof smoke.stdout !== "string",
+    )
+  )
+    return false;
+  return true;
 }
 
 async function readArtifact(
@@ -204,10 +311,9 @@ async function readArtifact(
   const receipt = parseJson(
     await readFile(receiptPath, "utf8"),
     "artifact-receipt-invalid",
-  ) as Receipt;
+  );
   if (
-    receipt?.schemaVersion !== 1 ||
-    !safeBasename(receipt.artifact?.file) ||
+    !isReceipt(receipt) ||
     receipt.artifact.file !== tgz.name ||
     receipt.artifact.checksumFile !== "SHA512SUMS"
   ) {
@@ -262,9 +368,11 @@ async function assertArtifactIdentity(options: {
       "utf8",
     ),
     "identity-invalid",
-  ) as Record<string, unknown>;
-  const packed = receipt?.packedManifest;
-  const publication = receipt?.publication;
+  );
+  if (!isRecord(manifest))
+    fail("identity-invalid", "checkout manifest is not an object");
+  const packed = receipt.packedManifest;
+  const publication = receipt.publication;
   const bin = packed?.bin;
   const sourceBin = manifest.bin;
   const command = publication?.commandName;
@@ -274,6 +382,9 @@ async function assertArtifactIdentity(options: {
     sourceBin !== null && typeof sourceBin === "object"
       ? Object.entries(sourceBin as Record<string, unknown>)
       : [];
+  const packedRepository = repositoryObject(packed?.repository);
+  const sourceRepository = repositoryObject(manifest.repository);
+  const expectedSmokeNames = ["runtime-import", "help", "version", "greet"];
   if (
     !packed ||
     !publication ||
@@ -287,6 +398,33 @@ async function assertArtifactIdentity(options: {
     sourceBinEntries[0]![0] !== command ||
     typeof packedBinEntries[0]![1] !== "string" ||
     packedBinEntries[0]![1] !== sourceBinEntries[0]![1] ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(publication.releaseDate) ||
+    publication.releaseNotes.trim().length === 0 ||
+    receipt.files.length === 0 ||
+    receipt.files.some(
+      (file) =>
+        !safeBasename(file.path.split("/").at(-1)) ||
+        !Number.isSafeInteger(file.mode) ||
+        !Number.isSafeInteger(file.size) ||
+        file.size < 0,
+    ) ||
+    receipt.bin.path !== "package/dist/cli.js" ||
+    receipt.bin.shebang !== "#!/usr/bin/env node" ||
+    !Number.isSafeInteger(receipt.bin.mode) ||
+    typeof receipt.bin.posixExecutableChecked !== "boolean" ||
+    receipt.smokes.length !== expectedSmokeNames.length ||
+    receipt.smokes.some(
+      (smoke, index) =>
+        smoke.name !== expectedSmokeNames[index] ||
+        !Array.isArray(smoke.args) ||
+        typeof smoke.stdout !== "string",
+    ) ||
+    packedRepository?.type !== "git" ||
+    packedRepository.url !== publication.repository ||
+    packedRepository.directory !== packagePath ||
+    sourceRepository?.type !== "git" ||
+    sourceRepository.url !== publication.repository ||
+    sourceRepository.directory !== packagePath ||
     !hasStableSemverShape(publication.version)
   ) {
     fail(
@@ -295,16 +433,16 @@ async function assertArtifactIdentity(options: {
     );
   }
   const receiptRepository = canonicalGithubRepository(publication.repository);
-  const packedRepository = canonicalGithubRepository(
-    repositoryName(packed.repository) ?? "",
+  const packedRepositoryName = canonicalGithubRepository(
+    packedRepository?.url ?? "",
   );
-  const sourceRepository = canonicalGithubRepository(
-    repositoryName(manifest.repository) ?? "",
+  const sourceRepositoryName = canonicalGithubRepository(
+    sourceRepository?.url ?? "",
   );
   if (
     receiptRepository !== options.githubRepository ||
-    packedRepository !== receiptRepository ||
-    sourceRepository !== receiptRepository
+    packedRepositoryName !== receiptRepository ||
+    sourceRepositoryName !== receiptRepository
   ) {
     fail(
       "identity-invalid",
@@ -326,6 +464,12 @@ function isolatedEnvironment(
     "GITHUB_REF",
     "GITHUB_EVENT_NAME",
     "GITHUB_ACTIONS",
+    "GITHUB_WORKFLOW_REF",
+    "GITHUB_SERVER_URL",
+    "GITHUB_RUN_ID",
+    "RUNNER_ENVIRONMENT",
+    "GITHUB_REPOSITORY_ID",
+    "GITHUB_REPOSITORY_OWNER_ID",
     "ACTIONS_ID_TOKEN_REQUEST_URL",
     "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
   ]) {
@@ -360,13 +504,16 @@ async function command(
   return result.stdout.trim();
 }
 
-function npmArguments(session: string): readonly string[] {
+function npmArguments(
+  prefix: string,
+  configurationRoot = prefix,
+): readonly string[] {
   return [
-    `--prefix=${session}`,
+    `--prefix=${prefix}`,
     `--registry=${registry}`,
-    `--userconfig=${path.join(session, "user-npmrc")}`,
-    `--globalconfig=${path.join(session, "global-npmrc")}`,
-    `--cache=${path.join(session, "npm-cache")}`,
+    `--userconfig=${path.join(configurationRoot, "user-npmrc")}`,
+    `--globalconfig=${path.join(configurationRoot, "global-npmrc")}`,
+    `--cache=${path.join(configurationRoot, "npm-cache")}`,
   ];
 }
 
@@ -595,7 +742,11 @@ export async function runDirectOidcPublication(
         dependencies: { [publication.packageName]: publication.version },
       }),
     );
-    const consumerArguments = npmArguments(consumer);
+    await writeFile(
+      path.join(consumer, ".npmrc"),
+      `registry=${registry}\nfetch-retries=1\n`,
+    );
+    const consumerArguments = npmArguments(consumer, session);
     await command(
       run,
       options.repositoryRoot,
@@ -633,25 +784,29 @@ export async function runDirectOidcPublication(
         "npm audit schema is incomplete or invalid",
       );
     }
-    const verified = audit.verified;
-    const matches = verified.filter((item) => {
-      const value = item as {
-        name?: unknown;
-        version?: unknown;
-        attestationBundles?: unknown;
-      };
-      return (
-        value.name === publication.packageName &&
-        value.version === publication.version &&
-        Array.isArray(value.attestationBundles) &&
-        value.attestationBundles.length > 0
-      );
-    });
+    const matches = audit.verified.filter(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        !Array.isArray(item) &&
+        (item as { name?: unknown }).name === publication.packageName &&
+        (item as { version?: unknown }).version === publication.version,
+    );
     if (matches.length !== 1)
       fail(
         "signature-audit-invalid",
         "exact package attestation is missing or ambiguous",
       );
+    const exactVerified = matches[0] as { attestationBundles?: unknown };
+    if (
+      !Array.isArray(exactVerified.attestationBundles) ||
+      exactVerified.attestationBundles.length === 0
+    ) {
+      fail(
+        "signature-audit-invalid",
+        "exact package attestation bundle is missing",
+      );
+    }
   } finally {
     await rm(session, { recursive: true, force: true });
   }

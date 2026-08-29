@@ -75,11 +75,16 @@ async function writeVerifiedArtifact(
   const artifact = path.join(workspace, "artifact");
   await mkdir(packageRoot, { recursive: true });
   await mkdir(artifact);
+  const repository = {
+    type: "git",
+    url: "git+https://github.com/publisher/tool.git",
+    directory: "packages/cli",
+  };
   const manifest = {
     name: "@publisher/tool",
     version,
     bin: { ship: "./dist/cli.js" },
-    repository: "git+https://github.com/publisher/tool.git",
+    repository,
   };
   await writeFile(
     path.join(packageRoot, "package.json"),
@@ -108,9 +113,27 @@ async function writeVerifiedArtifact(
         version,
         commandName: "ship",
         repository: "git+https://github.com/publisher/tool.git",
+        releaseDate: "2026-08-26",
+        releaseNotes: "Publish the stable CLI.",
       },
       packedManifest: manifest,
-      files: [],
+      files: [{ path: "package/package.json", mode: 420, size: 1 }],
+      bin: {
+        path: "package/dist/cli.js",
+        shebang: "#!/usr/bin/env node",
+        mode: 493,
+        posixExecutableChecked: true,
+      },
+      smokes: [
+        { name: "runtime-import", args: [], stdout: "" },
+        { name: "help", args: ["--help"], stdout: "Usage: ship" },
+        { name: "version", args: ["--version"], stdout: `${version}\n` },
+        {
+          name: "greet",
+          args: ["greet", "  Ada Lovelace  "],
+          stdout: "Hello, Ada Lovelace\n",
+        },
+      ],
     }),
   );
   return { directory: artifact, integrity };
@@ -124,14 +147,46 @@ type FakePublicationScenario = {
   readonly postLatest?: string;
   readonly audit?: unknown;
   readonly version?: string;
+  readonly mutateReceipt?: (receipt: Record<string, unknown>) => void;
+  readonly mutateSourceManifest?: (manifest: Record<string, unknown>) => void;
 };
 
 async function executeFakePublication(
   workspace: string,
   scenario: FakePublicationScenario = {},
-): Promise<{ readonly writes: number; readonly spawns: number }> {
+): Promise<{
+  readonly writes: number;
+  readonly spawns: number;
+  readonly initialInstalls: number;
+}> {
   const version = scenario.version ?? "1.0.1";
   const artifact = await writeVerifiedArtifact(workspace, version);
+  if (scenario.mutateReceipt !== undefined) {
+    const receiptPath = path.join(
+      artifact.directory,
+      "verified-publication-artifact.json",
+    );
+    const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    scenario.mutateReceipt(receipt);
+    await writeFile(receiptPath, JSON.stringify(receipt));
+  }
+  if (scenario.mutateSourceManifest !== undefined) {
+    const manifestPath = path.join(
+      workspace,
+      "packages",
+      "cli",
+      "package.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    scenario.mutateSourceManifest(manifest);
+    await writeFile(manifestPath, JSON.stringify(manifest));
+  }
   const { runDirectOidcPublication } = await loadPublishModule(workspace);
   const exact = scenario.exact ?? "absent";
   const latest = "latest" in scenario ? scenario.latest : "1.0.0";
@@ -149,6 +204,8 @@ async function executeFakePublication(
   let writes = 0;
   let exactReads = 0;
   let spawns = 0;
+  let initialInstalls = 0;
+  let sessionRoot: string | undefined;
   try {
     await runDirectOidcPublication({
       repositoryRoot: workspace,
@@ -158,19 +215,48 @@ async function executeFakePublication(
         GITHUB_RUN_ATTEMPT: String(scenario.attempt ?? 1),
         ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/request",
         ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-test-token",
+        GITHUB_WORKFLOW_REF:
+          "publisher/tool/.github/workflows/release.yml@refs/heads/main",
+        GITHUB_SERVER_URL: "https://github.com",
+        GITHUB_RUN_ID: "123",
+        RUNNER_ENVIRONMENT: "github-hosted",
+        GITHUB_REPOSITORY_ID: "456",
+        GITHUB_REPOSITORY_OWNER_ID: "789",
         DEPLOY_TOKEN: "must-not-reach-child-processes",
       },
-      async run(_command, arguments_, options) {
+      async run(command, arguments_, options) {
         spawns += 1;
+        expect(command).toBe("corepack");
         expect(options.env.DEPLOY_TOKEN).toBeUndefined();
         expect(options.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN).toBe(
           "oidc-test-token",
         );
         expect(options.env.NPM_CONFIG_REGISTRY).toBeUndefined();
-        const joined = arguments_.join(" ");
-        if (joined.includes(" pnpm install ")) {
+        expect(options.env).toMatchObject({
+          GITHUB_WORKFLOW_REF:
+            "publisher/tool/.github/workflows/release.yml@refs/heads/main",
+          GITHUB_SERVER_URL: "https://github.com",
+          GITHUB_RUN_ID: "123",
+          RUNNER_ENVIRONMENT: "github-hosted",
+          GITHUB_REPOSITORY_ID: "456",
+          GITHUB_REPOSITORY_OWNER_ID: "789",
+        });
+        if (arguments_[0] === "pnpm" && arguments_[1] === "install") {
+          initialInstalls += 1;
+          expect(options.cwd).toBe(workspace);
+          expect(arguments_).toEqual(
+            expect.arrayContaining([
+              "--frozen-lockfile",
+              "--ignore-scripts",
+              "--registry=https://registry.npmjs.org/",
+            ]),
+          );
+          expect(
+            arguments_.some((argument) => argument.startsWith("--store-dir=")),
+          ).toBe(true);
           const userConfig = options.env.NPM_CONFIG_USERCONFIG!;
           const session = path.dirname(userConfig);
+          sessionRoot = session;
           expect(await readFile(path.join(session, ".npmrc"), "utf8")).toBe(
             "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
           );
@@ -178,8 +264,13 @@ async function executeFakePublication(
           expect(
             await readFile(options.env.NPM_CONFIG_GLOBALCONFIG!, "utf8"),
           ).toBe("");
+          expect(options.env.NPM_CONFIG_CACHE).toBe(
+            path.join(session, "npm-cache"),
+          );
+          expect(options.env.HOME).toBe(path.join(session, "home"));
           return { exitCode: 0, stdout: "", stderr: "" };
         }
+        const joined = arguments_.join(" ");
         if (joined.includes(" --version"))
           return { exitCode: 0, stdout: "11.19.1\n", stderr: "" };
         if (joined.includes(" config get fetch-retries"))
@@ -235,6 +326,38 @@ async function executeFakePublication(
           writes += 1;
           return { exitCode: 0, stdout: "published", stderr: "" };
         }
+        if (joined.includes(" install --ignore-scripts")) {
+          const prefix = arguments_.find((argument) =>
+            argument.startsWith("--prefix="),
+          )!;
+          const consumer = prefix.slice("--prefix=".length);
+          expect(consumer).not.toBe(sessionRoot);
+          expect(options.cwd).toBe(workspace);
+          expect(arguments_).toEqual(
+            expect.arrayContaining([
+              `--prefix=${consumer}`,
+              "--registry=https://registry.npmjs.org/",
+              `--userconfig=${path.join(sessionRoot!, "user-npmrc")}`,
+              `--globalconfig=${path.join(sessionRoot!, "global-npmrc")}`,
+              `--cache=${path.join(sessionRoot!, "npm-cache")}`,
+              "install",
+              "--ignore-scripts",
+            ]),
+          );
+          expect(await readFile(path.join(consumer, ".npmrc"), "utf8")).toBe(
+            "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
+          );
+          expect(options.env.NPM_CONFIG_USERCONFIG).toBe(
+            path.join(sessionRoot!, "user-npmrc"),
+          );
+          expect(options.env.NPM_CONFIG_GLOBALCONFIG).toBe(
+            path.join(sessionRoot!, "global-npmrc"),
+          );
+          expect(options.env.NPM_CONFIG_CACHE).toBe(
+            path.join(sessionRoot!, "npm-cache"),
+          );
+          return { exitCode: 0, stdout: "", stderr: "" };
+        }
         if (joined.includes(" audit signatures"))
           return { exitCode: 0, stdout: JSON.stringify(audit), stderr: "" };
         return { exitCode: 0, stdout: "", stderr: "" };
@@ -242,11 +365,12 @@ async function executeFakePublication(
     });
   } catch (error) {
     if (typeof error === "object" && error !== null) {
-      Object.assign(error, { writes, spawns });
+      Object.assign(error, { writes, spawns, initialInstalls });
     }
     throw error;
   }
-  return { writes, spawns };
+  expect(initialInstalls).toBe(1);
+  return { writes, spawns, initialInstalls };
 }
 
 describe("manual npm publication capability", () => {
@@ -328,6 +452,30 @@ describe("manual npm publication capability", () => {
           }
         ).steps[3]!;
         caller.env = {};
+      },
+      (workflow: Record<string, unknown>) => {
+        const node = (
+          (workflow.jobs as Record<string, unknown>).verify as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[2]!;
+        node.if = "false";
+      },
+      (workflow: Record<string, unknown>) => {
+        const staging = (
+          (workflow.jobs as Record<string, unknown>).verify as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[5]!;
+        staging.run = "true";
+      },
+      (workflow: Record<string, unknown>) => {
+        const rootCheck = (
+          (workflow.jobs as Record<string, unknown>).verify as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[6]!;
+        rootCheck.env = { PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: "wrong" };
       },
     ]) {
       const workflow = parseDocument(source).toJS() as Record<string, unknown>;
@@ -500,6 +648,100 @@ describe("manual npm publication capability", () => {
 
   it.each([
     [
+      "release notes",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete (receipt.publication as Record<string, unknown>).releaseNotes;
+      },
+    ],
+    [
+      "release date",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete (receipt.publication as Record<string, unknown>).releaseDate;
+      },
+    ],
+    [
+      "non-empty files",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        receipt.files = [];
+      },
+    ],
+    [
+      "bin evidence",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete receipt.bin;
+      },
+    ],
+    [
+      "smoke evidence",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete receipt.smokes;
+      },
+    ],
+    [
+      "packed repository type",
+      "identity-invalid",
+      (receipt: Record<string, unknown>) => {
+        (
+          (receipt.packedManifest as Record<string, unknown>)
+            .repository as Record<string, unknown>
+        ).type = "npm";
+      },
+    ],
+    [
+      "packed package directory",
+      "identity-invalid",
+      (receipt: Record<string, unknown>) => {
+        (
+          (receipt.packedManifest as Record<string, unknown>)
+            .repository as Record<string, unknown>
+        ).directory = "packages/other";
+      },
+    ],
+  ] as const)(
+    "rejects a Ticket 09 receipt without %s before spawning",
+    async (_name, code, mutateReceipt) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-publication-caller-"),
+      );
+      try {
+        await expect(
+          executeFakePublication(workspace, { mutateReceipt }),
+        ).rejects.toMatchObject({ code, writes: 0, spawns: 0 });
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("rejects a source package directory mismatch before spawning", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-caller-"),
+    );
+    try {
+      await expect(
+        executeFakePublication(workspace, {
+          mutateSourceManifest(manifest) {
+            (manifest.repository as Record<string, unknown>).directory =
+              "packages/other";
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: "identity-invalid",
+        writes: 0,
+        spawns: 0,
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
       "an extra artifact member",
       "artifact-set-invalid",
       async (workspace: string, artifact: string) => {
@@ -600,7 +842,7 @@ describe("manual npm publication capability", () => {
         },
         async run(_command, arguments_) {
           const joined = arguments_.join(" ");
-          if (joined.includes(" pnpm install "))
+          if (arguments_[0] === "pnpm" && arguments_[1] === "install")
             return { exitCode: 0, stdout: "", stderr: "" };
           if (joined.includes(" --version"))
             return { exitCode: 0, stdout: "11.19.1\n", stderr: "" };
@@ -743,6 +985,29 @@ describe("manual npm publication capability", () => {
       1,
     ],
     [
+      "audit target has mixed empty and non-empty duplicate bundles",
+      {
+        audit: {
+          invalid: [],
+          missing: [],
+          verified: [
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [],
+            },
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [{}],
+            },
+          ],
+        },
+      },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
       "audit target bundle is empty",
       {
         audit: {
@@ -776,6 +1041,12 @@ describe("manual npm publication capability", () => {
       "signature-audit-invalid",
       1,
     ],
+    [
+      "post-write latest conflicts",
+      { postLatest: "1.0.0" },
+      "postwrite-integrity-conflict",
+      1,
+    ],
   ] as const)("fails closed when %s", async (_name, scenario, code, writes) => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-caller-"),
@@ -788,6 +1059,62 @@ describe("manual npm publication capability", () => {
         failure = error;
       }
       expect(failure).toMatchObject({ code, writes });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("allows rerun absence once and resumes an identical rerun without rewriting", async () => {
+    const absentWorkspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-caller-"),
+    );
+    const identicalWorkspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-caller-"),
+    );
+    try {
+      await expect(
+        executeFakePublication(absentWorkspace, {
+          attempt: 2,
+          exact: "absent",
+        }),
+      ).resolves.toMatchObject({ writes: 1, initialInstalls: 1 });
+      await expect(
+        executeFakePublication(identicalWorkspace, {
+          attempt: 2,
+          exact: "same",
+          latest: "1.0.1",
+        }),
+      ).resolves.toMatchObject({ writes: 0, initialInstalls: 1 });
+    } finally {
+      await Promise.all([
+        rm(absentWorkspace, { recursive: true, force: true }),
+        rm(identicalWorkspace, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it("handles primitive audit entries without weakening the exact identity gate", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-caller-"),
+    );
+    try {
+      await expect(
+        executeFakePublication(workspace, {
+          audit: {
+            invalid: [],
+            missing: [],
+            verified: [
+              null,
+              "unrelated",
+              {
+                name: "@publisher/tool",
+                version: "1.0.1",
+                attestationBundles: [{}],
+              },
+            ],
+          },
+        }),
+      ).resolves.toMatchObject({ writes: 1, initialInstalls: 1 });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

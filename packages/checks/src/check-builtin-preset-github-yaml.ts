@@ -234,6 +234,7 @@ function step(
 function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
   const value_ = step(plan, value, "Set up Node.js");
   if (
+    !hasExactKeys(value_, ["name", "uses", "with"]) ||
     value_.uses !==
       "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" ||
     !isParsedObject(value_.with) ||
@@ -304,11 +305,14 @@ function assertPublicationVerifySteps(
     !hasExactKeys(install, ["name", "run"]) ||
     install.run !== "pnpm install --frozen-lockfile" ||
     !hasExactKeys(staging, ["name", "run"]) ||
-    typeof staging.run !== "string" ||
+    staging.run !==
+      'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
     !hasExactKeys(check, ["name", "run", "env"]) ||
     check.run !== "pnpm run check" ||
     !isParsedObject(check.env) ||
-    typeof check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !== "string" ||
+    !hasExactKeys(check.env, ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]) ||
+    check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
+      "${{ runner.temp }}/npm-publication-artifact" ||
     !hasExactKeys(upload, ["name", "uses", "with"]) ||
     upload.uses !==
       "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
