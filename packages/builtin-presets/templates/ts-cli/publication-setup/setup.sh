@@ -113,8 +113,8 @@ if [ "$mode" = "status" ]; then
 fi
 
 cd "$repository_root" || fail ERROR repository-root "unreadable repository root" "the generated repository root" "Run setup from its generated directory." 5
-for command in bash node pnpm git; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
 printf 'STAGE 1/4 Check prerequisites\nCHECK local-toolchain\n'
+for command in bash node pnpm git; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
 REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" preflight
 preflight_status=$?
 [ "$preflight_status" -eq 0 ] || exit "$preflight_status"

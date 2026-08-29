@@ -361,6 +361,45 @@ describe("ts-cli Preset Definition behavior", () => {
         "dir",
       );
 
+      const commandsWithoutPnpm = path.join(workspace, "commands-without-pnpm");
+      await writeExecutable(
+        path.join(commandsWithoutPnpm, "bash"),
+        '#!/bin/sh\nexec /usr/bin/bash "$@"\n',
+      );
+      await writeExecutable(
+        path.join(commandsWithoutPnpm, "node"),
+        `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`,
+      );
+      await writeExecutable(
+        path.join(commandsWithoutPnpm, "dirname"),
+        '#!/bin/sh\nexec /usr/bin/dirname "$@"\n',
+      );
+      await writeExecutable(
+        path.join(commandsWithoutPnpm, "sed"),
+        '#!/bin/sh\nexec /usr/bin/sed "$@"\n',
+      );
+      await writeExecutable(
+        path.join(commandsWithoutPnpm, "tr"),
+        '#!/bin/sh\nexec /usr/bin/tr "$@"\n',
+      );
+      const missingPnpm = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        {
+          cwd: targetDir,
+          env: { PATH: commandsWithoutPnpm },
+          reject: false,
+        },
+      );
+      expect(missingPnpm.exitCode).toBe(5);
+      expect(missingPnpm.stdout).toContain("STAGE 1/4 Check prerequisites");
+      expect(missingPnpm.stdout).toContain("CHECK local-toolchain");
+      expect(missingPnpm.stdout).not.toContain(
+        "STAGE 2/4 Configure the public package",
+      );
+      expect(missingPnpm.stderr).toContain("ERROR prerequisite-command");
+      expect(missingPnpm.stderr).toContain("pnpm is unavailable");
+
       const result = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
