@@ -145,7 +145,7 @@ type ValidatedArtifactPaths = {
   readonly outputDirectory: string;
 };
 
-type InstalledBinCommand = {
+type CommandPlan = {
   readonly executable: string;
   readonly args: readonly string[];
   readonly environment: NodeJS.ProcessEnv;
@@ -593,18 +593,78 @@ function isolatedChildEnvironment(repositoryRoot: string): NodeJS.ProcessEnv {
 
 function quotedWindowsCommandArgument(value: string): string {
   if (/["\0\r\n]/u.test(value)) {
-    throw new Error("installed bin smoke argument is not command-safe");
+    throw new Error("Windows command argument is not command-safe");
   }
   return `"${value}"`;
 }
 
-/** @internal Pure installed-bin command seam used by focused platform tests. */
+function resolveWindowsExecutable(options: {
+  readonly executable: string;
+  readonly windowsExecutable?: string;
+  readonly windowsExecutableEnvironmentKey?: string;
+}): string {
+  if (
+    options.windowsExecutable !== undefined &&
+    options.windowsExecutableEnvironmentKey !== undefined
+  ) {
+    throw new Error("Windows command executable plan is ambiguous");
+  }
+  if (options.windowsExecutableEnvironmentKey !== undefined) {
+    if (
+      !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(options.windowsExecutableEnvironmentKey)
+    ) {
+      throw new Error("Windows command environment key is not safe");
+    }
+    return `"%${options.windowsExecutableEnvironmentKey}%"`;
+  }
+  return quotedWindowsCommandArgument(
+    options.windowsExecutable ?? options.executable,
+  );
+}
+
+function planCommandProcessorInvocation(options: {
+  readonly platform: NodeJS.Platform;
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly environment: NodeJS.ProcessEnv;
+  readonly windowsExecutable?: string;
+  readonly windowsExecutableEnvironmentKey?: string;
+}): CommandPlan {
+  if (options.platform !== "win32") {
+    return {
+      executable: options.executable,
+      args: options.args,
+      environment: options.environment,
+    };
+  }
+  const commandProcessor = options.environment.ComSpec;
+  if (
+    commandProcessor === undefined ||
+    !path.win32.isAbsolute(commandProcessor)
+  ) {
+    throw new Error("ComSpec must name the absolute Windows command processor");
+  }
+  const windowsExecutable = resolveWindowsExecutable(options);
+  const command = [
+    windowsExecutable,
+    ...options.args.map(quotedWindowsCommandArgument),
+  ].join(" ");
+  return {
+    executable: commandProcessor,
+    args: ["/d", "/s", "/c", `"${command}"`],
+    environment: {
+      ...options.environment,
+    },
+  };
+}
+
+/** @internal 用于聚焦平台计划测试的纯 installed-bin 命令 seam。 */
 export function planInstalledBinCommand(options: {
   readonly platform: NodeJS.Platform;
   readonly binPath: string;
   readonly args: readonly string[];
   readonly environment: NodeJS.ProcessEnv;
-}): InstalledBinCommand {
+}): CommandPlan {
   if (options.platform !== "win32") {
     return {
       executable: options.binPath,
@@ -615,25 +675,32 @@ export function planInstalledBinCommand(options: {
   if (/["\0\r\n]/u.test(options.binPath)) {
     throw new Error("installed Windows bin path is not command-safe");
   }
-  const commandProcessor = options.environment.ComSpec;
-  if (
-    commandProcessor === undefined ||
-    !path.win32.isAbsolute(commandProcessor)
-  ) {
-    throw new Error("ComSpec must name the absolute Windows command processor");
-  }
-  const command = [
-    `"%${installedBinEnvironmentKey}%"`,
-    ...options.args.map(quotedWindowsCommandArgument),
-  ].join(" ");
-  return {
-    executable: commandProcessor,
-    args: ["/d", "/s", "/c", `"${command}"`],
+  return planCommandProcessorInvocation({
+    platform: options.platform,
+    executable: options.binPath,
+    args: options.args,
     environment: {
       ...options.environment,
       [installedBinEnvironmentKey]: options.binPath,
     },
-  };
+    windowsExecutableEnvironmentKey: installedBinEnvironmentKey,
+  });
+}
+
+/** @internal 用于聚焦平台计划测试的纯 pnpm pack 命令 seam。 */
+export function planPnpmPackCommand(options: {
+  readonly platform: NodeJS.Platform;
+  readonly packDirectory: string;
+  readonly environment: NodeJS.ProcessEnv;
+}): CommandPlan {
+  const args = ["pack", "--pack-destination", options.packDirectory] as const;
+  return planCommandProcessorInvocation({
+    platform: options.platform,
+    executable: "pnpm",
+    args,
+    environment: options.environment,
+    windowsExecutable: "pnpm.cmd",
+  });
 }
 
 async function smokeCommand(options: {
@@ -741,20 +808,24 @@ export async function verifyNpmPublicationArtifact(options: {
       return result;
     }
 
-    const packArgs = ["pack", "--pack-destination", packDirectory] as const;
+    const packCommand = planPnpmPackCommand({
+      platform: process.platform,
+      packDirectory,
+      environment: childEnvironment,
+    });
     const pack = await runCommand({
-      executable: "pnpm",
-      args: packArgs,
+      executable: packCommand.executable,
+      args: packCommand.args,
       cwd: packageRoot,
-      env: childEnvironment,
+      env: packCommand.environment,
     });
     if (pack.exitCode !== 0) {
       result = {
         kind: "failed",
         failure: commandFailure(
           "artifact-pack-failed",
-          "pnpm",
-          packArgs,
+          packCommand.executable,
+          packCommand.args,
           pack,
           "The single pnpm pack lifecycle to succeed",
           "Correct the prepack build or package manifest and retry.",

@@ -168,12 +168,13 @@ describe("verified publication artifact contracts", () => {
     ).toMatchObject({ code: "artifact-manifest-contract" });
   });
 
-  it("uses the explicit Windows command processor only for installed cmd bins", async () => {
+  it("uses explicit platform command plans for cmd bins and pnpm pack", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-consumer-command-"),
     );
     workspaces.push(workspace);
-    const { planInstalledBinCommand } = await loadArtifactModule(workspace);
+    const { planInstalledBinCommand, planPnpmPackCommand } =
+      await loadArtifactModule(workspace);
     const environment = { ComSpec: String.raw`C:\Windows\System32\cmd.exe` };
     const binPath = String.raw`C:\consumer\node_modules\.bin\ship.cmd`;
 
@@ -208,6 +209,34 @@ describe("verified publication artifact contracts", () => {
       executable: "/consumer/node_modules/.bin/ship",
       args: ["--help"],
       environment: {},
+    });
+
+    expect(
+      planPnpmPackCommand({
+        platform: "win32",
+        packDirectory: String.raw`C:\temp\publication output`,
+        environment,
+      }),
+    ).toEqual({
+      executable: environment.ComSpec,
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        '""pnpm.cmd" "pack" "--pack-destination" "C:\\temp\\publication output""',
+      ],
+      environment,
+    });
+    expect(
+      planPnpmPackCommand({
+        platform: "linux",
+        packDirectory: "/tmp/publication-output",
+        environment: { PATH: "/usr/bin" },
+      }),
+    ).toEqual({
+      executable: "pnpm",
+      args: ["pack", "--pack-destination", "/tmp/publication-output"],
+      environment: { PATH: "/usr/bin" },
     });
   });
 });
