@@ -1436,11 +1436,11 @@ export function createFixtureEvidenceScheduler(
       if (resources.includes("docker")) {
         releases.push(await docker.acquire());
       }
-      if (resources.includes("development-container-session")) {
-        releases.push(await developmentContainerSession.acquire());
-      }
       if (resources.includes("browser")) {
         releases.push(await browser.acquire());
+      }
+      if (resources.includes("development-container-session")) {
+        releases.push(await developmentContainerSession.acquire());
       }
     } catch (error) {
       for (const release of releases.reverse()) release();

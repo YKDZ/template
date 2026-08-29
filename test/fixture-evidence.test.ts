@@ -2830,6 +2830,55 @@ describe("Fixture Verification Evidence", () => {
     expect(sessions.maximum()).toBe(2);
   });
 
+  it("does not retain Development Container sessions for browser-queued work", async () => {
+    const scheduler = createFixtureEvidenceScheduler({
+      concurrency: 4,
+      developmentContainerSessions: 4,
+    });
+    const browser = createBlockedConcurrencyProbe();
+    const ordinary = createBlockedConcurrencyProbe();
+    const browserJobs = [
+      scheduler.run(
+        ["development-container-session", "browser"],
+        async () => await browser.enter(),
+      ),
+    ];
+
+    try {
+      await vi.waitFor(() => {
+        expect(browser.active()).toBe(1);
+      });
+      browserJobs.push(
+        scheduler.run(
+          ["development-container-session", "browser"],
+          async () => await browser.enter(),
+        ),
+        scheduler.run(
+          ["development-container-session", "browser"],
+          async () => await browser.enter(),
+        ),
+      );
+      const ordinaryJobs = ["a", "b", "c"].map(
+        async () =>
+          await scheduler.run(
+            ["development-container-session"],
+            async () => await ordinary.enter(),
+          ),
+      );
+
+      await vi.waitFor(() => {
+        expect(ordinary.active()).toBe(3);
+      });
+
+      ordinary.release();
+      browser.release();
+      await Promise.all([...browserJobs, ...ordinaryJobs]);
+    } finally {
+      ordinary.release();
+      browser.release();
+    }
+  });
+
   it("holds a Development Container session lease until explicit release", async () => {
     const scheduler = createFixtureEvidenceScheduler({
       concurrency: 4,
