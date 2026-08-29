@@ -356,6 +356,64 @@ function safeBasename(value: unknown): value is string {
   );
 }
 
+function sameArguments(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
+}
+
+function isCanonicalPackageFilePath(value: string): boolean {
+  const segments = value.split("/");
+  return (
+    segments[0] === "package" &&
+    segments.length > 1 &&
+    segments.slice(1).every(safeBasename)
+  );
+}
+
+function hasCanonicalReceiptFiles(files: Receipt["files"]): boolean {
+  let previousPath: string | undefined;
+  for (const file of files) {
+    if (
+      !isCanonicalPackageFilePath(file.path) ||
+      !Number.isSafeInteger(file.mode) ||
+      file.mode < 0 ||
+      file.mode > 0o777 ||
+      !Number.isSafeInteger(file.size) ||
+      file.size < 0 ||
+      (previousPath !== undefined && previousPath >= file.path)
+    ) {
+      return false;
+    }
+    previousPath = file.path;
+  }
+  return true;
+}
+
+function hasStableSmokeEvidence(receipt: Receipt): boolean {
+  const [runtimeImport, help, version, greet] = receipt.smokes;
+  return (
+    receipt.smokes.length === 4 &&
+    runtimeImport?.name === "runtime-import" &&
+    sameArguments(runtimeImport.args, []) &&
+    runtimeImport.stdout === "" &&
+    help?.name === "help" &&
+    sameArguments(help.args, ["--help"]) &&
+    help.stdout.includes(`Usage: ${receipt.publication.commandName}`) &&
+    help.stdout.includes("greet") &&
+    version?.name === "version" &&
+    sameArguments(version.args, ["--version"]) &&
+    version.stdout === `${receipt.publication.version}\n` &&
+    greet?.name === "greet" &&
+    sameArguments(greet.args, ["greet", "  Ada Lovelace  "]) &&
+    greet.stdout === "Hello, Ada Lovelace\n"
+  );
+}
+
 async function assertArtifactIdentity(options: {
   readonly repositoryRoot: string;
   readonly receipt: Receipt;
@@ -384,7 +442,9 @@ async function assertArtifactIdentity(options: {
       : [];
   const packedRepository = repositoryObject(packed?.repository);
   const sourceRepository = repositoryObject(manifest.repository);
-  const expectedSmokeNames = ["runtime-import", "help", "version", "greet"];
+  const packedBinTarget = packedBinEntries[0]?.[1];
+  const binFile = receipt.files.find((file) => file.path === receipt.bin.path);
+  const posixExecutableChecked = process.platform !== "win32";
   if (
     !packed ||
     !publication ||
@@ -398,27 +458,18 @@ async function assertArtifactIdentity(options: {
     sourceBinEntries[0]![0] !== command ||
     typeof packedBinEntries[0]![1] !== "string" ||
     packedBinEntries[0]![1] !== sourceBinEntries[0]![1] ||
+    packedBinTarget !== "./dist/cli.js" ||
     !/^\d{4}-\d{2}-\d{2}$/u.test(publication.releaseDate) ||
     publication.releaseNotes.trim().length === 0 ||
     receipt.files.length === 0 ||
-    receipt.files.some(
-      (file) =>
-        !safeBasename(file.path.split("/").at(-1)) ||
-        !Number.isSafeInteger(file.mode) ||
-        !Number.isSafeInteger(file.size) ||
-        file.size < 0,
-    ) ||
+    !hasCanonicalReceiptFiles(receipt.files) ||
     receipt.bin.path !== "package/dist/cli.js" ||
     receipt.bin.shebang !== "#!/usr/bin/env node" ||
-    !Number.isSafeInteger(receipt.bin.mode) ||
-    typeof receipt.bin.posixExecutableChecked !== "boolean" ||
-    receipt.smokes.length !== expectedSmokeNames.length ||
-    receipt.smokes.some(
-      (smoke, index) =>
-        smoke.name !== expectedSmokeNames[index] ||
-        !Array.isArray(smoke.args) ||
-        typeof smoke.stdout !== "string",
-    ) ||
+    binFile === undefined ||
+    receipt.bin.mode !== binFile.mode ||
+    receipt.bin.posixExecutableChecked !== posixExecutableChecked ||
+    (posixExecutableChecked && (receipt.bin.mode & 0o111) === 0) ||
+    !hasStableSmokeEvidence(receipt) ||
     packedRepository?.type !== "git" ||
     packedRepository.url !== publication.repository ||
     packedRepository.directory !== packagePath ||

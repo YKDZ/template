@@ -117,7 +117,19 @@ async function writeVerifiedArtifact(
         releaseNotes: "Publish the stable CLI.",
       },
       packedManifest: manifest,
-      files: [{ path: "package/package.json", mode: 420, size: 1 }],
+      files: [
+        { path: "package/CHANGELOG.md", mode: 420, size: 1 },
+        { path: "package/LICENSE", mode: 420, size: 1 },
+        { path: "package/README.md", mode: 420, size: 1 },
+        {
+          path: "package/dist/cli-command-identity.js",
+          mode: 420,
+          size: 1,
+        },
+        { path: "package/dist/cli.js", mode: 493, size: 1 },
+        { path: "package/dist/main.js", mode: 420, size: 1 },
+        { path: "package/package.json", mode: 420, size: 1 },
+      ],
       bin: {
         path: "package/dist/cli.js",
         shebang: "#!/usr/bin/env node",
@@ -126,7 +138,7 @@ async function writeVerifiedArtifact(
       },
       smokes: [
         { name: "runtime-import", args: [], stdout: "" },
-        { name: "help", args: ["--help"], stdout: "Usage: ship" },
+        { name: "help", args: ["--help"], stdout: "Usage: ship\ngreet\n" },
         { name: "version", args: ["--version"], stdout: `${version}\n` },
         {
           name: "greet",
@@ -739,6 +751,45 @@ describe("manual npm publication capability", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    [
+      "the fixed help arguments",
+      (receipt: Record<string, unknown>) => {
+        (receipt.smokes as Record<string, unknown>[])[1]!.args = [];
+      },
+    ],
+    [
+      "a canonical package file path",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[])[0]!.path = "CHANGELOG.md";
+      },
+    ],
+    [
+      "the packed executable mode",
+      (receipt: Record<string, unknown>) => {
+        (receipt.bin as Record<string, unknown>).mode = 420;
+      },
+    ],
+  ] as const)(
+    "rejects a Ticket 09 receipt that changes %s before spawning",
+    async (_name, mutateReceipt) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-publication-caller-"),
+      );
+      try {
+        await expect(
+          executeFakePublication(workspace, { mutateReceipt }),
+        ).rejects.toMatchObject({
+          code: "identity-invalid",
+          spawns: 0,
+          writes: 0,
+        });
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each([
     [
