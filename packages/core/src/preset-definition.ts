@@ -37,6 +37,10 @@ export type PackageContributionReplayAdapter = {
   identify(contribution: PackageContribution): PlannedPackageContribution;
   replay(options: {
     readonly context: GenerationContext;
+    readonly planningContribution:
+      | "foundationPlan"
+      | "planInitialization"
+      | "planPackageAddition";
     readonly packageDefinition: PackageDefinition;
     readonly packageLeafName: string;
     readonly initialPackages: InitialPackageDefinitionLookup;

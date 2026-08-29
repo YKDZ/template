@@ -22,8 +22,10 @@ import {
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
+import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import { renderNewProject } from "#template-core/renderer";
 
+import { tsLibDefinition } from "../ts-lib/definition.ts";
 import { tsCliDefinition } from "./definition.ts";
 
 async function renderInstalledGeneratedRepository(prefix: string): Promise<{
@@ -106,6 +108,10 @@ describe("ts-cli Preset Definition behavior", () => {
       },
     });
     expect(contribution.exposure).toEqual({ exports: {}, imports: {} });
+    expect(contribution.planningIdentity).toBe("cli-publication-candidate");
+    expect(contribution.foundation.npmPublication).toEqual({
+      kind: "public-cli-candidate",
+    });
     for (const publicProgrammaticField of [
       "main",
       "types",
@@ -170,17 +176,229 @@ describe("ts-cli Preset Definition behavior", () => {
         packageLeafName: "release",
       }),
     ).toBe("packages/release");
-    expect(
-      tsCliDefinition.planPackageAddition?.({
-        context,
-        packageLeafName: "release",
-        packagePath: "tools/release",
-      }).definition,
-    ).toEqual({
+    const addition = tsCliDefinition.planPackageAddition?.({
+      context,
+      packageLeafName: "release",
+      packagePath: "tools/release",
+    });
+    expect(addition?.definition).toEqual({
       name: "@demo/release",
       path: "tools/release",
       role: "cli-tool",
     });
+    expect(addition?.planningIdentity).toBe("cli-package-addition");
+    expect(addition?.foundation.npmPublication).toBeUndefined();
+  });
+
+  it("does not create a publication candidate when ts-cli is added later", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-ts-cli-non-candidate-addition-"),
+    );
+    const targetDir = path.join(workspace, "demo-workspace");
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: tsLibDefinition,
+      context: createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: tsCliDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+        packageLeafName: "release",
+        packagePath: "packages/release",
+      });
+      const rootManifest = addition.manifests.find(
+        (manifest) => manifest.name === "demo-workspace",
+      );
+
+      expect(
+        addition.packageContributions.some(
+          (contribution) =>
+            contribution.foundation.npmPublication?.kind ===
+            "public-cli-candidate",
+        ),
+      ).toBe(false);
+      expect(rootManifest).not.toHaveProperty("scripts.publication:readiness");
+      expect(
+        addition.operations.some(
+          (operation) =>
+            "to" in operation &&
+            operation.to.startsWith("scripts/npm-publication/"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("projects publication readiness only for the initial CLI candidate", () => {
+    const plan = planGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      context: createGenerationContext({
+        targetDir: path.join("generated-repository", "demo-cli"),
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    });
+    const candidate = plan.packageContributions.find(
+      (contribution) =>
+        contribution.foundation.npmPublication?.kind === "public-cli-candidate",
+    );
+    const rootManifest = plan.manifests.find(
+      (manifest) => manifest.name === "demo-cli",
+    );
+
+    expect(candidate?.manifest.devDependencies).toMatchObject({
+      "@demo/typescript-config": "link:../typescript-config",
+    });
+    expect(
+      plan.generationRecord.packages.find(
+        (record) => record.path === "packages/cli",
+      ),
+    ).toMatchObject({
+      contributionIdentity: "cli-publication-candidate",
+      planningContribution: "planInitialization",
+    });
+    expect(rootManifest).toMatchObject({
+      scripts: {
+        check: expect.stringContaining("publication:readiness"),
+        "publication:readiness":
+          "node --conditions=source scripts/npm-publication/check-readiness.ts",
+      },
+      devDependencies: {
+        "@types/semver": "catalog:",
+        "@types/spdx-expression-parse": "catalog:",
+        semver: "catalog:",
+        "spdx-expression-parse": "catalog:",
+      },
+    });
+    expect(plan.operations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ to: ".pnpmfile.mjs" }),
+        expect.objectContaining({
+          kind: "writeTextTemplate",
+          from: "publication/check-readiness.ts",
+          to: "scripts/npm-publication/check-readiness.ts",
+          replacements: {
+            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+          },
+        }),
+        expect.objectContaining({
+          from: "publication/readiness.ts",
+          to: "scripts/npm-publication/readiness.ts",
+        }),
+        expect.objectContaining({
+          from: "publication/changelog.ts",
+          to: "scripts/npm-publication/changelog.ts",
+        }),
+        expect.objectContaining({
+          from: "src/cli-command-identity.ts",
+          to: "scripts/npm-publication/cli-command-identity.ts",
+        }),
+      ]),
+    );
+  });
+
+  it("fails closed when CLI replay identity conflicts with its planning phase", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-ts-cli-retired-replay-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    const plan = planGeneratedRepositoryInitialization({
+      definition: tsCliDefinition,
+      context: createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      }),
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: tsCliDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+        packageLeafName: "release",
+        packagePath: "packages/release",
+      });
+      expect(
+        addition.packageContributions.filter(
+          (contribution) =>
+            contribution.foundation.npmPublication?.kind ===
+            "public-cli-candidate",
+        ),
+      ).toHaveLength(1);
+      expect(
+        addition.generationRecord.packages.find(
+          (record) => record.path === "packages/release",
+        ),
+      ).toMatchObject({
+        contributionIdentity: "cli-package-addition",
+        planningContribution: "planPackageAddition",
+      });
+      const generationPath = path.join(targetDir, ".template/generation.json");
+      const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+        packages: { path: string; contributionIdentity: string }[];
+      };
+      const candidate = generation.packages.find(
+        (record) => record.path === "packages/cli",
+      )!;
+      candidate.contributionIdentity = "cli-package-addition";
+      await writeFile(
+        generationPath,
+        `${JSON.stringify(generation, null, 2)}\n`,
+      );
+      expect(() => loadLocalTemplateMetadata(targetDir)).toThrow(
+        "cli-package-addition replay identity requires planPackageAddition provenance",
+      );
+
+      candidate.contributionIdentity = "cli-publication-candidate";
+      await writeFile(
+        generationPath,
+        `${JSON.stringify(generation, null, 2)}\n`,
+      );
+      await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+      const addedGeneration = JSON.parse(
+        await readFile(generationPath, "utf8"),
+      ) as {
+        packages: { path: string; contributionIdentity: string }[];
+      };
+      addedGeneration.packages.find(
+        (record) => record.path === "packages/release",
+      )!.contributionIdentity = "cli-publication-candidate";
+      await writeFile(
+        generationPath,
+        `${JSON.stringify(addedGeneration, null, 2)}\n`,
+      );
+      expect(() => loadLocalTemplateMetadata(targetDir)).toThrow(
+        "cli-publication-candidate replay identity requires planInitialization provenance",
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("derives the CLI consumer engine from the Generation Context", () => {
@@ -311,6 +529,37 @@ describe("ts-cli Preset Definition behavior", () => {
       await expect(
         stat(path.join(project.packageRoot, "dist")),
       ).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(project.workspace, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("keeps the private candidate Root Check green while require-ready fails closed", async () => {
+    const project = await renderInstalledGeneratedRepository(
+      "template-ts-cli-publication-readiness-",
+    );
+
+    try {
+      const rootCheck = await execa("pnpm", ["run", "check"], {
+        cwd: project.targetDir,
+        reject: false,
+      });
+      expect(rootCheck.exitCode).toBe(0);
+
+      const baseline = await execa("pnpm", ["run", "publication:readiness"], {
+        cwd: project.targetDir,
+        reject: false,
+      });
+      expect(baseline.exitCode).toBe(0);
+      expect(baseline.stdout).toContain("npm publication readiness: blocked");
+
+      const required = await execa(
+        "pnpm",
+        ["run", "publication:readiness", "--require-ready"],
+        { cwd: project.targetDir, reject: false },
+      );
+      expect(required.exitCode).toBe(1);
+      expect(required.stdout).toContain("npm publication readiness: blocked");
     } finally {
       await rm(project.workspace, { recursive: true, force: true });
     }
@@ -619,13 +868,13 @@ describe("ts-cli Preset Definition behavior", () => {
         private: true,
         bin: { cli: "./dist/cli.js" },
         devDependencies: {
-          "@demo/typescript-config": "workspace:*",
+          "@demo/typescript-config": "link:../typescript-config",
         },
       });
       expect(sourceManifest).not.toHaveProperty("version");
       await expect(
         stat(path.join(project.targetDir, ".pnpmfile.mjs")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+      ).resolves.toMatchObject({ mode: expect.any(Number) });
 
       const packDestination = path.join(project.workspace, "packs");
       await mkdir(packDestination);

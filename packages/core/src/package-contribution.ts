@@ -59,6 +59,10 @@ const reservedSystemToolNames = new Set([
 ]);
 
 export type FoundationContribution = {
+  /** Closed publication capability consumed only by coordinated root policy. */
+  readonly npmPublication?: {
+    readonly kind: "public-cli-candidate";
+  };
   /** Toolchains the Foundation must install and project into coordinated root files. */
   readonly toolchains: {
     readonly rust?: {

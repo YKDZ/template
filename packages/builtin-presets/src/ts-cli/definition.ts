@@ -38,6 +38,7 @@ function cliContribution(options: {
   readonly packageLeafName: string;
   readonly packagePath: string;
   readonly packageDefinition?: PackageDefinition;
+  readonly publicationCandidate: boolean;
 }): PackageContribution {
   const definition: PackageDefinition = options.packageDefinition ?? {
     name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
@@ -149,6 +150,9 @@ function cliContribution(options: {
     operations,
     environmentNeeds: [],
     foundation: {
+      ...(options.publicationCandidate
+        ? { npmPublication: { kind: "public-cli-candidate" as const } }
+        : {}),
       toolchains: {},
       editorCapabilities: ["oxc-format-lint"],
       typescriptConfigurationPackage: { dependency: "required" },
@@ -160,15 +164,51 @@ function cliContribution(options: {
   };
 }
 
-const cliReplayAdapter = definePackageContributionReplayAdapter({
-  identity: "cli",
-  replay: ({ context, packageDefinition, packageLeafName }) =>
-    cliContribution({
+const cliPublicationCandidateReplayAdapter =
+  definePackageContributionReplayAdapter({
+    identity: "cli-publication-candidate",
+    replay: ({
+      context,
+      packageDefinition,
+      packageLeafName,
+      planningContribution,
+    }) => {
+      if (planningContribution !== "planInitialization") {
+        throw new Error(
+          "cli-publication-candidate replay identity requires planInitialization provenance",
+        );
+      }
+      return cliContribution({
+        context,
+        packageLeafName,
+        packagePath: packageDefinition.path,
+        packageDefinition,
+        publicationCandidate: true,
+      });
+    },
+  });
+
+const cliPackageAdditionReplayAdapter = definePackageContributionReplayAdapter({
+  identity: "cli-package-addition",
+  replay: ({
+    context,
+    packageDefinition,
+    packageLeafName,
+    planningContribution,
+  }) => {
+    if (planningContribution !== "planPackageAddition") {
+      throw new Error(
+        "cli-package-addition replay identity requires planPackageAddition provenance",
+      );
+    }
+    return cliContribution({
       context,
       packageLeafName,
       packagePath: packageDefinition.path,
       packageDefinition,
-    }),
+      publicationCandidate: false,
+    });
+  },
 });
 
 export const tsCliDefinition = {
@@ -179,19 +219,23 @@ export const tsCliDefinition = {
   },
   source: templateSources.tsCli,
   plannerSourceFile: fileURLToPath(import.meta.url),
-  packageContributionReplayAdapters: [cliReplayAdapter],
+  packageContributionReplayAdapters: [
+    cliPublicationCandidateReplayAdapter,
+    cliPackageAdditionReplayAdapter,
+  ],
   initialPrimaryPackage: {
     defaultLeafName: "cli",
     role: "cli-tool",
     defaultPackagePath: ({ packageLeafName }) =>
       packagePathForLeaf(packageLeafName),
     planInitialContribution({ context, resolvedPackageIdentity }) {
-      return cliReplayAdapter.identify(
+      return cliPublicationCandidateReplayAdapter.identify(
         cliContribution({
           context,
           packageLeafName: resolvedPackageIdentity.leafName,
           packagePath: resolvedPackageIdentity.definition.path,
           packageDefinition: resolvedPackageIdentity.definition,
+          publicationCandidate: true,
         }),
       );
     },
@@ -200,8 +244,13 @@ export const tsCliDefinition = {
     return packagePathForLeaf(packageLeafName);
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
-    return cliReplayAdapter.identify(
-      cliContribution({ context, packageLeafName, packagePath }),
+    return cliPackageAdditionReplayAdapter.identify(
+      cliContribution({
+        context,
+        packageLeafName,
+        packagePath,
+        publicationCandidate: false,
+      }),
     );
   },
 } satisfies BuiltInPresetDefinition;

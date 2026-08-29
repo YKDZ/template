@@ -170,6 +170,12 @@ export function isProtectedGeneratedPath(generatedPath: string): boolean {
     normalizedPath === ".github/dependabot.yml" ||
     normalizedPath.startsWith(".github/workflows/") ||
     normalizedPath.startsWith(".vscode/") ||
+    normalizedPath.startsWith("scripts/npm-publication/") ||
+    normalizedPath.startsWith("scripts/npm-publication-setup/") ||
+    fileName === "CHANGELOG.md" ||
+    fileName === "LICENSE" ||
+    fileName === "README.md" ||
+    fileName === "RELEASING.md" ||
     fileName === "oxfmt.config.ts" ||
     fileName === "oxlint.config.ts" ||
     fileName === "playwright.config.ts" ||

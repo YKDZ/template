@@ -277,11 +277,17 @@ export function renderTurboRunCommand(
   ].join(" ");
 }
 
-export function renderRootCheckCommand(): string {
-  return renderTurboRunCommand(qualityTaskVocabulary, [], {
-    continueAfterFailure: true,
-    taskPrefix: true,
-  });
+export function renderRootCheckCommand(
+  additionalTasks: readonly string[] = [],
+): string {
+  return renderTurboRunCommand(
+    [...qualityTaskVocabulary, ...additionalTasks],
+    [],
+    {
+      continueAfterFailure: true,
+      taskPrefix: true,
+    },
+  );
 }
 
 export function renderDeploymentCheckCommand(): string {

@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "allowImportingTsExtensions": true,
+    "checkJs": true,
+    "noEmit": true
+  },
+  "include": [".pnpmfile.mjs", "scripts/npm-publication/*.ts"]
+}

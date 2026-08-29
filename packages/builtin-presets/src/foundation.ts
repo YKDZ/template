@@ -526,14 +526,22 @@ function preflightLocalTemplateMetadata(options: {
       "Package Addition Generation Record contains duplicate initialization contribution identity",
     );
   }
-  for (const adapter of initialDefinition.packageContributionReplayAdapters) {
-    const matchingRecords = initialRecords.filter(
-      (candidate) => candidate.contributionIdentity === adapter.identity,
-    );
-    if (matchingRecords.length !== 1) {
+  if (initialDefinition.initialPrimaryPackage !== undefined) {
+    if (initialRecords.length !== 1) {
       throw new Error(
-        `${initialDefinition.metadata.name} requires exactly one initial ${adapter.identity} Package Contribution provenance record`,
+        `${initialDefinition.metadata.name} requires exactly one initial Primary Package Contribution provenance record`,
       );
+    }
+  } else {
+    for (const adapter of initialDefinition.packageContributionReplayAdapters) {
+      const matchingRecords = initialRecords.filter(
+        (candidate) => candidate.contributionIdentity === adapter.identity,
+      );
+      if (matchingRecords.length !== 1) {
+        throw new Error(
+          `${initialDefinition.metadata.name} requires exactly one initial ${adapter.identity} Package Contribution provenance record`,
+        );
+      }
     }
   }
   const initialDefinitions = new Map(
@@ -669,6 +677,7 @@ function replayPersistedPackageContribution(options: {
   try {
     contribution = options.adapter.replay({
       context: options.context,
+      planningContribution: options.record.planningContribution,
       packageDefinition: options.packageDefinition,
       packageLeafName: packageLeafName(options.packageDefinition),
       initialPackages: options.initialPackages,
@@ -1138,6 +1147,27 @@ function localTypescriptConfigurationSpecifier(options: {
   return `link:${relativePackagePath}`;
 }
 
+function publicCliCandidate(
+  contributions: readonly PackageContribution[],
+): PackageContribution | undefined {
+  const candidates = contributions.filter(
+    (contribution) =>
+      contribution.foundation.npmPublication?.kind === "public-cli-candidate",
+  );
+  if (candidates.length > 1) {
+    throw new Error(
+      `Generated Repository Plan supports at most one public CLI candidate; found ${candidates.map((candidate) => `${candidate.definition.name} at ${candidate.definition.path}`).join(", ")}`,
+    );
+  }
+  const candidate = candidates[0];
+  if (candidate !== undefined && candidate.definition.role !== "cli-tool") {
+    throw new Error(
+      `Public CLI candidate ${candidate.definition.name} must use the cli-tool Package role`,
+    );
+  }
+  return candidate;
+}
+
 function foundationPlan(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -1193,6 +1223,7 @@ function foundationPlan(options: {
       `Generation Context TypeScript Configuration Package ${configPackageName} conflicts with Blueprint Package Definition ${configDefinition.name}`,
     );
   }
+  const publicationCandidate = publicCliCandidate(options.contributions);
   const packageContributions = options.contributions.map((contribution) => {
     if (contribution.foundation.typescriptConfigurationPackage === undefined) {
       return contribution;
@@ -1204,7 +1235,8 @@ function foundationPlan(options: {
       : "devDependencies";
     const dependencySpecifier =
       dependencyField === "devDependencies" &&
-      contribution.manifest.private !== true
+      (contribution.manifest.private !== true ||
+        publicationCandidate?.definition.path === contribution.definition.path)
         ? localTypescriptConfigurationSpecifier({
             consumerPackagePath: contribution.definition.path,
             configurationPackagePath: configDefinition.path,
@@ -1223,7 +1255,6 @@ function foundationPlan(options: {
     };
   });
   const requiresPackingHook = packageContributions.some((contribution) => {
-    if (contribution.manifest.private === true) return false;
     const developmentDependencies = contribution.manifest.devDependencies;
     return (
       isRecord(developmentDependencies) &&
@@ -1375,8 +1406,17 @@ function foundationPlan(options: {
     private: true,
     type: "module",
     scripts: {
-      check: renderRootCheckCommand(),
+      check:
+        publicationCandidate === undefined
+          ? renderRootCheckCommand()
+          : renderRootCheckCommand(["publication:readiness"]),
       boundaries: "node --conditions=source scripts/check-boundaries.ts",
+      ...(publicationCandidate === undefined
+        ? {}
+        : {
+            "publication:readiness":
+              "node --conditions=source scripts/npm-publication/check-readiness.ts",
+          }),
       ...(hasDeploymentTask
         ? { "check:deployment": renderDeploymentCheckCommand() }
         : {}),
@@ -1392,9 +1432,21 @@ function foundationPlan(options: {
     },
     devDependencies: {
       "@types/node": "catalog:",
+      ...(publicationCandidate === undefined
+        ? {}
+        : {
+            "@types/semver": "catalog:",
+            "@types/spdx-expression-parse": "catalog:",
+          }),
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
+      ...(publicationCandidate === undefined
+        ? {}
+        : {
+            semver: "catalog:",
+            "spdx-expression-parse": "catalog:",
+          }),
       turbo: "catalog:",
       "typescript-7": "catalog:",
     },
@@ -1513,6 +1565,16 @@ function foundationPlan(options: {
       from: "turbo.json",
       to: "turbo.json",
     },
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication/turbo.json",
+            to: "turbo.json",
+          },
+        ]),
     ...turboBoundaryTags.map(
       (tag): RenderOperation => ({
         kind: "mergeJsonTemplate",
@@ -1539,7 +1601,17 @@ function foundationPlan(options: {
       from: "tsconfig.json",
       to: "tsconfig.json",
     },
-    ...(requiresPackingHook
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication/root-tsconfig.json",
+            to: "tsconfig.json",
+          },
+        ]),
+    ...(requiresPackingHook && publicationCandidate === undefined
       ? [
           {
             kind: "mergeJsonTemplate" as const,
@@ -1567,6 +1639,37 @@ function foundationPlan(options: {
       from: "oxfmt.config.ts",
       to: "oxfmt.config.ts",
     },
+    ...(publicationCandidate === undefined
+      ? []
+      : [
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication/readiness.ts",
+            to: "scripts/npm-publication/readiness.ts",
+          },
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication/check-readiness.ts",
+            to: "scripts/npm-publication/check-readiness.ts",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication/changelog.ts",
+            to: "scripts/npm-publication/changelog.ts",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "src/cli-command-identity.ts",
+            to: "scripts/npm-publication/cli-command-identity.ts",
+          },
+        ]),
     {
       kind: "writeJson",
       to: ".vscode/extensions.json",

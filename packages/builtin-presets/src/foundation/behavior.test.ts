@@ -7,6 +7,7 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   prepareGeneratedRepositoryInitialization,
+  type BuiltInGenerationContext,
 } from "../foundation.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
 
@@ -514,6 +515,28 @@ describe("Generated Repository initialization preparation", () => {
           runner: "./dist/cli.js",
         });
       }
+      if (
+        contribution.foundation.npmPublication?.kind === "public-cli-candidate"
+      ) {
+        expect(readJson("tsconfig.json")).toMatchObject({
+          compilerOptions: {
+            allowJs: true,
+            allowImportingTsExtensions: true,
+            checkJs: true,
+            noEmit: true,
+          },
+          include: [".pnpmfile.mjs", "scripts/npm-publication/*.ts"],
+        });
+        expect(preparation.plan.operations).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "writeTextTemplate",
+              to: "scripts/npm-publication/check-readiness.ts",
+              replacements: { PUBLIC_CLI_PACKAGE_PATH: "tools/release" },
+            }),
+          ]),
+        );
+      }
     },
   );
 
@@ -541,9 +564,70 @@ describe("Generated Repository initialization preparation", () => {
         "@acme/typescript-config": "workspace:*",
       },
     });
+    const rootManifest = preparation.plan.manifests.find(
+      (manifest) => manifest.name === "customer-repository",
+    );
+    expect(rootManifest).not.toHaveProperty("scripts.publication:readiness");
+    expect(rootManifest).not.toHaveProperty("devDependencies.semver");
+    expect(
+      preparation.plan.operations.some((operation) =>
+        "to" in operation
+          ? operation.to.startsWith("scripts/npm-publication/") ||
+            operation.to === ".pnpmfile.mjs"
+          : false,
+      ),
+    ).toBe(false);
     expect(contribution.manifest).toEqual(plannedManifest);
     expect(JSON.parse(new TextDecoder().decode(packageJson.content))).toEqual(
       contribution.manifest,
+    );
+  });
+
+  it("rejects a complete plan with more than one public CLI candidate", () => {
+    const base = builtInPresetRegistry.require("vue-hono-app");
+    if (
+      base.initialPrimaryPackage !== undefined ||
+      base.planInitializationContributions === undefined
+    ) {
+      throw new Error("Expected a fixed multi-package Preset Definition");
+    }
+    const baseContributions = (context: BuiltInGenerationContext) =>
+      base.planInitializationContributions!(context);
+    const markCandidate = <
+      T extends ReturnType<typeof baseContributions>[number],
+    >(
+      contribution: T,
+    ): T =>
+      ({
+        ...contribution,
+        foundation: {
+          ...contribution.foundation,
+          npmPublication: { kind: "public-cli-candidate" as const },
+        },
+      }) as T;
+    const definition = {
+      ...base,
+      metadata: { ...base.metadata, name: "two-public-cli-candidates" },
+      planInitialization(context: BuiltInGenerationContext) {
+        return markCandidate(base.planInitialization(context));
+      },
+      planInitializationContributions(context: BuiltInGenerationContext) {
+        return baseContributions(context).map((contribution, index) =>
+          index < 2 ? markCandidate(contribution) : contribution,
+        );
+      },
+    };
+
+    expect(() =>
+      planGeneratedRepositoryInitialization({
+        definition,
+        context: createGenerationContext({
+          targetDir: "/tmp/two-public-cli-candidates",
+          toolchain,
+        }),
+      }),
+    ).toThrow(
+      "Generated Repository Plan supports at most one public CLI candidate",
     );
   });
 

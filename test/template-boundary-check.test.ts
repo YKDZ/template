@@ -39,6 +39,65 @@ function workflowOperation(
 }
 
 describe("Template Source Boundary", () => {
+  it.each(["packages/cli/README.md", "scripts/npm-publication/readiness.ts"])(
+    "rejects an inline publication body for %s with its planner owner",
+    async (generatedPath) => {
+      const directory = await mkdtemp(
+        path.join(tmpdir(), "template-boundary-publication-body-"),
+      );
+      const sourceFilePath = path.join(directory, "publication-planner.ts");
+      await writeFile(
+        sourceFilePath,
+        [
+          "export function planPublicationBody() {",
+          "  return {",
+          '    kind: "writeText",',
+          `    to: ${JSON.stringify(generatedPath)},`,
+          '    text: "protected publication body\\n",',
+          "  };",
+          "}",
+        ].join("\n"),
+        "utf8",
+      );
+
+      try {
+        const result = await checkTemplateSourceBoundary({
+          projections: [
+            {
+              name: "ts-cli:planInitialization",
+              sourceFilePath,
+              definitionName: "ts-cli",
+              planningContribution: "planInitialization",
+              plan: {
+                operations: [
+                  {
+                    kind: "writeText",
+                    to: generatedPath,
+                    text: "protected publication body\n",
+                  },
+                ],
+              },
+            },
+          ],
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          violations: [
+            expect.objectContaining({
+              generatedPath,
+              owningFunction: "planPublicationBody",
+              operationKind: "writeText",
+              sourceFilePath,
+            }),
+          ],
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each([
     [
       "an extra declaration key",
