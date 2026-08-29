@@ -84,6 +84,8 @@ const publicationFiles = [
   "CHANGELOG.md",
 ] as const;
 
+const canonicalPublicationPrepack = "pnpm exec turbo run build --filter=.";
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -573,8 +575,7 @@ function addManifestBlockers(options: {
     isObject(scripts) &&
     typeof scripts.build === "string" &&
     scripts.build.length > 0 &&
-    typeof scripts.prepack === "string" &&
-    scripts.prepack.length > 0 &&
+    scripts.prepack === canonicalPublicationPrepack &&
     isObject(publishConfig) &&
     Object.keys(publishConfig).toSorted().join("\u0000") ===
       ["access", "registry"].join("\u0000") &&

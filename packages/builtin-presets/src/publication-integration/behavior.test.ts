@@ -6,6 +6,7 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -201,6 +202,21 @@ describe("ts-cli publication owner-fact integration", () => {
       });
       expect(await readdir(safeOutput)).toEqual([]);
 
+      const overlappingTarget = path.join(repositoryRoot, ".artifact-output");
+      await mkdir(overlappingTarget);
+      const overlappingOutput = path.join(workspace, "overlapping-output");
+      await symlink(overlappingTarget, overlappingOutput, "dir");
+      await expect(
+        artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory: overlappingOutput,
+        }),
+      ).resolves.toMatchObject({
+        kind: "failed",
+        failure: { code: "artifact-output-invalid" },
+      });
+
       const candidateManifestPath = path.join(
         repositoryRoot,
         "packages/cli/package.json",
@@ -234,10 +250,77 @@ describe("ts-cli publication owner-fact integration", () => {
       const sourceManifest = JSON.parse(
         await readFile(sourceManifestPath, "utf8"),
       ) as Record<string, unknown>;
-      const buildWitnessPath = path.join(workspace, "prepack-count.txt");
       const scripts = sourceManifest.scripts as Record<string, string>;
-      scripts.prepack = `node -e "require('node:fs').appendFileSync(process.env.TEMPLATE_TEST_BUILD_WITNESS, 'build\\n')" && ${scripts.prepack}`;
+      const canonicalPrepack = scripts.prepack!;
+      scripts.prepack = "true";
       await writeJson(sourceManifestPath, sourceManifest);
+
+      const invalidPrepackOutput = path.join(
+        workspace,
+        "invalid-prepack-output",
+      );
+      await mkdir(invalidPrepackOutput);
+      await expect(
+        artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory: invalidPrepackOutput,
+        }),
+      ).resolves.toMatchObject({
+        kind: "blocked",
+        readiness: {
+          mode: "public-intent",
+          blockers: expect.arrayContaining([
+            expect.objectContaining({ code: "manifest-contract" }),
+          ]),
+        },
+      });
+      expect(await readdir(invalidPrepackOutput)).toEqual([]);
+
+      scripts.prepack = canonicalPrepack;
+      scripts.postbuild = `${scripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
+      scripts.postpack =
+        "node -e \"const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('package.json','utf8'));value.description='Changed after pack';fs.writeFileSync('package.json',JSON.stringify(value,null,2)+'\\n')\"";
+      await writeJson(sourceManifestPath, sourceManifest);
+
+      const mainSourcePath = path.join(
+        repositoryRoot,
+        "packages/cli/src/main.ts",
+      );
+      const mainSource = await readFile(mainSourcePath, "utf8");
+      await writeFile(
+        mainSourcePath,
+        mainSource.replace(
+          "if (normalizedName.length === 0)",
+          "if (normalizedName.length < 0)",
+        ),
+      );
+      const invalidBehaviorOutput = path.join(
+        workspace,
+        "invalid-behavior-output",
+      );
+      await mkdir(invalidBehaviorOutput);
+      await expect(
+        artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory: invalidBehaviorOutput,
+        }),
+      ).resolves.toMatchObject({
+        kind: "failed",
+        failure: { code: "consumer-smoke-failed" },
+      });
+      expect(await readdir(invalidBehaviorOutput)).toEqual([]);
+      await writeFile(mainSourcePath, mainSource);
+      await rm(path.join(repositoryRoot, "packages/cli/.build-witness"), {
+        force: true,
+      });
+
+      const refreshedManifest = JSON.parse(
+        await readFile(sourceManifestPath, "utf8"),
+      ) as Record<string, unknown>;
+      refreshedManifest.description = "A focused command-line release tool.";
+      await writeJson(sourceManifestPath, refreshedManifest);
 
       const outputDirectory = path.join(workspace, "verified-output");
       await mkdir(outputDirectory);
@@ -245,12 +328,13 @@ describe("ts-cli publication owner-fact integration", () => {
         NPM_CONFIG_BIN_LINKS: process.env.NPM_CONFIG_BIN_LINKS,
         npm_config_package_lock_only: process.env.npm_config_package_lock_only,
         NPM_CONFIG_REGISTRY: process.env.NPM_CONFIG_REGISTRY,
-        TEMPLATE_TEST_BUILD_WITNESS: process.env.TEMPLATE_TEST_BUILD_WITNESS,
+        NODE_OPTIONS: process.env.NODE_OPTIONS,
       };
       process.env.NPM_CONFIG_BIN_LINKS = "false";
       process.env.npm_config_package_lock_only = "true";
       process.env.NPM_CONFIG_REGISTRY = "https://invalid.example/";
-      process.env.TEMPLATE_TEST_BUILD_WITNESS = buildWitnessPath;
+      process.env.NODE_OPTIONS =
+        "--require=/definitely/missing-node-options.cjs";
       let verified;
       try {
         verified = await artifactModule.verifyNpmPublicationArtifact({
@@ -316,7 +400,45 @@ describe("ts-cli publication owner-fact integration", () => {
           "verified-publication-artifact.json",
         ].toSorted(),
       );
-      expect(await readFile(buildWitnessPath, "utf8")).toBe("build\n");
+      expect(
+        await readFile(
+          path.join(repositoryRoot, "packages/cli/.build-witness"),
+          "utf8",
+        ),
+      ).toBe("build\n");
+      expect(
+        JSON.parse(await readFile(sourceManifestPath, "utf8")),
+      ).toMatchObject({ description: "Changed after pack" });
+      expect(verified.receipt.packedManifest).toMatchObject({
+        description: "A focused command-line release tool.",
+      });
+
+      const callerOutput = path.join(workspace, "caller-output");
+      await mkdir(callerOutput);
+      const caller = await execa(
+        "pnpm",
+        [
+          "run",
+          "publication:artifact",
+          "--",
+          "--output-directory",
+          callerOutput,
+        ],
+        { cwd: repositoryRoot, reject: false },
+      );
+      expect(caller.exitCode).toBe(0);
+      expect(caller.stdout).toContain("npm publication artifact: verified");
+      expect(await readdir(callerOutput)).toHaveLength(3);
+
+      const invalidCaller = await execa(
+        "pnpm",
+        ["run", "publication:artifact", "--", "--output-directory"],
+        { cwd: repositoryRoot, reject: false },
+      );
+      expect(invalidCaller).toMatchObject({
+        exitCode: 2,
+        stderr: expect.stringContaining("ERROR publication-artifact-usage"),
+      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -427,7 +549,7 @@ describe("ts-cli publication owner-fact integration", () => {
         string,
         string
       >;
-      rootCandidateScripts.prepack = `node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')" && ${rootCandidateScripts.prepack}`;
+      rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
       await writeJson(publicManifestPath, rootCandidateManifest);
       const rootCheck = await execa("pnpm", ["run", "check"], {
         cwd: repositoryRoot,

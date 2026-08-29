@@ -880,6 +880,33 @@ describe("Generated Repository npm publication readiness", () => {
     );
   });
 
+  it("blocks a public CLI whose prepack no longer owns the canonical build", async () => {
+    const repositoryRoot = await generatedRepository();
+    await writeReadyFacts(repositoryRoot, "@demo/cli");
+    const manifest = readyManifest("@demo/cli");
+    await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
+      ...manifest,
+      scripts: {
+        ...(manifest.scripts as Record<string, string>),
+        prepack: "true",
+      },
+    });
+    const { inspectNpmPublicationReadiness } =
+      await loadReadinessModule(repositoryRoot);
+
+    const result = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+
+    expect(result).toMatchObject({
+      kind: "blocked",
+      blockers: expect.arrayContaining([
+        expect.objectContaining({ code: "manifest-contract" }),
+      ]),
+    });
+  });
+
   it("maps release-critical changelog failures into readiness blockers", async () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "@demo/cli");

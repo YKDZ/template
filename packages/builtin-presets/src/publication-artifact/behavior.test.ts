@@ -99,7 +99,7 @@ describe("verified publication artifact contracts", () => {
     }
   });
 
-  it("rejects every packed scripts field even when the CLI identity is valid", async () => {
+  it("rejects scripts and unreviewed top-level packed manifest fields", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-manifest-contract-"),
     );
@@ -158,5 +158,56 @@ describe("verified publication artifact contracts", () => {
         readiness,
       }),
     ).toMatchObject({ code: "artifact-manifest-contract" });
+    const { scripts: _scripts, ...withoutScripts } = packedManifest;
+    expect(
+      inspectPackedManifestContract({
+        manifest: { ...withoutScripts, author: "Ada Lovelace" },
+        sourceManifest,
+        readiness,
+      }),
+    ).toMatchObject({ code: "artifact-manifest-contract" });
+  });
+
+  it("uses the explicit Windows command processor only for installed cmd bins", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-consumer-command-"),
+    );
+    workspaces.push(workspace);
+    const { planInstalledBinCommand } = await loadArtifactModule(workspace);
+    const environment = { ComSpec: String.raw`C:\Windows\System32\cmd.exe` };
+    const binPath = String.raw`C:\consumer\node_modules\.bin\ship.cmd`;
+
+    expect(
+      planInstalledBinCommand({
+        platform: "win32",
+        binPath,
+        args: ["--help"],
+        environment,
+      }),
+    ).toEqual({
+      executable: environment.ComSpec,
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        '""%TEMPLATE_VERIFIED_PUBLICATION_BIN%" "--help""',
+      ],
+      environment: {
+        ...environment,
+        TEMPLATE_VERIFIED_PUBLICATION_BIN: binPath,
+      },
+    });
+    expect(
+      planInstalledBinCommand({
+        platform: "linux",
+        binPath: "/consumer/node_modules/.bin/ship",
+        args: ["--help"],
+        environment: {},
+      }),
+    ).toEqual({
+      executable: "/consumer/node_modules/.bin/ship",
+      args: ["--help"],
+      environment: {},
+    });
   });
 });

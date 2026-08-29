@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -138,6 +139,18 @@ type ArchiveInspection = {
   readonly cliSource: Buffer;
 };
 
+type ValidatedArtifactPaths = {
+  readonly repositoryRoot: string;
+  readonly packageRoot: string;
+  readonly outputDirectory: string;
+};
+
+type InstalledBinCommand = {
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly environment: NodeJS.ProcessEnv;
+};
+
 const expectedFiles = [
   "package/CHANGELOG.md",
   "package/LICENSE",
@@ -147,6 +160,45 @@ const expectedFiles = [
   "package/dist/main.js",
   "package/package.json",
 ] as const;
+
+const allowedPackedManifestFields = new Set([
+  "bin",
+  "bugs",
+  "dependencies",
+  "description",
+  "engines",
+  "files",
+  "homepage",
+  "license",
+  "name",
+  "publishConfig",
+  "repository",
+  "type",
+  "version",
+]);
+
+const inheritedChildEnvironmentKeys = [
+  "ComSpec",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NO_PROXY",
+  "PATH",
+  "PATHEXT",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
+  "TMPDIR",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+] as const;
+
+const installedBinEnvironmentKey = "TEMPLATE_VERIFIED_PUBLICATION_BIN";
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -237,23 +289,39 @@ async function validateOutputDirectory(options: {
   readonly repositoryRoot: string;
   readonly packageRoot: string;
   readonly outputDirectory: string;
-}): Promise<PublicationArtifactFailure | undefined> {
+}): Promise<ValidatedArtifactPaths | PublicationArtifactFailure> {
   try {
-    const output = await stat(options.outputDirectory);
+    const [repositoryRoot, packageRoot, outputDirectory] = await Promise.all([
+      realpath(options.repositoryRoot),
+      realpath(options.packageRoot),
+      realpath(options.outputDirectory),
+    ]);
+    const [repository, packageDirectory, output] = await Promise.all([
+      stat(repositoryRoot),
+      stat(packageRoot),
+      stat(outputDirectory),
+    ]);
+    if (!repository.isDirectory())
+      throw new Error("repository path is not a directory");
+    if (!packageDirectory.isDirectory())
+      throw new Error("package path is not a directory");
     if (!output.isDirectory())
       throw new Error("output path is not a directory");
-    if ((await readdir(options.outputDirectory)).length !== 0) {
+    if (!pathContains(repositoryRoot, packageRoot)) {
+      throw new Error("package directory is outside the repository");
+    }
+    if ((await readdir(outputDirectory)).length !== 0) {
       throw new Error("output directory is not empty");
     }
     if (
-      pathContains(options.repositoryRoot, options.outputDirectory) ||
-      pathContains(options.outputDirectory, options.repositoryRoot) ||
-      pathContains(options.packageRoot, options.outputDirectory) ||
-      pathContains(options.outputDirectory, options.packageRoot)
+      pathContains(repositoryRoot, outputDirectory) ||
+      pathContains(outputDirectory, repositoryRoot) ||
+      pathContains(packageRoot, outputDirectory) ||
+      pathContains(outputDirectory, packageRoot)
     ) {
       throw new Error("output directory overlaps the repository or package");
     }
-    return undefined;
+    return { repositoryRoot, packageRoot, outputDirectory };
   } catch (error) {
     return failure(
       "artifact-output-invalid",
@@ -453,22 +521,9 @@ export function inspectPackedManifestContract(options: {
   const dependencies = manifest.dependencies;
   const files = manifest.files;
   const publishConfig = manifest.publishConfig;
-  const forbidden = [
-    "private",
-    "devDependencies",
-    "peerDependencies",
-    "optionalDependencies",
-    "bundledDependencies",
-    "bundleDependencies",
-    "main",
-    "types",
-    "typings",
-    "exports",
-    "imports",
-    "packageManager",
-    "pnpm",
-    "provenance",
-  ].filter((key) => Object.hasOwn(manifest, key));
+  const unexpectedFields = Object.keys(manifest).filter(
+    (key) => !allowedPackedManifestFields.has(key),
+  );
   const exactIdentity =
     manifest.name === readiness.publication.packageName &&
     manifest.version === readiness.publication.version &&
@@ -507,8 +562,7 @@ export function inspectPackedManifestContract(options: {
     !exactBin ||
     !exactDependencies ||
     !validPublishConfig ||
-    Object.hasOwn(manifest, "scripts") ||
-    forbidden.length > 0
+    unexpectedFields.length > 0
   ) {
     return failure(
       "artifact-manifest-contract",
@@ -518,8 +572,7 @@ export function inspectPackedManifestContract(options: {
         exactBin,
         exactDependencies,
         validPublishConfig,
-        forbidden,
-        scripts: manifest.scripts,
+        unexpectedFields,
       }),
       "The closed ready public CLI packed-manifest contract",
       "Correct the public CLI manifest or packing hook and retry.",
@@ -528,13 +581,59 @@ export function inspectPackedManifestContract(options: {
   return undefined;
 }
 
-function sanitizedNpmEnvironment(repositoryRoot: string): NodeJS.ProcessEnv {
+function isolatedChildEnvironment(repositoryRoot: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (!/^npm_config_/iu.test(key) && value !== undefined) env[key] = value;
+  for (const key of inheritedChildEnvironmentKeys) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
   }
   env.PATH = `${path.join(repositoryRoot, "node_modules", ".bin")}${path.delimiter}${env.PATH ?? ""}`;
   return env;
+}
+
+function quotedWindowsCommandArgument(value: string): string {
+  if (/["\0\r\n]/u.test(value)) {
+    throw new Error("installed bin smoke argument is not command-safe");
+  }
+  return `"${value}"`;
+}
+
+/** @internal Pure installed-bin command seam used by focused platform tests. */
+export function planInstalledBinCommand(options: {
+  readonly platform: NodeJS.Platform;
+  readonly binPath: string;
+  readonly args: readonly string[];
+  readonly environment: NodeJS.ProcessEnv;
+}): InstalledBinCommand {
+  if (options.platform !== "win32") {
+    return {
+      executable: options.binPath,
+      args: options.args,
+      environment: options.environment,
+    };
+  }
+  if (/["\0\r\n]/u.test(options.binPath)) {
+    throw new Error("installed Windows bin path is not command-safe");
+  }
+  const commandProcessor = options.environment.ComSpec;
+  if (
+    commandProcessor === undefined ||
+    !path.win32.isAbsolute(commandProcessor)
+  ) {
+    throw new Error("ComSpec must name the absolute Windows command processor");
+  }
+  const command = [
+    `"%${installedBinEnvironmentKey}%"`,
+    ...options.args.map(quotedWindowsCommandArgument),
+  ].join(" ");
+  return {
+    executable: commandProcessor,
+    args: ["/d", "/s", "/c", `"${command}"`],
+    environment: {
+      ...options.environment,
+      [installedBinEnvironmentKey]: options.binPath,
+    },
+  };
 }
 
 async function smokeCommand(options: {
@@ -561,22 +660,60 @@ export async function verifyNpmPublicationArtifact(options: {
   readonly packagePath: string;
   readonly outputDirectory: string;
 }): Promise<VerifiedPublicationArtifactResult> {
-  const repositoryRoot = path.resolve(options.repositoryRoot);
-  const packageRoot = path.resolve(repositoryRoot, options.packagePath);
-  const outputDirectory = path.resolve(options.outputDirectory);
-  const outputFailure = await validateOutputDirectory({
-    repositoryRoot,
-    packageRoot,
-    outputDirectory,
+  const requestedRepositoryRoot = path.resolve(options.repositoryRoot);
+  const requestedPackageRoot = path.resolve(
+    requestedRepositoryRoot,
+    options.packagePath,
+  );
+  const requestedOutputDirectory = path.resolve(options.outputDirectory);
+  const validatedPaths = await validateOutputDirectory({
+    repositoryRoot: requestedRepositoryRoot,
+    packageRoot: requestedPackageRoot,
+    outputDirectory: requestedOutputDirectory,
   });
-  if (outputFailure !== undefined)
-    return { kind: "failed", failure: outputFailure };
+  if ("code" in validatedPaths) {
+    return { kind: "failed", failure: validatedPaths };
+  }
+  const { repositoryRoot, packageRoot, outputDirectory } = validatedPaths;
+  const packagePath = path
+    .relative(repositoryRoot, packageRoot)
+    .split(path.sep)
+    .join("/");
 
   const readiness = await inspectNpmPublicationReadiness({
     repositoryRoot,
-    packagePath: options.packagePath,
+    packagePath,
   });
   if (readiness.kind === "blocked") return { kind: "blocked", readiness };
+
+  let sourceManifestValue: unknown;
+  try {
+    sourceManifestValue = JSON.parse(
+      await readFile(path.join(packageRoot, "package.json"), "utf8"),
+    );
+  } catch (error) {
+    return {
+      kind: "failed",
+      failure: failure(
+        "artifact-manifest-invalid",
+        error instanceof Error ? error.message : error,
+        "The readiness-approved source package manifest snapshot",
+        "Restore the package manifest and retry.",
+      ),
+    };
+  }
+  if (!isObject(sourceManifestValue)) {
+    return {
+      kind: "failed",
+      failure: failure(
+        "artifact-manifest-invalid",
+        "source package.json is not an object",
+        "The readiness-approved source package manifest snapshot",
+        "Restore the package manifest and retry.",
+      ),
+    };
+  }
+  const childEnvironment = isolatedChildEnvironment(repositoryRoot);
 
   const ownedTemporaryPaths: string[] = [];
   const ownedFinalPaths: string[] = [];
@@ -609,6 +746,7 @@ export async function verifyNpmPublicationArtifact(options: {
       executable: "pnpm",
       args: packArgs,
       cwd: packageRoot,
+      env: childEnvironment,
     });
     if (pack.exitCode !== 0) {
       result = {
@@ -666,21 +804,6 @@ export async function verifyNpmPublicationArtifact(options: {
       result = { kind: "failed", failure: archive };
       return result;
     }
-    const sourceManifestValue: unknown = JSON.parse(
-      await readFile(path.join(packageRoot, "package.json"), "utf8"),
-    );
-    if (!isObject(sourceManifestValue)) {
-      result = {
-        kind: "failed",
-        failure: failure(
-          "artifact-manifest-invalid",
-          "source package.json is not an object",
-          "The readiness-approved source package manifest",
-          "Restore the package manifest and retry.",
-        ),
-      };
-      return result;
-    }
     const manifestFailure = inspectPackedManifestContract({
       manifest: archive.manifest,
       sourceManifest: sourceManifestValue,
@@ -732,25 +855,24 @@ export async function verifyNpmPublicationArtifact(options: {
       "--audit=false",
       "--fund=false",
     ] as const;
-    const npmEnvironment = sanitizedNpmEnvironment(repositoryRoot);
-    const npmExecutable = path.join(
+    const npmCliPath = path.join(
       repositoryRoot,
-      "node_modules/.bin",
-      `npm${process.platform === "win32" ? ".cmd" : ""}`,
+      "node_modules/npm/bin/npm-cli.js",
     );
+    const npmCommandArgs = [npmCliPath, ...npmArgs] as const;
     const install = await runCommand({
-      executable: npmExecutable,
-      args: npmArgs,
+      executable: process.execPath,
+      args: npmCommandArgs,
       cwd: consumerDirectory,
-      env: npmEnvironment,
+      env: childEnvironment,
     });
     if (install.exitCode !== 0) {
       result = {
         kind: "failed",
         failure: commandFailure(
           "consumer-install-failed",
-          npmExecutable,
-          npmArgs,
+          process.execPath,
+          npmCommandArgs,
           install,
           "The locked npm client to install the local tgz with public runtime dependencies",
           "Restore registry access or correct the packed runtime dependency and retry.",
@@ -773,7 +895,7 @@ export async function verifyNpmPublicationArtifact(options: {
       executable: process.execPath,
       args: runtimeImportArgs,
       cwd: consumerDirectory,
-      env: npmEnvironment,
+      env: childEnvironment,
     });
     if ("code" in runtimeImport) {
       result = { kind: "failed", failure: runtimeImport };
@@ -814,31 +936,50 @@ export async function verifyNpmPublicationArtifact(options: {
     const helpArgs = ["--help"] as const;
     const versionArgs = ["--version"] as const;
     const greetArgs = ["greet", "  Ada Lovelace  "] as const;
-    const help = await smokeCommand({
-      executable: binPath,
+    const invalidGreetArgs = ["greet", "   "] as const;
+    const helpCommand = planInstalledBinCommand({
+      platform: process.platform,
+      binPath,
       args: helpArgs,
+      environment: childEnvironment,
+    });
+    const help = await smokeCommand({
+      executable: helpCommand.executable,
+      args: helpCommand.args,
       cwd: consumerDirectory,
-      env: npmEnvironment,
+      env: helpCommand.environment,
     });
     if ("code" in help) {
       result = { kind: "failed", failure: help };
       return result;
     }
-    const version = await smokeCommand({
-      executable: binPath,
+    const versionCommand = planInstalledBinCommand({
+      platform: process.platform,
+      binPath,
       args: versionArgs,
+      environment: childEnvironment,
+    });
+    const version = await smokeCommand({
+      executable: versionCommand.executable,
+      args: versionCommand.args,
       cwd: consumerDirectory,
-      env: npmEnvironment,
+      env: versionCommand.environment,
     });
     if ("code" in version) {
       result = { kind: "failed", failure: version };
       return result;
     }
-    const greet = await smokeCommand({
-      executable: binPath,
+    const greetCommand = planInstalledBinCommand({
+      platform: process.platform,
+      binPath,
       args: greetArgs,
+      environment: childEnvironment,
+    });
+    const greet = await smokeCommand({
+      executable: greetCommand.executable,
+      args: greetCommand.args,
       cwd: consumerDirectory,
-      env: npmEnvironment,
+      env: greetCommand.environment,
     });
     if ("code" in greet) {
       result = { kind: "failed", failure: greet };
@@ -861,6 +1002,44 @@ export async function verifyNpmPublicationArtifact(options: {
           }),
           "Installed help, exact version, and greet behavior",
           "Correct the packed command identity or behavior and retry.",
+        ),
+      };
+      return result;
+    }
+    const invalidGreetCommand = planInstalledBinCommand({
+      platform: process.platform,
+      binPath,
+      args: invalidGreetArgs,
+      environment: childEnvironment,
+    });
+    const invalidGreet = await runCommand({
+      executable: invalidGreetCommand.executable,
+      args: invalidGreetCommand.args,
+      cwd: consumerDirectory,
+      env: invalidGreetCommand.environment,
+    });
+    if (
+      invalidGreet.exitCode !== 1 ||
+      invalidGreet.stdout !== "" ||
+      !invalidGreet.stderr.startsWith("error: Name must not be empty\n")
+    ) {
+      result = {
+        kind: "failed",
+        failure: failure(
+          "consumer-smoke-failed",
+          JSON.stringify({
+            args: invalidGreetArgs,
+            exitCode: invalidGreet.exitCode,
+            stdout: invalidGreet.stdout,
+            stderr: invalidGreet.stderr,
+          }),
+          "Installed greet with a blank name to exit 1 with the stable validation error and no stdout",
+          "Correct the packed command validation behavior and retry.",
+          {
+            executable: invalidGreetCommand.executable,
+            args: invalidGreetCommand.args,
+            exitCode: invalidGreet.exitCode,
+          },
         ),
       };
       return result;

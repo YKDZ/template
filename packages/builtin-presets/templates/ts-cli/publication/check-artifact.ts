@@ -11,17 +11,32 @@ function oneLine(value: string): string {
   return value.replaceAll(/\s*\r?\n\s*/gu, " ");
 }
 
-const unknownArguments = process.argv.slice(2);
-if (unknownArguments.length > 0) {
+const rawArguments = process.argv.slice(2);
+const arguments_ =
+  rawArguments[0] === "--" ? rawArguments.slice(1) : rawArguments;
+const explicitOutputDirectory =
+  arguments_.length === 2 &&
+  arguments_[0] === "--output-directory" &&
+  arguments_[1]!.length > 0
+    ? path.resolve(arguments_[1]!)
+    : undefined;
+const validArguments =
+  arguments_.length === 0 || explicitOutputDirectory !== undefined;
+if (!validArguments) {
   console.error("ERROR publication-artifact-usage");
-  console.error(`Observed: ${JSON.stringify(unknownArguments)}`);
-  console.error("Expected: no arguments");
-  console.error("Next action: Run publication:artifact without arguments.");
+  console.error(`Observed: ${JSON.stringify(arguments_)}`);
+  console.error(
+    "Expected: no arguments or --output-directory <existing-empty-directory>",
+  );
+  console.error(
+    "Next action: Run without arguments for disposable verification, or pass one existing empty directory to retain the tgz, checksum, and receipt.",
+  );
   process.exitCode = 2;
 } else {
-  const outputDirectory = await mkdtemp(
-    path.join(tmpdir(), "npm-publication-artifact-"),
-  );
+  const ownedTemporaryOutput = explicitOutputDirectory === undefined;
+  const outputDirectory =
+    explicitOutputDirectory ??
+    (await mkdtemp(path.join(tmpdir(), "npm-publication-artifact-")));
   try {
     const result = await verifyNpmPublicationArtifact({
       repositoryRoot: process.cwd(),
@@ -57,8 +72,15 @@ if (unknownArguments.length > 0) {
       console.log(`Checksum: ${result.receipt.artifact.checksumFile}`);
       for (const smoke of result.receipt.smokes)
         console.log(`Smoke: ${smoke.name}`);
+      if (!ownedTemporaryOutput) {
+        console.log(`Artifact: ${result.artifactPath}`);
+        console.log(`Checksum file: ${result.checksumPath}`);
+        console.log(`Receipt: ${result.receiptPath}`);
+      }
     }
   } finally {
-    await rm(outputDirectory, { recursive: true, force: true });
+    if (ownedTemporaryOutput) {
+      await rm(outputDirectory, { recursive: true, force: true });
+    }
   }
 }
