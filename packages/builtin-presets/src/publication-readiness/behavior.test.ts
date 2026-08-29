@@ -327,6 +327,34 @@ describe("Generated Repository npm publication readiness", () => {
     },
   );
 
+  it.each([
+    ["removed", {}],
+    ["empty", { commander: "" }],
+  ])(
+    "blocks a $0 fixed CLI runtime dependency specifier",
+    async (_state, dependencies) => {
+      const repositoryRoot = await generatedRepository();
+      await writeReadyFacts(repositoryRoot, "@demo/cli");
+      await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
+        ...readyManifest("@demo/cli"),
+        dependencies,
+      });
+      const { inspectNpmPublicationReadiness } =
+        await loadReadinessModule(repositoryRoot);
+
+      const result = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+
+      expect(result.kind).toBe("blocked");
+      if (result.kind !== "blocked") throw new Error("Expected blockers");
+      expect(result.blockers).toContainEqual(
+        expect.objectContaining({ code: "manifest-contract" }),
+      );
+    },
+  );
+
   it("shares one inspection across safe baseline, public intent, and require-ready callers", async () => {
     const baselineRoot = await generatedRepository();
     const ordinaryBaseline = await runReadinessCaller(baselineRoot);
@@ -496,6 +524,73 @@ describe("Generated Repository npm publication readiness", () => {
     );
   });
 
+  it("requires a globally unique metadata target and init candidate provenance", async () => {
+    const repositoryRoot = await generatedRepository();
+    await writeReadyFacts(repositoryRoot, "@demo/cli");
+    await writeLocalTemplateMetadata(repositoryRoot, "@demo/cli");
+    const blueprintPath = path.join(repositoryRoot, ".template/blueprint.json");
+    const generationPath = path.join(
+      repositoryRoot,
+      ".template/generation.json",
+    );
+    const blueprint = JSON.parse(await readFile(blueprintPath, "utf8")) as {
+      readonly packages: readonly Record<string, unknown>[];
+    };
+    const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+      readonly packages: readonly Record<string, unknown>[];
+    };
+    const { inspectNpmPublicationReadiness } =
+      await loadReadinessModule(repositoryRoot);
+
+    await writeJson(blueprintPath, {
+      ...blueprint,
+      packages: [
+        ...blueprint.packages,
+        {
+          ...blueprint.packages[0],
+          name: "@demo/other",
+          path: "packages/other",
+        },
+      ],
+    });
+    const duplicateTargetId = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    expect(duplicateTargetId.kind).toBe("blocked");
+    if (duplicateTargetId.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    expect(duplicateTargetId.blockers).toContainEqual(
+      expect.objectContaining({ code: "local-template-metadata-mismatch" }),
+    );
+
+    await writeJson(blueprintPath, blueprint);
+    await writeJson(generationPath, {
+      ...generation,
+      packages: [
+        ...generation.packages,
+        {
+          ...generation.packages[0],
+          packageDefinitionId: `package-${"b".repeat(64)}`,
+          path: "packages/other",
+          planningContribution: "planPackageAddition",
+        },
+      ],
+    });
+    const additionMasquerade = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+    expect(additionMasquerade.kind).toBe("blocked");
+    if (additionMasquerade.kind !== "blocked") {
+      throw new Error("Expected blockers");
+    }
+    expect(additionMasquerade.blockers).toContainEqual(
+      expect.objectContaining({ code: "local-template-metadata-mismatch" }),
+    );
+  });
+
   it("fails closed when actual workspace membership cannot be inspected", async () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "@demo/cli");
@@ -514,6 +609,32 @@ describe("Generated Repository npm publication readiness", () => {
       expect.objectContaining({
         code: "manifest-contract",
         owner: { path: "pnpm-workspace.yaml" },
+      }),
+    );
+  });
+
+  it("fails closed when a declared workspace collection cannot be enumerated", async () => {
+    const repositoryRoot = await generatedRepository();
+    await writeReadyFacts(repositoryRoot, "@demo/cli");
+    await writeFile(
+      path.join(repositoryRoot, "pnpm-workspace.yaml"),
+      "packages:\n  - apps/*\n",
+    );
+    await writeFile(path.join(repositoryRoot, "apps"), "not a directory\n");
+    const { inspectNpmPublicationReadiness } =
+      await loadReadinessModule(repositoryRoot);
+
+    const result = await inspectNpmPublicationReadiness({
+      repositoryRoot,
+      packagePath: "packages/cli",
+    });
+
+    expect(result.kind).toBe("blocked");
+    if (result.kind !== "blocked") throw new Error("Expected blockers");
+    expect(result.blockers).toContainEqual(
+      expect.objectContaining({
+        code: "manifest-contract",
+        owner: { path: "apps" },
       }),
     );
   });

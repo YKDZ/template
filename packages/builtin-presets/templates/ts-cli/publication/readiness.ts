@@ -347,7 +347,12 @@ async function actualWorkspaceManifests(repositoryRoot: string): Promise<{
       entries = await readdir(path.join(repositoryRoot, collection), {
         withFileTypes: true,
       });
-    } catch {
+    } catch (error) {
+      if (isObject(error) && error.code === "ENOENT") continue;
+      failures.push({
+        path: collection,
+        reason: error instanceof Error ? error.message : String(error),
+      });
       continue;
     }
     for (const entry of entries) {
@@ -563,6 +568,8 @@ function addManifestBlockers(options: {
     isObject(manifest.engines) &&
     manifest.engines.node === `>=${baseline}` &&
     validRecordOfStrings(manifest.dependencies) &&
+    typeof manifest.dependencies.commander === "string" &&
+    manifest.dependencies.commander.trim().length > 0 &&
     isObject(scripts) &&
     typeof scripts.build === "string" &&
     scripts.build.length > 0 &&
@@ -885,21 +892,51 @@ async function addMetadataBlockers(options: {
   );
   const definition = definitions[0];
   const record = records[0];
+  const targetId =
+    definition !== undefined &&
+    typeof definition.packageDefinitionId === "string"
+      ? definition.packageDefinitionId
+      : undefined;
+  const definitionsWithTargetId =
+    targetId === undefined
+      ? []
+      : blueprintPackages.filter(
+          (item): item is JsonObject =>
+            isObject(item) && item.packageDefinitionId === targetId,
+        );
+  const recordsWithTargetId =
+    targetId === undefined
+      ? []
+      : generationPackages.filter(
+          (item): item is JsonObject =>
+            isObject(item) && item.packageDefinitionId === targetId,
+        );
+  const candidateProvenance = generationPackages.filter(
+    (item): item is JsonObject =>
+      isObject(item) &&
+      item.definitionName === "ts-cli" &&
+      item.contributionIdentity === "cli-publication-candidate",
+  );
+  const initCandidates = candidateProvenance.filter(
+    (item) => item.planningContribution === "planInitialization",
+  );
   const definitionMatches =
     definitions.length === 1 &&
     definition !== undefined &&
-    typeof definition.packageDefinitionId === "string" &&
-    definition.packageDefinitionId.length > 0 &&
+    targetId !== undefined &&
+    targetId.length > 0 &&
+    definitionsWithTargetId.length === 1 &&
     definition.name === options.packageName &&
     definition.role === "cli-tool";
   const recordMatches =
     records.length === 1 &&
     record !== undefined &&
     definition !== undefined &&
+    recordsWithTargetId.length === 1 &&
     record.packageDefinitionId === definition.packageDefinitionId &&
-    record.definitionName === "ts-cli" &&
-    record.planningContribution === "planInitialization" &&
-    record.contributionIdentity === "cli-publication-candidate";
+    candidateProvenance.length === 1 &&
+    initCandidates.length === 1 &&
+    initCandidates[0] === record;
   const repositoryMatches =
     generation.repositoryName === options.rootManifest?.name;
   if (!definitionMatches || !recordMatches || !repositoryMatches) {
@@ -910,6 +947,9 @@ async function addMetadataBlockers(options: {
         observed: display({
           definitions,
           records,
+          definitionsWithTargetId,
+          recordsWithTargetId,
+          candidateProvenance,
           repositoryName: generation.repositoryName,
         }),
         expected:
