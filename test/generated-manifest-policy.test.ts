@@ -61,7 +61,18 @@ describe("Generated Repository Node manifest publication policy", () => {
           foundationRecord?.packageDefinitionId,
       );
       expect(configurationDefinition).toBeDefined();
+      const publicCandidateDefinitionIds = new Set(
+        plan.generationRecord.packages
+          .filter(
+            (record) =>
+              record.definitionName === "ts-cli" &&
+              record.planningContribution === "planInitialization" &&
+              record.contributionIdentity === "cli-publication-candidate",
+          )
+          .map((record) => record.packageDefinitionId),
+      );
       let requiresPackingHook = false;
+      let requiresPackingHookTsconfig = false;
 
       for (const packageDefinition of plan.blueprint.packages) {
         const manifest = plan.manifests.find(
@@ -86,10 +97,17 @@ describe("Generated Repository Node manifest publication policy", () => {
         ].find((entry) => entry.name === configurationDefinition!.name);
         if (dependencyEntry === undefined) continue;
 
+        const isCandidateDevelopmentEdge =
+          publicCandidateDefinitionIds.has(
+            packageDefinition.packageDefinitionId,
+          ) && dependencyEntry.field === "devDependencies";
         const isPublicDevelopmentEdge =
-          manifest?.private !== true &&
+          (manifest?.private !== true || isCandidateDevelopmentEdge) &&
           dependencyEntry.field === "devDependencies";
         requiresPackingHook ||= isPublicDevelopmentEdge;
+        requiresPackingHookTsconfig ||=
+          manifest?.private !== true &&
+          dependencyEntry.field === "devDependencies";
         expect(dependencyEntry.specifier).toBe(
           isPublicDevelopmentEdge
             ? `link:${path.posix.relative(
@@ -117,7 +135,7 @@ describe("Generated Repository Node manifest publication policy", () => {
             operation.to === "tsconfig.json" &&
             operation.from === "tsconfig.packing-hook.json",
         ),
-      ).toHaveLength(requiresPackingHook ? 1 : 0);
+      ).toHaveLength(requiresPackingHookTsconfig ? 1 : 0);
       expect(plan.reconciliation).toContainEqual({
         path: "tsconfig.json",
         driver: "structured",

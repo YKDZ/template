@@ -44,8 +44,6 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/semver": "catalog:",
-    "@types/spdx-expression-parse": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-builtin-presets-source": "link:packages/builtin-presets",
     "@ykdz/template-checks": "workspace:*",
@@ -57,8 +55,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "semver": "catalog:",
-    "spdx-expression-parse": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:",

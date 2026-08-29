@@ -134,12 +134,6 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
-      '@types/semver':
-        specifier: 'catalog:'
-        version: 7.7.1
-      '@types/spdx-expression-parse':
-        specifier: 'catalog:'
-        version: 4.0.0
       '@ykdz/template-builtin-presets':
         specifier: workspace:*
         version: file:packages/builtin-presets(@typescript/typescript6@6.0.2)
@@ -173,12 +167,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2001
-      semver:
-        specifier: 'catalog:'
-        version: 7.8.5
-      spdx-expression-parse:
-        specifier: 'catalog:'
-        version: 5.0.0
       turbo:
         specifier: 'catalog:'
         version: 2.10.11
@@ -219,6 +207,12 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 24.13.3
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.7.1
+      '@types/spdx-expression-parse':
+        specifier: 'catalog:'
+        version: 4.0.0
       '@types/web-bluetooth':
         specifier: 'catalog:'
         version: 0.0.21
@@ -264,6 +258,12 @@ importers:
       pinia:
         specifier: 'catalog:'
         version: 4.0.2(@typescript/typescript6@6.0.2)(@vue/devtools-api@8.2.1)(vue@3.5.41(@typescript/typescript6@6.0.2))
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
+      spdx-expression-parse:
+        specifier: 'catalog:'
+        version: 5.0.0
       tailwindcss:
         specifier: 'catalog:'
         version: 4.3.3
