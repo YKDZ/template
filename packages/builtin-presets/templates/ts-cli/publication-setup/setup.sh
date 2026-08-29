@@ -88,13 +88,13 @@ NODE
 then
   existing_public=true
 fi
-if [ -z "$package_name$command_name$description$license$copyright_holder$repository" ] && [ "$non_interactive" = false ] && [ "$existing_public" = false ]; then
-  printf 'Package name: '; read -r package_name || exit 3
-  printf 'Command name: '; read -r command_name || exit 3
-  printf 'Public description: '; read -r description || exit 3
-  printf 'SPDX license: '; read -r license || exit 3
-  printf 'Copyright holder: '; read -r copyright_holder || exit 3
-  printf 'Public GitHub repository: '; read -r repository || exit 3
+if [ "$non_interactive" = false ] && [ "$existing_public" = false ]; then
+  [ -n "$package_name" ] || { printf 'Package name: '; read -r package_name || exit 3; }
+  [ -n "$command_name" ] || { printf 'Command name: '; read -r command_name || exit 3; }
+  [ -n "$description" ] || { printf 'Public description: '; read -r description || exit 3; }
+  [ -n "$license" ] || { printf 'SPDX license: '; read -r license || exit 3; }
+  [ -n "$copyright_holder" ] || { printf 'Copyright holder: '; read -r copyright_holder || exit 3; }
+  [ -n "$repository" ] || { printf 'Public GitHub repository: '; read -r repository || exit 3; }
 fi
 
 printf 'STAGE 2/4 Configure the public package\n'
@@ -110,7 +110,9 @@ remote_head=$(git ls-remote origin "refs/heads/$remote_default" 2>/dev/null | aw
 if [ "$branch" != "$remote_default" ] || [ -z "$remote_head" ] || [ "$(git rev-parse HEAD 2>/dev/null)" != "$remote_head" ]; then
   fail "ACTION REQUIRED" git-handoff-required "branch or remote is not synchronized" "clean public default branch at its remote HEAD" "Complete the normal Git handoff and rerun setup." 3
 fi
-case "$remote" in *"github.com"*) ;; *) fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "public GitHub origin" "Correct the normal Git remote and retry." 4 ;; esac
+if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" remote-matches-owner; then
+  fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "the public package owner GitHub repository" "Correct the normal Git remote and retry." 4
+fi
 printf 'OK git-handoff-complete\nSTAGE 4/4 Verify the first release artifact\n'
 artifact_root=$(mktemp -d "${TMPDIR:-/tmp}/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
 cleanup_artifact_root() {

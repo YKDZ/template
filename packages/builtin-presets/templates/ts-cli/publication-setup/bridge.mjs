@@ -160,6 +160,46 @@ async function status() {
   process.exitCode = statusExitCode;
 }
 
+function canonicalGitHubRepository(value) {
+  try {
+    const candidate = String(value ?? "")
+      .replace(/^git\+/u, "")
+      .replace(/^git@github\.com:/u, "https://github.com/");
+    const url = new URL(candidate);
+    const pathname = url.pathname.replace(/^\//u, "").replace(/\.git$/u, "");
+    return url.hostname.toLowerCase() === "github.com" &&
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(pathname)
+      ? `https://github.com/${pathname}`
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function repositoryOwner() {
+  try {
+    const manifest = JSON.parse(
+      readFileSync(path.join(root, packagePath, "package.json"), "utf8"),
+    );
+    const repository =
+      typeof manifest.repository === "object" && manifest.repository !== null
+        ? manifest.repository.url
+        : manifest.repository;
+    return canonicalGitHubRepository(repository);
+  } catch {
+    return null;
+  }
+}
+
+function remoteMatchesOwner() {
+  const owner = repositoryOwner();
+  process.exitCode =
+    owner !== null &&
+    owner === canonicalGitHubRepository(process.env.REMOTE_URL)
+      ? 0
+      : 1;
+}
+
 function stop(code, observed, expected, next, exitCode = 4) {
   process.stderr.write(
     `${exitCode === 3 ? "ACTION REQUIRED" : "ERROR"} ${code}\nObserved: ${oneLine(observed)}\nExpected: ${oneLine(expected)}\nNext action: ${oneLine(next)}\n`,
@@ -427,11 +467,16 @@ async function configure() {
   }
 }
 
-if (!root || !["status", "configure"].includes(process.argv[2])) {
+if (
+  !root ||
+  !["status", "configure", "remote-matches-owner"].includes(process.argv[2])
+) {
   process.stderr.write(
     "private setup bridge requires REPOSITORY_ROOT and a supported action\n",
   );
   process.exitCode = 5;
 } else {
-  await (process.argv[2] === "status" ? status() : configure());
+  if (process.argv[2] === "status") await status();
+  else if (process.argv[2] === "configure") await configure();
+  else remoteMatchesOwner();
 }
