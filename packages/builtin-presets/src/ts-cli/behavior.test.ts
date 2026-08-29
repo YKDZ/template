@@ -836,6 +836,65 @@ JSON
     }
   });
 
+  it("reaches the existing Ticket 09 artifact caller through setup.sh", async () => {
+    const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+      "template-publication-setup-real-artifact-",
+    );
+    try {
+      const fakeBin = path.join(workspace, "fake-bin");
+      await writeExecutable(
+        path.join(fakeBin, "git"),
+        `#!/usr/bin/env bash
+case "$1" in
+  status) exit 0 ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/ship\\n' ;;
+  ls-remote)
+    if [ "$2" = --symref ]; then
+      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+    else
+      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+    fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  *) exit 97 ;;
+esac
+`,
+      );
+      const result = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "MIT",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
+        {
+          cwd: targetDir,
+          env: { PATH: `${fakeBin}:${process.env.PATH}` },
+          reject: false,
+        },
+      );
+      expect(result.exitCode).toBe(3);
+      expect(result.stdout).toContain(
+        "STAGE 4/4 Verify the first release artifact",
+      );
+      expect(result.stdout).toContain("Package: @demo/ship@1.0.0");
+      expect(result.stdout).toContain("Artifact:");
+      expect(result.stderr).toContain("artifact-acceptance-required");
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("configures Apache-2.0 from the checked full license text", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-setup-apache-"),
