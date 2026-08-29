@@ -65,6 +65,16 @@ async function writeExecutable(filePath: string, body: string): Promise<void> {
   await chmod(filePath, 0o755);
 }
 
+function expectNoControlCharacters(value: string): void {
+  for (const line of value.split("\n"))
+    expect(
+      Array.from(line).some((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
+      }),
+    ).toBe(false);
+}
+
 describe("ts-cli Preset Definition behavior", () => {
   it("plans the registered unpublished CLI Tool Package boundary", () => {
     expect(tsCliDefinition.initialPrimaryPackage.defaultLeafName).toBe("cli");
@@ -573,6 +583,144 @@ exit 97
     }
   });
 
+  it("fails closed before configuration for metadata or reviewed owner intent and cleans a failed owner write", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-setup-stage-one-"),
+    );
+    const targetDir = path.join(workspace, "demo-cli");
+    const facts = [
+      "--package-name",
+      "@demo/ship",
+      "--bin",
+      "ship",
+      "--description",
+      "A focused command-line release tool.",
+      "--license",
+      "MIT",
+      "--copyright-holder",
+      "Ada Lovelace",
+      "--repository",
+      "https://github.com/demo/ship",
+      "--non-interactive",
+    ];
+    try {
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await symlink(
+        path.resolve(import.meta.dirname, "../../node_modules"),
+        path.join(targetDir, "node_modules"),
+        "dir",
+      );
+      const unsafeUsage = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["ToKeN=closure-secret\rINJECT\u0085"],
+        { cwd: targetDir, reject: false },
+      );
+      expect(unsafeUsage.exitCode).toBe(2);
+      expect(`${unsafeUsage.stdout}\n${unsafeUsage.stderr}`).not.toContain(
+        "closure-secret",
+      );
+      expectNoControlCharacters(`${unsafeUsage.stdout}\n${unsafeUsage.stderr}`);
+
+      const generationPath = path.join(targetDir, ".template/generation.json");
+      const originalGeneration = await readFile(generationPath, "utf8");
+      await writeFile(generationPath, "{}\n");
+      const corruptMetadata = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        facts,
+        { cwd: targetDir, reject: false },
+      );
+      expect(corruptMetadata.exitCode).toBe(4);
+      expect(corruptMetadata.stderr).toContain(
+        "local-template-metadata-invalid",
+      );
+      expect(corruptMetadata.stdout).not.toContain(
+        "STAGE 2/4 Configure the public package",
+      );
+      const corruptStatus = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--status", "--json"],
+        { cwd: targetDir, reject: false },
+      );
+      expect(corruptStatus.exitCode).toBe(0);
+      const corruptStatusBody = JSON.parse(corruptStatus.stdout) as {
+        readonly currentStage: { readonly id: string; readonly number: number };
+        readonly blockers: readonly { readonly code: string }[];
+      };
+      expect(corruptStatusBody.currentStage).toMatchObject({
+        id: "check-prerequisites",
+        number: 1,
+      });
+      expect(corruptStatusBody.blockers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ code: "local-template-metadata-invalid" }),
+        ]),
+      );
+      await writeFile(generationPath, originalGeneration);
+
+      const readmePath = path.join(targetDir, "packages/cli/README.md");
+      const manifestPath = path.join(targetDir, "packages/cli/package.json");
+      const initialManifest = await readFile(manifestPath, "utf8");
+      await writeFile(readmePath, "Reviewed public README.\n");
+      const reviewedReadme = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        facts,
+        { cwd: targetDir, reject: false },
+      );
+      expect(reviewedReadme.exitCode).toBe(4);
+      expect(reviewedReadme.stderr).toContain("owner-fact-conflict");
+      await expect(readFile(readmePath, "utf8")).resolves.toBe(
+        "Reviewed public README.\n",
+      );
+      await expect(readFile(manifestPath, "utf8")).resolves.toBe(
+        initialManifest,
+      );
+
+      await rm(readmePath);
+      const preloader = path.join(workspace, "rename-failure.cjs");
+      await writeFile(
+        preloader,
+        `const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const original = fs.renameSync;
+fs.renameSync = (from, to) => {
+  if (from.includes(".npm-publication-setup-")) throw new Error("simulated rename failure");
+  return original(from, to);
+};
+syncBuiltinESMExports();
+`,
+      );
+      const renameFailure = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        facts,
+        {
+          cwd: targetDir,
+          env: { NODE_OPTIONS: `--require=${preloader}` },
+          reject: false,
+        },
+      );
+      expect(renameFailure.exitCode).toBe(5);
+      expect(renameFailure.stderr).toContain("configuration-platform-failure");
+      expect(
+        (await readdir(path.join(targetDir, "packages/cli"))).filter((entry) =>
+          entry.includes(".npm-publication-setup-"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("uses the read-only Git ledger and a receipt for the local artifact handoff", async () => {
     const { workspace, targetDir } = await renderInstalledGeneratedRepository(
       "template-publication-setup-handoff-",
@@ -611,11 +759,22 @@ while [ "$#" -gt 0 ]; do
   if [ "$1" = --output-directory ]; then shift; out=$1; fi
   shift
 done
+if [ "${"${FAKE_ARTIFACT_FAILURE:-}"}" = true ]; then
+  printf 'ignored child bytes ToKeN=artifact-secret https://credential@example.invalid/ \\033[2J\\r\\302\\205\n' >&2
+  printf 'ERROR consumer-smoke-failed\nObserved: ToKeN=artifact-secret\\rINJECT\nExpected: a clean consumer smoke\nNext action: correct the packed command\n' >&2
+  exit 1
+fi
 printf 'token=artifact-secret https://credential@example.invalid/ \\033[2J\\r' >&2
 printf '%s\\n' "$out" >> ${JSON.stringify(artifactLedger)}
 mkdir -p "$out/receipt"
+if [ "${"${FAKE_EVIL_RECEIPT:-}"}" = true ]; then
 cat > "$out/receipt/verified-publication-artifact.json" <<'JSON'
-{"schemaVersion":1,"artifact":{"file":"ship-1.0.0.tgz","checksumFile":"SHA512SUMS","size":12,"integrity":"sha512-receipt"},"publication":{"packageName":"@demo/ship","version":"1.0.0","commandName":"ship","repository":"https://github.com/demo/ship","releaseDate":"2026-08-29","releaseNotes":"First stable release."},"packedManifest":{"name":"@demo/ship","version":"1.0.0"},"files":[{"path":"package/LICENSE","mode":420,"size":7},{"path":"package/README.md","mode":420,"size":12}],"bin":{"path":"package/dist/cli.js","shebang":"#!/usr/bin/env node","mode":493,"posixExecutableChecked":true},"smokes":[{"name":"runtime-import","args":[],"stdout":""},{"name":"help","args":["--help"],"stdout":"ship --help\\n"},{"name":"version","args":["--version"],"stdout":"1.0.0\\n"},{"name":"greet","args":["greet","  Ada Lovelace  "],"stdout":"Hello, Ada Lovelace\\n"}]}
+{"schemaVersion":1,"artifact":{"file":"ship-1.0.0.tgz","checksumFile":"SHA512SUMS","size":1,"integrity":"sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=="},"publication":{"packagePath":"packages/cli","packageName":"@demo/ship","version":"1.0.0","commandName":"ship","repository":"git+https://github.com/demo/ship.git","releaseDate":"2026-08-29","releaseNotes":"### Added\\n\\n- Publish the first stable CLI.\\n"},"packedManifest":{"name":"@demo/ship","version":"1.0.0","bin":{"ship":"./dist/cli.js"}},"files":[{"path":"package/CHANGELOG.md","mode":420,"size":1},{"path":"package/LICENSE","mode":420,"size":1},{"path":"package/README.md","mode":420,"size":1},{"path":"package/dist/cli-command-identity.js","mode":420,"size":1},{"path":"package/dist/cli.js","mode":493,"size":1},{"path":"package/dist/main.js","mode":420,"size":1},{"path":"package/package.json","mode":420,"size":1}],"bin":{"path":"package/dist/cli.js","shebang":"#!/usr/bin/env node","mode":493,"posixExecutableChecked":true},"smokes":[{"name":"runtime-import","args":[],"stdout":""},{"name":"help","args":["--help"],"stdout":"help"},{"name":"version","args":["--version"],"stdout":"1.0.0"},{"name":"greet","args":["greet","  Ada Lovelace  "],"stdout":"Hello, Ada Lovelace"}]}
+JSON
+exit 0
+fi
+cat > "$out/receipt/verified-publication-artifact.json" <<'JSON'
+{"schemaVersion":1,"artifact":{"file":"ship-1.0.0.tgz","checksumFile":"SHA512SUMS","size":12,"integrity":"sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=="},"publication":{"packagePath":"packages/cli","packageName":"@demo/ship","version":"1.0.0","commandName":"ship","repository":"git+https://github.com/demo/ship.git","releaseDate":"2026-08-29","releaseNotes":"### Added\\n\\n- Publish the first stable CLI.\\n"},"packedManifest":{"name":"@demo/ship","version":"1.0.0","description":"A focused command-line release tool.","homepage":"https://github.com/demo/ship#readme","bugs":{"url":"https://github.com/demo/ship/issues"},"license":"MIT","repository":{"type":"git","url":"git+https://github.com/demo/ship.git","directory":"packages/cli"},"bin":{"ship":"./dist/cli.js"},"files":["dist","README.md","LICENSE","CHANGELOG.md"],"type":"module","publishConfig":{"access":"public","registry":"https://registry.npmjs.org/"},"dependencies":{"commander":"^1.0.0"},"engines":{"node":">=24"}},"files":[{"path":"package/CHANGELOG.md","mode":420,"size":30},{"path":"package/LICENSE","mode":420,"size":7},{"path":"package/README.md","mode":420,"size":12},{"path":"package/dist/cli-command-identity.js","mode":420,"size":1},{"path":"package/dist/cli.js","mode":493,"size":1},{"path":"package/dist/main.js","mode":420,"size":1},{"path":"package/package.json","mode":420,"size":30}],"bin":{"path":"package/dist/cli.js","shebang":"#!/usr/bin/env node","mode":493,"posixExecutableChecked":true},"smokes":[{"name":"runtime-import","args":[],"stdout":""},{"name":"help","args":["--help"],"stdout":"ship --help\\n"},{"name":"version","args":["--version"],"stdout":"1.0.0\\n"},{"name":"greet","args":["greet","  Ada Lovelace  "],"stdout":"Hello, Ada Lovelace\\n"}]}
 JSON
 `,
       );
@@ -640,7 +799,8 @@ JSON
         {
           cwd: targetDir,
           env,
-          input: "ACCEPT @demo/ship@1.0.0 sha512-receipt\n",
+          input:
+            "ACCEPT @demo/ship@1.0.0 sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa==\n",
           reject: false,
         },
       );
@@ -650,7 +810,7 @@ JSON
       expect(accepted.stdout).toContain("Package: @demo/ship@1.0.0");
       expect(accepted.stdout).toContain("Command: ship");
       expect(accepted.stdout).toContain(
-        "Repository: https://github.com/demo/ship",
+        "Repository: git+https://github.com/demo/ship.git",
       );
       expect(accepted.stdout).toContain("Release date: 2026-08-29");
       expect(accepted.stdout).toContain("Artifact: ship-1.0.0.tgz (12 bytes)");
@@ -658,7 +818,9 @@ JSON
         "File: package/LICENSE mode 420 size 7",
       );
       expect(accepted.stdout).toContain("Bin: package/dist/cli.js mode 493");
-      expect(accepted.stdout).toContain("Integrity: sha512-receipt");
+      expect(accepted.stdout).toContain(
+        "Integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa==",
+      );
       expect(accepted.stdout).toContain("Checksum: SHA512SUMS");
       expect(accepted.stdout).toContain("Smoke: greet");
       expect(accepted.stdout).toContain("OK local-preparation-complete");
@@ -673,6 +835,7 @@ JSON
       expect(`${accepted.stdout}\n${accepted.stderr}`).not.toContain(
         String.fromCharCode(27),
       );
+      expectNoControlCharacters(`${accepted.stdout}\n${accepted.stderr}`);
       expect(await readFile(gitLedger, "utf8")).toBe(
         [
           "status --porcelain",
@@ -831,6 +994,40 @@ JSON
       );
       expect(unavailableGitHandoff.exitCode).toBe(5);
       expect(unavailableGitHandoff.stderr).toContain("git-read-unavailable");
+
+      const artifactFailure = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        {
+          cwd: targetDir,
+          env: { ...env, FAKE_ARTIFACT_FAILURE: "true" },
+          reject: false,
+        },
+      );
+      expect(artifactFailure.exitCode).toBe(5);
+      expect(artifactFailure.stderr).toContain("ERROR consumer-smoke-failed");
+      expect(artifactFailure.stderr).toContain("Observed: ToKeN=[REDACTED]");
+      expect(
+        `${artifactFailure.stdout}\n${artifactFailure.stderr}`,
+      ).not.toContain("artifact-secret");
+      expectNoControlCharacters(
+        `${artifactFailure.stdout}\n${artifactFailure.stderr}`,
+      );
+
+      const evilReceipt = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        {
+          cwd: targetDir,
+          env: { ...env, FAKE_EVIL_RECEIPT: "true" },
+          reject: false,
+        },
+      );
+      expect(evilReceipt.exitCode).toBe(5);
+      expect(evilReceipt.stderr).toContain("artifact-receipt-invalid");
+      expect(`${evilReceipt.stdout}\n${evilReceipt.stderr}`).not.toContain(
+        "ACCEPT @demo/ship@1.0.0",
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -883,7 +1080,7 @@ esac
           reject: false,
         },
       );
-      expect(result.exitCode).toBe(3);
+      expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(3);
       expect(result.stdout).toContain(
         "STAGE 4/4 Verify the first release artifact",
       );
@@ -1168,7 +1365,9 @@ syncBuiltinESMExports();
         { cwd: targetDir, reject: false },
       );
       expect(invalidDate.exitCode).toBe(4);
-      expect(invalidDate.stderr).toContain("owner-fact-conflict");
+      expect(invalidDate.stderr).toContain(
+        "changelog-target-release-date-invalid",
+      );
       expect(await readFile(changelogPath, "utf8")).toContain("2020-02-30");
     } finally {
       await rm(workspace, { recursive: true, force: true });

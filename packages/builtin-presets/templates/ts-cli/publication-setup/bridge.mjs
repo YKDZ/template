@@ -22,14 +22,69 @@ const packagePath = "{{PUBLIC_CLI_PACKAGE_PATH}}";
 const oneLine = (value) =>
   String(value ?? "")
     .replaceAll(/[\p{Cc}]/gu, "")
-    .replaceAll(/[\r\n]+/gu, " ")
     .replace(/(https?:\/\/)[^/@\s]+@/gu, "$1[REDACTED]@")
     .replace(
-      /([Tt]oken|[Pp]assword|[Oo][Tt][Pp]|[Ss]ession|[Aa]uthorization)[=:][^\s]+/gu,
+      /(token|password|otp|session|authorization|auth|config)[=:][^\s]+/giu,
       "$1=[REDACTED]",
     )
-    .replace(/(Bearer|Basic)\s+[^\s]+/gu, "$1 [REDACTED]");
+    .replace(/(bearer|basic)\s+[^\s]+/giu, "$1 [REDACTED]");
 const print = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
+
+class SetupFailure extends Error {
+  constructor(code, observed, expected, next, exitCode = 4) {
+    super(code);
+    this.code = code;
+    this.observed = observed;
+    this.expected = expected;
+    this.next = next;
+    this.exitCode = exitCode;
+  }
+}
+
+const artifactFailureCodes = new Set([
+  "artifact-output-invalid",
+  "artifact-temporary-output-failed",
+  "artifact-pack-failed",
+  "artifact-pack-output-invalid",
+  "artifact-archive-unsafe",
+  "artifact-manifest-invalid",
+  "artifact-manifest-contract",
+  "artifact-files-contract",
+  "artifact-bin-contract",
+  "consumer-install-failed",
+  "consumer-smoke-failed",
+  "artifact-receipt-failed",
+  "artifact-cleanup-failed",
+]);
+
+const readinessBlockerCodes = new Set([
+  "package-name",
+  "cli-bin",
+  "description",
+  "version",
+  "private",
+  "manifest-contract",
+  "license-id",
+  "license-content",
+  "repository",
+  "homepage",
+  "bugs",
+  "readme-missing",
+  "readme-content",
+  "license-missing",
+  "license-mismatch",
+  "changelog-missing",
+  "local-template-metadata-missing",
+  "local-template-metadata-invalid",
+  "local-template-metadata-mismatch",
+  "private-runtime-dependency",
+  "changelog-unreleased-missing",
+  "changelog-unreleased-duplicate",
+  "changelog-target-release-missing",
+  "changelog-target-release-duplicate",
+  "changelog-target-release-date-invalid",
+  "changelog-target-release-body-empty",
+]);
 
 function gitFacts() {
   const facts = {
@@ -156,12 +211,24 @@ async function status() {
       },
     ];
   }
-  const currentStage =
-    readiness === "ready" &&
-    git.workingTree === "clean" &&
-    git.currentBranch !== null &&
-    git.currentBranch === git.defaultBranch &&
-    git.headMatchesRemoteDefault
+  const prerequisiteBlocked =
+    readiness === "unavailable" ||
+    blockers.some(
+      (blocker) =>
+        blocker.code.startsWith("local-template-metadata-") ||
+        blocker.code === "private-runtime-dependency",
+    );
+  const currentStage = prerequisiteBlocked
+    ? {
+        id: "check-prerequisites",
+        number: 1,
+        name: "Check prerequisites",
+      }
+    : readiness === "ready" &&
+        git.workingTree === "clean" &&
+        git.currentBranch !== null &&
+        git.currentBranch === git.defaultBranch &&
+        git.headMatchesRemoteDefault
       ? {
           id: "verify-first-release-artifact",
           number: 4,
@@ -214,6 +281,40 @@ async function status() {
   process.exitCode = statusExitCode;
 }
 
+async function preflight() {
+  let readiness;
+  try {
+    readiness = await inspectNpmPublicationReadiness({
+      repositoryRoot: root,
+      packagePath,
+    });
+  } catch {
+    stop(
+      "readiness-unavailable",
+      "Ticket 08 readiness could not read local publication facts",
+      "Readable local publication facts",
+      "Correct the repository facts and retry.",
+      5,
+    );
+  }
+  if (readiness.kind === "ready") return;
+  const nonConfigurationBlocker = readiness.blockers.find(
+    (item) =>
+      item.code.startsWith("local-template-metadata-") ||
+      item.code === "private-runtime-dependency",
+  );
+  if (nonConfigurationBlocker !== undefined)
+    stop(
+      nonConfigurationBlocker.code,
+      nonConfigurationBlocker.observed,
+      nonConfigurationBlocker.expected,
+      nonConfigurationBlocker.nextAction,
+    );
+  if (readiness.mode === "safe-unconfigured") return;
+  const blocker = readiness.blockers[0];
+  stop(blocker.code, blocker.observed, blocker.expected, blocker.nextAction);
+}
+
 function canonicalGitHubRepository(value) {
   try {
     const candidate = String(value ?? "")
@@ -232,10 +333,7 @@ function canonicalGitHubRepository(value) {
 }
 
 function redactRemote(value) {
-  return String(value ?? "").replace(
-    /(https?:\/\/)[^/@\s]+@/u,
-    "$1[REDACTED]@",
-  );
+  return oneLine(value);
 }
 
 function repositoryOwner() {
@@ -268,6 +366,20 @@ function receiptRecord(value, label) {
   return value;
 }
 
+function receiptRecordWithKeys(value, label, keys) {
+  const record = receiptRecord(value, label);
+  if (
+    JSON.stringify(
+      Object.keys(record).toSorted((left, right) => left.localeCompare(right)),
+    ) !==
+    JSON.stringify(
+      [...keys].toSorted((left, right) => left.localeCompare(right)),
+    )
+  )
+    throw new Error(`${label} fields are invalid`);
+  return record;
+}
+
 function receiptString(value, label) {
   if (typeof value !== "string" || value.length === 0)
     throw new Error(`${label} must be a non-empty string`);
@@ -285,26 +397,184 @@ function receiptNumber(value, label) {
   return value;
 }
 
-function receiptLines() {
+function receiptSameJson(left, right) {
+  const canonical = (value) => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+      Object.entries(value)
+        .toSorted(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, item]) => [key, canonical(item)]),
+    );
+  };
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
+const receiptExpectedFiles = [
+  "package/CHANGELOG.md",
+  "package/LICENSE",
+  "package/README.md",
+  "package/dist/cli-command-identity.js",
+  "package/dist/cli.js",
+  "package/dist/main.js",
+  "package/package.json",
+];
+
+const packedManifestFields = new Set([
+  "bin",
+  "bugs",
+  "dependencies",
+  "description",
+  "engines",
+  "files",
+  "homepage",
+  "license",
+  "name",
+  "publishConfig",
+  "repository",
+  "type",
+  "version",
+]);
+
+async function receiptLines() {
   const receiptPath = process.env.RECEIPT_PATH;
   if (!receiptPath) throw new Error("receipt path is unavailable");
-  const receipt = receiptRecord(
+  const receipt = receiptRecordWithKeys(
     JSON.parse(readFileSync(receiptPath, "utf8")),
     "receipt",
+    [
+      "schemaVersion",
+      "artifact",
+      "publication",
+      "packedManifest",
+      "files",
+      "bin",
+      "smokes",
+    ],
   );
   if (receipt.schemaVersion !== 1) throw new Error("receipt schema is invalid");
-  const artifact = receiptRecord(receipt.artifact, "artifact");
-  const publication = receiptRecord(receipt.publication, "publication");
-  const packedManifest = receiptRecord(
+  const artifact = receiptRecordWithKeys(receipt.artifact, "artifact", [
+    "file",
+    "checksumFile",
+    "size",
+    "integrity",
+  ]);
+  const publication = receiptRecordWithKeys(
+    receipt.publication,
+    "publication",
+    [
+      "packagePath",
+      "packageName",
+      "version",
+      "commandName",
+      "repository",
+      "releaseDate",
+      "releaseNotes",
+    ],
+  );
+  const packedManifest = receiptRecordWithKeys(
     receipt.packedManifest,
     "packed manifest",
+    [...packedManifestFields],
   );
-  const bin = receiptRecord(receipt.bin, "bin");
+  const bin = receiptRecordWithKeys(receipt.bin, "bin", [
+    "path",
+    "shebang",
+    "mode",
+    "posixExecutableChecked",
+  ]);
   if (!Array.isArray(receipt.files) || !Array.isArray(receipt.smokes))
     throw new Error("receipt files and smokes are required");
+  const readiness = await inspectNpmPublicationReadiness({
+    repositoryRoot: root,
+    packagePath,
+  });
+  if (readiness.kind !== "ready")
+    throw new Error("current publication readiness is blocked");
+  const currentManifest = receiptRecord(
+    JSON.parse(
+      readFileSync(path.join(root, packagePath, "package.json"), "utf8"),
+    ),
+    "current package manifest",
+  );
   const packageName = receiptString(publication.packageName, "package name");
   const version = receiptString(publication.version, "version");
   const integrity = receiptString(artifact.integrity, "integrity");
+  const expectedPublication = readiness.publication;
+  for (const [field, actual, expected] of [
+    [
+      "package path",
+      receiptString(publication.packagePath, "package path"),
+      expectedPublication.packagePath,
+    ],
+    ["package name", packageName, expectedPublication.packageName],
+    ["version", version, expectedPublication.version],
+    [
+      "command name",
+      receiptString(publication.commandName, "command"),
+      expectedPublication.commandName,
+    ],
+    [
+      "repository",
+      receiptString(publication.repository, "repository"),
+      expectedPublication.repository,
+    ],
+    [
+      "release date",
+      receiptString(publication.releaseDate, "release date"),
+      expectedPublication.releaseDate,
+    ],
+    [
+      "release notes",
+      receiptString(publication.releaseNotes, "release notes"),
+      expectedPublication.releaseNotes,
+    ],
+  ])
+    if (actual !== expected) throw new Error(`receipt ${field} is stale`);
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._-]*\.tgz$/u.test(
+      receiptString(artifact.file, "artifact file"),
+    ) ||
+    receiptNumber(artifact.size, "artifact size") === 0 ||
+    !/^sha512-[A-Za-z0-9+/]{86}==$/u.test(integrity) ||
+    artifact.checksumFile !== "SHA512SUMS"
+  )
+    throw new Error("artifact receipt semantics are invalid");
+  const packedDependencies = receiptRecordWithKeys(
+    packedManifest.dependencies,
+    "packed dependencies",
+    ["commander"],
+  );
+  const packedPublishConfig = receiptRecordWithKeys(
+    packedManifest.publishConfig,
+    "packed publish configuration",
+    ["access", "registry"],
+  );
+  if (
+    packedManifest.name !== packageName ||
+    packedManifest.version !== version ||
+    packedManifest.description !== currentManifest.description ||
+    packedManifest.license !== currentManifest.license ||
+    packedManifest.homepage !== currentManifest.homepage ||
+    packedManifest.type !== "module" ||
+    !receiptSameJson(packedManifest.repository, currentManifest.repository) ||
+    !receiptSameJson(packedManifest.bugs, currentManifest.bugs) ||
+    !receiptSameJson(packedManifest.engines, currentManifest.engines) ||
+    !receiptSameJson(packedManifest.files, [
+      "dist",
+      "README.md",
+      "LICENSE",
+      "CHANGELOG.md",
+    ]) ||
+    !receiptSameJson(packedManifest.bin, {
+      [expectedPublication.commandName]: "./dist/cli.js",
+    }) ||
+    typeof packedDependencies.commander !== "string" ||
+    packedDependencies.commander.length === 0 ||
+    packedPublishConfig.access !== "public" ||
+    packedPublishConfig.registry !== "https://registry.npmjs.org/"
+  )
+    throw new Error("packed manifest semantics are invalid");
   const lines = [
     `Package: ${oneLine(packageName)}@${oneLine(version)}`,
     `Command: ${oneLine(receiptString(publication.commandName, "command"))}`,
@@ -317,13 +587,23 @@ function receiptLines() {
     `Packed manifest: ${oneLine(JSON.stringify(packedManifest))}`,
   ];
   const files = receipt.files.map((file) => {
-    const item = receiptRecord(file, "receipt file");
+    const item = receiptRecordWithKeys(file, "receipt file", [
+      "path",
+      "mode",
+      "size",
+    ]);
     return {
       path: receiptString(item.path, "receipt file path"),
       mode: receiptNumber(item.mode, "receipt file mode"),
       size: receiptNumber(item.size, "receipt file size"),
     };
   });
+  if (
+    JSON.stringify(files.map((file) => file.path)) !==
+      JSON.stringify(receiptExpectedFiles) ||
+    files.some((file) => file.mode > 0o777 || file.size === 0)
+  )
+    throw new Error("receipt files are not the fixed artifact file set");
   for (const file of [...files].toSorted((left, right) =>
     left.path.localeCompare(right.path),
   ))
@@ -334,11 +614,39 @@ function receiptLines() {
     `Bin: ${oneLine(receiptString(bin.path, "bin path"))} mode ${receiptNumber(bin.mode, "bin mode")}`,
     `Bin shebang: ${oneLine(receiptString(bin.shebang, "bin shebang"))}`,
   );
-  if (bin.posixExecutableChecked !== true)
+  if (
+    bin.path !== "package/dist/cli.js" ||
+    bin.shebang !== "#!/usr/bin/env node" ||
+    (receiptNumber(bin.mode, "bin mode") & 0o111) === 0 ||
+    bin.posixExecutableChecked !== (process.platform !== "win32")
+  )
     throw new Error("bin executable evidence is invalid");
-  for (const smoke of receipt.smokes) {
-    const item = receiptRecord(smoke, "smoke");
+  const expectedSmokes = [
+    ["runtime-import", [], ""],
+    ["help", ["--help"]],
+    ["version", ["--version"]],
+    ["greet", ["greet", "  Ada Lovelace  "]],
+  ];
+  if (receipt.smokes.length !== expectedSmokes.length)
+    throw new Error("receipt smoke tuple is invalid");
+  for (const [index, smoke] of receipt.smokes.entries()) {
+    const item = receiptRecordWithKeys(smoke, "smoke", [
+      "name",
+      "args",
+      "stdout",
+    ]);
     if (!Array.isArray(item.args)) throw new Error("smoke args are invalid");
+    const [name, args, stdout] = expectedSmokes[index];
+    if (
+      item.name !== name ||
+      !receiptSameJson(item.args, args) ||
+      (stdout !== undefined && item.stdout !== stdout) ||
+      (stdout === undefined &&
+        (typeof item.stdout !== "string" || item.stdout.length === 0)) ||
+      (item.name === "version" && item.stdout !== `${version}\n`) ||
+      (item.name === "greet" && item.stdout !== "Hello, Ada Lovelace\n")
+    )
+      throw new Error("receipt smoke tuple is invalid");
     lines.push(
       `Smoke: ${oneLine(receiptString(item.name, "smoke name"))} args ${oneLine(JSON.stringify(item.args))} stdout ${oneLine(receiptText(item.stdout, "smoke stdout"))}`,
     );
@@ -349,19 +657,64 @@ function receiptLines() {
   return lines;
 }
 
-function printReceipt() {
+async function printReceipt() {
   try {
-    process.stdout.write(`${receiptLines().join("\n")}\n`);
+    process.stdout.write(`${(await receiptLines()).join("\n")}\n`);
   } catch {
     process.exitCode = 1;
   }
 }
 
 function stop(code, observed, expected, next, exitCode = 4) {
+  throw new SetupFailure(code, observed, expected, next, exitCode);
+}
+
+function reportFailure(failure) {
   process.stderr.write(
-    `${exitCode === 3 ? "ACTION REQUIRED" : "ERROR"} ${code}\nObserved: ${oneLine(observed)}\nExpected: ${oneLine(expected)}\nNext action: ${oneLine(next)}\n`,
+    `${failure.exitCode === 3 ? "ACTION REQUIRED" : "ERROR"} ${failure.code}\nObserved: ${oneLine(failure.observed)}\nExpected: ${oneLine(failure.expected)}\nNext action: ${oneLine(failure.next)}\n`,
   );
-  process.exit(exitCode);
+  process.exitCode = failure.exitCode;
+}
+
+function artifactDiagnostic() {
+  try {
+    const source = readFileSync(
+      receiptString(process.env.ARTIFACT_OUTPUT_PATH, "artifact output path"),
+      "utf8",
+    );
+    const lines = source.split("\n");
+    const code = lines
+      .map((line) => /^(?:ERROR|BLOCKER) ([a-z-]+)$/u.exec(oneLine(line))?.[1])
+      .find(
+        (item) =>
+          item !== undefined &&
+          (artifactFailureCodes.has(item) || readinessBlockerCodes.has(item)),
+      );
+    const field = (label) =>
+      lines
+        .map(
+          (line) =>
+            new RegExp(`^${label}: ?(.*)$`, "u").exec(oneLine(line))?.[1],
+        )
+        .find((item) => item !== undefined);
+    const observed = field("Observed");
+    const expected = field("Expected");
+    const next = field("Next action");
+    if (
+      code === undefined ||
+      observed === undefined ||
+      expected === undefined ||
+      next === undefined
+    )
+      throw new Error("no authoritative artifact diagnostic");
+    const exitCode = artifactFailureCodes.has(code) ? 5 : 4;
+    process.stdout.write(
+      `${exitCode === 3 ? "ACTION REQUIRED" : "ERROR"} ${code}\nObserved: ${oneLine(observed)}\nExpected: ${oneLine(expected)}\nNext action: ${oneLine(next)}\n`,
+    );
+    process.exitCode = exitCode;
+  } catch {
+    process.exitCode = 1;
+  }
 }
 
 function placeholder(key) {
@@ -434,6 +787,16 @@ async function configure() {
     holder: input.copyrightHolder || existingHolder,
     repository: input.repository || existingRepository,
   };
+  const initialPrivateBin = receiptSameJson(manifest.bin, {
+    cli: "./dist/cli.js",
+  });
+  if (manifest.private === true && !initialPrivateBin)
+    stop(
+      "owner-fact-conflict",
+      "package bin has reviewed private intent",
+      "the generated placeholder CLI bin before public configuration",
+      "Resolve the package bin through normal review.",
+    );
   const publicOwnerConflicts = [
     ["description", input.description, manifest.description],
     ["license", input.license, manifest.license],
@@ -621,6 +984,20 @@ async function configure() {
       ),
     ],
   ]);
+  for (const file of files.slice(2)) {
+    const source = before.get(file);
+    if (
+      source !== null &&
+      source.byteLength > 0 &&
+      Buffer.compare(source, target.get(file)) !== 0
+    )
+      stop(
+        "owner-fact-conflict",
+        path.relative(root, file),
+        "a missing owner file or the exact partial setup owner bytes",
+        "Resolve reviewed owner content through normal review.",
+      );
+  }
   if (
     dates.length === 1 &&
     Buffer.compare(before.get(files[5]), target.get(files[5])) !== 0
@@ -634,6 +1011,14 @@ async function configure() {
   const overlay = mkdtempSync(
     path.join(tmpdir(), "npm-publication-setup-overlay-"),
   );
+  const ownerTemporaryPaths = new Set();
+  const ownsOverlay =
+    path.dirname(overlay) === path.resolve(tmpdir()) &&
+    path.basename(overlay).startsWith("npm-publication-setup-overlay-");
+  const ownsTemporary = (temporary) =>
+    files.some(
+      (file) => temporary === `${file}.npm-publication-setup-${process.pid}`,
+    );
   try {
     rmSync(overlay, { recursive: true, force: true });
     cpSync(root, overlay, {
@@ -671,8 +1056,10 @@ async function configure() {
     for (const [file, bytes] of target)
       if (Buffer.compare(before.get(file) ?? Buffer.alloc(0), bytes) !== 0) {
         const temporary = `${file}.npm-publication-setup-${process.pid}`;
+        ownerTemporaryPaths.add(temporary);
         writeFileSync(temporary, bytes);
         renameSync(temporary, file);
+        ownerTemporaryPaths.delete(temporary);
       }
     const actualReadiness = await inspectNpmPublicationReadiness({
       repositoryRoot: root,
@@ -693,15 +1080,33 @@ async function configure() {
         "Correct the owner facts through normal review and retry.",
       );
   } finally {
-    rmSync(overlay, { recursive: true, force: true });
+    for (const temporary of ownerTemporaryPaths)
+      if (ownsTemporary(temporary)) {
+        try {
+          rmSync(temporary, { force: true });
+        } catch {
+          // Best-effort cleanup must not replace the structured failure.
+        }
+      }
+    if (ownsOverlay)
+      try {
+        rmSync(overlay, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup must not replace the structured failure.
+      }
   }
 }
 
 if (
   !root ||
-  !["status", "configure", "remote-matches-owner", "receipt"].includes(
-    process.argv[2],
-  )
+  ![
+    "status",
+    "preflight",
+    "configure",
+    "remote-matches-owner",
+    "receipt",
+    "artifact-diagnostic",
+  ].includes(process.argv[2])
 ) {
   process.stderr.write(
     "private setup bridge requires REPOSITORY_ROOT and a supported action\n",
@@ -709,18 +1114,25 @@ if (
   process.exitCode = 5;
 } else {
   if (process.argv[2] === "status") await status();
-  else if (process.argv[2] === "configure") {
+  else if (process.argv[2] === "preflight" || process.argv[2] === "configure") {
     try {
-      await configure();
-    } catch {
-      stop(
-        "configuration-platform-failure",
-        "a local owner-file or temporary-directory operation failed",
-        "a readable and writable local repository",
-        "Correct the platform failure and retry.",
-        5,
-      );
+      if (process.argv[2] === "preflight") await preflight();
+      else await configure();
+    } catch (error) {
+      if (error instanceof SetupFailure) reportFailure(error);
+      else
+        reportFailure(
+          new SetupFailure(
+            "configuration-platform-failure",
+            "a local owner-file or temporary-directory operation failed",
+            "a readable and writable local repository",
+            "Correct the platform failure and retry.",
+            5,
+          ),
+        );
     }
-  } else if (process.argv[2] === "receipt") printReceipt();
-  else remoteMatchesOwner();
+  } else if (process.argv[2] === "receipt") await printReceipt();
+  else if (process.argv[2] === "artifact-diagnostic") {
+    artifactDiagnostic();
+  } else remoteMatchesOwner();
 }

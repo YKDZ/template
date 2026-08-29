@@ -37,11 +37,11 @@ diagnostic() {
 fail() { diagnostic "$1" "$2" "$3" "$4" "$5"; exit "$6"; }
 
 redact() {
-  sed -E 's#(https?://)[^/@[:space:]]+@#\1[REDACTED]@#g; s#([Tt]oken|[Pp]assword|[Oo][Tt][Pp]|[Ss]ession|[Aa]uthorization)[=:][^[:space:]]+#\1=[REDACTED]#g; s#(Bearer|Basic)[[:space:]]+[^[:space:]]+#\1 [REDACTED]#g'
+  sed -E 's#(https?://)[^/@[:space:]]+@#\1[REDACTED]@#g; s#(token|password|otp|session|authorization|auth|config)[=:][^[:space:]]+#\1=[REDACTED]#gI; s#(bearer|basic)[[:space:]]+[^[:space:]]+#\1 [REDACTED]#gI'
 }
 
 sanitize() {
-  printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037\177' | redact
+  printf '%s' "$1" | LC_ALL=C tr -d '\000-\037\177-\237' | redact
 }
 
 prompt_public_fact() {
@@ -114,6 +114,9 @@ fi
 
 cd "$repository_root" || fail ERROR repository-root "unreadable repository root" "the generated repository root" "Run setup from its generated directory." 5
 for command in bash node pnpm git; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
+REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" preflight
+preflight_status=$?
+[ "$preflight_status" -eq 0 ] || exit "$preflight_status"
 printf 'STAGE 1/4 Check prerequisites\nCHECK local-toolchain\nOK prerequisites\n'
 
 existing_public=false
@@ -173,17 +176,30 @@ if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=s
   fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "the public package owner GitHub repository" "Correct the normal Git remote and retry." 4
 fi
 printf 'OK git-handoff-complete\nSTAGE 4/4 Verify the first release artifact\n'
-artifact_root=$(mktemp -d "${TMPDIR:-/tmp}/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
+artifact_parent=${TMPDIR:-/tmp}
+artifact_root=$(mktemp -d "$artifact_parent/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
+artifact_output=""
 cleanup_artifact_root() {
   case "$artifact_root" in
-    "${TMPDIR:-/tmp}"/npm-publication-setup-artifact.*)
+    "$artifact_parent"/npm-publication-setup-artifact.*)
       [ -d "$artifact_root" ] && rm -rf -- "$artifact_root"
+      ;;
+  esac
+  case "$artifact_output" in
+    "$artifact_parent"/npm-publication-setup-artifact-log.*)
+      [ -f "$artifact_output" ] && rm -f -- "$artifact_output"
       ;;
   esac
 }
 trap cleanup_artifact_root EXIT HUP INT TERM
+artifact_output=$(mktemp "$artifact_parent/npm-publication-setup-artifact-log.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
 if [ "$debug" = true ]; then printf 'COMMAND %s\n' "pnpm run publication:artifact -- --output-directory [temporary]"; fi
-if ! pnpm run publication:artifact -- --output-directory "$artifact_root" >/dev/null 2>&1; then
+pnpm run publication:artifact -- --output-directory "$artifact_root" >"$artifact_output" 2>&1
+artifact_status=$?
+if [ "$artifact_status" -ne 0 ]; then
+  ARTIFACT_OUTPUT_PATH="$artifact_output" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" artifact-diagnostic >&2
+  diagnostic_status=$?
+  if [ "$diagnostic_status" -eq 4 ] || [ "$diagnostic_status" -eq 5 ]; then exit "$diagnostic_status"; fi
   fail ERROR artifact-verification-failed "publication artifact caller failed" "a verified Ticket 09 artifact" "Correct the reported artifact failure and retry." 5
 fi
 receipt=$(find "$artifact_root" -name verified-publication-artifact.json -type f -print -quit)
