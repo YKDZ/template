@@ -412,7 +412,7 @@ function reportFailure(failure) {
 }
 
 function placeholder(key) {
-  return `{${"{"}${key}}}`;
+  return `{{${key}}}`;
 }
 
 function validGregorianDate(value) {
@@ -425,6 +425,10 @@ function validGregorianDate(value) {
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day
   );
+}
+
+function asset(file) {
+  return readFileSync(path.join(process.env.SETUP_DIR, "assets", file), "utf8");
 }
 
 async function configure() {
@@ -586,8 +590,6 @@ async function configure() {
       facts.name,
       "Use the existing public package name.",
     );
-  const asset = (file) =>
-    readFileSync(path.join(process.env.SETUP_DIR, "assets", file), "utf8");
   let licenseBytes;
   if (facts.license === "MIT")
     licenseBytes = asset("LICENSE-MIT.txt").replaceAll(
