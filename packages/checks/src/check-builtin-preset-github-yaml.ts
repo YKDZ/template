@@ -127,16 +127,13 @@ type ParsedObject = Record<string, unknown>;
 
 const publicationWorkflowPath = ".github/workflows/release.yml";
 
-function publicationAction(reference: string): string {
-  return reference;
-}
-
 /** Publication is a ts-cli capability, not part of ProjectCheckWorkflowPlan. */
 export function assertPublicationWorkflowContract(
   plan: GeneratedRepositoryPlan,
   source: string,
   workflow: ParsedWorkflow,
 ): void {
+  void source;
   const candidate = plan.packageContributions.filter(
     (contribution) =>
       contribution.foundation.npmPublication?.kind === "public-cli-candidate",
@@ -191,20 +188,6 @@ export function assertPublicationWorkflowContract(
   });
   assertPublicationVerifySteps(plan, verify.steps);
   assertPublicationPublishSteps(plan, publish.steps);
-  for (const action of [
-    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-    "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-    "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-  ]) {
-    if (!source.includes(publicationAction(action))) {
-      failPublicationWorkflow(
-        plan,
-        `immutable action pin is missing: ${action}`,
-      );
-    }
-  }
 }
 
 function failPublicationWorkflow(
@@ -260,6 +243,24 @@ function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
     failPublicationWorkflow(plan, "Node setup must use package.json only");
 }
 
+function assertCheckout(plan: GeneratedRepositoryPlan, value: unknown): void {
+  const value_ = step(plan, value, "Checkout source");
+  if (
+    !hasExactKeys(value_, ["name", "uses", "with"]) ||
+    value_.uses !==
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    !isParsedObject(value_.with) ||
+    !hasExactKeys(value_.with, ["ref", "persist-credentials", "fetch-depth"]) ||
+    value_.with.ref !== "${{ github.sha }}" ||
+    value_.with["persist-credentials"] !== false ||
+    value_.with["fetch-depth"] !== 1
+  )
+    failPublicationWorkflow(
+      plan,
+      "checkout must be immutable, exact SHA, and credential-free",
+    );
+}
+
 function assertPublicationVerifySteps(
   plan: GeneratedRepositoryPlan,
   steps: unknown,
@@ -272,40 +273,50 @@ function assertPublicationVerifySteps(
   }
   const gate = step(plan, steps[0], "Require the default branch dispatch");
   if (
+    !hasExactKeys(gate, ["name", "run", "env"]) ||
     typeof gate.run !== "string" ||
-    !gate.run.includes("workflow_dispatch") ||
-    !gate.run.includes("GITHUB_REF")
+    gate.run !==
+      'test "$GITHUB_EVENT_NAME" = workflow_dispatch\ntest "$GITHUB_REF" = "refs/heads/$GITHUB_DEFAULT_BRANCH"\ntest -n "$GITHUB_SHA"\n' ||
+    !isParsedObject(gate.env) ||
+    !hasExactKeys(gate.env, ["GITHUB_DEFAULT_BRANCH"]) ||
+    gate.env.GITHUB_DEFAULT_BRANCH !==
+      "${{ github.event.repository.default_branch }}"
   ) {
     failPublicationWorkflow(
       plan,
       "verify must reject a non-default ref before checkout",
     );
   }
-  const checkout = step(plan, steps[1], "Checkout source");
-  if (
-    checkout.uses !==
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
-    !isParsedObject(checkout.with) ||
-    checkout.with.ref !== "${{ github.sha }}" ||
-    checkout.with["persist-credentials"] !== false
-  )
-    failPublicationWorkflow(
-      plan,
-      "verify checkout must be exact SHA without credentials",
-    );
+  assertCheckout(plan, steps[1]);
   assertNodeSetup(plan, steps[2]);
+  const pnpm = step(plan, steps[3], "Set up pnpm");
   const install = step(plan, steps[4], "Install dependencies");
+  const staging = step(plan, steps[5], "Create publication staging directory");
   const check = step(plan, steps[6], "Run Root Check once");
   const upload = step(plan, steps[7], "Upload verified npm artifact");
   if (
+    !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
+    pnpm.uses !==
+      "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320" ||
+    !isParsedObject(pnpm.with) ||
+    !hasExactKeys(pnpm.with, ["cache"]) ||
+    pnpm.with.cache !== true ||
+    !hasExactKeys(install, ["name", "run"]) ||
     install.run !== "pnpm install --frozen-lockfile" ||
+    !hasExactKeys(staging, ["name", "run"]) ||
+    typeof staging.run !== "string" ||
+    !hasExactKeys(check, ["name", "run", "env"]) ||
     check.run !== "pnpm run check" ||
     !isParsedObject(check.env) ||
     typeof check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !== "string" ||
+    !hasExactKeys(upload, ["name", "uses", "with"]) ||
     upload.uses !==
       "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
     !isParsedObject(upload.with) ||
+    !hasExactKeys(upload.with, ["name", "path", "if-no-files-found"]) ||
     upload.with.name !== "npm-publication-${{ github.run_id }}" ||
+    upload.with.path !==
+      "${{ runner.temp }}/npm-publication-artifact/*.tgz\n${{ runner.temp }}/npm-publication-artifact/SHA512SUMS\n${{ runner.temp }}/npm-publication-artifact/verified-publication-artifact.json\n" ||
     upload.with["if-no-files-found"] !== "error"
   )
     failPublicationWorkflow(
@@ -328,15 +339,32 @@ function assertPublicationPublishSteps(
   const download = step(plan, steps[2], "Download verified npm artifact");
   const caller = step(plan, steps[3], "Publish the verified tgz with OIDC");
   if (
+    !hasExactKeys(checkout, ["name", "uses", "with"]) ||
     checkout.uses !==
       "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
     !isParsedObject(checkout.with) ||
+    !hasExactKeys(checkout.with, [
+      "ref",
+      "persist-credentials",
+      "fetch-depth",
+    ]) ||
+    checkout.with.ref !== "${{ github.sha }}" ||
     checkout.with["persist-credentials"] !== false ||
+    checkout.with["fetch-depth"] !== 1 ||
+    !hasExactKeys(download, ["name", "uses", "with"]) ||
     download.uses !==
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
     !isParsedObject(download.with) ||
+    !hasExactKeys(download.with, ["name", "path"]) ||
     download.with.name !== "npm-publication-${{ github.run_id }}" ||
-    caller.run !== "node --conditions=source scripts/npm-publication/publish.ts"
+    download.with.path !== "${{ runner.temp }}/npm-publication-download" ||
+    !hasExactKeys(caller, ["name", "run", "env"]) ||
+    caller.run !==
+      "node --conditions=source scripts/npm-publication/publish.ts" ||
+    !isParsedObject(caller.env) ||
+    !hasExactKeys(caller.env, ["PUBLICATION_ARTIFACT_DIRECTORY"]) ||
+    caller.env.PUBLICATION_ARTIFACT_DIRECTORY !==
+      "${{ runner.temp }}/npm-publication-download"
   )
     failPublicationWorkflow(
       plan,

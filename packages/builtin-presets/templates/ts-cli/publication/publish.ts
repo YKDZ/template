@@ -2,9 +2,9 @@
 import { spawn } from "node:child_process";
 /** Direct npm/OIDC adapter.  It deliberately imports Node built-ins only. */
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import {
   mkdtemp,
+  lstat,
   mkdir,
   readFile,
   readdir,
@@ -49,6 +49,7 @@ export type DirectPublicationOptions = {
 };
 
 type Receipt = {
+  readonly schemaVersion: 1;
   readonly publication: {
     readonly packageName: string;
     readonly version: string;
@@ -61,7 +62,12 @@ type Receipt = {
     readonly bin: Record<string, string>;
     readonly repository: unknown;
   };
-  readonly artifact: { readonly integrity: string; readonly size: number };
+  readonly artifact: {
+    readonly file: string;
+    readonly checksumFile: "SHA512SUMS";
+    readonly integrity: string;
+    readonly size: number;
+  };
   readonly files: readonly { readonly path: string }[];
 };
 
@@ -93,22 +99,24 @@ export function assertNoAmbientCredentials(
   }
 }
 
-function stableSemver(value: string): readonly number[] | undefined {
-  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
-  return match?.slice(1).map(Number);
+function hasStableSemverShape(value: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u.test(
+    value,
+  );
 }
 
-function isGreaterStableSemver(candidate: string, current: string): boolean {
-  const left = stableSemver(candidate);
-  const right = stableSemver(current);
-  if (left === undefined || right === undefined) return false;
-  return left.some((part, index) =>
-    left
-      .slice(0, index)
-      .every((prefix, prefixIndex) => prefix === right[prefixIndex])
-      ? part > right[index]!
-      : false,
-  );
+type LockedSemver = {
+  readonly valid: (value: string) => string | null;
+  readonly prerelease: (value: string) => readonly unknown[] | null;
+  readonly gt: (left: string, right: string) => boolean;
+};
+
+async function loadLockedSemver(): Promise<LockedSemver> {
+  return (await import("semver")) as unknown as LockedSemver;
+}
+
+function isStableSemver(semver: LockedSemver, value: string): boolean {
+  return semver.valid(value) !== null && semver.prerelease(value) === null;
 }
 
 async function defaultRun(
@@ -197,6 +205,17 @@ async function readArtifact(
     await readFile(receiptPath, "utf8"),
     "artifact-receipt-invalid",
   ) as Receipt;
+  if (
+    receipt?.schemaVersion !== 1 ||
+    !safeBasename(receipt.artifact?.file) ||
+    receipt.artifact.file !== tgz.name ||
+    receipt.artifact.checksumFile !== "SHA512SUMS"
+  ) {
+    fail(
+      "artifact-receipt-invalid",
+      "receipt schema or artifact references are invalid",
+    );
+  }
   const tgzPath = path.resolve(directory, tgz.name);
   const tgzStat = await stat(tgzPath);
   if (
@@ -210,11 +229,25 @@ async function readArtifact(
   if (receipt?.artifact?.integrity !== integrity) {
     fail("artifact-integrity-invalid", "receipt SRI differs from tgz");
   }
-  const checksum = await readFile(path.join(directory, "SHA512SUMS"), "utf8");
+  const checksum = await readFile(
+    path.join(directory, receipt.artifact.checksumFile),
+    "utf8",
+  );
   const expectedChecksum = `${createHash("sha512").update(bytes).digest("hex")}  ${tgz.name}\n`;
   if (checksum !== expectedChecksum)
     fail("artifact-integrity-invalid", "checksum file differs from tgz");
   return { receipt, tgz: tgzPath };
+}
+
+function safeBasename(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[A-Za-z0-9._-]+$/u.test(value) &&
+    value !== "." &&
+    value !== ".." &&
+    !value.includes("/") &&
+    !value.includes("\\")
+  );
 }
 
 async function assertArtifactIdentity(options: {
@@ -233,6 +266,14 @@ async function assertArtifactIdentity(options: {
   const packed = receipt?.packedManifest;
   const publication = receipt?.publication;
   const bin = packed?.bin;
+  const sourceBin = manifest.bin;
+  const command = publication?.commandName;
+  const packedBinEntries =
+    bin !== null && typeof bin === "object" ? Object.entries(bin) : [];
+  const sourceBinEntries =
+    sourceBin !== null && typeof sourceBin === "object"
+      ? Object.entries(sourceBin as Record<string, unknown>)
+      : [];
   if (
     !packed ||
     !publication ||
@@ -240,10 +281,13 @@ async function assertArtifactIdentity(options: {
     packed.version !== publication.version ||
     manifest.name !== publication.packageName ||
     manifest.version !== publication.version ||
-    !bin ||
-    Object.keys(bin).length !== 1 ||
-    Object.keys(bin)[0] !== publication.commandName ||
-    !stableSemver(publication.version)
+    packedBinEntries.length !== 1 ||
+    sourceBinEntries.length !== 1 ||
+    packedBinEntries[0]![0] !== command ||
+    sourceBinEntries[0]![0] !== command ||
+    typeof packedBinEntries[0]![1] !== "string" ||
+    packedBinEntries[0]![1] !== sourceBinEntries[0]![1] ||
+    !hasStableSemverShape(publication.version)
   ) {
     fail(
       "identity-invalid",
@@ -274,29 +318,29 @@ function isolatedEnvironment(
   session: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(source)) {
-    const canonical = canonicalEnvironmentKey(key);
-    if (
-      !canonical.startsWith("npmconfig") &&
-      !canonical.startsWith("pnpmconfig") &&
-      !canonical.startsWith("corepack") &&
-      canonical !== "pnpmhome" &&
-      value !== undefined
-    )
-      environment[key] = value;
+  for (const key of [
+    "PATH",
+    "GITHUB_REPOSITORY",
+    "GITHUB_RUN_ATTEMPT",
+    "GITHUB_SHA",
+    "GITHUB_REF",
+    "GITHUB_EVENT_NAME",
+    "GITHUB_ACTIONS",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+  ]) {
+    if (source[key] !== undefined) environment[key] = source[key];
   }
   const home = path.join(session, "home");
-  const config = path.join(session, "npmrc");
   return {
     ...environment,
     HOME: home,
     USERPROFILE: home,
     COREPACK_HOME: path.join(session, "corepack"),
     COREPACK_NPM_REGISTRY: registry,
-    NPM_CONFIG_USERCONFIG: config,
+    NPM_CONFIG_USERCONFIG: path.join(session, "user-npmrc"),
     NPM_CONFIG_GLOBALCONFIG: path.join(session, "global-npmrc"),
     NPM_CONFIG_CACHE: path.join(session, "npm-cache"),
-    NPM_CONFIG_REGISTRY: registry,
     PNPM_HOME: path.join(session, "pnpm-home"),
   };
 }
@@ -312,8 +356,7 @@ async function command(
     cwd,
     env,
   });
-  if (result.exitCode !== 0)
-    fail(code, result.stderr || result.stdout || "npm command failed");
+  if (result.exitCode !== 0) fail(code, "npm command failed");
   return result.stdout.trim();
 }
 
@@ -321,25 +364,45 @@ function npmArguments(session: string): readonly string[] {
   return [
     `--prefix=${session}`,
     `--registry=${registry}`,
-    `--userconfig=${path.join(session, "npmrc")}`,
+    `--userconfig=${path.join(session, "user-npmrc")}`,
     `--globalconfig=${path.join(session, "global-npmrc")}`,
     `--cache=${path.join(session, "npm-cache")}`,
   ];
 }
 
 function isExplicitNotFound(result: ProcessResult): boolean {
-  return /(?:\bE404\b|\b404\b|not found)/iu.test(
-    `${result.stdout}\n${result.stderr}`,
-  );
+  return /^npm error code E404\s*$/mu.test(result.stderr);
+}
+
+async function assertNoCheckoutNpmrc(repositoryRoot: string): Promise<void> {
+  try {
+    await lstat(path.join(repositoryRoot, ".npmrc"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    fail("checkout-npmrc-conflict", "checkout .npmrc cannot be inspected");
+  }
+  fail("checkout-npmrc-conflict", "checkout root .npmrc is forbidden");
+}
+
+function assertOidcAvailable(
+  environment: Readonly<Record<string, string | undefined>>,
+): void {
+  if (
+    environment.ACTIONS_ID_TOKEN_REQUEST_URL === undefined ||
+    environment.ACTIONS_ID_TOKEN_REQUEST_URL.length === 0 ||
+    environment.ACTIONS_ID_TOKEN_REQUEST_TOKEN === undefined ||
+    environment.ACTIONS_ID_TOKEN_REQUEST_TOKEN.length === 0
+  ) {
+    fail("oidc-unavailable", "GitHub OIDC request variables are required");
+  }
 }
 
 export async function runDirectOidcPublication(
   options: DirectPublicationOptions,
 ): Promise<void> {
   assertNoAmbientCredentials(options.environment);
-  if (existsSync(path.join(options.repositoryRoot, ".npmrc"))) {
-    fail("checkout-npmrc-conflict", "checkout root .npmrc is forbidden");
-  }
+  await assertNoCheckoutNpmrc(options.repositoryRoot);
+  assertOidcAvailable(options.environment);
   const { receipt, tgz } = await readArtifact(options.artifactDirectory);
   const githubRepository = stringValue(
     options.environment.GITHUB_REPOSITORY,
@@ -365,9 +428,10 @@ export async function runDirectOidcPublication(
       mkdir(path.join(session, "pnpm-store")),
     ]);
     await writeFile(
-      path.join(session, "npmrc"),
+      path.join(session, ".npmrc"),
       `registry=${registry}\nfetch-retries=1\n`,
     );
+    await writeFile(path.join(session, "user-npmrc"), "");
     await writeFile(path.join(session, "global-npmrc"), "");
     const install = await run(
       "corepack",
@@ -382,11 +446,9 @@ export async function runDirectOidcPublication(
       { cwd: options.repositoryRoot, env },
     );
     if (install.exitCode !== 0)
-      fail(
-        "isolated-install-failed",
-        install.stderr || "frozen install failed",
-      );
+      fail("isolated-install-failed", "frozen install failed");
     const common = npmArguments(session);
+    const semver = await loadLockedSemver();
     if (
       (await command(
         run,
@@ -434,7 +496,7 @@ export async function runDirectOidcPublication(
     const latest = (
       parseJson(latestRaw, "registry-preflight-failed") as { latest?: unknown }
     ).latest;
-    if (typeof latest !== "string" || stableSemver(latest) === undefined)
+    if (typeof latest !== "string" || !isStableSemver(semver, latest))
       fail("latest-invalid", "daily lane needs stable latest");
     const exact = await run(
       "corepack",
@@ -476,7 +538,7 @@ export async function runDirectOidcPublication(
         fail("rerun-latest-conflict", "latest differs from candidate");
       alreadyWritten = true;
     }
-    if (!exactExists && !isGreaterStableSemver(publication.version, latest))
+    if (!exactExists && !semver.gt(publication.version, latest))
       fail("latest-stale", "candidate must be newer than latest");
     if (!alreadyWritten) {
       await command(
@@ -556,8 +618,22 @@ export async function runDirectOidcPublication(
         "signature-audit-invalid",
       ),
       "signature-audit-invalid",
-    ) as { verified?: unknown };
-    const verified = Array.isArray(audit.verified) ? audit.verified : [];
+    ) as { invalid?: unknown; missing?: unknown; verified?: unknown };
+    if (
+      typeof audit !== "object" ||
+      audit === null ||
+      !Array.isArray(audit.invalid) ||
+      audit.invalid.length !== 0 ||
+      !Array.isArray(audit.missing) ||
+      audit.missing.length !== 0 ||
+      !Array.isArray(audit.verified)
+    ) {
+      fail(
+        "signature-audit-invalid",
+        "npm audit schema is incomplete or invalid",
+      );
+    }
+    const verified = audit.verified;
     const matches = verified.filter((item) => {
       const value = item as {
         name?: unknown;
@@ -589,9 +665,22 @@ if (import.meta.main) {
       "PUBLICATION_ARTIFACT_DIRECTORY must be absolute",
     );
   }
-  await runDirectOidcPublication({
-    repositoryRoot: process.cwd(),
-    artifactDirectory,
-    environment: process.env,
-  });
+  try {
+    await runDirectOidcPublication({
+      repositoryRoot: process.cwd(),
+      artifactDirectory,
+      environment: process.env,
+    });
+  } catch (error) {
+    if (!(error instanceof PublicationFailure)) throw error;
+    console.error(`ERROR ${error.code}`);
+    console.error("Observed: publication precondition was not accepted");
+    console.error(
+      "Expected: a verified artifact and isolated GitHub OIDC session",
+    );
+    console.error(
+      "Next action: correct the reported publication precondition and rerun the failed job",
+    );
+    process.exitCode = 1;
+  }
 }

@@ -201,6 +201,51 @@ describe("ts-cli publication owner-fact integration", () => {
           cwd: repositoryRoot,
         }),
       ).resolves.toMatchObject({ stdout: "11.19.1" });
+      const npmSession = path.join(workspace, "isolated-npm-session");
+      await mkdir(npmSession);
+      const userConfig = path.join(npmSession, "user-npmrc");
+      const globalConfig = path.join(npmSession, "global-npmrc");
+      await Promise.all([
+        writeFile(
+          path.join(npmSession, ".npmrc"),
+          "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
+        ),
+        writeFile(userConfig, ""),
+        writeFile(globalConfig, ""),
+      ]);
+      const sessionConfigArguments = [
+        `--prefix=${npmSession}`,
+        `--userconfig=${userConfig}`,
+        `--globalconfig=${globalConfig}`,
+      ];
+      await expect(
+        execa(
+          "pnpm",
+          [
+            "exec",
+            "npm",
+            ...sessionConfigArguments,
+            "config",
+            "get",
+            "fetch-retries",
+          ],
+          { cwd: repositoryRoot },
+        ),
+      ).resolves.toMatchObject({ stdout: "1" });
+      await expect(
+        execa(
+          "pnpm",
+          [
+            "exec",
+            "npm",
+            ...sessionConfigArguments,
+            "config",
+            "get",
+            "registry",
+          ],
+          { cwd: repositoryRoot },
+        ),
+      ).resolves.toMatchObject({ stdout: "https://registry.npmjs.org/" });
       const artifactModule = (await import(
         `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
       )) as ArtifactModule;
