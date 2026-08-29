@@ -341,6 +341,53 @@ describe("ts-cli Preset Definition behavior", () => {
       });
       expect(result.stderr).toBe("");
 
+      const missingFacts = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        { cwd: targetDir, reject: false, input: "unexpected stdin\n" },
+      );
+      expect(missingFacts.exitCode).toBe(3);
+      expect(missingFacts.stderr).toContain(
+        "ACTION REQUIRED public-fact-required",
+      );
+
+      for (const args of [
+        ["--status"],
+        ["--json"],
+        ["--password", "not-read"],
+        ["--release-date", "2099-01-01"],
+      ]) {
+        const rejected = await execa(
+          "./scripts/npm-publication-setup/setup.sh",
+          args,
+          { cwd: targetDir, reject: false, input: "must not be read\n" },
+        );
+        expect(rejected.exitCode).toBe(2);
+        expect(rejected.stderr).toContain("ERROR publication-setup-usage");
+      }
+
+      const invalidLicense = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/ship",
+          "--bin",
+          "ship",
+          "--description",
+          "A focused command-line release tool.",
+          "--license",
+          "definitely-not-spdx",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/ship",
+          "--non-interactive",
+        ],
+        { cwd: targetDir, reject: false },
+      );
+      expect(invalidLicense.exitCode).toBe(2);
+      expect(invalidLicense.stderr).toContain("ERROR public-fact-invalid");
+
       const configured = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         [
@@ -364,6 +411,9 @@ describe("ts-cli Preset Definition behavior", () => {
       expect(configured.stdout).toContain(
         "STAGE 2/4 Configure the public package",
       );
+      expect(configured.stdout).not.toContain(String.fromCharCode(27));
+      expect(configured.stdout).not.toContain("\r");
+      expect(configured.stderr).not.toContain("not-read");
       const configuredManifest = JSON.parse(
         await readFile(
           path.join(targetDir, "packages/cli/package.json"),
@@ -375,6 +425,18 @@ describe("ts-cli Preset Definition behavior", () => {
         version: "1.0.0",
       });
       expect(configuredManifest).not.toHaveProperty("private");
+
+      const conflict = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--description",
+          "A different public description.",
+          "--non-interactive",
+        ],
+        { cwd: targetDir, reject: false },
+      );
+      expect(conflict.exitCode).toBe(4);
+      expect(conflict.stderr).toContain("ERROR owner-fact-conflict");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

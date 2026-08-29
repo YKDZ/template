@@ -1753,6 +1753,15 @@ function foundationPlan(options: {
             to: "scripts/npm-publication-setup/README.md",
           },
           {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
+            from: "publication-setup/bridge.mjs",
+            to: "scripts/npm-publication-setup/bridge.mjs",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
+          },
+          {
             kind: "copyFile" as const,
             source: templateSources.tsCli,
             from: "publication-setup/assets/LICENSE-MIT.txt",

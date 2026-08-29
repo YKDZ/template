@@ -73,37 +73,7 @@ if [ "$mode" = "status" ]; then
     printf '%s\n' '{"schemaVersion":1,"currentStage":{"id":"check-prerequisites","number":1,"name":"Check prerequisites"},"observations":{"packagePath":null,"packageName":null,"commandName":null,"version":null,"repository":null,"readiness":"unavailable","git":{"workingTree":null,"currentBranch":null,"defaultBranch":null,"headMatchesRemoteDefault":null}},"blockers":[{"code":"publication-setup-usage","observed":"invalid status arguments","expected":"--status --json only","nextAction":"Run ./scripts/npm-publication-setup/setup.sh --status --json."}],"nextAction":{"kind":"run","command":"./scripts/npm-publication-setup/setup.sh"}}'
     exit 2
   fi
-  REPOSITORY_ROOT="$repository_root" PACKAGE_PATH="$package_path" node --conditions=source --input-type=module <<'NODE'
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { inspectNpmPublicationReadiness } from "./scripts/npm-publication/readiness.ts";
-const root = process.env.REPOSITORY_ROOT;
-const packagePath = process.env.PACKAGE_PATH;
-const one = (value) => String(value ?? "").replaceAll(/[\r\n]+/gu, " ");
-let readiness = "unavailable";
-let blockers = [];
-let publication;
-try {
-  const result = await inspectNpmPublicationReadiness({ repositoryRoot: root, packagePath });
-  if (result.kind === "ready") { readiness = "ready"; publication = result.publication; }
-  else { readiness = result.mode === "safe" ? "safe-unconfigured" : "public-intent-blocked"; blockers = result.blockers.map((item) => ({ code: item.code, observed: one(item.observed), expected: one(item.expected), nextAction: one(item.nextAction) })); }
-} catch (error) { blockers = [{ code: "readiness-unavailable", observed: one(error), expected: "Readable local publication facts", nextAction: "Correct the repository facts and retry." }]; }
-let git = { workingTree: null, currentBranch: null, defaultBranch: null, headMatchesRemoteDefault: null };
-try {
-  const run = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  git.workingTree = run("status", "--porcelain") === "" ? "clean" : "dirty";
-  git.currentBranch = run("symbolic-ref", "--quiet", "--short", "HEAD") || null;
-  const remote = run("ls-remote", "--symref", "origin", "HEAD").split("\n");
-  const ref = remote.find((line) => line.startsWith("ref: "));
-  git.defaultBranch = ref?.match(/refs\/heads\/([^\t]+)/u)?.[1] ?? null;
-  const oid = remote.find((line) => /^[0-9a-f]{40}\s+HEAD$/u.test(line))?.split(/\s+/u)[0];
-  git.headMatchesRemoteDefault = oid === undefined ? null : run("rev-parse", "HEAD") === oid;
-} catch {}
-const currentStage = readiness === "ready" && git.workingTree === "clean" && git.currentBranch !== null && git.currentBranch === git.defaultBranch && git.headMatchesRemoteDefault ? { id: "verify-first-release-artifact", number: 4, name: "Verify the first release artifact" } : readiness === "ready" ? { id: "commit-publication-configuration", number: 3, name: "Commit the publication configuration" } : { id: "configure-public-package", number: 2, name: "Configure the public package" };
-if (blockers.length === 0 && currentStage.number === 3) blockers = [{ code: "git-handoff-required", observed: one(git.workingTree), expected: "A clean synchronized public default branch", nextAction: "Use the normal Git review and merge flow, then rerun setup." }];
-console.log(JSON.stringify({ schemaVersion: 1, currentStage, observations: { packagePath, packageName: publication?.packageName ?? null, commandName: publication?.commandName ?? null, version: publication?.version ?? null, repository: publication?.repository ?? null, readiness, git }, blockers, nextAction: { kind: currentStage.number === 2 ? "provide-public-facts" : currentStage.number === 3 ? "normal-git-handoff" : "verify-artifact", command: "./scripts/npm-publication-setup/setup.sh" } }));
-NODE
+  REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.mjs" status
   exit $?
 fi
 
@@ -128,54 +98,7 @@ if [ -z "$package_name$command_name$description$license$copyright_holder$reposit
 fi
 
 printf 'STAGE 2/4 Configure the public package\n'
-PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$description" LICENSE_NAME="$license" COPYRIGHT_HOLDER="$copyright_holder" REPOSITORY_URL="$repository" REPOSITORY_ROOT="$repository_root" PACKAGE_PATH="$package_path" SETUP_DIR="$script_dir" node --conditions=source --input-type=module <<'NODE'
-import { cpSync, existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { inspectNpmPublicationReadiness } from "./scripts/npm-publication/readiness.ts";
-const env = process.env, root = env.REPOSITORY_ROOT, packagePath = env.PACKAGE_PATH, packageRoot = path.join(root, packagePath);
-const fail = (code, observed, expected, next, status = 4) => { console.error(`ERROR ${code}\nObserved: ${observed}\nExpected: ${expected}\nNext action: ${next}`); process.exit(status); };
-const files = [path.join(packageRoot, "package.json"), path.join(root, ".template/blueprint.json"), path.join(root, "LICENSE"), path.join(packageRoot, "LICENSE"), path.join(packageRoot, "README.md"), path.join(packageRoot, "CHANGELOG.md")];
-let name = env.PACKAGE_NAME, command = env.COMMAND_NAME, description = env.DESCRIPTION, license = env.LICENSE_NAME, holder = env.COPYRIGHT_HOLDER, repository = env.REPOSITORY_URL;
-let manifest, blueprint;
-try { manifest = JSON.parse(readFileSync(files[0], "utf8")); blueprint = JSON.parse(readFileSync(files[1], "utf8")); } catch (error) { fail("owner-fact-invalid", String(error), "readable owner JSON", "Repair the owner file and retry."); }
-const manifestRepository = typeof manifest.repository === "object" && manifest.repository !== null ? manifest.repository.url : undefined;
-name ||= manifest.name;
-command ||= Object.keys(manifest.bin ?? {})[0];
-description ||= manifest.description;
-license ||= manifest.license;
-repository ||= typeof manifestRepository === "string" ? manifestRepository.replace(/^git\+/u, "").replace(/\.git$/u, "") : undefined;
-if (!holder && existsSync(files[2])) holder = readFileSync(files[2], "utf8").match(/^Copyright(?: \(c\))?\s+(.+)$/mu)?.[1];
-if (!/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u.test(name) || !/^[a-z0-9][a-z0-9-]*$/u.test(command) || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository) || !description.trim() || !license.trim() || !holder.trim()) fail("public-fact-invalid", "invalid public configuration", "valid npm, command, SPDX, holder, and public GitHub facts", "Correct the public flags and retry.", 2);
-const date = new Date().toISOString().slice(0, 10);
-const before = new Map(files.map((file) => [file, existsSync(file) ? readFileSync(file) : null]));
-if (manifest.name !== undefined && !manifest.private && manifest.name !== name) fail("owner-fact-conflict", manifest.name, name, "Use the already configured public identity or resolve it through normal review.");
-const asset = (file) => readFileSync(path.join(env.SETUP_DIR, "assets", file), "utf8");
-let licenseBytes;
-const placeholder = (key) => `{${"{"}${key}}}`;
-if (license === "MIT") licenseBytes = asset("LICENSE-MIT.txt").replaceAll(placeholder("COPYRIGHT_HOLDER"), holder);
-else if (license === "Apache-2.0") licenseBytes = asset("LICENSE-APACHE-2.0.txt").replaceAll(placeholder("COPYRIGHT_HOLDER"), holder);
-else { if (!before.get(files[2])) fail("license-owner-required", "missing root LICENSE", "existing non-placeholder LICENSE for a custom SPDX expression", "Add the license through normal review and retry."); licenseBytes = before.get(files[2]).toString(); }
-const markdown = (file, values) => Object.entries(values).reduce((text, [key, value]) => text.replaceAll(placeholder(key), value), asset(file));
-const target = new Map();
-target.set(files[0], Buffer.from(`${JSON.stringify({ ...manifest, name, version: "1.0.0", description, license, homepage: `${repository}#readme`, bugs: { url: `${repository}/issues` }, repository: { type: "git", url: `git+${repository}.git`, directory: packagePath }, bin: { [command]: "./dist/cli.js" }, files: ["dist", "README.md", "LICENSE", "CHANGELOG.md"], publishConfig: { access: "public", registry: "https://registry.npmjs.org/" }, private: undefined }, null, 2).replace(/\n  "private": undefined,?/u, "")}\n`));
-const nextManifest = JSON.parse(target.get(files[0]).toString()); delete nextManifest.private; target.set(files[0], Buffer.from(`${JSON.stringify(nextManifest, null, 2)}\n`));
-target.set(files[1], Buffer.from(`${JSON.stringify({ ...blueprint, packages: blueprint.packages.map((item) => item.path === packagePath ? { ...item, name } : item) }, null, 2)}\n`));
-target.set(files[2], Buffer.from(licenseBytes)); target.set(files[3], Buffer.from(licenseBytes));
-target.set(files[4], Buffer.from(markdown("README.md.template", { PACKAGE_NAME: name, DESCRIPTION: description, COMMAND_NAME: command })));
-const oldChangelog = before.get(files[5])?.toString(); const oldDate = oldChangelog?.match(/^## \[1\.0\.0\] - (\d{4}-\d{2}-\d{2})$/mu)?.[1];
-target.set(files[5], Buffer.from(markdown("CHANGELOG.md.template", { RELEASE_DATE: oldDate ?? date, REPOSITORY_URL: repository })));
-const overlay = mkdtempSync(path.join(tmpdir(), "npm-publication-setup-overlay-"));
-try {
-  rmSync(overlay, { recursive: true, force: true });
-  cpSync(root, overlay, { recursive: true, filter: (source) => !source.endsWith("/.git") && !source.includes("/node_modules") });
-  for (const [file, bytes] of target) writeFileSync(path.join(overlay, path.relative(root, file)), bytes);
-  const readiness = await inspectNpmPublicationReadiness({ repositoryRoot: overlay, packagePath });
-  if (readiness.kind !== "ready") fail("configuration-plan-blocked", readiness.blockers[0]?.code ?? "blocked", "Ticket 08 readiness", "Correct the public facts and retry.");
-  for (const [file, bytes] of before) { const current = existsSync(file) ? readFileSync(file) : null; if (String(current) !== String(bytes)) fail("configuration-preimage-changed", path.relative(root, file), "unchanged owner preimages", "Retry from a stable working tree."); }
-  for (const [file, bytes] of target) { if (Buffer.compare(before.get(file) ?? Buffer.alloc(0), bytes) === 0) continue; const temporary = `${file}.npm-publication-setup-${process.pid}`; writeFileSync(temporary, bytes); renameSync(temporary, file); }
-} finally { rmSync(overlay, { recursive: true, force: true }); }
-NODE
+PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$description" LICENSE_NAME="$license" COPYRIGHT_HOLDER="$copyright_holder" REPOSITORY_URL="$repository" REPOSITORY_ROOT="$repository_root" SETUP_DIR="$script_dir" node --conditions=source "$script_dir/bridge.mjs" configure
 configuration_status=$?
 [ "$configuration_status" -eq 0 ] || exit "$configuration_status"
 printf 'OK public-package-configured\nSTAGE 3/4 Commit the publication configuration\n'
@@ -190,15 +113,32 @@ fi
 case "$remote" in *"github.com"*) ;; *) fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "public GitHub origin" "Correct the normal Git remote and retry." 4 ;; esac
 printf 'OK git-handoff-complete\nSTAGE 4/4 Verify the first release artifact\n'
 artifact_root=$(mktemp -d "${TMPDIR:-/tmp}/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
-trap 'rm -rf "$artifact_root"' EXIT HUP INT TERM
+cleanup_artifact_root() {
+  case "$artifact_root" in
+    "${TMPDIR:-/tmp}"/npm-publication-setup-artifact.*)
+      [ -d "$artifact_root" ] && rm -rf -- "$artifact_root"
+      ;;
+  esac
+}
+trap cleanup_artifact_root EXIT HUP INT TERM
 if [ "$debug" = true ]; then printf 'COMMAND %s\n' "pnpm run publication:artifact -- --output-directory [temporary]"; fi
 pnpm run publication:artifact -- --output-directory "$artifact_root" || fail ERROR artifact-verification-failed "publication artifact caller failed" "a verified Ticket 09 artifact" "Correct the reported artifact failure and retry." 5
 receipt=$(find "$artifact_root" -name verified-publication-artifact.json -type f -print -quit)
 [ -n "$receipt" ] || fail ERROR artifact-receipt-missing "no receipt" "verified artifact receipt" "Retry artifact verification." 5
 acceptance=$(node --input-type=module - "$receipt" <<'NODE'
-import { readFileSync } from "node:fs"; const receipt = JSON.parse(readFileSync(process.argv[2], "utf8")); console.log(`ACCEPT ${receipt.publication.packageName}@${receipt.publication.version} ${receipt.artifact.integrity}`);
+import { readFileSync } from "node:fs";
+const receipt = JSON.parse(readFileSync(process.argv[2], "utf8"));
+console.log(`Package: ${receipt.publication.packageName}@${receipt.publication.version}`);
+console.log(`Command: ${receipt.publication.commandName}`);
+for (const file of receipt.files) console.log(`File: ${file.path}`);
+console.log(`Integrity: ${receipt.artifact.integrity}`);
+console.log(`Checksum: ${receipt.artifact.checksumFile}`);
+for (const smoke of receipt.smokes) console.log(`Smoke: ${smoke.name}`);
+console.log(`ACCEPT ${receipt.publication.packageName}@${receipt.publication.version} ${receipt.artifact.integrity}`);
 NODE
 )
+printf '%s\n' "$acceptance" | sed '$d'
+acceptance=$(printf '%s\n' "$acceptance" | tail -n 1)
 if [ "$non_interactive" = true ]; then fail "ACTION REQUIRED" artifact-acceptance-required "non-interactive mode cannot accept an artifact" "$acceptance" "Review the receipt and enter the exact acceptance interactively." 3; fi
 printf '%s\n' "$acceptance"; printf 'Acceptance: '; read -r entered || fail "ACTION REQUIRED" artifact-acceptance-required "end of input" "$acceptance" "Review the receipt and enter the exact acceptance." 3
 [ "$entered" = "$acceptance" ] || fail "ACTION REQUIRED" artifact-acceptance-required "acceptance did not match this receipt" "$acceptance" "Review the receipt and enter the exact acceptance." 3
