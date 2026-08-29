@@ -375,7 +375,23 @@ function isCanonicalPackageFilePath(value: string): boolean {
   );
 }
 
+const ticket09ReceiptFilePaths = [
+  "package/CHANGELOG.md",
+  "package/LICENSE",
+  "package/README.md",
+  "package/dist/cli-command-identity.js",
+  "package/dist/cli.js",
+  "package/dist/main.js",
+  "package/package.json",
+] as const;
+
 function hasCanonicalReceiptFiles(files: Receipt["files"]): boolean {
+  if (
+    files.length !== ticket09ReceiptFilePaths.length ||
+    files.some((file, index) => file.path !== ticket09ReceiptFilePaths[index])
+  ) {
+    return false;
+  }
   let previousPath: string | undefined;
   for (const file of files) {
     if (

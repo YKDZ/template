@@ -766,6 +766,22 @@ describe("manual npm publication capability", () => {
       },
     ],
     [
+      "one fixed packed file",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[]).splice(2, 1);
+      },
+    ],
+    [
+      "an otherwise sorted extra packed file",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[]).splice(5, 0, {
+          path: "package/dist/extra.js",
+          mode: 420,
+          size: 1,
+        });
+      },
+    ],
+    [
       "the packed executable mode",
       (receipt: Record<string, unknown>) => {
         (receipt.bin as Record<string, unknown>).mode = 420;
