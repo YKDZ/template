@@ -53,6 +53,7 @@ import {
   type FixtureEvidencePhase,
   type FixtureEvidencePhaseScope,
   type FixtureEvidenceScenarioActivityEvent,
+  type FixtureEvidenceExecutionResource,
   type FixtureEvidenceScheduler,
   type FixtureEvidenceSchedulerFactory,
   type FixtureEvidenceSchedulingOptions,
@@ -487,12 +488,16 @@ async function runScenario(
   const buildIdentity = await deriveDevelopmentContainerBuildIdentity({
     projectDir,
   });
-  const containerSessionResources = [
-    "development-container-session",
-    ...(deployment === undefined
-      ? []
-      : deploymentQualityExecutionResources(deployment)),
-  ] as const;
+  const containerSessionResources: readonly FixtureEvidenceExecutionResource[] =
+    [
+      ...new Set<FixtureEvidenceExecutionResource>([
+        "development-container-session",
+        ...generatedRootQualityExecutionResources(finalPlan),
+        ...(deployment === undefined
+          ? []
+          : deploymentQualityExecutionResources(deployment)),
+      ]),
+    ];
   const containerSession = createDevelopmentContainerFixtureSession({
     projectDir,
     probes: finalPlan.developmentContainer.probes,
@@ -569,9 +574,12 @@ async function runScenario(
         return;
       }
       const queue = await startPhase("scheduler-queue", options.gate);
+      const gateResources = options.resources.filter(
+        (resource) => !containerSessionResources.includes(resource),
+      );
       let entered = false;
       try {
-        await evidenceScheduler.run(options.resources, async () => {
+        await evidenceScheduler.run(gateResources, async () => {
           entered = true;
           await finishPhase(queue, { outcome: "succeeded" });
           await semantic();

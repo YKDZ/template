@@ -2955,6 +2955,7 @@ describe("Fixture Verification Evidence", () => {
       expect(acquiredResources).toEqual(
         acquiredResources.map(() => [
           "development-container-session",
+          "browser",
           "docker",
         ]),
       );
