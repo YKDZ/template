@@ -62,14 +62,20 @@ describe("Generated Repository Node manifest publication policy", () => {
       );
       expect(configurationDefinition).toBeDefined();
       const publicCandidateDefinitionIds = new Set(
-        plan.generationRecord.packages
-          .filter(
-            (record) =>
-              record.definitionName === "ts-cli" &&
-              record.planningContribution === "planInitialization" &&
-              record.contributionIdentity === "cli-publication-candidate",
-          )
-          .map((record) => record.packageDefinitionId),
+        plan.packageContributions.flatMap((contribution) => {
+          if (
+            contribution.foundation.npmPublication?.kind !==
+            "public-cli-candidate"
+          ) {
+            return [];
+          }
+          const packageDefinition = plan.blueprint.packages.find(
+            (candidate) => candidate.path === contribution.definition.path,
+          );
+          return packageDefinition === undefined
+            ? []
+            : [packageDefinition.packageDefinitionId];
+        }),
       );
       let requiresPackingHook = false;
       let requiresPackingHookTsconfig = false;

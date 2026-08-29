@@ -38,7 +38,7 @@ async function generatedRepository(
   );
   workspaces.push(repositoryRoot);
   await symlink(
-    path.resolve(import.meta.dirname, "../../../../node_modules"),
+    path.resolve(import.meta.dirname, "../../node_modules"),
     path.join(repositoryRoot, "node_modules"),
     "dir",
   );

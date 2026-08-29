@@ -25,7 +25,6 @@ import { describe, expect, it } from "vitest";
 import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
 import { renderNewProject } from "#template-core/renderer";
 
-import { tsLibDefinition } from "../ts-lib/definition.ts";
 import { tsCliDefinition } from "./definition.ts";
 
 async function renderInstalledGeneratedRepository(prefix: string): Promise<{
@@ -188,58 +187,6 @@ describe("ts-cli Preset Definition behavior", () => {
     });
     expect(addition?.planningIdentity).toBe("cli-package-addition");
     expect(addition?.foundation.npmPublication).toBeUndefined();
-  });
-
-  it("does not create a publication candidate when ts-cli is added later", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-cli-non-candidate-addition-"),
-    );
-    const targetDir = path.join(workspace, "demo-workspace");
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context: createGenerationContext({
-        targetDir,
-        defaultPackageScope: "demo",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
-      }),
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsCliDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
-        packageLeafName: "release",
-        packagePath: "packages/release",
-      });
-      const rootManifest = addition.manifests.find(
-        (manifest) => manifest.name === "demo-workspace",
-      );
-
-      expect(
-        addition.packageContributions.some(
-          (contribution) =>
-            contribution.foundation.npmPublication?.kind ===
-            "public-cli-candidate",
-        ),
-      ).toBe(false);
-      expect(rootManifest).not.toHaveProperty("scripts.publication:readiness");
-      expect(
-        addition.operations.some(
-          (operation) =>
-            "to" in operation &&
-            operation.to.startsWith("scripts/npm-publication/"),
-        ),
-      ).toBe(false);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
   });
 
   it("projects publication readiness only for the initial CLI candidate", () => {

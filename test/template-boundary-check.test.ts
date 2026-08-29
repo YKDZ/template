@@ -64,9 +64,9 @@ describe("Template Source Boundary", () => {
         const result = await checkTemplateSourceBoundary({
           projections: [
             {
-              name: "ts-cli:planInitialization",
+              name: "publication-boundary:planInitialization",
               sourceFilePath,
-              definitionName: "ts-cli",
+              definitionName: "publication-boundary",
               planningContribution: "planInitialization",
               plan: {
                 operations: [
