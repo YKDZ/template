@@ -39,7 +39,7 @@ catalog:
   node-diff3: ^3.2.1
   npm: 11.19.1
   oxfmt: ^0.58.0
-  oxlint: ^1.77.0
+  oxlint: ^1.80.0
   oxlint-tsgolint: ^7.0.2001
   semver: ^7.8.5
   "@types/semver": ^7.7.1
