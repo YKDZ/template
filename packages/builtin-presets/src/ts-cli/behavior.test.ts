@@ -1173,19 +1173,19 @@ const save = () => fs.writeFileSync(statePath, JSON.stringify(state)); const arg
 state.calls.push(args); save();
 const reply = (value) => process.stdout.write(include ? "HTTP/2 200\\n\\n" + JSON.stringify(value) : JSON.stringify(value)); const endpoint = args.find((arg) => arg.startsWith("repos/"));
 if (args[0] === "auth") process.exit(0);
-if (args[0] === "repo") { reply({ nameWithOwner: "demo/ship", visibility: "PUBLIC", defaultBranchRef: { name: "main", target: {} }, viewerCanAdminister: true, viewerPermission: "ADMIN" }); process.exit(0); }
+if (args[0] === "repo") { reply({ nameWithOwner: "demo/ship", visibility: "PUBLIC", defaultBranchRef: { name: state.branch || "main", target: {} }, viewerCanAdminister: true, viewerPermission: "ADMIN" }); process.exit(0); }
 if (args[0] === "api" && args.includes("user")) { reply({ login: "alice" }); process.exit(0); }
-if (args[0] === "api" && endpoint === "repos/demo/ship") { reply({ full_name: "demo/ship", visibility: "public", default_branch: "main", permissions: { admin: true, push: true } }); process.exit(0); }
-if (args[0] === "api" && endpoint.endsWith("immutable-releases")) { if (state.failure === "permission") { process.stdout.write("HTTP/2 403\\n\\n"); process.exit(1); } if (state.failure === "unknown") { process.stdout.write("HTTP/2 500\\n\\n"); process.exit(1); } if (args.includes("PUT")) { state.immutable = true; save(); process.stdout.write("HTTP/2 204\\n\\n"); process.exit(0); } if (!state.immutable) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ enabled: true, enforced_by_owner: false }); process.exit(0); }
+if (args[0] === "api" && endpoint === "repos/demo/ship") { reply({ full_name: "demo/ship", visibility: "public", default_branch: state.branch || "main", permissions: { admin: true, push: true } }); process.exit(0); }
+if (args[0] === "api" && endpoint.endsWith("immutable-releases")) { if (state.failure === "permission") { process.stdout.write("HTTP/2 403\\n\\n"); process.exit(1); } if (state.failure === "unknown") { process.stdout.write("HTTP/2 201\\n\\n{\\"enabled\\":true,\\"enforced_by_owner\\":false}"); process.exit(0); } if (state.failure === "immutable-race" && !state.immutable) { state.immutable = true; state.failure = "immutable-race-observed"; save(); process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } if (args.includes("PUT")) { state.immutable = true; save(); process.stdout.write("HTTP/2 204\\n\\n"); process.exit(0); } if (!state.immutable) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ enabled: true, enforced_by_owner: false }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/git/ref/heads/")) { reply({ object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/git/ref/tags/")) { if (!state.tag) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ object: { type: "tag", sha: "tag-object" } }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/git/tags/")) { reply({ tag: "v1.0.0", message: state.annotation, object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
 if (args[0] === "api" && endpoint.endsWith("/git/tags") && args.includes("POST")) { if (state.failure === "tag-write") { process.exit(1); } state.annotation = args.find((arg) => arg.startsWith("message=")).slice(8); save(); reply({ sha: "tag-object" }); process.exit(0); }
 if (args[0] === "api" && endpoint.endsWith("/git/refs") && args.includes("POST")) { state.tag = true; save(); reply({ ref: "refs/tags/v1.0.0" }); process.exit(0); }
-if (args[0] === "api" && endpoint.includes("/releases?")) { process.stdout.write(JSON.stringify([state.release ? [state.release] : []])); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/releases?")) { state.releaseReads = (state.releaseReads || 0) + 1; if (state.failure === "pre-public-drift" && state.releaseReads === 4) state.release.assets[0].bytes = "eA=="; save(); process.stdout.write(JSON.stringify([state.release ? [state.release] : []])); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/releases/assets/")) { if (state.failure === "gh-signal") { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid })); const onSignal = () => { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid, childSignalled: true })); process.exit(0); }; process.on("SIGTERM", onSignal); process.on("SIGHUP", onSignal); setInterval(() => {}, 1_000); } else { const id = Number(endpoint.split("/").at(-1)); const asset = state.release.assets.find((item) => item.id === id); fs.writeFileSync(args.find((arg) => arg.startsWith("--output=")).slice(9), Buffer.from(asset.bytes, "base64")); process.exit(0); } }
 if (args[0] === "release" && args[1] === "create") { const tag = args[2], tgz = fs.readFileSync(args[3]), checksum = fs.readFileSync(args[4]), notes = fs.readFileSync(args.find((arg) => arg.startsWith("--notes-file=")).slice(13), "utf8"); state.release = { tag_name: tag, name: tag, body: notes, draft: true, prerelease: false, immutable: false, published_at: null, assets: [{ id: 1, name: path.basename(args[3]), size: tgz.length, label: null, state: "uploaded", bytes: tgz.toString("base64") }, { id: 2, name: "SHA512SUMS", size: checksum.length, label: null, state: "uploaded", bytes: checksum.toString("base64") }] }; save(); process.exit(0); }
-if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = true; state.release.published_at = "2026-08-30T00:00:00Z"; save(); process.exit(0); }
+if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = true; state.release.published_at = "2026-08-30T00:00:00Z"; if (state.failure === "post-public-drift") state.release.assets[0].bytes = "eA=="; save(); process.exit(0); }
 if (args[0] === "release" && (args[1] === "verify" || args[1] === "verify-asset")) process.exit(0); if (state.failure !== "gh-signal") process.exit(97);
 `,
       );
@@ -1234,7 +1234,33 @@ save(); process.exit(97);
         packageName: "@demo/ship",
         commandName: "ship",
       });
-      const bridge = `${JSON.stringify(process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
+      await writeExecutable(
+        path.join(fakeBin, "node"),
+        `#!/usr/bin/env bash
+last=\${!#}
+if [ "$last" = artifact ]; then
+  fixture=\${ARTIFACT_FIXTURE_ROOT:-}
+  output=\${ARTIFACT_OUTPUT_DIRECTORY:-}
+  integrity=\${ARTIFACT_FIXTURE_INTEGRITY:-}
+  record=\${ARTIFACT_OUTPUT_RECORD:-}
+  case "$fixture" in /*) ;; *) exit 98 ;; esac
+  case "$output" in /tmp/npm-publication-setup-artifact.*) ;; *) exit 98 ;; esac
+  [ -n "$integrity" ] && [ -d "$fixture" ] && [ -d "$output" ] || exit 98
+  [ -z "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit)" ] || exit 98
+  for file in ship-1.0.0.tgz SHA512SUMS verified-publication-artifact.json; do
+    [ -f "$fixture/$file" ] || exit 98
+    cp "$fixture/$file" "$output/$file" || exit 98
+  done
+  [ -z "$record" ] || printf '%s\\n' "$output" > "$record"
+  printf 'receipt verified\\nACCEPT @demo/ship@1.0.0 %s\\n' "$integrity"
+  exit 0
+fi
+exec ${JSON.stringify(process.execPath)} "$@"
+`,
+      );
+      // The business journey intentionally enters through the real generated
+      // shell owner; bridge.ts is direct only for the compiler probes above.
+      const bridge = "./scripts/npm-publication-setup/setup.sh";
       const terminalInput = (lines: readonly string[]) =>
         lines
           .map((line) => `printf '%s\\n' ${JSON.stringify(line)}; sleep 1`)
@@ -1244,6 +1270,7 @@ save(); process.exit(97);
         [
           "-c",
           `(sleep 1; ${terminalInput([
+            `ACCEPT @demo/ship@1.0.0 ${first.integrity}`,
             "CONFIRM NPM 2FA AND RECOVERY CODES READY",
             `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
             "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
@@ -1254,8 +1281,8 @@ save(); process.exit(97);
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
-            REPOSITORY_ROOT: targetDir,
-            ARTIFACT_ROOT: first.directory,
+            ARTIFACT_FIXTURE_ROOT: first.directory,
+            ARTIFACT_FIXTURE_INTEGRITY: first.integrity,
           },
           reject: false,
           timeout: 60_000,
@@ -1273,6 +1300,10 @@ save(); process.exit(97);
       );
       expect(firstRun.stdout).toContain(
         "STAGE 8/9 Create the first GitHub release",
+      );
+      const firstTranscript = firstRun.stdout.replace(/\r/g, "");
+      expect(firstTranscript).toContain(
+        "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.",
       );
       const calls = (
         JSON.parse(await readFile(statePath, "utf8")) as {
@@ -1309,14 +1340,14 @@ save(); process.exit(97);
         "bash",
         [
           "-c",
-          `(sleep 1; ${terminalInput(["CONFIRM NPM 2FA AND RECOVERY CODES READY"])} ) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+          `(sleep 1; ${terminalInput([`ACCEPT @demo/ship@1.0.0 ${resume.integrity}`, "CONFIRM NPM 2FA AND RECOVERY CODES READY"])} ) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
         ],
         {
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
-            REPOSITORY_ROOT: targetDir,
-            ARTIFACT_ROOT: resume.directory,
+            ARTIFACT_FIXTURE_ROOT: resume.directory,
+            ARTIFACT_FIXTURE_INTEGRITY: resume.integrity,
           },
           reject: false,
           timeout: 60_000,
@@ -1346,6 +1377,7 @@ save(); process.exit(97);
           annotation: string;
           release: Record<string, unknown> | null;
           failure?: string;
+          branch?: string;
           calls: string[][];
         };
       const writeGithub = async (state: unknown) =>
@@ -1370,6 +1402,7 @@ save(); process.exit(97);
           [
             "-c",
             `(sleep 1; ${terminalInput([
+              `ACCEPT @demo/ship@1.0.0 ${artifact.integrity}`,
               "CONFIRM NPM 2FA AND RECOVERY CODES READY",
               ...(enterRelease
                 ? [
@@ -1382,8 +1415,8 @@ save(); process.exit(97);
             cwd: targetDir,
             env: {
               PATH: `${fakeBin}:${process.env.PATH}`,
-              REPOSITORY_ROOT: targetDir,
-              ARTIFACT_ROOT: artifact.directory,
+              ARTIFACT_FIXTURE_ROOT: artifact.directory,
+              ARTIFACT_FIXTURE_INTEGRITY: artifact.integrity,
             },
             reject: false,
             timeout: 60_000,
@@ -1472,6 +1505,106 @@ save(); process.exit(97);
       expect(partialResult.exitCode).toBe(4);
       expect(githubWrites((await readGithub()).calls)).toEqual([]);
 
+      await writeGithub({
+        ...exactDraft,
+        immutable: false,
+        failure: "immutable-race",
+        calls: [],
+      });
+      const immutableRaceArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const immutableRaceResult = await resumeGithub(immutableRaceArtifact);
+      expect(immutableRaceResult.exitCode).toBe(4);
+      expect(githubWrites((await readGithub()).calls)).toEqual([]);
+
+      await writeGithub({ ...exactDraft, immutable: true, calls: [] });
+      const receiptRaceArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const receiptRaceOwnedArtifact = path.join(
+        workspace,
+        "receipt-race-owned-artifact",
+      );
+      const mutateReceipt = `node -e ${JSON.stringify(
+        `const fs=require("node:fs");const root=fs.readFileSync(${JSON.stringify(receiptRaceOwnedArtifact)},"utf8").trim();const receipt=root+"/verified-publication-artifact.json";fs.writeFileSync(receipt,fs.readFileSync(receipt,"utf8").replace("Initial release.","Changed release."));`,
+      )}`;
+      const receiptRaceRun = execa("script", ["-qefc", bridge, "/dev/null"], {
+        cwd: targetDir,
+        env: {
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          ARTIFACT_FIXTURE_ROOT: receiptRaceArtifact.directory,
+          ARTIFACT_FIXTURE_INTEGRITY: receiptRaceArtifact.integrity,
+          ARTIFACT_OUTPUT_RECORD: receiptRaceOwnedArtifact,
+        },
+        reject: false,
+        stdin: "pipe",
+        timeout: 60_000,
+      });
+      let receiptTranscript = "";
+      receiptRaceRun.stdout?.on("data", (chunk: Buffer) => {
+        receiptTranscript += chunk.toString("utf8");
+      });
+      const waitForReceiptPrompt = async (prompt: string) => {
+        const deadline = Date.now() + 20_000;
+        while (!receiptTranscript.includes(prompt) && Date.now() < deadline)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(receiptTranscript).toContain(prompt);
+      };
+      await waitForReceiptPrompt("Acceptance: ");
+      receiptRaceRun.stdin?.write(
+        `ACCEPT @demo/ship@1.0.0 ${receiptRaceArtifact.integrity}\n`,
+      );
+      await waitForReceiptPrompt("STAGE 5/9 Authenticate with npm");
+      await waitForReceiptPrompt("Confirmation: ");
+      receiptRaceRun.stdin?.write("CONFIRM NPM 2FA AND RECOVERY CODES READY\n");
+      await waitForReceiptPrompt("GitHub release preview: ExactDraft");
+      await waitForReceiptPrompt("GitHub release preview: ExactDraft");
+      await execa("bash", ["-c", mutateReceipt], { cwd: targetDir });
+      receiptRaceRun.stdin?.write(
+        `RELEASE @demo/ship@1.0.0 ${receiptRaceArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789\n`,
+      );
+      const receiptRaceResult = await receiptRaceRun;
+      expect(receiptRaceResult.exitCode).toBe(4);
+      expect(githubWrites((await readGithub()).calls)).toEqual([]);
+
+      for (const drift of ["pre-public-drift", "post-public-drift"] as const) {
+        await writeGithub({
+          ...exactDraft,
+          immutable: true,
+          failure: drift,
+          releaseReads: 0,
+          calls: [],
+        });
+        const driftArtifact = await writeAcceptedFirstReleaseArtifact({
+          root: targetDir,
+          packageName: "@demo/ship",
+          commandName: "ship",
+        });
+        const driftResult = await resumeGithub(driftArtifact);
+        expect(driftResult.exitCode).toBe(4);
+        const writes = githubWrites((await readGithub()).calls);
+        expect(writes).toEqual(
+          drift === "pre-public-drift"
+            ? []
+            : [expect.arrayContaining(["release", "edit"])],
+        );
+      }
+
+      await writeGithub({ ...tagOnly, branch: "release", calls: [] });
+      const branchArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const branchResult = await resumeGithub(branchArtifact, false);
+      expect(branchResult.exitCode).toBe(4);
+      expect(githubWrites((await readGithub()).calls)).toEqual([]);
+
       for (const failure of ["permission", "unknown", "tag-write"] as const) {
         await writeGithub({
           ...tagOnly,
@@ -1489,8 +1622,18 @@ save(); process.exit(97);
         const result = await resumeGithub(artifact, failure === "tag-write");
         expect(result.exitCode).toBe(failure === "tag-write" ? 4 : 4);
         const writes = githubWrites((await readGithub()).calls);
-        if (failure === "tag-write") expect(writes).toHaveLength(1);
-        else expect(writes).toEqual([]);
+        if (failure === "tag-write") {
+          expect(writes).toHaveLength(1);
+          const callsAfterFailure = (await readGithub()).calls.slice(
+            (await readGithub()).calls.findIndex(
+              (args) => args[0] === "api" && args.includes("POST"),
+            ) + 1,
+          );
+          expect(callsAfterFailure).toEqual(
+            expect.arrayContaining([expect.arrayContaining(["api", "GET"])]),
+          );
+          expect(githubWrites(callsAfterFailure)).toEqual([]);
+        } else expect(writes).toEqual([]);
       }
       await writeGithub({
         ...publicState,
@@ -1509,6 +1652,10 @@ save(); process.exit(97);
         packageName: "@demo/ship",
         commandName: "ship",
       });
+      const ghSignalOwnedArtifact = path.join(
+        workspace,
+        "github-owned-artifact",
+      );
       const logoutCountBeforeSignal = (
         JSON.parse(await readFile(statePath, "utf8")) as { calls: string[][] }
       ).calls.filter((args) => args[0] === "logout").length;
@@ -1517,6 +1664,7 @@ save(); process.exit(97);
         [
           "-c",
           `(sleep 1; ${terminalInput([
+            `ACCEPT @demo/ship@1.0.0 ${ghSignalArtifact.integrity}`,
             "CONFIRM NPM 2FA AND RECOVERY CODES READY",
             `RELEASE @demo/ship@1.0.0 ${ghSignalArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
           ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
@@ -1525,8 +1673,9 @@ save(); process.exit(97);
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
-            REPOSITORY_ROOT: targetDir,
-            ARTIFACT_ROOT: ghSignalArtifact.directory,
+            ARTIFACT_FIXTURE_ROOT: ghSignalArtifact.directory,
+            ARTIFACT_FIXTURE_INTEGRITY: ghSignalArtifact.integrity,
+            ARTIFACT_OUTPUT_RECORD: ghSignalOwnedArtifact,
           },
           reject: false,
           timeout: 60_000,
@@ -1536,7 +1685,7 @@ save(); process.exit(97);
       let blockedBridgePid: number | undefined;
       for (
         let attempt = 0;
-        attempt < 100 && blockedBridgePid === undefined;
+        attempt < 1_000 && blockedBridgePid === undefined;
         attempt += 1
       ) {
         const block = await readFile(githubBlockPath, "utf8").catch(() => "");
@@ -1558,7 +1707,9 @@ save(); process.exit(97);
           await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(ghChildSignalled).toBe(true);
-      await expect(stat(ghSignalArtifact.directory)).rejects.toThrow();
+      await expect(
+        stat((await readFile(ghSignalOwnedArtifact, "utf8")).trim()),
+      ).rejects.toThrow();
       expect(
         (
           JSON.parse(await readFile(statePath, "utf8")) as { calls: string[][] }

@@ -1931,14 +1931,7 @@ async function capturedGh(arguments_: readonly string[]): Promise<NpmResult> {
     PAGER: "cat",
     NO_COLOR: "1",
   };
-  for (const key of [
-    "PATH",
-    "HOME",
-    "XDG_CONFIG_HOME",
-    "GH_CONFIG_DIR",
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-  ])
+  for (const key of ["PATH", "HOME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR"])
     if (process.env[key] !== undefined) environment[key] = process.env[key];
   const result = await runChild({
     command: "gh",
@@ -2015,6 +2008,30 @@ function githubRelease(value: unknown): GithubRelease | undefined {
   };
 }
 
+function isGithubTimestamp(value: string | null): value is string {
+  if (
+    value === null ||
+    !/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/u.test(value)
+  )
+    return false;
+  const [, year, month, day, hour, minute, second] =
+    /^(.{4})-(.{2})-(.{2})T(.{2}):(.{2}):(.{2})Z$/u.exec(value)!;
+  const instant = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    ),
+  );
+  return (
+    !Number.isNaN(instant.valueOf()) &&
+    instant.toISOString() === `${value.slice(0, -1)}.000Z`
+  );
+}
+
 async function githubImmutable(
   repository: string,
 ): Promise<"enabled" | "disabled"> {
@@ -2029,16 +2046,38 @@ async function githubImmutable(
     "X-GitHub-Api-Version: 2026-03-10",
     `repos/${repository}/immutable-releases`,
   ]);
-  if (result.status !== 0) {
-    if (/^HTTP\/\d(?:\.\d)? 404(?:\s|$)/mu.test(result.stdout))
-      return "disabled";
+  const included =
+    /^HTTP\/\d(?:\.\d)? (\d{3})[^\r\n]*\r?\n(?:[^\r\n]*\r?\n)*\r?\n([\s\S]*)$/u.exec(
+      result.stdout,
+    );
+  const status = included?.[1];
+  const body = included?.[2] ?? "";
+  if (result.status !== 0 || status !== "200") {
+    if (status === "404") return "disabled";
+    if (status === "401" || status === "403")
+      throw githubFailure(
+        "github-administration-permission-required",
+        "immutable releases endpoint denied administration access",
+        "repository administration permission",
+      );
+    if (status === "409")
+      throw githubFailure(
+        "github-immutable-setting-conflict",
+        "immutable releases endpoint reported a conflict",
+        "one stable immutable releases setting",
+      );
     throw githubFailure(
       "github-immutable-state-unknown",
       "immutable releases endpoint was unavailable",
       "an exact enabled or disabled immutable-releases response",
     );
   }
-  const body = /\r?\n\r?\n([\s\S]*)$/u.exec(result.stdout)?.[1];
+  if (result.stderr !== "")
+    throw githubFailure(
+      "github-immutable-state-unknown",
+      "immutable releases response had stderr",
+      "one clean HTTP 200 immutable releases response",
+    );
   let value: unknown;
   try {
     value = JSON.parse(body ?? "");
@@ -2065,6 +2104,7 @@ async function githubImmutable(
 async function ensureGithubPreimage(
   repository: string,
   sha: string,
+  expectedBranch: string,
 ): Promise<void> {
   const status = await capturedGh([
     "auth",
@@ -2114,6 +2154,12 @@ async function ensureGithubPreimage(
       `public repository ${repository}`,
     );
   const branch = viewed.defaultBranchRef.name;
+  if (branch !== expectedBranch)
+    throw githubFailure(
+      "github-branch-conflict",
+      `GitHub default branch ${branch}`,
+      `local and origin default branch ${expectedBranch}`,
+    );
   const apiRepository = ghJson(
     await capturedGh(["api", `repos/${repository}`]),
     "github-repository-unknown",
@@ -2121,7 +2167,7 @@ async function ensureGithubPreimage(
   if (
     apiRepository.full_name !== repository ||
     apiRepository.visibility !== "public" ||
-    apiRepository.default_branch !== branch ||
+    apiRepository.default_branch !== expectedBranch ||
     !isObject(apiRepository.permissions) ||
     apiRepository.permissions.admin !== true ||
     apiRepository.permissions.push !== true
@@ -2132,7 +2178,10 @@ async function ensureGithubPreimage(
       `public repository ${repository} with administration and contents write facts`,
     );
   const ref = ghJson(
-    await capturedGh(["api", `repos/${repository}/git/ref/heads/${branch}`]),
+    await capturedGh([
+      "api",
+      `repos/${repository}/git/ref/heads/${expectedBranch}`,
+    ]),
     "github-branch-unknown",
   );
   if (
@@ -2255,6 +2304,97 @@ async function githubReleaseForTag(
   return matches[0];
 }
 
+async function githubWriteFailure(
+  repository: string,
+  tag: string,
+  sha: string,
+  annotation: string,
+  accepted: AcceptedPublicationArtifact,
+  downloads: string,
+  observed: unknown,
+  expected: unknown,
+): Promise<never> {
+  // A failed or indeterminate write gets exactly one bounded, read-only target
+  // diagnosis. It is evidence for a human; it never becomes a repair loop.
+  const diagnosis: string[] = [];
+  let remoteImmutable: "enabled" | "disabled" | "unknown" = "unknown";
+  try {
+    remoteImmutable = await githubImmutable(repository);
+    diagnosis.push(`immutable=${remoteImmutable}`);
+  } catch (error) {
+    diagnosis.push(
+      `immutable=${error instanceof Error ? error.message : "unknown"}`,
+    );
+  }
+  try {
+    const remoteTag = await githubTag(repository, tag, sha, annotation);
+    const release = await githubReleaseForTag(repository, tag);
+    if (remoteTag === "absent" && release === undefined)
+      diagnosis.push("state=Fresh");
+    else if (remoteTag === "exact" && release === undefined)
+      diagnosis.push("state=ExactTagOnly");
+    else if (remoteTag === "exact" && release?.draft) {
+      await assertGithubRelease(
+        repository,
+        release,
+        accepted,
+        tag,
+        true,
+        downloads,
+      );
+      diagnosis.push("state=ExactDraft");
+    } else if (
+      remoteTag === "exact" &&
+      release !== undefined &&
+      !release.draft &&
+      release.immutable &&
+      isGithubTimestamp(release.publishedAt) &&
+      remoteImmutable === "enabled"
+    ) {
+      await assertGithubRelease(
+        repository,
+        release,
+        accepted,
+        tag,
+        false,
+        downloads,
+      );
+      for (const arguments_ of [
+        ["release", "verify", tag, "--repo", repository],
+        ["release", "verify-asset", tag, accepted.tgz, "--repo", repository],
+        [
+          "release",
+          "verify-asset",
+          tag,
+          accepted.checksum,
+          "--repo",
+          repository,
+        ],
+      ] as const)
+        if ((await capturedGh(arguments_)).status !== 0)
+          throw new Error("public-attestation-invalid");
+      diagnosis.push("state=ExactPublic");
+    } else diagnosis.push("state=Conflict");
+  } catch (error) {
+    const code = error instanceof SetupFailure ? error.code : "unknown";
+    const state = [
+      "github-release-conflict",
+      "github-release-asset-conflict",
+      "github-immutable-setting-conflict",
+    ].includes(code)
+      ? "Conflict"
+      : code === "github-release-attestation-invalid"
+        ? "Incident"
+        : "Unknown";
+    diagnosis.push(`state=${state}:${code}`);
+  }
+  throw githubFailure(
+    "github-release-write-failed",
+    `${String(observed)}; read-only diagnosis: ${diagnosis.join(", ")}`,
+    expected,
+  );
+}
+
 async function assertGithubRelease(
   repository: string,
   release: GithubRelease,
@@ -2325,24 +2465,39 @@ async function runGithubFirstRelease(options: {
   readonly accepted: AcceptedPublicationArtifact;
   readonly repository: string;
   readonly sha: string;
-  readonly initialRegistryArtifact: RegistryExactArtifact;
+  readonly branch: string;
 }): Promise<void> {
-  const {
-    isolation,
+  const { isolation, client, accepted, repository, sha, branch } = options;
+  // Stage 8 deliberately receives a new registry download, even after Stage 6
+  // already proved publication. ExactPublic therefore never verifies a stale
+  // handoff tarball.
+  const initialView = await classifyVersion(
     client,
+    isolation,
+    accepted.receipt.publication.packageName,
+  );
+  if (initialView.kind !== "present")
+    throw githubFailure(
+      "github-preimage-changed",
+      "registry publication is no longer the accepted exact version",
+      "the exact published registry artifact",
+    );
+  const initialRegistryArtifact = await exactRemoteArtifact(
+    client,
+    isolation,
     accepted,
-    repository,
-    sha,
-    initialRegistryArtifact,
-  } = options;
+    accepted.receipt.publication.packageName,
+    initialView.value,
+  );
   const initialExactArtifact: AcceptedPublicationArtifact = {
     ...accepted,
     tgz: initialRegistryArtifact.tgz,
   };
   const tag = "v1.0.0";
   const annotation = `npm artifact SHA-512: ${accepted.sha512}`;
-  await ensureGithubPreimage(repository, sha);
-  let immutable = await githubImmutable(repository);
+  await ensureGithubPreimage(repository, sha, branch);
+  const initialImmutable = await githubImmutable(repository);
+  let immutable = initialImmutable;
   const tagState = await githubTag(repository, tag, sha, annotation);
   let release = await githubReleaseForTag(repository, tag);
   let state: GithubState;
@@ -2356,7 +2511,7 @@ async function runGithubFirstRelease(options: {
     release !== undefined &&
     !release.draft &&
     release.immutable &&
-    release.publishedAt !== null
+    isGithubTimestamp(release.publishedAt)
   )
     state = "ExactPublic";
   else
@@ -2426,7 +2581,7 @@ async function runGithubFirstRelease(options: {
   await readExactPhrase(phrase, "github-release-confirmation-required");
   // A confirmation authorizes one bounded attempt only. Re-observe every fact
   // before its first GitHub write and never repair a partial remote result.
-  await acceptDownloadedPublicationArtifact({
+  const refreshed = await acceptDownloadedPublicationArtifact({
     repositoryRoot: root,
     packagePath,
     artifactDirectory: process.env.ARTIFACT_ROOT!,
@@ -2438,6 +2593,17 @@ async function runGithubFirstRelease(options: {
       "the accepted receipt-bound artifact",
     );
   });
+  if (
+    refreshed.tgz !== accepted.tgz ||
+    refreshed.checksum !== accepted.checksum ||
+    refreshed.sha512 !== accepted.sha512 ||
+    JSON.stringify(refreshed.receipt) !== JSON.stringify(accepted.receipt)
+  )
+    throw githubFailure(
+      "github-preimage-changed",
+      "receipt, notes, checksum, or artifact identity changed after confirmation",
+      "the original confirmation-bound publication preimage",
+    );
   const registryArtifact = await exactRemoteArtifact(
     client,
     isolation,
@@ -2456,12 +2622,14 @@ async function runGithubFirstRelease(options: {
     ...accepted,
     tgz: registryArtifact.tgz,
   };
-  await ensureGithubPreimage(repository, sha);
+  await ensureGithubPreimage(repository, sha, branch);
   const recheckedGit = gitFacts();
   if (
     recheckedGit.unavailable ||
     recheckedGit.detached ||
     recheckedGit.facts.workingTree !== "clean" ||
+    recheckedGit.facts.currentBranch !== branch ||
+    recheckedGit.facts.defaultBranch !== branch ||
     !recheckedGit.facts.headMatchesRemoteDefault ||
     !remoteMatchesPublicOwner(recheckedGit.remote) ||
     execFileSync("git", ["rev-parse", "HEAD"], {
@@ -2476,6 +2644,12 @@ async function runGithubFirstRelease(options: {
       "the accepted clean synchronized default-branch preimage",
     );
   immutable = await githubImmutable(repository);
+  if (immutable !== initialImmutable)
+    throw githubFailure(
+      "github-preimage-changed",
+      "immutable releases classification changed after confirmation",
+      `unchanged immutable releases ${initialImmutable}`,
+    );
   const afterTag = await githubTag(repository, tag, sha, annotation);
   release = await githubReleaseForTag(repository, tag);
   if (
@@ -2517,42 +2691,67 @@ async function runGithubFirstRelease(options: {
         enabled.stdout,
       )
     )
-      throw githubFailure(
-        "github-immutable-enable-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "immutable releases enable failed",
-        "HTTP 204 followed by an enabled readback",
+        "an exact bodyless HTTP 204 followed by an enabled readback",
       );
     if ((await githubImmutable(repository)) !== "enabled")
-      throw githubFailure(
-        "github-immutable-enable-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "immutable releases did not read back enabled",
         "an enabled immutable-releases response",
       );
   }
   if (state === "Fresh") {
-    const object = ghJson(
-      await capturedGh([
-        "api",
-        "--method",
-        "POST",
-        `repos/${repository}/git/tags`,
-        "-f",
-        `tag=${tag}`,
-        "-f",
-        `message=${annotation}`,
-        "-f",
-        `object=${sha}`,
-        "-f",
-        "type=commit",
-      ]),
-      "github-release-write-failed",
-    );
+    const tagObjectResult = await capturedGh([
+      "api",
+      "--method",
+      "POST",
+      `repos/${repository}/git/tags`,
+      "-f",
+      `tag=${tag}`,
+      "-f",
+      `message=${annotation}`,
+      "-f",
+      `object=${sha}`,
+      "-f",
+      "type=commit",
+    ]);
+    if (tagObjectResult.status !== 0 || tagObjectResult.stderr !== "")
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
+        "tag object write failed",
+        "one annotated tag object SHA",
+      );
+    const object = ghJson(tagObjectResult, "github-release-write-failed");
     if (typeof object.sha !== "string")
-      throw githubFailure(
-        "github-release-write-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "tag object write returned no SHA",
         "one annotated tag object SHA",
       );
+    const objectSha = String(object.sha);
     if (
       (
         await capturedGh([
@@ -2563,18 +2762,28 @@ async function runGithubFirstRelease(options: {
           "-f",
           `ref=refs/tags/${tag}`,
           "-f",
-          `sha=${object.sha}`,
+          `sha=${objectSha}`,
         ])
       ).status !== 0
     )
-      throw githubFailure(
-        "github-release-write-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "tag ref write failed",
         "one annotated tag reference",
       );
     if ((await githubTag(repository, tag, sha, annotation)) !== "exact")
-      throw githubFailure(
-        "github-release-write-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "annotated tag did not read back exactly",
         "one exact annotated tag reference",
       );
@@ -2600,22 +2809,59 @@ async function runGithubFirstRelease(options: {
         ])
       ).status !== 0
     )
-      throw githubFailure(
-        "github-release-write-failed",
+      await githubWriteFailure(
+        repository,
+        tag,
+        sha,
+        annotation,
+        exactArtifact,
+        downloads,
         "draft release write failed",
         "one exact draft release with two assets",
       );
   }
   const draft = await githubReleaseForTag(repository, tag);
   if (draft === undefined || !draft.draft)
-    throw githubFailure(
-      "github-release-conflict",
+    await githubWriteFailure(
+      repository,
+      tag,
+      sha,
+      annotation,
+      exactArtifact,
+      downloads,
       "draft release did not read back",
       "one exact draft release",
     );
   await assertGithubRelease(
     repository,
-    draft,
+    draft!,
+    exactArtifact,
+    tag,
+    true,
+    downloads,
+  );
+  if ((await githubImmutable(repository)) !== "enabled")
+    throw githubFailure(
+      "github-release-immutability-unproven",
+      "immutable releases was not enabled immediately before publication",
+      "an enabled immutable releases setting",
+    );
+  if ((await githubTag(repository, tag, sha, annotation)) !== "exact")
+    throw githubFailure(
+      "github-preimage-changed",
+      "annotated tag changed immediately before publication",
+      "the exact confirmation-bound annotated tag",
+    );
+  const finalDraft = await githubReleaseForTag(repository, tag);
+  if (finalDraft === undefined || !finalDraft.draft)
+    throw githubFailure(
+      "github-preimage-changed",
+      "draft release changed immediately before publication",
+      "the exact confirmation-bound draft release",
+    );
+  await assertGithubRelease(
+    repository,
+    finalDraft,
     exactArtifact,
     tag,
     true,
@@ -2633,17 +2879,34 @@ async function runGithubFirstRelease(options: {
       ])
     ).status !== 0
   )
-    throw githubFailure(
-      "github-release-write-failed",
+    await githubWriteFailure(
+      repository,
+      tag,
+      sha,
+      annotation,
+      exactArtifact,
+      downloads,
       "public release transition failed",
       "one successful draft-to-public transition",
     );
   const publicRelease = await githubReleaseForTag(repository, tag);
+  if ((await githubImmutable(repository)) !== "enabled")
+    throw githubFailure(
+      "github-release-immutability-unproven",
+      "immutable releases was not enabled after publication",
+      "an enabled immutable releases setting",
+    );
+  if ((await githubTag(repository, tag, sha, annotation)) !== "exact")
+    throw githubFailure(
+      "github-release-immutability-unproven",
+      "annotated tag changed after publication",
+      "the exact annotated tag",
+    );
   if (
     publicRelease === undefined ||
     publicRelease.draft ||
     !publicRelease.immutable ||
-    publicRelease.publishedAt === null
+    !isGithubTimestamp(publicRelease.publishedAt)
   )
     throw githubFailure(
       "github-release-immutability-unproven",
@@ -2802,7 +3065,6 @@ async function external() {
       isolation,
       accepted.receipt.publication.packageName,
     );
-    let initialRegistryArtifact: RegistryExactArtifact | undefined;
     if (firstView.kind === "unknown")
       throw externalFailure(
         "npm-version-state-unknown",
@@ -2826,7 +3088,7 @@ async function external() {
         accepted.receipt.publication.packageName,
         whoami,
       );
-      initialRegistryArtifact = await exactRemoteArtifact(
+      await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -2916,7 +3178,7 @@ async function external() {
         accepted.receipt.publication.packageName,
         whoami,
       );
-      initialRegistryArtifact = await exactRemoteArtifact(
+      await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -2933,21 +3195,13 @@ async function external() {
     process.stdout.write(
       "OK trusted-publishing-configured\nSTAGE 8/9 Create the first GitHub release\n",
     );
-    if (initialRegistryArtifact === undefined)
-      throw externalFailure(
-        "npm-remote-artifact-unavailable",
-        "registry artifact was not retained for GitHub verification",
-        "one exact registry artifact for this invocation",
-        "Rerun setup from Stage 1.",
-        5,
-      );
     await runGithubFirstRelease({
       isolation,
       client,
       accepted,
       repository,
       sha: githubSha,
-      initialRegistryArtifact,
+      branch: git.facts.currentBranch!,
     });
     githubReleaseVerified = true;
   } catch (error) {
@@ -2999,7 +3253,7 @@ async function external() {
   if (cleanupError !== undefined) throw cleanupError;
   if (githubReleaseVerified)
     process.stdout.write(
-      "OK first-github-release-verified\nSTAGE 9/9 Finish setup\nOK first-release-setup-complete\nSee RELEASING.md: run the daily release workflow without inputs after a reviewed version and changelog PR. After the first successful natural OIDC release, enable Require 2FA and disallow tokens and revoke unneeded write tokens in npm. You may now manually delete the entire scripts/npm-publication-setup directory.\n",
+      "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.\n",
     );
 }
 
