@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -1332,11 +1333,13 @@ save(); process.exit(97);
     );
     const fakeBin = path.join(workspace, "fake-bin");
     const ownedTemporaryDirectory = path.join(workspace, "owned-temporary");
+    const ambientTemporaryDirectory = path.join(workspace, "ambient-temporary");
     const eventLog = path.join(workspace, "signal-events.jsonl");
     const scenarioPath = path.join(workspace, "signal-scenario");
     const fixtureParent = path.join(workspace, "artifact-fixture");
     try {
       await mkdir(ownedTemporaryDirectory, { recursive: true });
+      await mkdir(ambientTemporaryDirectory, { recursive: true });
       await mkdir(fixtureParent, { recursive: true });
       await writeExecutable(
         path.join(fakeBin, "git"),
@@ -1504,12 +1507,18 @@ else if (args[0] === "publish") {
       };
       const normalized = (value: string): string =>
         value.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-      const runInTerminal = (command: string, artifactRoot?: string) => {
+      const runInTerminal = (
+        command: string,
+        artifactRoot?: string,
+        temporaryEnvironment: Record<string, string | undefined> = {
+          TMPDIR: ownedTemporaryDirectory,
+        },
+      ) => {
         const running = execa("script", ["-qefc", command, "/dev/null"], {
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
-            TMPDIR: ownedTemporaryDirectory,
+            ...temporaryEnvironment,
             ...(artifactRoot === undefined
               ? {}
               : { REPOSITORY_ROOT: targetDir, ARTIFACT_ROOT: artifactRoot }),
@@ -1556,7 +1565,16 @@ else if (args[0] === "publish") {
 
       await writeFile(eventLog, "");
       await writeFile(scenarioPath, "prompt");
-      const prompt = runInTerminal("./scripts/npm-publication-setup/setup.sh");
+      const canonicalTemporaryParent = await realpath("/tmp");
+      const prompt = runInTerminal(
+        "./scripts/npm-publication-setup/setup.sh",
+        undefined,
+        {
+          TMPDIR: undefined,
+          TMP: ambientTemporaryDirectory,
+          TEMP: ambientTemporaryDirectory,
+        },
+      );
       const acceptance = await waitFor(
         "Stage 4 acceptance",
         () =>
@@ -1589,6 +1607,12 @@ else if (args[0] === "publish") {
         (event) => event.kind === "artifact",
       )?.artifact;
       expect(setupArtifact).toBeTypeOf("string");
+      expect(path.dirname(setupArtifact as string)).toBe(
+        canonicalTemporaryParent,
+      );
+      expect(path.dirname(promptCorepack.isolation as string)).toBe(
+        canonicalTemporaryParent,
+      );
       expect(promptEvents.map((event) => event.kind)).toEqual([
         "artifact",
         "corepack",

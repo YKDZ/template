@@ -594,7 +594,7 @@ async function configure() {
         "Repair the owner file and retry.",
         5,
       );
-    manifest = parsedManifest as Manifest;
+    manifest = parsedManifest;
     blueprint = parsedBlueprint as Blueprint;
   } catch (error) {
     stop(
@@ -1049,7 +1049,7 @@ function isInside(parent: string, candidate: string): boolean {
 }
 
 function controlledTemporaryParent(): string {
-  const configured = process.env.TMPDIR ?? tmpdir();
+  const configured = process.env.TMPDIR || "/tmp";
   try {
     const parent = realpathSync(path.resolve(configured));
     if (!lstatSync(parent).isDirectory()) throw new Error("not a directory");

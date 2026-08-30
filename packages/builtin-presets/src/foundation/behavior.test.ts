@@ -525,7 +525,11 @@ describe("Generated Repository initialization preparation", () => {
             checkJs: true,
             noEmit: true,
           },
-          include: [".pnpmfile.mjs", "scripts/npm-publication/*.ts"],
+          include: [
+            ".pnpmfile.mjs",
+            "scripts/npm-publication/*.ts",
+            "scripts/npm-publication-setup/bridge.ts",
+          ],
         });
         expect(preparation.plan.operations).toEqual(
           expect.arrayContaining([
