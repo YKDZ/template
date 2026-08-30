@@ -12,7 +12,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,7 +63,7 @@ type Isolation = {
   readonly globalConfig: string;
 };
 
-type NpmClient = { readonly node: string; readonly cli: string };
+type NpmClient = { readonly repositoryRoot: string };
 type NpmResult = {
   readonly status: number;
   readonly signal: NodeJS.Signals | null;
@@ -638,7 +637,7 @@ async function configure() {
     manifest.bin !== null &&
     !Array.isArray(manifest.bin) &&
     Object.keys(manifest.bin).length === 1 &&
-    manifest.bin.cli === "./dist/cli.js";
+    Object.values(manifest.bin).every((value) => value === "./dist/cli.js");
   if (manifest.private === true && !initialPrivateBin)
     stop(
       "owner-fact-conflict",
@@ -1011,48 +1010,6 @@ function rejectAmbientCredentials() {
   );
 }
 
-function regularRealpath(value: string, code: string): string {
-  let resolved;
-  try {
-    resolved = realpathSync(value);
-    if (!statSync(resolved).isFile()) throw new Error("not a regular file");
-  } catch {
-    throw externalFailure(
-      code,
-      value,
-      "a readable regular file within the generated repository",
-      "Restore the locked npm client and retry.",
-      5,
-    );
-  }
-  return resolved;
-}
-
-function directoryRealpath(value: string, code: string): string {
-  try {
-    const resolved = realpathSync(value);
-    if (!statSync(resolved).isDirectory()) throw new Error("not a directory");
-    return resolved;
-  } catch {
-    throw externalFailure(
-      code,
-      value,
-      "a readable npm package directory",
-      "Restore the locked npm client and retry.",
-      5,
-    );
-  }
-}
-
-function isInside(parent: string, candidate: string): boolean {
-  const relative = path.relative(parent, candidate);
-  return (
-    relative !== "" &&
-    !relative.startsWith(`..${path.sep}`) &&
-    relative !== ".."
-  );
-}
-
 function controlledTemporaryParent(): string {
   const configured = process.env.TMPDIR || "/tmp";
   try {
@@ -1234,49 +1191,7 @@ async function bootstrapClient(isolation: Isolation): Promise<NpmClient> {
       "Correct the generated dependency installation and retry.",
       5,
     );
-  const npmRoot = directoryRealpath(
-    path.join(root, "node_modules", "npm"),
-    "npm-client-pin-invalid",
-  );
-  let packageJson;
-  try {
-    packageJson = JSON.parse(
-      readFileSync(path.join(npmRoot, "package.json"), "utf8"),
-    );
-  } catch {
-    throw externalFailure(
-      "npm-client-pin-invalid",
-      "npm package metadata is unreadable",
-      "npm@11.19.1",
-      "Restore the locked npm client and retry.",
-      5,
-    );
-  }
-  if (
-    packageJson.version !== "11.19.1" ||
-    typeof packageJson.bin?.npm !== "string"
-  )
-    throw externalFailure(
-      "npm-client-pin-invalid",
-      "npm client is not version 11.19.1",
-      "npm@11.19.1",
-      "Restore the locked npm client and retry.",
-      5,
-    );
-  const cli = regularRealpath(
-    path.join(npmRoot, packageJson.bin.npm),
-    "npm-client-pin-invalid",
-  );
-  if (!isInside(npmRoot, cli))
-    throw externalFailure(
-      "npm-client-pin-invalid",
-      "npm CLI escapes its npm package root",
-      "the pinned npm CLI within node_modules/npm",
-      "Restore the locked npm client and retry.",
-      5,
-    );
-  const node = regularRealpath(process.execPath, "npm-client-pin-invalid");
-  return { node, cli };
+  return { repositoryRoot: root };
 }
 
 function npmFlags(isolation: Isolation): string[] {
@@ -1296,8 +1211,16 @@ async function capturedNpm(
   allowSignal = false,
 ): Promise<NpmResult> {
   const result = await runChild({
-    command: client.node,
-    arguments: [client.cli, ...arguments_, ...npmFlags(isolation)],
+    command: "corepack",
+    arguments: [
+      "pnpm",
+      "--dir",
+      client.repositoryRoot,
+      "exec",
+      "npm",
+      ...arguments_,
+      ...npmFlags(isolation),
+    ],
     cwd: isolation.session,
     env: isolatedEnvironment(isolation),
     captured: true,
@@ -1315,8 +1238,16 @@ async function interactiveNpm(
 ): Promise<InteractiveResult> {
   process.stdout.write(`INTERACTIVE ${name} BEGIN\n`);
   const result = await runChild({
-    command: client.node,
-    arguments: [client.cli, ...arguments_, ...npmFlags(isolation)],
+    command: "corepack",
+    arguments: [
+      "pnpm",
+      "--dir",
+      client.repositoryRoot,
+      "exec",
+      "npm",
+      ...arguments_,
+      ...npmFlags(isolation),
+    ],
     cwd: isolation.session,
     env: isolatedEnvironment(isolation),
     captured: false,
@@ -1612,7 +1543,7 @@ function parseTrustObjectStream(raw: string): JsonObject[] {
         "npm-trust-schema-unsupported",
         "trust JSON is not an object stream",
         "blank output or whitespace-separated top-level objects",
-        "Update the pinned npm adapter before retrying.",
+        "Update the locked npm adapter before retrying.",
         5,
       );
     const start = index;
@@ -1643,7 +1574,7 @@ function parseTrustObjectStream(raw: string): JsonObject[] {
         "npm-trust-schema-unsupported",
         "trust JSON object is incomplete",
         "complete JSON objects",
-        "Update the pinned npm adapter before retrying.",
+        "Update the locked npm adapter before retrying.",
         5,
       );
     try {
@@ -1655,7 +1586,7 @@ function parseTrustObjectStream(raw: string): JsonObject[] {
         "npm-trust-schema-unsupported",
         "trust JSON object is invalid",
         "valid JSON objects",
-        "Update the pinned npm adapter before retrying.",
+        "Update the locked npm adapter before retrying.",
         5,
       );
     }
@@ -1671,7 +1602,7 @@ function parseTrustObjectStream(raw: string): JsonObject[] {
         "npm-trust-schema-unsupported",
         "trust objects are not whitespace-separated",
         "ASCII whitespace between JSON objects",
-        "Update the pinned npm adapter before retrying.",
+        "Update the locked npm adapter before retrying.",
         5,
       );
   }
@@ -1751,8 +1682,8 @@ async function trustList(
     throw externalFailure(
       "npm-trust-schema-unsupported",
       "trust list has an unsupported item shape",
-      "the pinned npm 11.19.1 trust shape",
-      "Update the pinned npm adapter before retrying.",
+      "the locked npm trust shape",
+      "Update the locked npm adapter before retrying.",
       5,
     );
   return normalized.filter((value): value is TrustRecord => value !== null);

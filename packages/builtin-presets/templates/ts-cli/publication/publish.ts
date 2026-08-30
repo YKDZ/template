@@ -15,7 +15,6 @@ import {
 export { PublicationFailure } from "./handoff.ts";
 
 const packagePath = "{{PUBLIC_CLI_PACKAGE_PATH}}";
-const npmVersion = "11.19.1";
 const registry = "https://registry.npmjs.org/";
 
 export type ProcessResult = {
@@ -250,17 +249,6 @@ export async function runDirectOidcPublication(
       fail("isolated-install-failed", "frozen install failed");
     const common = npmArguments(session);
     const semver = await loadLockedSemver();
-    if (
-      (await command(
-        run,
-        options.repositoryRoot,
-        env,
-        [...common, "--version"],
-        "npm-client-pin-invalid",
-      )) !== npmVersion
-    ) {
-      fail("npm-client-pin-invalid", `locked npm must be ${npmVersion}`);
-    }
     if (
       (await command(
         run,

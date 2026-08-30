@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import {
   chmod,
-  copyFile,
   mkdir,
   mkdtemp,
   readFile,
@@ -36,6 +35,7 @@ import { tsCliDefinition } from "./definition.ts";
 async function renderGeneratedRepository(
   prefix: string,
   installDependencies: boolean,
+  initialName?: string,
 ): Promise<{
   readonly workspace: string;
   readonly targetDir: string;
@@ -43,17 +43,19 @@ async function renderGeneratedRepository(
 }> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const targetDir = path.join(workspace, "demo-cli");
-  const plan = planGeneratedRepositoryInitialization({
+  const prepared = prepareGeneratedRepositoryInitialization({
     definition: tsCliDefinition,
-    context: createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
-      },
-    }),
+    targetDir,
+    toolchain: {
+      nodeLtsMajor: "24",
+      packageManagerPin: "pnpm@11.11.0",
+    },
+    overrides: {
+      scope: "demo",
+      ...(initialName === undefined ? {} : { name: initialName }),
+    },
   });
+  const plan = prepared.plan;
   await renderNewProject({
     targetRoot: targetDir,
     operations: [...plan.operations],
@@ -76,7 +78,12 @@ async function renderGeneratedRepository(
   return {
     workspace,
     targetDir,
-    packageRoot: path.join(targetDir, "packages/cli"),
+    packageRoot: path.join(
+      targetDir,
+      prepared.resolved.packages.find((candidate) =>
+        candidate.path.startsWith("packages/"),
+      )?.path ?? "packages/cli",
+    ),
   };
 }
 
@@ -112,7 +119,7 @@ async function writeAcceptedFirstReleaseArtifact(options: {
 }): Promise<{ readonly directory: string; readonly integrity: string }> {
   const directory = await mkdtemp(
     path.join(
-      options.temporaryParent ?? tmpdir(),
+      options.temporaryParent ?? path.dirname(options.root),
       "npm-publication-setup-artifact.",
     ),
   );
@@ -235,6 +242,93 @@ describe("ts-cli Preset Definition behavior", () => {
       "#npm-publication/readiness",
     ]);
     expect(bridge).not.toMatch(/from "\.\.\/(?:npm-)?publication\//u);
+  });
+
+  it("configures a generated named CLI placeholder and permits an explicit bin override", async () => {
+    const configureRunner = async (
+      project: Awaited<ReturnType<typeof renderGeneratedRepository>>,
+      bin: string,
+    ) => {
+      const fakeBin = path.join(project.workspace, "fake-bin");
+      await writeExecutable(
+        path.join(fakeBin, "git"),
+        `#!/usr/bin/env bash
+case "$1" in
+  status) exit 0 ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/runner\\n' ;;
+  ls-remote)
+    if [ "$2" = --symref ]; then
+      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+    else
+      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+    fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  *) exit 97 ;;
+esac
+`,
+      );
+      return await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        [
+          "--package-name",
+          "@demo/runner",
+          "--bin",
+          bin,
+          "--description",
+          "A runner CLI.",
+          "--license",
+          "MIT",
+          "--copyright-holder",
+          "Ada Lovelace",
+          "--repository",
+          "https://github.com/demo/runner",
+          "--non-interactive",
+        ],
+        {
+          cwd: project.targetDir,
+          env: { PATH: `${fakeBin}:${process.env.PATH}` },
+          reject: false,
+        },
+      );
+    };
+    const runner = await renderGeneratedRepository(
+      "template-ts-cli-runner-",
+      true,
+      "runner",
+    );
+    try {
+      const configured = await configureRunner(runner, "runner");
+      expect(configured.exitCode).toBe(3);
+      expect(configured.stderr).not.toContain("owner-fact-conflict");
+      expect(
+        JSON.parse(
+          await readFile(path.join(runner.packageRoot, "package.json"), "utf8"),
+        ),
+      ).toMatchObject({ bin: { runner: "./dist/cli.js" } });
+    } finally {
+      await rm(runner.workspace, { recursive: true, force: true });
+    }
+
+    const overridden = await renderGeneratedRepository(
+      "template-ts-cli-runner-override-",
+      true,
+      "runner",
+    );
+    try {
+      const configured = await configureRunner(overridden, "launch");
+      expect(configured.exitCode).toBe(3);
+      expect(
+        JSON.parse(
+          await readFile(
+            path.join(overridden.packageRoot, "package.json"),
+            "utf8",
+          ),
+        ),
+      ).toMatchObject({ bin: { launch: "./dist/cli.js" } });
+    } finally {
+      await rm(overridden.workspace, { recursive: true, force: true });
+    }
   });
 
   it("plans the registered unpublished CLI Tool Package boundary", () => {
@@ -1017,6 +1111,7 @@ exit 19
     );
     const fakeBin = path.join(workspace, "fake-bin");
     const statePath = path.join(workspace, "npm-state.json");
+    const isolatedTemporaryParent = path.join(workspace, "isolated-tmp");
     const setupDirectory = path.join(
       targetDir,
       "scripts/npm-publication-setup",
@@ -1033,6 +1128,7 @@ exit 19
       REPOSITORY_URL: "https://github.com/demo/ship",
     };
     try {
+      await mkdir(isolatedTemporaryParent);
       for (const command of ["format:check", "lint", "typecheck"] as const) {
         const checked = await execa("pnpm", ["run", command], {
           cwd: targetDir,
@@ -1160,7 +1256,17 @@ esac
       );
       await writeExecutable(
         path.join(fakeBin, "corepack"),
-        "#!/bin/sh\nexit 0\n",
+        `#!/usr/bin/env bash
+node -e ${JSON.stringify(`const fs=require("node:fs");const statePath=${JSON.stringify(statePath)};const state=fs.existsSync(statePath)?JSON.parse(fs.readFileSync(statePath,"utf8")):{published:false,trusted:false,calls:[]};state.corepackCalls=[...(state.corepackCalls||[]),process.argv.slice(1)];fs.writeFileSync(statePath,JSON.stringify(state));`)} "$@"
+if [ "$1" = pnpm ]; then shift; fi
+repository=""
+if [ "$1" = --dir ]; then repository="$2"; shift 2; fi
+if [ "$1" = exec ] && [ "$2" = npm ]; then
+  shift 2
+  exec ${JSON.stringify(process.execPath)} "$repository/node_modules/npm/bin/npm-cli.js" "$@"
+fi
+exit 0
+`,
       );
       await writeExecutable(
         path.join(fakeBin, "gh"),
@@ -1208,6 +1314,8 @@ const args = process.argv.slice(2);
 const statePath = ${JSON.stringify(statePath)};
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : { published: false, trusted: false, calls: [] };
 state.calls.push(args);
+if (args[0] === "login" || args[0] === "publish")
+  state.interactiveTty = state.interactiveTty || process.stdout.isTTY;
 const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
 const spec = "@demo/ship@1.0.0";
 const integrity = ${JSON.stringify("placeholder")};
@@ -1244,7 +1352,7 @@ if [ "$last" = artifact ]; then
   integrity=\${ARTIFACT_FIXTURE_INTEGRITY:-}
   record=\${ARTIFACT_OUTPUT_RECORD:-}
   case "$fixture" in /*) ;; *) exit 98 ;; esac
-  case "$output" in /tmp/npm-publication-setup-artifact.*) ;; *) exit 98 ;; esac
+  case "$output" in ${isolatedTemporaryParent}/npm-publication-setup-artifact.*) ;; *) exit 98 ;; esac
   [ -n "$integrity" ] && [ -d "$fixture" ] && [ -d "$output" ] || exit 98
   [ -z "$(find "$output" -mindepth 1 -maxdepth 1 -print -quit)" ] || exit 98
   for file in ship-1.0.0.tgz SHA512SUMS verified-publication-artifact.json; do
@@ -1281,6 +1389,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
+            TMPDIR: isolatedTemporaryParent,
             ARTIFACT_FIXTURE_ROOT: first.directory,
             ARTIFACT_FIXTURE_INTEGRITY: first.integrity,
           },
@@ -1310,6 +1419,11 @@ exec ${JSON.stringify(process.execPath)} "$@"
           calls: string[][];
         }
       ).calls;
+      const corepackCalls = (
+        JSON.parse(await readFile(statePath, "utf8")) as {
+          corepackCalls: string[][];
+        }
+      ).corepackCalls;
       expect(calls).toEqual(
         expect.arrayContaining([
           expect.arrayContaining(["login", "--auth-type=web"]),
@@ -1324,12 +1438,40 @@ exec ${JSON.stringify(process.execPath)} "$@"
         ]),
       );
       expect(
+        (
+          JSON.parse(await readFile(statePath, "utf8")) as {
+            readonly interactiveTty: unknown;
+          }
+        ).interactiveTty,
+      ).toBe(true);
+      expect(corepackCalls).toEqual(
+        expect.arrayContaining([
+          expect.arrayContaining([
+            "pnpm",
+            "--dir",
+            targetDir,
+            "exec",
+            "npm",
+            "login",
+          ]),
+          expect.arrayContaining([
+            "pnpm",
+            "--dir",
+            targetDir,
+            "exec",
+            "npm",
+            "publish",
+          ]),
+        ]),
+      );
+      expect(
         calls
           .flat()
           .some(
             (argument) => argument === "--provenance" || argument === "--otp",
           ),
       ).toBe(false);
+      expect(await readdir(isolatedTemporaryParent)).toEqual([]);
 
       const resume = await writeAcceptedFirstReleaseArtifact({
         root: targetDir,
@@ -1346,6 +1488,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
+            TMPDIR: isolatedTemporaryParent,
             ARTIFACT_FIXTURE_ROOT: resume.directory,
             ARTIFACT_FIXTURE_INTEGRITY: resume.integrity,
           },
@@ -1358,6 +1501,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
         `${resumeRun.stdout}\n${resumeRun.stderr}`,
       ).toBe(0);
       expect(resumeRun.stdout).toContain("OK npm-publish-resumed-exact");
+      expect(await readdir(isolatedTemporaryParent)).toEqual([]);
       const afterResume = JSON.parse(await readFile(statePath, "utf8")) as {
         calls: string[][];
       };
@@ -1415,6 +1559,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
             cwd: targetDir,
             env: {
               PATH: `${fakeBin}:${process.env.PATH}`,
+              TMPDIR: isolatedTemporaryParent,
               ARTIFACT_FIXTURE_ROOT: artifact.directory,
               ARTIFACT_FIXTURE_INTEGRITY: artifact.integrity,
             },
@@ -1537,6 +1682,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
         cwd: targetDir,
         env: {
           PATH: `${fakeBin}:${process.env.PATH}`,
+          TMPDIR: isolatedTemporaryParent,
           ARTIFACT_FIXTURE_ROOT: receiptRaceArtifact.directory,
           ARTIFACT_FIXTURE_INTEGRITY: receiptRaceArtifact.integrity,
           ARTIFACT_OUTPUT_RECORD: receiptRaceOwnedArtifact,
@@ -1648,6 +1794,13 @@ exec ${JSON.stringify(process.execPath)} "$@"
       ).toEqual(
         expect.arrayContaining([expect.arrayContaining(["api", "GET"])]),
       );
+      expect(
+        (
+          JSON.parse(await readFile(statePath, "utf8")) as {
+            readonly interactiveTty: unknown;
+          }
+        ).interactiveTty,
+      ).toBe(true);
 
       for (const [failure, diagnosis] of [
         ["public-write-exact", "state=PublicIncident"],
@@ -1755,6 +1908,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           cwd: targetDir,
           env: {
             PATH: `${fakeBin}:${process.env.PATH}`,
+            TMPDIR: isolatedTemporaryParent,
             ARTIFACT_FIXTURE_ROOT: ghSignalArtifact.directory,
             ARTIFACT_FIXTURE_INTEGRITY: ghSignalArtifact.integrity,
             ARTIFACT_OUTPUT_RECORD: ghSignalOwnedArtifact,
@@ -1897,6 +2051,13 @@ exec ${JSON.stringify(process.execPath)} "$@"
       await writeExecutable(
         path.join(fakeBin, "corepack"),
         `#!/usr/bin/env bash
+if [ "$1" = pnpm ]; then shift; fi
+repository=""
+if [ "$1" = --dir ]; then repository="$2"; shift 2; fi
+if [ "$1" = exec ] && [ "$2" = npm ]; then
+  shift 2
+  exec ${JSON.stringify(process.execPath)} "$repository/node_modules/npm/bin/npm-cli.js" "$@"
+fi
 isolation=$(dirname -- "$NPM_CONFIG_USERCONFIG")
 printf '{"kind":"corepack","bridgePid":%s,"session":"%s","isolation":"%s"}\\n' "$PPID" "$isolation/session" "$isolation" >> ${JSON.stringify(eventLog)}
 exit 0
@@ -2220,11 +2381,9 @@ else if (args[0] === "publish") {
       ["collaborator-substring", 4, false],
       ["identity", 4, false],
       ["bytes", 4, false],
-      ["launcher", 5, false],
       ["ambient", 4, false],
       ["non-tty", 3, false],
       ["bootstrap", 5, false],
-      ["spawn-error", 5, false],
       ["trust-array", 5, false],
       ["trust-scalar", 5, false],
       ["trust-partial", 5, false],
@@ -2389,17 +2548,19 @@ process.exit(97);
           statePath,
           '{"calls":[],"views":0,"corepack":0,"trustLists":0}',
         );
-        await writeFile(
-          npmManifest,
-          mode === "launcher"
-            ? '{"version":"0.0.0","bin":{"npm":"bin/npm-cli.js"}}\n'
-            : originalNpmManifest,
-        );
+        await writeFile(npmManifest, originalNpmManifest);
         await writeFakeNpm(mode);
         await writeExecutable(
           path.join(fakeBin, "corepack"),
           `#!/bin/sh
 node -e ${JSON.stringify(`const fs=require("node:fs");const state=JSON.parse(fs.readFileSync(${JSON.stringify(statePath)},"utf8"));state.corepack+=1;fs.writeFileSync(${JSON.stringify(statePath)},JSON.stringify(state));`)}
+if [ "$1" = pnpm ]; then shift; fi
+repository=""
+if [ "$1" = --dir ]; then repository="$2"; shift 2; fi
+if [ "$1" = exec ] && [ "$2" = npm ]; then
+  shift 2
+  exec ${JSON.stringify(process.execPath)} "$repository/node_modules/npm/bin/npm-cli.js" "$@"
+fi
 exit ${mode === "bootstrap" ? "1" : "0"}
 `,
         );
@@ -2416,12 +2577,7 @@ exit ${mode === "bootstrap" ? "1" : "0"}
           ARTIFACT_ROOT: accepted.directory,
           ...(mode === "ambient" ? { NODE_AUTH_TOKEN: "poisoned" } : {}),
         };
-        const bridgeNode = path.join(workspace, "node-copy");
-        if (mode === "spawn-error") {
-          await copyFile(process.execPath, bridgeNode);
-          await chmod(bridgeNode, 0o755);
-        }
-        const bridge = `${JSON.stringify(mode === "spawn-error" ? bridgeNode : process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
+        const bridge = `${JSON.stringify(process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
         const running =
           mode === "non-tty"
             ? execa(
@@ -2445,12 +2601,7 @@ exit ${mode === "bootstrap" ? "1" : "0"}
                 stdin: "pipe",
                 timeout: 60_000,
               });
-        if (
-          mode !== "ambient" &&
-          mode !== "non-tty" &&
-          mode !== "launcher" &&
-          mode !== "bootstrap"
-        ) {
+        if (mode !== "ambient" && mode !== "non-tty" && mode !== "bootstrap") {
           await new Promise((resolve) => setTimeout(resolve, 250));
           running.stdin?.write("CONFIRM NPM 2FA AND RECOVERY CODES READY\n");
           if (needsPublishPhrase) {

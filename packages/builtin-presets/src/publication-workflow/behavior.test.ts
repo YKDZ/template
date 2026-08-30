@@ -919,6 +919,11 @@ describe("manual npm publication capability", () => {
       await loadPublicationYamlChecker();
     for (const mutate of [
       (workflow: Record<string, unknown>) => {
+        const verify = (workflow.jobs as Record<string, unknown>)
+          .verify as Record<string, unknown>;
+        verify["timeout-minutes"] = 29;
+      },
+      (workflow: Record<string, unknown>) => {
         (
           (workflow.jobs as Record<string, unknown>).verify as {
             steps: unknown[];

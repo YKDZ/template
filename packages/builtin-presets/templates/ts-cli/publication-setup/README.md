@@ -18,7 +18,8 @@ Stages 1–4 prepare reviewed public package facts and verify one receipt-bound
 tgz on the clean, synchronized public default branch. After the exact Stage 4
 acceptance, the private setup bridge creates an isolated temporary npm session.
 It rejects ambient npm credentials and any repository `.npmrc`, uses the locked
-`npm@11.19.1` CLI, and performs web authentication directly in your terminal.
+npm CLI through the workspace's Corepack pnpm, and performs web authentication
+directly in your terminal.
 The wizard never asks for or stores a password, OTP, recovery code, token, or
 generic `--yes` acceptance.
 

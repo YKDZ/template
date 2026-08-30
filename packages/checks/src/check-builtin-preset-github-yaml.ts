@@ -185,17 +185,31 @@ export function assertPublicationWorkflowContract(
     );
   }
   assertPublicationJob(plan, verify, {
-    keys: ["name", "runs-on", "permissions", "steps"],
+    keys: ["name", "runs-on", "timeout-minutes", "permissions", "steps"],
     permissions: { contents: "read" },
     needs: undefined,
   });
   assertPublicationJob(plan, publish, {
-    keys: ["name", "needs", "runs-on", "permissions", "steps"],
+    keys: [
+      "name",
+      "needs",
+      "runs-on",
+      "timeout-minutes",
+      "permissions",
+      "steps",
+    ],
     permissions: { contents: "read", "id-token": "write" },
     needs: "verify",
   });
   assertPublicationJob(plan, release, {
-    keys: ["name", "needs", "runs-on", "permissions", "steps"],
+    keys: [
+      "name",
+      "needs",
+      "runs-on",
+      "timeout-minutes",
+      "permissions",
+      "steps",
+    ],
     permissions: { contents: "write" },
     needs: "publish",
   });
@@ -223,6 +237,7 @@ function assertPublicationJob(
   if (
     !hasExactKeys(job, expected.keys) ||
     job["runs-on"] !== "ubuntu-latest" ||
+    job["timeout-minutes"] !== 30 ||
     JSON.stringify(job.permissions) !== JSON.stringify(expected.permissions) ||
     job.needs !== expected.needs ||
     !Array.isArray(job.steps)
