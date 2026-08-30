@@ -24,6 +24,9 @@ import { tsCliDefinition } from "../ts-cli/definition.ts";
 type PublishModule =
   typeof import("../../templates/ts-cli/publication/publish.ts");
 
+type ReleaseModule =
+  typeof import("../../templates/ts-cli/publication/release.ts");
+
 type PublicationYamlChecker = {
   readonly assertPublicationWorkflowContract: (
     plan: ReturnType<typeof planGeneratedRepositoryInitialization>,
@@ -74,6 +77,44 @@ async function loadPublishModule(workspace: string): Promise<PublishModule> {
   return (await import(
     `${pathToFileURL(publishPath).href}?test=${crypto.randomUUID()}`
   )) as PublishModule;
+}
+
+async function loadReleaseModule(workspace: string): Promise<ReleaseModule> {
+  const moduleRoot = path.join(workspace, "release-module");
+  await mkdir(moduleRoot);
+  await Promise.all([
+    cp(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/ts-cli/publication/release.ts",
+      ),
+      path.join(moduleRoot, "release.ts"),
+    ),
+    cp(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/ts-cli/publication/handoff.ts",
+      ),
+      path.join(moduleRoot, "handoff.ts"),
+    ),
+  ]);
+  const releasePath = path.join(moduleRoot, "release.ts");
+  await writeFile(
+    releasePath,
+    (await readFile(releasePath, "utf8")).replace(
+      "{{PUBLIC_CLI_PACKAGE_PATH}}",
+      "packages/cli",
+    ),
+  );
+  await writeFile(path.join(workspace, "package.json"), '{"type":"module"}\n');
+  await symlink(
+    path.resolve(import.meta.dirname, "../../node_modules"),
+    path.join(workspace, "node_modules"),
+    "dir",
+  );
+  return (await import(
+    `${pathToFileURL(releasePath).href}?test=${crypto.randomUUID()}`
+  )) as ReleaseModule;
 }
 
 async function writeVerifiedArtifact(
@@ -419,12 +460,416 @@ describe("manual npm publication capability", () => {
           replacements: { PUBLIC_CLI_PACKAGE_PATH: "packages/cli" },
         }),
         expect.objectContaining({
+          kind: "writeTextTemplate",
+          from: "publication/release.ts",
+          to: "scripts/npm-publication/release.ts",
+          replacements: { PUBLIC_CLI_PACKAGE_PATH: "packages/cli" },
+        }),
+        expect.objectContaining({
           kind: "copyFile",
           from: "publication/handoff.ts",
           to: "scripts/npm-publication/handoff.ts",
         }),
       ]),
     );
+  });
+
+  it("creates and proves one immutable release from the accepted artifact", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-release-"),
+    );
+    try {
+      const artifact = await writeVerifiedArtifact(workspace);
+      const { runImmutableGithubRelease } = await loadReleaseModule(workspace);
+      const tag = "v1.0.1";
+      const targetCommit = "a".repeat(40);
+      const annotation = `npm artifact SHA-512: ${createHash("sha512").update("verified-tgz-bytes").digest("hex")}`;
+      const commands: readonly (readonly string[])[] = [];
+      let tagCreated = false;
+      let releaseState: "absent" | "draft" | "public" = "absent";
+      const assets = [
+        { id: 11, name: "tool-1.0.1.tgz", size: 18 },
+        { id: 12, name: "SHA512SUMS", size: 145 },
+      ];
+      const response = (value: unknown) => ({
+        exitCode: 0,
+        stdout: JSON.stringify(value),
+        stderr: "",
+      });
+      const release = () =>
+        releaseState === "absent"
+          ? []
+          : [
+              {
+                id: 7,
+                tag_name: tag,
+                name: tag,
+                body: "Publish the stable CLI.",
+                draft: releaseState === "draft",
+                immutable: releaseState === "public",
+                published_at:
+                  releaseState === "public" ? "2026-08-30T00:00:00Z" : null,
+                assets,
+              },
+            ];
+
+      await runImmutableGithubRelease({
+        repositoryRoot: workspace,
+        artifactDirectory: artifact.directory,
+        environment: {
+          GITHUB_EVENT_NAME: "workflow_dispatch",
+          GITHUB_REPOSITORY: "publisher/tool",
+          GITHUB_SHA: targetCommit,
+          GITHUB_REF: "refs/heads/main",
+          GITHUB_DEFAULT_BRANCH: "main",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          GH_TOKEN: "must-not-escape-gh",
+          PATH: process.env.PATH,
+        },
+        async run(command, arguments_, options) {
+          (commands as (readonly string[])[]).push([command, ...arguments_]);
+          expect(options.env).toEqual({
+            GH_TOKEN: "must-not-escape-gh",
+            PATH: process.env.PATH,
+          });
+          const request = arguments_.join(" ");
+          if (request.includes("/git/ref/tags/")) {
+            return tagCreated
+              ? {
+                  exitCode: 0,
+                  stdout: `HTTP/2 200\n\n${JSON.stringify({ object: { type: "tag", sha: "tag-object" } })}`,
+                  stderr: "",
+                }
+              : { exitCode: 1, stdout: "HTTP/2 404\n\n", stderr: "" };
+          }
+          if (request.includes("/git/tags/tag-object")) {
+            return response({
+              tag,
+              message: annotation,
+              object: { type: "commit", sha: targetCommit },
+            });
+          }
+          if (request.includes("/releases?per_page=100"))
+            return response([release()]);
+          if (request.includes("/git/tags") && request.includes("POST")) {
+            tagCreated = true;
+            return response({ sha: "tag-object" });
+          }
+          if (request.includes("/git/refs") && request.includes("POST"))
+            return response({});
+          if (arguments_[0] === "release" && arguments_[1] === "create") {
+            releaseState = "draft";
+            return response({});
+          }
+          if (request.includes("/releases/assets/")) {
+            const output = arguments_.find((value) =>
+              value.startsWith("--output="),
+            );
+            if (output === undefined)
+              throw new Error("Expected gh asset output path");
+            const assetId = Number(request.match(/assets\/(\d+)/u)?.[1]);
+            await writeFile(
+              output.slice("--output=".length),
+              assetId === 11
+                ? "verified-tgz-bytes"
+                : await readFile(path.join(artifact.directory, "SHA512SUMS")),
+            );
+            return response({});
+          }
+          if (arguments_[0] === "release" && arguments_[1] === "edit") {
+            releaseState = "public";
+            return response({});
+          }
+          if (
+            arguments_[0] === "release" &&
+            (arguments_[1] === "verify" || arguments_[1] === "verify-asset")
+          )
+            return response({});
+          throw new Error(`Unexpected gh command: ${request}`);
+        },
+      });
+
+      const writes = commands.filter((command) =>
+        [
+          "api --method POST repos/publisher/tool/git/tags",
+          "api --method POST repos/publisher/tool/git/refs",
+          "release create v1.0.1",
+          "release edit v1.0.1 --draft=false",
+        ].some((prefix) => command.join(" ").startsWith(`gh ${prefix}`)),
+      );
+      expect(writes).toHaveLength(4);
+      expect(writes[2]).toEqual(
+        expect.arrayContaining([
+          "release",
+          "create",
+          tag,
+          "--draft",
+          "--verify-tag",
+          "--title",
+          tag,
+        ]),
+      );
+      expect(writes[3]).toEqual([
+        "gh",
+        "release",
+        "edit",
+        tag,
+        "--draft=false",
+      ]);
+      expect(commands.slice(-3)).toEqual([
+        ["gh", "release", "verify", tag],
+        ["gh", "release", "verify-asset", tag, expect.any(String)],
+        ["gh", "release", "verify-asset", tag, expect.any(String)],
+      ]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: "rejects a fresh dispatch that finds existing state",
+      attempt: "1",
+      initialState: "draft",
+      initialTag: true,
+      expectedCode: "fresh-release-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with no tag or release",
+      attempt: "2",
+      initialState: "absent",
+      initialTag: false,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with only an annotated tag",
+      attempt: "2",
+      initialState: "absent",
+      initialTag: true,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with a partial draft without repairing it",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      partialDraft: true,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "resumes the exact draft without recreating it",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      expectedWrites: 1,
+    },
+    {
+      name: "only proves an exact immutable public release on rerun",
+      attempt: "2",
+      initialState: "public",
+      initialTag: true,
+      expectedWrites: 0,
+    },
+    {
+      name: "stops before publication when a draft asset differs",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      corruptAsset: true,
+      expectedCode: "release-asset-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "stops before a draft when the existing tag annotation differs",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      mismatchedTag: true,
+      expectedCode: "release-tag-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "does not claim a failed public conversion completed",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      publicConversionFails: true,
+      expectedCode: "release-write-failed",
+      expectedWrites: 4,
+    },
+    {
+      name: "stops after an unproven immutable public transition",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      immutableFalse: true,
+      expectedCode: "release-immutability-unproven",
+      expectedWrites: 4,
+    },
+    {
+      name: "fails closed when GitHub's documented attestation command fails",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      attestationFails: true,
+      expectedCode: "release-attestation-invalid",
+      expectedWrites: 4,
+    },
+    {
+      name: "rejects an invalid dispatch context before starting gh",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      invalidContext: true,
+      expectedCode: "release-context-invalid",
+      expectedWrites: 0,
+    },
+  ])("%s", async (scenario) => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-publication-release-state-"),
+    );
+    try {
+      const artifact = await writeVerifiedArtifact(workspace);
+      const { runImmutableGithubRelease } = await loadReleaseModule(workspace);
+      const tag = "v1.0.1";
+      const targetCommit = "a".repeat(40);
+      const annotation = `npm artifact SHA-512: ${createHash("sha512").update("verified-tgz-bytes").digest("hex")}`;
+      const commands: (readonly string[])[] = [];
+      let tagCreated = scenario.initialTag;
+      let releaseState: "absent" | "draft" | "public" =
+        scenario.initialState as "absent" | "draft" | "public";
+      const assets = [
+        { id: 11, name: "tool-1.0.1.tgz", size: 18 },
+        { id: 12, name: "SHA512SUMS", size: 145 },
+      ];
+      const response = (value: unknown, exitCode = 0) => ({
+        exitCode,
+        stdout: JSON.stringify(value),
+        stderr: "GITHUB_TOKEN=must-not-escape-gh",
+      });
+      const release = () =>
+        releaseState === "absent"
+          ? []
+          : [
+              {
+                id: 7,
+                tag_name: tag,
+                name: tag,
+                body: "Publish the stable CLI.",
+                draft: releaseState === "draft",
+                immutable:
+                  releaseState === "public" && !scenario.immutableFalse,
+                published_at:
+                  releaseState === "public" ? "2026-08-30T00:00:00Z" : null,
+                assets:
+                  scenario.partialDraft && releaseState === "draft"
+                    ? assets.slice(0, 1)
+                    : assets,
+              },
+            ];
+
+      const execution = runImmutableGithubRelease({
+        repositoryRoot: workspace,
+        artifactDirectory: artifact.directory,
+        environment: {
+          GITHUB_EVENT_NAME: "workflow_dispatch",
+          GITHUB_REPOSITORY: "publisher/tool",
+          GITHUB_SHA: targetCommit,
+          GITHUB_REF: scenario.invalidContext
+            ? "refs/heads/not-main"
+            : "refs/heads/main",
+          GITHUB_DEFAULT_BRANCH: "main",
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: scenario.attempt,
+          GH_TOKEN: "must-not-escape-gh",
+          PATH: process.env.PATH,
+        },
+        async run(command, arguments_) {
+          commands.push([command, ...arguments_]);
+          const request = arguments_.join(" ");
+          if (request.includes("/git/ref/tags/")) {
+            return tagCreated
+              ? {
+                  exitCode: 0,
+                  stdout: `HTTP/2 200\n\n${JSON.stringify({ object: { type: "tag", sha: "tag-object" } })}`,
+                  stderr: "",
+                }
+              : { exitCode: 1, stdout: "HTTP/2 404\n\n", stderr: "" };
+          }
+          if (request.includes("/git/tags/tag-object")) {
+            return response({
+              tag,
+              message: scenario.mismatchedTag
+                ? "different annotation"
+                : annotation,
+              object: { type: "commit", sha: targetCommit },
+            });
+          }
+          if (request.includes("/releases?per_page=100"))
+            return response([release()]);
+          if (request.includes("/git/tags") && request.includes("POST")) {
+            tagCreated = true;
+            return response({ sha: "tag-object" });
+          }
+          if (request.includes("/git/refs") && request.includes("POST"))
+            return response({});
+          if (arguments_[0] === "release" && arguments_[1] === "create") {
+            releaseState = "draft";
+            return response({});
+          }
+          if (request.includes("/releases/assets/")) {
+            const output = arguments_.find((value) =>
+              value.startsWith("--output="),
+            );
+            if (output === undefined)
+              throw new Error("Expected gh asset output path");
+            const assetId = Number(request.match(/assets\/(\d+)/u)?.[1]);
+            await writeFile(
+              output.slice("--output=".length),
+              assetId === 11 && scenario.corruptAsset
+                ? "different-tgz-bytes"
+                : assetId === 11
+                  ? "verified-tgz-bytes"
+                  : await readFile(path.join(artifact.directory, "SHA512SUMS")),
+            );
+            return response({});
+          }
+          if (arguments_[0] === "release" && arguments_[1] === "edit") {
+            if (!scenario.publicConversionFails) releaseState = "public";
+            return response({}, scenario.publicConversionFails ? 1 : 0);
+          }
+          if (
+            arguments_[0] === "release" &&
+            (arguments_[1] === "verify" || arguments_[1] === "verify-asset")
+          )
+            return response({}, scenario.attestationFails ? 1 : 0);
+          throw new Error(`Unexpected gh command: ${request}`);
+        },
+      });
+
+      if (scenario.expectedCode === undefined)
+        await expect(execution).resolves.toBeUndefined();
+      else
+        await expect(execution).rejects.toMatchObject({
+          code: scenario.expectedCode,
+        });
+      const writes = commands.filter((command) =>
+        [
+          "api --method POST repos/publisher/tool/git/tags",
+          "api --method POST repos/publisher/tool/git/refs",
+          "release create v1.0.1",
+          "release edit v1.0.1 --draft=false",
+        ].some((prefix) => command.join(" ").startsWith(`gh ${prefix}`)),
+      );
+      expect(writes).toHaveLength(scenario.expectedWrites);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("rejects semantic release mutations at their parsed YAML location", async () => {
@@ -502,6 +947,39 @@ describe("manual npm publication capability", () => {
           }
         ).steps[6]!;
         rootCheck.env = { PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: "wrong" };
+      },
+      (workflow: Record<string, unknown>) => {
+        (workflow.jobs as Record<string, unknown>).release = {
+          ...((workflow.jobs as Record<string, unknown>).release as Record<
+            string,
+            unknown
+          >),
+          needs: "verify",
+        };
+      },
+      (workflow: Record<string, unknown>) => {
+        const download = (
+          (workflow.jobs as Record<string, unknown>).release as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[2]!;
+        download.with = {
+          ...(download.with as Record<string, unknown>),
+          name: "different-artifact",
+        };
+      },
+      (workflow: Record<string, unknown>) => {
+        const caller = (
+          (workflow.jobs as Record<string, unknown>).release as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[3]!;
+        caller.run = "pnpm run check";
+      },
+      (workflow: Record<string, unknown>) => {
+        const release = (workflow.jobs as Record<string, unknown>)
+          .release as Record<string, unknown>;
+        release.permissions = { contents: "write", "id-token": "write" };
       },
     ]) {
       const workflow = parseDocument(source).toJS() as Record<string, unknown>;

@@ -164,7 +164,7 @@ export function assertPublicationWorkflowContract(
     workflow.concurrency["cancel-in-progress"] !== false ||
     workflow.concurrency.queue !== "max" ||
     !isParsedObject(workflow.jobs) ||
-    !hasExactKeys(workflow.jobs, ["verify", "publish"])
+    !hasExactKeys(workflow.jobs, ["verify", "publish", "release"])
   ) {
     failPublicationWorkflow(
       plan,
@@ -173,8 +173,16 @@ export function assertPublicationWorkflowContract(
   }
   const verify = workflow.jobs.verify;
   const publish = workflow.jobs.publish;
-  if (!isParsedObject(verify) || !isParsedObject(publish)) {
-    failPublicationWorkflow(plan, "verify and publish jobs are required");
+  const release = workflow.jobs.release;
+  if (
+    !isParsedObject(verify) ||
+    !isParsedObject(publish) ||
+    !isParsedObject(release)
+  ) {
+    failPublicationWorkflow(
+      plan,
+      "verify, publish, and release jobs are required",
+    );
   }
   assertPublicationJob(plan, verify, {
     keys: ["name", "runs-on", "permissions", "steps"],
@@ -186,8 +194,14 @@ export function assertPublicationWorkflowContract(
     permissions: { contents: "read", "id-token": "write" },
     needs: "verify",
   });
+  assertPublicationJob(plan, release, {
+    keys: ["name", "needs", "runs-on", "permissions", "steps"],
+    permissions: { contents: "write" },
+    needs: "publish",
+  });
   assertPublicationVerifySteps(plan, verify.steps);
   assertPublicationPublishSteps(plan, publish.steps);
+  assertPublicationReleaseSteps(plan, release.steps);
 }
 
 function failPublicationWorkflow(
@@ -374,6 +388,62 @@ function assertPublicationPublishSteps(
       plan,
       "publish must download the same artifact then invoke the direct caller",
     );
+  assertNodeSetup(plan, steps[1]);
+}
+
+function assertPublicationReleaseSteps(
+  plan: GeneratedRepositoryPlan,
+  steps: unknown,
+): void {
+  if (!Array.isArray(steps) || steps.length !== 4) {
+    failPublicationWorkflow(
+      plan,
+      "release must have the closed four-step sequence",
+    );
+  }
+  const checkout = step(plan, steps[0], "Checkout source");
+  const download = step(plan, steps[2], "Download verified npm artifact");
+  const caller = step(plan, steps[3], "Create immutable GitHub Release");
+  if (
+    !hasExactKeys(checkout, ["name", "uses", "with"]) ||
+    checkout.uses !==
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    !isParsedObject(checkout.with) ||
+    !hasExactKeys(checkout.with, [
+      "ref",
+      "persist-credentials",
+      "fetch-depth",
+    ]) ||
+    checkout.with.ref !== "${{ github.sha }}" ||
+    checkout.with["persist-credentials"] !== false ||
+    checkout.with["fetch-depth"] !== 1 ||
+    !hasExactKeys(download, ["name", "uses", "with"]) ||
+    download.uses !==
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
+    !isParsedObject(download.with) ||
+    !hasExactKeys(download.with, ["name", "path"]) ||
+    download.with.name !== "npm-publication-${{ github.run_id }}" ||
+    download.with.path !== "${{ runner.temp }}/npm-publication-release" ||
+    !hasExactKeys(caller, ["name", "run", "env"]) ||
+    caller.run !==
+      "node --conditions=source scripts/npm-publication/release.ts" ||
+    !isParsedObject(caller.env) ||
+    !hasExactKeys(caller.env, [
+      "PUBLICATION_ARTIFACT_DIRECTORY",
+      "GITHUB_DEFAULT_BRANCH",
+      "GH_TOKEN",
+    ]) ||
+    caller.env.PUBLICATION_ARTIFACT_DIRECTORY !==
+      "${{ runner.temp }}/npm-publication-release" ||
+    caller.env.GITHUB_DEFAULT_BRANCH !==
+      "${{ github.event.repository.default_branch }}" ||
+    caller.env.GH_TOKEN !== "${{ github.token }}"
+  ) {
+    failPublicationWorkflow(
+      plan,
+      "release must consume the same artifact with only its GitHub credential",
+    );
+  }
   assertNodeSetup(plan, steps[1]);
 }
 

@@ -1720,6 +1720,15 @@ function foundationPlan(options: {
           {
             kind: "writeTextTemplate" as const,
             source: templateSources.tsCli,
+            from: "publication/release.ts",
+            to: "scripts/npm-publication/release.ts",
+            replacements: {
+              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
+            },
+          },
+          {
+            kind: "writeTextTemplate" as const,
+            source: templateSources.tsCli,
             from: "publication/check-readiness.ts",
             to: "scripts/npm-publication/check-readiness.ts",
             replacements: {
