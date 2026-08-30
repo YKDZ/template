@@ -1694,6 +1694,12 @@ function foundationPlan(options: {
             to: "scripts/npm-publication/artifact.ts",
           },
           {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
+            from: "publication/handoff.ts",
+            to: "scripts/npm-publication/handoff.ts",
+          },
+          {
             kind: "writeTextTemplate" as const,
             source: templateSources.tsCli,
             from: "publication/check-artifact.ts",

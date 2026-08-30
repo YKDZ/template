@@ -41,13 +41,22 @@ async function loadPublicationYamlChecker(): Promise<PublicationYamlChecker> {
 async function loadPublishModule(workspace: string): Promise<PublishModule> {
   const moduleRoot = path.join(workspace, "module");
   await mkdir(moduleRoot);
-  await cp(
-    path.resolve(
-      import.meta.dirname,
-      "../../templates/ts-cli/publication/publish.ts",
+  await Promise.all([
+    cp(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/ts-cli/publication/publish.ts",
+      ),
+      path.join(moduleRoot, "publish.ts"),
     ),
-    path.join(moduleRoot, "publish.ts"),
-  );
+    cp(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/ts-cli/publication/handoff.ts",
+      ),
+      path.join(moduleRoot, "handoff.ts"),
+    ),
+  ]);
   const publishPath = path.join(moduleRoot, "publish.ts");
   await writeFile(
     publishPath,
@@ -408,6 +417,11 @@ describe("manual npm publication capability", () => {
           from: "publication/publish.ts",
           to: "scripts/npm-publication/publish.ts",
           replacements: { PUBLIC_CLI_PACKAGE_PATH: "packages/cli" },
+        }),
+        expect.objectContaining({
+          kind: "copyFile",
+          from: "publication/handoff.ts",
+          to: "scripts/npm-publication/handoff.ts",
         }),
       ]),
     );
