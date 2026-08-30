@@ -529,6 +529,11 @@ describe("manual npm publication capability", () => {
         },
         async run(command, arguments_, options) {
           (commands as (readonly string[])[]).push([command, ...arguments_]);
+          if (command === "git") {
+            expect(arguments_).toEqual(["rev-parse", "--verify", "HEAD"]);
+            expect(options.env).toEqual({ PATH: process.env.PATH });
+            return { exitCode: 0, stdout: `${targetCommit}\n`, stderr: "" };
+          }
           expect(options.env).toEqual({
             GH_TOKEN: "must-not-escape-gh",
             PATH: process.env.PATH,
@@ -729,6 +734,15 @@ describe("manual npm publication capability", () => {
       expectedCode: "release-context-invalid",
       expectedWrites: 0,
     },
+    {
+      name: "rejects a checkout whose checked-out HEAD is not the dispatch SHA",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      checkoutMismatch: true,
+      expectedCode: "release-context-invalid",
+      expectedWrites: 0,
+    },
   ])("%s", async (scenario) => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-release-state-"),
@@ -789,8 +803,21 @@ describe("manual npm publication capability", () => {
           GH_TOKEN: "must-not-escape-gh",
           PATH: process.env.PATH,
         },
-        async run(command, arguments_) {
+        async run(command, arguments_, options) {
           commands.push([command, ...arguments_]);
+          if (command === "git") {
+            expect(arguments_).toEqual(["rev-parse", "--verify", "HEAD"]);
+            expect(options.env).toEqual({ PATH: process.env.PATH });
+            return {
+              exitCode: 0,
+              stdout: `${scenario.checkoutMismatch ? "b" : targetCommit}\n`,
+              stderr: "",
+            };
+          }
+          expect(options.env).toEqual({
+            GH_TOKEN: "must-not-escape-gh",
+            PATH: process.env.PATH,
+          });
           const request = arguments_.join(" ");
           if (request.includes("/git/ref/tags/")) {
             return tagCreated
@@ -980,6 +1007,39 @@ describe("manual npm publication capability", () => {
         const release = (workflow.jobs as Record<string, unknown>)
           .release as Record<string, unknown>;
         release.permissions = { contents: "write", "id-token": "write" };
+      },
+      (workflow: Record<string, unknown>) => {
+        const caller = (
+          (workflow.jobs as Record<string, unknown>).release as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[3]!;
+        caller.run = "gh release create v1.0.1 --draft=false";
+      },
+      (workflow: Record<string, unknown>) => {
+        const caller = (
+          (workflow.jobs as Record<string, unknown>).release as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[3]!;
+        caller.run = "gh release create v1.0.1 --generate-notes";
+      },
+      (workflow: Record<string, unknown>) => {
+        const caller = (
+          (workflow.jobs as Record<string, unknown>).release as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[3]!;
+        caller.run = "gh release upload v1.0.1 artifact.tgz --clobber";
+      },
+      (workflow: Record<string, unknown>) => {
+        const release = (workflow.jobs as Record<string, unknown>).release as {
+          steps: Record<string, unknown>[];
+        };
+        release.steps.push({
+          name: "Upload assets after public release",
+          run: "gh release upload v1.0.1 artifact.tgz",
+        });
       },
     ]) {
       const workflow = parseDocument(source).toJS() as Record<string, unknown>;

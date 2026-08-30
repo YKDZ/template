@@ -24,6 +24,7 @@ type ReleaseContext = {
   readonly sha: string;
   readonly runAttempt: number;
   readonly childEnvironment: NodeJS.ProcessEnv;
+  readonly gitEnvironment: NodeJS.ProcessEnv;
 };
 
 type RemoteAsset = {
@@ -66,15 +67,19 @@ function stringField(value: unknown): string | undefined {
 }
 
 function noControl(value: string): boolean {
-  return [...value].every((character) => {
-    const codePoint = character.codePointAt(0);
-    return (
-      codePoint !== undefined &&
-      codePoint >= 0x20 &&
-      codePoint !== 0x7f &&
-      (codePoint < 0x80 || codePoint > 0x9f)
-    );
-  });
+  for (let index = 0; index < value.length;) {
+    const codePoint = value.codePointAt(index);
+    if (
+      codePoint === undefined ||
+      codePoint < 0x20 ||
+      codePoint === 0x7f ||
+      (codePoint >= 0x80 && codePoint <= 0x9f)
+    ) {
+      return false;
+    }
+    index += codePoint > 0xffff ? 2 : 1;
+  }
+  return true;
 }
 
 function exactEnvironmentValue(
@@ -113,7 +118,9 @@ function releaseContext(
   if (!Number.isSafeInteger(runAttempt)) fail("release-context-invalid");
   const childEnvironment: NodeJS.ProcessEnv = { GH_TOKEN: token };
   if (environment.PATH !== undefined) childEnvironment.PATH = environment.PATH;
-  return { repository, sha, runAttempt, childEnvironment };
+  const gitEnvironment: NodeJS.ProcessEnv = {};
+  if (environment.PATH !== undefined) gitEnvironment.PATH = environment.PATH;
+  return { repository, sha, runAttempt, childEnvironment, gitEnvironment };
 }
 
 async function defaultRun(
@@ -151,6 +158,25 @@ async function gh(options: {
     });
   } catch {
     fail("release-remote-unavailable");
+  }
+}
+
+async function assertCheckoutHead(options: {
+  readonly run: NonNullable<ImmutableGithubReleaseOptions["run"]>;
+  readonly repositoryRoot: string;
+  readonly context: ReleaseContext;
+}): Promise<void> {
+  let result: ProcessResult;
+  try {
+    result = await options.run("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: options.repositoryRoot,
+      env: options.context.gitEnvironment,
+    });
+  } catch {
+    fail("release-context-invalid");
+  }
+  if (result.exitCode !== 0 || result.stdout !== `${options.context.sha}\n`) {
+    fail("release-context-invalid");
   }
 }
 
@@ -328,7 +354,9 @@ async function assertReleaseIdentity(options: {
   readonly identityFailure: string;
   readonly assetCountFailure: string;
 }): Promise<readonly RemoteAsset[]> {
-  const checksum = await readFile(options.artifact.checksum);
+  const checksum = await readFile(options.artifact.checksum).catch(() =>
+    fail("release-artifact-invalid"),
+  );
   const expected = [
     {
       name: path.basename(options.artifact.tgz),
@@ -374,14 +402,10 @@ async function verifyAssetBytes(options: {
   readonly assets: readonly RemoteAsset[];
   readonly temporaryDirectory: string;
 }): Promise<void> {
-  const expected = new Map([
-    [path.basename(options.artifact.tgz), options.artifact.tgz],
-    ["SHA512SUMS", options.artifact.checksum],
-  ]);
+  const expected = new Set([path.basename(options.artifact.tgz), "SHA512SUMS"]);
   const downloaded = new Map<string, string>();
   for (const asset of options.assets) {
-    const source = expected.get(asset.name);
-    if (source === undefined) fail("release-asset-conflict");
+    if (!expected.has(asset.name)) fail("release-asset-conflict");
     const destination = path.join(
       options.temporaryDirectory,
       `asset-${asset.id}`,
@@ -409,7 +433,7 @@ async function verifyAssetBytes(options: {
     readFile(tgz),
     readFile(checksum),
     readFile(options.artifact.checksum),
-  ]);
+  ]).catch(() => fail("release-asset-conflict"));
   if (
     downloadedTgz.byteLength !== options.artifact.receipt.artifact.size ||
     createHash("sha512").update(downloadedTgz).digest("hex") !==
@@ -555,6 +579,29 @@ async function requireRelease(options: {
   return release;
 }
 
+function installSignalCleanup(temporaryDirectory: string): () => void {
+  let receivedSignal = false;
+  const remove = () => {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+  };
+  const cleanupAndResend = (signal: NodeJS.Signals) => {
+    if (receivedSignal) return;
+    receivedSignal = true;
+    void rm(temporaryDirectory, { recursive: true, force: true })
+      .catch(() => undefined)
+      .finally(() => {
+        remove();
+        process.kill(process.pid, signal);
+      });
+  };
+  const onSigint = () => cleanupAndResend("SIGINT");
+  const onSigterm = () => cleanupAndResend("SIGTERM");
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+  return remove;
+}
+
 export async function runImmutableGithubRelease(
   options: ImmutableGithubReleaseOptions,
 ): Promise<void> {
@@ -567,13 +614,21 @@ export async function runImmutableGithubRelease(
   const tag = `v${artifact.receipt.packedManifest.version}`;
   const annotation = `npm artifact SHA-512: ${artifact.sha512}`;
   const run = options.run ?? defaultRun;
+  await assertCheckoutHead({
+    run,
+    repositoryRoot: options.repositoryRoot,
+    context,
+  });
   const temporaryDirectory = await mkdtemp(
     path.join(tmpdir(), "npm-github-release-"),
   ).catch(() => fail("release-remote-unavailable"));
+  const removeSignalCleanup = installSignalCleanup(temporaryDirectory);
   let completed = false;
   try {
     const notesPath = path.join(temporaryDirectory, "notes.md");
-    await writeFile(notesPath, artifact.receipt.publication.releaseNotes);
+    await writeFile(notesPath, artifact.receipt.publication.releaseNotes).catch(
+      () => fail("release-write-failed"),
+    );
     let alreadyImmutable = false;
     const remoteTag = await tagReference({
       run,
@@ -626,21 +681,13 @@ export async function runImmutableGithubRelease(
       if (!remoteRelease.draft) {
         if (!remoteRelease.immutable || remoteRelease.publishedAt === null)
           fail("release-immutability-unproven");
-        const assets = await assertReleaseIdentity({
+        await assertReleaseIdentity({
           release: remoteRelease,
           artifact,
           tag,
           draft: false,
           identityFailure: "release-asset-conflict",
           assetCountFailure: "release-incomplete-conflict",
-        });
-        await verifyAssetBytes({
-          run,
-          repositoryRoot: options.repositoryRoot,
-          context,
-          artifact,
-          assets,
-          temporaryDirectory,
         });
         await verifyAttestations({
           run,
@@ -702,7 +749,7 @@ export async function runImmutableGithubRelease(
         tag,
       });
       if (published.draft) fail("release-write-failed");
-      const publishedAssets = await assertReleaseIdentity({
+      await assertReleaseIdentity({
         release: published,
         artifact,
         tag,
@@ -712,14 +759,6 @@ export async function runImmutableGithubRelease(
       });
       if (!published.immutable || published.publishedAt === null)
         fail("release-immutability-unproven");
-      await verifyAssetBytes({
-        run,
-        repositoryRoot: options.repositoryRoot,
-        context,
-        artifact,
-        assets: publishedAssets,
-        temporaryDirectory,
-      });
       await assertAnnotatedTag({
         run,
         repositoryRoot: options.repositoryRoot,
@@ -737,6 +776,7 @@ export async function runImmutableGithubRelease(
     }
     completed = true;
   } finally {
+    removeSignalCleanup();
     try {
       await rm(temporaryDirectory, { recursive: true, force: true });
     } catch {
@@ -765,7 +805,9 @@ if (import.meta.main) {
     });
   } catch (error) {
     const code =
-      error instanceof PublicationFailure ? error.code : "release-failed";
+      error instanceof PublicationFailure
+        ? error.code
+        : "release-remote-unavailable";
     console.error(`ERROR ${code}`);
     console.error("Observed: GitHub release evidence was not accepted");
     console.error("Expected: one immutable release for the accepted artifact");
