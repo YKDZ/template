@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import {
   access,
   chmod,
@@ -5868,14 +5867,8 @@ describe("Fixture Verification Evidence", () => {
 
   it("schedules real matrix misses by final Check Environment Needs", async () => {
     const workspace = await temporaryRepository("fixture-matrix-scheduling-");
-    const scheduledResources = new AsyncLocalStorage<
-      readonly FixtureEvidenceExecutionResource[]
-    >();
-    const resourcesByScenario = new Map<
-      string,
-      readonly FixtureEvidenceExecutionResource[]
-    >();
     const installedScenarios: string[] = [];
+    const acquiredLeases: (readonly FixtureEvidenceExecutionResource[])[] = [];
     const scheduledRuns: (readonly FixtureEvidenceExecutionResource[])[] = [];
     const needsByScenario = new Map<
       string,
@@ -5887,13 +5880,13 @@ describe("Fixture Verification Evidence", () => {
       (scheduling) => {
         const scheduler = createFixtureEvidenceScheduler(scheduling);
         return {
-          acquire: scheduler.acquire,
+          acquire: async (resources) => {
+            acquiredLeases.push(resources);
+            return await scheduler.acquire(resources);
+          },
           run: async (resources, execute) => {
             scheduledRuns.push(resources);
-            return await scheduler.run(
-              resources,
-              async () => await scheduledResources.run(resources, execute),
-            );
+            return await scheduler.run(resources, execute);
           },
         };
       },
@@ -5916,15 +5909,12 @@ describe("Fixture Verification Evidence", () => {
             ) as {
               readonly check: readonly { readonly kind?: string }[];
             };
-            const resources = scheduledResources.getStore();
-            expect(resources).toBeDefined();
             const browser = environmentNeeds.check.some(
               (need) => need.kind === "playwright-browser-assets",
             );
             const scenarioId = path.basename(options.cwd);
             installedScenarios.push(scenarioId);
             needsByScenario.set(scenarioId, environmentNeeds);
-            resourcesByScenario.set(scenarioId, resources!);
             if (browser) {
               browserScenarios.add(scenarioId);
             } else {
@@ -5949,22 +5939,34 @@ describe("Fixture Verification Evidence", () => {
       expect(schedulerFactory).toHaveBeenCalledOnce();
       expect(schedulerFactory).toHaveBeenCalledWith({ concurrency: 4 });
       expect(scheduledRuns).toHaveLength(scenarios.length);
+      expect(scheduledRuns).toEqual(
+        Array.from({ length: scenarios.length }, () => []),
+      );
       expect(installedScenarios.sort()).toEqual(scenarioIds);
-      expect([...resourcesByScenario.keys()].sort()).toEqual(scenarioIds);
       expect(needsByScenario.size).toBe(scenarios.length);
       expect(ordinaryScenarios.size).toBeGreaterThanOrEqual(2);
       expect(browserScenarios.size).toBeGreaterThanOrEqual(2);
-      for (const scenario of scenarios) {
-        const finalNeeds = needsByScenario.get(scenario.id);
-        expect(finalNeeds).toBeDefined();
-        expect(resourcesByScenario.get(scenario.id)).toEqual(
-          finalNeeds!.check.some(
-            (need) => need.kind === "playwright-browser-assets",
-          )
-            ? ["browser"]
-            : [],
-        );
-      }
+      const resourceSignature = (
+        resources: readonly FixtureEvidenceExecutionResource[],
+      ) => [...resources].toSorted().join(",");
+      expect(acquiredLeases.map(resourceSignature).toSorted()).toEqual(
+        scenarios
+          .map((scenario) => {
+            const finalNeeds = needsByScenario.get(scenario.id);
+            expect(finalNeeds).toBeDefined();
+            const resources: readonly FixtureEvidenceExecutionResource[] = [
+              "development-container-session",
+              ...(finalNeeds!.check.some(
+                (need) => need.kind === "playwright-browser-assets",
+              )
+                ? ["browser" as const]
+                : []),
+            ];
+            return resources;
+          })
+          .map(resourceSignature)
+          .toSorted(),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
