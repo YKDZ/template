@@ -76,6 +76,11 @@ type InteractiveResult = {
   readonly status: number;
   readonly signal: string | null;
 };
+type RegistryExactArtifact = {
+  readonly tgz: string;
+  readonly size: number;
+  readonly integrity: string;
+};
 type TrustExpectation = {
   readonly packageName: string;
   readonly repository: string;
@@ -1322,7 +1327,10 @@ async function interactiveNpm(
   return { status: result.status, signal: result.signal };
 }
 
-async function readExactPhrase(expected: string): Promise<void> {
+async function readExactPhrase(
+  expected: string,
+  code = "npm-confirmation-required",
+): Promise<void> {
   throwIfSignalled();
   const { createInterface } = await import("node:readline/promises");
   const lineReader = createInterface({
@@ -1339,7 +1347,7 @@ async function readExactPhrase(expected: string): Promise<void> {
     throwIfSignalled();
     if (entered !== expected)
       throw externalFailure(
-        "npm-confirmation-required",
+        code,
         "confirmation did not match",
         expected,
         "Review the displayed registry action and enter the exact confirmation.",
@@ -1501,7 +1509,10 @@ async function exactRemoteArtifact(
   accepted: AcceptedPublicationArtifact,
   packageName: string,
   metadata: JsonObject,
-) {
+): Promise<RegistryExactArtifact> {
+  // Every reacceptance receives a new owned directory. A previous registry
+  // download must never be mistaken for this attempt's single remote tgz.
+  const download = mkdtempSync(path.join(isolation.root, "registry-download-"));
   const dist = isObject(metadata.dist) ? metadata.dist : undefined;
   const repository = isObject(metadata.repository)
     ? metadata.repository
@@ -1538,7 +1549,7 @@ async function exactRemoteArtifact(
   const result = await capturedNpm(client, isolation, [
     "pack",
     `${packageName}@1.0.0`,
-    `--pack-destination=${isolation.download}`,
+    `--pack-destination=${download}`,
   ]);
   if (result.status !== 0 || result.stderr !== "")
     throw externalFailure(
@@ -1548,13 +1559,13 @@ async function exactRemoteArtifact(
       "Correct the registry failure and retry.",
       5,
     );
-  const entries = readdirSync(isolation.download, { withFileTypes: true });
+  const entries = readdirSync(download, { withFileTypes: true });
   const entry = entries[0];
   if (
     entries.length !== 1 ||
     entry === undefined ||
     !entry.isFile() ||
-    !entry.name.endsWith(".tgz")
+    entry.name !== accepted.receipt.artifact.file
   )
     throw externalFailure(
       "npm-remote-artifact-invalid",
@@ -1563,7 +1574,7 @@ async function exactRemoteArtifact(
       "Investigate the registry package outside this wizard.",
       4,
     );
-  const remotePath = path.join(isolation.download, entry.name);
+  const remotePath = path.join(download, entry.name);
   const remoteBytes = readFileSync(remotePath);
   const localBytes = readFileSync(accepted.tgz);
   if (
@@ -1578,6 +1589,11 @@ async function exactRemoteArtifact(
       "Investigate the existing npm package outside this wizard.",
       4,
     );
+  return {
+    tgz: remotePath,
+    size: remoteBytes.byteLength,
+    integrity: sha512Integrity(remoteBytes),
+  };
 }
 
 function parseTrustObjectStream(raw: string): JsonObject[] {
@@ -1876,12 +1892,799 @@ function removeOwnedDirectory(value: string): void {
   rmSync(value, { recursive: true, force: true });
 }
 
+type GithubAsset = {
+  readonly id: number;
+  readonly name: string;
+  readonly size: number;
+  readonly label: string | null;
+  readonly state: "uploaded";
+};
+type GithubRelease = {
+  readonly tag: string;
+  readonly title: string;
+  readonly body: string;
+  readonly draft: boolean;
+  readonly prerelease: boolean;
+  readonly immutable: boolean;
+  readonly publishedAt: string | null;
+  readonly assets: readonly GithubAsset[];
+};
+type GithubState = "Fresh" | "ExactTagOnly" | "ExactDraft" | "ExactPublic";
+
+function githubFailure(
+  code: string,
+  observed: unknown,
+  expected: unknown,
+): SetupFailure {
+  return externalFailure(
+    code,
+    observed,
+    expected,
+    "Inspect the GitHub repository outside this wizard and rerun setup.",
+    4,
+  );
+}
+
+async function capturedGh(arguments_: readonly string[]): Promise<NpmResult> {
+  const environment: NodeJS.ProcessEnv = {
+    GH_PROMPT_DISABLED: "1",
+    PAGER: "cat",
+    NO_COLOR: "1",
+  };
+  for (const key of [
+    "PATH",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "GH_CONFIG_DIR",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+  ])
+    if (process.env[key] !== undefined) environment[key] = process.env[key];
+  const result = await runChild({
+    command: "gh",
+    arguments:
+      arguments_[0] === "api"
+        ? ["api", "--hostname", "github.com", ...arguments_.slice(1)]
+        : arguments_,
+    cwd: root,
+    env: environment,
+    captured: true,
+  });
+  throwIfSignalled();
+  return result;
+}
+
+function ghJson(result: NpmResult, code: string): JsonObject {
+  if (result.status !== 0 || result.stderr !== "")
+    throw githubFailure(
+      code,
+      "GitHub did not return clean JSON",
+      "one exact GitHub JSON response",
+    );
+  return strictJsonObject(result, code);
+}
+
+function githubAsset(value: unknown): GithubAsset | undefined {
+  if (
+    !isObject(value) ||
+    typeof value.id !== "number" ||
+    !Number.isSafeInteger(value.id) ||
+    value.id <= 0 ||
+    typeof value.name !== "string" ||
+    typeof value.size !== "number" ||
+    !Number.isSafeInteger(value.size) ||
+    value.size < 0 ||
+    (value.label !== null && typeof value.label !== "string") ||
+    value.state !== "uploaded"
+  )
+    return undefined;
+  return {
+    id: value.id,
+    name: value.name,
+    size: value.size,
+    label: value.label,
+    state: "uploaded",
+  };
+}
+
+function githubRelease(value: unknown): GithubRelease | undefined {
+  if (
+    !isObject(value) ||
+    typeof value.tag_name !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.body !== "string" ||
+    typeof value.draft !== "boolean" ||
+    typeof value.prerelease !== "boolean" ||
+    typeof value.immutable !== "boolean" ||
+    (value.published_at !== null && typeof value.published_at !== "string") ||
+    !Array.isArray(value.assets)
+  )
+    return undefined;
+  const assets = value.assets.map(githubAsset);
+  if (!assets.every((asset): asset is GithubAsset => asset !== undefined))
+    return undefined;
+  return {
+    tag: value.tag_name,
+    title: value.name,
+    body: value.body,
+    draft: value.draft,
+    prerelease: value.prerelease,
+    immutable: value.immutable,
+    publishedAt: value.published_at,
+    assets,
+  };
+}
+
+async function githubImmutable(
+  repository: string,
+): Promise<"enabled" | "disabled"> {
+  const result = await capturedGh([
+    "api",
+    "--include",
+    "--method",
+    "GET",
+    "-H",
+    "Accept: application/vnd.github+json",
+    "-H",
+    "X-GitHub-Api-Version: 2026-03-10",
+    `repos/${repository}/immutable-releases`,
+  ]);
+  if (result.status !== 0) {
+    if (/^HTTP\/\d(?:\.\d)? 404(?:\s|$)/mu.test(result.stdout))
+      return "disabled";
+    throw githubFailure(
+      "github-immutable-state-unknown",
+      "immutable releases endpoint was unavailable",
+      "an exact enabled or disabled immutable-releases response",
+    );
+  }
+  const body = /\r?\n\r?\n([\s\S]*)$/u.exec(result.stdout)?.[1];
+  let value: unknown;
+  try {
+    value = JSON.parse(body ?? "");
+  } catch {
+    throw githubFailure(
+      "github-immutable-state-unknown",
+      "immutable releases response was not JSON",
+      "{ enabled: true, enforced_by_owner: boolean }",
+    );
+  }
+  if (
+    !isObject(value) ||
+    value.enabled !== true ||
+    typeof value.enforced_by_owner !== "boolean"
+  )
+    throw githubFailure(
+      "github-immutable-state-unknown",
+      "immutable releases response was not exact",
+      "{ enabled: true, enforced_by_owner: boolean }",
+    );
+  return "enabled";
+}
+
+async function ensureGithubPreimage(
+  repository: string,
+  sha: string,
+): Promise<void> {
+  const status = await capturedGh([
+    "auth",
+    "status",
+    "--active",
+    "--hostname",
+    "github.com",
+  ]);
+  if (status.status !== 0)
+    throw githubFailure(
+      "github-session-required",
+      "no active github.com gh session",
+      "an authenticated github.com gh session",
+    );
+  const user = ghJson(
+    await capturedGh(["api", "user"]),
+    "github-identity-unknown",
+  );
+  if (typeof user.login !== "string")
+    throw githubFailure(
+      "github-identity-unknown",
+      "GitHub user response was not exact",
+      "one authenticated GitHub login",
+    );
+  const viewed = ghJson(
+    await capturedGh([
+      "repo",
+      "view",
+      repository,
+      "--json",
+      "nameWithOwner,visibility,defaultBranchRef,viewerCanAdminister,viewerPermission",
+    ]),
+    "github-repository-unknown",
+  );
+  if (
+    viewed.nameWithOwner !== repository ||
+    viewed.visibility !== "PUBLIC" ||
+    viewed.viewerCanAdminister !== true ||
+    viewed.viewerPermission !== "ADMIN" ||
+    !isObject(viewed.defaultBranchRef) ||
+    typeof viewed.defaultBranchRef.name !== "string" ||
+    typeof viewed.defaultBranchRef.target !== "object"
+  )
+    throw githubFailure(
+      "github-repository-conflict",
+      "GitHub repository identity or visibility differs",
+      `public repository ${repository}`,
+    );
+  const branch = viewed.defaultBranchRef.name;
+  const apiRepository = ghJson(
+    await capturedGh(["api", `repos/${repository}`]),
+    "github-repository-unknown",
+  );
+  if (
+    apiRepository.full_name !== repository ||
+    apiRepository.visibility !== "public" ||
+    apiRepository.default_branch !== branch ||
+    !isObject(apiRepository.permissions) ||
+    apiRepository.permissions.admin !== true ||
+    apiRepository.permissions.push !== true
+  )
+    throw githubFailure(
+      "github-repository-conflict",
+      "GitHub repository permissions or default branch differ",
+      `public repository ${repository} with administration and contents write facts`,
+    );
+  const ref = ghJson(
+    await capturedGh(["api", `repos/${repository}/git/ref/heads/${branch}`]),
+    "github-branch-unknown",
+  );
+  if (
+    !isObject(ref.object) ||
+    ref.object.type !== "commit" ||
+    ref.object.sha !== sha
+  )
+    throw githubFailure(
+      "github-branch-conflict",
+      "GitHub default branch commit differs",
+      `default branch commit ${sha}`,
+    );
+}
+
+async function githubTag(
+  repository: string,
+  tag: string,
+  sha: string,
+  annotation: string,
+): Promise<"absent" | "exact"> {
+  const ref = await capturedGh([
+    "api",
+    "--include",
+    `repos/${repository}/git/ref/tags/${tag}`,
+  ]);
+  if (ref.status !== 0) {
+    if (/^HTTP\/\d(?:\.\d)? 404(?:\s|$)/mu.test(ref.stdout)) return "absent";
+    throw githubFailure(
+      "github-release-state-unknown",
+      "tag reference could not be classified",
+      "an absent or exact annotated tag",
+    );
+  }
+  const body = /\r?\n\r?\n([\s\S]*)$/u.exec(ref.stdout)?.[1];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body ?? "");
+  } catch {
+    throw githubFailure(
+      "github-release-state-unknown",
+      "tag reference was not JSON",
+      "an exact annotated tag",
+    );
+  }
+  if (
+    !isObject(parsed) ||
+    !isObject(parsed.object) ||
+    parsed.object.type !== "tag" ||
+    typeof parsed.object.sha !== "string"
+  )
+    throw githubFailure(
+      "github-release-conflict",
+      "tag is not annotated",
+      "an exact annotated tag",
+    );
+  const object = ghJson(
+    await capturedGh([
+      "api",
+      `repos/${repository}/git/tags/${parsed.object.sha}`,
+    ]),
+    "github-release-state-unknown",
+  );
+  if (
+    object.tag !== tag ||
+    object.message !== annotation ||
+    !isObject(object.object) ||
+    object.object.type !== "commit" ||
+    object.object.sha !== sha
+  )
+    throw githubFailure(
+      "github-release-conflict",
+      "tag differs from the accepted artifact preimage",
+      "the exact annotated first-release tag",
+    );
+  return "exact";
+}
+
+async function githubReleaseForTag(
+  repository: string,
+  tag: string,
+): Promise<GithubRelease | undefined> {
+  const result = await capturedGh([
+    "api",
+    "--paginate",
+    "--slurp",
+    `repos/${repository}/releases?per_page=100`,
+  ]);
+  if (result.status !== 0 || result.stderr !== "")
+    throw githubFailure(
+      "github-release-state-unknown",
+      "releases could not be listed",
+      "one complete release listing",
+    );
+  let pages: unknown;
+  try {
+    pages = JSON.parse(result.stdout);
+  } catch {
+    throw githubFailure(
+      "github-release-state-unknown",
+      "release listing was not JSON",
+      "one complete release listing",
+    );
+  }
+  if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page)))
+    throw githubFailure(
+      "github-release-state-unknown",
+      "release listing had an unsupported shape",
+      "one complete release listing",
+    );
+  const matches = pages
+    .flat()
+    .filter((item) => isObject(item) && item.tag_name === tag)
+    .map(githubRelease);
+  if (matches.length > 1 || matches.some((item) => item === undefined))
+    throw githubFailure(
+      "github-release-conflict",
+      "release state is ambiguous",
+      "at most one exact first release",
+    );
+  return matches[0];
+}
+
+async function assertGithubRelease(
+  repository: string,
+  release: GithubRelease,
+  accepted: AcceptedPublicationArtifact,
+  tag: string,
+  draft: boolean,
+  downloads: string,
+): Promise<void> {
+  const checksum = readFileSync(accepted.checksum);
+  const expected = new Map([
+    [path.basename(accepted.tgz), accepted.receipt.artifact.size],
+    ["SHA512SUMS", checksum.byteLength],
+  ]);
+  if (
+    release.tag !== tag ||
+    release.title !== tag ||
+    release.body !== accepted.receipt.publication.releaseNotes ||
+    release.draft !== draft ||
+    release.prerelease ||
+    release.assets.length !== 2 ||
+    release.assets.some(
+      (asset) =>
+        expected.get(asset.name) !== asset.size ||
+        asset.label !== null ||
+        asset.state !== "uploaded" ||
+        release.assets.filter((candidate) => candidate.name === asset.name)
+          .length !== 1,
+    )
+  )
+    throw githubFailure(
+      "github-release-conflict",
+      "release identity or assets differ",
+      "the exact first-release draft",
+    );
+  for (const asset of release.assets) {
+    const destination = path.join(downloads, `asset-${asset.id}`);
+    const result = await capturedGh([
+      "api",
+      "--method",
+      "GET",
+      "-H",
+      "Accept: application/octet-stream",
+      `repos/${repository}/releases/assets/${asset.id}`,
+      `--output=${destination}`,
+    ]);
+    if (result.status !== 0)
+      throw githubFailure(
+        "github-release-asset-conflict",
+        "release asset could not be downloaded",
+        "exact release asset bytes",
+      );
+    const bytes = readFileSync(destination);
+    const local =
+      asset.name === "SHA512SUMS" ? checksum : readFileSync(accepted.tgz);
+    if (!bytes.equals(local))
+      throw githubFailure(
+        "github-release-asset-conflict",
+        "release asset bytes differ",
+        "the accepted artifact bytes",
+      );
+    rmSync(destination, { force: true });
+  }
+}
+
+async function runGithubFirstRelease(options: {
+  readonly isolation: Isolation;
+  readonly client: NpmClient;
+  readonly accepted: AcceptedPublicationArtifact;
+  readonly repository: string;
+  readonly sha: string;
+  readonly initialRegistryArtifact: RegistryExactArtifact;
+}): Promise<void> {
+  const {
+    isolation,
+    client,
+    accepted,
+    repository,
+    sha,
+    initialRegistryArtifact,
+  } = options;
+  const initialExactArtifact: AcceptedPublicationArtifact = {
+    ...accepted,
+    tgz: initialRegistryArtifact.tgz,
+  };
+  const tag = "v1.0.0";
+  const annotation = `npm artifact SHA-512: ${accepted.sha512}`;
+  await ensureGithubPreimage(repository, sha);
+  let immutable = await githubImmutable(repository);
+  const tagState = await githubTag(repository, tag, sha, annotation);
+  let release = await githubReleaseForTag(repository, tag);
+  let state: GithubState;
+  if (tagState === "absent" && release === undefined) state = "Fresh";
+  else if (tagState === "exact" && release === undefined)
+    state = "ExactTagOnly";
+  else if (tagState === "exact" && release !== undefined && release.draft)
+    state = "ExactDraft";
+  else if (
+    tagState === "exact" &&
+    release !== undefined &&
+    !release.draft &&
+    release.immutable &&
+    release.publishedAt !== null
+  )
+    state = "ExactPublic";
+  else
+    throw githubFailure(
+      "github-release-conflict",
+      "remote tag and release state is not an exact resumable state",
+      "Fresh, ExactTagOnly, ExactDraft, or ExactPublic",
+    );
+  const downloads = mkdtempSync(
+    path.join(isolation.root, "github-release-assets-"),
+  );
+  if (state === "ExactPublic") {
+    if (immutable !== "enabled")
+      throw githubFailure(
+        "github-immutable-state-unknown",
+        "immutable releases is not enabled",
+        "enabled immutable releases",
+      );
+    await assertGithubRelease(
+      repository,
+      release!,
+      initialExactArtifact,
+      tag,
+      false,
+      downloads,
+    );
+    for (const arguments_ of [
+      ["release", "verify", tag, "--repo", repository],
+      [
+        "release",
+        "verify-asset",
+        tag,
+        initialExactArtifact.tgz,
+        "--repo",
+        repository,
+      ],
+      [
+        "release",
+        "verify-asset",
+        tag,
+        initialExactArtifact.checksum,
+        "--repo",
+        repository,
+      ],
+    ] as const)
+      if ((await capturedGh(arguments_)).status !== 0)
+        throw githubFailure(
+          "github-release-attestation-invalid",
+          "GitHub release attestation was not accepted",
+          "three successful GitHub release verification commands",
+        );
+    return;
+  }
+  if (state === "ExactDraft")
+    await assertGithubRelease(
+      repository,
+      release!,
+      initialExactArtifact,
+      tag,
+      true,
+      downloads,
+    );
+  const phrase = `RELEASE ${accepted.receipt.publication.packageName}@1.0.0 ${accepted.receipt.artifact.integrity} TO ${repository} ${tag} AT ${sha}`;
+  process.stdout.write(
+    `GitHub release preview: ${state}; immutable releases ${immutable}.\n`,
+  );
+  await readExactPhrase(phrase, "github-release-confirmation-required");
+  // A confirmation authorizes one bounded attempt only. Re-observe every fact
+  // before its first GitHub write and never repair a partial remote result.
+  await acceptDownloadedPublicationArtifact({
+    repositoryRoot: root,
+    packagePath,
+    artifactDirectory: process.env.ARTIFACT_ROOT!,
+    githubRepository: repository,
+  }).catch(() => {
+    throw githubFailure(
+      "github-preimage-changed",
+      "accepted artifact changed after confirmation",
+      "the accepted receipt-bound artifact",
+    );
+  });
+  const registryArtifact = await exactRemoteArtifact(
+    client,
+    isolation,
+    accepted,
+    accepted.receipt.publication.packageName,
+    strictJsonObject(
+      await capturedNpm(client, isolation, [
+        "view",
+        `${accepted.receipt.publication.packageName}@1.0.0`,
+        "--json",
+      ]),
+      "npm-registry-schema-unsupported",
+    ),
+  );
+  const exactArtifact: AcceptedPublicationArtifact = {
+    ...accepted,
+    tgz: registryArtifact.tgz,
+  };
+  await ensureGithubPreimage(repository, sha);
+  const recheckedGit = gitFacts();
+  if (
+    recheckedGit.unavailable ||
+    recheckedGit.detached ||
+    recheckedGit.facts.workingTree !== "clean" ||
+    !recheckedGit.facts.headMatchesRemoteDefault ||
+    !remoteMatchesPublicOwner(recheckedGit.remote) ||
+    execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() !== sha
+  )
+    throw githubFailure(
+      "github-preimage-changed",
+      "local Git handoff facts changed after confirmation",
+      "the accepted clean synchronized default-branch preimage",
+    );
+  immutable = await githubImmutable(repository);
+  const afterTag = await githubTag(repository, tag, sha, annotation);
+  release = await githubReleaseForTag(repository, tag);
+  if (
+    (state === "Fresh" && (afterTag !== "absent" || release !== undefined)) ||
+    (state === "ExactTagOnly" &&
+      (afterTag !== "exact" || release !== undefined)) ||
+    (state === "ExactDraft" &&
+      (afterTag !== "exact" || release === undefined || !release.draft))
+  )
+    throw githubFailure(
+      "github-preimage-changed",
+      "GitHub release classification changed after confirmation",
+      `unchanged ${state} classification`,
+    );
+  if (state === "ExactDraft")
+    await assertGithubRelease(
+      repository,
+      release!,
+      exactArtifact,
+      tag,
+      true,
+      downloads,
+    );
+  if (immutable === "disabled") {
+    const enabled = await capturedGh([
+      "api",
+      "--include",
+      "--method",
+      "PUT",
+      "-H",
+      "Accept: application/vnd.github+json",
+      "-H",
+      "X-GitHub-Api-Version: 2026-03-10",
+      `repos/${repository}/immutable-releases`,
+    ]);
+    if (
+      enabled.status !== 0 ||
+      !/^HTTP\/\d(?:\.\d)? 204[^\r\n]*\r?\n(?:[^\r\n]*\r?\n)*\r?\n$/u.test(
+        enabled.stdout,
+      )
+    )
+      throw githubFailure(
+        "github-immutable-enable-failed",
+        "immutable releases enable failed",
+        "HTTP 204 followed by an enabled readback",
+      );
+    if ((await githubImmutable(repository)) !== "enabled")
+      throw githubFailure(
+        "github-immutable-enable-failed",
+        "immutable releases did not read back enabled",
+        "an enabled immutable-releases response",
+      );
+  }
+  if (state === "Fresh") {
+    const object = ghJson(
+      await capturedGh([
+        "api",
+        "--method",
+        "POST",
+        `repos/${repository}/git/tags`,
+        "-f",
+        `tag=${tag}`,
+        "-f",
+        `message=${annotation}`,
+        "-f",
+        `object=${sha}`,
+        "-f",
+        "type=commit",
+      ]),
+      "github-release-write-failed",
+    );
+    if (typeof object.sha !== "string")
+      throw githubFailure(
+        "github-release-write-failed",
+        "tag object write returned no SHA",
+        "one annotated tag object SHA",
+      );
+    if (
+      (
+        await capturedGh([
+          "api",
+          "--method",
+          "POST",
+          `repos/${repository}/git/refs`,
+          "-f",
+          `ref=refs/tags/${tag}`,
+          "-f",
+          `sha=${object.sha}`,
+        ])
+      ).status !== 0
+    )
+      throw githubFailure(
+        "github-release-write-failed",
+        "tag ref write failed",
+        "one annotated tag reference",
+      );
+    if ((await githubTag(repository, tag, sha, annotation)) !== "exact")
+      throw githubFailure(
+        "github-release-write-failed",
+        "annotated tag did not read back exactly",
+        "one exact annotated tag reference",
+      );
+  }
+  if (state === "Fresh" || state === "ExactTagOnly") {
+    const notes = path.join(isolation.root, "github-release-notes.md");
+    writeFileSync(notes, accepted.receipt.publication.releaseNotes);
+    if (
+      (
+        await capturedGh([
+          "release",
+          "create",
+          tag,
+          exactArtifact.tgz,
+          exactArtifact.checksum,
+          "--draft",
+          "--verify-tag",
+          "--title",
+          tag,
+          `--notes-file=${notes}`,
+          "--repo",
+          repository,
+        ])
+      ).status !== 0
+    )
+      throw githubFailure(
+        "github-release-write-failed",
+        "draft release write failed",
+        "one exact draft release with two assets",
+      );
+  }
+  const draft = await githubReleaseForTag(repository, tag);
+  if (draft === undefined || !draft.draft)
+    throw githubFailure(
+      "github-release-conflict",
+      "draft release did not read back",
+      "one exact draft release",
+    );
+  await assertGithubRelease(
+    repository,
+    draft,
+    exactArtifact,
+    tag,
+    true,
+    downloads,
+  );
+  if (
+    (
+      await capturedGh([
+        "release",
+        "edit",
+        tag,
+        "--draft=false",
+        "--repo",
+        repository,
+      ])
+    ).status !== 0
+  )
+    throw githubFailure(
+      "github-release-write-failed",
+      "public release transition failed",
+      "one successful draft-to-public transition",
+    );
+  const publicRelease = await githubReleaseForTag(repository, tag);
+  if (
+    publicRelease === undefined ||
+    publicRelease.draft ||
+    !publicRelease.immutable ||
+    publicRelease.publishedAt === null
+  )
+    throw githubFailure(
+      "github-release-immutability-unproven",
+      "public release did not read back immutable",
+      "one immutable public release",
+    );
+  await assertGithubRelease(
+    repository,
+    publicRelease,
+    exactArtifact,
+    tag,
+    false,
+    downloads,
+  );
+  for (const arguments_ of [
+    ["release", "verify", tag, "--repo", repository],
+    ["release", "verify-asset", tag, exactArtifact.tgz, "--repo", repository],
+    [
+      "release",
+      "verify-asset",
+      tag,
+      exactArtifact.checksum,
+      "--repo",
+      repository,
+    ],
+  ] as const)
+    if ((await capturedGh(arguments_)).status !== 0)
+      throw githubFailure(
+        "github-release-attestation-invalid",
+        "GitHub release attestation was not accepted",
+        "three successful GitHub release verification commands",
+      );
+}
+
 async function external() {
   const artifactRoot = ownedArtifactRoot(process.env.ARTIFACT_ROOT);
   let isolationRoot: string | undefined;
   let isolation: Isolation | undefined;
   let client: NpmClient | undefined;
   let loginStarted = false;
+  let githubReleaseVerified = false;
   let primary: unknown;
   const handlers: readonly NodeJS.Signals[] = ["SIGHUP", "SIGINT", "SIGTERM"];
   const onSignal = (signal: NodeJS.Signals): void => {
@@ -1943,7 +2746,20 @@ async function external() {
         "Correct the package publication facts and retry.",
         4,
       );
-    process.stdout.write("STAGE 5/7 Authenticate with npm\n");
+    const githubSha = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!/^[0-9a-f]{40}$/u.test(githubSha))
+      throw externalFailure(
+        "github-branch-conflict",
+        "local HEAD is not an exact commit SHA",
+        "one exact default-branch commit SHA",
+        "Restore the public Git handoff and rerun setup.",
+        4,
+      );
+    process.stdout.write("STAGE 5/9 Authenticate with npm\n");
     isolationRoot = createIsolationRoot((created) => {
       isolationRoot = created;
     });
@@ -1979,13 +2795,14 @@ async function external() {
       );
     const whoami = whoamiResult.stdout.trim();
     process.stdout.write(
-      "OK npm-authenticated\nSTAGE 6/7 Publish version 1.0.0\n",
+      "OK npm-authenticated\nSTAGE 6/9 Publish version 1.0.0\n",
     );
     const firstView = await classifyVersion(
       client,
       isolation,
       accepted.receipt.publication.packageName,
     );
+    let initialRegistryArtifact: RegistryExactArtifact | undefined;
     if (firstView.kind === "unknown")
       throw externalFailure(
         "npm-version-state-unknown",
@@ -2009,7 +2826,7 @@ async function external() {
         accepted.receipt.publication.packageName,
         whoami,
       );
-      await exactRemoteArtifact(
+      initialRegistryArtifact = await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -2099,7 +2916,7 @@ async function external() {
         accepted.receipt.publication.packageName,
         whoami,
       );
-      await exactRemoteArtifact(
+      initialRegistryArtifact = await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -2108,14 +2925,31 @@ async function external() {
       );
       process.stdout.write("OK npm-published-exact\n");
     }
-    process.stdout.write("STAGE 7/7 Configure trusted publishing\n");
+    process.stdout.write("STAGE 7/9 Configure trusted publishing\n");
     await configureTrust(client, isolation, {
       packageName: accepted.receipt.publication.packageName,
       repository,
     });
     process.stdout.write(
-      "OK trusted-publishing-configured\nNext action: Continue with Ticket 14 release completion work.\n",
+      "OK trusted-publishing-configured\nSTAGE 8/9 Create the first GitHub release\n",
     );
+    if (initialRegistryArtifact === undefined)
+      throw externalFailure(
+        "npm-remote-artifact-unavailable",
+        "registry artifact was not retained for GitHub verification",
+        "one exact registry artifact for this invocation",
+        "Rerun setup from Stage 1.",
+        5,
+      );
+    await runGithubFirstRelease({
+      isolation,
+      client,
+      accepted,
+      repository,
+      sha: githubSha,
+      initialRegistryArtifact,
+    });
+    githubReleaseVerified = true;
   } catch (error) {
     primary = error;
   }
@@ -2163,6 +2997,10 @@ async function external() {
   if (receivedSignal !== undefined) process.kill(process.pid, receivedSignal);
   if (primary !== undefined) throw primary;
   if (cleanupError !== undefined) throw cleanupError;
+  if (githubReleaseVerified)
+    process.stdout.write(
+      "OK first-github-release-verified\nSTAGE 9/9 Finish setup\nOK first-release-setup-complete\nSee RELEASING.md: run the daily release workflow without inputs after a reviewed version and changelog PR. After the first successful natural OIDC release, enable Require 2FA and disallow tokens and revoke unneeded write tokens in npm. You may now manually delete the entire scripts/npm-publication-setup directory.\n",
+    );
 }
 
 if (

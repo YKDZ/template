@@ -113,8 +113,8 @@ if [ "$mode" = "status" ]; then
 fi
 
 cd "$repository_root" || fail ERROR repository-root "unreadable repository root" "the generated repository root" "Run setup from its generated directory." 5
-printf 'STAGE 1/7 Check prerequisites\nCHECK local-toolchain\n'
-for command in bash node pnpm git; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
+printf 'STAGE 1/9 Check prerequisites\nCHECK local-toolchain\n'
+for command in bash node pnpm git gh; do command -v "$command" >/dev/null 2>&1 || fail ERROR prerequisite-command "$command is unavailable" "required local command $command" "Install the generated repository toolchain and retry." 5; done
 REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.ts" preflight
 preflight_status=$?
 [ "$preflight_status" -eq 0 ] || exit "$preflight_status"
@@ -136,11 +136,11 @@ if [ "$non_interactive" = false ] && [ "$existing_public" = false ]; then
   [ -n "$repository" ] || prompt_public_fact "Public GitHub repository" repository
 fi
 
-printf 'STAGE 2/7 Configure the public package\n'
+printf 'STAGE 2/9 Configure the public package\n'
 PACKAGE_NAME="$package_name" COMMAND_NAME="$command_name" DESCRIPTION="$description" LICENSE_NAME="$license" COPYRIGHT_HOLDER="$copyright_holder" REPOSITORY_URL="$repository" REPOSITORY_ROOT="$repository_root" SETUP_DIR="$script_dir" node --conditions=source "$script_dir/bridge.ts" configure
 configuration_status=$?
 [ "$configuration_status" -eq 0 ] || exit "$configuration_status"
-printf 'OK public-package-configured\nSTAGE 3/7 Commit the publication configuration\n'
+printf 'OK public-package-configured\nSTAGE 3/9 Commit the publication configuration\n'
 if ! working_tree=$(git status --porcelain 2>/dev/null); then
   fail ERROR git-read-unavailable "working tree could not be read" "readable local Git facts" "Correct the Git or platform failure and retry." 5
 fi
@@ -176,7 +176,7 @@ fi
 if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=source "$script_dir/bridge.ts" remote-matches-owner; then
   fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "the public package owner GitHub repository" "Correct the normal Git remote and retry." 4
 fi
-printf 'OK git-handoff-complete\nSTAGE 4/7 Verify the first release artifact\n'
+printf 'OK git-handoff-complete\nSTAGE 4/9 Verify the first release artifact\n'
 artifact_parent_input=${TMPDIR:-/tmp}
 if ! artifact_parent=$(CDPATH='' cd -- "$artifact_parent_input" && pwd -P); then
   fail ERROR artifact-temporary-output "temporary parent is unreadable" "a readable local temporary directory" "Correct TMPDIR permissions and retry." 5

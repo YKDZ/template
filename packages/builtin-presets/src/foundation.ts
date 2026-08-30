@@ -1752,6 +1752,12 @@ function foundationPlan(options: {
           {
             kind: "copyFile" as const,
             source: templateSources.tsCli,
+            from: "publication/RELEASING.md",
+            to: "RELEASING.md",
+          },
+          {
+            kind: "copyFile" as const,
+            source: templateSources.tsCli,
             from: "src/cli-command-identity.ts",
             to: "scripts/npm-publication/cli-command-identity.ts",
           },

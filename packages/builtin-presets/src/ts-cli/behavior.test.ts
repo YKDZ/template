@@ -572,10 +572,10 @@ describe("ts-cli Preset Definition behavior", () => {
         },
       );
       expect(missingPnpm.exitCode).toBe(5);
-      expect(missingPnpm.stdout).toContain("STAGE 1/7 Check prerequisites");
+      expect(missingPnpm.stdout).toContain("STAGE 1/9 Check prerequisites");
       expect(missingPnpm.stdout).toContain("CHECK local-toolchain");
       expect(missingPnpm.stdout).not.toContain(
-        "STAGE 2/7 Configure the public package",
+        "STAGE 2/9 Configure the public package",
       );
       expect(missingPnpm.stderr).toContain("ERROR prerequisite-command");
       expect(missingPnpm.stderr).toContain("pnpm is unavailable");
@@ -739,7 +739,7 @@ describe("ts-cli Preset Definition behavior", () => {
         `${configured.stdout}\n${configured.stderr}`,
       ).toBe(5);
       expect(configured.stdout).toContain(
-        "STAGE 2/7 Configure the public package",
+        "STAGE 2/9 Configure the public package",
       );
       expect(configured.stdout).not.toContain(String.fromCharCode(27));
       expect(configured.stdout).not.toContain("\r");
@@ -868,9 +868,9 @@ exit 97
         "local-template-metadata-invalid",
       );
       expect(corruptMetadata.stdout).not.toContain(
-        "STAGE 2/7 Configure the public package",
+        "STAGE 2/9 Configure the public package",
       );
-      expect(corruptMetadata.stdout).toContain("STAGE 1/7 Check prerequisites");
+      expect(corruptMetadata.stdout).toContain("STAGE 1/9 Check prerequisites");
       const corruptStatus = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
@@ -1162,6 +1162,33 @@ esac
         path.join(fakeBin, "corepack"),
         "#!/bin/sh\nexit 0\n",
       );
+      await writeExecutable(
+        path.join(fakeBin, "gh"),
+        `#!/usr/bin/env node
+const fs = require("node:fs"); const path = require("node:path");
+const statePath = ${JSON.stringify(path.join(workspace, "github-state.json"))};
+const blockPath = ${JSON.stringify(path.join(workspace, "github-block.json"))};
+const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : { immutable: false, tag: false, release: null, calls: [] };
+const save = () => fs.writeFileSync(statePath, JSON.stringify(state)); const args = process.argv.slice(2); const include = args.includes("--include");
+state.calls.push(args); save();
+const reply = (value) => process.stdout.write(include ? "HTTP/2 200\\n\\n" + JSON.stringify(value) : JSON.stringify(value)); const endpoint = args.find((arg) => arg.startsWith("repos/"));
+if (args[0] === "auth") process.exit(0);
+if (args[0] === "repo") { reply({ nameWithOwner: "demo/ship", visibility: "PUBLIC", defaultBranchRef: { name: "main", target: {} }, viewerCanAdminister: true, viewerPermission: "ADMIN" }); process.exit(0); }
+if (args[0] === "api" && args.includes("user")) { reply({ login: "alice" }); process.exit(0); }
+if (args[0] === "api" && endpoint === "repos/demo/ship") { reply({ full_name: "demo/ship", visibility: "public", default_branch: "main", permissions: { admin: true, push: true } }); process.exit(0); }
+if (args[0] === "api" && endpoint.endsWith("immutable-releases")) { if (state.failure === "permission") { process.stdout.write("HTTP/2 403\\n\\n"); process.exit(1); } if (state.failure === "unknown") { process.stdout.write("HTTP/2 500\\n\\n"); process.exit(1); } if (args.includes("PUT")) { state.immutable = true; save(); process.stdout.write("HTTP/2 204\\n\\n"); process.exit(0); } if (!state.immutable) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ enabled: true, enforced_by_owner: false }); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/git/ref/heads/")) { reply({ object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/git/ref/tags/")) { if (!state.tag) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ object: { type: "tag", sha: "tag-object" } }); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/git/tags/")) { reply({ tag: "v1.0.0", message: state.annotation, object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
+if (args[0] === "api" && endpoint.endsWith("/git/tags") && args.includes("POST")) { if (state.failure === "tag-write") { process.exit(1); } state.annotation = args.find((arg) => arg.startsWith("message=")).slice(8); save(); reply({ sha: "tag-object" }); process.exit(0); }
+if (args[0] === "api" && endpoint.endsWith("/git/refs") && args.includes("POST")) { state.tag = true; save(); reply({ ref: "refs/tags/v1.0.0" }); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/releases?")) { process.stdout.write(JSON.stringify([state.release ? [state.release] : []])); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/releases/assets/")) { if (state.failure === "gh-signal") { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid })); const onSignal = () => { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid, childSignalled: true })); process.exit(0); }; process.on("SIGTERM", onSignal); process.on("SIGHUP", onSignal); setInterval(() => {}, 1_000); } else { const id = Number(endpoint.split("/").at(-1)); const asset = state.release.assets.find((item) => item.id === id); fs.writeFileSync(args.find((arg) => arg.startsWith("--output=")).slice(9), Buffer.from(asset.bytes, "base64")); process.exit(0); } }
+if (args[0] === "release" && args[1] === "create") { const tag = args[2], tgz = fs.readFileSync(args[3]), checksum = fs.readFileSync(args[4]), notes = fs.readFileSync(args.find((arg) => arg.startsWith("--notes-file=")).slice(13), "utf8"); state.release = { tag_name: tag, name: tag, body: notes, draft: true, prerelease: false, immutable: false, published_at: null, assets: [{ id: 1, name: path.basename(args[3]), size: tgz.length, label: null, state: "uploaded", bytes: tgz.toString("base64") }, { id: 2, name: "SHA512SUMS", size: checksum.length, label: null, state: "uploaded", bytes: checksum.toString("base64") }] }; save(); process.exit(0); }
+if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = true; state.release.published_at = "2026-08-30T00:00:00Z"; save(); process.exit(0); }
+if (args[0] === "release" && (args[1] === "verify" || args[1] === "verify-asset")) process.exit(0); if (state.failure !== "gh-signal") process.exit(97);
+`,
+      );
       await rm(path.join(targetDir, "node_modules/npm"), {
         recursive: true,
         force: true,
@@ -1193,7 +1220,7 @@ else if (args[0] === "view") {
   const tgz = Buffer.from(state.tgz, "base64");
   process.stdout.write(JSON.stringify({ name: "@demo/ship", version: "1.0.0", repository: { type: "git", url: "git+https://github.com/demo/ship.git", directory: "packages/cli" }, dist: { integrity: "sha512-" + require("node:crypto").createHash("sha512").update(tgz).digest("base64") } })); save(); process.exit(0);
 }
-if (args[0] === "pack") { const target = args.find((arg) => arg.startsWith("--pack-destination=")).slice("--pack-destination=".length); fs.writeFileSync(path.join(target, "remote.tgz"), Buffer.from(state.tgz, "base64")); save(); process.exit(0); }
+if (args[0] === "pack") { const target = args.find((arg) => arg.startsWith("--pack-destination=")).slice("--pack-destination=".length); fs.writeFileSync(path.join(target, "ship-1.0.0.tgz"), Buffer.from(state.tgz, "base64")); save(); process.exit(0); }
 if (args[0] === "publish") { state.published = true; state.tgz = fs.readFileSync(args[1]).toString("base64"); save(); process.exit(0); }
 if (args[0] === "trust" && args[1] === "list") { if (state.trusted) process.stdout.write('{"id":"trust-1","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"]}'); save(); process.exit(0); }
 if (args[0] === "trust" && args.includes("--dry-run")) { process.stdout.write('{"package":"@demo/ship","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"]}'); save(); process.exit(0); }
@@ -1220,6 +1247,7 @@ save(); process.exit(97);
             "CONFIRM NPM 2FA AND RECOVERY CODES READY",
             `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
             "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
+            `RELEASE @demo/ship@1.0.0 ${first.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
           ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
         ],
         {
@@ -1236,12 +1264,15 @@ save(); process.exit(97);
       expect(firstRun.exitCode, `${firstRun.stdout}\n${firstRun.stderr}`).toBe(
         0,
       );
-      expect(firstRun.stdout).toContain("STAGE 5/7 Authenticate with npm");
+      expect(firstRun.stdout).toContain("STAGE 5/9 Authenticate with npm");
       expect(firstRun.stdout).toContain("INTERACTIVE npm-login BEGIN");
       expect(firstRun.stdout).toContain("INTERACTIVE npm-publish END 0");
       expect(firstRun.stdout).toContain("INTERACTIVE npm-trust-write END 0");
       expect(firstRun.stdout).toContain(
-        "STAGE 7/7 Configure trusted publishing",
+        "STAGE 7/9 Configure trusted publishing",
+      );
+      expect(firstRun.stdout).toContain(
+        "STAGE 8/9 Create the first GitHub release",
       );
       const calls = (
         JSON.parse(await readFile(statePath, "utf8")) as {
@@ -1307,13 +1338,238 @@ save(); process.exit(97);
           (args) => args[0] === "trust" && args[1] === "github",
         ),
       ).toHaveLength(2);
+      const githubStatePath = path.join(workspace, "github-state.json");
+      const readGithub = async () =>
+        JSON.parse(await readFile(githubStatePath, "utf8")) as {
+          immutable: boolean;
+          tag: boolean;
+          annotation: string;
+          release: Record<string, unknown> | null;
+          failure?: string;
+          calls: string[][];
+        };
+      const writeGithub = async (state: unknown) =>
+        writeFile(githubStatePath, `${JSON.stringify(state)}\n`);
+      const githubWrites = (calls: readonly string[][]) =>
+        calls.filter(
+          (args) =>
+            (args[0] === "api" && args.includes("PUT")) ||
+            (args[0] === "api" && args.includes("POST")) ||
+            (args[0] === "release" &&
+              ["create", "edit"].includes(args[1] ?? "")),
+        );
+      const resumeGithub = async (
+        artifact: {
+          readonly directory: string;
+          readonly integrity: string;
+        },
+        enterRelease = true,
+      ) =>
+        await execa(
+          "bash",
+          [
+            "-c",
+            `(sleep 1; ${terminalInput([
+              "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+              ...(enterRelease
+                ? [
+                    `RELEASE @demo/ship@1.0.0 ${artifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+                  ]
+                : []),
+            ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+          ],
+          {
+            cwd: targetDir,
+            env: {
+              PATH: `${fakeBin}:${process.env.PATH}`,
+              REPOSITORY_ROOT: targetDir,
+              ARTIFACT_ROOT: artifact.directory,
+            },
+            reject: false,
+            timeout: 60_000,
+          },
+        );
+      const publicState = await readGithub();
+      const tagOnly = {
+        ...publicState,
+        immutable: true,
+        tag: true,
+        release: null,
+        failure: undefined,
+        calls: [],
+      };
+      await writeGithub(tagOnly);
+      const tagOnlyArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const tagOnlyResult = await resumeGithub(tagOnlyArtifact);
+      expect(tagOnlyResult.exitCode).toBe(0);
+      expect(githubWrites((await readGithub()).calls)).toEqual([
+        expect.arrayContaining(["release", "create"]),
+        expect.arrayContaining(["release", "edit"]),
+      ]);
+
+      const drafted = await readGithub();
+      const exactDraft = {
+        ...drafted,
+        immutable: true,
+        release: {
+          ...drafted.release,
+          draft: true,
+          immutable: false,
+          published_at: null,
+        },
+        failure: undefined,
+        calls: [],
+      };
+      await writeGithub(exactDraft);
+      const draftArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const draftResult = await resumeGithub(draftArtifact);
+      expect(draftResult.exitCode).toBe(0);
+      expect(githubWrites((await readGithub()).calls)).toEqual([
+        expect.arrayContaining(["release", "edit"]),
+      ]);
+
+      const partial = await readGithub();
+      const partialAssets = Array.isArray(partial.release?.assets)
+        ? partial.release.assets
+        : [];
+      await writeGithub({
+        ...partial,
+        immutable: true,
+        release: {
+          ...partial.release,
+          draft: true,
+          immutable: false,
+          published_at: null,
+          assets: [
+            ...partialAssets,
+            {
+              id: 3,
+              name: "extra",
+              size: 1,
+              label: null,
+              state: "uploaded",
+              bytes: "eA==",
+            },
+          ],
+        },
+        failure: undefined,
+        calls: [],
+      });
+      const partialArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const partialResult = await resumeGithub(partialArtifact, false);
+      expect(partialResult.exitCode).toBe(4);
+      expect(githubWrites((await readGithub()).calls)).toEqual([]);
+
+      for (const failure of ["permission", "unknown", "tag-write"] as const) {
+        await writeGithub({
+          ...tagOnly,
+          immutable: failure === "tag-write",
+          tag: false,
+          release: null,
+          failure,
+          calls: [],
+        });
+        const artifact = await writeAcceptedFirstReleaseArtifact({
+          root: targetDir,
+          packageName: "@demo/ship",
+          commandName: "ship",
+        });
+        const result = await resumeGithub(artifact, failure === "tag-write");
+        expect(result.exitCode).toBe(failure === "tag-write" ? 4 : 4);
+        const writes = githubWrites((await readGithub()).calls);
+        if (failure === "tag-write") expect(writes).toHaveLength(1);
+        else expect(writes).toEqual([]);
+      }
+      await writeGithub({
+        ...publicState,
+        immutable: true,
+        release: {
+          ...publicState.release,
+          draft: true,
+          immutable: false,
+          published_at: null,
+        },
+        failure: "gh-signal",
+        calls: [],
+      });
+      const ghSignalArtifact = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const logoutCountBeforeSignal = (
+        JSON.parse(await readFile(statePath, "utf8")) as { calls: string[][] }
+      ).calls.filter((args) => args[0] === "logout").length;
+      const ghSignalRun = execa(
+        "bash",
+        [
+          "-c",
+          `(sleep 1; ${terminalInput([
+            "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+            `RELEASE @demo/ship@1.0.0 ${ghSignalArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+          ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            REPOSITORY_ROOT: targetDir,
+            ARTIFACT_ROOT: ghSignalArtifact.directory,
+          },
+          reject: false,
+          timeout: 60_000,
+        },
+      );
+      const githubBlockPath = path.join(workspace, "github-block.json");
+      let blockedBridgePid: number | undefined;
+      for (
+        let attempt = 0;
+        attempt < 100 && blockedBridgePid === undefined;
+        attempt += 1
+      ) {
+        const block = await readFile(githubBlockPath, "utf8").catch(() => "");
+        blockedBridgePid = JSON.parse(block || "null")?.bridgePid;
+        if (blockedBridgePid === undefined)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(blockedBridgePid).toBeTypeOf("number");
+      process.kill(blockedBridgePid!, "SIGTERM");
+      const ghSignalResult = await ghSignalRun;
+      expect(ghSignalResult.exitCode).toBe(143);
+      let ghChildSignalled = false;
+      for (let attempt = 0; attempt < 100 && !ghChildSignalled; attempt += 1) {
+        const block = JSON.parse(await readFile(githubBlockPath, "utf8")) as {
+          readonly childSignalled?: boolean;
+        };
+        ghChildSignalled = block.childSignalled === true;
+        if (!ghChildSignalled)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(ghChildSignalled).toBe(true);
+      await expect(stat(ghSignalArtifact.directory)).rejects.toThrow();
+      expect(
+        (
+          JSON.parse(await readFile(statePath, "utf8")) as { calls: string[][] }
+        ).calls.filter((args) => args[0] === "logout"),
+      ).toHaveLength(logoutCountBeforeSignal + 1);
       const generatedManifest = JSON.parse(
         await readFile(path.join(targetDir, "package.json"), "utf8"),
       ) as { readonly imports?: Record<string, string> };
       expect(generatedManifest.imports).toEqual({
         "#npm-publication/*": "./scripts/npm-publication/*.ts",
       });
-      await rm(setupDirectory, { recursive: true, force: true });
       for (const command of ["format:check", "lint", "typecheck"] as const) {
         const permanentTask = await execa("pnpm", ["run", command], {
           cwd: targetDir,
@@ -1595,7 +1851,7 @@ else if (args[0] === "publish") {
           ),
       );
       await waitFor("npm 2FA confirmation prompt", () =>
-        prompt.transcript().includes("STAGE 5/7 Authenticate with npm") &&
+        prompt.transcript().includes("STAGE 5/9 Authenticate with npm") &&
         prompt.transcript().includes("Confirmation: ")
           ? true
           : undefined,
@@ -1867,7 +2123,7 @@ if (args[0] === "view") {
 }
 if (args[0] === "pack") {
   const destination = args.find((argument) => argument.startsWith("--pack-destination=")).slice("--pack-destination=".length);
-  fs.writeFileSync(path.join(destination, "remote.tgz"), mode === "bytes" ? Buffer.from("different bytes") : bytes);
+  fs.writeFileSync(path.join(destination, "ship-1.0.0.tgz"), mode === "bytes" ? Buffer.from("different bytes") : bytes);
   process.exit(0);
 }
 if (args[0] === "trust" && args[1] === "list") {
@@ -2588,10 +2844,6 @@ syncBuiltinESMExports();
     );
 
     try {
-      await rm(path.join(project.targetDir, "scripts/npm-publication-setup"), {
-        recursive: true,
-        force: true,
-      });
       const rootCheck = await execa("pnpm", ["run", "check"], {
         cwd: project.targetDir,
         reject: false,
