@@ -2295,20 +2295,27 @@ async function githubReleaseForTag(
       "release listing had an unsupported shape",
       "one complete release listing",
     );
-  const matches = pages
+  const rawMatches = pages
     .flat()
-    .filter((item) => isObject(item) && item.tag_name === tag)
-    .map(githubRelease);
-  if (matches.length > 1)
+    .filter(
+      (item): item is JsonObject => isObject(item) && item.tag_name === tag,
+    );
+  if (rawMatches.length > 1) {
+    if (rawMatches.some((release) => release.draft === false))
+      throw githubFailure(
+        "github-release-incident-required",
+        "multiple releases include a public target-tag release",
+        "one complete exact public release",
+      );
     throw githubFailure(
-      "github-release-conflict",
+      "github-release-state-unknown",
       "release state is ambiguous",
       "at most one exact first release",
     );
-  const raw = pages
-    .flat()
-    .find((item) => isObject(item) && item.tag_name === tag);
-  if (matches[0] === undefined && raw !== undefined) {
+  }
+  const raw = rawMatches[0];
+  const release = raw === undefined ? undefined : githubRelease(raw);
+  if (release === undefined && raw !== undefined) {
     if (isObject(raw) && raw.draft === false)
       throw githubFailure(
         "github-release-incident-required",
@@ -2321,7 +2328,7 @@ async function githubReleaseForTag(
       "one exact first release",
     );
   }
-  return matches[0];
+  return release;
 }
 
 async function githubWriteFailure(
