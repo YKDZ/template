@@ -55,7 +55,7 @@ catalog:
   typescript-7: npm:typescript@^7.0.2
   valibot: ^1.4.2
   vite: ^8.2.0
-  vike: ^0.4.260
+  vike: ^0.4.264
   vike-vue: ^0.9.12
   vitest: ^4.1.10
   vue: ^3.5.40
