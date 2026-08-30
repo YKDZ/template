@@ -254,7 +254,7 @@ describe("ts-cli Preset Definition behavior", () => {
         path.join(fakeBin, "git"),
         `#!/usr/bin/env bash
 case "$1" in
-  status) exit 0 ;;
+  status) printf ' M packages/runner/package.json\n' ;;
   symbolic-ref) printf 'main\\n' ;;
   remote) printf 'https://github.com/demo/runner\\n' ;;
   ls-remote)
@@ -299,11 +299,13 @@ esac
     );
     try {
       const configured = await configureRunner(runner, "runner");
-      if (configured.exitCode !== 3)
-        throw new Error(
-          `publication setup exited ${configured.exitCode}: ${configured.stderr}`,
-        );
-      expect(configured.exitCode).toBe(3);
+      expect({
+        exitCode: configured.exitCode,
+        stderr: configured.stderr,
+      }).toEqual({
+        exitCode: 3,
+        stderr: expect.stringContaining("git-handoff-required"),
+      });
       expect(configured.stderr).not.toContain("owner-fact-conflict");
       expect(
         JSON.parse(
@@ -321,11 +323,13 @@ esac
     );
     try {
       const configured = await configureRunner(overridden, "launch");
-      if (configured.exitCode !== 3)
-        throw new Error(
-          `publication setup exited ${configured.exitCode}: ${configured.stderr}`,
-        );
-      expect(configured.exitCode).toBe(3);
+      expect({
+        exitCode: configured.exitCode,
+        stderr: configured.stderr,
+      }).toEqual({
+        exitCode: 3,
+        stderr: expect.stringContaining("git-handoff-required"),
+      });
       expect(
         JSON.parse(
           await readFile(
