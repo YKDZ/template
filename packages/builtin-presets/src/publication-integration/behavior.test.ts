@@ -689,7 +689,9 @@ describe("ts-cli publication owner-fact integration", () => {
         generation.packages.find((item) => item.path === "packages/cli"),
       ).toEqual(initialGenerationRecord);
 
-      await execa("pnpm", ["install"], { cwd: repositoryRoot });
+      await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+        cwd: repositoryRoot,
+      });
       await requireReady(repositoryRoot);
       const rootCandidateManifest = JSON.parse(
         await readFile(publicManifestPath, "utf8"),

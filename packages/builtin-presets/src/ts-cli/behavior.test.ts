@@ -299,7 +299,10 @@ esac
     );
     try {
       const configured = await configureRunner(runner, "runner");
-      expect(configured.exitCode).toBe(3);
+      expect({
+        exitCode: configured.exitCode,
+        stderr: configured.stderr,
+      }).toMatchObject({ exitCode: 3 });
       expect(configured.stderr).not.toContain("owner-fact-conflict");
       expect(
         JSON.parse(
@@ -317,7 +320,10 @@ esac
     );
     try {
       const configured = await configureRunner(overridden, "launch");
-      expect(configured.exitCode).toBe(3);
+      expect({
+        exitCode: configured.exitCode,
+        stderr: configured.stderr,
+      }).toMatchObject({ exitCode: 3 });
       expect(
         JSON.parse(
           await readFile(
@@ -3513,7 +3519,9 @@ syncBuiltinESMExports();
           2,
         )}\n`,
       );
-      await execa("pnpm", ["install"], { cwd: project.targetDir });
+      await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+        cwd: project.targetDir,
+      });
       await execa(
         "pnpm",
         ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
