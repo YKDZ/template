@@ -2032,6 +2032,10 @@ function isGithubTimestamp(value: string | null): value is string {
   );
 }
 
+function isGithubObjectSha(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value);
+}
+
 async function githubImmutable(
   repository: string,
 ): Promise<"enabled" | "disabled"> {
@@ -2230,7 +2234,7 @@ async function githubTag(
     !isObject(parsed) ||
     !isObject(parsed.object) ||
     parsed.object.type !== "tag" ||
-    typeof parsed.object.sha !== "string"
+    !isGithubObjectSha(parsed.object.sha)
   )
     throw githubFailure(
       "github-release-conflict",
@@ -2295,12 +2299,28 @@ async function githubReleaseForTag(
     .flat()
     .filter((item) => isObject(item) && item.tag_name === tag)
     .map(githubRelease);
-  if (matches.length > 1 || matches.some((item) => item === undefined))
+  if (matches.length > 1)
     throw githubFailure(
       "github-release-conflict",
       "release state is ambiguous",
       "at most one exact first release",
     );
+  const raw = pages
+    .flat()
+    .find((item) => isObject(item) && item.tag_name === tag);
+  if (matches[0] === undefined && raw !== undefined) {
+    if (isObject(raw) && raw.draft === false)
+      throw githubFailure(
+        "github-release-incident-required",
+        "a public release did not return exact immutable release facts",
+        "a complete exact public release",
+      );
+    throw githubFailure(
+      "github-release-conflict",
+      "release state is not an exact draft release",
+      "one exact first release",
+    );
+  }
   return matches[0];
 }
 
@@ -2321,72 +2341,120 @@ async function githubWriteFailure(
   try {
     remoteImmutable = await githubImmutable(repository);
     diagnosis.push(`immutable=${remoteImmutable}`);
-  } catch (error) {
-    diagnosis.push(
-      `immutable=${error instanceof Error ? error.message : "unknown"}`,
-    );
+  } catch {
+    diagnosis.push("immutable=unknown");
   }
+  let remoteTag: "absent" | "exact" | undefined;
+  let tagProblem: string | undefined;
   try {
-    const remoteTag = await githubTag(repository, tag, sha, annotation);
-    const release = await githubReleaseForTag(repository, tag);
+    remoteTag = await githubTag(repository, tag, sha, annotation);
+  } catch (error) {
+    tagProblem = error instanceof SetupFailure ? error.code : "unknown";
+  }
+  let release: GithubRelease | undefined;
+  let releaseProblem: string | undefined;
+  try {
+    release = await githubReleaseForTag(repository, tag);
+  } catch (error) {
+    releaseProblem = error instanceof SetupFailure ? error.code : "unknown";
+  }
+  const publicObserved =
+    release?.draft === false ||
+    releaseProblem === "github-release-incident-required";
+  if (publicObserved) {
+    // Public is irreversible. Keep reading bounded proof facts for the
+    // diagnosis, but never let a healthy-looking readback downgrade it.
+    let publicFact = "release-fact-invalid";
+    if (release !== undefined) {
+      try {
+        await assertGithubRelease(
+          repository,
+          release,
+          accepted,
+          tag,
+          false,
+          downloads,
+        );
+        if (remoteImmutable !== "enabled")
+          publicFact = `immutable-${remoteImmutable}`;
+        else if (!release.immutable) publicFact = "nonimmutable";
+        else if (!isGithubTimestamp(release.publishedAt))
+          publicFact = "published-fact-invalid";
+        else {
+          publicFact = "exact-readback";
+          for (const arguments_ of [
+            ["release", "verify", tag, "--repo", repository],
+            [
+              "release",
+              "verify-asset",
+              tag,
+              accepted.tgz,
+              "--repo",
+              repository,
+            ],
+            [
+              "release",
+              "verify-asset",
+              tag,
+              accepted.checksum,
+              "--repo",
+              repository,
+            ],
+          ] as const)
+            if ((await capturedGh(arguments_)).status !== 0) {
+              publicFact = "attestation-invalid";
+              break;
+            }
+        }
+      } catch {
+        publicFact = "release-fact-invalid";
+      }
+    }
+    if (tagProblem !== undefined) diagnosis.push(`tag=${tagProblem}`);
+    if (releaseProblem !== undefined)
+      diagnosis.push(`release=${releaseProblem}`);
+    diagnosis.push(`state=PublicIncident:${publicFact}`);
+  } else if (tagProblem === undefined && releaseProblem === undefined) {
     if (remoteTag === "absent" && release === undefined)
       diagnosis.push("state=Fresh");
     else if (remoteTag === "exact" && release === undefined)
       diagnosis.push("state=ExactTagOnly");
     else if (remoteTag === "exact" && release?.draft) {
-      await assertGithubRelease(
-        repository,
-        release,
-        accepted,
-        tag,
-        true,
-        downloads,
-      );
-      diagnosis.push("state=ExactDraft");
-    } else if (
-      remoteTag === "exact" &&
-      release !== undefined &&
-      !release.draft &&
-      release.immutable &&
-      isGithubTimestamp(release.publishedAt) &&
-      remoteImmutable === "enabled"
-    ) {
-      await assertGithubRelease(
-        repository,
-        release,
-        accepted,
-        tag,
-        false,
-        downloads,
-      );
-      for (const arguments_ of [
-        ["release", "verify", tag, "--repo", repository],
-        ["release", "verify-asset", tag, accepted.tgz, "--repo", repository],
-        [
-          "release",
-          "verify-asset",
-          tag,
-          accepted.checksum,
-          "--repo",
+      try {
+        await assertGithubRelease(
           repository,
-        ],
-      ] as const)
-        if ((await capturedGh(arguments_)).status !== 0)
-          throw new Error("public-attestation-invalid");
-      diagnosis.push("state=ExactPublic");
+          release,
+          accepted,
+          tag,
+          true,
+          downloads,
+        );
+        diagnosis.push("state=ExactDraft");
+      } catch (error) {
+        const code = error instanceof SetupFailure ? error.code : "unknown";
+        const state = [
+          "github-release-conflict",
+          "github-release-asset-conflict",
+        ].includes(code)
+          ? "Conflict"
+          : "Unknown";
+        diagnosis.push(`state=${state}:${code}`);
+      }
     } else diagnosis.push("state=Conflict");
-  } catch (error) {
-    const code = error instanceof SetupFailure ? error.code : "unknown";
-    const state = [
-      "github-release-conflict",
-      "github-release-asset-conflict",
-      "github-immutable-setting-conflict",
-    ].includes(code)
+  } else {
+    const problems = [tagProblem, releaseProblem].filter(
+      (problem): problem is string => problem !== undefined,
+    );
+    const state = problems.every((problem) =>
+      [
+        "github-release-conflict",
+        "github-release-asset-conflict",
+        "github-immutable-setting-conflict",
+      ].includes(problem),
+    )
       ? "Conflict"
-      : code === "github-release-attestation-invalid"
-        ? "Incident"
-        : "Unknown";
-    diagnosis.push(`state=${state}:${code}`);
+      : "Unknown";
+    diagnosis.push(`state=${state}:${problems.join("+")}`);
   }
   throw githubFailure(
     "github-release-write-failed",
@@ -2739,8 +2807,15 @@ async function runGithubFirstRelease(options: {
         "tag object write failed",
         "one annotated tag object SHA",
       );
-    const object = ghJson(tagObjectResult, "github-release-write-failed");
-    if (typeof object.sha !== "string")
+    let object: unknown;
+    try {
+      object = JSON.parse(tagObjectResult.stdout);
+    } catch {
+      object = undefined;
+    }
+    const objectSha =
+      isObject(object) && isGithubObjectSha(object.sha) ? object.sha : null;
+    if (objectSha === null)
       await githubWriteFailure(
         repository,
         tag,
@@ -2751,7 +2826,6 @@ async function runGithubFirstRelease(options: {
         "tag object write returned no SHA",
         "one annotated tag object SHA",
       );
-    const objectSha = String(object.sha);
     if (
       (
         await capturedGh([
@@ -2867,6 +2941,14 @@ async function runGithubFirstRelease(options: {
     true,
     downloads,
   );
+  // Asset bytes are the final mutable release fact. Re-prove the repository
+  // setting after that readback so the publish write has no unchecked gap.
+  if ((await githubImmutable(repository)) !== "enabled")
+    throw githubFailure(
+      "github-release-immutability-unproven",
+      "immutable releases was not enabled after final draft asset verification",
+      "an enabled immutable releases setting immediately before publication",
+    );
   if (
     (
       await capturedGh([

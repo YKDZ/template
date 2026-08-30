@@ -1178,15 +1178,15 @@ if (args[0] === "api" && args.includes("user")) { reply({ login: "alice" }); pro
 if (args[0] === "api" && endpoint === "repos/demo/ship") { reply({ full_name: "demo/ship", visibility: "public", default_branch: state.branch || "main", permissions: { admin: true, push: true } }); process.exit(0); }
 if (args[0] === "api" && endpoint.endsWith("immutable-releases")) { if (state.failure === "permission") { process.stdout.write("HTTP/2 403\\n\\n"); process.exit(1); } if (state.failure === "unknown") { process.stdout.write("HTTP/2 201\\n\\n{\\"enabled\\":true,\\"enforced_by_owner\\":false}"); process.exit(0); } if (state.failure === "immutable-race" && !state.immutable) { state.immutable = true; state.failure = "immutable-race-observed"; save(); process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } if (args.includes("PUT")) { state.immutable = true; save(); process.stdout.write("HTTP/2 204\\n\\n"); process.exit(0); } if (!state.immutable) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ enabled: true, enforced_by_owner: false }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/git/ref/heads/")) { reply({ object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
-if (args[0] === "api" && endpoint.includes("/git/ref/tags/")) { if (!state.tag) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ object: { type: "tag", sha: "tag-object" } }); process.exit(0); }
+if (args[0] === "api" && endpoint.includes("/git/ref/tags/")) { if (!state.tag) { process.stdout.write("HTTP/2 404\\n\\n"); process.exit(1); } reply({ object: { type: "tag", sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/git/tags/")) { reply({ tag: "v1.0.0", message: state.annotation, object: { type: "commit", sha: "0123456789012345678901234567890123456789" } }); process.exit(0); }
-if (args[0] === "api" && endpoint.endsWith("/git/tags") && args.includes("POST")) { if (state.failure === "tag-write") { process.exit(1); } state.annotation = args.find((arg) => arg.startsWith("message=")).slice(8); save(); reply({ sha: "tag-object" }); process.exit(0); }
+if (args[0] === "api" && endpoint.endsWith("/git/tags") && args.includes("POST")) { if (state.failure === "tag-write") { process.exit(1); } state.annotation = args.find((arg) => arg.startsWith("message=")).slice(8); save(); reply({ sha: state.failure === "tag-object-malformed" ? "truncated" : "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }); process.exit(0); }
 if (args[0] === "api" && endpoint.endsWith("/git/refs") && args.includes("POST")) { state.tag = true; save(); reply({ ref: "refs/tags/v1.0.0" }); process.exit(0); }
 if (args[0] === "api" && endpoint.includes("/releases?")) { state.releaseReads = (state.releaseReads || 0) + 1; if (state.failure === "pre-public-drift" && state.releaseReads === 4) state.release.assets[0].bytes = "eA=="; save(); process.stdout.write(JSON.stringify([state.release ? [state.release] : []])); process.exit(0); }
-if (args[0] === "api" && endpoint.includes("/releases/assets/")) { if (state.failure === "gh-signal") { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid })); const onSignal = () => { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid, childSignalled: true })); process.exit(0); }; process.on("SIGTERM", onSignal); process.on("SIGHUP", onSignal); setInterval(() => {}, 1_000); } else { const id = Number(endpoint.split("/").at(-1)); const asset = state.release.assets.find((item) => item.id === id); fs.writeFileSync(args.find((arg) => arg.startsWith("--output=")).slice(9), Buffer.from(asset.bytes, "base64")); process.exit(0); } }
+if (args[0] === "api" && endpoint.includes("/releases/assets/")) { if (state.failure === "gh-signal") { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid })); const onSignal = () => { fs.writeFileSync(blockPath, JSON.stringify({ bridgePid: process.ppid, childSignalled: true })); process.exit(0); }; process.on("SIGTERM", onSignal); process.on("SIGHUP", onSignal); setInterval(() => {}, 1_000); } else { const id = Number(endpoint.split("/").at(-1)); const asset = state.release.assets.find((item) => item.id === id); state.assetDownloads = (state.assetDownloads || 0) + 1; if (state.failure === "pre-publish-immutable-drift" && state.assetDownloads === 8) state.immutable = false; save(); fs.writeFileSync(args.find((arg) => arg.startsWith("--output=")).slice(9), Buffer.from(asset.bytes, "base64")); process.exit(0); } }
 if (args[0] === "release" && args[1] === "create") { const tag = args[2], tgz = fs.readFileSync(args[3]), checksum = fs.readFileSync(args[4]), notes = fs.readFileSync(args.find((arg) => arg.startsWith("--notes-file=")).slice(13), "utf8"); state.release = { tag_name: tag, name: tag, body: notes, draft: true, prerelease: false, immutable: false, published_at: null, assets: [{ id: 1, name: path.basename(args[3]), size: tgz.length, label: null, state: "uploaded", bytes: tgz.toString("base64") }, { id: 2, name: "SHA512SUMS", size: checksum.length, label: null, state: "uploaded", bytes: checksum.toString("base64") }] }; save(); process.exit(0); }
-if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = true; state.release.published_at = "2026-08-30T00:00:00Z"; if (state.failure === "post-public-drift") state.release.assets[0].bytes = "eA=="; save(); process.exit(0); }
-if (args[0] === "release" && (args[1] === "verify" || args[1] === "verify-asset")) process.exit(0); if (state.failure !== "gh-signal") process.exit(97);
+if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = state.failure !== "public-write-nonimmutable"; state.release.published_at = "2026-08-30T00:00:00Z"; if (state.failure === "post-public-drift") state.release.assets[0].bytes = "eA=="; save(); if (["public-write-exact", "public-write-nonimmutable", "public-write-attestation"].includes(state.failure)) process.exit(1); process.exit(0); }
+if (args[0] === "release" && (args[1] === "verify" || args[1] === "verify-asset")) { if (state.failure === "public-write-attestation") process.exit(1); process.exit(0); } if (state.failure !== "gh-signal") process.exit(97);
 `,
       );
       await rm(path.join(targetDir, "node_modules/npm"), {
@@ -1593,6 +1593,87 @@ exec ${JSON.stringify(process.execPath)} "$@"
             ? []
             : [expect.arrayContaining(["release", "edit"])],
         );
+      }
+
+      await writeGithub({
+        ...exactDraft,
+        immutable: true,
+        failure: "pre-publish-immutable-drift",
+        assetDownloads: 0,
+        calls: [],
+      });
+      const immutableAfterAssetsArtifact =
+        await writeAcceptedFirstReleaseArtifact({
+          root: targetDir,
+          packageName: "@demo/ship",
+          commandName: "ship",
+        });
+      const immutableAfterAssetsResult = await resumeGithub(
+        immutableAfterAssetsArtifact,
+      );
+      expect(immutableAfterAssetsResult.exitCode).toBe(4);
+      expect(githubWrites((await readGithub()).calls)).toEqual([]);
+
+      await writeGithub({
+        ...tagOnly,
+        immutable: true,
+        tag: false,
+        release: null,
+        failure: "tag-object-malformed",
+        calls: [],
+      });
+      const malformedTagObjectArtifact =
+        await writeAcceptedFirstReleaseArtifact({
+          root: targetDir,
+          packageName: "@demo/ship",
+          commandName: "ship",
+        });
+      const malformedTagObjectResult = await resumeGithub(
+        malformedTagObjectArtifact,
+      );
+      expect(malformedTagObjectResult.exitCode).toBe(4);
+      expect(malformedTagObjectResult.stdout).toContain(
+        "github-release-write-failed",
+      );
+      const malformedTagObjectCalls = (await readGithub()).calls;
+      expect(githubWrites(malformedTagObjectCalls)).toEqual([
+        expect.arrayContaining(["api", "POST", "repos/demo/ship/git/tags"]),
+      ]);
+      expect(
+        malformedTagObjectCalls.slice(
+          malformedTagObjectCalls.findIndex(
+            (args) => args[0] === "api" && args.includes("POST"),
+          ) + 1,
+        ),
+      ).toEqual(
+        expect.arrayContaining([expect.arrayContaining(["api", "GET"])]),
+      );
+
+      for (const [failure, diagnosis] of [
+        ["public-write-exact", "state=PublicIncident"],
+        ["public-write-nonimmutable", "state=PublicIncident"],
+        ["public-write-attestation", "state=PublicIncident"],
+      ] as const) {
+        await writeGithub({
+          ...exactDraft,
+          immutable: true,
+          failure,
+          calls: [],
+        });
+        const publicWriteFailureArtifact =
+          await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+        const publicWriteFailureResult = await resumeGithub(
+          publicWriteFailureArtifact,
+        );
+        expect(publicWriteFailureResult.exitCode).toBe(4);
+        expect(publicWriteFailureResult.stdout).toContain(diagnosis);
+        expect(githubWrites((await readGithub()).calls)).toEqual([
+          expect.arrayContaining(["release", "edit"]),
+        ]);
       }
 
       await writeGithub({ ...tagOnly, branch: "release", calls: [] });
