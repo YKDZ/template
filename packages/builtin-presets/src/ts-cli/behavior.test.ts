@@ -299,10 +299,11 @@ esac
     );
     try {
       const configured = await configureRunner(runner, "runner");
-      expect({
-        exitCode: configured.exitCode,
-        stderr: configured.stderr,
-      }).toMatchObject({ exitCode: 3 });
+      if (configured.exitCode !== 3)
+        throw new Error(
+          `publication setup exited ${configured.exitCode}: ${configured.stderr}`,
+        );
+      expect(configured.exitCode).toBe(3);
       expect(configured.stderr).not.toContain("owner-fact-conflict");
       expect(
         JSON.parse(
@@ -320,10 +321,11 @@ esac
     );
     try {
       const configured = await configureRunner(overridden, "launch");
-      expect({
-        exitCode: configured.exitCode,
-        stderr: configured.stderr,
-      }).toMatchObject({ exitCode: 3 });
+      if (configured.exitCode !== 3)
+        throw new Error(
+          `publication setup exited ${configured.exitCode}: ${configured.stderr}`,
+        );
+      expect(configured.exitCode).toBe(3);
       expect(
         JSON.parse(
           await readFile(
