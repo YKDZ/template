@@ -177,7 +177,10 @@ if ! REMOTE_URL="$remote" REPOSITORY_ROOT="$repository_root" node --conditions=s
   fail ERROR repository-remote-conflict "$(printf '%s' "$remote" | redact)" "the public package owner GitHub repository" "Correct the normal Git remote and retry." 4
 fi
 printf 'OK git-handoff-complete\nSTAGE 4/7 Verify the first release artifact\n'
-artifact_parent=${TMPDIR:-/tmp}
+artifact_parent_input=${TMPDIR:-/tmp}
+if ! artifact_parent=$(CDPATH='' cd -- "$artifact_parent_input" && pwd -P); then
+  fail ERROR artifact-temporary-output "temporary parent is unreadable" "a readable local temporary directory" "Correct TMPDIR permissions and retry." 5
+fi
 artifact_root=$(mktemp -d "$artifact_parent/npm-publication-setup-artifact.XXXXXX") || fail ERROR artifact-temporary-output "unable to create temporary output" "an empty local temporary directory" "Correct temporary directory permissions and retry." 5
 artifact_cleaned=false
 cleanup_artifact_root() {
@@ -186,7 +189,11 @@ cleanup_artifact_root() {
     "$artifact_parent"/npm-publication-setup-artifact.*) ;;
     *) return 1 ;;
   esac
-  [ ! -d "$artifact_root" ] || rm -rf -- "$artifact_root" || return 1
+  [ "$(dirname -- "$artifact_root")" = "$artifact_parent" ] || return 1
+  [ ! -e "$artifact_root" ] && [ ! -L "$artifact_root" ] || {
+    [ -d "$artifact_root" ] && [ ! -L "$artifact_root" ] || return 1
+    rm -rf -- "$artifact_root" || return 1
+  }
   artifact_cleaned=true
 }
 cleanup_artifact_best_effort() {

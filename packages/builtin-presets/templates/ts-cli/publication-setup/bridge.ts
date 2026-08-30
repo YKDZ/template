@@ -1,5 +1,5 @@
 // Private implementation bridge for setup.sh; it is not a supported entrypoint.
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   cpSync,
@@ -67,6 +67,7 @@ type Isolation = {
 type NpmClient = { readonly node: string; readonly cli: string };
 type NpmResult = {
   readonly status: number;
+  readonly signal: NodeJS.Signals | null;
   readonly stdout: string;
   readonly stderr: string;
   readonly error: Error | undefined;
@@ -96,6 +97,10 @@ type TrustRecord =
       readonly environment: null;
       readonly permissions: readonly ["createPackage"];
     };
+
+let activeChild: ChildProcess | undefined;
+let activePrompt: { abort(): void } | undefined;
+let receivedSignal: NodeJS.Signals | undefined;
 
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -965,7 +970,7 @@ function rejectAmbientCredentials() {
   for (const key of Object.keys(process.env)) {
     const canonical = key.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
     const credentialKey =
-      canonical === "nodauthtoken" ||
+      canonical === "nodeauthtoken" ||
       canonical === "npmtoken" ||
       canonical === "npmauthtoken" ||
       ((canonical.startsWith("npmconfig") ||
@@ -1043,11 +1048,43 @@ function isInside(parent: string, candidate: string): boolean {
   );
 }
 
-function createIsolation() {
+function controlledTemporaryParent(): string {
+  const configured = process.env.TMPDIR ?? tmpdir();
+  try {
+    const parent = realpathSync(path.resolve(configured));
+    if (!lstatSync(parent).isDirectory()) throw new Error("not a directory");
+    return parent;
+  } catch {
+    throw externalFailure(
+      "npm-temporary-directory-invalid",
+      "TMPDIR is not a readable temporary directory",
+      "a readable local temporary directory",
+      "Correct TMPDIR and retry.",
+      5,
+    );
+  }
+}
+
+function createIsolationRoot(register: (root: string) => void): string {
   const base = mkdtempSync(
-    path.join(tmpdir(), "npm-publication-setup-session-"),
+    path.join(controlledTemporaryParent(), "npm-publication-setup-session-"),
   );
+  // Registration is deliberately the first operation after mkdtemp: every
+  // later validation or construction failure still has one external owner.
+  register(base);
   const isolationRoot = realpathSync(base);
+  if (!lstatSync(isolationRoot).isDirectory())
+    throw externalFailure(
+      "npm-temporary-directory-invalid",
+      "created isolation root is not a directory",
+      "an owned temporary directory",
+      "Correct temporary directory permissions and retry.",
+      5,
+    );
+  return isolationRoot;
+}
+
+function completeIsolation(isolationRoot: string): Isolation {
   const home = path.join(isolationRoot, "home");
   const pnpmConfig = path.join(isolationRoot, "pnpm-config");
   const pnpmStore = path.join(isolationRoot, "pnpm-store");
@@ -1099,10 +1136,78 @@ function isolatedEnvironment(isolation: Isolation): NodeJS.ProcessEnv {
   };
 }
 
-function bootstrapClient(isolation: Isolation): NpmClient {
-  const result = spawnSync(
-    "corepack",
-    [
+function throwIfSignalled(): void {
+  if (receivedSignal !== undefined)
+    throw new Error("external setup interrupted");
+}
+
+async function runChild(options: {
+  readonly command: string;
+  readonly arguments: readonly string[];
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly captured: boolean;
+  readonly allowSignal?: boolean;
+}): Promise<NpmResult> {
+  if (!options.allowSignal) throwIfSignalled();
+  return new Promise((resolve) => {
+    let settled = false;
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    const settle = (result: NpmResult): void => {
+      if (settled) return;
+      settled = true;
+      if (activeChild === child) activeChild = undefined;
+      resolve(result);
+    };
+    let child: ChildProcess | undefined;
+    try {
+      child = spawn(options.command, [...options.arguments], {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: options.captured ? ["ignore", "pipe", "pipe"] : "inherit",
+      });
+      activeChild = child;
+      child.stdout?.on("data", (chunk: Buffer) =>
+        stdout.push(Buffer.from(chunk)),
+      );
+      child.stderr?.on("data", (chunk: Buffer) =>
+        stderr.push(Buffer.from(chunk)),
+      );
+      child.once("error", (error) =>
+        settle({
+          status: 5,
+          signal: null,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+          error,
+        }),
+      );
+      child.once("close", (status, signal) =>
+        settle({
+          status: status ?? 5,
+          signal,
+          stdout: Buffer.concat(stdout).toString("utf8"),
+          stderr: Buffer.concat(stderr).toString("utf8"),
+          error: undefined,
+        }),
+      );
+    } catch (error) {
+      settle({
+        status: 5,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        error: error instanceof Error ? error : new Error("child spawn failed"),
+      });
+    }
+  });
+}
+
+async function bootstrapClient(isolation: Isolation): Promise<NpmClient> {
+  const result = await runChild({
+    command: "corepack",
+    arguments: [
       "pnpm",
       "install",
       "--frozen-lockfile",
@@ -1111,8 +1216,11 @@ function bootstrapClient(isolation: Isolation): NpmClient {
       `--store-dir=${isolation.pnpmStore}`,
       `--config-dir=${isolation.pnpmConfig}`,
     ],
-    { cwd: root, env: isolatedEnvironment(isolation), stdio: "ignore" },
-  );
+    cwd: root,
+    env: isolatedEnvironment(isolation),
+    captured: true,
+  });
+  throwIfSignalled();
   if (result.error || result.status !== 0)
     throw externalFailure(
       "npm-client-pin-invalid",
@@ -1176,68 +1284,59 @@ function npmFlags(isolation: Isolation): string[] {
   ];
 }
 
-function capturedNpm(
+async function capturedNpm(
   client: NpmClient,
   isolation: Isolation,
   arguments_: readonly string[],
-): NpmResult {
-  const result = spawnSync(
-    client.node,
-    [client.cli, ...arguments_, ...npmFlags(isolation)],
-    {
-      cwd: isolation.session,
-      env: isolatedEnvironment(isolation),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  return {
-    status: result.status ?? 5,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-    error: result.error,
-  };
+  allowSignal = false,
+): Promise<NpmResult> {
+  const result = await runChild({
+    command: client.node,
+    arguments: [client.cli, ...arguments_, ...npmFlags(isolation)],
+    cwd: isolation.session,
+    env: isolatedEnvironment(isolation),
+    captured: true,
+    allowSignal,
+  });
+  if (!allowSignal) throwIfSignalled();
+  return result;
 }
 
-let activeNpmChild: ReturnType<typeof spawn> | undefined;
-let receivedSignal: NodeJS.Signals | undefined;
-
-function interactiveNpm(
+async function interactiveNpm(
   client: NpmClient,
   isolation: Isolation,
   name: string,
   arguments_: readonly string[],
 ): Promise<InteractiveResult> {
   process.stdout.write(`INTERACTIVE ${name} BEGIN\n`);
-  return new Promise<InteractiveResult>((resolve) => {
-    activeNpmChild = spawn(
-      client.node,
-      [client.cli, ...arguments_, ...npmFlags(isolation)],
-      {
-        cwd: isolation.session,
-        env: isolatedEnvironment(isolation),
-        stdio: "inherit",
-      },
-    );
-    activeNpmChild.once("close", (status, signal) => {
-      activeNpmChild = undefined;
-      process.stdout.write(
-        `INTERACTIVE ${name} END ${signal ?? status ?? 5}\n`,
-      );
-      resolve({ status: status ?? 5, signal });
-    });
+  const result = await runChild({
+    command: client.node,
+    arguments: [client.cli, ...arguments_, ...npmFlags(isolation)],
+    cwd: isolation.session,
+    env: isolatedEnvironment(isolation),
+    captured: false,
   });
+  process.stdout.write(
+    `INTERACTIVE ${name} END ${result.signal ?? result.status}\n`,
+  );
+  return { status: result.status, signal: result.signal };
 }
 
 async function readExactPhrase(expected: string): Promise<void> {
+  throwIfSignalled();
   const { createInterface } = await import("node:readline/promises");
   const lineReader = createInterface({
     input: process.stdin,
     output: process.stdout,
     terminal: true,
   });
+  const controller = new AbortController();
+  activePrompt = controller;
   try {
-    const entered = await lineReader.question("Confirmation: ");
+    const entered = await lineReader.question("Confirmation: ", {
+      signal: controller.signal,
+    });
+    throwIfSignalled();
     if (entered !== expected)
       throw externalFailure(
         "npm-confirmation-required",
@@ -1246,7 +1345,11 @@ async function readExactPhrase(expected: string): Promise<void> {
         "Review the displayed registry action and enter the exact confirmation.",
         3,
       );
+  } catch (error) {
+    throwIfSignalled();
+    throw error;
   } finally {
+    activePrompt = undefined;
     lineReader.close();
   }
 }
@@ -1276,14 +1379,53 @@ function strictJsonObject(result: NpmResult, code: string): JsonObject {
   }
 }
 
-function classifyVersion(
+async function classifyPackageExistence(
   client: NpmClient,
   isolation: Isolation,
   packageName: string,
-):
+): Promise<"absent" | "present" | "unknown"> {
+  const result = await capturedNpm(client, isolation, [
+    "view",
+    packageName,
+    "--json",
+  ]);
+  if (result.status === 0) {
+    try {
+      const value: unknown = JSON.parse(result.stdout);
+      if (
+        !isObject(value) ||
+        value.name !== packageName ||
+        result.stderr !== ""
+      )
+        return "unknown";
+      return "present";
+    } catch {
+      return "unknown";
+    }
+  }
+  if (result.stdout !== "") return "unknown";
+  try {
+    const error: unknown = JSON.parse(result.stderr);
+    return isObject(error) &&
+      error.code === "E404" &&
+      error.pkgid === packageName
+      ? "absent"
+      : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+async function classifyVersion(
+  client: NpmClient,
+  isolation: Isolation,
+  packageName: string,
+): Promise<
   | { readonly kind: "absent" | "unknown" }
-  | { readonly kind: "present"; readonly value: JsonObject } {
-  const result = capturedNpm(client, isolation, [
+  | { readonly kind: "present"; readonly value: JsonObject }
+  | { readonly kind: "package-present-version-absent" }
+> {
+  const result = await capturedNpm(client, isolation, [
     "view",
     `${packageName}@1.0.0`,
     "--json",
@@ -1296,22 +1438,36 @@ function classifyVersion(
   if (result.stdout !== "") return { kind: "unknown" };
   try {
     const error = JSON.parse(result.stderr);
-    if (error?.code === "E404" && error?.pkgid === `${packageName}@1.0.0`)
-      return { kind: "absent" };
+    if (
+      isObject(error) &&
+      error.code === "E404" &&
+      error.pkgid === `${packageName}@1.0.0`
+    ) {
+      const packageExistence = await classifyPackageExistence(
+        client,
+        isolation,
+        packageName,
+      );
+      return packageExistence === "absent"
+        ? { kind: "absent" }
+        : packageExistence === "present"
+          ? { kind: "package-present-version-absent" }
+          : { kind: "unknown" };
+    }
   } catch {
     // Only a structured target-specific E404 is absence.
   }
   return { kind: "unknown" };
 }
 
-function assertCollaboratorWrite(
+async function assertCollaboratorWrite(
   client: NpmClient,
   isolation: Isolation,
   packageName: string,
   whoami: string,
-): void {
+): Promise<void> {
   const value = strictJsonObject(
-    capturedNpm(client, isolation, [
+    await capturedNpm(client, isolation, [
       "access",
       "list",
       "collaborators",
@@ -1339,7 +1495,7 @@ function repositoryNameFromReceipt(repository: unknown): string | null {
   return url?.replace("https://github.com/", "") ?? null;
 }
 
-function exactRemoteArtifact(
+async function exactRemoteArtifact(
   client: NpmClient,
   isolation: Isolation,
   accepted: AcceptedPublicationArtifact,
@@ -1347,14 +1503,12 @@ function exactRemoteArtifact(
   metadata: JsonObject,
 ) {
   const dist = isObject(metadata.dist) ? metadata.dist : undefined;
-  const integrity =
-    stringValue(dist?.integrity) ?? stringValue(metadata["dist.integrity"]);
   const repository = isObject(metadata.repository)
-    ? stringValue(metadata.repository.url)
-    : stringValue(metadata.repository);
-  const expectedRepository = accepted.receipt.publication.repository;
+    ? metadata.repository
+    : undefined;
+  const expectedRepository = accepted.receipt.packedManifest.repository;
   const tags = strictJsonObject(
-    capturedNpm(client, isolation, [
+    await capturedNpm(client, isolation, [
       "view",
       packageName,
       "dist-tags",
@@ -1363,8 +1517,15 @@ function exactRemoteArtifact(
     "npm-registry-schema-unsupported",
   );
   if (
-    integrity !== accepted.receipt.artifact.integrity ||
-    repository !== expectedRepository ||
+    metadata.name !== packageName ||
+    metadata.version !== "1.0.0" ||
+    !isObject(expectedRepository) ||
+    repository === undefined ||
+    Object.keys(repository).length !== 3 ||
+    repository.type !== expectedRepository.type ||
+    repository.url !== expectedRepository.url ||
+    repository.directory !== expectedRepository.directory ||
+    dist?.integrity !== accepted.receipt.artifact.integrity ||
     tags.latest !== "1.0.0"
   )
     throw externalFailure(
@@ -1374,7 +1535,7 @@ function exactRemoteArtifact(
       "Investigate the existing npm package outside this wizard.",
       4,
     );
-  const result = capturedNpm(client, isolation, [
+  const result = await capturedNpm(client, isolation, [
     "pack",
     `${packageName}@1.0.0`,
     `--pack-destination=${isolation.download}`,
@@ -1547,12 +1708,12 @@ function normalizeTrust(
       };
 }
 
-function trustList(
+async function trustList(
   client: NpmClient,
   isolation: Isolation,
   expected: TrustExpectation,
-): TrustRecord[] {
-  const result = capturedNpm(client, isolation, [
+): Promise<TrustRecord[]> {
+  const result = await capturedNpm(client, isolation, [
     "trust",
     "list",
     expected.packageName,
@@ -1586,8 +1747,18 @@ async function configureTrust(
   isolation: Isolation,
   expected: TrustExpectation,
 ): Promise<void> {
-  const existing = trustList(client, isolation, expected);
-  if (existing.length === 1) return;
+  const existing = await trustList(client, isolation, expected);
+  if (existing.length === 1) {
+    const confirmed = await trustList(client, isolation, expected);
+    if (confirmed.length === 1) return;
+    throw externalFailure(
+      "npm-trust-conflict",
+      "trusted publisher changed during exact resume confirmation",
+      "one exact trusted publisher relationship",
+      "Resolve the npm trust configuration manually.",
+      4,
+    );
+  }
   if (existing.length !== 0)
     throw externalFailure(
       "npm-trust-conflict",
@@ -1596,7 +1767,7 @@ async function configureTrust(
       "Resolve the npm trust configuration manually.",
       4,
     );
-  const dryRun = capturedNpm(client, isolation, [
+  const dryRun = await capturedNpm(client, isolation, [
     "trust",
     "github",
     expected.packageName,
@@ -1630,7 +1801,8 @@ async function configureTrust(
   await readExactPhrase(
     `TRUST ${expected.packageName} GITHUB ${expected.repository} release.yml createPackage`,
   );
-  const raced = trustList(client, isolation, expected);
+  throwIfSignalled();
+  const raced = await trustList(client, isolation, expected);
   if (raced.length === 1) return;
   if (raced.length !== 0)
     throw externalFailure(
@@ -1649,7 +1821,8 @@ async function configureTrust(
     "--allow-publish",
     "--yes",
   ]);
-  const readback = trustList(client, isolation, expected);
+  throwIfSignalled();
+  const readback = await trustList(client, isolation, expected);
   if (readback.length !== 1 || write.signal)
     throw externalFailure(
       "npm-trust-readback-failed",
@@ -1660,9 +1833,8 @@ async function configureTrust(
     );
 }
 
-async function external() {
-  const artifactRoot = process.env.ARTIFACT_ROOT;
-  if (typeof artifactRoot !== "string" || !path.isAbsolute(artifactRoot))
+function ownedArtifactRoot(value: unknown): string {
+  if (typeof value !== "string" || !path.isAbsolute(value))
     throw externalFailure(
       "artifact-unavailable",
       "accepted artifact root is unavailable",
@@ -1670,6 +1842,43 @@ async function external() {
       "Rerun setup from Stage 1.",
       5,
     );
+  const parent = controlledTemporaryParent();
+  let resolved: string;
+  try {
+    const entry = lstatSync(value);
+    if (entry.isSymbolicLink() || !entry.isDirectory())
+      throw new Error("not an owned directory");
+    resolved = realpathSync(value);
+    if (
+      path.dirname(resolved) !== parent ||
+      !/^npm-publication-setup-artifact\.[A-Za-z0-9]+$/u.test(
+        path.basename(resolved),
+      ) ||
+      lstatSync(resolved).isSymbolicLink()
+    )
+      throw new Error("outside owned artifact parent");
+  } catch {
+    throw externalFailure(
+      "artifact-unavailable",
+      "accepted artifact root is not an owned temporary artifact directory",
+      "an exact non-symlink npm-publication-setup-artifact directory",
+      "Rerun setup from Stage 1.",
+      5,
+    );
+  }
+  return resolved;
+}
+
+function removeOwnedDirectory(value: string): void {
+  const entry = lstatSync(value);
+  if (entry.isSymbolicLink() || !entry.isDirectory())
+    throw new Error("owned path changed before cleanup");
+  rmSync(value, { recursive: true, force: true });
+}
+
+async function external() {
+  const artifactRoot = ownedArtifactRoot(process.env.ARTIFACT_ROOT);
+  let isolationRoot: string | undefined;
   let isolation: Isolation | undefined;
   let client: NpmClient | undefined;
   let loginStarted = false;
@@ -1678,7 +1887,8 @@ async function external() {
   const onSignal = (signal: NodeJS.Signals): void => {
     if (receivedSignal !== undefined) return;
     receivedSignal = signal;
-    activeNpmChild?.kill(signal);
+    activePrompt?.abort();
+    activeChild?.kill(signal);
   };
   const signalHandlers = new Map(
     handlers.map((signal) => [signal, () => onSignal(signal)]),
@@ -1734,9 +1944,13 @@ async function external() {
         4,
       );
     process.stdout.write("STAGE 5/7 Authenticate with npm\n");
-    isolation = createIsolation();
-    client = bootstrapClient(isolation);
+    isolationRoot = createIsolationRoot((created) => {
+      isolationRoot = created;
+    });
+    isolation = completeIsolation(isolationRoot);
+    client = await bootstrapClient(isolation);
     await readExactPhrase("CONFIRM NPM 2FA AND RECOVERY CODES READY");
+    throwIfSignalled();
     loginStarted = true;
     const login = await interactiveNpm(client, isolation, "npm-login", [
       "login",
@@ -1750,7 +1964,7 @@ async function external() {
         "Complete npm authentication and rerun setup.",
         4,
       );
-    const whoamiResult = capturedNpm(client, isolation, ["whoami"]);
+    const whoamiResult = await capturedNpm(client, isolation, ["whoami"]);
     if (
       whoamiResult.status !== 0 ||
       whoamiResult.stderr !== "" ||
@@ -1767,7 +1981,7 @@ async function external() {
     process.stdout.write(
       "OK npm-authenticated\nSTAGE 6/7 Publish version 1.0.0\n",
     );
-    const firstView = classifyVersion(
+    const firstView = await classifyVersion(
       client,
       isolation,
       accepted.receipt.publication.packageName,
@@ -1780,14 +1994,22 @@ async function external() {
         "Correct the registry failure and retry.",
         5,
       );
+    if (firstView.kind === "package-present-version-absent")
+      throw externalFailure(
+        "npm-existing-version-conflict",
+        "the package exists but does not contain version 1.0.0",
+        "a nonexistent package or the exact accepted 1.0.0 version",
+        "Investigate the existing npm package outside this wizard.",
+        4,
+      );
     if (firstView.kind === "present") {
-      assertCollaboratorWrite(
+      await assertCollaboratorWrite(
         client,
         isolation,
         accepted.receipt.publication.packageName,
         whoami,
       );
-      exactRemoteArtifact(
+      await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -1802,6 +2024,7 @@ async function external() {
       await readExactPhrase(
         `PUBLISH ${accepted.receipt.publication.packageName}@1.0.0 ${accepted.receipt.artifact.integrity}`,
       );
+      throwIfSignalled();
       let refreshed: AcceptedPublicationArtifact;
       try {
         refreshed = await acceptDownloadedPublicationArtifact({
@@ -1831,20 +2054,24 @@ async function external() {
           "Rerun setup from Stage 1.",
           4,
         );
-      const race = classifyVersion(
+      const race = await classifyVersion(
         client,
         isolation,
         accepted.receipt.publication.packageName,
       );
       if (race.kind !== "absent")
         throw externalFailure(
-          race.kind === "present"
+          race.kind === "present" ||
+            race.kind === "package-present-version-absent"
             ? "npm-publish-race"
             : "npm-version-state-unknown",
           "registry version changed before publish",
           "target version absent immediately before publish",
           "Investigate the npm package and rerun setup.",
-          race.kind === "present" ? 4 : 5,
+          race.kind === "present" ||
+            race.kind === "package-present-version-absent"
+            ? 4
+            : 5,
         );
       const published = await interactiveNpm(client, isolation, "npm-publish", [
         "publish",
@@ -1852,7 +2079,8 @@ async function external() {
         "--access=public",
         "--tag=latest",
       ]);
-      const readback = classifyVersion(
+      throwIfSignalled();
+      const readback = await classifyVersion(
         client,
         isolation,
         accepted.receipt.publication.packageName,
@@ -1865,7 +2093,13 @@ async function external() {
           "Inspect npm before retrying.",
           4,
         );
-      exactRemoteArtifact(
+      await assertCollaboratorWrite(
+        client,
+        isolation,
+        accepted.receipt.publication.packageName,
+        whoami,
+      );
+      await exactRemoteArtifact(
         client,
         isolation,
         accepted,
@@ -1888,7 +2122,7 @@ async function external() {
   let cleanupError;
   if (isolation !== undefined) {
     if (loginStarted && client !== undefined) {
-      const logout = capturedNpm(client, isolation, ["logout"]);
+      const logout = await capturedNpm(client, isolation, ["logout"], true);
       if (logout.status !== 0 && primary === undefined)
         cleanupError = externalFailure(
           "npm-session-cleanup-failed",
@@ -1898,8 +2132,10 @@ async function external() {
           5,
         );
     }
+  }
+  if (isolationRoot !== undefined)
     try {
-      rmSync(isolation.root, { recursive: true, force: true });
+      removeOwnedDirectory(isolationRoot);
     } catch {
       if (primary === undefined)
         cleanupError = externalFailure(
@@ -1910,9 +2146,8 @@ async function external() {
           5,
         );
     }
-  }
   try {
-    rmSync(artifactRoot, { recursive: true, force: true });
+    removeOwnedDirectory(artifactRoot);
   } catch {
     if (primary === undefined)
       cleanupError = externalFailure(
