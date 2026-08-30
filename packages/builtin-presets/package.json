@@ -12,7 +12,8 @@
       "source": "@ykdz/template-core-source/*",
       "types": "@ykdz/template-core/*",
       "default": "@ykdz/template-core/*"
-    }
+    },
+    "#npm-publication/*": "./templates/ts-cli/publication/*.ts"
   },
   "exports": {
     ".": {
@@ -25,8 +26,8 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix",
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . && oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix && oxlint --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts --fix",
     "test": "vitest run --config vitest.config.ts --reporter=agent --silent=passed-only --maxWorkers=1",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },

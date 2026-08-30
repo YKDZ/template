@@ -10,6 +10,7 @@
   "include": [
     "src/**/*.ts",
     "vitest.config.ts",
+    "templates/ts-cli/publication-setup/bridge.ts",
     "templates/foundation/.pnpmfile.mjs",
     "templates/foundation/scripts/check-boundaries.ts",
     "templates/foundation/scripts/run-root-owned-task.ts"

@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   stat,
   symlink,
@@ -73,6 +75,90 @@ function expectNoControlCharacters(value: string): void {
         return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
       }),
     ).toBe(false);
+}
+
+async function writeAcceptedFirstReleaseArtifact(options: {
+  readonly root: string;
+  readonly packageName: string;
+  readonly commandName: string;
+}): Promise<{ readonly directory: string; readonly integrity: string }> {
+  const directory = await mkdtemp(path.join(tmpdir(), "ticket-13-artifact-"));
+  const bytes = Buffer.from("ticket-13 accepted tarball\n");
+  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  const file = "ship-1.0.0.tgz";
+  await writeFile(path.join(directory, file), bytes);
+  await writeFile(
+    path.join(directory, "SHA512SUMS"),
+    `${createHash("sha512").update(bytes).digest("hex")}  ${file}\n`,
+  );
+  await writeFile(
+    path.join(directory, "verified-publication-artifact.json"),
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        publication: {
+          packageName: options.packageName,
+          version: "1.0.0",
+          commandName: options.commandName,
+          repository: "git+https://github.com/demo/ship.git",
+          releaseDate: "2026-08-30",
+          releaseNotes: "Initial release.",
+        },
+        packedManifest: {
+          name: options.packageName,
+          version: "1.0.0",
+          bin: { [options.commandName]: "./dist/cli.js" },
+          repository: {
+            type: "git",
+            url: "git+https://github.com/demo/ship.git",
+            directory: "packages/cli",
+          },
+        },
+        artifact: {
+          file,
+          checksumFile: "SHA512SUMS",
+          integrity,
+          size: bytes.byteLength,
+        },
+        files: [
+          "package/CHANGELOG.md",
+          "package/LICENSE",
+          "package/README.md",
+          "package/dist/cli-command-identity.js",
+          "package/dist/cli.js",
+          "package/dist/main.js",
+          "package/package.json",
+        ].map((entry, index) => ({
+          path: entry,
+          mode: entry === "package/dist/cli.js" ? 0o755 : 0o644,
+          size: index + 1,
+        })),
+        bin: {
+          path: "package/dist/cli.js",
+          shebang: "#!/usr/bin/env node",
+          mode: 0o755,
+          posixExecutableChecked: process.platform !== "win32",
+        },
+        smokes: [
+          { name: "runtime-import", args: [], stdout: "" },
+          {
+            name: "help",
+            args: ["--help"],
+            stdout: `Usage: ${options.commandName} greet`,
+          },
+          { name: "version", args: ["--version"], stdout: "1.0.0\n" },
+          {
+            name: "greet",
+            args: ["greet", "  Ada Lovelace  "],
+            stdout: "Hello, Ada Lovelace\n",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  return { directory, integrity };
 }
 
 describe("ts-cli Preset Definition behavior", () => {
@@ -239,6 +325,9 @@ describe("ts-cli Preset Definition behavior", () => {
       planningContribution: "planInitialization",
     });
     expect(rootManifest).toMatchObject({
+      imports: {
+        "#npm-publication/*": "./scripts/npm-publication/*.ts",
+      },
       scripts: {
         check: expect.stringContaining("publication:artifact"),
         "publication:artifact":
@@ -300,8 +389,24 @@ describe("ts-cli Preset Definition behavior", () => {
           from: "publication-setup/setup.sh",
           to: "scripts/npm-publication-setup/setup.sh",
         }),
+        expect.objectContaining({
+          kind: "writeTextTemplate",
+          from: "publication-setup/bridge.ts",
+          to: "scripts/npm-publication-setup/bridge.ts",
+          replacements: {
+            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+          },
+        }),
       ]),
     );
+    expect(
+      plan.operations.some(
+        (operation) =>
+          "from" in operation &&
+          typeof operation.from === "string" &&
+          operation.from.includes("bridge.mjs"),
+      ),
+    ).toBe(false);
   });
 
   it("keeps the one-time publication setup handoff outside the generated plan", () => {
@@ -392,10 +497,10 @@ describe("ts-cli Preset Definition behavior", () => {
         },
       );
       expect(missingPnpm.exitCode).toBe(5);
-      expect(missingPnpm.stdout).toContain("STAGE 1/4 Check prerequisites");
+      expect(missingPnpm.stdout).toContain("STAGE 1/7 Check prerequisites");
       expect(missingPnpm.stdout).toContain("CHECK local-toolchain");
       expect(missingPnpm.stdout).not.toContain(
-        "STAGE 2/4 Configure the public package",
+        "STAGE 2/7 Configure the public package",
       );
       expect(missingPnpm.stderr).toContain("ERROR prerequisite-command");
       expect(missingPnpm.stderr).toContain("pnpm is unavailable");
@@ -559,7 +664,7 @@ describe("ts-cli Preset Definition behavior", () => {
         `${configured.stdout}\n${configured.stderr}`,
       ).toBe(5);
       expect(configured.stdout).toContain(
-        "STAGE 2/4 Configure the public package",
+        "STAGE 2/7 Configure the public package",
       );
       expect(configured.stdout).not.toContain(String.fromCharCode(27));
       expect(configured.stdout).not.toContain("\r");
@@ -688,9 +793,9 @@ exit 97
         "local-template-metadata-invalid",
       );
       expect(corruptMetadata.stdout).not.toContain(
-        "STAGE 2/4 Configure the public package",
+        "STAGE 2/7 Configure the public package",
       );
-      expect(corruptMetadata.stdout).toContain("STAGE 1/4 Check prerequisites");
+      expect(corruptMetadata.stdout).toContain("STAGE 1/7 Check prerequisites");
       const corruptStatus = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
@@ -880,7 +985,7 @@ esac
       );
       expect(result.exitCode, `${result.stdout}\n${result.stderr}`).toBe(3);
       expect(result.stdout).toContain(
-        "STAGE 4/4 Verify the first release artifact",
+        "STAGE 4/7 Verify the first release artifact",
       );
       expect(result.stdout).toContain("Package: @demo/ship@1.0.0");
       expect(result.stdout).toContain("Artifact:");
@@ -889,6 +994,705 @@ esac
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it("runs the isolated npm first-publish and exact-resume bridge through a generated terminal", async () => {
+    const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+      "template-publication-setup-ticket-13-",
+    );
+    const fakeBin = path.join(workspace, "fake-bin");
+    const statePath = path.join(workspace, "npm-state.json");
+    const setupDirectory = path.join(
+      targetDir,
+      "scripts/npm-publication-setup",
+    );
+    const bridgePath = path.join(setupDirectory, "bridge.ts");
+    const configureEnvironment = {
+      REPOSITORY_ROOT: targetDir,
+      SETUP_DIR: setupDirectory,
+      PACKAGE_NAME: "@demo/ship",
+      COMMAND_NAME: "ship",
+      DESCRIPTION: "A focused command-line release tool.",
+      LICENSE_NAME: "MIT",
+      COPYRIGHT_HOLDER: "Ada Lovelace",
+      REPOSITORY_URL: "https://github.com/demo/ship",
+    };
+    try {
+      for (const command of ["format:check", "lint", "typecheck"] as const) {
+        const checked = await execa("pnpm", ["run", command], {
+          cwd: targetDir,
+          reject: false,
+        });
+        expect(
+          checked.exitCode,
+          `${command}: ${checked.stdout}\n${checked.stderr}`,
+        ).toBe(0);
+      }
+      const projectedBridge = await readFile(bridgePath, "utf8");
+      await writeFile(
+        bridgePath,
+        `${projectedBridge}\nconst formatProbe={ value: 1 };\n`,
+      );
+      const malformed = await execa("pnpm", ["run", "format:check"], {
+        cwd: targetDir,
+        reject: false,
+      });
+      expect(malformed.exitCode).not.toBe(0);
+      await writeFile(bridgePath, projectedBridge);
+      await writeFile(bridgePath, `${projectedBridge}\nconst lintProbe = 1;\n`);
+      const lintViolation = await execa("pnpm", ["run", "lint"], {
+        cwd: targetDir,
+        reject: false,
+      });
+      expect(lintViolation.exitCode).not.toBe(0);
+      await writeFile(bridgePath, projectedBridge);
+      await writeFile(
+        bridgePath,
+        `${projectedBridge}\nenum InvalidBridgeEnum { Value }\n`,
+      );
+      const nonErasable = await execa("pnpm", ["run", "typecheck"], {
+        cwd: targetDir,
+        reject: false,
+      });
+      expect(nonErasable.exitCode).not.toBe(0);
+      await writeFile(bridgePath, projectedBridge);
+      const restoredTypecheck = await execa("pnpm", ["run", "typecheck"], {
+        cwd: targetDir,
+        reject: false,
+      });
+      expect(restoredTypecheck.exitCode).toBe(0);
+      const configured = await execa(
+        process.execPath,
+        [
+          "--conditions=source",
+          "scripts/npm-publication-setup/bridge.ts",
+          "configure",
+        ],
+        { cwd: targetDir, env: configureEnvironment, reject: false },
+      );
+      expect(configured.exitCode).toBe(0);
+      await writeExecutable(
+        path.join(fakeBin, "git"),
+        `#!/usr/bin/env bash
+case "$1" in
+  status) exit 0 ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/ship\\n' ;;
+  ls-remote)
+    if [ "$2" = --symref ]; then
+      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+    else
+      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+    fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  *) exit 97 ;;
+esac
+`,
+      );
+      await writeExecutable(
+        path.join(fakeBin, "corepack"),
+        "#!/bin/sh\nexit 0\n",
+      );
+      await rm(path.join(targetDir, "node_modules/npm"), {
+        recursive: true,
+        force: true,
+      });
+      await mkdir(path.join(targetDir, "node_modules/npm/bin"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(targetDir, "node_modules/npm/package.json"),
+        '{"version":"11.19.1","bin":{"npm":"bin/npm-cli.js"}}\n',
+      );
+      await writeFile(
+        path.join(targetDir, "node_modules/npm/bin/npm-cli.js"),
+        `const fs = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+const statePath = ${JSON.stringify(statePath)};
+const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : { published: false, trusted: false, calls: [] };
+state.calls.push(args);
+const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
+const spec = "@demo/ship@1.0.0";
+const integrity = ${JSON.stringify("placeholder")};
+if (args[0] === "login") { save(); process.exit(0); }
+if (args[0] === "logout") { save(); process.exit(0); }
+if (args[0] === "whoami") { save(); process.stdout.write("alice\\n"); process.exit(0); }
+if (args[0] === "view" && args[2] === "dist-tags") { save(); process.stdout.write('{"latest":"1.0.0"}'); process.exit(0); }
+if (args[0] === "view") {
+  if (!state.published) { process.stderr.write(JSON.stringify({ code: "E404", pkgid: spec })); save(); process.exit(1); }
+  const tgz = Buffer.from(state.tgz, "base64");
+  process.stdout.write(JSON.stringify({ dist: { integrity: "sha512-" + require("node:crypto").createHash("sha512").update(tgz).digest("base64") }, repository: "git+https://github.com/demo/ship.git" })); save(); process.exit(0);
+}
+if (args[0] === "pack") { const target = args.find((arg) => arg.startsWith("--pack-destination=")).slice("--pack-destination=".length); fs.writeFileSync(path.join(target, "remote.tgz"), Buffer.from(state.tgz, "base64")); save(); process.exit(0); }
+if (args[0] === "publish") { state.published = true; state.tgz = fs.readFileSync(args[1]).toString("base64"); save(); process.exit(0); }
+if (args[0] === "trust" && args[1] === "list") { if (state.trusted) process.stdout.write('{"id":"trust-1","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"]}'); save(); process.exit(0); }
+if (args[0] === "trust" && args.includes("--dry-run")) { process.stdout.write('{"package":"@demo/ship","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"]}'); save(); process.exit(0); }
+if (args[0] === "trust") { state.trusted = true; save(); process.exit(0); }
+if (args[0] === "access") { process.stdout.write('{"alice":"read-write"}'); save(); process.exit(0); }
+save(); process.exit(97);
+`,
+      );
+      const first = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const bridge = `${JSON.stringify(process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
+      const terminalInput = (lines: readonly string[]) =>
+        lines
+          .map((line) => `printf '%s\\n' ${JSON.stringify(line)}; sleep 1`)
+          .join("; ");
+      const firstRun = await execa(
+        "bash",
+        [
+          "-c",
+          `(sleep 1; ${terminalInput([
+            "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+            `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
+            "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
+          ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            REPOSITORY_ROOT: targetDir,
+            ARTIFACT_ROOT: first.directory,
+          },
+          reject: false,
+          timeout: 60_000,
+        },
+      );
+      expect(firstRun.exitCode, `${firstRun.stdout}\n${firstRun.stderr}`).toBe(
+        0,
+      );
+      expect(firstRun.stdout).toContain("STAGE 5/7 Authenticate with npm");
+      expect(firstRun.stdout).toContain("INTERACTIVE npm-login BEGIN");
+      expect(firstRun.stdout).toContain("INTERACTIVE npm-publish END 0");
+      expect(firstRun.stdout).toContain("INTERACTIVE npm-trust-write END 0");
+      expect(firstRun.stdout).toContain(
+        "STAGE 7/7 Configure trusted publishing",
+      );
+      const calls = (
+        JSON.parse(await readFile(statePath, "utf8")) as {
+          calls: string[][];
+        }
+      ).calls;
+      expect(calls).toEqual(
+        expect.arrayContaining([
+          expect.arrayContaining(["login", "--auth-type=web"]),
+          expect.arrayContaining([
+            "publish",
+            expect.stringMatching(/\.tgz$/u),
+            "--access=public",
+            "--tag=latest",
+          ]),
+          expect.arrayContaining(["trust", "github", "@demo/ship", "--yes"]),
+          expect.arrayContaining(["logout"]),
+        ]),
+      );
+      expect(
+        calls
+          .flat()
+          .some(
+            (argument) => argument === "--provenance" || argument === "--otp",
+          ),
+      ).toBe(false);
+
+      const resume = await writeAcceptedFirstReleaseArtifact({
+        root: targetDir,
+        packageName: "@demo/ship",
+        commandName: "ship",
+      });
+      const resumeRun = await execa(
+        "bash",
+        [
+          "-c",
+          `(sleep 1; ${terminalInput(["CONFIRM NPM 2FA AND RECOVERY CODES READY"])} ) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            REPOSITORY_ROOT: targetDir,
+            ARTIFACT_ROOT: resume.directory,
+          },
+          reject: false,
+          timeout: 60_000,
+        },
+      );
+      expect(
+        resumeRun.exitCode,
+        `${resumeRun.stdout}\n${resumeRun.stderr}`,
+      ).toBe(0);
+      expect(resumeRun.stdout).toContain("OK npm-publish-resumed-exact");
+      const afterResume = JSON.parse(await readFile(statePath, "utf8")) as {
+        calls: string[][];
+      };
+      expect(
+        afterResume.calls.filter((args) => args[0] === "publish"),
+      ).toHaveLength(1);
+      expect(
+        afterResume.calls.filter(
+          (args) => args[0] === "trust" && args[1] === "github",
+        ),
+      ).toHaveLength(2);
+      const generatedManifest = JSON.parse(
+        await readFile(path.join(targetDir, "package.json"), "utf8"),
+      ) as { readonly imports?: Record<string, string> };
+      expect(generatedManifest.imports).toEqual({
+        "#npm-publication/*": "./scripts/npm-publication/*.ts",
+      });
+      await rm(setupDirectory, { recursive: true, force: true });
+      for (const command of ["format:check", "lint", "typecheck"] as const) {
+        const permanentTask = await execa("pnpm", ["run", command], {
+          cwd: targetDir,
+          reject: false,
+        });
+        expect(permanentTask.exitCode).toBe(0);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("restores SIGTERM after setup.sh transfers the accepted artifact to the blocking npm session", async () => {
+    const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+      "template-publication-setup-signal-",
+    );
+    const fakeBin = path.join(workspace, "fake-bin");
+    const ownedTemporaryDirectory = path.join(workspace, "owned-temporary");
+    const statePath = path.join(workspace, "signal-npm-state.json");
+    try {
+      await mkdir(ownedTemporaryDirectory, { recursive: true });
+      await writeExecutable(
+        path.join(fakeBin, "git"),
+        `#!/usr/bin/env bash
+case "$1" in
+  status) exit 0 ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/ship\\n' ;;
+  ls-remote)
+    if [ "$2" = --symref ]; then
+      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+    else
+      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+    fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  *) exit 97 ;;
+esac
+`,
+      );
+      const setupDirectory = path.join(
+        targetDir,
+        "scripts/npm-publication-setup",
+      );
+      const configured = await execa(
+        process.execPath,
+        [
+          "--conditions=source",
+          "scripts/npm-publication-setup/bridge.ts",
+          "configure",
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            REPOSITORY_ROOT: targetDir,
+            SETUP_DIR: setupDirectory,
+            PACKAGE_NAME: "@demo/ship",
+            COMMAND_NAME: "ship",
+            DESCRIPTION: "A focused command-line release tool.",
+            LICENSE_NAME: "MIT",
+            COPYRIGHT_HOLDER: "Ada Lovelace",
+            REPOSITORY_URL: "https://github.com/demo/ship",
+          },
+          reject: false,
+        },
+      );
+      expect(configured.exitCode).toBe(0);
+      const staged = await execa(
+        "./scripts/npm-publication-setup/setup.sh",
+        ["--non-interactive"],
+        {
+          cwd: targetDir,
+          env: {
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            TMPDIR: ownedTemporaryDirectory,
+          },
+          reject: false,
+        },
+      );
+      expect(staged.exitCode).toBe(3);
+      const acceptance = /^Expected: (ACCEPT .+)$/mu.exec(
+        `${staged.stdout}\n${staged.stderr}`,
+      )?.[1];
+      if (acceptance === undefined)
+        throw new Error(`${staged.stdout}\n${staged.stderr}`);
+      await writeExecutable(
+        path.join(fakeBin, "corepack"),
+        "#!/bin/sh\nexit 0\n",
+      );
+      const npmCli = path.join(targetDir, "node_modules/npm/bin/npm-cli.js");
+      const realNpmCli = `${npmCli}.real`;
+      await rename(npmCli, realNpmCli);
+      await writeFile(
+        npmCli,
+        `const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const statePath = ${JSON.stringify(statePath)};
+const realNpmCli = ${JSON.stringify(realNpmCli)};
+const events = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : [];
+const save = () => fs.writeFileSync(statePath, JSON.stringify(events));
+const session = process.cwd();
+const isolation = path.dirname(session);
+if (process.argv[2] === "install") {
+  process.exit(spawnSync(process.execPath, [realNpmCli, ...process.argv.slice(2)], { stdio: "inherit" }).status ?? 5);
+}
+if (process.argv[2] === "login") {
+  events.push({ kind: "login", session, isolation, bridgePid: process.ppid }); save();
+  process.on("SIGTERM", () => {
+    events.push({ kind: "login-signal", session, isolation, bridgePid: process.ppid }); save(); process.exit(0);
+  });
+  setInterval(() => {}, 1_000);
+} else if (process.argv[2] === "logout") {
+  events.push({ kind: "logout", session, isolation, sessionExists: fs.existsSync(session), isolationExists: fs.existsSync(isolation) }); save(); process.exit(0);
+} else { events.push({ kind: process.argv[2], session, isolation }); save(); process.exit(0); }
+`,
+      );
+      const command = `./scripts/npm-publication-setup/setup.sh`;
+      const running = execa("script", ["-qefc", command, "/dev/null"], {
+        cwd: targetDir,
+        env: {
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          TMPDIR: ownedTemporaryDirectory,
+        },
+        reject: false,
+        stdin: "pipe",
+        timeout: 60_000,
+      });
+      running.stdin?.write(`${acceptance}\n`);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      running.stdin?.write("CONFIRM NPM 2FA AND RECOVERY CODES READY\n");
+      let artifactRoot: string | undefined;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const state = await readFile(statePath, "utf8").catch(() => "[]");
+        const loginStarted = (
+          JSON.parse(state) as Array<{ kind: string }>
+        ).find(
+          (
+            event,
+          ): event is { readonly kind: string; readonly bridgePid: number } =>
+            event.kind === "login" && "bridgePid" in event,
+        );
+        if (loginStarted !== undefined) {
+          const environment = await readFile(
+            `/proc/${loginStarted.bridgePid}/environ`,
+            "utf8",
+          );
+          artifactRoot = environment
+            .split("\0")
+            .find((entry) => entry.startsWith("ARTIFACT_ROOT="))
+            ?.slice("ARTIFACT_ROOT=".length);
+        }
+        if (loginStarted !== undefined && artifactRoot !== undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      if (artifactRoot === undefined)
+        throw new Error(await readFile(statePath, "utf8"));
+      expect(artifactRoot).toMatch(
+        new RegExp(
+          `^${ownedTemporaryDirectory}/npm-publication-setup-artifact\\.`,
+          "u",
+        ),
+      );
+      const beforeSignal = JSON.parse(
+        await readFile(statePath, "utf8"),
+      ) as Array<{
+        readonly kind: string;
+        readonly bridgePid?: number;
+      }>;
+      const login = beforeSignal.find((event) => event.kind === "login");
+      expect(login?.bridgePid).toBeTypeOf("number");
+      process.kill(login?.bridgePid as number, "SIGTERM");
+      const terminated = await running;
+      expect(terminated.exitCode).toBe(143);
+      const events = JSON.parse(await readFile(statePath, "utf8")) as Array<{
+        readonly kind: string;
+        readonly session: string;
+        readonly isolation: string;
+        readonly bridgePid?: number;
+        readonly sessionExists?: boolean;
+        readonly isolationExists?: boolean;
+      }>;
+      expect(events.map((event) => event.kind)).toEqual([
+        "login",
+        "login-signal",
+        "logout",
+      ]);
+      const logout = events.at(-1);
+      expect(logout?.sessionExists).toBe(true);
+      expect(logout?.isolationExists).toBe(true);
+      await expect(stat(logout?.isolation ?? "")).rejects.toThrow();
+      await expect(stat(artifactRoot as string)).rejects.toThrow();
+      expect((await stat(setupDirectory)).isDirectory()).toBe(true);
+      await expect(
+        stat(path.join(targetDir, "package.json")),
+      ).resolves.toBeDefined();
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("fails the parameterized Ticket 13 registry matrix in the generated external bridge", async () => {
+    const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+      "template-publication-setup-negative-matrix-",
+    );
+    const fakeBin = path.join(workspace, "fake-bin");
+    const ownedTemporaryDirectory = path.join(workspace, "owned-temporary");
+    const statePath = path.join(workspace, "negative-matrix-state.json");
+    const cases = [
+      ["preimage", 4, true],
+      ["race", 4, true],
+      ["unknown", 5, false],
+      ["collaborator-missing", 4, false],
+      ["collaborator-read-only", 4, false],
+      ["collaborator-nonobject", 5, false],
+      ["collaborator-invalid", 5, false],
+      ["collaborator-mixed-stderr", 5, false],
+      ["collaborator-substring", 4, false],
+      ["identity", 4, false],
+      ["bytes", 4, false],
+      ["launcher", 5, false],
+      ["ambient", 4, false],
+      ["non-tty", 3, false],
+      ["bootstrap", 5, false],
+      ["trust-array", 5, false],
+      ["trust-scalar", 5, false],
+      ["trust-partial", 5, false],
+      ["trust-garbage", 5, false],
+      ["trust-mixed-stderr", 5, false],
+      ["trust-environment", 4, false],
+      ["trust-stage", 4, false],
+    ] as const;
+    try {
+      await mkdir(ownedTemporaryDirectory, { recursive: true });
+      await writeExecutable(
+        path.join(fakeBin, "git"),
+        `#!/usr/bin/env bash
+case "$1" in
+  status) exit 0 ;;
+  symbolic-ref) printf 'main\\n' ;;
+  remote) printf 'https://github.com/demo/ship\\n' ;;
+  ls-remote)
+    if [ "$2" = --symref ]; then
+      printf 'ref: refs/heads/main\\tHEAD\\n0123456789012345678901234567890123456789\\tHEAD\\n'
+    else
+      printf '0123456789012345678901234567890123456789\\trefs/heads/main\\n'
+    fi ;;
+  rev-parse) printf '0123456789012345678901234567890123456789\\n' ;;
+  *) exit 97 ;;
+esac
+`,
+      );
+      const setupDirectory = path.join(
+        targetDir,
+        "scripts/npm-publication-setup",
+      );
+      const configured = await execa(
+        process.execPath,
+        [
+          "--conditions=source",
+          "scripts/npm-publication-setup/bridge.ts",
+          "configure",
+        ],
+        {
+          cwd: targetDir,
+          env: {
+            REPOSITORY_ROOT: targetDir,
+            SETUP_DIR: setupDirectory,
+            PACKAGE_NAME: "@demo/ship",
+            COMMAND_NAME: "ship",
+            DESCRIPTION: "A focused command-line release tool.",
+            LICENSE_NAME: "MIT",
+            COPYRIGHT_HOLDER: "Ada Lovelace",
+            REPOSITORY_URL: "https://github.com/demo/ship",
+          },
+          reject: false,
+        },
+      );
+      expect(configured.exitCode).toBe(0);
+      await writeExecutable(
+        path.join(fakeBin, "corepack"),
+        "#!/bin/sh\nexit 0\n",
+      );
+      const npmCli = path.join(targetDir, "node_modules/npm/bin/npm-cli.js");
+      const realNpmCli = `${npmCli}.matrix-real`;
+      await rename(npmCli, realNpmCli);
+      const npmManifest = path.join(targetDir, "node_modules/npm/package.json");
+      const originalNpmManifest = await readFile(npmManifest, "utf8");
+      const writeFakeNpm = async (mode: string): Promise<void> => {
+        await writeFile(
+          npmCli,
+          `const { createHash } = require("node:crypto");
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
+const mode = ${JSON.stringify(mode)};
+const statePath = ${JSON.stringify(statePath)};
+const realNpmCli = ${JSON.stringify(realNpmCli)};
+const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : { calls: [], views: 0 };
+const save = () => fs.writeFileSync(statePath, JSON.stringify(state));
+const args = process.argv.slice(2);
+const bytes = Buffer.from("ticket-13 accepted tarball\\n");
+const integrity = "sha512-" + createHash("sha512").update(bytes).digest("base64");
+const present = (identity) => JSON.stringify({ dist: { integrity }, repository: identity ? "git+https://github.com/demo/other.git" : "git+https://github.com/demo/ship.git" });
+const absent = () => { process.stderr.write(JSON.stringify({ code: "E404", pkgid: "@demo/ship@1.0.0" })); save(); process.exit(1); };
+state.calls.push(args); save();
+if (args[0] === "install") process.exit(spawnSync(process.execPath, [realNpmCli, ...args], { stdio: "inherit" }).status ?? 5);
+if (args[0] === "login" || args[0] === "logout") process.exit(0);
+if (args[0] === "whoami") { process.stdout.write("alice\\n"); process.exit(0); }
+if (args[0] === "access") {
+  if (mode === "collaborator-missing") process.stdout.write("{}");
+  else if (mode === "collaborator-read-only") process.stdout.write('{"alice":"read-only"}');
+  else if (mode === "collaborator-nonobject") process.stdout.write("[]");
+  else if (mode === "collaborator-invalid") process.stdout.write("not-json");
+  else if (mode === "collaborator-mixed-stderr") { process.stdout.write('{"alice":"read-write"}'); process.stderr.write("warning"); }
+  else if (mode === "collaborator-substring") process.stdout.write('{"malice":"read-write"}');
+  else process.stdout.write('{"alice":"read-write"}');
+  process.exit(0);
+}
+if (args[0] === "view" && args[2] === "dist-tags") { process.stdout.write('{"latest":"1.0.0"}'); process.exit(0); }
+if (args[0] === "view") {
+  if (mode === "unknown") { process.stdout.write("registry-unknown"); process.exit(1); }
+  if (mode === "preimage" || mode === "race") {
+    state.views += 1; save();
+    if (mode === "race" && state.views > 1) { process.stdout.write(present(false)); process.exit(0); }
+    absent();
+  }
+  process.stdout.write(present(mode === "identity")); process.exit(0);
+}
+if (args[0] === "pack") {
+  const destination = args.find((argument) => argument.startsWith("--pack-destination=")).slice("--pack-destination=".length);
+  fs.writeFileSync(path.join(destination, "remote.tgz"), mode === "bytes" ? Buffer.from("different bytes") : bytes);
+  process.exit(0);
+}
+if (args[0] === "trust" && args[1] === "list") {
+  if (mode === "trust-array") process.stdout.write("[]");
+  else if (mode === "trust-scalar") process.stdout.write('"scalar"');
+  else if (mode === "trust-partial") process.stdout.write('{"id":"only-id"}');
+  else if (mode === "trust-garbage") process.stdout.write("{} garbage");
+  else if (mode === "trust-mixed-stderr") { process.stdout.write("{}"); process.stderr.write("warning"); }
+  else process.stdout.write("");
+  process.exit(0);
+}
+if (args[0] === "trust" && args.includes("--dry-run")) {
+  if (mode === "trust-environment") process.stdout.write('{"package":"@demo/ship","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"],"environment":"production"}');
+  else if (mode === "trust-stage") process.stdout.write('{"package":"@demo/ship","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"],"stage":"production"}');
+  else process.stdout.write('{"package":"@demo/ship","type":"github","repository":"demo/ship","file":"release.yml","permissions":["createPackage"]}');
+  process.exit(0);
+}
+process.exit(97);
+`,
+        );
+      };
+      for (const [mode, expectedExit, needsPublishPhrase] of cases) {
+        await writeFile(statePath, '{"calls":[],"views":0}');
+        await writeFile(
+          npmManifest,
+          mode === "launcher"
+            ? '{"version":"0.0.0","bin":{"npm":"bin/npm-cli.js"}}\n'
+            : originalNpmManifest,
+        );
+        await writeFakeNpm(mode);
+        await writeExecutable(
+          path.join(fakeBin, "corepack"),
+          `#!/bin/sh\nexit ${mode === "bootstrap" ? "1" : "0"}\n`,
+        );
+        const accepted = await writeAcceptedFirstReleaseArtifact({
+          root: targetDir,
+          packageName: "@demo/ship",
+          commandName: "ship",
+        });
+        const externalEnvironment = {
+          PATH: `${fakeBin}:${process.env.PATH}`,
+          TMPDIR: ownedTemporaryDirectory,
+          REPOSITORY_ROOT: targetDir,
+          ARTIFACT_ROOT: accepted.directory,
+          ...(mode === "ambient" ? { NPM_TOKEN: "poisoned" } : {}),
+        };
+        const bridge = `${JSON.stringify(process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
+        const running =
+          mode === "non-tty"
+            ? execa(
+                process.execPath,
+                [
+                  "--conditions=source",
+                  "scripts/npm-publication-setup/bridge.ts",
+                  "external",
+                ],
+                {
+                  cwd: targetDir,
+                  env: externalEnvironment,
+                  reject: false,
+                  timeout: 60_000,
+                },
+              )
+            : execa("script", ["-qefc", bridge, "/dev/null"], {
+                cwd: targetDir,
+                env: externalEnvironment,
+                reject: false,
+                stdin: "pipe",
+                timeout: 60_000,
+              });
+        if (
+          mode !== "ambient" &&
+          mode !== "non-tty" &&
+          mode !== "launcher" &&
+          mode !== "bootstrap"
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+          running.stdin?.write("CONFIRM NPM 2FA AND RECOVERY CODES READY\n");
+          if (needsPublishPhrase) {
+            await new Promise((resolve) => setTimeout(resolve, 1_000));
+            if (mode === "preimage") {
+              await writeFile(
+                path.join(accepted.directory, "ship-1.0.0.tgz"),
+                "changed after publish confirmation",
+              );
+            }
+            running.stdin?.write(
+              `PUBLISH @demo/ship@1.0.0 ${accepted.integrity}\n`,
+            );
+          }
+        }
+        const result = await running;
+        expect(
+          result.exitCode,
+          `${mode}: ${result.stdout}\n${result.stderr}`,
+        ).toBe(expectedExit);
+        const state = JSON.parse(await readFile(statePath, "utf8")) as {
+          readonly calls: string[][];
+        };
+        expect(
+          state.calls.filter(
+            (arguments_) =>
+              arguments_[0] === "publish" ||
+              (arguments_[0] === "trust" && arguments_.includes("--yes")),
+          ),
+        ).toHaveLength(0);
+        expect(
+          (await readdir(ownedTemporaryDirectory)).filter((entry) =>
+            entry.startsWith("npm-publication-setup-"),
+          ),
+        ).toEqual([]);
+        await expect(stat(accepted.directory)).rejects.toThrow();
+      }
+      expect((await stat(setupDirectory)).isDirectory()).toBe(true);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }, 300_000);
 
   it("configures Apache-2.0 from the checked full license text", async () => {
     const workspace = await mkdtemp(
@@ -1399,6 +2203,10 @@ syncBuiltinESMExports();
     );
 
     try {
+      await rm(path.join(project.targetDir, "scripts/npm-publication-setup"), {
+        recursive: true,
+        force: true,
+      });
       const rootCheck = await execa("pnpm", ["run", "check"], {
         cwd: project.targetDir,
         reject: false,

@@ -1428,6 +1428,13 @@ function foundationPlan(options: {
     name: options.context.repositoryName,
     private: true,
     type: "module",
+    ...(publicationCandidate === undefined
+      ? {}
+      : {
+          imports: {
+            "#npm-publication/*": "./scripts/npm-publication/*.ts",
+          },
+        }),
     scripts: {
       check:
         publicationCandidate === undefined
@@ -1648,6 +1655,7 @@ function foundationPlan(options: {
             source: templateSources.tsCli,
             from: "publication/root-tsconfig.json",
             to: "tsconfig.json",
+            multilineArrays: ["include"],
           },
         ]),
     ...(requiresPackingHook && publicationCandidate === undefined
@@ -1770,8 +1778,8 @@ function foundationPlan(options: {
           {
             kind: "writeTextTemplate" as const,
             source: templateSources.tsCli,
-            from: "publication-setup/bridge.mjs",
-            to: "scripts/npm-publication-setup/bridge.mjs",
+            from: "publication-setup/bridge.ts",
+            to: "scripts/npm-publication-setup/bridge.ts",
             replacements: {
               PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
             },
