@@ -1169,7 +1169,7 @@ describe("packed public CLI consumer", () => {
         await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),
       ) as { readonly scripts: Readonly<Record<string, string>> };
       expect(rootManifestAfterRust.scripts.check).toContain(
-        "turbo run boundaries format:check lint typecheck test",
+        "pnpm run boundaries && turbo run format:check lint typecheck test",
       );
       expect(rootManifestAfterRust.scripts.check).toContain(
         "turbo run build test:e2e --filter=!./packages/cli",
@@ -1275,12 +1275,15 @@ describe("packed public CLI consumer", () => {
           reject: false,
         },
       );
-      expect(reservedPackagePath.exitCode).not.toBe(0);
-      expect(
-        `${reservedPackagePath.stdout}\n${reservedPackagePath.stderr}`,
-      ).toContain(
-        "Package Path dist/evil uses reserved workspace collection dist",
-      );
+      expect(reservedPackagePath.exitCode).toBe(64);
+      expect(reservedPackagePath.stderr).toBe("");
+      expect(JSON.parse(reservedPackagePath.stdout)).toMatchObject({
+        cliVersion: sourceManifest.version,
+        command: "add package",
+        status: "usage-error",
+        code: "USAGE_ADD_PACKAGE_INVALID",
+        issues: [{ code: "RESERVED_PACKAGE_PATH" }],
+      });
       expect(await workspaceByteSnapshot(previewTarget)).toEqual(
         reservedBefore,
       );
@@ -1463,8 +1466,8 @@ describe("packed public CLI consumer", () => {
       );
       expect(textConflict.exitCode).not.toBe(0);
       expect(textConflict.stderr).toContain(".devcontainer/Dockerfile (text)");
-      expect(textConflict.stderr).toContain("Region:");
-      expect(textConflict.stderr).toContain("Current:");
+      expect(textConflict.stderr).toContain("区域:");
+      expect(textConflict.stderr).toContain("当前:");
       expect(await workspaceByteSnapshot(previewTarget)).toEqual(textBefore);
     } finally {
       await rm(workspace, { recursive: true, force: true });

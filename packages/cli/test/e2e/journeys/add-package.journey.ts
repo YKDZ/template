@@ -206,6 +206,9 @@ const journey: CliJourney = {
     ];
   },
   async assertions({ context, results }) {
+    const manifest = JSON.parse(
+      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
+    ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
 
     const preview = JSON.parse(results[1]?.stdout ?? "");
@@ -230,10 +233,17 @@ const journey: CliJourney = {
     );
 
     assert.deepEqual(JSON.parse(results[3]?.stdout ?? "").actions, []);
-    assert.equal(results[4]?.exitCode, 1);
+    assert.equal(results[4]?.exitCode, 64);
+    assert.equal(results[4]?.stdout, "");
     assert.match(
       results[4]?.stderr ?? "",
-      /required option '--preset <name>' not specified/u,
+      new RegExp(`^template ${manifest.version}\\n`, "u"),
+    );
+    assert.match(results[4]?.stderr ?? "", /USAGE_MISSING_REQUIRED_OPTION/u);
+    assert.match(results[4]?.stderr ?? "", /缺少必需选项/u);
+    assert.match(
+      results[4]?.stderr ?? "",
+      /用法: template add package \[options\]/u,
     );
 
     const conflict = JSON.parse(results[5]?.stdout ?? "");

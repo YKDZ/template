@@ -55,7 +55,7 @@ describe("Template Repository native task model", () => {
     const scripts = manifest.scripts;
 
     expect(scripts.check).toBe(
-      "pnpm run build && turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
+      "pnpm run build && pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     );
     expect(scripts.fix).toBe(
       "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
@@ -67,9 +67,9 @@ describe("Template Repository native task model", () => {
       "turbo run check:focused --output-logs=errors-only --log-order=grouped",
     );
     expect(scripts.check).not.toContain("check:focused");
+    expect(scripts.boundaries).toBe("turbo boundaries --no-color");
 
     for (const task of [
-      "boundaries",
       "format:check",
       "format:write",
       "lint",
@@ -110,7 +110,6 @@ describe("Template Repository native task model", () => {
     const tasks = turbo.tasks;
 
     for (const task of [
-      "boundaries",
       "format:check",
       "format:write",
       "lint",
@@ -175,7 +174,6 @@ describe("Template Repository native task model", () => {
       ]);
     }
     expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");
-    expect(tasks.boundaries?.cache).toBe(false);
     expect(tasks["format:write"]?.cache).toBe(false);
     expect(tasks["lint:fix"]?.cache).toBe(false);
 
@@ -185,7 +183,6 @@ describe("Template Repository native task model", () => {
         "exec",
         "turbo",
         "run",
-        "boundaries",
         "format:check",
         "lint",
         "typecheck",
@@ -202,7 +199,7 @@ describe("Template Repository native task model", () => {
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
-    expect(taskIds).toContain("//#boundaries");
+    expect(taskIds).not.toContain("//#boundaries");
     expect(taskIds).toContain("//#format:check");
     expect(taskIds).toContain("//#lint");
     expect(taskIds).toContain("//#typecheck");

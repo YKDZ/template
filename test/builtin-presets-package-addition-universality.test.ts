@@ -554,7 +554,6 @@ describe("Built-in Preset Package Addition universality", () => {
           "exec",
           "turbo",
           "run",
-          "boundaries",
           "format:check",
           "lint",
           "typecheck",
@@ -570,6 +569,7 @@ describe("Built-in Preset Package Addition universality", () => {
           tasks: readonly { taskId: string }[];
         }
       ).tasks.map((task) => task.taskId);
+      expect(taskIds).not.toContain("//#boundaries");
       const addedManifest = JSON.parse(
         await readFile(
           path.join(targetDir, "packages/natural/package.json"),

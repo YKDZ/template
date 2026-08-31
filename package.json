@@ -22,7 +22,7 @@
   },
   "scripts": {
     "build": "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
-    "check": "pnpm run build && turbo run boundaries format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
+    "check": "pnpm run build && pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     "check:fixtures": "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
     "check:focused": "turbo run check:focused --output-logs=errors-only --log-order=grouped",
     "check:generated": "turbo run check:generated --output-logs=errors-only --log-order=grouped",
@@ -34,7 +34,7 @@
     "update:toolchain": "pnpm --filter @ykdz/template-checks update:toolchain",
     "resolve:toolchain:update": "node --conditions=source packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs",
     "fix": "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
-    "boundaries": "node --conditions=source scripts/check-boundaries.ts",
+    "boundaries": "turbo boundaries --no-color",
     "format:check": "oxfmt --list-different --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "format:write": "oxfmt --write --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts vitest.config.ts scripts test",

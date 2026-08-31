@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
     "allowJs": true,
-    "checkJs": true,
-    "noEmit": true
+    "checkJs": true
   },
-  "include": [".pnpmfile.mjs"]
+  "files": [".pnpmfile.mjs"]
 }

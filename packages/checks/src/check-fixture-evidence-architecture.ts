@@ -580,7 +580,6 @@ function rootQualityCommand(command: string, args: readonly string[]): boolean {
     return true;
   }
   const qualityTasks = new Set([
-    "boundaries",
     "format:check",
     "format:write",
     "lint",

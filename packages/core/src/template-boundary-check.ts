@@ -777,7 +777,7 @@ const rootTsconfigConfigCompilerOptions = {
   noEmitOnError: true,
   skipLibCheck: false,
   strict: true,
-  target: "es2023",
+  target: "es2024",
 } as const;
 
 const rootTsconfigConfigIncludes = new Set([

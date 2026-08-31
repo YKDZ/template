@@ -64,7 +64,12 @@ import {
   projectCheckWorkflowTemplateReplacements,
   projectDependabotTemplateReplacements,
 } from "#template-core/project-github";
-import { planExplicitProjectLinks } from "#template-core/project-linking-v2";
+import {
+  canConsumeNodePackageNameImport,
+  canLinkNodePackageRoles,
+  canProvideSourceConditionPackageNameImport,
+  planExplicitProjectLinks,
+} from "#template-core/project-linking-v2";
 import type {
   MaterializeProjectProjectionOptions,
   ProjectProjectionPathPrecondition,
@@ -164,6 +169,65 @@ export type GeneratedRepositoryPackageAdditionPlan = GeneratedRepositoryPlan & {
     readonly preconditions: readonly ProjectProjectionPathPrecondition[];
   };
 };
+
+/** 用户可修正的 Package Addition 输入事实，顺序由 Foundation 固定。 */
+export type PackageAdditionInputIssue = {
+  readonly code:
+    | "PRESET_UNKNOWN"
+    | "PRESET_NOT_ADDABLE"
+    | "INVALID_PACKAGE_NAME"
+    | "INVALID_PACKAGE_PATH"
+    | "RESERVED_PACKAGE_PATH"
+    | "INVALID_LINK_FROM"
+    | "RESERVED_LINK_FROM"
+    | "UNKNOWN_LINK_FROM"
+    | "UNSUPPORTED_LINK";
+};
+
+export type PackageAdditionPreparation =
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly PackageAdditionInputIssue[];
+    }
+  | {
+      readonly status: "conflict";
+      readonly conflict: PackageAdditionBusinessConflict;
+    }
+  | {
+      readonly status: "operation-failure";
+      readonly phase: "metadata" | "default" | "planning";
+    }
+  | {
+      readonly status: "ready";
+      readonly definition: BuiltInPresetDefinition;
+      readonly plan: GeneratedRepositoryPackageAdditionPlan;
+    };
+
+export class PackageAdditionBusinessConflict extends Error {
+  readonly kind: "identity" | "missing-link";
+  readonly existing: PackageDefinition;
+  readonly requested: PackageDefinition;
+  readonly missingLink?: {
+    readonly consumerPackagePath: string;
+    readonly providerPackagePath: string;
+  };
+
+  constructor(
+    kind: "identity" | "missing-link",
+    existing: PackageDefinition,
+    requested: PackageDefinition,
+    missingLink?: {
+      readonly consumerPackagePath: string;
+      readonly providerPackagePath: string;
+    },
+  ) {
+    super("Package Addition business conflict");
+    this.kind = kind;
+    this.existing = existing;
+    this.requested = requested;
+    if (missingLink !== undefined) this.missingLink = missingLink;
+  }
+}
 
 export type PublicationSetupHandoff = null | {
   readonly command: "./scripts/npm-publication-setup/setup.sh";
@@ -1177,11 +1241,11 @@ function renderPublicationRootCheckCommand(
   candidatePackagePath: string,
 ): string {
   return [
-    renderTurboRunCommand(
-      ["boundaries", "format:check", "lint", "typecheck", "test"],
-      [],
-      { continueAfterFailure: true, taskPrefix: true },
-    ),
+    "pnpm run boundaries",
+    renderTurboRunCommand(["format:check", "lint", "typecheck", "test"], [], {
+      continueAfterFailure: true,
+      taskPrefix: true,
+    }),
     renderTurboRunCommand(
       ["build", "test:e2e"],
       [`--filter=!./${candidatePackagePath}`],
@@ -1442,7 +1506,7 @@ function foundationPlan(options: {
           : renderPublicationRootCheckCommand(
               publicationCandidate.definition.path,
             ),
-      boundaries: "node --conditions=source scripts/check-boundaries.ts",
+      boundaries: "turbo boundaries --no-color",
       ...(publicationCandidate === undefined
         ? {}
         : {
@@ -1456,12 +1520,12 @@ function foundationPlan(options: {
         : {}),
       fix: renderFixCommand(),
       "format:check":
-        "node --conditions=source scripts/run-root-owned-task.ts format:check",
+        "oxfmt --list-different --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
       "format:write":
-        "node --conditions=source scripts/run-root-owned-task.ts format:write",
-      lint: "node --conditions=source scripts/run-root-owned-task.ts lint",
+        "oxfmt --write --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
+      lint: "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
       "lint:fix":
-        "node --conditions=source scripts/run-root-owned-task.ts lint:fix",
+        "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts --fix",
       typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
@@ -1632,18 +1696,6 @@ function foundationPlan(options: {
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: "scripts/check-boundaries.ts",
-      to: "scripts/check-boundaries.ts",
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "scripts/run-root-owned-task.ts",
-      to: "scripts/run-root-owned-task.ts",
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
       from: "tsconfig.json",
       to: "tsconfig.json",
     },
@@ -1655,7 +1707,6 @@ function foundationPlan(options: {
             source: templateSources.tsCli,
             from: "publication/root-tsconfig.json",
             to: "tsconfig.json",
-            multilineArrays: ["include"],
           },
         ]),
     ...(requiresPackingHook && publicationCandidate === undefined
@@ -2011,6 +2062,219 @@ export type ResolvedInitialization = {
   readonly scope: string;
 };
 
+/** A user-correctable initialization fact, ordered by the owning Foundation. */
+export type InitializationInputIssue = {
+  readonly code:
+    | "PRESET_UNKNOWN"
+    | "FIXED_TOPOLOGY_OVERRIDE"
+    | "INVALID_PACKAGE_NAME"
+    | "INVALID_PACKAGE_PATH"
+    | "RESERVED_PACKAGE_PATH"
+    | "INVALID_PACKAGE_SCOPE"
+    | "INVALID_REPOSITORY_SCOPE"
+    | "CONFLICTING_PACKAGE_IDENTITY";
+};
+
+export type InitializationPreparation =
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly InitializationInputIssue[];
+    }
+  | {
+      readonly status: "operation-failure";
+      readonly phase: "preset" | "planning" | "preflight";
+    }
+  | {
+      readonly status: "ready";
+      readonly context: BuiltInGenerationContext;
+      readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
+      readonly resolved: ResolvedInitialization;
+      readonly plan: GeneratedRepositoryPlan;
+      readonly publicationSetup: PublicationSetupHandoff;
+    };
+
+export type InitializationInputValidation =
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly InitializationInputIssue[];
+    }
+  | { readonly status: "valid" };
+
+type CollectedInitializationInput =
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly InitializationInputIssue[];
+    }
+  | {
+      readonly status: "valid";
+      readonly definition: BuiltInPresetDefinition;
+      readonly normalizedScope: string | undefined;
+      readonly nameOverride: string | undefined;
+      readonly pathOverride: string | undefined;
+      readonly repositoryName: string;
+      readonly configurablePrimaryPackage: boolean;
+      readonly validScopeOverride: boolean;
+      readonly validRepositoryScope: boolean;
+      readonly resolvedScope: string;
+      readonly initialPrimaryPackage:
+        | BuiltInPresetDefinition["initialPrimaryPackage"]
+        | undefined;
+      readonly foundationDefinition: PackageDefinition;
+    };
+
+type InitializationInputOptions = {
+  readonly definition?: BuiltInPresetDefinition;
+  readonly preset?: string;
+  readonly targetDir: string;
+  readonly overrides?: InitializationIdentityOverrides;
+};
+
+function deduplicateInitializationInputIssues(
+  issues: readonly InitializationInputIssue[],
+): readonly InitializationInputIssue[] {
+  return issues.filter(
+    (issue, index) =>
+      issues.findIndex((candidate) => candidate.code === issue.code) === index,
+  );
+}
+
+function collectInitializationInput(
+  options: InitializationInputOptions,
+): CollectedInitializationInput {
+  const issues: InitializationInputIssue[] = [];
+  const definition =
+    options.definition ??
+    (options.preset === undefined
+      ? undefined
+      : builtInPresetRegistry
+          .all()
+          .find((candidate) => candidate.metadata.name === options.preset));
+  if (definition === undefined) {
+    return {
+      status: "input-invalid",
+      issues: [{ code: "PRESET_UNKNOWN" }],
+    };
+  }
+  const scopeOverride = options.overrides?.scope;
+  const normalizedScope =
+    scopeOverride?.startsWith("@") === true
+      ? scopeOverride.slice(1)
+      : scopeOverride;
+  const nameOverride = options.overrides?.name;
+  const pathOverride = options.overrides?.path;
+  const repositoryName = path.basename(path.resolve(options.targetDir));
+  const configurablePrimaryPackage =
+    definition.initialPrimaryPackage !== undefined;
+  if (
+    !configurablePrimaryPackage &&
+    (nameOverride !== undefined || pathOverride !== undefined)
+  ) {
+    issues.push({ code: "FIXED_TOPOLOGY_OVERRIDE" });
+  }
+  let validNameOverride =
+    nameOverride !== undefined &&
+    isValidNewNpmPackageName(`@x/${nameOverride}`);
+  if (nameOverride !== undefined && !validNameOverride) {
+    issues.push({ code: "INVALID_PACKAGE_NAME" });
+  }
+  if (pathOverride !== undefined) {
+    const pathValidation = validateNewPackagePath(pathOverride);
+    if (!pathValidation.hasValidShape) {
+      issues.push({ code: "INVALID_PACKAGE_PATH" });
+    }
+    if (pathValidation.reservedWorkspaceCollection !== undefined) {
+      issues.push({ code: "RESERVED_PACKAGE_PATH" });
+    }
+  }
+  let validScopeOverride =
+    normalizedScope !== undefined &&
+    scopeOverride === scopeOverride?.trim() &&
+    isValidDefaultPackageScope(normalizedScope) &&
+    isValidNewNpmPackageName(`@${normalizedScope}/typescript-config`);
+  if (normalizedScope !== undefined && !validScopeOverride) {
+    issues.push({ code: "INVALID_PACKAGE_SCOPE" });
+  }
+  let validRepositoryScope =
+    isValidDefaultPackageScope(repositoryName) &&
+    isValidNewNpmPackageName(`@${repositoryName}/typescript-config`);
+  if (normalizedScope === undefined && !validRepositoryScope) {
+    issues.push({ code: "INVALID_REPOSITORY_SCOPE" });
+  }
+
+  const resolvedScope = validScopeOverride
+    ? (normalizedScope ?? "repository")
+    : validRepositoryScope
+      ? repositoryName
+      : "repository";
+  const resolvedLeaf =
+    configurablePrimaryPackage &&
+    nameOverride !== undefined &&
+    validNameOverride
+      ? nameOverride
+      : configurablePrimaryPackage
+        ? definition.initialPrimaryPackage?.defaultLeafName
+        : undefined;
+  if (
+    resolvedLeaf !== undefined &&
+    !isValidNewNpmPackageName(`@${resolvedScope}/${resolvedLeaf}`)
+  ) {
+    if (nameOverride !== undefined) {
+      validNameOverride = false;
+      issues.push({ code: "INVALID_PACKAGE_NAME" });
+    } else if (scopeOverride !== undefined) {
+      validScopeOverride = false;
+      issues.push({ code: "INVALID_PACKAGE_SCOPE" });
+    } else {
+      validRepositoryScope = false;
+      issues.push({ code: "INVALID_REPOSITORY_SCOPE" });
+    }
+  }
+
+  const initialPrimaryPackage = definition.initialPrimaryPackage;
+  const foundationDefinition = typescriptConfigPackageDefinition({
+    foundationPackages: {
+      typescriptConfiguration: {
+        name: `@${resolvedScope}/typescript-config`,
+      },
+    },
+  });
+  if (
+    (nameOverride !== undefined &&
+      `@${resolvedScope}/${nameOverride}` === foundationDefinition.name) ||
+    pathOverride === foundationDefinition.path
+  ) {
+    issues.push({ code: "CONFLICTING_PACKAGE_IDENTITY" });
+  }
+
+  if (issues.length > 0) {
+    return {
+      status: "input-invalid",
+      issues: deduplicateInitializationInputIssues(issues),
+    };
+  }
+  return {
+    status: "valid",
+    definition,
+    normalizedScope,
+    nameOverride,
+    pathOverride,
+    repositoryName,
+    configurablePrimaryPackage,
+    validScopeOverride,
+    validRepositoryScope,
+    resolvedScope,
+    initialPrimaryPackage,
+    foundationDefinition,
+  };
+}
+
+export function validateGeneratedRepositoryInitializationInput(
+  options: InitializationInputOptions,
+): InitializationInputValidation {
+  const input = collectInitializationInput(options);
+  return input.status === "input-invalid" ? input : { status: "valid" };
+}
+
 function errorDiagnostics(error: unknown): readonly string[] {
   return (error instanceof Error ? error.message : String(error))
     .split("\n")
@@ -2189,104 +2453,54 @@ export function planGeneratedRepositoryInitialization(options: {
 }
 
 export function prepareGeneratedRepositoryInitialization(options: {
-  readonly definition: BuiltInPresetDefinition;
+  /** Direct Definitions are retained for Preset-local behavior tests. */
+  readonly definition?: BuiltInPresetDefinition;
+  /** CLI callers select a Preset through the owning Built-in Presets Module. */
+  readonly preset?: string;
   readonly targetDir: string;
   readonly toolchain: BuiltInGenerationContext["toolchain"];
   readonly overrides?: InitializationIdentityOverrides;
-}): {
-  readonly context: BuiltInGenerationContext;
-  readonly resolvedPackageIdentity?: ResolvedPrimaryPackageIdentity;
-  readonly resolved: ResolvedInitialization;
-  readonly plan: GeneratedRepositoryPlan;
-  readonly publicationSetup: PublicationSetupHandoff;
-} {
-  const diagnostics: string[] = [];
-  const appendDiagnostics = (error: unknown): void => {
-    diagnostics.push(...errorDiagnostics(error));
-  };
-  const scopeOverride = options.overrides?.scope;
-  const normalizedScope =
-    scopeOverride?.startsWith("@") === true
-      ? scopeOverride.slice(1)
-      : scopeOverride;
-  const nameOverride = options.overrides?.name;
-  const pathOverride = options.overrides?.path;
-  const repositoryName = path.basename(path.resolve(options.targetDir));
-  const configurablePrimaryPackage =
-    options.definition.initialPrimaryPackage !== undefined;
-  if (
-    !configurablePrimaryPackage &&
-    (nameOverride !== undefined || pathOverride !== undefined)
-  ) {
-    diagnostics.push(
-      `Built-in Preset ${options.definition.metadata.name} has fixed initial package topology and does not accept --name or --path`,
-    );
-  }
-  let validNameOverride =
-    nameOverride !== undefined &&
-    isValidNewNpmPackageName(`@x/${nameOverride}`);
-  if (nameOverride !== undefined && !validNameOverride) {
-    diagnostics.push("--name must be an unscoped package leaf name");
-  }
-  let validPathOverride = pathOverride !== undefined;
-  if (pathOverride !== undefined) {
-    const pathValidation = validateNewPackagePath(pathOverride);
-    if (!pathValidation.hasValidShape) {
-      diagnostics.push("--path must be exactly two safe path segments");
-      validPathOverride = false;
-    }
-    if (pathValidation.reservedWorkspaceCollection !== undefined) {
-      diagnostics.push(
-        `--path ${pathOverride} uses reserved workspace collection ${pathValidation.reservedWorkspaceCollection}`,
-      );
-      validPathOverride = false;
-    }
-  }
-  let validScopeOverride =
-    normalizedScope !== undefined &&
-    scopeOverride === scopeOverride?.trim() &&
-    isValidDefaultPackageScope(normalizedScope) &&
-    isValidNewNpmPackageName(`@${normalizedScope}/typescript-config`);
-  if (normalizedScope !== undefined && !validScopeOverride) {
-    diagnostics.push("--scope must be a valid npm scope without whitespace");
-  }
-  let validRepositoryScope =
-    isValidDefaultPackageScope(repositoryName) &&
-    isValidNewNpmPackageName(`@${repositoryName}/typescript-config`);
-  if (normalizedScope === undefined && !validRepositoryScope) {
-    diagnostics.push(
-      `Repository Identity ${repositoryName} is not a valid default package scope; pass --scope with a valid npm scope`,
-    );
-  }
+}): InitializationPreparation {
+  const input = collectInitializationInput(options);
+  if (input.status === "input-invalid") return input;
+  const {
+    definition,
+    normalizedScope,
+    nameOverride,
+    pathOverride,
+    repositoryName,
+    configurablePrimaryPackage,
+    validScopeOverride,
+    validRepositoryScope,
+    resolvedScope,
+    initialPrimaryPackage,
+    foundationDefinition,
+  } = input;
 
-  const resolvedScope = validScopeOverride
-    ? (normalizedScope ?? "repository")
-    : validRepositoryScope
-      ? repositoryName
-      : "repository";
-  const resolvedLeaf =
-    configurablePrimaryPackage &&
-    nameOverride !== undefined &&
-    validNameOverride
-      ? nameOverride
-      : configurablePrimaryPackage
-        ? options.definition.initialPrimaryPackage?.defaultLeafName
-        : undefined;
-  if (
-    resolvedLeaf !== undefined &&
-    !isValidNewNpmPackageName(`@${resolvedScope}/${resolvedLeaf}`)
-  ) {
-    if (nameOverride !== undefined) {
-      validNameOverride = false;
-      diagnostics.push("--name must be an unscoped package leaf name");
-    } else if (scopeOverride !== undefined) {
-      validScopeOverride = false;
-      diagnostics.push("--scope must be a valid npm scope without whitespace");
-    } else {
-      validRepositoryScope = false;
-      diagnostics.push(
-        `Repository Identity ${repositoryName} is not a valid default package scope; pass --scope with a valid npm scope`,
-      );
+  let derivedPackagePath: string | undefined;
+  if (initialPrimaryPackage !== undefined) {
+    try {
+      derivedPackagePath = initialPrimaryPackage.defaultPackagePath({
+        packageLeafName: nameOverride ?? initialPrimaryPackage.defaultLeafName,
+      });
+    } catch {
+      return { status: "operation-failure", phase: "preset" };
+    }
+    const derivedPathValidation = validateNewPackagePath(derivedPackagePath);
+    if (
+      !derivedPathValidation.hasValidShape ||
+      derivedPathValidation.reservedWorkspaceCollection !== undefined
+    ) {
+      return { status: "operation-failure", phase: "preset" };
+    }
+    if (
+      (nameOverride === undefined &&
+        `@${resolvedScope}/${initialPrimaryPackage.defaultLeafName}` ===
+          foundationDefinition.name) ||
+      (pathOverride === undefined &&
+        derivedPackagePath === foundationDefinition.path)
+    ) {
+      return { status: "operation-failure", phase: "preset" };
     }
   }
 
@@ -2299,83 +2513,55 @@ export function prepareGeneratedRepositoryInitialization(options: {
         : "repository",
     toolchain: options.toolchain,
   });
-  const safeNameOverride =
-    configurablePrimaryPackage && nameOverride !== undefined
-      ? validNameOverride
-        ? nameOverride
-        : "x"
-      : undefined;
-  let safeDerivedPathOverride: string | undefined;
-  const initialPrimaryPackage = options.definition.initialPrimaryPackage;
-  if (initialPrimaryPackage !== undefined && pathOverride === undefined) {
-    const safeLeafName =
-      safeNameOverride ?? initialPrimaryPackage.defaultLeafName;
-    const derivedPackagePath = initialPrimaryPackage.defaultPackagePath({
-      packageLeafName: safeLeafName,
-    });
-    const derivedPathValidation = validateNewPackagePath(derivedPackagePath);
-    if (
-      !derivedPathValidation.hasValidShape ||
-      derivedPathValidation.reservedWorkspaceCollection !== undefined
-    ) {
-      diagnostics.push(
-        `Preset-derived Package Path ${derivedPackagePath} is unsafe; pass --path with exactly two safe path segments`,
-      );
-      safeDerivedPathOverride = "packages/invalid";
-    }
-  }
   const safeIdentityOverrides: Pick<
     InitializationIdentityOverrides,
     "name" | "path"
   > = {
-    ...(safeNameOverride === undefined ? {} : { name: safeNameOverride }),
+    ...(configurablePrimaryPackage && nameOverride !== undefined
+      ? { name: nameOverride }
+      : {}),
     ...(configurablePrimaryPackage && pathOverride !== undefined
-      ? { path: validPathOverride ? pathOverride : "packages/invalid" }
-      : safeDerivedPathOverride === undefined
+      ? { path: pathOverride }
+      : derivedPackagePath === undefined
         ? {}
-        : { path: safeDerivedPathOverride }),
+        : { path: derivedPackagePath }),
   };
-  let prepared: PreparedPresetInitialization | undefined;
+  let prepared: PreparedPresetInitialization;
   try {
     prepared = preparePresetInitialization({
-      definition: options.definition,
+      definition,
       context,
       ...(Object.keys(safeIdentityOverrides).length === 0
         ? {}
         : { overrides: safeIdentityOverrides }),
     });
-  } catch (error) {
-    appendDiagnostics(error);
+  } catch {
+    return { status: "operation-failure", phase: "preset" };
   }
-  let plan: GeneratedRepositoryPlan | undefined;
-  if (prepared !== undefined) {
-    try {
-      plan = planPreparedRepositoryInitialization({
-        definition: options.definition,
-        context,
-        presetBlueprint: prepared.presetBlueprint,
-        contributions: prepared.contributions,
-      });
-    } catch (error) {
-      appendDiagnostics(error);
-    }
-  }
-  if (plan !== undefined) {
-    diagnostics.push(
-      ...validateProjectProjectionPlan({
+  let plan: GeneratedRepositoryPlan;
+  try {
+    plan = planPreparedRepositoryInitialization({
+      definition,
+      context,
+      presetBlueprint: prepared.presetBlueprint,
+      contributions: prepared.contributions,
+    });
+    if (
+      validateProjectProjectionPlan({
         operations: plan.operations,
         reconciliation: plan.reconciliation,
-      }),
-    );
-  }
-  if (diagnostics.length > 0) throw new Error(diagnostics.join("\n"));
-  if (prepared === undefined || plan === undefined) {
-    throw new Error("Initialization preparation did not produce a plan");
+      }).length > 0
+    ) {
+      return { status: "operation-failure", phase: "preflight" };
+    }
+  } catch {
+    return { status: "operation-failure", phase: "planning" };
   }
   return {
+    status: "ready",
     context,
     resolved: {
-      preset: options.definition.metadata.name,
+      preset: definition.metadata.name,
       topology:
         prepared.resolvedPackageIdentity === undefined
           ? "fixed"
@@ -2397,37 +2583,19 @@ export function prepareGeneratedRepositoryInitialization(options: {
   };
 }
 
-export function planGeneratedRepositoryPackageAddition(options: {
+function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly localTemplateMetadata: LocalTemplateMetadata;
   readonly packageLeafName: string;
-  readonly packagePath?: string;
+  readonly packagePath: string;
+  readonly contribution: PlannedPackageContribution;
   /** Existing consumers that explicitly import the newly added provider. */
   readonly linkFrom?: readonly string[];
 }): GeneratedRepositoryPackageAdditionPlan {
   const { blueprint: persistedBlueprint, context } =
     options.localTemplateMetadata;
   assertProjectBlueprint(persistedBlueprint);
-  if (!options.definition.planPackageAddition)
-    throw new Error(
-      `Built-in Preset ${options.definition.metadata.name} does not support Package Addition`,
-    );
-  const packagePath =
-    options.packagePath ??
-    options.definition.defaultPackagePath?.({
-      context,
-      packageLeafName: options.packageLeafName,
-    });
-  if (packagePath === undefined) {
-    throw new Error(
-      `Built-in Preset ${options.definition.metadata.name} must own a default Package Path or receive an explicit Package Path`,
-    );
-  }
-  const contribution = options.definition.planPackageAddition({
-    context,
-    packageLeafName: options.packageLeafName,
-    packagePath,
-  });
+  const contribution = options.contribution;
   const requestedPackageLinkIntents = [...new Set(options.linkFrom ?? [])].map(
     (consumerPackagePath) => ({
       consumerPackagePath,
@@ -2493,12 +2661,17 @@ export function planGeneratedRepositoryPackageAddition(options: {
       };
     }
     if (isExactPackageDefinition) {
-      throw new Error(
-        `Package Addition conflicts because requested Package Link Intent ${missingPackageLinkIntent!.consumerPackagePath} -> ${missingPackageLinkIntent!.providerPackagePath} does not already exist`,
+      throw new PackageAdditionBusinessConflict(
+        "missing-link",
+        conflictingPackage,
+        contribution.definition,
+        missingPackageLinkIntent,
       );
     }
-    throw new Error(
-      `Package Addition conflicts with existing Package Definition ${conflictingPackage.name} at ${conflictingPackage.path} (${conflictingPackage.role}); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
+    throw new PackageAdditionBusinessConflict(
+      "identity",
+      conflictingPackage,
+      contribution.definition,
     );
   }
   const contributionIdentity = requireReplayAdapter({
@@ -2615,4 +2788,201 @@ export function planGeneratedRepositoryPackageAddition(options: {
       ],
     },
   };
+}
+
+export function planGeneratedRepositoryPackageAddition(options: {
+  readonly definition: BuiltInPresetDefinition;
+  readonly localTemplateMetadata: LocalTemplateMetadata;
+  readonly packageLeafName: string;
+  readonly packagePath?: string;
+  readonly linkFrom?: readonly string[];
+}): GeneratedRepositoryPackageAdditionPlan {
+  const { context } = options.localTemplateMetadata;
+  if (options.definition.planPackageAddition === undefined) {
+    throw new Error(
+      `Built-in Preset ${options.definition.metadata.name} does not support Package Addition`,
+    );
+  }
+  const packagePath =
+    options.packagePath ??
+    options.definition.defaultPackagePath?.({
+      context,
+      packageLeafName: options.packageLeafName,
+    });
+  if (packagePath === undefined) {
+    throw new Error(
+      `Built-in Preset ${options.definition.metadata.name} must own a default Package Path or receive an explicit Package Path`,
+    );
+  }
+  const contribution = options.definition.planPackageAddition({
+    context,
+    packageLeafName: options.packageLeafName,
+    packagePath,
+  });
+  return planGeneratedRepositoryPackageAdditionFromPreparedContribution({
+    ...options,
+    packagePath,
+    contribution,
+  });
+}
+
+function collectPackageAdditionInput(options: {
+  readonly preset: string;
+  readonly packageLeafName: string;
+  readonly packagePath?: string;
+  readonly linkFrom?: readonly string[];
+}):
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly PackageAdditionInputIssue[];
+    }
+  | {
+      readonly status: "valid";
+      readonly definition: BuiltInPresetDefinition;
+      readonly linkFrom: readonly string[];
+    } {
+  const issues: PackageAdditionInputIssue[] = [];
+  const definition = builtInPresetRegistry
+    .all()
+    .find((candidate) => candidate.metadata.name === options.preset);
+  if (definition === undefined) issues.push({ code: "PRESET_UNKNOWN" });
+  else if (definition.planPackageAddition === undefined)
+    issues.push({ code: "PRESET_NOT_ADDABLE" });
+  if (!isValidNewNpmPackageName(`@x/${options.packageLeafName}`)) {
+    issues.push({ code: "INVALID_PACKAGE_NAME" });
+  }
+  if (options.packagePath !== undefined) {
+    const validation = validateNewPackagePath(options.packagePath);
+    if (!validation.hasValidShape)
+      issues.push({ code: "INVALID_PACKAGE_PATH" });
+    if (validation.reservedWorkspaceCollection !== undefined) {
+      issues.push({ code: "RESERVED_PACKAGE_PATH" });
+    }
+  }
+  const linkFrom = [...new Set(options.linkFrom ?? [])];
+  for (const consumerPackagePath of linkFrom) {
+    const validation = validateNewPackagePath(consumerPackagePath);
+    if (!validation.hasValidShape) {
+      issues.push({ code: "INVALID_LINK_FROM" });
+    }
+    if (validation.reservedWorkspaceCollection !== undefined)
+      issues.push({ code: "RESERVED_LINK_FROM" });
+  }
+  if (issues.length > 0 || definition === undefined) {
+    return { status: "input-invalid", issues };
+  }
+  return { status: "valid", definition, linkFrom };
+}
+
+/**
+ * Command-owned preparation: user input is checked before local metadata or any
+ * Preset default/planner work; all remaining failures are deliberately bounded.
+ */
+export function prepareGeneratedRepositoryPackageAddition(options: {
+  readonly repositoryRoot: string;
+  readonly preset: string;
+  readonly packageLeafName: string;
+  readonly packagePath?: string;
+  readonly linkFrom?: readonly string[];
+}): PackageAdditionPreparation {
+  const input = collectPackageAdditionInput(options);
+  if (input.status === "input-invalid") return input;
+  let localTemplateMetadata: LocalTemplateMetadata;
+  try {
+    localTemplateMetadata = loadLocalTemplateMetadata(options.repositoryRoot);
+  } catch {
+    return { status: "operation-failure", phase: "metadata" };
+  }
+  if (
+    input.linkFrom.some(
+      (consumerPackagePath) =>
+        !localTemplateMetadata.blueprint.packages.some(
+          (candidate) => candidate.path === consumerPackagePath,
+        ),
+    )
+  ) {
+    return {
+      status: "input-invalid",
+      issues: [{ code: "UNKNOWN_LINK_FROM" }],
+    };
+  }
+  let packagePath = options.packagePath;
+  if (packagePath === undefined) {
+    try {
+      packagePath = input.definition.defaultPackagePath?.({
+        context: localTemplateMetadata.context,
+        packageLeafName: options.packageLeafName,
+      });
+    } catch {
+      return { status: "operation-failure", phase: "default" };
+    }
+    const defaultPathValidation =
+      packagePath === undefined
+        ? undefined
+        : validateNewPackagePath(packagePath);
+    if (
+      defaultPathValidation === undefined ||
+      !defaultPathValidation.hasValidShape ||
+      defaultPathValidation.reservedWorkspaceCollection !== undefined
+    ) {
+      return { status: "operation-failure", phase: "default" };
+    }
+  }
+  if (packagePath === undefined) {
+    return { status: "operation-failure", phase: "default" };
+  }
+  let provider: PlannedPackageContribution;
+  try {
+    provider = input.definition.planPackageAddition!({
+      context: localTemplateMetadata.context,
+      packageLeafName: options.packageLeafName,
+      packagePath,
+    });
+  } catch {
+    return { status: "operation-failure", phase: "planning" };
+  }
+  const contributionsByPath = new Map(
+    localTemplateMetadata[
+      localTemplateMetadataStateKey
+    ].packageContributions.map((contribution) => [
+      contribution.definition.path,
+      contribution,
+    ]),
+  );
+  if (
+    input.linkFrom.length > 0 &&
+    (!canProvideSourceConditionPackageNameImport(provider) ||
+      input.linkFrom.some((consumerPackagePath) => {
+        const consumer = contributionsByPath.get(consumerPackagePath);
+        return (
+          consumer === undefined ||
+          !canConsumeNodePackageNameImport(consumer) ||
+          !canLinkNodePackageRoles(
+            consumer.definition.role,
+            provider.definition.role,
+          )
+        );
+      }))
+  ) {
+    return { status: "input-invalid", issues: [{ code: "UNSUPPORTED_LINK" }] };
+  }
+  try {
+    return {
+      status: "ready",
+      definition: input.definition,
+      plan: planGeneratedRepositoryPackageAdditionFromPreparedContribution({
+        definition: input.definition,
+        localTemplateMetadata,
+        packageLeafName: options.packageLeafName,
+        packagePath,
+        contribution: provider,
+        ...(input.linkFrom.length === 0 ? {} : { linkFrom: input.linkFrom }),
+      }),
+    };
+  } catch (error) {
+    if (error instanceof PackageAdditionBusinessConflict) {
+      return { status: "conflict", conflict: error };
+    }
+    return { status: "operation-failure", phase: "planning" };
+  }
 }

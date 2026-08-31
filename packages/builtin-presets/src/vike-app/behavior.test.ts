@@ -45,7 +45,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
   it("registers the complete Vike application Definition", () => {
     expect(builtInPresetRegistry.require("vike-app").metadata).toMatchObject({
       name: "vike-app",
-      title: "Vike app",
+      title: "Vike 应用",
     });
   });
 
@@ -558,7 +558,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         "check:deployment":
           "turbo run deployment --output-logs=errors-only --log-order=grouped --log-prefix=task",
         check:
-          "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+          "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
         fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
       },
     });

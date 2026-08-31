@@ -54,11 +54,8 @@ async function checkContributionTemplateSource(
   const formattedFiles = sourceFiles.filter((sourceFile) =>
     formattedTemplateSourceFile.test(sourceFile),
   );
-  const lintedFiles = sourceFiles.filter(
-    (sourceFile) =>
-      lintedTemplateSourceFile.test(sourceFile) &&
-      !sourceFile.endsWith("/foundation/scripts/check-boundaries.ts") &&
-      !sourceFile.endsWith("/foundation/scripts/run-root-owned-task.ts"),
+  const lintedFiles = sourceFiles.filter((sourceFile) =>
+    lintedTemplateSourceFile.test(sourceFile),
   );
   const rustSourceFiles = sourceFiles.filter((sourceFile) =>
     sourceFile.endsWith(".rs"),

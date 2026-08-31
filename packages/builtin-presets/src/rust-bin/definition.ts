@@ -159,9 +159,8 @@ const binaryReplayAdapter = definePackageContributionReplayAdapter({
 export const rustBinDefinition = {
   metadata: {
     name: "rust-bin",
-    title: "Rust binary",
-    description:
-      "Rust native binary workspace with rustfmt, clippy, and cargo tests.",
+    title: "Rust 二进制程序",
+    description: "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
   },
   source: templateSources.rustBin,
   plannerSourceFile: fileURLToPath(import.meta.url),

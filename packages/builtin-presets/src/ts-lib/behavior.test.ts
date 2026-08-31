@@ -72,12 +72,10 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       },
       scripts: {
         build: "tsc -p tsconfig.build.json --pretty false",
-        "format:check":
-          "oxfmt --list-different --config ../../oxfmt.config.ts .",
-        "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-        lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
-        "lint:fix":
-          "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+        "format:check": "oxfmt --list-different .",
+        "format:write": "oxfmt --write .",
+        lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+        "lint:fix": "oxlint --format=unix . --fix",
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
@@ -85,9 +83,8 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
     expect(contribution).not.toHaveProperty("fixes");
     expect(contribution.manifest).toMatchObject({
       scripts: {
-        "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-        "lint:fix":
-          "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+        "format:write": "oxfmt --write .",
+        "lint:fix": "oxlint --format=unix . --fix",
       },
     });
     expect(contribution.operations).toContainEqual({
@@ -115,7 +112,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       value: {
         scripts: {
           check:
-            "turbo run boundaries format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
           fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
         },
       },
@@ -377,6 +374,59 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       });
       await execa("pnpm", ["install"], { cwd: targetDir });
       const packagePath = plan.blueprint.packages[0]!.path;
+      await mkdir(path.join(targetDir, "scripts"), { recursive: true });
+      await mkdir(path.join(targetDir, packagePath, "scripts"), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(targetDir, "scripts/automation-probe.ts"),
+        'export const rootAutomationProbe = "root";\n',
+      );
+      await writeFile(
+        path.join(targetDir, packagePath, "scripts/automation-probe.ts"),
+        'export const packageAutomationProbe = "package";\n',
+      );
+      await execa("pnpm", ["run", "format:check"], { cwd: targetDir });
+      await execa("pnpm", ["run", "lint"], { cwd: targetDir });
+      await execa("pnpm", ["run", "typecheck"], { cwd: targetDir });
+      for (const command of ["format:check", "lint", "typecheck"] as const) {
+        await execa("pnpm", ["--filter", `./${packagePath}`, "run", command], {
+          cwd: targetDir,
+        });
+      }
+      const showConfig = async (
+        args: readonly string[],
+        configName: string,
+      ): Promise<{ readonly files: readonly string[] }> => {
+        const shown = await execa(
+          "pnpm",
+          [...args, "exec", "tsc", "-p", configName, "--showConfig"],
+          { cwd: targetDir },
+        );
+        return JSON.parse(shown.stdout) as {
+          readonly files: readonly string[];
+        };
+      };
+      const rootConfig = await showConfig([], "tsconfig.json");
+      const packageConfig = await showConfig(
+        ["--filter", `./${packagePath}`],
+        "tsconfig.json",
+      );
+      const packageBuildConfig = await showConfig(
+        ["--filter", `./${packagePath}`],
+        "tsconfig.build.json",
+      );
+      expect(rootConfig.files).toContain("./scripts/automation-probe.ts");
+      expect(rootConfig.files).not.toContain(
+        `./${packagePath}/scripts/automation-probe.ts`,
+      );
+      expect(packageConfig.files).toContain("./scripts/automation-probe.ts");
+      expect(packageBuildConfig.files).not.toContain(
+        "./scripts/automation-probe.ts",
+      );
+      await execa("pnpm", ["--filter", `./${packagePath}`, "run", "build"], {
+        cwd: targetDir,
+      });
       const compilerVersion = await execa(
         "pnpm",
         ["--filter", `./${packagePath}`, "exec", "tsc", "--version"],

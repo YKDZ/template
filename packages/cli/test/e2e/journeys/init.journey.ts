@@ -121,6 +121,8 @@ const journey: CliJourney = {
     assert.equal(results[0]?.exitCode, 0);
     const preview = JSON.parse(results[0]?.stdout ?? "");
     assert.equal(preview.command, "init");
+    assert.equal(preview.status, "success");
+    assert.equal(preview.cliVersion, "0.0.36");
     assert.equal(preview.dryRun, true);
     assert.equal(preview.targetDir, "preview");
     assert.deepEqual(preview.resolved, {
@@ -137,25 +139,19 @@ const journey: CliJourney = {
       code: "ENOENT",
     });
 
-    assert.equal(results[1]?.exitCode, 1);
-    assert.match(
-      results[1]?.stderr ?? "",
-      /fixed initial package topology and does not accept --name or --path/u,
-    );
+    assert.equal(results[1]?.exitCode, 64);
+    assert.match(results[1]?.stderr ?? "", /固定初始包拓扑/u);
     await assert.rejects(stat(path.join(context.workDir, "fixed-rejected")), {
       code: "ENOENT",
     });
 
-    assert.equal(results[2]?.exitCode, 1);
-    assert.match(
-      results[2]?.stderr ?? "",
-      /Non-interactive init requires --yes/u,
-    );
+    assert.equal(results[2]?.exitCode, 64);
+    assert.match(results[2]?.stderr ?? "", /非交互式初始化必须显式传入 --yes/u);
 
-    assert.equal(results[3]?.exitCode, 1);
+    assert.equal(results[3]?.exitCode, 64);
     assert.match(
       results[3]?.stderr ?? "",
-      /--scope must be a valid npm scope without whitespace/u,
+      /--scope 必须是不含空白字符的有效 npm scope/u,
     );
     await assert.rejects(stat(path.join(context.workDir, "invalid-scope")), {
       code: "ENOENT",
@@ -179,8 +175,8 @@ const journey: CliJourney = {
       code: "ENOENT",
     });
 
-    assert.equal(results[5]?.exitCode, 1);
-    assert.match(results[5]?.stderr ?? "", /Target directory is not empty/u);
+    assert.equal(results[5]?.exitCode, 65);
+    assert.match(results[5]?.stderr ?? "", /OPERATION_INIT_FAILED/u);
   },
 };
 

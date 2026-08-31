@@ -208,7 +208,8 @@ describe("Non-Destructive Package Addition", () => {
         ),
       ).resolves.toMatchObject({
         compilerOptions: { allowJs: true, checkJs: true },
-        include: expect.arrayContaining([".pnpmfile.mjs"]),
+        files: [".pnpmfile.mjs"],
+        include: ["*.config.ts", "scripts/**/*.ts"],
       });
 
       await execa("pnpm", ["install"], { cwd: targetDir });

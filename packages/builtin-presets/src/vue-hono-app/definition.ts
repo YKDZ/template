@@ -22,10 +22,10 @@ function apiScripts(): Record<string, string> {
   return {
     build: "tsc -p tsconfig.build.json",
     dev: "node --conditions=source --watch src/server.ts",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
     start: "node dist/server.js",
     test: "vitest run --reporter=agent --silent=passed-only",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
@@ -198,9 +198,8 @@ const webReplayAdapter = definePackageContributionReplayAdapter({
 export const vueHonoAppDefinition = {
   metadata: {
     name: "vue-hono-app",
-    title: "Vue Hono app",
-    description:
-      "Full-stack Vue and Hono workspace with separated app package boundaries.",
+    title: "Vue Hono 全栈应用",
+    description: "采用独立应用包边界的 Vue 与 Hono 全栈工作区。",
   },
   source: templateSources.vueHonoApp,
   plannerSourceFile: fileURLToPath(import.meta.url),

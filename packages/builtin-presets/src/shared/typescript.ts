@@ -13,14 +13,19 @@ import { templateSources } from "../template-sources.ts";
 
 const typescriptConfigPackageReplacement = "TYPESCRIPT_CONFIG_PACKAGE";
 
+type TypescriptConfigFoundationContext = Pick<
+  GenerationContext,
+  "foundationPackages"
+>;
+
 export function typescriptConfigPackageName(
-  context: GenerationContext,
+  context: TypescriptConfigFoundationContext,
 ): string {
   return context.foundationPackages.typescriptConfiguration.name;
 }
 
 export function typescriptConfigPackageDefinition(
-  context: GenerationContext,
+  context: TypescriptConfigFoundationContext,
 ): PackageDefinition {
   return {
     name: typescriptConfigPackageName(context),
@@ -60,9 +65,8 @@ export function typescriptConfigContribution(
       private: true,
       files: ["base.json"],
       scripts: {
-        "format:check":
-          "oxfmt --list-different --config ../../oxfmt.config.ts .",
-        "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
+        "format:check": "oxfmt --list-different .",
+        "format:write": "oxfmt --write .",
       },
       devDependencies: { oxfmt: "catalog:" },
       engines: { node: context.toolchain.nodeLtsMajor },

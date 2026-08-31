@@ -10,7 +10,7 @@
     "moduleResolution": "bundler",
     "rootDir": ".",
     "skipLibCheck": true,
-    "target": "es2023",
+    "target": "es2024",
     "types": ["node"]
   },
   "include": [

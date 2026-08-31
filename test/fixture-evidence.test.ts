@@ -4704,7 +4704,6 @@ describe("Fixture Verification Evidence", () => {
           "exec",
           "turbo",
           "run",
-          "boundaries",
           "format:check",
           "lint",
           "typecheck",

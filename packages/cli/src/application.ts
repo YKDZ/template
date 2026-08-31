@@ -3,10 +3,17 @@ import path from "node:path";
 
 import {
   builtInPresetRegistry,
-  loadLocalTemplateMetadata,
+  prepareGeneratedRepositoryPackageAddition,
+  validateGeneratedRepositoryInitializationInput,
   prepareGeneratedRepositoryInitialization,
-  planGeneratedRepositoryPackageAddition,
   templateSources,
+  type GeneratedRepositoryPlan,
+  type InitializationInputIssue,
+  type PackageAdditionInputIssue,
+  type NextStepInstruction,
+  type ProjectBlueprint,
+  type PublicationSetupHandoff,
+  type ResolvedInitialization,
 } from "#template-builtin-presets";
 import { validateProjectBlueprint } from "#template-core/project-blueprint";
 import {
@@ -61,13 +68,110 @@ export type AddPackageCommandOptions = {
   readonly json: boolean;
 };
 
-export type ApplicationCommandResult = {
-  readonly exitCode: number;
-  readonly stdout?: string;
-  readonly stderr?: string;
+export type InitCommandResult =
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "init";
+      readonly status: "success";
+      readonly dryRun: boolean;
+      readonly targetDir: string;
+      readonly resolved: ResolvedInitialization;
+      readonly blueprint: ProjectBlueprint;
+      readonly generationRecord: GeneratedRepositoryPlan["generationRecord"];
+      readonly toolchain: ReturnType<typeof toolchainReport>;
+      readonly nextSteps: readonly NextStepInstruction[];
+      readonly publicationSetup: PublicationSetupHandoff;
+      readonly followUpDocument: {
+        readonly enabled: boolean;
+        readonly path?: string;
+      };
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "init";
+      readonly status: "cancelled";
+      readonly code: "CANCELLED";
+      readonly targetDir: string;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "init";
+      readonly status: "usage-error";
+      readonly code: "USAGE_INIT_INVALID";
+      readonly targetDir: string;
+      readonly issues: readonly (
+        | InitializationInputIssue
+        | { readonly code: "NON_INTERACTIVE_CONFIRMATION_REQUIRED" }
+      )[];
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "init";
+      readonly status: "operation-failure";
+      readonly code: "OPERATION_INIT_FAILED";
+      readonly phase:
+        | "toolchain"
+        | "preset"
+        | "planning"
+        | "preflight"
+        | "materialization"
+        | "render";
+      readonly targetDir: string;
+      readonly error: { readonly message: string; readonly suggestion: string };
+    };
+
+type PresetCatalogEntry = {
+  readonly name: string;
+  readonly title: string;
+  readonly description: string;
 };
 
-type PackageAdditionCliConflict = Omit<
+export type PresetCatalogCommandResult = {
+  readonly schemaVersion: 1;
+  readonly command: "presets";
+  readonly status: "success";
+  readonly presets: readonly PresetCatalogEntry[];
+};
+
+export type BlueprintValidationCommandResult =
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "blueprint validate";
+      readonly status: "success";
+      readonly path: string;
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "blueprint validate";
+      readonly status: "invalid";
+      readonly code: "BLUEPRINT_INVALID";
+      readonly path: string;
+      readonly issues: readonly {
+        readonly path: string;
+        readonly message: string;
+      }[];
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "blueprint validate";
+      readonly status: "operation-failure";
+      readonly code:
+        | "OPERATION_BLUEPRINT_READ_FAILED"
+        | "OPERATION_BLUEPRINT_PARSE_FAILED";
+      readonly path: string;
+      readonly reason:
+        | "not-found"
+        | "permission-denied"
+        | "not-a-file"
+        | "unreadable"
+        | "invalid-json";
+      readonly error: {
+        readonly message: string;
+        readonly suggestion: string;
+      };
+    };
+
+type PackageAdditionCoreConflict = Omit<
   ProjectProjectionConflict,
   "before" | "current" | "after"
 > & {
@@ -78,7 +182,25 @@ type PackageAdditionCliConflict = Omit<
   };
 };
 
-type PackageAdditionCliResult =
+type PackageAdditionBusinessConflict = {
+  readonly kind: "identity" | "missing-link";
+  readonly existing: {
+    readonly name: string;
+    readonly path: string;
+    readonly role: string;
+  };
+  readonly requested: {
+    readonly name: string;
+    readonly path: string;
+    readonly role: string;
+  };
+  readonly missingLink?: {
+    readonly consumerPackagePath: string;
+    readonly providerPackagePath: string;
+  };
+};
+
+export type PackageAdditionCommandResult =
   | {
       readonly schemaVersion: 1;
       readonly command: "add package";
@@ -92,22 +214,38 @@ type PackageAdditionCliResult =
       readonly status: "conflict";
       readonly dryRun: boolean;
       readonly actions: readonly [];
-      readonly conflicts: readonly PackageAdditionCliConflict[];
+      readonly conflicts: readonly (
+        | PackageAdditionCoreConflict
+        | PackageAdditionBusinessConflict
+      )[];
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "add package";
+      readonly status: "usage-error";
+      readonly code: "USAGE_ADD_PACKAGE_INVALID";
+      readonly issues: readonly PackageAdditionInputIssue[];
+    }
+  | {
+      readonly schemaVersion: 1;
+      readonly command: "add package";
+      readonly status: "operation-failure";
+      readonly code: "OPERATION_ADD_PACKAGE_FAILED";
+      readonly phase: "metadata" | "default" | "planning" | "reconciliation";
+      readonly error: { readonly message: string; readonly suggestion: string };
     };
 
-export function formatPresetCatalog(): string {
-  return [
-    "Built-in presets",
-    "",
-    ...formatRows(
-      builtInPresetRegistry
-        .all()
-        .map((definition) => [
-          definition.metadata.name,
-          `${definition.metadata.title} - ${definition.metadata.description}`,
-        ]),
-    ),
-  ].join("\n");
+export function listPresetCatalog(): PresetCatalogCommandResult {
+  return {
+    schemaVersion: 1,
+    command: "presets",
+    status: "success",
+    presets: builtInPresetRegistry.all().map((definition) => ({
+      name: definition.metadata.name,
+      title: definition.metadata.title,
+      description: definition.metadata.description,
+    })),
+  };
 }
 
 function toolchainSourceFromEnv(
@@ -145,16 +283,9 @@ function formatRows(rows: readonly (readonly [string, string])[]): string[] {
   );
 }
 
-function formatLineSpan(span: {
-  readonly startLine: number;
-  readonly lineCount: number;
-}): string {
-  return `line ${span.startLine} (${span.lineCount} line${span.lineCount === 1 ? "" : "s"})`;
-}
-
 function packageAdditionConflict(
   conflict: ProjectProjectionConflict,
-): PackageAdditionCliConflict {
+): PackageAdditionCoreConflict {
   const { before, current, after, ...details } = conflict;
   return {
     ...details,
@@ -162,100 +293,209 @@ function packageAdditionConflict(
   };
 }
 
-export function renderPackageAdditionResult(
-  result: PackageAdditionCliResult,
-  options: AddPackageCommandOptions,
-  preset: string,
-): string {
-  if (result.status === "conflict") {
-    return [
-      "Package Addition conflict",
-      "",
-      ...result.conflicts.flatMap((conflict) => [
-        `  ${conflict.path} (${conflict.driver})`,
-        ...(conflict.location === undefined
-          ? []
-          : [`    Location: ${conflict.location || "<document root>"}`]),
-        ...(conflict.region === undefined
-          ? []
-          : [
-              `    Region: Before ${formatLineSpan(conflict.region.before)}; Current ${formatLineSpan(conflict.region.current)}; After ${formatLineSpan(conflict.region.after)}`,
-            ]),
-        ...(conflict.attribute === undefined
-          ? []
-          : [`    Attribute: ${conflict.attribute}`]),
-        `    Reason: ${conflict.reason}`,
-        `    Before: ${conflict.context.before}`,
-        `    Current: ${conflict.context.current}`,
-        `    After: ${conflict.context.after}`,
-      ]),
-    ].join("\n");
-  }
-  return [
-    result.dryRun ? "Package Addition preview" : "Added package",
-    "",
-    ...formatRows([
-      ["Preset", preset],
-      ["Name", options.name],
-    ]),
-    "",
-    ...(result.actions.length === 0
-      ? ["No changes"]
-      : result.actions.map(
-          (action) => `  ${action.action} ${action.path} (${action.driver})`,
-        )),
-  ].join("\n");
-}
-
 export async function validateBlueprintFile(
   filePath: string,
   runtime: ApplicationRuntime,
-): Promise<string> {
-  const value: unknown = JSON.parse(
-    await readFile(path.resolve(runtime.cwd, filePath), "utf8"),
-  );
+): Promise<BlueprintValidationCommandResult> {
+  const resolvedPath = path.resolve(runtime.cwd, filePath);
+  let source: string;
+  try {
+    source = await readFile(resolvedPath, "utf8");
+  } catch (error) {
+    return readBlueprintFailure(resolvedPath, error);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch {
+    return {
+      schemaVersion: 1,
+      command: "blueprint validate",
+      status: "operation-failure",
+      code: "OPERATION_BLUEPRINT_PARSE_FAILED",
+      path: resolvedPath,
+      reason: "invalid-json",
+      error: {
+        message: "Blueprint JSON 格式无效。",
+        suggestion: "修正 JSON 语法后重新验证；若文件来源不明确，请人工处理。",
+      },
+    };
+  }
   const result = validateProjectBlueprint(value);
   if (!result.ok) {
-    throw new Error(
-      result.issues
-        .map((issue) => `${issue.path}: ${issue.message}`)
-        .join("\n"),
-    );
+    return {
+      schemaVersion: 1,
+      command: "blueprint validate",
+      status: "invalid",
+      code: "BLUEPRINT_INVALID",
+      path: resolvedPath,
+      issues: result.issues,
+    };
   }
-  return "Blueprint is valid";
+  return {
+    schemaVersion: 1,
+    command: "blueprint validate",
+    status: "success",
+    path: resolvedPath,
+  };
+}
+
+function readBlueprintFailure(
+  filePath: string,
+  error: unknown,
+): Extract<
+  BlueprintValidationCommandResult,
+  { readonly status: "operation-failure" }
+> {
+  const errorCode =
+    typeof error === "object" && error !== null && "code" in error
+      ? error.code
+      : undefined;
+  const [reason, message, suggestion]: readonly [
+    Extract<
+      BlueprintValidationCommandResult,
+      { readonly status: "operation-failure" }
+    >["reason"],
+    string,
+    string,
+  ] =
+    errorCode === "ENOENT"
+      ? ["not-found", "找不到 Blueprint 文件。", "检查路径是否正确后重新验证。"]
+      : errorCode === "EACCES" || errorCode === "EPERM"
+        ? [
+            "permission-denied",
+            "没有读取 Blueprint 文件的权限。",
+            "授予读取权限后重新验证；若权限归属不明确，请人工处理。",
+          ]
+        : errorCode === "EISDIR" || errorCode === "ENOTDIR"
+          ? [
+              "not-a-file",
+              "Blueprint 目标不是可读取的文件。",
+              "提供一个可读取的 Blueprint JSON 文件路径后重新验证。",
+            ]
+          : [
+              "unreadable",
+              "无法读取 Blueprint 文件。",
+              "检查路径、文件权限和挂载状态后重试；若需要其他访问权限，请人工处理。",
+            ];
+  return {
+    schemaVersion: 1,
+    command: "blueprint validate",
+    status: "operation-failure",
+    code: "OPERATION_BLUEPRINT_READ_FAILED",
+    path: filePath,
+    reason,
+    error: { message, suggestion },
+  };
+}
+
+function initOperationFailure(options: {
+  readonly phase: Extract<
+    InitCommandResult,
+    { readonly status: "operation-failure" }
+  >["phase"];
+  readonly targetDir: string;
+}): Extract<InitCommandResult, { readonly status: "operation-failure" }> {
+  const phase =
+    options.phase === "toolchain"
+      ? "工具链解析"
+      : options.phase === "preset"
+        ? "预设准备"
+        : options.phase === "planning"
+          ? "生成规划"
+          : options.phase === "preflight"
+            ? "生成预检"
+            : options.phase === "materialization"
+              ? "生成物料化"
+              : "目标目录渲染";
+  return {
+    schemaVersion: 1,
+    command: "init",
+    status: "operation-failure",
+    code: "OPERATION_INIT_FAILED",
+    phase: options.phase,
+    targetDir: options.targetDir,
+    error: {
+      message: `${phase}失败。`,
+      suggestion: "检查目标目录与运行环境后重试；若问题持续发生，请人工处理。",
+    },
+  };
 }
 
 export async function runInit(
   options: InitCommandOptions,
   runtime: ApplicationRuntime,
-): Promise<string> {
-  const definition = builtInPresetRegistry.require(options.preset);
-  const toolchain = await resolveToolchain(runtime.env);
+): Promise<InitCommandResult> {
+  if (
+    !options.dryRun &&
+    !options.yes &&
+    (options.json || !runtime.tty.stdin || !runtime.tty.stdout)
+  ) {
+    return {
+      schemaVersion: 1,
+      command: "init",
+      status: "usage-error",
+      code: "USAGE_INIT_INVALID",
+      targetDir: options.dir,
+      issues: [{ code: "NON_INTERACTIVE_CONFIRMATION_REQUIRED" }],
+    };
+  }
+  const targetDir = path.resolve(runtime.cwd, options.dir);
+  const overrides =
+    (options.name ?? options.path ?? options.scope) === undefined
+      ? undefined
+      : {
+          ...(options.name === undefined ? {} : { name: options.name }),
+          ...(options.path === undefined ? {} : { path: options.path }),
+          ...(options.scope === undefined ? {} : { scope: options.scope }),
+        };
+  const input = validateGeneratedRepositoryInitializationInput({
+    preset: options.preset,
+    targetDir,
+    ...(overrides === undefined ? {} : { overrides }),
+  });
+  if (input.status === "input-invalid") {
+    return {
+      schemaVersion: 1,
+      command: "init",
+      status: "usage-error",
+      code: "USAGE_INIT_INVALID",
+      targetDir: options.dir,
+      issues: input.issues,
+    };
+  }
+  let toolchain: ResolvedToolchainVersions;
+  try {
+    toolchain = await resolveToolchain(runtime.env);
+  } catch {
+    return initOperationFailure({ phase: "toolchain", targetDir: options.dir });
+  }
   const preparation = prepareGeneratedRepositoryInitialization({
-    definition,
-    targetDir: path.resolve(runtime.cwd, options.dir),
+    preset: options.preset,
+    targetDir,
     toolchain: {
       nodeLtsMajor: toolchain.nodeLtsMajor.value,
       packageManagerPin: toolchain.packageManagerPin.value,
     },
-    ...((options.name ?? options.path ?? options.scope) === undefined
-      ? {}
-      : {
-          overrides: {
-            ...(options.name === undefined ? {} : { name: options.name }),
-            ...(options.path === undefined ? {} : { path: options.path }),
-            ...(options.scope === undefined ? {} : { scope: options.scope }),
-          },
-        }),
+    ...(overrides === undefined ? {} : { overrides }),
   });
+  if (preparation.status === "input-invalid") {
+    return {
+      schemaVersion: 1,
+      command: "init",
+      status: "usage-error",
+      code: "USAGE_INIT_INVALID",
+      targetDir: options.dir,
+      issues: preparation.issues,
+    };
+  }
+  if (preparation.status === "operation-failure") {
+    return initOperationFailure({
+      phase: preparation.phase,
+      targetDir: options.dir,
+    });
+  }
   const { plan, resolved, publicationSetup } = preparation;
-  const resolvedPackageRows: readonly (readonly [string, string])[] = [
-    ["Name", resolved.packages.map(({ name }) => name).join(", ")],
-    [
-      "Path",
-      resolved.packages.map(({ path: packagePath }) => packagePath).join(", "),
-    ],
-  ];
   const operations = [
     ...plan.operations,
     ...(options.todo
@@ -277,12 +517,21 @@ export async function runInit(
         ]
       : []),
   ];
-  await materializeProjectProjection({
-    operations,
-    reconciliation: plan.reconciliation,
-  });
-  const output = {
+  try {
+    await materializeProjectProjection({
+      operations,
+      reconciliation: plan.reconciliation,
+    });
+  } catch {
+    return initOperationFailure({
+      phase: "materialization",
+      targetDir: options.dir,
+    });
+  }
+  const output: Extract<InitCommandResult, { readonly status: "success" }> = {
+    schemaVersion: 1,
     command: "init",
+    status: "success",
     dryRun: options.dryRun,
     targetDir: options.dir,
     resolved,
@@ -293,88 +542,118 @@ export async function runInit(
     publicationSetup,
     followUpDocument: {
       enabled: options.todo,
-      path: options.todo ? "TODO.md" : undefined,
+      ...(options.todo ? { path: "TODO.md" } : {}),
     },
   };
-  if (options.dryRun) return JSON.stringify(output, null, 2);
+  if (options.dryRun) return output;
 
-  if (
-    !options.yes &&
-    (options.json || !runtime.tty.stdin || !runtime.tty.stdout)
-  ) {
-    throw new Error("Non-interactive init requires --yes");
-  }
   if (
     !options.yes &&
     !(await runtime.confirmation.confirm({
       message: [
-        "Planned project",
+        "计划生成的项目",
         "",
         ...formatRows([
-          ["Preset", resolved.preset],
-          ...resolvedPackageRows,
+          ["预设", resolved.preset],
+          ["名称", resolved.packages.map(({ name }) => name).join(", ")],
+          [
+            "路径",
+            resolved.packages
+              .map(({ path: packagePath }) => packagePath)
+              .join(", "),
+          ],
           ["Scope", resolved.scope],
-          ["Target", options.dir],
-          ["Packages", String(plan.blueprint.packages.length)],
+          ["目标", options.dir],
+          ["包数量", String(plan.blueprint.packages.length)],
         ]),
       ].join("\n"),
-      prompt: "Generate this project? [y/N] ",
+      prompt: "生成这个项目？[y/N] ",
     }))
   ) {
-    throw new Error("Init cancelled");
+    return {
+      schemaVersion: 1,
+      command: "init",
+      status: "cancelled",
+      code: "CANCELLED",
+      targetDir: options.dir,
+    };
   }
 
-  await renderNewProject({
-    targetRoot: path.resolve(runtime.cwd, options.dir),
-    operations,
-  });
-  if (options.json) return JSON.stringify(output, null, 2);
-  return [
-    "Initialized project",
-    "",
-    ...formatRows([
-      ["Preset", resolved.preset],
-      ...resolvedPackageRows,
-      ["Scope", resolved.scope],
-      ["Target", options.dir],
-    ]),
-    "",
-    "Next steps",
-    "",
-    ...plan.nextStepInstructions.map(
-      (instruction, index) => `  ${index + 1}. ${instruction.display}`,
-    ),
-    ...(publicationSetup === null
-      ? []
-      : [
-          "",
-          "One-time npm publication setup",
-          "",
-          `  ${publicationSetup.command}`,
-        ]),
-  ].join("\n");
+  try {
+    await renderNewProject({
+      targetRoot: path.resolve(runtime.cwd, options.dir),
+      operations,
+    });
+  } catch {
+    return initOperationFailure({ phase: "render", targetDir: options.dir });
+  }
+  return output;
 }
 
 export async function runAddPackage(
   options: AddPackageCommandOptions,
   runtime: ApplicationRuntime,
-): Promise<ApplicationCommandResult> {
-  const localTemplateMetadata = loadLocalTemplateMetadata(runtime.cwd);
-  const definition = builtInPresetRegistry.require(options.preset);
-  const plan = planGeneratedRepositoryPackageAddition({
-    definition,
-    localTemplateMetadata,
+): Promise<PackageAdditionCommandResult> {
+  const preparation = prepareGeneratedRepositoryPackageAddition({
+    repositoryRoot: runtime.cwd,
+    preset: options.preset,
     packageLeafName: options.name,
-    ...(options.path ? { packagePath: options.path } : {}),
-    ...(options.linkFrom.length > 0 ? { linkFrom: options.linkFrom } : {}),
+    ...(options.path === undefined ? {} : { packagePath: options.path }),
+    ...(options.linkFrom.length === 0 ? {} : { linkFrom: options.linkFrom }),
   });
-  const reconciliation = await reconcileAndApplyProjectProjections({
-    targetRoot: runtime.cwd,
-    ...plan.projectProjections,
-    dryRun: options.dryRun,
-  });
+  if (preparation.status === "input-invalid") {
+    return {
+      schemaVersion: 1,
+      command: "add package",
+      status: "usage-error",
+      code: "USAGE_ADD_PACKAGE_INVALID",
+      issues: preparation.issues,
+    };
+  }
+  if (preparation.status === "operation-failure") {
+    return packageAdditionOperationFailure(preparation.phase);
+  }
+  if (preparation.status === "conflict") {
+    return {
+      schemaVersion: 1,
+      command: "add package",
+      status: "conflict",
+      dryRun: options.dryRun,
+      actions: [],
+      conflicts: [
+        {
+          kind: preparation.conflict.kind,
+          existing: {
+            name: preparation.conflict.existing.name,
+            path: preparation.conflict.existing.path,
+            role: preparation.conflict.existing.role,
+          },
+          requested: {
+            name: preparation.conflict.requested.name,
+            path: preparation.conflict.requested.path,
+            role: preparation.conflict.requested.role,
+          },
+          ...(preparation.conflict.missingLink === undefined
+            ? {}
+            : { missingLink: preparation.conflict.missingLink }),
+        },
+      ],
+    };
+  }
+  let reconciliation: Awaited<
+    ReturnType<typeof reconcileAndApplyProjectProjections>
+  >;
+  try {
+    reconciliation = await reconcileAndApplyProjectProjections({
+      targetRoot: runtime.cwd,
+      ...preparation.plan.projectProjections,
+      dryRun: options.dryRun,
+    });
+  } catch {
+    return packageAdditionOperationFailure("reconciliation");
+  }
   if (!reconciliation.ok) {
-    const output: PackageAdditionCliResult = {
+    return {
       schemaVersion: 1,
       command: "add package",
       status: "conflict",
@@ -382,24 +661,29 @@ export async function runAddPackage(
       actions: [],
       conflicts: reconciliation.conflicts.map(packageAdditionConflict),
     };
-    return options.json
-      ? { exitCode: 1, stdout: JSON.stringify(output, null, 2) }
-      : {
-          exitCode: 1,
-          stderr: renderPackageAdditionResult(output, options, options.preset),
-        };
   }
-  const output: PackageAdditionCliResult = {
+  return {
     schemaVersion: 1,
     command: "add package",
     status: "success",
     dryRun: options.dryRun,
     actions: reconciliation.actions,
   };
+}
+
+function packageAdditionOperationFailure(
+  phase: "metadata" | "default" | "planning" | "reconciliation",
+): PackageAdditionCommandResult {
   return {
-    exitCode: 0,
-    stdout: options.json
-      ? JSON.stringify(output, null, 2)
-      : renderPackageAdditionResult(output, options, definition.metadata.name),
+    schemaVersion: 1,
+    command: "add package",
+    status: "operation-failure",
+    code: "OPERATION_ADD_PACKAGE_FAILED",
+    phase,
+    error: {
+      message: "添加 Package 时发生操作失败。",
+      suggestion:
+        "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。",
+    },
   };
 }

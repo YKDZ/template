@@ -39,9 +39,8 @@ describe("vue-app Built-in Preset Definition behavior", () => {
 
     expect(vueAppDefinition.metadata).toEqual({
       name: "vue-app",
-      title: "Vue app",
-      description:
-        "Vue app workspace with Vite, Tailwind, Pinia, and test tooling.",
+      title: "Vue 应用",
+      description: "使用 Vite、Tailwind、Pinia 和测试工具的 Vue 应用工作区。",
     });
     expect(contribution.definition).toEqual({
       name: "@demo/web",

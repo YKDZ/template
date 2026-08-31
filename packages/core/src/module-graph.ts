@@ -246,7 +246,6 @@ export function dockerEngineEnvironmentNeed(): DockerEngineEnvironmentNeed {
 }
 
 export const qualityTaskVocabulary = [
-  "boundaries",
   "format:check",
   "lint",
   "typecheck",
@@ -280,14 +279,13 @@ export function renderTurboRunCommand(
 export function renderRootCheckCommand(
   additionalTasks: readonly string[] = [],
 ): string {
-  return renderTurboRunCommand(
-    [...qualityTaskVocabulary, ...additionalTasks],
-    [],
-    {
+  return [
+    "pnpm run boundaries",
+    renderTurboRunCommand([...qualityTaskVocabulary, ...additionalTasks], [], {
       continueAfterFailure: true,
       taskPrefix: true,
-    },
-  );
+    }),
+  ].join(" && ");
 }
 
 export function renderDeploymentCheckCommand(): string {

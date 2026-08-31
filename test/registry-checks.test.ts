@@ -336,30 +336,64 @@ describe("Preset Registry generated scenarios", () => {
         )}\n`,
       );
 
-      expect(() =>
+      let identityConflict: unknown;
+      try {
         planGeneratedRepositoryPackageAddition({
           definition: scenario.addition!,
           localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName,
-        }),
-      ).toThrow(
-        `Package Addition conflicts with existing Package Definition ${contribution.definition.name} at ${contribution.definition.path} (native-package); requested ${contribution.definition.name} at ${contribution.definition.path} (${contribution.definition.role})`,
-      );
+        });
+      } catch (error) {
+        identityConflict = error;
+      }
+      expect(identityConflict).toBeDefined();
+      expect(identityConflict).toMatchObject({
+        kind: "identity",
+        existing: {
+          name: contribution.definition.name,
+          path: contribution.definition.path,
+          role: "native-package",
+        },
+        requested: {
+          name: contribution.definition.name,
+          path: contribution.definition.path,
+          role: contribution.definition.role,
+        },
+      });
 
       await writeFile(
         blueprintPath,
         `${JSON.stringify(occupied.blueprint, null, 2)}\n`,
       );
-      expect(() =>
+      let missingLinkConflict: unknown;
+      try {
         planGeneratedRepositoryPackageAddition({
           definition: scenario.addition!,
           localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName,
           linkFrom: scenario.linkFrom!,
-        }),
-      ).toThrow(
-        `requested Package Link Intent ${scenario.linkFrom![0]} -> ${contribution.definition.path} does not already exist`,
-      );
+        });
+      } catch (error) {
+        missingLinkConflict = error;
+      }
+      expect(missingLinkConflict).toBeDefined();
+      expect(missingLinkConflict).toMatchObject({
+        kind: "missing-link",
+        existing: {
+          name: contribution.definition.name,
+          path: contribution.definition.path,
+          role: contribution.definition.role,
+        },
+        requested: {
+          name: contribution.definition.name,
+          path: contribution.definition.path,
+          role: contribution.definition.role,
+        },
+        missingLink: {
+          consumerPackagePath: scenario.linkFrom![0],
+          providerPackagePath: contribution.definition.path,
+        },
+      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

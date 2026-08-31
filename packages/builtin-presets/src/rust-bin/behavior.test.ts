@@ -113,9 +113,9 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
 
     expect(rustBinDefinition.metadata).toEqual({
       name: "rust-bin",
-      title: "Rust binary",
+      title: "Rust 二进制程序",
       description:
-        "Rust native binary workspace with rustfmt, clippy, and cargo tests.",
+        "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
     });
     expect(contribution.definition).toEqual({
       name: "@demo/app",
@@ -386,7 +386,6 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "exec",
         "turbo",
         "run",
-        "boundaries",
         "format:check",
         "lint",
         "typecheck",
@@ -409,7 +408,6 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const taskIds = tasks.map((task) => task.taskId);
     expect(taskIds).toEqual(
       expect.arrayContaining([
-        "//#boundaries",
         "//#format:check",
         "//#lint",
         "//#typecheck",

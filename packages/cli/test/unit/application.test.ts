@@ -10,21 +10,7 @@ import {
 } from "#template-builtin-presets";
 import { resolveToolchainVersions } from "#template-core/toolchain-resolution";
 
-import {
-  formatPresetCatalog,
-  runInit,
-  type ApplicationRuntime,
-} from "../../src/application.ts";
-
-describe("template CLI business rules", () => {
-  it("renders the registry-owned Preset Catalog deterministically", () => {
-    const catalog = formatPresetCatalog();
-
-    expect(catalog).toContain("Built-in presets");
-    expect(catalog).toContain("ts-lib:");
-    expect(catalog).toContain("ts-cli:");
-  });
-});
+import { runInit, type ApplicationRuntime } from "../../src/application.ts";
 
 describe("init publication setup handoff", () => {
   it("renders the one-time setup command only in the init terminal result", async () => {
@@ -33,17 +19,22 @@ describe("init publication setup handoff", () => {
       const toolchain = await resolveToolchainVersions({
         source: "bundled-fallback",
       });
-      const publicationSetupPreset = builtInPresetRegistry.all().find(
-        (definition) =>
-          prepareGeneratedRepositoryInitialization({
+      const publicationSetupPreset = builtInPresetRegistry
+        .all()
+        .find((definition) => {
+          const preparation = prepareGeneratedRepositoryInitialization({
             definition,
             targetDir: path.join(workspace, "publication-setup-test"),
             toolchain: {
               nodeLtsMajor: toolchain.nodeLtsMajor.value,
               packageManagerPin: toolchain.packageManagerPin.value,
             },
-          }).publicationSetup !== null,
-      );
+          });
+          return (
+            preparation.status === "ready" &&
+            preparation.publicationSetup !== null
+          );
+        });
       if (publicationSetupPreset === undefined)
         throw new Error("Expected a Built-in Preset with publication setup");
       const runtime: ApplicationRuntime = {
@@ -64,21 +55,25 @@ describe("init publication setup handoff", () => {
         runtime,
       );
 
-      expect(output).toContain("One-time npm publication setup");
-      expect(output).toContain("./scripts/npm-publication-setup/setup.sh");
-      const preview = JSON.parse(
-        await runInit(
-          {
-            dir: "preview",
-            preset: publicationSetupPreset.metadata.name,
-            yes: true,
-            dryRun: true,
-            json: true,
-            todo: false,
-          },
-          runtime,
-        ),
+      expect(output.status).toBe("success");
+      if (output.status !== "success") throw new Error("Expected init success");
+      expect(output.publicationSetup).toEqual({
+        command: "./scripts/npm-publication-setup/setup.sh",
+      });
+      const preview = await runInit(
+        {
+          dir: "preview",
+          preset: publicationSetupPreset.metadata.name,
+          yes: true,
+          dryRun: true,
+          json: true,
+          todo: false,
+        },
+        runtime,
       );
+      expect(preview.status).toBe("success");
+      if (preview.status !== "success")
+        throw new Error("Expected preview success");
       expect(preview.publicationSetup).toEqual({
         command: "./scripts/npm-publication-setup/setup.sh",
       });

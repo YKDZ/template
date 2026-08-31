@@ -22,21 +22,29 @@ const journey: CliJourney = {
       await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
     ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
-    assert.equal(results[0]?.stdout, `${manifest.version}\n`);
+    assert.equal(results[0]?.stdout, `template ${manifest.version}\n`);
     assert.equal(results[0]?.stderr, "");
 
     assert.equal(results[1]?.exitCode, 0);
-    assert.match(results[1]?.stdout ?? "", /Usage: template/u);
+    assert.match(results[1]?.stdout ?? "", /用法: template/u);
     assert.match(results[1]?.stdout ?? "", /template add package/u);
 
     assert.equal(results[2]?.exitCode, 0);
+    assert.match(results[2]?.stdout ?? "", /用法: template init/u);
     assert.match(results[2]?.stdout ?? "", /--no-todo/u);
     assert.equal(results[3]?.exitCode, 0);
+    assert.match(results[3]?.stdout ?? "", /用法: template add package/u);
     assert.match(results[3]?.stdout ?? "", /--link-from <path>/u);
 
-    assert.equal(results[4]?.exitCode, 1);
+    assert.equal(results[4]?.exitCode, 64);
     assert.equal(results[4]?.stdout, "");
-    assert.match(results[4]?.stderr ?? "", /error: unknown command 'unknown'/u);
+    assert.match(
+      results[4]?.stderr ?? "",
+      new RegExp(`^template ${manifest.version}\\n`, "u"),
+    );
+    assert.match(results[4]?.stderr ?? "", /USAGE_UNKNOWN_COMMAND/u);
+    assert.match(results[4]?.stderr ?? "", /未知命令/u);
+    assert.match(results[4]?.stderr ?? "", /用法: template/u);
   },
 };
 

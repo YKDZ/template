@@ -18,10 +18,10 @@ function packagePathForLeaf(packageLeafName: string): string {
 
 function packageScripts(): Record<string, string> {
   return {
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
     build: "tsc -p tsconfig.build.json --pretty false",
     postbuild:
       "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
@@ -214,8 +214,8 @@ const cliPackageAdditionReplayAdapter = definePackageContributionReplayAdapter({
 export const tsCliDefinition = {
   metadata: {
     name: "ts-cli",
-    title: "TypeScript CLI",
-    description: "TypeScript command-line package.",
+    title: "TypeScript 命令行工具",
+    description: "TypeScript 命令行包。",
   },
   source: templateSources.tsCli,
   plannerSourceFile: fileURLToPath(import.meta.url),

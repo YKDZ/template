@@ -23,6 +23,7 @@ import {
   planGeneratedRepositoryInitialization,
   prepareGeneratedRepositoryInitialization,
   resolveBuiltInTemplateSource,
+  type InitializationPreparation,
 } from "@ykdz/template-builtin-presets";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
@@ -31,6 +32,18 @@ import { reconcileAndApplyProjectProjections } from "#template-core/project-proj
 import { renderNewProject } from "#template-core/renderer";
 
 import { tsCliDefinition } from "./definition.ts";
+
+function requireReadyInitialization(
+  options: Parameters<typeof prepareGeneratedRepositoryInitialization>[0],
+): Extract<InitializationPreparation, { readonly status: "ready" }> {
+  const preparation = prepareGeneratedRepositoryInitialization(options);
+  if (preparation.status !== "ready") {
+    throw new Error(
+      `Expected ready initialization, received ${preparation.status}`,
+    );
+  }
+  return preparation;
+}
 
 async function renderGeneratedRepository(
   prefix: string,
@@ -43,7 +56,7 @@ async function renderGeneratedRepository(
 }> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const targetDir = path.join(workspace, "demo-cli");
-  const prepared = prepareGeneratedRepositoryInitialization({
+  const prepared = requireReadyInitialization({
     definition: tsCliDefinition,
     targetDir,
     toolchain: {
@@ -591,7 +604,7 @@ esac
   });
 
   it("keeps the one-time publication setup handoff outside the generated plan", () => {
-    const preparation = prepareGeneratedRepositoryInitialization({
+    const preparation = requireReadyInitialization({
       definition: tsCliDefinition,
       targetDir: path.join("generated-repository", "demo-cli"),
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
@@ -607,7 +620,7 @@ esac
   });
 
   it("does not expose a publication setup handoff for a non-candidate preset", () => {
-    const preparation = prepareGeneratedRepositoryInitialization({
+    const preparation = requireReadyInitialization({
       definition: builtInPresetRegistry.require("ts-lib"),
       targetDir: path.join("generated-repository", "demo-library"),
       toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
@@ -3127,7 +3140,7 @@ syncBuiltinESMExports();
   });
 
   it("rejects a reserved command identity before initialization writes", () => {
-    expect(() =>
+    expect(
       prepareGeneratedRepositoryInitialization({
         definition: tsCliDefinition,
         targetDir: path.join("generated-repository", "demo-cli"),
@@ -3137,7 +3150,7 @@ syncBuiltinESMExports();
         },
         overrides: { name: "node" },
       }),
-    ).toThrow('CLI command name is a reserved system tool; received "node"');
+    ).toEqual({ status: "operation-failure", phase: "planning" });
   });
 
   it("rejects an added command that conflicts with an existing manifest fact before writes", async () => {
@@ -3208,8 +3221,11 @@ syncBuiltinESMExports();
       ],
       { cwd: repositoryRoot },
     );
-    expect(result.stdout).toContain("Built-in presets");
+    expect(result.stdout).toContain("内置预设");
     expect(result.stdout).toMatch(/\bts-cli\b/u);
+    expect(result.stdout).toContain(
+      "TypeScript 命令行工具 - TypeScript 命令行包。",
+    );
   });
 
   it("runs identity and greet unit tests from TypeScript source without a build", async () => {

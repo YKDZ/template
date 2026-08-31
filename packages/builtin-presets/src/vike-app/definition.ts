@@ -136,11 +136,10 @@ function webScripts(): Record<string, string> {
     deployment:
       "node --conditions=source scripts/check-standalone-deployment.ts",
     dev: "vike dev",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware --config ../../oxlint.config.ts .",
-    "lint:fix":
-      "oxlint --type-aware --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware .",
+    "lint:fix": "oxlint --type-aware --format=unix . --fix",
     preview: "vike preview",
     start: "node ./dist/server/index.mjs",
     test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
@@ -154,10 +153,10 @@ function databaseScripts(): Record<string, string> {
   return {
     build: "tsc -p tsconfig.build.json --noEmit",
     "db:seed:example": "node --conditions=source scripts/seed-example.ts",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
     test: "vitest run --reporter=agent --silent=passed-only",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
@@ -173,10 +172,10 @@ function migrationScripts(databasePackageName: string): Record<string, string> {
     "db:prepare:deploy": "pnpm run db:migrate",
     "db:push": withDatabasePackage("drizzle-kit push"),
     "db:studio": withDatabasePackage("drizzle-kit studio"),
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -521,9 +520,9 @@ const migrationsReplayAdapter = definePackageContributionReplayAdapter({
 export const vikeAppDefinition = {
   metadata: {
     name: "vike-app",
-    title: "Vike app",
+    title: "Vike 应用",
     description:
-      "Vike, Hono, Telefunc, Drizzle, and Vue workspace with separate database and migration packages.",
+      "包含独立数据库和迁移包的 Vike、Hono、Telefunc、Drizzle 与 Vue 工作区。",
   },
   source: templateSources.vikeApp,
   plannerSourceFile: fileURLToPath(import.meta.url),

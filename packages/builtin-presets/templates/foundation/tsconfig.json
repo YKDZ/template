@@ -1,9 +1,7 @@
 {
   "extends": "./tsconfig.config.json",
-  "files": [
-    "oxfmt.config.ts",
-    "oxlint.config.ts",
-    "scripts/check-boundaries.ts",
-    "scripts/run-root-owned-task.ts"
-  ]
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["*.config.ts", "scripts/**/*.ts"]
 }

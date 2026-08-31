@@ -2,12 +2,7 @@
   "compilerOptions": {
     "allowJs": true,
     "allowImportingTsExtensions": true,
-    "checkJs": true,
-    "noEmit": true
+    "checkJs": true
   },
-  "include": [
-    ".pnpmfile.mjs",
-    "scripts/npm-publication/*.ts",
-    "scripts/npm-publication-setup/bridge.ts"
-  ]
+  "files": [".pnpmfile.mjs"]
 }

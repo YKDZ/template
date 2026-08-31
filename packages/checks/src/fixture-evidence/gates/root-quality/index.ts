@@ -11,7 +11,6 @@ import {
 } from "../../kernel/index.ts";
 
 const qualityTaskNames = [
-  "boundaries",
   "format:check",
   "lint",
   "typecheck",

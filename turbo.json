@@ -202,14 +202,6 @@
     "test:e2e": {
       "cache": false
     },
-    "boundaries": {
-      "cache": false,
-      "outputs": []
-    },
-    "//#boundaries": {
-      "cache": false,
-      "outputs": []
-    },
     "//#format:check": {
       "outputs": []
     },

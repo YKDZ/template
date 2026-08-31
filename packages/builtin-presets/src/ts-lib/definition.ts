@@ -18,10 +18,10 @@ function packagePathForLeaf(packageLeafName: string): string {
 
 function packageScripts(): Record<string, string> {
   return {
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    lint: "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern node_modules .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts . --fix",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
     build: "tsc -p tsconfig.build.json --pretty false",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
@@ -134,8 +134,8 @@ const libraryReplayAdapter = definePackageContributionReplayAdapter({
 export const tsLibDefinition = {
   metadata: {
     name: "ts-lib",
-    title: "TypeScript library",
-    description: "Strict TypeScript package with pnpm catalog tooling.",
+    title: "TypeScript 库",
+    description: "采用 pnpm catalog 工具配置的严格 TypeScript 包。",
   },
   source: templateSources.tsLib,
   plannerSourceFile: fileURLToPath(import.meta.url),
