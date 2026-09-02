@@ -32,8 +32,8 @@ catalog:
   "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
   commander: ^15.0.0
-  drizzle-kit: 1.0.0-rc.4
-  drizzle-orm: 1.0.0-rc.4
+  drizzle-kit: 1.0.0-rc.5-ab785fc
+  drizzle-orm: 1.0.0-rc.5-169397b
   execa: ^10.0.1
   hono: ^4.13.3
   node-diff3: ^3.2.1
