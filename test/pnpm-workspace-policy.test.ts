@@ -230,7 +230,7 @@ describe("pnpm Workspace Policy", () => {
     ).resolves.toBe("after\n");
   }, 30_000);
 
-  it("installs a real rendered Preset from its frozen pnpm 11 lockfile", async () => {
+  it("installs a real rendered Preset from its frozen packageManager-pinned lockfile", async () => {
     const projectDir = await generateNodeOnlyProject("pnpm-rendered-preset-");
     const environment = { ...process.env, CI: "1" };
 
@@ -242,6 +242,11 @@ describe("pnpm Workspace Policy", () => {
         "--lockfile-only",
         "--prefer-offline",
       ],
+      { cwd: projectDir, env: environment },
+    );
+    await execa(
+      "corepack",
+      [releaseToolchainSnapshot.packageManagerPin, "fetch"],
       { cwd: projectDir, env: environment },
     );
     await execa(
@@ -316,7 +321,9 @@ describe("pnpm Workspace Policy", () => {
       await execa(
         "docker",
         [
+          "buildx",
           "build",
+          "--load",
           "-t",
           imageTag,
           "--build-arg",

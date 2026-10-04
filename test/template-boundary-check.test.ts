@@ -4,7 +4,6 @@ import path from "node:path";
 
 import type {
   PackageDefinition,
-  PackageDefinitionId,
   PersistedPackageDefinition,
 } from "@ykdz/template-core/project-blueprint";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
@@ -20,8 +19,7 @@ function persistedDefinition(
 ): PersistedPackageDefinition {
   return {
     ...definition,
-    packageDefinitionId:
-      `package-${hexDigit.repeat(64)}` as PackageDefinitionId,
+    packageDefinitionId: `package-${hexDigit.repeat(64)}`,
   };
 }
 

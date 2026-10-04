@@ -734,7 +734,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(checkWorkflow).toContain("job_name: Deployment Check");
     expect(checkWorkflow).toContain("timeout_minutes: 45");
     expect(checkWorkflow).toContain(
-      "uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0",
+      "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1",
     );
     expect(checkWorkflow).toContain("if: matrix.requires_docker");
     expect(checkWorkflow).toContain("name: Stage Root Check diagnostics");
@@ -953,18 +953,17 @@ async function treeFingerprint(root: string): Promise<string> {
   async function walk(directory: string): Promise<void> {
     const entries = (
       await Promise.all(
-        (
-          await readdir(directory, { withFileTypes: true })
-        ).map(async (entry) =>
-          entry.isDirectory()
-            ? { kind: "dir" as const, name: entry.name }
-            : {
-                kind: "file" as const,
-                name: entry.name,
-                digest: createHash("sha256")
-                  .update(await readFile(path.join(directory, entry.name)))
-                  .digest("hex"),
-              },
+        (await readdir(directory, { withFileTypes: true })).map(
+          async (entry) =>
+            entry.isDirectory()
+              ? { kind: "dir" as const, name: entry.name }
+              : {
+                  kind: "file" as const,
+                  name: entry.name,
+                  digest: createHash("sha256")
+                    .update(await readFile(path.join(directory, entry.name)))
+                    .digest("hex"),
+                },
         ),
       )
     ).toSorted((left, right) => left.name.localeCompare(right.name));

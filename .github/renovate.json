@@ -24,6 +24,18 @@
       "matchManagers": ["dockerfile"],
       "matchPackageNames": ["node"],
       "enabled": false
+    },
+    {
+      "description": "ADR-0091 混合方案（用户确认保留）：TS6 旧 API provider 角色（public-cli-runtime catalog 与 core/builtin-presets peer）限制为 <7，不放宽 peer；TS7 编译器别名 typescript-7（pnpm.catalog.default，depName typescript-7）与 @typescript/typescript6 provider（depType pnpm.catalog.default）不受影响。",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "matchDepTypes": ["pnpm.catalog.public-cli-runtime", "peerDependencies"],
+      "matchFileNames": [
+        "pnpm-workspace.yaml",
+        "packages/core/package.json",
+        "packages/builtin-presets/package.json"
+      ],
+      "allowedVersions": "<7"
     }
   ]
 }

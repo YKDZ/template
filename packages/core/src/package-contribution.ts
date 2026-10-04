@@ -207,6 +207,7 @@ export function assertPackageContributionCommandNames(
         if (existingOwner !== undefined) {
           throw new Error(
             `CLI command name ${JSON.stringify(commandName)} from ${contribution.definition.name} is already used by ${existingOwner}`,
+            { cause: error },
           );
         }
         throw error;

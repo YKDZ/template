@@ -1,4 +1,4 @@
-FROM node:24.16.0-bookworm
+FROM node:24.21.0-bookworm
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV COREPACK_HOME="/corepack"

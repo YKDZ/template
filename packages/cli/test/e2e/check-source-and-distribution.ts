@@ -15,7 +15,7 @@ const workspace = await mkdtemp(
   path.join(tmpdir(), "template-source-condition-"),
 );
 const repositoryRoot = path.join(workspace, "repository");
-const ignoredTopLevelPaths = new Set([
+const ignoredDirectoryNames = new Set([
   ".git",
   ".fixture-evidence",
   ".fixture-evidence-activity",
@@ -38,10 +38,10 @@ try {
       const relativePath = portablePath(
         path.relative(liveRepositoryRoot, source),
       );
-      const firstSegment = relativePath.split("/")[0];
       if (
-        firstSegment !== undefined &&
-        ignoredTopLevelPaths.has(firstSegment)
+        relativePath
+          .split("/")
+          .some((segment) => ignoredDirectoryNames.has(segment))
       ) {
         return false;
       }

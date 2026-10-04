@@ -564,7 +564,7 @@ function isForwardingCommandRunnerCall(
     ts.isArrayLiteralExpression(unwrappedArgs) &&
     unwrappedArgs.elements.length === 1 &&
     ts.isSpreadElement(unwrappedArgs.elements[0]!)
-      ? unwrapExpression(unwrappedArgs.elements[0]!.expression)
+      ? unwrapExpression(unwrappedArgs.elements[0].expression)
       : undefined;
   return (
     spreadExpression !== undefined &&

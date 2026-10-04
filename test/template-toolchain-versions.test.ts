@@ -25,6 +25,18 @@ const verifiedBaseline = {
   releaseSnapshotRustVersion: "1.97.1",
 };
 
+// 入口点 fixture 若交给脚本真实运行，必须从实际加载的 Core 发版快照派生三版本，只暴露 fixture 自设的故意漂移
+const liveFixtureBaseline = {
+  node: releaseToolchainSnapshot.nodeVersion,
+  packageManager: releaseToolchainSnapshot.packageManagerPin,
+  pnpmVersion: releaseToolchainSnapshot.packageManagerPin.slice("pnpm@".length),
+  rust: releaseToolchainSnapshot.rustVersion,
+};
+const raisedRootNode = liveFixtureBaseline.node.replace(
+  /\.\d+$/u,
+  (tail) => `.${Number(tail.slice(1)) + 1}`,
+);
+
 async function writeFixtureRepository(
   root: string,
   manifest: {
@@ -52,7 +64,8 @@ async function writeFixtureRepository(
   await mkdir(path.join(root, ".devcontainer"), { recursive: true });
   await writeFile(
     path.join(root, ".devcontainer/Dockerfile"),
-    manifest.devcontainerDockerfile ?? "FROM node:24.16.0-bookworm\n",
+    manifest.devcontainerDockerfile ??
+      `FROM node:${liveFixtureBaseline.node}-bookworm\n`,
   );
 }
 
@@ -181,10 +194,10 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.16.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: liveFixtureBaseline.node },
+          packageManager: liveFixtureBaseline.packageManager,
         },
-        cli: { engines: { node: "^24.16.0" } },
+        cli: { engines: { node: `^${liveFixtureBaseline.node}` } },
         rustToolchain: '[toolchain]\nchannel = "1.96.0"\n',
       });
 
@@ -201,11 +214,11 @@ describe("Template toolchain version authority", () => {
         ],
         {
           reject: false,
-          env: { ...process.env, RUSTUP_TOOLCHAIN: "1.97.1" },
+          env: { ...process.env, RUSTUP_TOOLCHAIN: liveFixtureBaseline.rust },
         },
       );
       expect(entry.exitCode).toBe(1);
-      expect(entry.stderr).toContain("实际 Rust 1.97.1");
+      expect(entry.stderr).toContain(`实际 Rust ${liveFixtureBaseline.rust}`);
       expect(entry.stderr).toContain(
         "根 rust-toolchain.toml 声明的 1.96.0 不一致",
       );
@@ -219,10 +232,10 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.16.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: liveFixtureBaseline.node },
+          packageManager: liveFixtureBaseline.packageManager,
         },
-        cli: { engines: { node: "^24.16.0" } },
+        cli: { engines: { node: `^${liveFixtureBaseline.node}` } },
         rustToolchain: '[toolchain]\nchannel = "stable"\n',
       });
 
@@ -239,7 +252,7 @@ describe("Template toolchain version authority", () => {
         ],
         {
           reject: false,
-          env: { ...process.env, RUSTUP_TOOLCHAIN: "1.97.1" },
+          env: { ...process.env, RUSTUP_TOOLCHAIN: liveFixtureBaseline.rust },
         },
       );
       expect(entry.exitCode).toBe(1);
@@ -271,17 +284,17 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.16.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: liveFixtureBaseline.node },
+          packageManager: liveFixtureBaseline.packageManager,
         },
-        cli: { engines: { node: "^24.16.0" } },
-        rustToolchain: '[toolchain]\nchannel = "1.97.1"\n',
+        cli: { engines: { node: `^${liveFixtureBaseline.node}` } },
+        rustToolchain: `[toolchain]\nchannel = "${liveFixtureBaseline.rust}"\n`,
         devcontainerDockerfile: "FROM node:24-bookworm\n",
       });
 
       const facts = await readTemplateToolchainVersionFacts({
         repositoryRoot,
-        readRunningPnpmVersion: async () => "12.8.1",
+        readRunningPnpmVersion: async () => liveFixtureBaseline.pnpmVersion,
       });
       expect(facts.devcontainerNodeVersion).toBe("24");
       expect(checkTemplateToolchainVersions(facts)).toEqual([
@@ -303,7 +316,7 @@ describe("Template toolchain version authority", () => {
       );
       expect(entry.exitCode).toBe(1);
       expect(entry.stderr).toContain(
-        "开发容器 .devcontainer/Dockerfile 的 Node 基础镜像必须是根精确 Node 24.16.0 投影的静态副本（形如 node:24.16.0-bookworm，不接受浮动 tag 或漂移版本），当前为 24",
+        `开发容器 .devcontainer/Dockerfile 的 Node 基础镜像必须是根精确 Node ${liveFixtureBaseline.node} 投影的静态副本（形如 node:${liveFixtureBaseline.node}-bookworm，不接受浮动 tag 或漂移版本），当前为 24`,
       );
     } finally {
       await rm(repositoryRoot, { force: true, recursive: true });
@@ -315,11 +328,11 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.16.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: liveFixtureBaseline.node },
+          packageManager: liveFixtureBaseline.packageManager,
         },
-        cli: { engines: { node: "^24.16.0" } },
-        rustToolchain: '[toolchain]\nchannel = "1.97.1"\n',
+        cli: { engines: { node: `^${liveFixtureBaseline.node}` } },
+        rustToolchain: `[toolchain]\nchannel = "${liveFixtureBaseline.rust}"\n`,
       });
 
       const entry = await execa(
@@ -335,7 +348,7 @@ describe("Template toolchain version authority", () => {
         ],
         {
           reject: false,
-          env: { ...process.env, RUSTUP_TOOLCHAIN: "1.97.1" },
+          env: { ...process.env, RUSTUP_TOOLCHAIN: liveFixtureBaseline.rust },
         },
       );
       expect(entry.exitCode).toBe(0);
@@ -350,16 +363,16 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.16.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: liveFixtureBaseline.node },
+          packageManager: liveFixtureBaseline.packageManager,
         },
         cli: { engines: { node: ">=24.0.0" } },
-        rustToolchain: '[toolchain]\nchannel = "1.97.1"\n',
+        rustToolchain: `[toolchain]\nchannel = "${liveFixtureBaseline.rust}"\n`,
       });
 
       const facts = await readTemplateToolchainVersionFacts({
         repositoryRoot,
-        readRunningPnpmVersion: async () => "12.8.1",
+        readRunningPnpmVersion: async () => liveFixtureBaseline.pnpmVersion,
       });
       expect(checkTemplateToolchainVersions(facts)).toEqual([
         expect.stringContaining("当前为 >=24.0.0"),
@@ -379,7 +392,9 @@ describe("Template toolchain version authority", () => {
         { reject: false },
       );
       expect(entry.exitCode).toBe(1);
-      expect(entry.stderr).toContain("同 LTS caret 范围 ^24.16.0");
+      expect(entry.stderr).toContain(
+        `同 LTS caret 范围 ^${liveFixtureBaseline.node}`,
+      );
     } finally {
       await rm(repositoryRoot, { force: true, recursive: true });
     }
@@ -423,12 +438,12 @@ describe("Template toolchain version authority", () => {
     try {
       await writeFixtureRepository(repositoryRoot, {
         root: {
-          engines: { node: "24.17.0" },
-          packageManager: "pnpm@12.8.1",
+          engines: { node: raisedRootNode },
+          packageManager: liveFixtureBaseline.packageManager,
         },
-        cli: { engines: { node: "^24.17.0" } },
-        rustToolchain: '[toolchain]\nchannel = "1.97.1"\n',
-        devcontainerDockerfile: "FROM node:24.17.0-bookworm\n",
+        cli: { engines: { node: `^${raisedRootNode}` } },
+        rustToolchain: `[toolchain]\nchannel = "${liveFixtureBaseline.rust}"\n`,
+        devcontainerDockerfile: `FROM node:${raisedRootNode}-bookworm\n`,
       });
 
       const entry = await execa(
@@ -444,12 +459,12 @@ describe("Template toolchain version authority", () => {
         ],
         {
           reject: false,
-          env: { ...process.env, RUSTUP_TOOLCHAIN: "1.97.1" },
+          env: { ...process.env, RUSTUP_TOOLCHAIN: liveFixtureBaseline.rust },
         },
       );
       expect(entry.exitCode).toBe(1);
       expect(entry.stderr).toContain(
-        "Core 发版快照的 Node 副本 24.16.0 与根真源 24.17.0 漂移",
+        `Core 发版快照的 Node 副本 ${releaseToolchainSnapshot.nodeVersion} 与根真源 ${raisedRootNode} 漂移`,
       );
     } finally {
       await rm(repositoryRoot, { force: true, recursive: true });

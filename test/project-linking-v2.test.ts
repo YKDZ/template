@@ -1,7 +1,6 @@
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   PackageDefinition,
-  PackageDefinitionId,
   PersistedPackageDefinition,
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
@@ -44,8 +43,7 @@ function persistedDefinition(
 ): PersistedPackageDefinition {
   return {
     ...definition,
-    packageDefinitionId:
-      `package-${hexDigit.repeat(64)}` as PackageDefinitionId,
+    packageDefinitionId: `package-${hexDigit.repeat(64)}`,
   };
 }
 

@@ -159,7 +159,7 @@ describe("Generated Deployment Check workflow", () => {
       job.steps.find((step) => step.name === "Upload Root Check diagnostics"),
     ).toMatchObject({
       if: "failure() && matrix.capability == 'root'",
-      uses: "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+      uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
       with: {
         name: "root-check-diagnostics",
         path: ".template-ci-diagnostics",

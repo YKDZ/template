@@ -45,7 +45,7 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
       typeof declaration !== "object" ||
       declaration === null ||
       Array.isArray(declaration) ||
-      !hasExactKeys(declaration as Record<string, unknown>, ["kind", "owner"])
+      !hasExactKeys(declaration, ["kind", "owner"])
     ) {
       throw new Error(
         "CI Diagnostic Artifact declarations may contain only kind and owner",
@@ -322,7 +322,7 @@ function assertPublicationVerifySteps(
   if (
     !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
     pnpm.uses !==
-      "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320" ||
+      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b" ||
     !isParsedObject(pnpm.with) ||
     !hasExactKeys(pnpm.with, ["cache"]) ||
     pnpm.with.cache !== true ||
@@ -487,36 +487,36 @@ const workflowPolicy = {
     checkout: {
       name: "Checkout source",
       action: "actions/checkout",
-      reference: "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-      release: "v5",
+      reference: "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      release: "v7",
       with: { "persist-credentials": false, "fetch-depth": 1 },
     },
     node: {
       name: "Set up Node.js",
       action: "actions/setup-node",
-      reference: "a0853c24544627f65ddf259abe73b1d18a591444",
-      release: "v5",
+      reference: "820762786026740c76f36085b0efc47a31fe5020",
+      release: "v7",
       with: { "node-version-file": "package.json" },
     },
     pnpm: {
       name: "Set up pnpm",
       action: "pnpm/action-setup",
-      reference: "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
-      release: "v4.4.0",
+      reference: "d9184bf108216479bc5a137cc391f4d7b14c870b",
+      release: "v6.1.0",
       with: { cache: true },
     },
     buildx: {
       name: "Set up Docker Buildx",
       action: "docker/setup-buildx-action",
-      reference: "bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
-      release: "v4.2.0",
+      reference: "f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      release: "v4.4.1",
       condition: "matrix.requires_docker",
     },
     upload: {
       name: "Upload Root Check diagnostics",
       action: "actions/upload-artifact",
-      reference: "65462800fd760344b1a7b4382951275a0abb4808",
-      release: "v4",
+      reference: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+      release: "v7",
     },
   } as Readonly<Record<WorkflowActionKey, WorkflowActionContract>>,
   installStep: {
@@ -1021,12 +1021,10 @@ function dependabotOracle(
       declaredDirectories.length === 0
         ? [ecosystem === "docker" ? "/.devcontainer" : "/"]
         : declaredDirectories;
-    return directories.map(
-      (directory): DependabotUpdateOracle => ({
-        ecosystem,
-        directory,
-      }),
-    );
+    return directories.map((directory): DependabotUpdateOracle => ({
+      ecosystem,
+      directory,
+    }));
   });
 }
 

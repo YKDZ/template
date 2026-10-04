@@ -624,6 +624,7 @@ function readJsonFile(filePath: string, label: string): unknown {
   } catch (error) {
     throw new Error(
       `Package Addition requires valid ${label}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 }
@@ -1036,6 +1037,7 @@ function readPersistedEnvironmentNeeds(
   } catch (error) {
     throw new Error(
       `Package Addition requires valid Check Environment Need facts: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   try {
@@ -1136,6 +1138,7 @@ function readExistingPackageAdditionState(options: {
     } catch (error) {
       throw new Error(
         `Package Addition requires manifest truth for ${expectedDefinition.path}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
     if (!isRecord(manifest) || manifest.name !== expectedDefinition.name) {
@@ -2295,6 +2298,7 @@ function assertDatabaseViteRuntimeTruth(options: {
   } catch (error) {
     throw new Error(
       `Package Addition requires Vite runtime truth in ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const sourceFile = ts.createSourceFile(
@@ -2374,6 +2378,7 @@ function assertVueHonoJointE2ePlaywrightTruth(options: {
   } catch (error) {
     throw new Error(
       `Package Addition requires Vue-Hono joint E2E root Playwright truth in ${configPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const sourceFile = ts.createSourceFile(
@@ -3549,18 +3554,14 @@ function foundationPlan(options: {
             to: "turbo.json",
           },
         ]),
-    ...turboBoundaryTags.map(
-      (tag): RenderOperation => ({
-        kind: "mergeJsonTemplate",
-        source: templateSources.foundation,
-        from: `turbo-boundary-tags/${tag}.json`,
-        to: "turbo.json",
-        multilineArrays:
-          deploymentCheck === undefined
-            ? []
-            : ["tasks.//#deployment.dependsOn"],
-      }),
-    ),
+    ...turboBoundaryTags.map((tag): RenderOperation => ({
+      kind: "mergeJsonTemplate",
+      source: templateSources.foundation,
+      from: `turbo-boundary-tags/${tag}.json`,
+      to: "turbo.json",
+      multilineArrays:
+        deploymentCheck === undefined ? [] : ["tasks.//#deployment.dependsOn"],
+    })),
     {
       kind: "copyFile",
       source: templateSources.foundation,

@@ -305,7 +305,7 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
       /--filter=!\.\/[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*/gu,
     );
     expect(publicationExclusions).toHaveLength(1);
-    expect(checkCommand.replace(publicationExclusions![0]!, "")).not.toContain(
+    expect(checkCommand.replace(publicationExclusions![0], "")).not.toContain(
       "--filter",
     );
   }
@@ -374,7 +374,7 @@ async function expectPackedPlaywrightConfig(
   visit(source);
   expect(options).toBeDefined();
   if (options === undefined) return;
-  const loadedOptions = options as ts.ObjectLiteralExpression;
+  const loadedOptions = options;
   const use = configProperty(loadedOptions, "use");
   const reporter = configProperty(loadedOptions, "reporter");
   expect(use !== undefined && ts.isObjectLiteralExpression(use)).toBe(true);
@@ -512,24 +512,24 @@ async function expectPackedHardenedRootCheckWorkflow(
   const expectedSteps = [
     {
       name: "Checkout source",
-      uses: "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
+      uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
       with: { "persist-credentials": false, "fetch-depth": 1 },
     },
     {
       name: "Set up Node.js",
-      uses: "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
+      uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       with: { "node-version-file": "package.json" },
     },
     {
       name: "Set up pnpm",
-      uses: "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+      uses: "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b",
       with: { cache: true },
     },
     ...(deploymentWorkflow
       ? [
           {
             name: "Set up Docker Buildx",
-            uses: "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
+            uses: "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
             if: "matrix.requires_docker",
           },
         ]
@@ -561,7 +561,7 @@ async function expectPackedHardenedRootCheckWorkflow(
       if: deploymentWorkflow
         ? "failure() && matrix.capability == 'root'"
         : "failure()",
-      uses: "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
+      uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
       with: {
         name: "root-check-diagnostics",
         "if-no-files-found": "ignore",
@@ -572,14 +572,14 @@ async function expectPackedHardenedRootCheckWorkflow(
   }
 
   const actionVersions = [
-    ["actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"],
-    ["actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444", "v5"],
-    ["pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320", "v4.4.0"],
+    ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "v7"],
+    ["actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", "v7"],
+    ["pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b", "v6.1.0"],
     ...(deploymentWorkflow
       ? [
           [
-            "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
-            "v4.2.0",
+            "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+            "v4.4.1",
           ],
         ]
       : []),
@@ -587,8 +587,8 @@ async function expectPackedHardenedRootCheckWorkflow(
       ? []
       : [
           [
-            "actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808",
-            "v4",
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            "v7",
           ],
         ]),
   ];

@@ -453,12 +453,10 @@ function orderLayers(
   }
 
   const remaining = uniqueOptionalLayers
-    .map(
-      (layer): PlannedDevelopmentContainerToolLayer => ({
-        ...layer,
-        kind: "optional",
-      }),
-    )
+    .map((layer): PlannedDevelopmentContainerToolLayer => ({
+      ...layer,
+      kind: "optional",
+    }))
     .toSorted((left, right) => compareText(left.identity, right.identity));
   const ordered = [base];
   const resolved = new Set([base.identity]);

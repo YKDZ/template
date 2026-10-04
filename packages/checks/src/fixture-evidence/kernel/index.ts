@@ -742,6 +742,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       } catch (error) {
         throw new Error(
           `Docker is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+          { cause: error },
         );
       }
       try {
@@ -749,6 +750,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       } catch (error) {
         throw new Error(
           `The pinned Dev Container CLI is required for Generated Repository Fixture quality: ${errorMessage(error)}`,
+          { cause: error },
         );
       }
       const dependencyCacheOverride = await createDependencyCacheOverride();
@@ -805,6 +807,7 @@ export function createDevelopmentContainerFixtureSession(options: {
         } catch (error) {
           throw new Error(
             `Tool Layer capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
+            { cause: error },
           );
         }
       }
@@ -3346,7 +3349,7 @@ export async function runFixtureEvidenceGate(
       : options.rootEvidence.identity;
   if (
     options.gate !== "generated-root-quality" &&
-    (options.rootEvidence[fixtureEvidenceProof] !== true ||
+    (!options.rootEvidence[fixtureEvidenceProof] ||
       options.rootEvidence.gate !== "generated-root-quality" ||
       options.rootEvidence.generatedContentIdentity !==
         options.generatedContentIdentity ||
@@ -3372,7 +3375,7 @@ export async function runFixtureEvidenceGate(
   } as const;
   let missReason: FixtureEvidenceMissReason | undefined;
 
-  if ((options.readEnabled ?? options.storage !== undefined) === false) {
+  if (!(options.readEnabled ?? options.storage !== undefined)) {
     missReason = "read-disabled";
   } else {
     try {
@@ -3464,10 +3467,7 @@ export async function runFixtureEvidenceGate(
     throw error;
   }
 
-  if (
-    (options.writeEnabled ?? false) === false ||
-    options.storage === undefined
-  ) {
+  if (!(options.writeEnabled ?? false) || options.storage === undefined) {
     return {
       [fixtureEvidenceProof]: true,
       gate: options.gate,

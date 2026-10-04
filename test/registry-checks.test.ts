@@ -156,8 +156,8 @@ describe("Preset Registry generated scenarios", () => {
 
   it("rejects generated debris from a packed Built-in Presets artifact", async () => {
     const debris = [
-      `package/templates/.template-packages-rust-${"bin"}-leaked/package.json`,
-      `package/dist/src/rust-${"bin"}/behavior.test.js`,
+      `package/templates/.template-packages-rust-bin-leaked/package.json`,
+      `package/dist/src/rust-bin/behavior.test.js`,
       "package/templates/shared/node_modules/left-pad/package.json",
       "package/dist/node_modules/leaked/index.js",
       "package/src/foundation/node_modules/leaked/index.js",

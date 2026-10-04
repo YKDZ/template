@@ -129,6 +129,7 @@ async function assertDeploymentTaskDiscovery(options: {
   } catch (error) {
     throw new Error(
       `Turbo dry-run did not return a Deployment task graph: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const missing = expectedDeploymentTaskIds(options.deployment.plan).filter(

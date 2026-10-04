@@ -128,7 +128,7 @@ describe("Template Repository dependency DAG", () => {
                   node.expression.kind === ts.SyntaxKind.ImportKeyword &&
                   node.arguments.length === 1 &&
                   ts.isStringLiteral(node.arguments[0]!)
-                ? node.arguments[0]!.text
+                ? node.arguments[0].text
                 : undefined;
           if (specifier !== undefined) {
             const target = importedPackage(sourceFile, specifier);

@@ -298,6 +298,7 @@ export async function executeFocusedPackageLink(options: {
   } catch (error) {
     throw new Error(
       `Focused provider probe could not read manifests for ${diagnostic}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
 
@@ -354,6 +355,7 @@ export async function executeFocusedPackageLink(options: {
   } catch (error) {
     throw new Error(
       `Focused provider consumption failed for ${diagnostic} (${provider.name}): ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   } finally {
     await rm(probePath, { force: true });

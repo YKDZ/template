@@ -32,10 +32,10 @@ function planTemplateSourceFiles(
       resolveBuiltInTemplateSource(source, from);
     if (operation.kind === "writeTextFromFragments") {
       return operation.fragments.map((fragment) =>
-        sourceFile(fragment.source!, fragment.from),
+        sourceFile(fragment.source, fragment.from),
       );
     }
-    return [sourceFile(operation.source!, operation.from)];
+    return [sourceFile(operation.source, operation.from)];
   });
 }
 

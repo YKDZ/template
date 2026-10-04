@@ -190,6 +190,7 @@ function cliContribution(
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
+        vite: "catalog:",
         vitest: "catalog:",
       },
       engines: {

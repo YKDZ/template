@@ -155,6 +155,7 @@ export async function assertGeneratedTaskDiscovery(options: {
   } catch (error) {
     throw new Error(
       `Turbo dry-run did not return a task graph for ${options.taskNames.join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   const missing = expectedTaskIds(options).filter(

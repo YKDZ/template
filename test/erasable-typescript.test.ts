@@ -72,7 +72,7 @@ function importsTypeScript6Api(sourceFile: ts.SourceFile): boolean {
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
       node.arguments.length === 1 &&
       ts.isStringLiteral(node.arguments[0]!) &&
-      node.arguments[0]!.text === "typescript";
+      node.arguments[0].text === "typescript";
     const isTypeImport =
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&

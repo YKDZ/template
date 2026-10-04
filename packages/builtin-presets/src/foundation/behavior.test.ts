@@ -734,14 +734,13 @@ describe("Generated Repository initialization preparation", () => {
       T extends ReturnType<typeof baseContributions>[number],
     >(
       contribution: T,
-    ): T =>
-      ({
-        ...contribution,
-        foundation: {
-          ...contribution.foundation,
-          npmPublication: { kind: "public-cli-candidate" as const },
-        },
-      }) as T;
+    ): T => ({
+      ...contribution,
+      foundation: {
+        ...contribution.foundation,
+        npmPublication: { kind: "public-cli-candidate" as const },
+      },
+    });
     const definition = {
       ...base,
       metadata: { ...base.metadata, name: "two-public-cli-candidates" },
@@ -878,7 +877,7 @@ describe("Generated Repository Package Addition preparation", () => {
         >[0],
       ) {
         calls += 1;
-        return tsLibDefinition.planPackageAddition!(options);
+        return tsLibDefinition.planPackageAddition(options);
       },
     };
     const registry = vi
@@ -1702,8 +1701,8 @@ function structuredValuesEqual(left: unknown, right: unknown): boolean {
   ) {
     return false;
   }
-  const leftKeys = Object.keys(left as MutableJsonObject);
-  const rightKeys = Object.keys(right as MutableJsonObject);
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
   return (
     leftKeys.length === rightKeys.length &&
     leftKeys.every(
@@ -1742,18 +1741,17 @@ async function treeFingerprint(root: string): Promise<string> {
   async function walk(directory: string): Promise<void> {
     const entries = (
       await Promise.all(
-        (
-          await readdir(directory, { withFileTypes: true })
-        ).map(async (entry) =>
-          entry.isDirectory()
-            ? { kind: "dir" as const, name: entry.name }
-            : {
-                kind: "file" as const,
-                name: entry.name,
-                digest: createHash("sha256")
-                  .update(await readFile(path.join(directory, entry.name)))
-                  .digest("hex"),
-              },
+        (await readdir(directory, { withFileTypes: true })).map(
+          async (entry) =>
+            entry.isDirectory()
+              ? { kind: "dir" as const, name: entry.name }
+              : {
+                  kind: "file" as const,
+                  name: entry.name,
+                  digest: createHash("sha256")
+                    .update(await readFile(path.join(directory, entry.name)))
+                    .digest("hex"),
+                },
         ),
       )
     ).toSorted((left, right) => left.name.localeCompare(right.name));

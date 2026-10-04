@@ -29,11 +29,11 @@
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
     "jsonc-parser": "^3.3.1",
-    "npm-package-arg": "^13.0.2",
-    "picomatch": "^4.0.5",
+    "npm-package-arg": "^14.0.0",
+    "picomatch": "^4.0.7",
     "semver": "catalog:",
     "smol-toml": "^1.8.0",
-    "unbash": "4.0.11",
+    "unbash": "5.0.0",
     "valibot": "catalog:",
     "yaml": "catalog:"
   },
@@ -44,7 +44,7 @@
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@types/npm-package-arg": "^6.1.4",
-    "@types/picomatch": "^3.0.2",
+    "@types/picomatch": "^4.0.3",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
     "@types/web-bluetooth": "catalog:",

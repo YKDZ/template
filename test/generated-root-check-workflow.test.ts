@@ -134,18 +134,18 @@ describe("Generated Root Check workflow", () => {
       "Set up pnpm",
     ]);
     expect(actionSteps.map((step) => step.uses)).toEqual([
-      "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-      "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444",
-      "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
+      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b",
     ]);
     expect(source).toContain(
-      "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5",
+      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
     );
     expect(source).toContain(
-      "actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5",
+      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7",
     );
     expect(source).toContain(
-      "pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0",
+      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0",
     );
     expect(actionSteps[0]?.with).toEqual({
       "persist-credentials": false,

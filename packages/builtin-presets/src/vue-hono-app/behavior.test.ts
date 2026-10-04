@@ -82,9 +82,8 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       definition: vueHonoAppDefinition,
       context,
     });
-    const browserLayer = vueHonoAppDefinition.planInitializationContributions!(
-      context,
-    )
+    const browserLayer = vueHonoAppDefinition
+      .planInitializationContributions(context)
       .flatMap(
         (contribution) =>
           contribution.foundation.developmentContainerToolLayers ?? [],

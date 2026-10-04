@@ -257,7 +257,7 @@ describe("ts-cli publication owner-fact integration", () => {
         execa("pnpm", ["exec", "npm", "--version"], {
           cwd: repositoryRoot,
         }),
-      ).resolves.toMatchObject({ stdout: "11.19.1" });
+      ).resolves.toMatchObject({ stdout: "12.2.0" });
       const npmSession = path.join(workspace, "isolated-npm-session");
       await mkdir(npmSession);
       const userConfig = path.join(npmSession, "user-npmrc");

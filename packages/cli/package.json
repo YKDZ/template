@@ -61,16 +61,16 @@
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "commander": "catalog:",
-    "hosted-git-info": "^9.0.3",
-    "lru-cache": "^11.5.2",
+    "hosted-git-info": "^10.0.0",
+    "lru-cache": "^11.5.3",
     "node-diff3": "catalog:",
-    "npm-package-arg": "^13.0.2",
-    "picomatch": "^4.0.5",
-    "proc-log": "^6.1.0",
+    "npm-package-arg": "^14.0.0",
+    "picomatch": "^4.0.7",
+    "proc-log": "^7.0.0",
     "semver": "catalog:",
     "typescript": "catalog:public-cli-runtime",
     "valibot": "catalog:",
-    "validate-npm-package-name": "^7.0.2",
+    "validate-npm-package-name": "^8.0.0",
     "yaml": "catalog:"
   },
   "devDependencies": {
@@ -97,7 +97,7 @@
     "yaml"
   ],
   "engines": {
-    "node": "^24.16.0"
+    "node": "^24.21.0"
   },
   "turbo": {
     "tags": [

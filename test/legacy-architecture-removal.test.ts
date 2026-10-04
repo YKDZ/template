@@ -106,7 +106,7 @@ describe("Legacy Architecture Removal Check", () => {
       await Promise.all([
         writeFile(
           path.join(root, "packages/core/src/old.ts"),
-          `import { x } from "./preset-${"source"}.ts";\nexport { x } from "./preset-${"source"}.ts";\nexport type ${"Preset"}Source = typeof x;`,
+          `import { x } from "./preset-source.ts";\nexport { x } from "./preset-source.ts";\nexport type PresetSource = typeof x;`,
         ),
         writeFile(
           path.join(root, "packages/core/src/renderer.ts"),
@@ -118,9 +118,9 @@ describe("Legacy Architecture Removal Check", () => {
         ),
         writeFile(
           path.join(root, "test/identity.test.ts"),
-          `const selected = "ts-${"lib"}"; if (selected === "ts-${"lib"}") {}`,
+          `const selected = "ts-lib"; if (selected === "ts-lib") {}`,
         ),
-        writeFile(path.join(root, "docs/current.md"), `${"Preset"} Source`),
+        writeFile(path.join(root, "docs/current.md"), `Preset Source`),
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
@@ -154,18 +154,18 @@ describe("Legacy Architecture Removal Check", () => {
       await Promise.all([
         writeFile(
           path.join(root, "packages/core/src/legacy.ts"),
-          `export type ${"Preset"}Source = string;`,
+          `export type PresetSource = string;`,
         ),
         writeFile(
           path.join(root, "packages/core/src/re-export.ts"),
-          `export { ${"Preset"}Source as Old } from "./legacy.ts";`,
+          `export { PresetSource as Old } from "./legacy.ts";`,
         ),
         writeFile(
           path.join(root, "packages/core/src/catalog.ts"),
           [
             `import type { Old } from "./re-export.ts";`,
             `const first = "ts-" + "lib";`,
-            `const catalog: readonly Old[] = [first, \`rust-${"bin"}\`];`,
+            `const catalog: readonly Old[] = [first, \`rust-bin\`];`,
             `switch (first) { case "ts-lib": break; }`,
             `const selected = first === "ts-lib" ? "yes" : "no";`,
             `void [catalog, selected];`,
@@ -195,16 +195,13 @@ describe("Legacy Architecture Removal Check", () => {
     const root = await fixture();
     try {
       await mkdir(path.join(root, "docs/adr"), { recursive: true });
-      await writeFile(
-        path.join(root, "docs/adr/0001-old.md"),
-        `${"Preset"} Source`,
-      );
+      await writeFile(path.join(root, "docs/adr/0001-old.md"), `Preset Source`);
       await expect(checkLegacyArchitectureRemoval(root)).rejects.toThrow(
         /historical-adr-status/u,
       );
       await writeFile(
         path.join(root, "docs/adr/0001-old.md"),
-        `Superseded by ADR-0093.\n\n${"Preset"} Source`,
+        `Superseded by ADR-0093.\n\nPreset Source`,
       );
       await expect(
         checkLegacyArchitectureRemoval(root),
@@ -218,7 +215,7 @@ describe("Legacy Architecture Removal Check", () => {
     expect(
       findLegacyArchitectureTarballFindings([
         "package/dist/cli.js",
-        `package/node_modules/@ykdz/template-builtin-${"source"}/index.js`,
+        `package/node_modules/@ykdz/template-builtin-source/index.js`,
         "package/node_modules/@ykdz/template-builtin-presets/dist/src/example/behavior.test.js",
       ]),
     ).toEqual(
@@ -370,8 +367,8 @@ describe("Legacy Architecture Removal Check", () => {
         writeFile(
           path.join(root, "packages/core/src/legacy-task.ts"),
           [
-            `export type ${"Check"}Plan = readonly string[];`,
-            `const deployment${"Owner"} = "apps/web";`,
+            `export type CheckPlan = readonly string[];`,
+            `const deploymentOwner = "apps/web";`,
             'const compatibility = "legacy task-model migration";',
             `const manifest = { scripts: { check: "turbo run lint --filter=./apps/web" } };`,
             "void [compatibility, deploymentOwner, manifest];",
@@ -387,10 +384,10 @@ describe("Legacy Architecture Removal Check", () => {
             },
           }),
         ),
-        writeFile(path.join(root, "docs/current.md"), `${"Fix"} Component`),
+        writeFile(path.join(root, "docs/current.md"), `Fix Component`),
         writeFile(
           path.join(root, "docs/adr/0001-old-task-model.md"),
-          `${"Check"} Plan`,
+          `Check Plan`,
         ),
         writeFile(path.join(root, "packages/cli/package.json"), "{}"),
         writeFile(
@@ -400,7 +397,7 @@ describe("Legacy Architecture Removal Check", () => {
         writeFile(path.join(root, "packages/core/package.json"), "{}"),
         writeFile(
           path.join(root, "packages/cli/dist/legacy.js"),
-          `export const task = "${"deployment"} owner";`,
+          `export const task = "deployment owner";`,
         ),
       ]);
 
@@ -495,13 +492,13 @@ describe("Legacy Architecture Removal Check", () => {
         writeFile(
           path.join(root, "packages/core/src/devcontainer.ts"),
           [
-            `export type ${"DevelopmentContainer"}RustLayer = { kind: "rust" };`,
-            `export type ${"DevelopmentContainer"}Capability = { kind: "docker-client" };`,
-            `export type ${"RustDevelopmentContainer"}Options = { toolchain: string };`,
-            `export function ${"rustTool"}Layer() { return { kind: "rust" }; }`,
-            `export function ${"createRustDevelopmentContainer"}Layer() { return { kind: "rust" }; }`,
-            `export function ${"developmentContainerCapability"}Compatibility() {}`,
-            `export function ${"dockerfileFirstRustPnpm"}Devcontainer() {}`,
+            `export type DevelopmentContainerRustLayer = { kind: "rust" };`,
+            `export type DevelopmentContainerCapability = { kind: "docker-client" };`,
+            `export type RustDevelopmentContainerOptions = { toolchain: string };`,
+            `export function rustToolLayer() { return { kind: "rust" }; }`,
+            `export function createRustDevelopmentContainerLayer() { return { kind: "rust" }; }`,
+            `export function developmentContainerCapabilityCompatibility() {}`,
+            `export function dockerfileFirstRustPnpmDevcontainer() {}`,
             `export function select(layer: { kind: string }) {`,
             `  switch (layer.kind) { case "rust": return true; case "docker-client": return true; default: return false; }`,
             `}`,
@@ -538,7 +535,7 @@ describe("Legacy Architecture Removal Check", () => {
         writeFile(
           path.join(root, "packages/checks/src/check-generated-registry.ts"),
           [
-            `async function ${"ensureHostFixtureDependencies"}() {`,
+            `async function ensureHostFixtureDependencies() {`,
             `  await run("rustup", ["toolchain", "install", "stable"], { cwd: "." });`,
             `  await run("pnpm", ["exec", "playwright", "install", "--with-deps", "chromium"], { cwd: "." });`,
             `}`,
@@ -599,7 +596,7 @@ describe("Legacy Architecture Removal Check", () => {
       });
       await writeFile(
         path.join(root, "packages/builtin-presets/src/vike-app/definition.ts"),
-        `import { vueAppDefinition } from "../vue-${"app"}/definition.ts"; void vueAppDefinition;`,
+        `import { vueAppDefinition } from "../vue-app/definition.ts"; void vueAppDefinition;`,
       );
 
       await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(

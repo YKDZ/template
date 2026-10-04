@@ -426,6 +426,7 @@ function databaseContribution(
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
+        vite: "catalog:",
         vitest: "catalog:",
       },
       engines: { node: context.toolchain.nodeLtsMajor },

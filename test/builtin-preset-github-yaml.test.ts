@@ -234,7 +234,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     await expectRootOnlyWorkflowRejected(
       source.replace(
         "      - name: Install dependencies\n",
-        "      - name: Checkout another repository\n        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n      - name: Install dependencies\n",
+        "      - name: Checkout another repository\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n      - name: Install dependencies\n",
       ),
     );
   });
@@ -243,12 +243,12 @@ describe("Built-in Preset GitHub YAML checker", () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
       source.replace(
-        "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+        "d9184bf108216479bc5a137cc391f4d7b14c870b",
         "0000000000000000000000000000000000000000",
       ),
     );
     await expectRootOnlyWorkflowRejected(
-      source.replace("# v4.4.0", "# v4.4.1"),
+      source.replace("# v6.1.0", "# v6.1.1"),
     );
   });
 
@@ -287,9 +287,9 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
     await expectDeploymentWorkflowRejected(
       `${source.replace(
-        "uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0",
-        "uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c",
-      )}\n# uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0\n`,
+        "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1",
+        "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
+      )}\n# uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1\n`,
     );
   });
 

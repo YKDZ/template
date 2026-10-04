@@ -65,7 +65,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const contribution = rustBinDefinition.planPackageAddition?.({
       context,
       packageLeafName: "worker",
-      packagePath: packagePath!,
+      packagePath: packagePath,
     });
 
     expect(packagePath).toBe("packages/worker");

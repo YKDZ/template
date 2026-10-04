@@ -270,6 +270,7 @@ export async function discoverPresetLocalBehaviorTests(): Promise<
       } catch (error) {
         throw new Error(
           `${definition.metadata.name}: missing Preset-Local Behavior Test at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
         );
       }
       return { definition, filePath };
@@ -295,14 +296,14 @@ function operationReferences(
   if (operation.kind === "writeTextFromFragments") {
     return operation.fragments.map((fragment) => ({
       generatedPath: operation.to,
-      sourceFile: resolveBuiltInTemplateSource(fragment.source!, fragment.from),
+      sourceFile: resolveBuiltInTemplateSource(fragment.source, fragment.from),
     }));
   }
   return [
     {
       generatedPath: operation.to,
       sourceFile: resolveBuiltInTemplateSource(
-        operation.source!,
+        operation.source,
         operation.from,
       ),
     },
@@ -331,6 +332,7 @@ export function planSourceReferences(options: {
     } catch (error) {
       throw new Error(
         `generated ${operation.to}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
       );
     }
   });
@@ -350,6 +352,7 @@ export async function validatePlanSources(options: {
   } catch (error) {
     throw new Error(
       `${options.definition.metadata.name}: ${options.definition.plannerSourceFile} references undeclared or escaping Template Source for a generated output: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
     );
   }
   for (const reference of references) {
@@ -660,17 +663,15 @@ function planMirrorSlotKeys(plan: GeneratedRepositoryPlan): readonly string[] {
     .flatMap((policy) =>
       policy.driver === "canonical"
         ? []
-        : (policy.mirrorSlots ?? []).map(
-            (slot): ComparableMirrorSlot => ({
-              driver: slot.location.kind,
-              id: slot.id,
-              location:
-                slot.location.kind === "json-pointer"
-                  ? slot.location.pointer
-                  : slot.location.name,
-              path: policy.path,
-            }),
-          ),
+        : (policy.mirrorSlots ?? []).map((slot): ComparableMirrorSlot => ({
+            driver: slot.location.kind,
+            id: slot.id,
+            location:
+              slot.location.kind === "json-pointer"
+                ? slot.location.pointer
+                : slot.location.name,
+            path: policy.path,
+          })),
     )
     .map(mirrorSlotKey)
     .toSorted();
@@ -689,7 +690,7 @@ function collectJsonParseTemplateLiterals(
     node.arguments.length === 1 &&
     ts.isNoSubstitutionTemplateLiteral(node.arguments[0]!)
   ) {
-    literals.push(node.arguments[0]!.text);
+    literals.push(node.arguments[0].text);
   }
   node.forEachChild((child) => {
     collectJsonParseTemplateLiterals(child, literals);

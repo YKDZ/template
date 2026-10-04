@@ -480,7 +480,7 @@ function replaceTemplateSource(options: {
     "source" in options.operation &&
     options.operation.source === options.from
   ) {
-    return { ...options.operation, source: options.to } as RenderOperation;
+    return { ...options.operation, source: options.to };
   }
   if (options.operation.kind === "writeTextFromFragments") {
     return {
@@ -507,7 +507,7 @@ function replaceContributionTemplateSource<
     operations: options.contribution.operations.map((operation) =>
       replaceTemplateSource({ operation, from: options.from, to: options.to }),
     ),
-  } as Contribution;
+  };
 }
 
 async function renderMatrixScenario(options: {
@@ -3820,7 +3820,7 @@ describe("Fixture Verification Evidence", () => {
           writeEnabled: true,
           clock: () =>
             new Date(
-              "expired" in invalidation && invalidation.expired === true
+              "expired" in invalidation && invalidation.expired
                 ? "2026-07-08T00:00:00.000Z"
                 : "2026-07-01T00:00:00.000Z",
             ),
@@ -3842,7 +3842,7 @@ describe("Fixture Verification Evidence", () => {
           storage,
           clock: () =>
             new Date(
-              "expired" in invalidation && invalidation.expired === true
+              "expired" in invalidation && invalidation.expired
                 ? "2026-07-08T00:00:00.000Z"
                 : "2026-07-01T00:00:00.000Z",
             ),

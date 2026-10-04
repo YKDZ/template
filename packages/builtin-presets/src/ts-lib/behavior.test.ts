@@ -3105,7 +3105,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
         return {
           code: result.exitCode,
           output,
-          diag: (output.match(/包文件系统隔离/g)?.length ?? 0) as number,
+          diag: output.match(/包文件系统隔离/g)?.length ?? 0,
         };
       };
 
