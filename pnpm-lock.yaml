@@ -173,9 +173,6 @@ catalogs:
     '@playwright/test':
       specifier: ^1.62.1
       version: 1.63.0
-    '@pnpm/workspace.package-patterns':
-      specifier: 1100.0.1
-      version: 1100.0.1
     '@tailwindcss/vite':
       specifier: ^4.3.3
       version: 4.3.3
@@ -236,9 +233,6 @@ catalogs:
     semver:
       specifier: ^7.8.5
       version: 7.8.5
-    shell-quote:
-      specifier: 1.12.0
-      version: 1.12.0
     spdx-expression-parse:
       specifier: ^5.0.0
       version: 5.0.0
@@ -297,9 +291,6 @@ importers:
 
   .:
     devDependencies:
-      '@pnpm/workspace.package-patterns':
-        specifier: 'catalog:'
-        version: 1100.0.1
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1
@@ -327,9 +318,6 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2003
-      shell-quote:
-        specifier: 'catalog:'
-        version: 1.12.0
       turbo:
         specifier: 'catalog:'
         version: 2.11.7
@@ -385,9 +373,6 @@ importers:
       '@playwright/test':
         specifier: 'catalog:'
         version: 1.63.0
-      '@pnpm/workspace.package-patterns':
-        specifier: 'catalog:'
-        version: 1100.0.1
       '@tailwindcss/vite':
         specifier: 'catalog:'
         version: 4.3.3(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
@@ -448,9 +433,6 @@ importers:
       pinia:
         specifier: 'catalog:'
         version: 4.0.3(@vue/devtools-api@8.2.1)(vue@3.5.43)
-      shell-quote:
-        specifier: 'catalog:'
-        version: 1.12.0
       spdx-expression-parse:
         specifier: 'catalog:'
         version: 5.0.0
@@ -1479,10 +1461,6 @@ packages:
     resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
     engines: {node: '>=20'}
     hasBin: true
-
-  '@pnpm/workspace.package-patterns@1100.0.1':
-    resolution: {integrity: sha512-0Pge0SGpHL2Grv1fiDbhe/VzNz+vti8+qxTJqQ5lDS+GLdpjyYSp+IYXDpe83c1nJTSSrOlVBB5+t9Xs+1LSwg==}
-    engines: {node: '>=22.13'}
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -2897,10 +2875,6 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  shell-quote@1.12.0:
-    resolution: {integrity: sha512-PcByqNyT/38F2kDNi006HAMRJaULuBzq/FOsw3qdZvX/GA9W/jamDaRskgHjubHiftXK5sIFxLNkvrXUwcof6Q==}
-    engines: {node: '>= 0.4'}
-
   signal-exit@4.1.0:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
@@ -3742,10 +3716,6 @@ snapshots:
   '@playwright/test@1.63.0':
     dependencies:
       playwright: 1.63.0
-
-  '@pnpm/workspace.package-patterns@1100.0.1':
-    dependencies:
-      micromatch: 4.0.8
 
   '@polka/url@1.0.0-next.29': {}
 
@@ -4872,8 +4842,6 @@ snapshots:
   semver@6.3.1: {}
 
   semver@7.8.5: {}
-
-  shell-quote@1.12.0: {}
 
   signal-exit@4.1.0: {}
 

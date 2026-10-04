@@ -40,7 +40,6 @@
   "devDependencies": {
     "@hono/node-server": "catalog:",
     "@playwright/test": "catalog:",
-    "@pnpm/workspace.package-patterns": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "@types/npm-package-arg": "^6.1.4",
@@ -61,7 +60,6 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "pinia": "catalog:",
-    "shell-quote": "catalog:",
     "spdx-expression-parse": "catalog:",
     "tailwindcss": "catalog:",
     "tar": "catalog:",

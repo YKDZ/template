@@ -24,7 +24,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "devDependencies": {
-    "@pnpm/workspace.package-patterns": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-checks": "workspace:*",
@@ -34,7 +33,6 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "shell-quote": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:",

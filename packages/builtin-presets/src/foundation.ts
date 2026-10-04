@@ -1264,6 +1264,10 @@ function contributedDevcontainerComposition(options: {
           value: options.rootNodeDeclaration,
         },
       ],
+      probes: [
+        { identity: "procps", command: "ps", args: ["--version"] },
+        { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
+      ],
       mounts: [
         {
           identity: "pnpm-store",
@@ -3226,12 +3230,6 @@ function foundationPlan(options: {
   );
   const rootOwnedE2e = vueHonoJointE2e !== undefined;
   const rootAutomationPaths = rootOwnedE2e ? "scripts test" : "scripts";
-  // 根 checker 的 SFC 源码闭包只依官方 parser：已有 Vue 依赖事实条件投影根 devDependency，无 Vue 形态不引入该依赖。
-  const requiresSfcSourceClosure = contributions.some((contribution) => {
-    const dependencies = contribution.manifest.dependencies;
-
-    return isRecord(dependencies) && Object.hasOwn(dependencies, "vue");
-  });
   const rootManifest = {
     name: options.context.repositoryName,
     private: true,
@@ -3255,7 +3253,7 @@ function foundationPlan(options: {
         ? {}
         : { "toolchain:prepare": "cargo --version" }),
       boundaries:
-        "turbo boundaries --no-color && node --conditions=source scripts/check-package-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
+        "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
       ...(databasePreparation === undefined
         ? {}
         : databasePreparationCommands(databasePreparation)),
@@ -3286,9 +3284,7 @@ function foundationPlan(options: {
       typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
-      "@pnpm/workspace.package-patterns": "catalog:",
       "@types/node": "catalog:",
-      ...(requiresSfcSourceClosure ? { "@vue/compiler-sfc": "catalog:" } : {}),
       ...(rootOwnedE2e ? { "@playwright/test": "catalog:" } : {}),
       ...(publicationCandidate === undefined
         ? {}
@@ -3299,7 +3295,6 @@ function foundationPlan(options: {
       oxfmt: "catalog:",
       oxlint: "catalog:",
       "oxlint-tsgolint": "catalog:",
-      "shell-quote": "catalog:",
       "smol-toml": "catalog:",
       ...(publicationCandidate === undefined
         ? {}
@@ -3310,9 +3305,7 @@ function foundationPlan(options: {
             tar: "catalog:",
           }),
       turbo: "catalog:",
-      typescript: "catalog:",
       "typescript-7": "catalog:",
-      yaml: "catalog:",
     },
     engines: { node: options.rootNodeDeclaration },
     packageManager: options.context.toolchain.packageManagerPin,
@@ -3566,12 +3559,6 @@ function foundationPlan(options: {
       multilineArrays:
         deploymentCheck === undefined ? [] : ["tasks.//#deployment.dependsOn"],
     })),
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "scripts/check-package-boundaries.ts",
-      to: "scripts/check-package-boundaries.ts",
-    },
     {
       kind: "writeTextTemplate",
       source: templateSources.foundation,

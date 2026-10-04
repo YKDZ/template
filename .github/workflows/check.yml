@@ -149,6 +149,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 清理测试容器
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
+        run: |
+          fixture_container_ids="$(docker ps -aq --filter label=com.ykdz.template.fixture.project)"
+          if [[ -n "$fixture_container_ids" ]]; then
+            readarray -t fixture_containers <<< "$fixture_container_ids"
+            docker rm -f "${fixture_containers[@]}"
+          fi
+
       - name: Save BuildKit cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
         uses: actions/cache/save@v6
