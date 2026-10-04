@@ -100,6 +100,10 @@ export function normalizedGeneratedRootQualityPlan(
             args: ["run", "fix"],
           }
         : null,
+    gitSafety:
+      options.includeFix === true
+        ? { safeDirectory: "generated-container-workspace" }
+        : null,
     rootCheck: {
       command: "pnpm",
       args: ["run", "check"],
@@ -172,6 +176,7 @@ export async function executeGeneratedRootQuality(options: {
   readonly plan: GeneratedRepositoryPlan;
   readonly projectDir: string;
   readonly fixtureWorkspace: string;
+  readonly gitSafeDirectory?: string;
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
 }): Promise<void> {
@@ -197,6 +202,9 @@ export async function executeGeneratedRootQuality(options: {
     const beforeFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
       run: options.run,
+      ...(options.gitSafeDirectory === undefined
+        ? {}
+        : { gitSafeDirectory: options.gitSafeDirectory }),
     });
     await options.run("pnpm", ["run", "fix"], {
       cwd: options.projectDir,
@@ -205,6 +213,9 @@ export async function executeGeneratedRootQuality(options: {
     const afterFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
       run: options.run,
+      ...(options.gitSafeDirectory === undefined
+        ? {}
+        : { gitSafeDirectory: options.gitSafeDirectory }),
     });
     if (afterFix !== beforeFix) {
       throw new Error(

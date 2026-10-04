@@ -1552,6 +1552,15 @@ describe("Development Container Fixture Executor", () => {
             containerGeneratedLockfiles.add(options.cwd);
           }
           if (nestedCommand === "git") {
+            if (
+              nestedArgs[0] !== "-c" ||
+              nestedArgs[1] !==
+                `safe.directory=/workspaces/${path.basename(options.cwd)}`
+            ) {
+              throw new Error(
+                `fatal: detected dubious ownership in repository at '/workspaces/${path.basename(options.cwd)}'`,
+              );
+            }
             return await execa(nestedCommand, [...nestedArgs], options);
           }
           return {};
@@ -1597,9 +1606,14 @@ describe("Development Container Fixture Executor", () => {
         calls.filter(({ command, args }) => {
           if (command !== "devcontainer" || args[0] !== "exec") return false;
           const nested = nestedDevcontainerCommand(args);
+          const nestedGitArgs =
+            nested.args[0] === "-c" &&
+            nested.args[1]?.startsWith("safe.directory=")
+              ? nested.args.slice(2)
+              : nested.args;
           return (
             nested.command === "git" &&
-            (nested.args[0] === "add" || nested.args[0] === "write-tree")
+            (nestedGitArgs[0] === "add" || nestedGitArgs[0] === "write-tree")
           );
         }),
       ).toHaveLength(scenarioCount * 4);

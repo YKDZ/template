@@ -613,6 +613,10 @@ async function runScenario(
             plan: finalPlan,
             projectDir,
             fixtureWorkspace: options.workspace,
+            gitSafeDirectory: path.posix.join(
+              "/workspaces",
+              path.basename(projectDir),
+            ),
             includeFix,
             run: containerSession.run,
           });

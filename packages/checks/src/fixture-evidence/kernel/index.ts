@@ -3624,10 +3624,15 @@ export async function initializeFixtureGitRepository(options: {
 export async function stageFixtureGitRepository(options: {
   readonly repositoryRoot: string;
   readonly run?: FixtureCommandRunner;
+  readonly gitSafeDirectory?: string;
 }): Promise<void> {
+  const gitConfigArgs =
+    options.gitSafeDirectory === undefined
+      ? []
+      : ["-c", `safe.directory=${options.gitSafeDirectory}`];
   await (options.run ?? defaultCommandRunner)(
     "git",
-    ["add", "--all", "--", "."],
+    [...gitConfigArgs, "add", "--all", "--", "."],
     {
       cwd: options.repositoryRoot,
     },
@@ -3637,13 +3642,21 @@ export async function stageFixtureGitRepository(options: {
 export async function writeGeneratedRepositoryTree(options: {
   readonly repositoryRoot: string;
   readonly run?: FixtureCommandRunner;
+  readonly gitSafeDirectory?: string;
 }): Promise<string> {
   const run = options.run ?? defaultCommandRunner;
   await stageFixtureGitRepository({
     repositoryRoot: options.repositoryRoot,
     run,
+    ...(options.gitSafeDirectory === undefined
+      ? {}
+      : { gitSafeDirectory: options.gitSafeDirectory }),
   });
-  const result = await run("git", ["write-tree"], {
+  const gitConfigArgs =
+    options.gitSafeDirectory === undefined
+      ? []
+      : ["-c", `safe.directory=${options.gitSafeDirectory}`];
+  const result = await run("git", [...gitConfigArgs, "write-tree"], {
     cwd: options.repositoryRoot,
   });
   const identity = commandStdout(result);
