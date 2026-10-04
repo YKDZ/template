@@ -1422,14 +1422,11 @@ describe("Development Container Fixture Executor", () => {
           if (args.includes("--dry-run=json")) {
             return { stdout: JSON.stringify({ tasks: taskIds }) };
           }
-          if (command === "pnpm" && args[1] === "check") rootChecks += 1;
-          return {};
-        },
-        identityRun: async (command, args) => {
           if (command === "git" && args[0] === "write-tree") {
             treeWrites += 1;
             return { stdout: `${treeWrites}`.repeat(40) };
           }
+          if (command === "pnpm" && args[1] === "check") rootChecks += 1;
           return {};
         },
       }),
@@ -1492,6 +1489,7 @@ describe("Development Container Fixture Executor", () => {
       "/tmp/template-development-container-registry-test",
     );
     const calls: Command[] = [];
+    const containerGeneratedLockfiles = new Set<string>();
     await rm(workspace, { recursive: true, force: true });
     const evidenceRoot = path.join(workspace, ".test-evidence");
     const ledger = new FileFixtureEvidenceActivityLedger({
@@ -1515,6 +1513,14 @@ describe("Development Container Fixture Executor", () => {
         run: async (command, args, options) => {
           calls.push({ command, args, cwd: options.cwd });
           if (command === "git") {
+            if (
+              args[0] === "add" &&
+              containerGeneratedLockfiles.has(options.cwd)
+            ) {
+              throw new Error(
+                'error: open("pnpm-lock.yaml"): Permission denied',
+              );
+            }
             return await execa(command, [...args], options);
           }
           if (args.includes("--dry-run=json")) {
@@ -1543,6 +1549,7 @@ describe("Development Container Fixture Executor", () => {
               path.join(options.cwd, "pnpm-lock.yaml"),
               "lockfileVersion: '9.0'\n",
             );
+            containerGeneratedLockfiles.add(options.cwd);
           }
           if (nestedCommand === "git") {
             return await execa(nestedCommand, [...nestedArgs], options);
@@ -1586,6 +1593,16 @@ describe("Development Container Fixture Executor", () => {
           ({ command, args }) => command === "devcontainer" && args[0] === "up",
         ),
       ).toHaveLength(scenarioCount);
+      expect(
+        calls.filter(({ command, args }) => {
+          if (command !== "devcontainer" || args[0] !== "exec") return false;
+          const nested = nestedDevcontainerCommand(args);
+          return (
+            nested.command === "git" &&
+            (nested.args[0] === "add" || nested.args[0] === "write-tree")
+          );
+        }),
+      ).toHaveLength(scenarioCount * 4);
       const buildCacheSources = calls
         .filter(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",

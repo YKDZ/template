@@ -174,7 +174,6 @@ export async function executeGeneratedRootQuality(options: {
   readonly fixtureWorkspace: string;
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
-  readonly identityRun?: FixtureCommandRunner;
 }): Promise<void> {
   await assertGeneratedTaskDiscovery({
     plan: options.plan,
@@ -197,7 +196,7 @@ export async function executeGeneratedRootQuality(options: {
   if (options.includeFix === true) {
     const beforeFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
-      run: options.identityRun ?? options.run,
+      run: options.run,
     });
     await options.run("pnpm", ["run", "fix"], {
       cwd: options.projectDir,
@@ -205,7 +204,7 @@ export async function executeGeneratedRootQuality(options: {
     });
     const afterFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
-      run: options.identityRun ?? options.run,
+      run: options.run,
     });
     if (afterFix !== beforeFix) {
       throw new Error(

@@ -6,6 +6,7 @@
     "//#lint": { "outputs": [] },
     "//#format:write": { "dependsOn": ["//#lint:fix"], "cache": false },
     "//#lint:fix": { "cache": false },
+    "//#toolchain:prepare": { "cache": false },
     "//#typecheck": { "outputs": [] },
     "format:check": { "outputs": [] },
     "lint": { "outputs": [] },

@@ -2960,5 +2960,6 @@ describe("Generated Repository toolchain checker projection", () => {
       "turbo boundaries --no-color && node --conditions=source scripts/check-package-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
     );
     expect(checkScript.startsWith("pnpm run boundaries &&")).toBe(true);
+    expect(scripts).not.toHaveProperty("toolchain:prepare");
   });
 });

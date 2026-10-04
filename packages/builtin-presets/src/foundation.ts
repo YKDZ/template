@@ -3250,6 +3250,10 @@ function foundationPlan(options: {
           : renderPublicationRootCheckCommand(
               publicationCandidate.definition.path,
             ),
+      // Cargo 会在首次代理调用时按根 rust-toolchain.toml 安装版本与组件；先经唯一根任务完成解析，再并行运行各 Rust 包的 Cargo 检查。
+      ...(rustToolchain === undefined
+        ? {}
+        : { "toolchain:prepare": "cargo --version" }),
       boundaries:
         "turbo boundaries --no-color && node --conditions=source scripts/check-package-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
       ...(databasePreparation === undefined

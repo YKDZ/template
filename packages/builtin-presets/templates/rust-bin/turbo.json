@@ -1,4 +1,22 @@
 {
   "extends": ["//"],
-  "tags": ["native"]
+  "tags": ["native"],
+  "tasks": {
+    "format:check": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "outputs": []
+    },
+    "format:write": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "cache": false
+    },
+    "lint": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "outputs": []
+    }
+  }
 }

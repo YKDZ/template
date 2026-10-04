@@ -13,7 +13,7 @@ import {
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { rustBinDefinition } from "./definition.ts";
 
@@ -34,6 +34,15 @@ const renderToolchain = {
   nodeVersion: releaseToolchainSnapshot.nodeVersion,
   rustVersion: releaseToolchainSnapshot.rustVersion,
 } as const;
+const cleanupDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    cleanupDirectories.splice(0).map(async (directory) => {
+      await rm(directory, { recursive: true, force: true });
+    }),
+  );
+});
 
 function requireReadyInitialization(
   preparation: ReturnType<typeof prepareGeneratedRepositoryInitialization>,
@@ -354,11 +363,12 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     }
   });
 
-  it("generates a Rust repository whose Root Check runs native formatting, linting, and tests", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-rust-")),
-      "demo-rust",
+  it("orders one Rustup preparation before generated Cargo tasks", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-rust-check-"),
     );
+    cleanupDirectories.push(workspace);
+    const targetDir = path.join(workspace, "demo-rust");
     const context = createGenerationContext({
       targetDir,
       defaultPackageScope: "demo",
@@ -459,12 +469,14 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       scripts: {
         check: expect.stringContaining("test"),
         fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+        "toolchain:prepare": "cargo --version",
       },
     });
     expect(
       JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
     ).toMatchObject({
       globalPassThroughEnv: ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
+      tasks: { "//#toolchain:prepare": { cache: false } },
     });
 
     await mkdir(path.join(targetDir, "apps/discovered"), { recursive: true });
@@ -495,6 +507,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "build",
         "test",
         "test:e2e",
+        "format:write",
         "--dry-run=json",
       ],
       { cwd: targetDir },
@@ -514,7 +527,9 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         "//#format:check",
         "//#lint",
         "//#typecheck",
+        "//#toolchain:prepare",
         "@demo/app#format:check",
+        "@demo/app#format:write",
         "@demo/app#lint",
         "@demo/app#test",
         "@demo/discovered#lint",
@@ -535,7 +550,78 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       tasks.find((task) => task.taskId === "@demo/discovered#test:e2e")
         ?.resolvedTaskDefinition.cache,
     ).toBe(false);
-    await execa("pnpm", ["run", "check"], { cwd: targetDir });
+    expect(
+      tasks.filter((task) => task.taskId === "//#toolchain:prepare"),
+    ).toHaveLength(1);
+    expect(
+      tasks.find((task) => task.taskId === "//#toolchain:prepare")
+        ?.resolvedTaskDefinition.cache,
+    ).toBe(false);
+    for (const taskId of [
+      "@demo/app#format:check",
+      "@demo/app#lint",
+      "@demo/app#test",
+      "@demo/app#format:write",
+    ]) {
+      expect(
+        tasks.find((task) => task.taskId === taskId)?.dependencies,
+      ).toContain("//#toolchain:prepare");
+    }
+    expect(
+      tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
+    ).toContain("//#lint:fix");
+    expect(taskIds).not.toContain("@demo/app#lint:fix");
+    const cargoHome = path.join(workspace, "cargo-home");
+    const rustupHome = path.join(workspace, "rustup-home");
+    const fakeBin = path.join(workspace, "fake-bin");
+    await mkdir(fakeBin, { recursive: true });
+    // 用临时 Cargo 记录器跳过工具链下载，只验证生成 Root Check 的真实任务顺序。
+    await writeFile(
+      path.join(fakeBin, "cargo"),
+      `#!/bin/sh
+set -eu
+state="${"$"}{CARGO_HOME:?}/template-cargo-calls"
+prepared="${"$"}{CARGO_HOME:?}/template-toolchain-prepared"
+mkdir -p "${"$"}{CARGO_HOME}"
+if [ "${"$"}#" -eq 1 ] && [ "${"$"}1" = "--version" ]; then
+  if [ -e "${"$"}prepared" ]; then
+    printf '%s\\n' 'toolchain preparation ran more than once' >&2
+    exit 91
+  fi
+  : > "${"$"}prepared"
+  printf '%s\\n' "${"$"}*" >> "${"$"}state"
+  exit 0
+fi
+if [ ! -e "${"$"}prepared" ]; then
+  printf '%s\\n' 'Cargo task ran before toolchain preparation' >&2
+  exit 90
+fi
+printf '%s\\n' "${"$"}*" >> "${"$"}state"
+`,
+      { mode: 0o755 },
+    );
+    await execa("pnpm", ["run", "check"], {
+      cwd: targetDir,
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+        CARGO_HOME: cargoHome,
+        RUSTUP_HOME: rustupHome,
+      },
+    });
+    const cargoCalls = (
+      await readFile(path.join(cargoHome, "template-cargo-calls"), "utf8")
+    )
+      .trim()
+      .split("\n");
+    expect(cargoCalls.filter((call) => call === "--version")).toHaveLength(1);
+    expect(cargoCalls).toEqual(
+      expect.arrayContaining([
+        "fmt --all -- --check",
+        "clippy --workspace --all-targets -- -D warnings",
+        "test --workspace",
+      ]),
+    );
   }, 180_000);
 
   it("discovers a manual package and runs source tests independently of failed builds", async () => {

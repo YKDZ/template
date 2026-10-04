@@ -615,7 +615,6 @@ async function runScenario(
             fixtureWorkspace: options.workspace,
             includeFix,
             run: containerSession.run,
-            identityRun: run,
           });
         },
       });
