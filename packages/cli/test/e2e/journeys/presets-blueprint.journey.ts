@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { CliJourney } from "../journey.ts";
@@ -61,6 +61,9 @@ const journey: CliJourney = {
     ];
   },
   async assertions({ context, results }) {
+    const manifest = JSON.parse(
+      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
+    ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
     assert.match(results[0]?.stdout ?? "", /^template .+\n内置预设/mu);
     assert.match(results[0]?.stdout ?? "", /\n  ts-cli:/u);
@@ -84,7 +87,7 @@ const journey: CliJourney = {
     for (const name of presetNames) {
       assert.ok((results[0]?.stdout ?? "").includes(`\n  ${name}:`));
     }
-    assert.equal(catalog.cliVersion, "0.0.36");
+    assert.equal(catalog.cliVersion, manifest.version);
     assert.equal(results[1]?.stderr, "");
 
     assert.equal(results[2]?.exitCode, 0);
@@ -95,7 +98,7 @@ const journey: CliJourney = {
       command: "blueprint validate",
       status: "success",
       path: path.join(context.workDir, "valid-blueprint.json"),
-      cliVersion: "0.0.36",
+      cliVersion: manifest.version,
     });
     assert.equal(results[3]?.stderr, "");
 

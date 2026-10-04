@@ -114,11 +114,14 @@ const journey: CliJourney = {
     ];
   },
   async assertions({ context, results }) {
+    const manifest = JSON.parse(
+      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
+    ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
     const preview = JSON.parse(results[0]?.stdout ?? "");
     assert.equal(preview.command, "init");
     assert.equal(preview.status, "success");
-    assert.equal(preview.cliVersion, "0.0.36");
+    assert.equal(preview.cliVersion, manifest.version);
     assert.equal(preview.dryRun, true);
     assert.equal(preview.targetDir, "preview");
     assert.deepEqual(preview.resolved, {
