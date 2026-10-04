@@ -1160,6 +1160,24 @@ describe("packed public CLI consumer", () => {
       ).resolves.toEqual({
         extends: ["//"],
         tags: ["native"],
+        tasks: {
+          "format:check": {
+            dependsOn: ["//#toolchain:prepare"],
+            outputs: [],
+          },
+          "format:write": {
+            dependsOn: ["//#toolchain:prepare"],
+            cache: false,
+          },
+          lint: {
+            dependsOn: ["//#toolchain:prepare"],
+            outputs: [],
+          },
+          test: {
+            dependsOn: ["//#toolchain:prepare"],
+            outputs: [],
+          },
+        },
       });
       const rootManifestAfterRust = JSON.parse(
         await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),

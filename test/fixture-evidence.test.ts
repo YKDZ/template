@@ -5605,6 +5605,10 @@ describe("Fixture Verification Evidence", () => {
     const secondWorkspace = path.join(root, "warm");
     const storage = new FileFixtureEvidenceStorage(evidenceRoot);
     const clock = () => new Date("2026-07-28T00:00:00.000Z");
+    const gitSubcommand = (args: readonly string[]) =>
+      args[0] === "-c" && args[1]?.startsWith("safe.directory=")
+        ? args[2]
+        : args[0];
 
     const createRunner =
       (
@@ -5687,12 +5691,14 @@ describe("Fixture Verification Evidence", () => {
       ).length;
       expect(
         coldCommands.filter(
-          ({ command, args }) => command === "git" && args[0] === "init",
+          ({ command, args }) =>
+            command === "git" && gitSubcommand(args) === "init",
         ),
       ).toHaveLength(scenarioCount);
       expect(
         coldCommands.filter(
-          ({ command, args }) => command === "git" && args[0] === "add",
+          ({ command, args }) =>
+            command === "git" && gitSubcommand(args) === "add",
         ),
       ).toHaveLength(scenarioCount * 4);
       expect(
@@ -5720,11 +5726,13 @@ describe("Fixture Verification Evidence", () => {
         );
         expect(
           scenarioCommands.findIndex(
-            ({ command, args }) => command === "git" && args[0] === "init",
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "init",
           ),
         ).toBeLessThan(
           scenarioCommands.findIndex(
-            ({ command, args }) => command === "git" && args[0] === "add",
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "add",
           ),
         );
       }
@@ -5736,17 +5744,20 @@ describe("Fixture Verification Evidence", () => {
       );
       expect(
         warmCommands.filter(
-          ({ command, args }) => command === "git" && args[0] === "init",
+          ({ command, args }) =>
+            command === "git" && gitSubcommand(args) === "init",
         ),
       ).toHaveLength(scenarioCount);
       expect(
         warmCommands.filter(
-          ({ command, args }) => command === "git" && args[0] === "add",
+          ({ command, args }) =>
+            command === "git" && gitSubcommand(args) === "add",
         ),
       ).toHaveLength(scenarioCount * 2);
       expect(
         warmCommands.filter(
-          ({ command, args }) => command === "git" && args[0] === "write-tree",
+          ({ command, args }) =>
+            command === "git" && gitSubcommand(args) === "write-tree",
         ),
       ).toHaveLength(scenarioCount);
       expect(
@@ -6342,6 +6353,7 @@ if (command === "sh" && commandArgs[0] === "-c") {
 }
 const forwards =
   command === "node" ||
+  command === "git" ||
   (command === "pnpm" &&
     (["install", "fetch", "run"].includes(commandArgs[0]) ||
       (commandArgs[0] === "exec" && commandArgs[1] === "turbo")));
