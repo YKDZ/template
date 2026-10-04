@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { rmSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -10,8 +8,6 @@ import { defineConfig, devices } from "@playwright/test";
 const externalBaseUrlName = "PLAYWRIGHT_EXTERNAL_BASE_URL";
 const externalReadinessTimeoutMs = 30_000;
 const webRoot = path.dirname(fileURLToPath(import.meta.url));
-const migrationsRoot = path.resolve(webRoot, "../../packages/db-migrations");
-const databaseFile = path.join(webRoot, "node_modules/.tmp/e2e.sqlite");
 const stateFile = path.join(webRoot, "node_modules/.tmp/playwright-port");
 
 function externalBaseUrl(): string | undefined {
@@ -89,44 +85,28 @@ async function awaitExternalService(baseUrl: string): Promise<void> {
   );
 }
 
-async function sharedPort(envName: string): Promise<{
-  readonly port: string;
-  readonly prepared: boolean;
-}> {
+async function sharedPort(envName: string): Promise<string> {
   const envPort = process.env[envName];
   if (envPort !== undefined) {
-    return { port: envPort, prepared: false };
+    return envPort;
   }
   try {
-    return { port: await readFile(stateFile, "utf8"), prepared: false };
+    return await readFile(stateFile, "utf8");
   } catch {
     const port = await availablePort();
     await mkdir(path.dirname(stateFile), { recursive: true });
     await writeFile(stateFile, port, "utf8");
-    return { port, prepared: true };
+    return port;
   }
-}
-
-function prepareLocalDatabase(): void {
-  rmSync(databaseFile, { force: true });
-  execFileSync("pnpm", ["run", "db:push"], {
-    cwd: migrationsRoot,
-    env: { ...process.env, DATABASE_FILE: databaseFile },
-    stdio: "inherit",
-  });
 }
 
 const externalServiceUrl = externalBaseUrl();
 let previewUrl: string;
 
 if (externalServiceUrl === undefined) {
-  const { port, prepared } = await sharedPort("PLAYWRIGHT_WEB_PORT");
+  const port = await sharedPort("PLAYWRIGHT_WEB_PORT");
   previewUrl = `http://127.0.0.1:${port}`;
-  process.env.DATABASE_FILE = databaseFile;
   process.env.PORT = port;
-  if (prepared) {
-    prepareLocalDatabase();
-  }
 } else {
   previewUrl = externalServiceUrl;
   await awaitExternalService(externalServiceUrl);

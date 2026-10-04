@@ -12,13 +12,9 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
 
 import type { CliJourney } from "../journey.ts";
-
-const fallbackEnvironment = {
-  TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-};
 
 type WorkspaceEntry = {
   readonly path: string;
@@ -145,7 +141,6 @@ const journey: CliJourney = {
           "acme",
           "--yes",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "dry-run first diagnostic addition",
@@ -172,7 +167,6 @@ const journey: CliJourney = {
           "--json",
         ],
         cwd: project,
-        env: fallbackEnvironment,
       },
       {
         name: "apply first diagnostic addition",
@@ -199,7 +193,6 @@ const journey: CliJourney = {
           "--json",
         ],
         cwd: project,
-        env: fallbackEnvironment,
       },
       {
         name: "JSON diagnostic overlap conflict",
@@ -232,7 +225,6 @@ const journey: CliJourney = {
           "--json",
         ],
         cwd: project,
-        env: fallbackEnvironment,
       },
       {
         name: "install generated workspace after diagnostic addition",

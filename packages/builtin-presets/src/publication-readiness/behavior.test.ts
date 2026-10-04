@@ -31,6 +31,7 @@ async function writeJson(filePath: string, value: unknown): Promise<void> {
 async function generatedRepository(
   options: {
     readonly manifest?: Readonly<Record<string, unknown>>;
+    readonly rootNode?: string;
   } = {},
 ): Promise<string> {
   const repositoryRoot = await mkdtemp(
@@ -46,7 +47,7 @@ async function generatedRepository(
     name: "demo-cli",
     private: true,
     type: "module",
-    engines: { node: "26" },
+    engines: { node: options.rootNode ?? "26" },
     packageManager: "pnpm@11.11.0",
     scripts: {
       "publication:readiness":
@@ -351,6 +352,79 @@ describe("Generated Repository npm publication readiness", () => {
       if (result.kind !== "blocked") throw new Error("Expected blockers");
       expect(result.blockers).toContainEqual(
         expect.objectContaining({ code: "manifest-contract" }),
+      );
+    },
+  );
+
+  it.each([
+    { root: "24", nodeRange: ">=24" },
+    { root: "24.16.0", nodeRange: "^24.16.0" },
+  ])(
+    "checks the public CLI engine against root engines.node $root",
+    async ({ root, nodeRange }) => {
+      const repositoryRoot = await generatedRepository({ rootNode: root });
+      await writeReadyFacts(repositoryRoot, "@demo/cli");
+      await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
+        ...readyManifest("@demo/cli"),
+        engines: { node: nodeRange },
+      });
+      const { inspectNpmPublicationReadiness } =
+        await loadReadinessModule(repositoryRoot);
+
+      const result = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+
+      expect(result.kind).toBe("ready");
+    },
+  );
+
+  it.each([">=24", "^24.15.0", ">=26"])(
+    "blocks public CLI engine %s that does not match an exact root version",
+    async (nodeRange) => {
+      const repositoryRoot = await generatedRepository({ rootNode: "24.16.0" });
+      await writeReadyFacts(repositoryRoot, "@demo/cli");
+      await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
+        ...readyManifest("@demo/cli"),
+        engines: { node: nodeRange },
+      });
+      const { inspectNpmPublicationReadiness } =
+        await loadReadinessModule(repositoryRoot);
+
+      const result = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+
+      expect(result.kind).toBe("blocked");
+      if (result.kind !== "blocked") throw new Error("Expected blockers");
+      expect(result.blockers.map(({ code }) => code)).toEqual([
+        "manifest-contract",
+      ]);
+    },
+  );
+
+  it.each([">=24", "24.16", "v24", "24.16.0-beta.1", ""])(
+    "blocks an unsupported root engines.node declaration %s without substituting a baseline",
+    async (root) => {
+      const repositoryRoot = await generatedRepository({ rootNode: root });
+      await writeReadyFacts(repositoryRoot, "@demo/cli");
+      const { inspectNpmPublicationReadiness } =
+        await loadReadinessModule(repositoryRoot);
+
+      const result = await inspectNpmPublicationReadiness({
+        repositoryRoot,
+        packagePath: "packages/cli",
+      });
+
+      expect(result.kind).toBe("blocked");
+      if (result.kind !== "blocked") throw new Error("Expected blockers");
+      expect(result.blockers).toContainEqual(
+        expect.objectContaining({
+          code: "manifest-contract",
+          owner: { path: "packages/cli/package.json" },
+        }),
       );
     },
   );

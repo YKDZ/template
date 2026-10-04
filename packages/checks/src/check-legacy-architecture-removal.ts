@@ -322,6 +322,55 @@ function isAssertionArgument(node: ts.Node): boolean {
   );
 }
 
+/** 命令夹具上下文识别：packages/builtin-presets/src/<preset>/behavior.test.ts 把被测边界 checker 的任务命令原样嵌入 setScripts/setRootScripts 对象值、{cmd, code, diag} 数据表行与 probeCommand(...) 参数。这三类来源是测试夹具数据而非生产自动化任务，generated-task-filter 与 manual-dependency-build-chain 两条源码命令规则对其不判定；其余规则（含 manifest 独立扫描）不受影响。 */
+const businessCommandFixtureFile =
+  /^packages\/builtin-presets\/src\/[^/]+\/behavior\.test\.ts$/u;
+
+function isBusinessCommandFixture(
+  relativePath: string,
+  node: ts.Node,
+): boolean {
+  if (!businessCommandFixtureFile.test(relativePath)) return false;
+  const parent = node.parent;
+  if (parent === undefined) return false;
+  if (
+    ts.isCallExpression(parent) &&
+    ts.isIdentifier(parent.expression) &&
+    parent.expression.text === "probeCommand"
+  ) {
+    return true;
+  }
+  if (!ts.isPropertyAssignment(parent) || parent.initializer !== node) {
+    return false;
+  }
+  const holder = parent.parent;
+  if (holder === undefined || !ts.isObjectLiteralExpression(holder)) {
+    return false;
+  }
+  let container: ts.Node = holder;
+  if (
+    container.parent !== undefined &&
+    ts.isAwaitExpression(container.parent)
+  ) {
+    container = container.parent;
+  }
+  const call = container.parent;
+  if (
+    call !== undefined &&
+    ts.isCallExpression(call) &&
+    ts.isIdentifier(call.expression) &&
+    (call.expression.text === "setScripts" ||
+      call.expression.text === "setRootScripts")
+  ) {
+    return true;
+  }
+  return (
+    propertyNameText(parent.name) === "cmd" &&
+    holder.parent !== undefined &&
+    ts.isArrayLiteralExpression(holder.parent)
+  );
+}
+
 const prohibitedTaskPlanFields = new Set([
   "checks",
   "fixes",
@@ -794,6 +843,7 @@ function collectTypeScriptFindings(
     }
     if (
       !relativePath.startsWith("test/") &&
+      !isBusinessCommandFixture(relativePath, node) &&
       ts.isStringLiteralLike(node) &&
       isForbiddenTaskCommandWithFilter(node.text)
     ) {
@@ -812,7 +862,11 @@ function collectTypeScriptFindings(
         : undefined;
     if (!relativePath.startsWith("test/") && composedCommand !== undefined) {
       const command = evaluatedString(checker, composedCommand);
-      if (command !== undefined && isForbiddenTaskCommandWithFilter(command)) {
+      if (
+        command !== undefined &&
+        !isBusinessCommandFixture(relativePath, composedCommand) &&
+        isForbiddenTaskCommandWithFilter(command)
+      ) {
         findings.push(
           finding(
             "generated-task-filter",
@@ -863,6 +917,7 @@ function collectTypeScriptFindings(
     if (
       ts.isStringLiteralLike(node) &&
       !isAssertionArgument(node) &&
+      !isBusinessCommandFixture(relativePath, node) &&
       usesManualDependencyBuildChain(node.text)
     ) {
       findings.push(
@@ -1329,10 +1384,6 @@ function manifestFindings(
     return Object.entries(value).some(
       ([key, target]) =>
         target !== null &&
-        !(
-          relativePath === "packages/checks/package.json" &&
-          key === "./check-online-toolchain-resolution-contract"
-        ) &&
         (/(?:registry-checks|(?:^|[/-])check-[\w-]*)/iu.test(key) ||
           exposesRepositoryCheckModule(target)),
     );

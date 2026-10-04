@@ -8,11 +8,6 @@
   ],
   "type": "module",
   "imports": {
-    "#template-core/*": {
-      "source": "@ykdz/template-core-source/*",
-      "types": "@ykdz/template-core/*",
-      "default": "@ykdz/template-core/*"
-    },
     "#npm-publication/*": "./templates/ts-cli/publication/*.ts"
   },
   "exports": {
@@ -33,13 +28,23 @@
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
-    "valibot": "catalog:"
+    "jsonc-parser": "^3.3.1",
+    "npm-package-arg": "^13.0.2",
+    "picomatch": "^4.0.5",
+    "semver": "catalog:",
+    "smol-toml": "^1.8.0",
+    "unbash": "4.0.11",
+    "valibot": "catalog:",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@hono/node-server": "catalog:",
     "@playwright/test": "catalog:",
+    "@pnpm/workspace.package-patterns": "catalog:",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
+    "@types/npm-package-arg": "^6.1.4",
+    "@types/picomatch": "^3.0.2",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
     "@types/web-bluetooth": "catalog:",
@@ -47,7 +52,6 @@
     "@vitejs/plugin-vue": "catalog:",
     "@vue/devtools-api": "catalog:",
     "@vue/tsconfig": "catalog:",
-    "@ykdz/template-core-source": "link:../core",
     "commander": "catalog:",
     "drizzle-kit": "catalog:",
     "drizzle-orm": "catalog:",
@@ -57,7 +61,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "pinia": "catalog:",
-    "semver": "catalog:",
+    "shell-quote": "catalog:",
     "spdx-expression-parse": "catalog:",
     "tailwindcss": "catalog:",
     "tar": "catalog:",
@@ -69,9 +73,20 @@
     "vite": "catalog:",
     "vitest": "catalog:",
     "vue": "catalog:",
-    "vue-tsc": "catalog:",
-    "yaml": "catalog:"
+    "vue-tsc": "catalog:"
   },
+  "peerDependencies": {
+    "typescript": ">=6 <7"
+  },
+  "bundleDependencies": [
+    "jsonc-parser",
+    "npm-package-arg",
+    "picomatch",
+    "semver",
+    "smol-toml",
+    "unbash",
+    "yaml"
+  ],
   "turbo": {
     "tags": [
       "template-builtin-presets"

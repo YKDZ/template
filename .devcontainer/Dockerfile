@@ -1,4 +1,4 @@
-FROM node:24-bookworm
+FROM node:24.16.0-bookworm
 
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 ENV COREPACK_HOME="/corepack"
@@ -10,6 +10,7 @@ ENV RUST_BACKTRACE=1
 ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$CARGO_HOME/bin:$PATH"
 
 COPY package.json /tmp/template/package.json
+COPY rust-toolchain.toml /tmp/template/rust-toolchain.toml
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -36,6 +37,7 @@ RUN apt-get update \
     && corepack enable --install-directory "$PNPM_HOME" \
     && PACKAGE_MANAGER_PIN="$(node -p "require('/tmp/template/package.json').packageManager")" \
     && corepack prepare "$PACKAGE_MANAGER_PIN" --activate \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable \
-    && rustup component add rustfmt clippy \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none \
+    # rustup 就近读取上面复制进工作目录的 rust-toolchain.toml 来安装组件，镜像内不再固定第二版本源
+    && (cd /tmp/template && rustup component add rustfmt clippy) \
     && pnpm install -g --allow-build=@openai/codex @openai/codex turbo

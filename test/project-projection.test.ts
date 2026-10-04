@@ -10,8 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   createProjectProjectionReconciler,
   materializeProjectProjection,
@@ -21,11 +19,13 @@ import {
   type CurrentProjectProjectionEntry,
   type ProjectProjection,
   type ProjectProjectionEntry,
-} from "#template-core/project-projection";
+  type ProjectProjectionMirrorSlot,
+} from "@ykdz/template-core/project-projection";
 import {
   createTemplateSourceHandle,
   type RenderOperation,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1826,5 +1826,771 @@ describe("Project Projection materialization", () => {
       "Package Addition projection may not delete path: removed.txt",
     );
     expect(reads).toEqual([]);
+  });
+});
+
+const rootValue = "24.16.0";
+const driftedValue = "999";
+const declaredConfigPath = "container/config.json";
+const declaredLauncherPath = "deploy/launcher.txt";
+
+const toolSlot: ProjectProjectionMirrorSlot = {
+  id: "tool-version",
+  location: { kind: "json-pointer", pointer: "/env/TOOL_VERSION" },
+};
+const toolAnchorSlot: ProjectProjectionMirrorSlot = {
+  id: "tool-version-anchor",
+  location: { kind: "text-anchor", name: "TOOL_VERSION" },
+};
+
+function mirrorStructuredProjection(
+  value: unknown,
+  projectionPath = declaredConfigPath,
+): ProjectProjection {
+  return {
+    entries: [textEntry(projectionPath, `${JSON.stringify(value, null, 2)}\n`)],
+    reconciliation: [
+      {
+        path: projectionPath,
+        driver: "structured",
+        mirrorSlots: [toolSlot],
+      },
+    ],
+  };
+}
+
+function mirrorTextProjection(text: string): ProjectProjection {
+  return {
+    entries: [textEntry(declaredLauncherPath, text)],
+    reconciliation: [
+      {
+        path: declaredLauncherPath,
+        driver: "text",
+        mirrorSlots: [toolAnchorSlot],
+      },
+    ],
+  };
+}
+
+function anchoredText(defaultValue: string): string {
+  return [
+    "FROM base:1",
+    "# @template-mirror TOOL_VERSION",
+    `ARG TOOL_VERSION="${defaultValue}"`,
+    "# @end-template-mirror",
+    "RUN existing step",
+    "",
+  ].join("\n");
+}
+
+function structuredConfigPlan(value: unknown) {
+  return {
+    operations: [{ kind: "writeJson" as const, to: declaredConfigPath, value }],
+    reconciliation: [
+      {
+        path: declaredConfigPath,
+        driver: "structured" as const,
+        mirrorSlots: [toolSlot],
+      },
+    ],
+  };
+}
+
+function anchoredLauncherPlan(text: string) {
+  return {
+    operations: [
+      { kind: "writeText" as const, to: declaredLauncherPath, text },
+    ],
+    reconciliation: [
+      {
+        path: declaredLauncherPath,
+        driver: "text" as const,
+        mirrorSlots: [toolAnchorSlot],
+      },
+    ],
+  };
+}
+
+describe("Declared mirror-slot coordination", () => {
+  it("reads only declared slot paths when Before equals After and restores the root value", async () => {
+    const declared = mirrorStructuredProjection({
+      env: { TOOL_VERSION: rootValue },
+      name: "demo",
+    });
+    const undeclared = structuredProjection("workspace/plain.json", {
+      keep: true,
+    });
+    const projection: ProjectProjection = {
+      entries: [...declared.entries, ...undeclared.entries],
+      reconciliation: [
+        ...declared.reconciliation,
+        ...undeclared.reconciliation,
+      ],
+    };
+    const reads: string[] = [];
+
+    const result = await reconcileProjectProjections({
+      before: projection,
+      after: projection,
+      async readCurrent(projectionPath) {
+        reads.push(projectionPath);
+        if (projectionPath === declaredConfigPath) {
+          return textEntry(
+            projectionPath,
+            `${JSON.stringify(
+              {
+                name: "demo",
+                env: { TOOL_VERSION: driftedValue },
+                userOnly: { retained: true },
+              },
+              null,
+              4,
+            )}\n`,
+          );
+        }
+        return textEntry(
+          projectionPath,
+          `${JSON.stringify({ keep: false }, null, 2)}\n`,
+        );
+      },
+    });
+
+    expect(reads).toEqual([declaredConfigPath]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mutations).toHaveLength(1);
+    expect(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
+    ).toEqual({
+      name: "demo",
+      env: { TOOL_VERSION: rootValue },
+      userOnly: { retained: true },
+    });
+  });
+
+  it("carries one update action for a legal same-file delta and the coordinated slot", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-slot-delta-"),
+    );
+    const configPath = path.join(targetRoot, declaredConfigPath);
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(
+        configPath,
+        `${JSON.stringify(
+          {
+            env: { TOOL_VERSION: driftedValue },
+            features: { beta: false },
+            userOnly: { retained: true },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const applied = await reconcileAndApplyProjectProjections({
+        targetRoot,
+        before: structuredConfigPlan({
+          env: { TOOL_VERSION: rootValue },
+          features: { beta: false },
+        }),
+        after: structuredConfigPlan({
+          env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
+          features: { beta: true },
+        }),
+      });
+
+      expect(applied).toEqual({
+        ok: true,
+        changedPaths: [declaredConfigPath],
+        actions: [
+          { path: declaredConfigPath, driver: "structured", action: "update" },
+        ],
+      });
+      const written = await readFile(configPath, "utf8");
+      expect(JSON.parse(written) as unknown).toEqual({
+        env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
+        features: { beta: true },
+        userOnly: { retained: true },
+      });
+
+      const repeated = await reconcileAndApplyProjectProjections({
+        targetRoot,
+        before: structuredConfigPlan({
+          env: { TOOL_VERSION: rootValue },
+          features: { beta: false },
+        }),
+        after: structuredConfigPlan({
+          env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
+          features: { beta: true },
+        }),
+      });
+      expect(repeated).toEqual({ ok: true, changedPaths: [], actions: [] });
+      await expect(readFile(configPath, "utf8")).resolves.toBe(written);
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a deleted slot absent while a legal new key lands in the same file", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-slot-deleted-"),
+    );
+    const configPath = path.join(targetRoot, declaredConfigPath);
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(
+        configPath,
+        `${JSON.stringify({ env: {}, userOnly: true }, null, 2)}\n`,
+      );
+
+      await expect(
+        reconcileAndApplyProjectProjections({
+          targetRoot,
+          before: structuredConfigPlan({ env: { TOOL_VERSION: rootValue } }),
+          after: structuredConfigPlan({
+            env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
+          }),
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        changedPaths: [declaredConfigPath],
+        actions: [
+          { path: declaredConfigPath, driver: "structured", action: "update" },
+        ],
+      });
+      const merged = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+      expect(merged).toEqual({
+        env: { ADDITIONAL_TOOL: "1.4.0" },
+        userOnly: true,
+      });
+      expect(merged).not.toHaveProperty(["env", "TOOL_VERSION"]);
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("adds a slot value that only After declares", async () => {
+    const result = await reconcileProjectProjections({
+      before: mirrorStructuredProjection({ env: { OTHER: "keep" } }),
+      after: mirrorStructuredProjection({
+        env: { OTHER: "keep", TOOL_VERSION: rootValue },
+      }),
+      async readCurrent() {
+        return textEntry(
+          declaredConfigPath,
+          `${JSON.stringify({ env: { OTHER: "keep" } }, null, 2)}\n`,
+        );
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
+    ).toEqual({ env: { OTHER: "keep", TOOL_VERSION: rootValue } });
+  });
+
+  it.each([
+    { absentShape: "missing file", current: undefined },
+    {
+      absentShape: "directory in place of the file",
+      current: { path: declaredConfigPath, kind: "directory" as const },
+    },
+  ])(
+    "skips a pure coordination path whose Current is $absentShape",
+    async ({ current }) => {
+      const projection = mirrorStructuredProjection({
+        env: { TOOL_VERSION: rootValue },
+      });
+
+      await expect(
+        reconcileProjectProjections({
+          before: projection,
+          after: projection,
+          async readCurrent() {
+            return current;
+          },
+        }),
+      ).resolves.toEqual({ ok: true, mutations: [] });
+    },
+  );
+
+  it("keeps the presence conflict when a declared path also carries a delta", async () => {
+    const result = await reconcileProjectProjections({
+      before: mirrorStructuredProjection({ env: { TOOL_VERSION: rootValue } }),
+      after: mirrorStructuredProjection({
+        env: { TOOL_VERSION: rootValue },
+        features: { beta: true },
+      }),
+      async readCurrent() {
+        return undefined;
+      },
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      conflicts: [
+        expect.objectContaining({
+          path: declaredConfigPath,
+          driver: "structured",
+          reason: "Path presence changed concurrently",
+        }),
+      ],
+    });
+  });
+
+  it("reports no change when a declared slot already equals the root value in another format", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-slot-format-"),
+    );
+    const configPath = path.join(targetRoot, declaredConfigPath);
+    const formatted = `${JSON.stringify(
+      { userOnly: { retained: true }, env: { TOOL_VERSION: rootValue } },
+      null,
+      4,
+    )}\n`;
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await writeFile(configPath, formatted);
+
+      const plan = structuredConfigPlan({
+        env: { TOOL_VERSION: rootValue },
+        name: "demo",
+      });
+      await expect(
+        reconcileAndApplyProjectProjections({
+          targetRoot,
+          before: plan,
+          after: plan,
+        }),
+      ).resolves.toEqual({ ok: true, changedPaths: [], actions: [] });
+      await expect(readFile(configPath, "utf8")).resolves.toBe(formatted);
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      unusableShape: "JSON with comments",
+      currentBytes: new TextEncoder().encode(
+        `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
+      ),
+      diagnostic: "Current structured content is not valid JSON",
+    },
+    {
+      unusableShape: "non-string slot value",
+      currentBytes: new TextEncoder().encode(
+        '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
+      ),
+      diagnostic: "holds a non-string Current value",
+    },
+    {
+      unusableShape: "binary bytes",
+      currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
+      diagnostic: "Current structured content is not valid JSON",
+    },
+  ])(
+    "fails atomically with zero writes for an unusable $unusableShape declared slot",
+    async ({ currentBytes, diagnostic }) => {
+      const targetRoot = await mkdtemp(
+        path.join(tmpdir(), "template-projection-slot-invalid-"),
+      );
+      const configPath = path.join(targetRoot, declaredConfigPath);
+      const reservedPath = path.join(targetRoot, "services/new/package.json");
+
+      try {
+        await mkdir(path.dirname(configPath), { recursive: true });
+        await writeFile(configPath, currentBytes);
+
+        await expect(
+          reconcileAndApplyProjectProjections({
+            targetRoot,
+            before: structuredConfigPlan({
+              env: { TOOL_VERSION: rootValue },
+            }),
+            after: {
+              operations: [
+                ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
+                  .operations,
+                {
+                  kind: "writeJson",
+                  to: "services/new/package.json",
+                  value: { name: "@demo/new" },
+                },
+              ],
+              reconciliation: structuredConfigPlan({
+                env: { TOOL_VERSION: rootValue },
+              }).reconciliation,
+            },
+            preconditions: [
+              {
+                path: "services/new",
+                kind: "must-not-exist",
+                reason:
+                  "Package Path services/new already exists and cannot be used for a new Package Addition",
+              },
+            ],
+          }),
+        ).resolves.toEqual({
+          ok: false,
+          conflicts: [
+            expect.objectContaining({
+              path: declaredConfigPath,
+              driver: "structured",
+              reason: expect.stringContaining(diagnostic),
+            }),
+          ],
+        });
+        await expect(readFile(configPath)).resolves.toEqual(
+          Buffer.from(currentBytes),
+        );
+        await expect(stat(reservedPath)).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      } finally {
+        await rm(targetRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
+    const projection = mirrorTextProjection(anchoredText(rootValue));
+    const result = await reconcileProjectProjections({
+      before: projection,
+      after: projection,
+      async readCurrent() {
+        return textEntry(
+          declaredLauncherPath,
+          anchoredText(driftedValue).replace(
+            "RUN existing step\n",
+            "RUN existing step\nRUN user step\n",
+          ),
+        );
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(decoder.decode(result.mutations[0]!.content)).toBe(
+      anchoredText(rootValue).replace(
+        "RUN existing step\n",
+        "RUN existing step\nRUN user step\n",
+      ),
+    );
+  });
+
+  it("replaces the owned block when Before has no block and keeps bytes outside it", async () => {
+    const result = await reconcileProjectProjections({
+      before: mirrorTextProjection("FROM base:1\nRUN existing step\n"),
+      after: mirrorTextProjection(anchoredText(rootValue)),
+      async readCurrent() {
+        return textEntry(
+          declaredLauncherPath,
+          anchoredText(driftedValue).replace(
+            "RUN existing step\n",
+            "RUN existing step\nRUN user step\n",
+          ),
+        );
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mutations).toHaveLength(1);
+    expect(decoder.decode(result.mutations[0]!.content)).toBe(
+      anchoredText(rootValue).replace(
+        "RUN existing step\n",
+        "RUN existing step\nRUN user step\n",
+      ),
+    );
+  });
+
+  it("fails atomically when Before holds the anchor more than once", async () => {
+    const result = await reconcileProjectProjections({
+      before: mirrorTextProjection(
+        anchoredText(rootValue) + anchoredText(rootValue),
+      ),
+      after: mirrorTextProjection(anchoredText(rootValue)),
+      async readCurrent() {
+        return textEntry(declaredLauncherPath, anchoredText(driftedValue));
+      },
+    });
+
+    expect(result).not.toHaveProperty("mutations");
+    expect(result).toEqual({
+      ok: false,
+      conflicts: [
+        expect.objectContaining({
+          path: declaredLauncherPath,
+          driver: "text",
+          location: "TOOL_VERSION",
+          reason: expect.stringContaining("in Before could not be located"),
+        }),
+      ],
+    });
+  });
+
+  it("lands a template text delta together with the coordinated anchor", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-slot-text-delta-"),
+    );
+    const launcherPath = path.join(targetRoot, declaredLauncherPath);
+
+    try {
+      await mkdir(path.dirname(launcherPath), { recursive: true });
+      await writeFile(
+        launcherPath,
+        anchoredText(driftedValue).replace(
+          "RUN existing step\n",
+          "RUN existing step\nRUN user step\n",
+        ),
+      );
+
+      await expect(
+        reconcileAndApplyProjectProjections({
+          targetRoot,
+          before: anchoredLauncherPlan(anchoredText(rootValue)),
+          after: anchoredLauncherPlan(
+            `# generated header\n${anchoredText(rootValue)}`,
+          ),
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        changedPaths: [declaredLauncherPath],
+        actions: [
+          { path: declaredLauncherPath, driver: "text", action: "update" },
+        ],
+      });
+      await expect(readFile(launcherPath, "utf8")).resolves.toBe(
+        `# generated header\n${anchoredText(rootValue).replace(
+          "RUN existing step\n",
+          "RUN existing step\nRUN user step\n",
+        )}`,
+      );
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      brokenAnchor: "markers removed but the carrier assignment remains",
+      current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
+    },
+    {
+      brokenAnchor: "marker removed but the reference remains",
+      current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
+    },
+    {
+      brokenAnchor: "the anchored region is duplicated",
+      current: anchoredText(driftedValue) + anchoredText(driftedValue),
+    },
+    {
+      brokenAnchor: "the anchored region holds two lines",
+      current: anchoredText(driftedValue).replace(
+        `ARG TOOL_VERSION="${driftedValue}"\n`,
+        `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
+      ),
+    },
+  ])(
+    "fails when $brokenAnchor while the carrier or reference is still present",
+    async ({ current }) => {
+      const projection = mirrorTextProjection(anchoredText(rootValue));
+      const result = await reconcileProjectProjections({
+        before: projection,
+        after: projection,
+        async readCurrent() {
+          return textEntry(declaredLauncherPath, current);
+        },
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        conflicts: [
+          expect.objectContaining({
+            path: declaredLauncherPath,
+            driver: "text",
+            location: "TOOL_VERSION",
+            reason: expect.stringContaining("anchor could not be located"),
+          }),
+        ],
+      });
+    },
+  );
+
+  it("keeps a text slot absent when the carrier and every reference exited", async () => {
+    const projection = mirrorTextProjection(anchoredText(rootValue));
+
+    await expect(
+      reconcileProjectProjections({
+        before: projection,
+        after: projection,
+        async readCurrent() {
+          return textEntry(
+            declaredLauncherPath,
+            "FROM base:1\nRUN existing step\n",
+          );
+        },
+      }),
+    ).resolves.toEqual({ ok: true, mutations: [] });
+  });
+
+  it("rolls back the coordinated slot together with the other mutations", async () => {
+    const targetRoot = await mkdtemp(
+      path.join(tmpdir(), "template-projection-slot-rollback-"),
+    );
+    const configPath = path.join(targetRoot, declaredConfigPath);
+    const guidePath = path.join(targetRoot, "docs/guide.md");
+    const committed: string[] = [];
+    const reconcile = createProjectProjectionReconciler({
+      async commitMutation(options) {
+        committed.push(options.relativePath);
+        if (committed.length === 2) {
+          throw new Error("injected mirror-slot commit failure");
+        }
+        await options.commit();
+      },
+    });
+    const before = {
+      operations: [
+        ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
+          .operations,
+        { kind: "writeText" as const, to: "docs/guide.md", text: "before\n" },
+      ],
+      reconciliation: structuredConfigPlan({
+        env: { TOOL_VERSION: rootValue },
+      }).reconciliation,
+    };
+    const after = {
+      operations: [
+        ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
+          .operations,
+        { kind: "writeText" as const, to: "docs/guide.md", text: "after\n" },
+      ],
+      reconciliation: structuredConfigPlan({
+        env: { TOOL_VERSION: rootValue },
+      }).reconciliation,
+    };
+
+    try {
+      await mkdir(path.dirname(configPath), { recursive: true });
+      await mkdir(path.dirname(guidePath), { recursive: true });
+      await writeFile(
+        configPath,
+        `${JSON.stringify({ env: { TOOL_VERSION: driftedValue } }, null, 2)}\n`,
+      );
+      await writeFile(guidePath, "before\n");
+      const driftedConfig = await readFile(configPath, "utf8");
+
+      await expect(reconcile({ targetRoot, before, after })).rejects.toThrow(
+        "injected mirror-slot commit failure",
+      );
+      await expect(readFile(configPath, "utf8")).resolves.toBe(driftedConfig);
+      await expect(readFile(guidePath, "utf8")).resolves.toBe("before\n");
+    } finally {
+      await rm(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      malformed: "a JSON Pointer location on the text driver",
+      driver: "text" as const,
+      slot: toolSlot,
+      diagnostic: "text mirror slots require a named text anchor",
+    },
+    {
+      malformed: "a named text anchor on the structured driver",
+      driver: "structured" as const,
+      slot: toolAnchorSlot,
+      diagnostic: "structured mirror slots require a JSON Pointer location",
+    },
+    {
+      malformed: "an invalid JSON Pointer",
+      driver: "structured" as const,
+      slot: {
+        id: "bad-pointer",
+        location: { kind: "json-pointer", pointer: "/env/~2" },
+      } satisfies ProjectProjectionMirrorSlot,
+      diagnostic: "must be an RFC 6901 JSON Pointer",
+    },
+    {
+      malformed: "a repeated slot id",
+      driver: "structured" as const,
+      slot: { id: "tool-version", location: { ...toolSlot.location } },
+      duplicateId: true,
+      diagnostic: "mirror slot ids must be unique and non-empty",
+    },
+    {
+      malformed: "a slot name made of separate words",
+      driver: "text" as const,
+      slot: {
+        id: "spaced",
+        location: { kind: "text-anchor", name: "TOOL VERSION" },
+      } satisfies ProjectProjectionMirrorSlot,
+      diagnostic: "text mirror slot names must be single non-empty tokens",
+    },
+  ])(
+    "rejects malformed declarations such as $malformed before reading Current",
+    async ({ driver, slot, duplicateId, diagnostic }) => {
+      let reads = 0;
+      const slots = duplicateId ? [slot, toolSlot] : [slot];
+      const projection: ProjectProjection = {
+        entries: [
+          textEntry(declaredConfigPath, '{"env":{"TOOL_VERSION":"x"}}\n'),
+        ],
+        reconciliation: [
+          { path: declaredConfigPath, driver, mirrorSlots: slots },
+        ],
+      };
+
+      await expect(
+        reconcileProjectProjections({
+          before: projection,
+          after: projection,
+          async readCurrent() {
+            reads += 1;
+            return projection.entries[0];
+          },
+        }),
+      ).rejects.toThrow(diagnostic);
+      expect(reads).toBe(0);
+    },
+  );
+
+  it("carries the declaration through plan preflight and materialization", async () => {
+    const operations = [
+      {
+        kind: "writeText" as const,
+        to: declaredLauncherPath,
+        text: anchoredText(rootValue),
+      },
+    ];
+    const reconciliation = [
+      {
+        path: declaredLauncherPath,
+        driver: "text" as const,
+        mirrorSlots: [toolAnchorSlot],
+      },
+    ];
+
+    expect(
+      validateProjectProjectionPlan({ operations, reconciliation }),
+    ).toEqual([]);
+    const projection = await materializeProjectProjection({
+      operations,
+      reconciliation,
+    });
+    expect(projection.reconciliation).toEqual(reconciliation);
+
+    const undeclared = await materializeProjectProjection({ operations });
+    expect(undeclared.reconciliation).toEqual([
+      { path: declaredLauncherPath, driver: "text" },
+    ]);
   });
 });

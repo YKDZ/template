@@ -2,9 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { createAtomicProjectRenderer } from "@ykdz/template-core/renderer";
 import { describe, expect, it } from "vitest";
-
-import { createAtomicProjectRenderer } from "#template-core/renderer";
 
 describe("atomic renderer", () => {
   it("commits only planned paths and rolls them all back after a commit failure", async () => {

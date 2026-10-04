@@ -1,20 +1,50 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  prepareGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
-
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   renderNewProject,
   resolveTemplateSource,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import { rustBinDefinition } from "./definition.ts";
+
+/** Preset 必须投影上下文提供的 Rust 事实，而不是自带版本常量。 */
+const contextToolchain = {
+  nodeLtsMajor: "24",
+  packageManagerPin: "pnpm@11.11.0",
+  rustVersion: "1.42.3",
+} as const;
+
+/** 需要真正执行 Cargo 任务的生成现场使用本机已安装且与发版快照一致的精确 Node、pnpm 与 Rust 事实。 */
+const renderToolchain = {
+  nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+    0,
+    releaseToolchainSnapshot.nodeVersion.indexOf("."),
+  ),
+  packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+  nodeVersion: releaseToolchainSnapshot.nodeVersion,
+  rustVersion: releaseToolchainSnapshot.rustVersion,
+} as const;
+
+function requireReadyInitialization(
+  preparation: ReturnType<typeof prepareGeneratedRepositoryInitialization>,
+): Extract<typeof preparation, { readonly status: "ready" }> {
+  if (preparation.status !== "ready") {
+    throw new Error(
+      `Expected ready initialization, received ${preparation.status}`,
+    );
+  }
+  return preparation;
+}
 
 describe("rust-bin Built-in Preset Definition behavior", () => {
   it("adds worker as @scope/worker with matching Cargo name and default path", () => {
@@ -26,7 +56,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       foundationPackages: {
         typescriptConfiguration: { name: "@scope/typescript-config" },
       },
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: contextToolchain,
     };
     const packagePath = rustBinDefinition.defaultPackagePath?.({
       context,
@@ -64,7 +94,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       foundationPackages: {
         typescriptConfiguration: { name: "@scope/typescript-config" },
       },
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: contextToolchain,
     };
     const initialization =
       rustBinDefinition.initialPrimaryPackage.planInitialContribution({
@@ -95,7 +125,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       foundationPackages: {
         typescriptConfiguration: { name: "@demo/typescript-config" },
       },
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: contextToolchain,
     };
 
     const contribution =
@@ -149,7 +179,10 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(contribution).not.toHaveProperty("foundationOperations");
     expect(contribution.foundation).toMatchObject({
       toolchains: {
-        rust: { toolchain: "stable", components: ["rustfmt", "clippy"] },
+        rust: {
+          toolchain: contextToolchain.rustVersion,
+          components: ["rustfmt", "clippy"],
+        },
       },
       editorCapabilities: ["rust-tooling"],
       dependencyMaintenance: {
@@ -172,7 +205,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       foundationPackages: {
         typescriptConfiguration: { name: "@demo/typescript-config" },
       },
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: contextToolchain,
     };
     const contribution =
       rustBinDefinition.initialPrimaryPackage.planInitialContribution({
@@ -188,11 +221,13 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       });
     const [layer] =
       contribution.foundation.developmentContainerToolLayers ?? [];
+    const rustChannel = contribution.foundation.toolchains.rust!.toolchain;
 
+    expect(rustChannel).toBe(contextToolchain.rustVersion);
     expect(layer).toMatchObject({
       identity: "rust",
       requires: ["node-pnpm"],
-      buildArguments: [{ name: "RUST_TOOLCHAIN", value: "stable" }],
+      buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustChannel }],
       mounts: [
         {
           identity: "cargo-registry",
@@ -230,7 +265,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const context = createGenerationContext({
       targetDir,
       defaultPackageScope: "demo",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: renderToolchain,
     });
     const plan = planGeneratedRepositoryInitialization({
       definition: rustBinDefinition,
@@ -254,6 +289,71 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     ).resolves.toMatchObject({ stdout: artifactPath });
   });
 
+  it("建立仓库根 Rust 声明时逐字使用发版快照版本而非浮动 stable", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-rust-snapshot-"),
+    );
+    const targetDir = path.join(workspace, "demo-rust");
+    try {
+      const preparation = requireReadyInitialization(
+        prepareGeneratedRepositoryInitialization({
+          preset: "rust-bin",
+          targetDir,
+        }),
+      );
+      const snapshotRustVersion = releaseToolchainSnapshot.rustVersion;
+      const rootToolchainOperation = preparation.plan.operations.find(
+        (operation) =>
+          "to" in operation && operation.to === "rust-toolchain.toml",
+      );
+
+      expect(preparation.context.toolchain.rustVersion).toBe(
+        snapshotRustVersion,
+      );
+      expect(rootToolchainOperation).toMatchObject({
+        kind: "writeTextTemplate",
+        source: rustBinDefinition.source,
+        from: "rust-toolchain.toml",
+        replacements: { RUST_TOOLCHAIN: snapshotRustVersion },
+      });
+
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...preparation.plan.operations],
+      });
+
+      expect(
+        await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
+      ).toBe(
+        `[toolchain]\nchannel = "${snapshotRustVersion}"\ncomponents = ["rustfmt", "clippy"]\n`,
+      );
+      expect(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, ".devcontainer/devcontainer.json"),
+            "utf8",
+          ),
+        ).build.args.RUST_TOOLCHAIN,
+      ).toBe(snapshotRustVersion);
+      expect(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, ".template/environment-needs.json"),
+            "utf8",
+          ),
+        ).check,
+      ).toEqual([
+        {
+          kind: "rust-toolchain",
+          owner: { kind: "package-boundary", path: "packages/app" },
+          toolchain: "stable",
+        },
+      ]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("generates a Rust repository whose Root Check runs native formatting, linting, and tests", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-rust-")),
@@ -262,7 +362,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const context = createGenerationContext({
       targetDir,
       defaultPackageScope: "demo",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: renderToolchain,
     });
     const plan = planGeneratedRepositoryInitialization({
       definition: rustBinDefinition,
@@ -282,7 +382,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     ).toContain('name = "app"');
     expect(
       await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-    ).toContain('channel = "stable"');
+    ).toContain(`channel = "${renderToolchain.rustVersion}"`);
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -297,8 +397,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
     );
     expect(devcontainerDockerfile).toContain(
-      'corepack prepare "${PACKAGE_MANAGER_PIN}" --activate',
+      'corepack enable --install-directory "$PNPM_HOME"',
     );
+    expect(devcontainerDockerfile).not.toContain("corepack prepare");
+    expect(devcontainerDockerfile).not.toContain("PACKAGE_MANAGER_PIN");
+    expect(devcontainerDockerfile).not.toContain("COREPACK_HOME");
     expect(devcontainerDockerfile).toContain("    git \\");
     expect(devcontainerDockerfile).toContain(
       "git config --system init.defaultBranch main",
@@ -311,7 +414,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         ),
       ),
     ).toMatchObject({
-      build: { args: { RUST_TOOLCHAIN: "stable" } },
+      build: { args: { RUST_TOOLCHAIN: renderToolchain.rustVersion } },
       mounts: [
         {
           type: "volume",
@@ -443,7 +546,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const context = createGenerationContext({
       targetDir,
       defaultPackageScope: "demo",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: renderToolchain,
     });
     const plan = planGeneratedRepositoryInitialization({
       definition: rustBinDefinition,
@@ -495,7 +598,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     const context = createGenerationContext({
       targetDir,
       defaultPackageScope: "demo",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: renderToolchain,
     });
     const plan = planGeneratedRepositoryInitialization({
       definition: rustBinDefinition,

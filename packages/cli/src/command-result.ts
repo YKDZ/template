@@ -17,7 +17,7 @@ export type CommandPresentation = {
   readonly exitCode: 0 | 1 | 2 | 64 | 65;
 };
 
-/** Pure projection; main owns identity prefixes and actual stream writes. */
+/** 纯投影；main 拥有身份前缀和实际流写入。 */
 export function projectCommandResult(
   result: TemplateCommandResult,
   json: boolean,

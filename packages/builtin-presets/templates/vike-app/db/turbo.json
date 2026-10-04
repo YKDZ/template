@@ -3,7 +3,7 @@
   "tags": ["library"],
   "tasks": {
     "build": {
-      "outputs": []
+      "outputs": ["dist/**"]
     }
   }
 }

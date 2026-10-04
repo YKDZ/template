@@ -12,18 +12,18 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
 import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
-} from "#template-core/project-linking-v2";
+} from "@ykdz/template-core/project-linking-v2";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { describe, expect, it } from "vitest";
 
 import { runCli, type CliRuntime } from "../../src/main.ts";
 
@@ -544,7 +544,6 @@ describe("template CLI command control", () => {
     await expect(
       runCli({
         ...epiped.runtime,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         tty: { stdin: true, stdout: true, stderr: true },
         confirmation: {
           async confirm() {
@@ -558,7 +557,6 @@ describe("template CLI command control", () => {
     await expect(
       runCli({
         ...broken.runtime,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         tty: { stdin: true, stdout: true, stderr: true },
         confirmation: {
           async confirm() {
@@ -572,7 +570,6 @@ describe("template CLI command control", () => {
     await expect(
       runCli({
         ...generic.runtime,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         tty: { stdin: true, stdout: true, stderr: true },
         confirmation: {
           async confirm() {
@@ -590,7 +587,6 @@ describe("template CLI command control", () => {
     await expect(
       runCli({
         ...codedGeneric.runtime,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         tty: { stdin: true, stdout: true, stderr: true },
         confirmation: {
           async confirm() {
@@ -637,7 +633,7 @@ describe("template CLI command control", () => {
     expect(output.stderr()).toBe("");
   });
 
-  it("runs init dry-run JSON through injected cwd and environment without writing", async () => {
+  it("runs init dry-run JSON through the injected cwd without writing", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
     const output = testRuntime([
       "init",
@@ -652,7 +648,6 @@ describe("template CLI command control", () => {
     const runtime: CliRuntime = {
       ...output.runtime,
       cwd: workspace,
-      env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
     };
 
     await expect(runCli(runtime)).resolves.toBe(0);
@@ -674,6 +669,54 @@ describe("template CLI command control", () => {
     });
   });
 
+  it("initializes the release snapshot without reading any environment fact", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-snapshot-init-"),
+    );
+    const output = testRuntime([
+      "init",
+      "demo",
+      "--preset",
+      addablePresetName,
+      "--scope",
+      "acme",
+      "--yes",
+      "--json",
+    ]);
+    const unreadableEnvironment = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("init must not read the environment");
+        },
+      },
+    );
+
+    await expect(
+      runCli({
+        ...output.runtime,
+        cwd: workspace,
+        env: unreadableEnvironment,
+      }),
+    ).resolves.toBe(0);
+    expect(JSON.parse(output.stdout()).toolchain).toEqual({
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+    });
+    const rootManifest = JSON.parse(
+      await readFile(path.join(workspace, "demo/package.json"), "utf8"),
+    ) as {
+      readonly engines: { readonly node: string };
+      readonly packageManager: string;
+    };
+    expect(rootManifest.engines.node).toBe(
+      releaseToolchainSnapshot.nodeVersion,
+    );
+    expect(rootManifest.packageManager).toBe(
+      releaseToolchainSnapshot.packageManagerPin,
+    );
+  });
+
   it("uses the injected confirmation boundary and leaves a cancelled init untouched", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-confirm-"),
@@ -683,7 +726,6 @@ describe("template CLI command control", () => {
     const runtime: CliRuntime = {
       ...output.runtime,
       cwd: workspace,
-      env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       tty: { stdin: true, stdout: true, stderr: true },
       confirmation: {
         async confirm(request) {
@@ -734,7 +776,6 @@ describe("template CLI command control", () => {
       runCli({
         ...output.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(64);
     expect(output.stderr()).toContain("USAGE_INIT_INVALID");
@@ -865,7 +906,6 @@ describe("template CLI command control", () => {
       runCli({
         ...initOutput.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
     expect(initOutput.stdout()).toContain("已初始化项目");
@@ -893,7 +933,6 @@ describe("template CLI command control", () => {
       runCli({
         ...output.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
 
@@ -934,7 +973,6 @@ describe("template CLI command control", () => {
       runCli({
         ...unknownConsumer.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(64);
     expect(JSON.parse(unknownConsumer.stdout())).toMatchObject({
@@ -960,7 +998,6 @@ describe("template CLI command control", () => {
       runCli({
         ...apply.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
     const beforeMissingLink = await workspaceByteSnapshot(target);
@@ -981,7 +1018,6 @@ describe("template CLI command control", () => {
       runCli({
         ...missingLink.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(1);
     const missingLinkJson = JSON.parse(missingLink.stdout());
@@ -1032,7 +1068,6 @@ describe("template CLI command control", () => {
       runCli({
         ...retry.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
     expect(JSON.parse(retry.stdout())).toMatchObject({
@@ -1096,7 +1131,6 @@ describe("template CLI command control", () => {
       runCli({
         ...initOutput.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
 
@@ -1127,7 +1161,6 @@ describe("template CLI command control", () => {
     const exitCode = await runCli({
       ...output.runtime,
       cwd: target,
-      env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
     });
     expect(exitCode).toBe(0);
     expect(output.stderr()).toBe("");
@@ -1169,7 +1202,6 @@ describe("template CLI command control", () => {
         runCli({
           ...initOutput.runtime,
           cwd: workspace,
-          env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         }),
       ).resolves.toBe(0);
 
@@ -1194,7 +1226,6 @@ describe("template CLI command control", () => {
         runCli({
           ...output.runtime,
           cwd: target,
-          env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
         }),
       ).resolves.toBe(1);
       expect(JSON.parse(output.stdout())).toMatchObject({
@@ -1235,7 +1266,6 @@ describe("template CLI command control", () => {
       runCli({
         ...initOutput.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
 
@@ -1261,7 +1291,6 @@ describe("template CLI command control", () => {
       runCli({
         ...output.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(1);
     expect(JSON.parse(output.stdout())).toMatchObject({
@@ -1298,7 +1327,6 @@ describe("template CLI command control", () => {
       runCli({
         ...initOutput.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
 
@@ -1323,7 +1351,6 @@ describe("template CLI command control", () => {
       runCli({
         ...output.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(1);
     expect(JSON.parse(output.stdout())).toMatchObject({
@@ -1357,7 +1384,6 @@ describe("template CLI command control", () => {
       runCli({
         ...initOutput.runtime,
         cwd: workspace,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(0);
 
@@ -1380,7 +1406,6 @@ describe("template CLI command control", () => {
       runCli({
         ...output.runtime,
         cwd: target,
-        env: { TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback" },
       }),
     ).resolves.toBe(64);
     expect(JSON.parse(output.stdout())).toMatchObject({

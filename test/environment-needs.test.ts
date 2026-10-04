@@ -1,11 +1,10 @@
-import { describe, expect, it } from "vitest";
-
 import {
   normalizeEnvironmentNeeds,
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
-} from "#template-core/module-graph";
+} from "@ykdz/template-core/module-graph";
+import { describe, expect, it } from "vitest";
 
 const workspaceOwner = {
   kind: "workspace-orchestration" as const,

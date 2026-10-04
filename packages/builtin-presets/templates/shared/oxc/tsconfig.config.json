@@ -5,6 +5,7 @@
     "erasableSyntaxOnly": true,
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "rewriteRelativeImportExtensions": true,
     "target": "es2024",
     "types": ["node"]
   }

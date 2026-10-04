@@ -1,16 +1,51 @@
 import { fileURLToPath } from "node:url";
 
-import type { PackageContribution } from "#template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";
+
+type CandidateCreationOrigin =
+  | "new-publication-candidate"
+  | "existing-candidate-replay";
+
+// 公开候选 engines.node 的唯一派生点：精确三段 nodeVersion 派生 `^<精确值>`，绝不从
+// nodeLtsMajor 猜 patch。新建候选缺失或非精确一律清楚失败；既有候选 replay 允许旧根只声明
+// 大版本，此时投影与磁盘原文相同的 `>=major`，由既有三方合并律保留，不引入磁盘 engines 接管。
+function publicationCandidateNodeEngine(
+  toolchain: GenerationContext["toolchain"],
+  creationOrigin: CandidateCreationOrigin,
+): string {
+  const nodeVersion = toolchain.nodeVersion;
+  if (nodeVersion === undefined) {
+    if (creationOrigin === "existing-candidate-replay") {
+      return `>=${toolchain.nodeLtsMajor}`;
+    }
+    throw new Error(
+      "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
+    );
+  }
+  if (!/^\d+\.\d+\.\d+$/u.test(nodeVersion)) {
+    throw new Error(
+      `公开 ts-cli 发布候选要求 toolchain.nodeVersion 为精确三段 Node 版本（例如 "24.16.0"），实际收到 ${JSON.stringify(nodeVersion)}。`,
+    );
+  }
+  if (
+    nodeVersion.slice(0, nodeVersion.indexOf(".")) !== toolchain.nodeLtsMajor
+  ) {
+    throw new Error(
+      `公开 ts-cli 发布候选的 toolchain.nodeVersion ${nodeVersion} 与 nodeLtsMajor ${toolchain.nodeLtsMajor} 大版本不一致。`,
+    );
+  }
+  return `^${nodeVersion}`;
+}
 
 function packagePathForLeaf(packageLeafName: string): string {
   return `packages/${packageLeafName}`;
@@ -33,13 +68,25 @@ function packageScripts(): Record<string, string> {
   };
 }
 
-function cliContribution(options: {
-  readonly context: GenerationContext;
-  readonly packageLeafName: string;
-  readonly packagePath: string;
-  readonly packageDefinition?: PackageDefinition;
-  readonly publicationCandidate: boolean;
-}): PackageContribution {
+function cliContribution(
+  options:
+    | {
+        readonly context: GenerationContext;
+        readonly packageLeafName: string;
+        readonly packagePath: string;
+        readonly packageDefinition?: PackageDefinition;
+        readonly publicationCandidate: false;
+        readonly creationOrigin?: undefined;
+      }
+    | {
+        readonly context: GenerationContext;
+        readonly packageLeafName: string;
+        readonly packagePath: string;
+        readonly packageDefinition?: PackageDefinition;
+        readonly publicationCandidate: true;
+        readonly creationOrigin: CandidateCreationOrigin;
+      },
+): PackageContribution {
   const definition: PackageDefinition = options.packageDefinition ?? {
     name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
     path: options.packagePath,
@@ -145,7 +192,14 @@ function cliContribution(options: {
         "typescript-7": "catalog:",
         vitest: "catalog:",
       },
-      engines: { node: `>=${options.context.toolchain.nodeLtsMajor}` },
+      engines: {
+        node: options.publicationCandidate
+          ? publicationCandidateNodeEngine(
+              options.context.toolchain,
+              options.creationOrigin,
+            )
+          : `>=${options.context.toolchain.nodeLtsMajor}`,
+      },
     },
     operations,
     environmentNeeds: [],
@@ -184,6 +238,7 @@ const cliPublicationCandidateReplayAdapter =
         packagePath: packageDefinition.path,
         packageDefinition,
         publicationCandidate: true,
+        creationOrigin: "existing-candidate-replay",
       });
     },
   });
@@ -236,6 +291,7 @@ export const tsCliDefinition = {
           packagePath: resolvedPackageIdentity.definition.path,
           packageDefinition: resolvedPackageIdentity.definition,
           publicationCandidate: true,
+          creationOrigin: "new-publication-candidate",
         }),
       );
     },

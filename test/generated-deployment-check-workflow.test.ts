@@ -2,15 +2,15 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 type WorkflowStep = {
   readonly name: string;
@@ -60,22 +60,11 @@ async function renderDeploymentWorkflow(): Promise<DeploymentWorkflow> {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         }),
       });
-      return (
-        candidatePlan.deploymentEnvironmentNeeds.some(
-          (need) => need.kind === "docker-engine",
-        ) &&
-        candidatePlan.manifests.some((manifest) => {
-          const scripts = manifest.scripts;
-          return (
-            typeof scripts === "object" &&
-            scripts !== null &&
-            typeof (scripts as Record<string, unknown>).deployment === "string"
-          );
-        })
-      );
+      return candidatePlan.deploymentCheck !== undefined;
     });
     if (definition === undefined) {
       throw new Error(
@@ -87,7 +76,11 @@ async function renderDeploymentWorkflow(): Promise<DeploymentWorkflow> {
       context: createGenerationContext({
         targetDir: targetRoot,
         defaultPackageScope: "demo",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
       }),
     });
     await renderNewProject({ targetRoot, operations: [...plan.operations] });

@@ -70,6 +70,14 @@
       }
     }
   },
+  "globalPassThroughEnv": [
+    "TMPDIR",
+    "DOCKER_CONFIG",
+    "BUILDX_CONFIG",
+    "BUILDX_BUILDER",
+    "PNPM_CONFIG_STORE_DIR",
+    "PNPM_CONFIG_CACHE_DIR"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -173,9 +181,6 @@
       "outputs": []
     },
     "check:templates:github-yaml": {
-      "outputs": []
-    },
-    "check:toolchain:online": {
       "outputs": []
     },
     "format:check": {

@@ -83,8 +83,11 @@ export type ProjectCheckWorkflowDiagnosticOptions = {
 };
 
 type ProjectCheckWorkflowOptions = ProjectCheckWorkflowDiagnosticOptions & {
-  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
-  readonly hasDeploymentTask?: boolean | undefined;
+  readonly deploymentCheck?:
+    | {
+        readonly environmentNeeds: readonly DeploymentEnvironmentNeed[];
+      }
+    | undefined;
   readonly capability?: CiCapability | undefined;
   readonly environmentPreparation?:
     | Partial<CiEnvironmentPreparation>
@@ -127,8 +130,8 @@ export function projectCheckWorkflowPlan(
     ...options.environmentPreparation,
   };
   const taskLayer = options.taskLayer ?? pnpmTaskLayer;
-  const hasDeploymentTask = options.hasDeploymentTask === true;
-  const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
+  const hasDeploymentTask = options.deploymentCheck !== undefined;
+  const needsDocker = (options.deploymentCheck?.environmentNeeds ?? []).some(
     (need) => need.kind === "docker-engine",
   );
   if (hasDeploymentTask && !needsDocker) {
@@ -179,16 +182,19 @@ export function projectCheckWorkflowPlan(
 /** Selects a complete Foundation-owned workflow Template Source. */
 export function projectCheckWorkflowTemplateSource(
   options: ProjectCheckWorkflowDiagnosticOptions & {
-    readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
-    readonly hasDeploymentTask?: boolean | undefined;
+    readonly deploymentCheck?:
+      | {
+          readonly environmentNeeds: readonly DeploymentEnvironmentNeed[];
+        }
+      | undefined;
   },
 ):
   | ".github/workflows/check.yml"
   | ".github/workflows/check-diagnostics.yml"
   | ".github/workflows/check-deployment.yml"
   | ".github/workflows/check-deployment-diagnostics.yml" {
-  const hasDeploymentTask = options.hasDeploymentTask === true;
-  const needsDocker = (options.deploymentEnvironmentNeeds ?? []).some(
+  const hasDeploymentTask = options.deploymentCheck !== undefined;
+  const needsDocker = (options.deploymentCheck?.environmentNeeds ?? []).some(
     (need) => need.kind === "docker-engine",
   );
   if (hasDeploymentTask && !needsDocker) {

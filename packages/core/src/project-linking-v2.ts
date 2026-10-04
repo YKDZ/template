@@ -12,8 +12,8 @@ export type ExplicitProjectLinkPlan = {
     string,
     {
       readonly dependencies: Readonly<Record<string, "workspace:*">>;
-      readonly dependenciesMeta: Readonly<
-        Record<string, { readonly injected: boolean }>
+      readonly dependenciesMeta?: Readonly<
+        Record<string, { readonly injected: true }>
       >;
     }
   >;
@@ -165,7 +165,7 @@ export function planExplicitProjectLinks(options: {
     string,
     {
       dependencies: Record<string, "workspace:*">;
-      dependenciesMeta: Record<string, { injected: boolean }>;
+      dependenciesMeta?: Record<string, { injected: true }>;
     }
   >();
   for (const intent of blueprint.packageLinkIntents ?? []) {
@@ -232,15 +232,21 @@ export function planExplicitProjectLinks(options: {
     if (consumerPatch === undefined) {
       manifestPatches.set(intent.consumerPackagePath, {
         dependencies: { [provider.definition.name]: "workspace:*" },
-        dependenciesMeta: {
-          [provider.definition.name]: { injected },
-        },
+        ...(injected
+          ? {
+              dependenciesMeta: {
+                [provider.definition.name]: { injected: true as const },
+              },
+            }
+          : {}),
       });
     } else {
       consumerPatch.dependencies[provider.definition.name] = "workspace:*";
-      consumerPatch.dependenciesMeta[provider.definition.name] = {
-        injected,
-      };
+      if (injected) {
+        (consumerPatch.dependenciesMeta ??= {})[provider.definition.name] = {
+          injected: true,
+        };
+      }
     }
   }
   return {

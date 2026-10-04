@@ -25,11 +25,10 @@ import {
   resolveBuiltInTemplateSource,
   type InitializationPreparation,
 } from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
-
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
 
 import { tsCliDefinition } from "./definition.ts";
 
@@ -59,10 +58,6 @@ async function renderGeneratedRepository(
   const prepared = requireReadyInitialization({
     definition: tsCliDefinition,
     targetDir,
-    toolchain: {
-      nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@11.11.0",
-    },
     overrides: {
       scope: "demo",
       ...(initialName === undefined ? {} : { name: initialName }),
@@ -122,6 +117,68 @@ function expectNoControlCharacters(value: string): void {
         return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
       }),
     ).toBe(false);
+}
+
+type TerminalConfirmationStep = {
+  readonly marker: string;
+  readonly prompt: string;
+  readonly line: string;
+  readonly before?: () => Promise<void>;
+};
+
+// 向导的每个确认阶段挂载一次性读取器，因此每行只能在其自身阶段提示出现后输入；提前输入的文本会被丢弃。
+async function driveGeneratedTerminal(
+  command: string,
+  options: {
+    readonly cwd: string;
+    readonly env: Record<string, string | undefined>;
+  },
+  steps: readonly TerminalConfirmationStep[],
+) {
+  const running = execa("script", ["-qefc", command, "/dev/null"], {
+    cwd: options.cwd,
+    env: options.env,
+    reject: false,
+    stdin: "pipe",
+    timeout: 60_000,
+  });
+  let transcript = "";
+  let closed = false;
+  running.stdout?.on("data", (chunk: Buffer) => {
+    transcript += chunk.toString("utf8");
+  });
+  running.stdout?.on("end", () => {
+    closed = true;
+  });
+  let typedThrough = 0;
+  for (const step of steps) {
+    const waitForPrompt = async (): Promise<number> => {
+      const deadline = Date.now() + 20_000;
+      for (;;) {
+        const observed = transcript.replaceAll("\r", "");
+        const markerAt = observed.indexOf(step.marker, typedThrough);
+        if (markerAt >= 0) {
+          const promptAt = observed.indexOf(
+            step.prompt,
+            markerAt + step.marker.length,
+          );
+          if (promptAt >= 0) return promptAt;
+        }
+        if (closed) return -1;
+        if (Date.now() >= deadline)
+          throw new Error(
+            `Terminal protocol stalled before ${step.marker}: ${observed}`,
+          );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    const promptAt = await waitForPrompt();
+    if (promptAt < 0) break;
+    typedThrough = promptAt + step.prompt.length;
+    await step.before?.();
+    running.stdin?.write(`${step.line}\n`);
+  }
+  return await running;
 }
 
 async function writeAcceptedFirstReleaseArtifact(options: {
@@ -364,6 +421,7 @@ esac
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "24.16.0",
       },
     });
     const contribution =
@@ -394,7 +452,7 @@ esac
       type: "module",
       bin: { cli: "./dist/cli.js" },
       dependencies: { commander: "catalog:" },
-      engines: { node: ">=24" },
+      engines: { node: "^24.16.0" },
       scripts: {
         build: "tsc -p tsconfig.build.json --pretty false",
         prepack: "pnpm exec turbo run build --filter=.",
@@ -464,6 +522,7 @@ esac
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "24.16.0",
       },
     });
 
@@ -485,6 +544,7 @@ esac
     });
     expect(addition?.planningIdentity).toBe("cli-package-addition");
     expect(addition?.foundation.npmPublication).toBeUndefined();
+    expect(addition?.manifest.engines).toEqual({ node: ">=24" });
   });
 
   it("projects publication readiness only for the initial CLI candidate", () => {
@@ -496,6 +556,7 @@ esac
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: "24.16.0",
         },
       }),
     });
@@ -607,7 +668,6 @@ esac
     const preparation = requireReadyInitialization({
       definition: tsCliDefinition,
       targetDir: path.join("generated-repository", "demo-cli"),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
 
     expect(preparation.publicationSetup).toEqual({
@@ -623,7 +683,6 @@ esac
     const preparation = requireReadyInitialization({
       definition: builtInPresetRegistry.require("ts-lib"),
       targetDir: path.join("generated-repository", "demo-library"),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
     });
 
     expect(preparation.publicationSetup).toBeNull();
@@ -647,7 +706,11 @@ esac
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -951,7 +1014,11 @@ exit 97
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -1398,18 +1465,8 @@ exec ${JSON.stringify(process.execPath)} "$@"
         lines
           .map((line) => `printf '%s\\n' ${JSON.stringify(line)}; sleep 1`)
           .join("; ");
-      const firstRun = await execa(
-        "bash",
-        [
-          "-c",
-          `(sleep 1; ${terminalInput([
-            `ACCEPT @demo/ship@1.0.0 ${first.integrity}`,
-            "CONFIRM NPM 2FA AND RECOVERY CODES READY",
-            `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
-            "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
-            `RELEASE @demo/ship@1.0.0 ${first.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
-          ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
-        ],
+      const firstRun = await driveGeneratedTerminal(
+        bridge,
         {
           cwd: targetDir,
           env: {
@@ -1418,9 +1475,34 @@ exec ${JSON.stringify(process.execPath)} "$@"
             ARTIFACT_FIXTURE_ROOT: first.directory,
             ARTIFACT_FIXTURE_INTEGRITY: first.integrity,
           },
-          reject: false,
-          timeout: 60_000,
         },
+        [
+          {
+            marker: "STAGE 4/9 Verify the first release artifact",
+            prompt: "Acceptance: ",
+            line: `ACCEPT @demo/ship@1.0.0 ${first.integrity}`,
+          },
+          {
+            marker: "STAGE 5/9 Authenticate with npm",
+            prompt: "Confirmation: ",
+            line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+          },
+          {
+            marker: "STAGE 6/9 Publish version 1.0.0",
+            prompt: "Confirmation: ",
+            line: `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
+          },
+          {
+            marker: "STAGE 7/9 Configure trusted publishing",
+            prompt: "Confirmation: ",
+            line: "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
+          },
+          {
+            marker: "STAGE 8/9 Create the first GitHub release",
+            prompt: "Confirmation: ",
+            line: `RELEASE @demo/ship@1.0.0 ${first.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+          },
+        ],
       );
       expect(firstRun.exitCode, `${firstRun.stdout}\n${firstRun.stderr}`).toBe(
         0,
@@ -1503,12 +1585,8 @@ exec ${JSON.stringify(process.execPath)} "$@"
         packageName: "@demo/ship",
         commandName: "ship",
       });
-      const resumeRun = await execa(
-        "bash",
-        [
-          "-c",
-          `(sleep 1; ${terminalInput([`ACCEPT @demo/ship@1.0.0 ${resume.integrity}`, "CONFIRM NPM 2FA AND RECOVERY CODES READY"])} ) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
-        ],
+      const resumeRun = await driveGeneratedTerminal(
+        bridge,
         {
           cwd: targetDir,
           env: {
@@ -1517,9 +1595,19 @@ exec ${JSON.stringify(process.execPath)} "$@"
             ARTIFACT_FIXTURE_ROOT: resume.directory,
             ARTIFACT_FIXTURE_INTEGRITY: resume.integrity,
           },
-          reject: false,
-          timeout: 60_000,
         },
+        [
+          {
+            marker: "STAGE 4/9 Verify the first release artifact",
+            prompt: "Acceptance: ",
+            line: `ACCEPT @demo/ship@1.0.0 ${resume.integrity}`,
+          },
+          {
+            marker: "STAGE 5/9 Authenticate with npm",
+            prompt: "Confirmation: ",
+            line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+          },
+        ],
       );
       expect(
         resumeRun.exitCode,
@@ -1566,20 +1654,8 @@ exec ${JSON.stringify(process.execPath)} "$@"
         },
         enterRelease = true,
       ) =>
-        await execa(
-          "bash",
-          [
-            "-c",
-            `(sleep 1; ${terminalInput([
-              `ACCEPT @demo/ship@1.0.0 ${artifact.integrity}`,
-              "CONFIRM NPM 2FA AND RECOVERY CODES READY",
-              ...(enterRelease
-                ? [
-                    `RELEASE @demo/ship@1.0.0 ${artifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
-                  ]
-                : []),
-            ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
-          ],
+        await driveGeneratedTerminal(
+          bridge,
           {
             cwd: targetDir,
             env: {
@@ -1588,9 +1664,28 @@ exec ${JSON.stringify(process.execPath)} "$@"
               ARTIFACT_FIXTURE_ROOT: artifact.directory,
               ARTIFACT_FIXTURE_INTEGRITY: artifact.integrity,
             },
-            reject: false,
-            timeout: 60_000,
           },
+          [
+            {
+              marker: "STAGE 4/9 Verify the first release artifact",
+              prompt: "Acceptance: ",
+              line: `ACCEPT @demo/ship@1.0.0 ${artifact.integrity}`,
+            },
+            {
+              marker: "STAGE 5/9 Authenticate with npm",
+              prompt: "Confirmation: ",
+              line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+            },
+            ...(enterRelease
+              ? [
+                  {
+                    marker: "STAGE 8/9 Create the first GitHub release",
+                    prompt: "Confirmation: ",
+                    line: `RELEASE @demo/ship@1.0.0 ${artifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+                  },
+                ]
+              : []),
+          ],
         );
       const publicState = await readGithub();
       const tagOnly = {
@@ -2603,9 +2698,35 @@ exit ${mode === "bootstrap" ? "1" : "0"}
           ...(mode === "ambient" ? { NODE_AUTH_TOKEN: "poisoned" } : {}),
         };
         const bridge = `${JSON.stringify(process.execPath)} --conditions=source scripts/npm-publication-setup/bridge.ts external`;
-        const running =
+        const externalSteps: readonly TerminalConfirmationStep[] =
+          mode === "ambient" || mode === "non-tty" || mode === "bootstrap"
+            ? []
+            : [
+                {
+                  marker: "STAGE 5/9 Authenticate with npm",
+                  prompt: "Confirmation: ",
+                  line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+                },
+                ...(needsPublishPhrase
+                  ? [
+                      {
+                        marker: "STAGE 6/9 Publish version 1.0.0",
+                        prompt: "Confirmation: ",
+                        line: `PUBLISH @demo/ship@1.0.0 ${accepted.integrity}`,
+                        before: async () => {
+                          if (mode !== "preimage") return;
+                          await writeFile(
+                            path.join(accepted.directory, "ship-1.0.0.tgz"),
+                            "changed after publish confirmation",
+                          );
+                        },
+                      },
+                    ]
+                  : []),
+              ];
+        const result =
           mode === "non-tty"
-            ? execa(
+            ? await execa(
                 process.execPath,
                 [
                   "--conditions=source",
@@ -2619,30 +2740,11 @@ exit ${mode === "bootstrap" ? "1" : "0"}
                   timeout: 60_000,
                 },
               )
-            : execa("script", ["-qefc", bridge, "/dev/null"], {
-                cwd: targetDir,
-                env: externalEnvironment,
-                reject: false,
-                stdin: "pipe",
-                timeout: 60_000,
-              });
-        if (mode !== "ambient" && mode !== "non-tty" && mode !== "bootstrap") {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          running.stdin?.write("CONFIRM NPM 2FA AND RECOVERY CODES READY\n");
-          if (needsPublishPhrase) {
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            if (mode === "preimage") {
-              await writeFile(
-                path.join(accepted.directory, "ship-1.0.0.tgz"),
-                "changed after publish confirmation",
+            : await driveGeneratedTerminal(
+                bridge,
+                { cwd: targetDir, env: externalEnvironment },
+                externalSteps,
               );
-            }
-            running.stdin?.write(
-              `PUBLISH @demo/ship@1.0.0 ${accepted.integrity}\n`,
-            );
-          }
-        }
-        const result = await running;
         expect(
           result.exitCode,
           `${mode}: ${result.stdout}\n${result.stderr}`,
@@ -2755,7 +2857,11 @@ syncBuiltinESMExports();
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -2816,7 +2922,11 @@ syncBuiltinESMExports();
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -2876,7 +2986,11 @@ syncBuiltinESMExports();
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -2954,7 +3068,11 @@ syncBuiltinESMExports();
         context: createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: "24.16.0",
+          },
         }),
       });
       await renderNewProject({
@@ -3039,6 +3157,7 @@ syncBuiltinESMExports();
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: "24.16.0",
         },
       }),
     });
@@ -3114,15 +3233,17 @@ syncBuiltinESMExports();
     }
   });
 
-  it("derives the CLI consumer engine from the Generation Context", () => {
+  it("derives a new public CLI candidate engine as a caret over the exact root version", () => {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "future-cli"),
       defaultPackageScope: "demo",
       toolchain: {
         nodeLtsMajor: "26",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "26.4.2",
       },
     });
+
     const contribution =
       tsCliDefinition.initialPrimaryPackage.planInitialContribution({
         context,
@@ -3136,7 +3257,101 @@ syncBuiltinESMExports();
         },
       });
 
-    expect(contribution.manifest.engines).toEqual({ node: ">=26" });
+    expect(contribution.manifest.engines).toEqual({ node: "^26.4.2" });
+  });
+
+  it("fails a new public CLI candidate when the exact root version is missing or imprecise", () => {
+    const planNewCandidate = (toolchain: {
+      readonly nodeLtsMajor: string;
+      readonly packageManagerPin: string;
+      readonly nodeVersion?: string;
+    }) =>
+      tsCliDefinition.initialPrimaryPackage.planInitialContribution({
+        context: createGenerationContext({
+          targetDir: path.join("generated-repository", "future-cli"),
+          defaultPackageScope: "demo",
+          toolchain,
+        }),
+        resolvedPackageIdentity: {
+          leafName: "cli",
+          definition: {
+            name: "@demo/cli",
+            path: "packages/cli",
+            role: "cli-tool",
+          },
+        },
+      });
+
+    expect(() =>
+      planNewCandidate({
+        nodeLtsMajor: "26",
+        packageManagerPin: "pnpm@11.11.0",
+      }),
+    ).toThrow(
+      "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
+    );
+    expect(() =>
+      planNewCandidate({
+        nodeLtsMajor: "26",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "26.4",
+      }),
+    ).toThrow('实际收到 "26.4"');
+    expect(() =>
+      planNewCandidate({
+        nodeLtsMajor: "26",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: ">=26.4.2",
+      }),
+    ).toThrow('实际收到 ">=26.4.2"');
+    expect(() =>
+      planNewCandidate({
+        nodeLtsMajor: "26",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "24.16.0",
+      }),
+    ).toThrow("与 nodeLtsMajor 26 大版本不一致");
+  });
+
+  it("replays an existing public CLI candidate with the engine form of its root declaration", () => {
+    const replay = tsCliDefinition.packageContributionReplayAdapters.find(
+      (adapter) => adapter.identity === "cli-publication-candidate",
+    );
+    if (replay === undefined)
+      throw new Error("Missing candidate replay adapter");
+    const packageDefinition = {
+      name: "@demo/cli",
+      path: "packages/cli",
+      role: "cli-tool" as const,
+    };
+    const replayCandidate = (nodeVersion?: string) =>
+      replay.replay({
+        context: createGenerationContext({
+          targetDir: path.join("generated-repository", "demo-cli"),
+          defaultPackageScope: "demo",
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            ...(nodeVersion === undefined ? {} : { nodeVersion }),
+          },
+        }),
+        planningContribution: "planInitialization",
+        packageDefinition,
+        packageLeafName: "cli",
+        initialPackages: {
+          require: () => {
+            throw new Error(
+              "candidate replay does not require initial packages",
+            );
+          },
+        },
+      });
+
+    expect(replayCandidate().manifest.engines).toEqual({ node: ">=24" });
+
+    expect(replayCandidate("24.16.0").manifest.engines).toEqual({
+      node: "^24.16.0",
+    });
   });
 
   it("rejects a reserved command identity before initialization writes", () => {
@@ -3144,10 +3359,6 @@ syncBuiltinESMExports();
       prepareGeneratedRepositoryInitialization({
         definition: tsCliDefinition,
         targetDir: path.join("generated-repository", "demo-cli"),
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
         overrides: { name: "node" },
       }),
     ).toEqual({ status: "operation-failure", phase: "planning" });
@@ -3164,6 +3375,7 @@ syncBuiltinESMExports();
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: "24.16.0",
       },
     });
     const initialization = planGeneratedRepositoryInitialization({
@@ -3605,7 +3817,9 @@ syncBuiltinESMExports();
         { cwd: project.packageRoot, reject: false },
       );
       expect(pack.exitCode).toBe(1);
-      expect(pack.stdout).toContain("ERR_PNPM_PACKAGE_VERSION_NOT_FOUND");
+      expect(`${pack.stdout}\n${pack.stderr}`).toContain(
+        "ERR_PNPM_PACKAGE_VERSION_NOT_FOUND",
+      );
       await expect(readFile(sourceManifestPath, "utf8")).resolves.toBe(
         sourceManifestBytes,
       );

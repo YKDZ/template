@@ -2,30 +2,8 @@
   "name": "@ykdz/template-checks",
   "private": true,
   "type": "module",
-  "imports": {
-    "#template-builtin-presets": {
-      "source": "@ykdz/template-builtin-presets-source",
-      "types": "@ykdz/template-builtin-presets",
-      "default": "@ykdz/template-builtin-presets"
-    },
-    "#template-core/*": {
-      "source": "@ykdz/template-core-source/*",
-      "types": "@ykdz/template-core/*",
-      "default": "@ykdz/template-core/*"
-    }
-  },
   "exports": {
-    "./check-generated-registry": null,
-    "./check-online-toolchain-resolution-contract": {
-      "source": "./src/check-online-toolchain-resolution-contract.ts",
-      "types": "./dist/check-online-toolchain-resolution-contract.d.ts",
-      "default": "./dist/check-online-toolchain-resolution-contract.js"
-    },
-    "./update-toolchain-baseline": {
-      "source": "./src/update-toolchain-baseline.ts",
-      "types": "./dist/update-toolchain-baseline.d.ts",
-      "default": "./dist/update-toolchain-baseline.js"
-    }
+    "./check-generated-registry": null
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
@@ -37,8 +15,6 @@
     "check:templates": "node --conditions=source src/check-template-source.ts && node --conditions=source src/check-registry-contract.ts && node --conditions=source src/check-publication-source.ts && node --conditions=source src/check-legacy-architecture-removal.ts --packed",
     "check:templates:boundary": "node --conditions=source src/check-template-boundary.ts",
     "check:templates:github-yaml": "node --conditions=source src/check-builtin-preset-github-yaml.ts",
-    "check:toolchain:online": "node --conditions=source src/check-online-toolchain-resolution-contract.ts",
-    "update:toolchain": "node --conditions=source src/update-toolchain-baseline.ts",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
@@ -54,8 +30,6 @@
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
-    "@ykdz/template-builtin-presets-source": "link:../builtin-presets",
-    "@ykdz/template-core-source": "link:../core",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

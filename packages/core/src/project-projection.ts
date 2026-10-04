@@ -54,15 +54,33 @@ export type StructuredIdentitySetPolicy = {
       };
 };
 
+export type ProjectProjectionMirrorSlotLocation =
+  | {
+      readonly kind: "json-pointer";
+      readonly pointer: string;
+    }
+  | {
+      readonly kind: "text-anchor";
+      readonly name: string;
+    };
+
+export type ProjectProjectionMirrorSlot = {
+  readonly id: string;
+  readonly location: ProjectProjectionMirrorSlotLocation;
+};
+
 export type ProjectProjectionReconciliation =
   | {
       readonly path: string;
       readonly driver: "structured";
       readonly identitySets?: readonly StructuredIdentitySetPolicy[];
+      /** planner 拥有的根声明位置，在三向合并之前归一。 */
+      readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
     }
   | {
       readonly path: string;
       readonly driver: "text";
+      readonly mirrorSlots?: readonly ProjectProjectionMirrorSlot[];
     }
   | {
       readonly path: string;
@@ -361,10 +379,84 @@ function describeExecutableMode(entry: ProjectProjectionEntry): string {
   return entry.mode.toString(8).padStart(3, "0");
 }
 
+type TextMirrorMarker =
+  | { readonly kind: "start"; readonly name: string }
+  | { readonly kind: "end" }
+  | { readonly kind: "content" };
+
+/**
+ * 识别已接受设计中有限的成对锚点词表。
+ * 剥掉注释标点只是为了读出标记本身，这里不解释文件格式、关键字或版本。
+ */
+function textMirrorMarker(line: string): TextMirrorMarker {
+  const stripped = line
+    .trim()
+    .replace(/^[#;%*/-]+/u, "")
+    .trim();
+  if (stripped === "@end-template-mirror") return { kind: "end" };
+  const start = /^@template-mirror\s+(\S+)$/u.exec(stripped);
+  if (start?.[1] !== undefined) return { kind: "start", name: start[1] };
+  return { kind: "content" };
+}
+
+type TextMirrorRegion = {
+  readonly contentStart: number;
+  readonly contentEnd: number;
+};
+
+/** 定位唯一被拥有的那一行；任何不可用形态都返回 `undefined`。 */
+function locateTextMirrorRegion(
+  lines: readonly string[],
+  name: string,
+): TextMirrorRegion | undefined {
+  const starts: number[] = [];
+  for (const [index, line] of lines.entries()) {
+    const marker = textMirrorMarker(line);
+    if (marker.kind === "start" && marker.name === name) starts.push(index);
+  }
+  if (starts.length !== 1) return undefined;
+  const start = starts[0]!;
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const marker = textMirrorMarker(lines[index]!);
+    if (marker.kind === "start") return undefined;
+    if (marker.kind !== "end") continue;
+    return index - start === 2
+      ? { contentStart: start + 1, contentEnd: index }
+      : undefined;
+  }
+  return undefined;
+}
+
+/** Before 是否出现过该名的开始标记：区分槽位真缺席与标记不可解释。 */
+function hasTextMirrorStartMarker(
+  lines: readonly string[],
+  name: string,
+): boolean {
+  for (const line of lines) {
+    const marker = textMirrorMarker(line);
+    if (marker.kind === "start" && marker.name === name) return true;
+  }
+  return false;
+}
+
+function escapeRegExpToken(value: string): string {
+  return value.replaceAll(/[.$()*?[\]{}+/|^\\]/gu, String.raw`\$&`);
+}
+
+/** 有界的承载检查：文件是否仍在赋值或引用这个名称？ */
+function textUsesMirrorSlotName(text: string, name: string): boolean {
+  const token = escapeRegExpToken(name);
+  return (
+    new RegExp(`(?:^|[^\\w$])${token}\\s*=`, "u").test(text) ||
+    new RegExp(String.raw`\$\{\s*${token}\s*\}`, "u").test(text)
+  );
+}
+
 function reconcileTextEntry(options: {
   readonly before: ProjectProjectionEntry;
   readonly current: ProjectProjectionEntry;
   readonly after: ProjectProjectionEntry;
+  readonly mirrorSlots: readonly ProjectProjectionMirrorSlot[];
 }):
   | { readonly ok: true; readonly entry: ProjectProjectionEntry }
   | {
@@ -397,12 +489,60 @@ function reconcileTextEntry(options: {
       ],
     };
   }
-  const regions = diff3Merge(
-    textLines(currentText),
-    textLines(beforeText),
-    textLines(afterText),
-    { excludeFalseConflicts: true },
-  );
+  const slotConflict = (slot: ProjectProjectionMirrorSlot, reason: string) =>
+    ({
+      ok: false,
+      conflicts: [
+        {
+          ...(slot.location.kind === "text-anchor"
+            ? { location: slot.location.name }
+            : {}),
+          reason,
+          before: describeEntry(options.before),
+          current: describeEntry(options.current),
+          after: describeEntry(options.after),
+        },
+      ],
+    }) as const;
+  const beforeLines = textLines(beforeText);
+  let currentLines = textLines(currentText);
+  for (const slot of options.mirrorSlots) {
+    if (slot.location.kind !== "text-anchor") continue;
+    const name = slot.location.name;
+    const currentRegion = locateTextMirrorRegion(currentLines, name);
+    if (currentRegion === undefined) {
+      if (textUsesMirrorSlotName(currentText, name)) {
+        return slotConflict(
+          slot,
+          `Declared mirror slot ${JSON.stringify(slot.id)} anchor could not be located while the ${JSON.stringify(name)} carrier or reference remains`,
+        );
+      }
+      continue;
+    }
+    const beforeRegion = locateTextMirrorRegion(beforeLines, name);
+    if (beforeRegion === undefined) {
+      if (hasTextMirrorStartMarker(beforeLines, name)) {
+        return slotConflict(
+          slot,
+          `Declared mirror slot ${JSON.stringify(slot.id)} anchor in Before could not be located while its markers remain`,
+        );
+      }
+      // 模板拥有完整镜像块，标记行也属于该块，因此移除整块后再交既有 diff3。
+      currentLines = [
+        ...currentLines.slice(0, currentRegion.contentStart - 1),
+        ...currentLines.slice(currentRegion.contentEnd + 1),
+      ];
+      continue;
+    }
+    currentLines = [
+      ...currentLines.slice(0, currentRegion.contentStart),
+      ...beforeLines.slice(beforeRegion.contentStart, beforeRegion.contentEnd),
+      ...currentLines.slice(currentRegion.contentEnd),
+    ];
+  }
+  const regions = diff3Merge(currentLines, beforeLines, textLines(afterText), {
+    excludeFalseConflicts: true,
+  });
   const conflicts = regions.flatMap((region) => {
     const conflict = region.conflict;
     if (conflict === undefined) return [];
@@ -782,13 +922,251 @@ function parseStructuredEntry(
   }
 }
 
+function describeStructuredValueAt(
+  value: StructuredValue | MissingStructuredValue,
+): string {
+  return describeStructuredValue(value);
+}
+
+type MirrorSlotParentResult =
+  | { readonly found: true; readonly parent: StructuredValue }
+  | { readonly found: false };
+
+function mirrorSlotParent(
+  root: StructuredValue,
+  segments: readonly string[],
+): MirrorSlotParentResult {
+  if (segments.length === 0) return { found: false };
+  let value = root;
+  for (const segment of segments.slice(0, -1)) {
+    if (isStructuredObject(value) && Object.hasOwn(value, segment)) {
+      value = value[segment]!;
+      continue;
+    }
+    if (
+      Array.isArray(value) &&
+      /^(?:0|[1-9][0-9]*)$/u.test(segment) &&
+      Number.isSafeInteger(Number(segment)) &&
+      Object.hasOwn(value, Number(segment))
+    ) {
+      value = value[Number(segment)]!;
+      continue;
+    }
+    return { found: false };
+  }
+  return { found: true, parent: value };
+}
+
+function mirrorSlotValue(
+  root: StructuredValue,
+  segments: readonly string[],
+): StructuredValue | MissingStructuredValue {
+  const parent = mirrorSlotParent(root, segments);
+  if (!parent.found) return missingStructuredValue;
+  const key = segments[segments.length - 1]!;
+  if (isStructuredObject(parent.parent)) {
+    return Object.hasOwn(parent.parent, key)
+      ? parent.parent[key]!
+      : missingStructuredValue;
+  }
+  if (
+    Array.isArray(parent.parent) &&
+    /^(?:0|[1-9][0-9]*)$/u.test(key) &&
+    Object.hasOwn(parent.parent, Number(key))
+  ) {
+    return parent.parent[Number(key)]!;
+  }
+  return missingStructuredValue;
+}
+
+export type ProjectedMirrorSlotScalar =
+  | { readonly ok: true; readonly scalar: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * 有限的槽位读取：把一个 plan 声明的镜像位置在真实投影里解析成恰好一条标量字符串。
+ * Core 只认识通用位置与值形态（合法 JSON、位置存在、值为字符串、锚点区域恰一行），
+ * 不认识具体生成路径、Node/Rust 语义或 ARG 写法；承载行的解释留给 Checks 层。
+ */
+export function readProjectedMirrorSlotScalar(
+  entry: ProjectProjectionEntry,
+  location: ProjectProjectionMirrorSlotLocation,
+): ProjectedMirrorSlotScalar {
+  if (location.kind === "json-pointer") {
+    const parsed = parseStructuredEntry(entry);
+    if (!parsed.ok) {
+      return { ok: false, reason: `槽位文件不是合法 JSON：${parsed.message}` };
+    }
+    let segments: readonly string[];
+    try {
+      segments = parseJsonPointer(location.pointer);
+    } catch (error) {
+      return {
+        ok: false,
+        reason: `JSON Pointer 非法：${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    if (segments.length === 0) {
+      return { ok: false, reason: "镜像槽位不能定位到文档根本身" };
+    }
+    const value = mirrorSlotValue(parsed.value, segments);
+    if (value === missingStructuredValue) {
+      return {
+        ok: false,
+        reason: `声明位置在真实投影中不存在：${location.pointer}`,
+      };
+    }
+    if (typeof value !== "string") {
+      return {
+        ok: false,
+        reason: `镜像槽位的值必须是字符串标量：${location.pointer}`,
+      };
+    }
+    return { ok: true, scalar: value };
+  }
+  const decoded = decodeText(entry.content);
+  if (decoded === undefined) {
+    return { ok: false, reason: "文本锚点所在文件不是合法 UTF-8 文本" };
+  }
+  const lines = textLines(decoded);
+  const region = locateTextMirrorRegion(lines, location.name);
+  if (region === undefined) {
+    return {
+      ok: false,
+      reason: `锚点区域缺失、重复、不成对或含额外正文：${location.name}`,
+    };
+  }
+  // locateTextMirrorRegion 已保证区域内恰好一条承载行。
+  return { ok: true, scalar: lines[region.contentStart]! };
+}
+
+function withoutMirrorSlot(
+  root: StructuredValue,
+  segments: readonly string[],
+): StructuredValue {
+  if (segments.length === 0) return root;
+  const [head, ...rest] = segments;
+  if (rest.length === 0) {
+    if (!isStructuredObject(root) || !Object.hasOwn(root, head!)) return root;
+    const kept: Record<string, StructuredValue> = {};
+    for (const [key, value] of Object.entries(root)) {
+      if (key !== head) kept[key] = value;
+    }
+    return kept;
+  }
+  if (isStructuredObject(root) && Object.hasOwn(root, head!)) {
+    return {
+      ...root,
+      [head!]: withoutMirrorSlot(root[head!]!, rest),
+    };
+  }
+  if (
+    Array.isArray(root) &&
+    /^(?:0|[1-9][0-9]*)$/u.test(head!) &&
+    Object.hasOwn(root, Number(head))
+  ) {
+    return root.map((member, index) =>
+      index === Number(head) ? withoutMirrorSlot(member, rest) : member,
+    );
+  }
+  return root;
+}
+
+function withMirrorSlot(
+  root: StructuredValue,
+  segments: readonly string[],
+  value: StructuredValue,
+): StructuredValue {
+  if (segments.length === 0) return root;
+  const [head, ...rest] = segments;
+  if (rest.length === 0) {
+    if (isStructuredObject(root) && Object.hasOwn(root, head!)) {
+      return { ...root, [head!]: value };
+    }
+    if (
+      Array.isArray(root) &&
+      /^(?:0|[1-9][0-9]*)$/u.test(head!) &&
+      Object.hasOwn(root, Number(head))
+    ) {
+      return root.map((member, index) =>
+        index === Number(head) ? value : member,
+      );
+    }
+    return root;
+  }
+  if (isStructuredObject(root) && Object.hasOwn(root, head!)) {
+    return {
+      ...root,
+      [head!]: withMirrorSlot(root[head!]!, rest, value),
+    };
+  }
+  if (
+    Array.isArray(root) &&
+    /^(?:0|[1-9][0-9]*)$/u.test(head!) &&
+    Object.hasOwn(root, Number(head))
+  ) {
+    return root.map((member, index) =>
+      index === Number(head) ? withMirrorSlot(member, rest, value) : member,
+    );
+  }
+  return root;
+}
+
+type NormalizedCurrentResult =
+  | { readonly ok: true; readonly value: StructuredValue }
+  | { readonly ok: false; readonly conflict: StructuredConflict };
+
+/**
+ * 把 Current 中每个由 planner 声明的位置改写回 Before。
+ * 归一只改写已存在的位置，绝不新建，所以消费者删掉的槽位在既有合并法则下保持缺席。
+ */
+function normalizeCurrentMirrorSlots(options: {
+  readonly before: StructuredValue;
+  readonly current: StructuredValue;
+  readonly after: StructuredValue;
+  readonly slots: readonly {
+    readonly slot: ProjectProjectionMirrorSlot;
+    readonly segments: readonly string[];
+  }[];
+}): NormalizedCurrentResult {
+  let normalized = options.current;
+  for (const { slot, segments } of options.slots) {
+    const location = structuredLocation(segments);
+    const currentValue = mirrorSlotValue(normalized, segments);
+    if (currentValue === missingStructuredValue) continue;
+    const beforeValue = mirrorSlotValue(options.before, segments);
+    const afterValue = mirrorSlotValue(options.after, segments);
+    const unusable = (side: string) =>
+      ({
+        ok: false,
+        conflict: {
+          location,
+          reason: `Declared mirror slot ${JSON.stringify(slot.id)} holds a non-string ${side} value`,
+          before: describeStructuredValueAt(beforeValue),
+          current: describeStructuredValueAt(currentValue),
+          after: describeStructuredValueAt(afterValue),
+        },
+      }) as const;
+    if (typeof currentValue !== "string") return unusable("Current");
+    if (beforeValue === missingStructuredValue) {
+      normalized = withoutMirrorSlot(normalized, segments);
+      continue;
+    }
+    if (typeof beforeValue !== "string") return unusable("Before");
+    normalized = withMirrorSlot(normalized, segments, beforeValue);
+  }
+  return { ok: true, value: normalized };
+}
+
 function reconcileStructuredEntry(options: {
   readonly before: ProjectProjectionEntry;
   readonly current: ProjectProjectionEntry;
   readonly after: ProjectProjectionEntry;
   readonly identitySets: readonly StructuredIdentitySetPolicy[];
+  readonly mirrorSlots: readonly ProjectProjectionMirrorSlot[];
 }):
   | { readonly ok: true; readonly entry: ProjectProjectionEntry }
+  | { readonly ok: true; readonly skip: true }
   | { readonly ok: false; readonly conflict?: StructuredConflict } {
   const mode = reconcileMode(options.before, options.current, options.after);
   if (mode === undefined) return { ok: false };
@@ -812,9 +1190,23 @@ function reconcileStructuredEntry(options: {
   if (!before.ok) return parseConflict("Before", before.message);
   if (!current.ok) return parseConflict("Current", current.message);
   if (!after.ok) return parseConflict("After", after.message);
+  const slotLocations = options.mirrorSlots.map((slot) => ({
+    slot,
+    segments:
+      slot.location.kind === "json-pointer"
+        ? parseJsonPointer(slot.location.pointer)
+        : [],
+  }));
+  const normalized = normalizeCurrentMirrorSlots({
+    before: before.value,
+    current: current.value,
+    after: after.value,
+    slots: slotLocations,
+  });
+  if (!normalized.ok) return normalized;
   const reconciled = reconcileStructuredValue(
     before.value,
-    current.value,
+    normalized.value,
     after.value,
     [],
     options.identitySets,
@@ -822,6 +1214,13 @@ function reconcileStructuredEntry(options: {
   if (!reconciled.ok) return reconciled;
   if (reconciled.value === missingStructuredValue) {
     return { ok: false };
+  }
+  if (
+    options.mirrorSlots.length > 0 &&
+    structuredValuesEqual(current.value, reconciled.value) &&
+    options.current.mode === mode
+  ) {
+    return { ok: true, skip: true };
   }
   let content: Uint8Array;
   try {
@@ -873,6 +1272,51 @@ function assertNormalizedSafeRelativePath(
   }
 }
 
+function assertMirrorSlots(
+  entry: ProjectProjectionEntry,
+  reconciliation: Exclude<
+    ProjectProjectionReconciliation,
+    { readonly driver: "canonical" }
+  >,
+): void {
+  const slots = reconciliation.mirrorSlots ?? [];
+  const ids = new Set<string>();
+  for (const slot of slots) {
+    if (slot.id.length === 0 || ids.has(slot.id)) {
+      throw new Error(
+        `Project Projection mirror slot ids must be unique and non-empty: ${entry.path} ${JSON.stringify(slot.id)}`,
+      );
+    }
+    ids.add(slot.id);
+    if (reconciliation.driver === "structured") {
+      if (slot.location.kind !== "json-pointer") {
+        throw new Error(
+          `Project Projection structured mirror slots require a JSON Pointer location: ${entry.path} ${slot.id}`,
+        );
+      }
+      try {
+        parseJsonPointer(slot.location.pointer);
+      } catch (error) {
+        throw new Error(
+          `Project Projection mirror slot location must be an RFC 6901 JSON Pointer: ${entry.path} ${slot.id} (${error instanceof Error ? error.message : String(error)})`,
+          { cause: error },
+        );
+      }
+      continue;
+    }
+    if (slot.location.kind !== "text-anchor") {
+      throw new Error(
+        `Project Projection text mirror slots require a named text anchor: ${entry.path} ${slot.id}`,
+      );
+    }
+    if (!/^\S+$/u.test(slot.location.name)) {
+      throw new Error(
+        `Project Projection text mirror slot names must be single non-empty tokens: ${entry.path} ${slot.id}`,
+      );
+    }
+  }
+}
+
 function assertProjectionContract(
   projection: ProjectProjection,
 ): ReadonlyMap<string, ProjectProjectionReconciliation> {
@@ -915,6 +1359,12 @@ function assertProjectionContract(
         reconciliation,
       );
     }
+    if (reconciliation.driver !== "canonical") {
+      assertMirrorSlots(
+        projection.entries.find((entry) => entry.path === reconciliation.path)!,
+        reconciliation,
+      );
+    }
     policies.set(reconciliation.path, reconciliation);
   }
   for (const projectionPath of paths) {
@@ -925,6 +1375,30 @@ function assertProjectionContract(
     }
   }
   return policies;
+}
+
+/**
+ * 槽位声明沿既有通用合并接缝只允许单调新增：Before 的每个槽位必须按原序出现在 After 前缀，
+ * After 可追加消费者新增能力所对应的位置。删除、重排或改写既有槽位仍判为策略不兼容。
+ * Core 不理解具体文件名或工具链，只在槽位列表结构上判定。
+ */
+function mirrorSlotsExtendMonotonically(
+  before: readonly ProjectProjectionMirrorSlot[] | undefined,
+  after: readonly ProjectProjectionMirrorSlot[] | undefined,
+): boolean {
+  const prior = before ?? [];
+  const next = after ?? [];
+  if (prior.length > next.length) return false;
+  for (let index = 0; index < prior.length; index += 1) {
+    if (
+      JSON.stringify(prior[index] ?? null) !==
+      JSON.stringify(next[index] ?? null)
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function reconciliationPoliciesCompatible(
@@ -942,6 +1416,9 @@ function reconciliationPoliciesCompatible(
   const leftIdentitySets = left.identitySets ?? [];
   const rightIdentitySets = right.identitySets ?? [];
   if (leftIdentitySets.length !== rightIdentitySets.length) return false;
+  if (!mirrorSlotsExtendMonotonically(left.mirrorSlots, right.mirrorSlots)) {
+    return false;
+  }
 
   return leftIdentitySets.every((leftPolicy, index) => {
     const rightPolicy = rightIdentitySets[index];
@@ -1117,6 +1594,13 @@ function assertIdentitySetPolicies(
   }
 }
 
+function declaredMirrorSlots(
+  policy: ProjectProjectionReconciliation | undefined,
+): readonly ProjectProjectionMirrorSlot[] {
+  if (policy === undefined || policy.driver === "canonical") return [];
+  return policy.mirrorSlots ?? [];
+}
+
 export async function reconcileProjectProjections(options: {
   readonly before: ProjectProjection;
   readonly after: ProjectProjection;
@@ -1150,27 +1634,43 @@ export async function reconcileProjectProjections(options: {
       );
     }
   }
-  const deltaPaths = [
-    ...new Set([...beforeByPath.keys(), ...afterByPath.keys()]),
-  ]
-    .filter(
-      (projectionPath) =>
-        !entriesEqual(
-          beforeByPath.get(projectionPath),
-          afterByPath.get(projectionPath),
-        ),
-    )
-    .toSorted();
+  const deltaPathSet = new Set(
+    [...new Set([...beforeByPath.keys(), ...afterByPath.keys()])]
+      .filter(
+        (projectionPath) =>
+          !entriesEqual(
+            beforeByPath.get(projectionPath),
+            afterByPath.get(projectionPath),
+          ),
+      )
+      .toSorted(),
+  );
+  const declaredMirrorPaths = new Set<string>();
+  for (const [projectionPath, policy] of afterPolicies) {
+    if (declaredMirrorSlots(policy).length > 0) {
+      declaredMirrorPaths.add(projectionPath);
+    }
+  }
+  for (const [projectionPath, policy] of beforePolicies) {
+    if (declaredMirrorSlots(policy).length > 0) {
+      declaredMirrorPaths.add(projectionPath);
+    }
+  }
+  const reconcilePaths = [
+    ...new Set([...deltaPathSet, ...declaredMirrorPaths]),
+  ].toSorted();
   const mutations: ProjectProjectionEntry[] = [];
   const conflicts: ProjectProjectionConflict[] = [];
 
-  for (const projectionPath of deltaPaths) {
+  for (const projectionPath of reconcilePaths) {
     const before = beforeByPath.get(projectionPath);
     const after = afterByPath.get(projectionPath)!;
     const beforePolicy = beforePolicies.get(projectionPath);
     const afterPolicy = afterPolicies.get(projectionPath);
     const policy = afterPolicy ?? beforePolicy!;
     const driver = policy.driver;
+    const mirrorSlots = declaredMirrorSlots(policy);
+    const isDeltaPath = deltaPathSet.has(projectionPath);
     const current = await options.readCurrent(projectionPath);
     if (entriesEqual(current, after)) continue;
     if (entriesEqual(current, before)) {
@@ -1189,6 +1689,7 @@ export async function reconcileProjectProjections(options: {
       continue;
     }
     if (before === undefined || current === undefined) {
+      if (!isDeltaPath && mirrorSlots.length > 0) continue;
       conflicts.push({
         path: projectionPath,
         driver,
@@ -1201,6 +1702,7 @@ export async function reconcileProjectProjections(options: {
       continue;
     }
     if (current.kind !== "file") {
+      if (!isDeltaPath && mirrorSlots.length > 0) continue;
       conflicts.push({
         path: projectionPath,
         driver,
@@ -1232,18 +1734,20 @@ export async function reconcileProjectProjections(options: {
             current,
             after,
             identitySets: combinedIdentitySets(beforePolicy, afterPolicy),
+            mirrorSlots,
           })
         : undefined;
     const text =
       driver === "text"
-        ? reconcileTextEntry({ before, current, after })
+        ? reconcileTextEntry({ before, current, after, mirrorSlots })
         : undefined;
+    if (structured?.ok === true && "skip" in structured) continue;
     const reconciled =
       driver === "text"
         ? text?.ok
           ? text.entry
           : undefined
-        : structured?.ok
+        : structured?.ok && "entry" in structured
           ? structured.entry
           : undefined;
     if (reconciled === undefined) {

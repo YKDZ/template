@@ -1,13 +1,12 @@
-import { describe, expect, it } from "vitest";
-
-import type { PackageContribution } from "#template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   PackageDefinition,
   PackageDefinitionId,
   PersistedPackageDefinition,
   ProjectBlueprint,
-} from "#template-core/project-blueprint";
-import { planExplicitProjectLinks } from "#template-core/project-linking-v2";
+} from "@ykdz/template-core/project-blueprint";
+import { planExplicitProjectLinks } from "@ykdz/template-core/project-linking-v2";
+import { describe, expect, it } from "vitest";
 
 function contribution(
   definition: PackageDefinition,

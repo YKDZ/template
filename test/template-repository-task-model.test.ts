@@ -44,7 +44,7 @@ describe("Template Repository native task model", () => {
     ) as WorkspaceConfig;
     const turbo = await readJson<TurboConfig>("turbo.json");
 
-    expect(workspace.injectWorkspacePackages).toBe(true);
+    expect(workspace.injectWorkspacePackages).toBe(false);
     expect(workspace.dedupeInjectedDeps).toBe(false);
     expect(workspace.syncInjectedDepsAfterScripts).toContain("build");
     expect(turbo.tasks.build?.cache).toBe(false);
@@ -55,7 +55,7 @@ describe("Template Repository native task model", () => {
     const scripts = manifest.scripts;
 
     expect(scripts.check).toBe(
-      "pnpm run build && pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
+      "pnpm run build && pnpm run boundaries && pnpm run check:toolchain:versions && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     );
     expect(scripts.fix).toBe(
       "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
@@ -143,7 +143,6 @@ describe("Template Repository native task model", () => {
       "check:templates",
       "check:templates:boundary",
       "check:templates:github-yaml",
-      "check:toolchain:online",
     ]) {
       expect(tasks[task]?.dependsOn ?? []).not.toContain("^build");
     }

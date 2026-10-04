@@ -2,14 +2,14 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
 
 type Tsconfig = {
   readonly compilerOptions?: Readonly<Record<string, unknown>>;
@@ -100,6 +100,7 @@ describe("Generated Repository TypeScript policy", () => {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         });

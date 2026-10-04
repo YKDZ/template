@@ -8,15 +8,11 @@
     "erasableSyntaxOnly": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
     "rootDir": ".",
     "skipLibCheck": true,
     "target": "es2024",
     "types": ["node"]
   },
-  "include": [
-    "src/**/*.ts",
-    "scripts/**/*.ts",
-    "test/**/*.ts",
-    "vitest.config.ts"
-  ]
+  "include": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"]
 }

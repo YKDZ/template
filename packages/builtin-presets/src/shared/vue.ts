@@ -1,8 +1,8 @@
-import { playwrightBrowserAssetsEnvironmentNeed } from "#template-core/module-graph";
-import type { PackageContribution } from "#template-core/package-contribution";
-import type { GenerationContext } from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+import { playwrightBrowserAssetsEnvironmentNeed } from "@ykdz/template-core/module-graph";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { GenerationContext } from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 import { browserTestDevelopmentContainerToolLayer } from "./development-container.ts";
@@ -96,6 +96,8 @@ export function vueApplicationManifest(options: {
   readonly context: GenerationContext;
   readonly definition: PackageDefinition;
   readonly scripts: Record<string, string>;
+  /** Vue-Hono's root owns its joint browser runner. */
+  readonly includePlaywright?: boolean;
 }): PackageContribution["manifest"] {
   return {
     name: options.definition.name,
@@ -109,7 +111,9 @@ export function vueApplicationManifest(options: {
       vue: "catalog:",
     },
     devDependencies: {
-      "@playwright/test": "catalog:",
+      ...(options.includePlaywright === false
+        ? {}
+        : { "@playwright/test": "catalog:" }),
       "@tailwindcss/vite": "catalog:",
       "@types/node": "catalog:",
       "@types/web-bluetooth": "catalog:",

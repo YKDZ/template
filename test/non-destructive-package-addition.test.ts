@@ -11,9 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -22,13 +19,16 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
-} from "#template-builtin-presets";
-import { type PackageRole } from "#template-core/project-blueprint";
+} from "@ykdz/template-builtin-presets";
+import { type PackageRole } from "@ykdz/template-core/project-blueprint";
 import {
   materializeProjectProjection,
   reconcileAndApplyProjectProjections,
-} from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 function requireAddableDefinitionForRole(
   context: BuiltInGenerationContext,
@@ -246,6 +246,8 @@ describe("Non-Destructive Package Addition", () => {
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        // 该夹具以 ts-cli Definition 直接新建含公开候选的仓库，需要快照精确版本。
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     });
     const baseDefinition = requireAddableDefinitionForRole(context, "cli-tool");
@@ -551,20 +553,18 @@ describe("Non-Destructive Package Addition", () => {
             )!.content,
           ),
         ) as {
-          dependenciesMeta: Record<string, { injected: boolean }>;
+          dependenciesMeta?: Record<string, { injected: true }>;
         };
 
+      expect(manifestFrom(before, consumerPath)).not.toHaveProperty(
+        "dependenciesMeta",
+      );
       expect(
-        manifestFrom(before, consumerPath).dependenciesMeta["@demo/provider"],
-      ).toEqual({ injected: false });
-      expect(
-        manifestFrom(after, consumerPath).dependenciesMeta["@demo/provider"],
+        manifestFrom(after, consumerPath).dependenciesMeta?.["@demo/provider"],
       ).toEqual({ injected: true });
       expect(
-        manifestFrom(after, consumerPath).dependenciesMeta[
-          "@demo/next-provider"
-        ],
-      ).toEqual({ injected: false });
+        manifestFrom(after, consumerPath).dependenciesMeta,
+      ).not.toHaveProperty("@demo/next-provider");
       await expect(
         reconcileAndApplyProjectProjections({
           targetRoot: targetDir,

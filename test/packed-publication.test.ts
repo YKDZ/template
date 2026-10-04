@@ -13,17 +13,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { execa } from "execa";
-import ts from "typescript";
-import { describe, expect, it } from "vitest";
-import { parse as parseYaml } from "yaml";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import type { PackageRole } from "#template-core/project-blueprint";
+} from "@ykdz/template-builtin-presets";
+import type { PackageRole } from "@ykdz/template-core/project-blueprint";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
 
@@ -81,7 +81,7 @@ async function expectPackedProjectionRollback(
   );
   const projection = (await import(
     pathToFileURL(packedProjectionModule).href
-  )) as typeof import("#template-core/project-projection");
+  )) as typeof import("@ykdz/template-core/project-projection");
   const committedPaths: string[] = [];
   const reconcile = projection.createProjectProjectionReconciler({
     async commitMutation(options) {
@@ -137,6 +137,7 @@ function definitionWithPackagePath(packagePath: string) {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     }).blueprint.packages.some((pkg) => pkg.path === packagePath),
@@ -169,6 +170,7 @@ function definitionWithInitialPackageRole(role: PackageRole) {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     }).blueprint.packages.some((pkg) => pkg.role === role),
@@ -612,7 +614,11 @@ function initializationDiagnosticPlan(definitionName: string) {
         "packed-diagnostic-expectation",
         definitionName,
       ),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      },
     }),
   });
 }
@@ -847,10 +853,6 @@ describe("packed public CLI consumer", () => {
           ],
           {
             cwd: consumer,
-            env: {
-              ...process.env,
-              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-            },
           },
         );
         await expectNativeTaskModel(
@@ -894,10 +896,6 @@ describe("packed public CLI consumer", () => {
           ],
           {
             cwd: path.join(consumer, "generated", candidate.name),
-            env: {
-              ...process.env,
-              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-            },
             reject: false,
           },
         );
@@ -933,6 +931,7 @@ describe("packed public CLI consumer", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         });
         const contributions = planGeneratedRepositoryInitialization({
@@ -1003,10 +1002,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: rustAdditionTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
         },
       );
       const rustPreview = JSON.parse(rustPreviewResult.stdout) as {
@@ -1065,10 +1060,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: rustAdditionTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
         },
       );
       await expect(
@@ -1111,8 +1102,13 @@ describe("packed public CLI consumer", () => {
           readonly target: string;
         }[];
       };
+      const rustToolchainAfterRust = await readFile(rustToolchainPath, "utf8");
+      const rootRustChannel = rustToolchainAfterRust.match(
+        /^channel = "([^"]+)"$/mu,
+      )?.[1];
+      expect(rootRustChannel).toBe(releaseToolchainSnapshot.rustVersion);
       expect(devcontainerAfterRust.build.args).toMatchObject({
-        RUST_TOOLCHAIN: "stable",
+        RUST_TOOLCHAIN: rootRustChannel,
       });
       expect(devcontainerAfterRust.mounts).toEqual(
         expect.arrayContaining([
@@ -1140,8 +1136,8 @@ describe("packed public CLI consumer", () => {
           }),
         ]),
       );
-      await expect(readFile(rustToolchainPath, "utf8")).resolves.toBe(
-        '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',
+      expect(rustToolchainAfterRust).toBe(
+        `[toolchain]\nchannel = "${releaseToolchainSnapshot.rustVersion}"\ncomponents = ["rustfmt", "clippy"]\n`,
       );
       const dependabotAfterRust = parseYaml(
         await readFile(dependabotPath, "utf8"),
@@ -1212,10 +1208,6 @@ describe("packed public CLI consumer", () => {
           ],
           {
             cwd: cliTarget,
-            env: {
-              ...process.env,
-              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-            },
           },
         );
       };
@@ -1268,10 +1260,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: previewTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
           reject: false,
         },
       );
@@ -1311,10 +1299,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: previewTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
           reject: false,
         },
       );
@@ -1353,10 +1337,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: previewTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
         },
       );
       expect(JSON.parse(preview.stdout)).toMatchObject({
@@ -1397,10 +1377,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: previewTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
           reject: false,
         },
       );
@@ -1431,8 +1407,7 @@ describe("packed public CLI consumer", () => {
         ".devcontainer/Dockerfile",
       );
       const dockerfile = await readFile(dockerfilePath, "utf8");
-      const baseToolLayerTail =
-        '    && chmod -R a+rX "$COREPACK_HOME" "$PNPM_HOME"';
+      const baseToolLayerTail = '    && chmod -R a+rX "$PNPM_HOME"';
       const baseToolLayerBoundary = `${baseToolLayerTail}\n\n`;
       expect(dockerfile).toContain(baseToolLayerBoundary);
       await writeFile(
@@ -1457,10 +1432,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: previewTarget,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
           reject: false,
         },
       );
@@ -1507,10 +1478,6 @@ describe("packed public CLI consumer", () => {
         ],
         {
           cwd: consumer,
-          env: {
-            ...process.env,
-            TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-          },
         },
       );
       const gitignorePath = path.join(generated, ".gitignore");
@@ -1545,10 +1512,6 @@ describe("packed public CLI consumer", () => {
           ],
           {
             cwd: generated,
-            env: {
-              ...process.env,
-              TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-            },
           },
         );
       };

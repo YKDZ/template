@@ -1,17 +1,16 @@
-import type { PackageContribution } from "#template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import {
   sharedVueSourceOperations,
   vueApplicationDevelopmentContainerToolLayers,
-  vueApplicationEnvironmentNeeds,
   vueApplicationExposure,
   vueApplicationManifest,
   vueApplicationScripts,
@@ -34,7 +33,11 @@ function apiScripts(): Record<string, string> {
 
 function webScripts(): Record<string, string> {
   return {
-    ...vueApplicationScripts(),
+    ...Object.fromEntries(
+      Object.entries(vueApplicationScripts()).filter(
+        ([name]) => name !== "test:e2e",
+      ),
+    ),
     typecheck:
       "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
@@ -131,6 +134,7 @@ function apiContribution(
 
 function webContribution(
   context: GenerationContext,
+  apiDefinition: PackageDefinition,
   definition: PackageDefinition = {
     name: `@${context.defaultPackageScope}/web`,
     path: "apps/web",
@@ -141,13 +145,11 @@ function webContribution(
   const localSourceFiles = [
     "env.d.ts",
     "index.html",
-    "playwright.config.ts",
     "vite.config.ts",
     "vitest.config.ts",
     "turbo.json",
     "src/api.ts",
     "src/App.vue",
-    "test/e2e/app.spec.ts",
   ] as const;
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
@@ -166,17 +168,16 @@ function webContribution(
       context,
       definition,
       scripts: webScripts(),
+      includePlaywright: false,
     }),
     operations,
-    environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
-    ciDiagnosticArtifacts: [
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
+    environmentNeeds: [],
     foundation: {
       ...packageFoundation(definition.path),
+      vueHonoJointE2e: {
+        kind: "vue-hono-joint-e2e",
+        apiPackageName: apiDefinition.name,
+      },
       developmentContainerToolLayers:
         vueApplicationDevelopmentContainerToolLayers(),
     },
@@ -191,8 +192,8 @@ const apiReplayAdapter = definePackageContributionReplayAdapter({
 
 const webReplayAdapter = definePackageContributionReplayAdapter({
   identity: "web",
-  replay: ({ context, packageDefinition }) =>
-    webContribution(context, packageDefinition),
+  replay: ({ context, packageDefinition, initialPackages }) =>
+    webContribution(context, initialPackages.require("api"), packageDefinition),
 });
 
 export const vueHonoAppDefinition = {
@@ -206,7 +207,7 @@ export const vueHonoAppDefinition = {
   packageContributionReplayAdapters: [apiReplayAdapter, webReplayAdapter],
   blueprint(context) {
     const api = apiContribution(context);
-    const web = webContribution(context);
+    const web = webContribution(context, api.definition);
     return {
       schemaVersion: 3,
       packages: [api.definition, web.definition],
@@ -222,9 +223,10 @@ export const vueHonoAppDefinition = {
     return apiReplayAdapter.identify(apiContribution(context));
   },
   planInitializationContributions(context) {
+    const api = apiContribution(context);
     return [
-      apiReplayAdapter.identify(apiContribution(context)),
-      webReplayAdapter.identify(webContribution(context)),
+      apiReplayAdapter.identify(api),
+      webReplayAdapter.identify(webContribution(context, api.definition)),
     ];
   },
 } satisfies BuiltInPresetDefinition;

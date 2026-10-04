@@ -1,9 +1,9 @@
-import type { PackageBoundaryOwner } from "./module-graph.ts";
+import type { ComponentOwner } from "./module-graph.ts";
 
 /** Closed, owner-scoped native evidence a Package Contribution may retain in CI. */
 export type CiDiagnosticArtifactDeclaration = {
   readonly kind: "playwright";
-  readonly owner: PackageBoundaryOwner;
+  readonly owner: ComponentOwner;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -58,9 +58,11 @@ export function assertCiDiagnosticArtifactDeclaration(
     throw new Error("CI Diagnostic Artifact requires a Package Boundary owner");
   }
   if (
-    value.owner.kind !== "package-boundary" ||
-    typeof value.owner.path !== "string" ||
-    !isSafePackagePath(value.owner.path)
+    (value.owner.kind !== "workspace-orchestration" ||
+      value.owner.path !== ".") &&
+    (value.owner.kind !== "package-boundary" ||
+      typeof value.owner.path !== "string" ||
+      !isSafePackagePath(value.owner.path))
   ) {
     throw new Error(
       "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
@@ -68,7 +70,10 @@ export function assertCiDiagnosticArtifactDeclaration(
   }
   return {
     kind: "playwright",
-    owner: { kind: "package-boundary", path: value.owner.path },
+    owner:
+      value.owner.kind === "workspace-orchestration"
+        ? { kind: "workspace-orchestration", path: "." }
+        : { kind: "package-boundary", path: value.owner.path },
   };
 }
 
@@ -91,7 +96,10 @@ export function composeCiDiagnosticArtifacts(options: {
   const artifacts = new Map<string, CiDiagnosticArtifactDeclaration>();
   for (const value of options.declarations) {
     const declaration = assertCiDiagnosticArtifactDeclaration(value);
-    if (!owners.has(declaration.owner.path)) {
+    if (
+      declaration.owner.kind === "package-boundary" &&
+      !owners.has(declaration.owner.path)
+    ) {
       throw new Error(
         `CI Diagnostic Artifact owner is not a declared Package Boundary: ${declaration.owner.path}`,
       );

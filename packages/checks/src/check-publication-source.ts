@@ -3,12 +3,11 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-
 import {
   resolveBuiltInTemplateSource,
   templateSources,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
+import { execa } from "execa";
 
 import { validatePlanPublicationSources } from "./registry-checks.ts";
 
@@ -36,7 +35,7 @@ export async function checkPresetPublicationSources(): Promise<void> {
       "-tf",
       path.join(destination, archive),
     ]);
-    validatePlanPublicationSources({
+    await validatePlanPublicationSources({
       packageRoot,
       packedPaths: contents.stdout.split("\n").filter(Boolean),
     });

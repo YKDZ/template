@@ -9,9 +9,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -20,18 +17,14 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
-} from "#template-builtin-presets";
-import { dockerEngineEnvironmentNeed } from "#template-core/module-graph";
-import type { PackageContribution } from "#template-core/package-contribution";
-import { definePackageContributionReplayAdapter } from "#template-core/preset-definition";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import {
-  createTemplateSourceHandle,
-  renderNewProject,
-} from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
-const source = createTemplateSourceHandle(process.cwd());
 
 async function snapshot(
   root: string,
@@ -112,109 +105,31 @@ function baseDefinition(): BuiltInPresetDefinition {
   return definition;
 }
 
-function diagnosticDeploymentContribution(options: {
-  readonly context: BuiltInGenerationContext;
-  readonly packageLeafName: string;
-  readonly packagePath: string;
-}): PackageContribution {
-  const name = `@${options.context.defaultPackageScope}/${options.packageLeafName}`;
-  const owner = {
-    kind: "package-boundary" as const,
-    path: options.packagePath,
-  };
-  return {
-    definition: { name, path: options.packagePath, role: "runtime-service" },
-    manifest: {
-      name,
-      private: true,
-      scripts: { deployment: "node scripts/check-deployment.js" },
-    },
-    exposure: { exports: {}, imports: {} },
-    operations: [
-      {
-        kind: "writeJson",
-        to: `${options.packagePath}/package.json`,
-        value: {},
-      },
-    ],
-    foundation: {
-      toolchains: {},
-      editorCapabilities: [],
-      dependencyMaintenance: {
-        ecosystems: ["github-actions"],
-        interval: "weekly",
-      },
-    },
-    environmentNeeds: [],
-    deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
-    ciDiagnosticArtifacts: [{ kind: "playwright", owner }],
-  };
-}
-
-const diagnosticDeploymentReplayAdapter =
-  definePackageContributionReplayAdapter({
-    identity: "diagnostic-deployment",
-    replay: ({ context, packageDefinition, packageLeafName }) => {
-      const contribution = diagnosticDeploymentContribution({
-        context,
-        packageLeafName,
-        packagePath: packageDefinition.path,
-      });
-      return {
-        ...contribution,
-        definition: packageDefinition,
-        manifest: { ...contribution.manifest, name: packageDefinition.name },
-      };
+function deploymentDefinition(): BuiltInPresetDefinition {
+  // 该探测会直接规划 Registry 中每个 Preset 的新建初始化，含新建公开 ts-cli 候选，
+  // 需要发版快照的精确三段版本；其余仅规划私有仓库的上下文保持大版本声明。
+  const context = createGenerationContext({
+    targetDir: "generated-repository/deployment-capability",
+    defaultPackageScope: "demo",
+    toolchain: {
+      ...toolchain,
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
     },
   });
-
-const diagnosticDeploymentAddition: BuiltInPresetDefinition = {
-  metadata: {
-    name: "synthetic-diagnostic-deployment-addition",
-    title: "Synthetic diagnostic deployment addition",
-    description: "Test-only capability composition.",
-  },
-  source,
-  plannerSourceFile: import.meta.filename,
-  packageContributionReplayAdapters: [diagnosticDeploymentReplayAdapter],
-  blueprint(generationContext) {
-    return {
-      schemaVersion: 3,
-      packages: [
-        diagnosticDeploymentContribution({
-          context: generationContext,
-          packageLeafName: "deployment",
-          packagePath: "services/deployment",
-        }).definition,
-      ],
-    };
-  },
-  planInitialization(generationContext) {
-    return diagnosticDeploymentReplayAdapter.identify(
-      diagnosticDeploymentContribution({
-        context: generationContext,
-        packageLeafName: "deployment",
-        packagePath: "services/deployment",
-      }),
+  const definition = builtInPresetRegistry.all().find((candidate) => {
+    const plan = planGeneratedRepositoryInitialization({
+      definition: candidate,
+      context,
+    });
+    return plan.deploymentCheck !== undefined;
+  });
+  if (definition === undefined) {
+    throw new Error(
+      "Expected a registry-defined Built-in Preset with Deployment capability",
     );
-  },
-  defaultPackagePath({ packageLeafName }) {
-    return `services/${packageLeafName}`;
-  },
-  planPackageAddition({
-    context: generationContext,
-    packageLeafName,
-    packagePath,
-  }) {
-    return diagnosticDeploymentReplayAdapter.identify(
-      diagnosticDeploymentContribution({
-        context: generationContext,
-        packageLeafName,
-        packagePath,
-      }),
-    );
-  },
-};
+  }
+  return definition;
+}
 
 async function initializedBase(targetDir: string) {
   const generationContext = context(targetDir);
@@ -455,21 +370,36 @@ describe("diagnostic Package Addition", () => {
           "",
         ),
       );
+
+      const deploymentTargetDir = path.join(workspace, "deployment-project");
+      const deploymentContext = context(deploymentTargetDir);
+      const deploymentInitialization = planGeneratedRepositoryInitialization({
+        definition: deploymentDefinition(),
+        context: deploymentContext,
+      });
+      await renderNewProject({
+        targetRoot: deploymentTargetDir,
+        operations: [...deploymentInitialization.operations],
+      });
       const combined = planGeneratedRepositoryPackageAddition({
-        definition: diagnosticDeploymentAddition,
+        definition: diagnosticAddition(),
         localTemplateMetadata: loadLocalTemplateMetadata(
-          generationContext.targetDir,
+          deploymentContext.targetDir,
         ),
-        packageLeafName: "deployment",
-        packagePath: "services/deployment",
+        packageLeafName: "admin",
+        packagePath: "apps/admin",
       });
       expect(
         await reconcileAndApplyProjectProjections({
-          targetRoot: targetDir,
+          targetRoot: deploymentTargetDir,
           ...combined.projectProjections,
         }),
       ).toMatchObject({ ok: true });
-      const workflow = parse(await readFile(workflowPath, "utf8")) as {
+      const deploymentWorkflowSource = await readFile(
+        path.join(deploymentTargetDir, ".github/workflows/check.yml"),
+        "utf8",
+      );
+      const workflow = parse(deploymentWorkflowSource) as {
         readonly jobs: {
           readonly check: {
             readonly strategy: {
@@ -497,6 +427,7 @@ describe("diagnostic Package Addition", () => {
         if: "failure() && matrix.capability == 'root'",
       });
       expect(upload?.with?.path).toBe(".template-ci-diagnostics");
+      expect(deploymentWorkflowSource).toContain("apps/admin");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -8,8 +8,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -18,9 +16,11 @@ import {
   planGeneratedRepositoryPackageAddition,
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
-} from "#template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it, vi } from "vitest";
 
 const toolchain = {
   nodeLtsMajor: "24",
@@ -67,13 +67,14 @@ async function initializedRepository(
   selectDefinition: (
     context: BuiltInGenerationContext,
   ) => BuiltInPresetDefinition = requireSharedLibraryAdditionDefinition,
+  contextToolchain: BuiltInGenerationContext["toolchain"] = toolchain,
 ) {
   const parent = await mkdtemp(path.join(tmpdir(), "template-metadata-"));
   const repositoryRoot = path.join(parent, "recorded-repository");
   const context = createGenerationContext({
     targetDir: repositoryRoot,
     defaultPackageScope: "recorded-scope",
-    toolchain,
+    toolchain: contextToolchain,
   });
   const definition = selectDefinition(context);
   const plan = planGeneratedRepositoryInitialization({
@@ -359,22 +360,32 @@ describe("Local Template Metadata", () => {
   it.each(["cli-tool", "native-package"] as const)(
     "replays persisted %s provenance without consulting current Preset defaults",
     async (role) => {
-      const initialized = await initializedRepository((context) => {
-        const definition = builtInPresetRegistry.all().find((candidate) => {
-          const contributions = planGeneratedRepositoryInitialization({
-            definition: candidate,
-            context,
-          }).packageContributions;
-          return (
-            contributions.length === 1 &&
-            contributions[0]?.definition.role === role
-          );
-        });
-        if (definition === undefined) {
-          throw new Error(`Expected a single-Package ${role} Definition`);
-        }
-        return definition;
-      });
+      // cli-tool 探测会直接规划新建公开 ts-cli 候选，初始化上下文需要快照精确值；
+      // 持久化记录仍只含大版本，加包 replay 保持缺省兼容。
+      const initialized = await initializedRepository(
+        (context) => {
+          const definition = builtInPresetRegistry.all().find((candidate) => {
+            const contributions = planGeneratedRepositoryInitialization({
+              definition: candidate,
+              context,
+            }).packageContributions;
+            return (
+              contributions.length === 1 &&
+              contributions[0]?.definition.role === role
+            );
+          });
+          if (definition === undefined) {
+            throw new Error(`Expected a single-Package ${role} Definition`);
+          }
+          return definition;
+        },
+        role === "cli-tool"
+          ? {
+              ...toolchain,
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
+            }
+          : toolchain,
+      );
       if (initialized.definition.initialPrimaryPackage === undefined) {
         throw new Error(`Expected configurable ${role} Definition`);
       }
@@ -852,10 +863,461 @@ describe("Local Template Metadata", () => {
     });
     expect(manifestsByName.get("@recorded-scope/db-migrations")).toMatchObject({
       scripts: {
-        "db:migrate":
-          "DATABASE_PACKAGE_NAME=@recorded-scope/db drizzle-kit migrate",
+        "db:migrate": "drizzle-kit migrate",
       },
     });
+  });
+
+  it("rejects changed database preparation leaf commands before Package Addition", async () => {
+    const initialized = await initializedRepository(
+      requireMultiPackageDefinition,
+    );
+    const manifestPath = path.join(
+      initialized.repositoryRoot,
+      "packages/db-migrations/package.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts["db:push"] = "drizzle-kit push --force";
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    const before = await workspaceByteSnapshot(initialized.repositoryRoot);
+
+    expect(() =>
+      planGeneratedRepositoryPackageAddition({
+        definition: requireSharedLibraryAdditionDefinition(initialized.context),
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          initialized.repositoryRoot,
+        ),
+        packageLeafName: "after-command-change",
+      }),
+    ).toThrow(
+      "Database Preparation requires exact @recorded-scope/db-migrations script db:push",
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      before,
+    );
+  });
+
+  it("rejects a missing database provider ordering edge before Package Addition", async () => {
+    const initialized = await initializedRepository(
+      requireMultiPackageDefinition,
+    );
+    const deploymentCheck = initialized.plan.deploymentCheck;
+    if (deploymentCheck === undefined) {
+      throw new Error("Expected a deployment-capable multi-Package Definition");
+    }
+    const taskName = `${deploymentCheck.applicationPackageName}#typecheck`;
+    const turboPath = path.join(initialized.repositoryRoot, "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      tasks: Record<string, { dependsOn?: string[] }>;
+    };
+    const task = turbo.tasks[taskName];
+    if (task === undefined) throw new Error(`Expected Turbo task ${taskName}`);
+    task.dependsOn = [];
+    await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+    const before = await workspaceByteSnapshot(initialized.repositoryRoot);
+
+    expect(() =>
+      planGeneratedRepositoryPackageAddition({
+        definition: requireSharedLibraryAdditionDefinition(initialized.context),
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          initialized.repositoryRoot,
+        ),
+        packageLeafName: "after-turbo-change",
+      }),
+    ).toThrow(
+      `Package Addition root Turbo Truth requires Turbo task ${taskName} dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      before,
+    );
+  });
+
+  it("rejects capability truth overrides while preserving compatible consumer Turbo customizations", async () => {
+    const initialized = await initializedRepository(
+      requireMultiPackageDefinition,
+    );
+    const deploymentCheck = initialized.plan.deploymentCheck;
+    if (deploymentCheck === undefined) {
+      throw new Error("Expected a deployment-capable multi-Package Definition");
+    }
+    const packagePath = (packageName: string) => {
+      const definition = initialized.plan.blueprint.packages.find(
+        (candidate) => candidate.name === packageName,
+      );
+      if (definition === undefined) {
+        throw new Error(`Expected Package ${packageName}`);
+      }
+      return definition.path;
+    };
+    const databaseName = deploymentCheck.databasePackageName;
+    const applicationName = deploymentCheck.applicationPackageName;
+    const applicationPath = packagePath(applicationName);
+    const databasePath = packagePath(databaseName);
+    const addPackage = () =>
+      planGeneratedRepositoryPackageAddition({
+        definition: requireSharedLibraryAdditionDefinition(initialized.context),
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          initialized.repositoryRoot,
+        ),
+        packageLeafName: "after-capability-truth-change",
+      });
+
+    const applicationTurboPath = path.join(
+      initialized.repositoryRoot,
+      applicationPath,
+      "turbo.json",
+    );
+    const applicationTurbo = JSON.parse(
+      await readFile(applicationTurboPath, "utf8"),
+    ) as Record<string, unknown> & { tasks: Record<string, unknown> };
+    applicationTurbo.extends = ["//", "../additional-turbo-base"];
+    await writeFile(
+      applicationTurboPath,
+      `${JSON.stringify(applicationTurbo, null, 2)}\n`,
+    );
+    const packageExtendsBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${applicationName} Turbo Truth requires exact Turbo extends truth`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      packageExtendsBefore,
+    );
+
+    applicationTurbo.extends = ["//"];
+    applicationTurbo.tasks.typecheck = { extends: false };
+    await writeFile(
+      applicationTurboPath,
+      `${JSON.stringify(applicationTurbo, null, 2)}\n`,
+    );
+    const turboBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
+
+    expect(addPackage).toThrow(
+      `Package Addition ${applicationName} Turbo Truth requires Turbo task typecheck dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      turboBefore,
+    );
+
+    applicationTurbo.tasks.typecheck = {
+      dependsOn: [`${databaseName}#build`, "user:preflight"],
+    };
+    applicationTurbo.tasks["test:e2e"] = { extends: false };
+    await writeFile(
+      applicationTurboPath,
+      `${JSON.stringify(applicationTurbo, null, 2)}\n`,
+    );
+    const e2eBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
+
+    expect(addPackage).toThrow(
+      `Package Addition ${applicationName} Turbo Truth requires Turbo task test:e2e dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      e2eBefore,
+    );
+
+    delete applicationTurbo.tasks["test:e2e"];
+    await writeFile(
+      applicationTurboPath,
+      `${JSON.stringify(applicationTurbo, null, 2)}\n`,
+    );
+
+    applicationTurbo.tasks["user:report"] = { cache: false };
+    await writeFile(
+      applicationTurboPath,
+      `${JSON.stringify(applicationTurbo, null, 2)}\n`,
+    );
+
+    const vitePath = path.join(
+      initialized.repositoryRoot,
+      applicationPath,
+      "vite.config.ts",
+    );
+    await writeFile(
+      vitePath,
+      [
+        'import { defineConfig } from "vite";',
+        "",
+        "export default defineConfig({",
+        `  ssr: { external: ["${databaseName}"] },`,
+        "  ...{ ssr: { noExternal: true } },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const viteBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
+
+    expect(addPackage).toThrow(
+      `Package Addition requires ${applicationPath}/vite.config.ts to externalize ${databaseName} through Vite SSR`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      viteBefore,
+    );
+
+    await writeFile(
+      vitePath,
+      [
+        'import { defineConfig } from "vite";',
+        "",
+        "export default defineConfig({",
+        '  ...{ resolve: { conditions: ["source"] } },',
+        `  ssr: { external: ["${databaseName}"] },`,
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    const databaseManifestPath = path.join(
+      initialized.repositoryRoot,
+      databasePath,
+      "package.json",
+    );
+    const databaseManifest = JSON.parse(
+      await readFile(databaseManifestPath, "utf8"),
+    ) as {
+      exports: Record<string, Record<string, string>>;
+      imports: Record<string, Record<string, string>>;
+    };
+    databaseManifest.exports["."] = {
+      default: "./dist/index.js",
+      source: "./src/index.ts",
+      types: "./dist/index.d.ts",
+    };
+    await writeFile(
+      databaseManifestPath,
+      `${JSON.stringify(databaseManifest, null, 2)}\n`,
+    );
+    const exportsBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Database Preparation ${databaseName} exports . must preserve replayed condition order`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      exportsBefore,
+    );
+
+    databaseManifest.exports["."] = {
+      source: "./src/index.ts",
+      types: "./dist/index.d.ts",
+      default: "./dist/index.js",
+    };
+    databaseManifest.imports["#db/*"] = {
+      default: "./dist/*.js",
+      source: "./src/*.ts",
+      types: "./dist/*.d.ts",
+    };
+    await writeFile(
+      databaseManifestPath,
+      `${JSON.stringify(databaseManifest, null, 2)}\n`,
+    );
+    const conditionBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Database Preparation ${databaseName} imports #db/* must preserve replayed condition order`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      conditionBefore,
+    );
+
+    databaseManifest.imports["#db/*"] = {
+      source: "./src/*.ts",
+      types: "./dist/*.d.ts",
+      default: "./dist/*.js",
+    };
+    await writeFile(
+      databaseManifestPath,
+      `${JSON.stringify(databaseManifest, null, 2)}\n`,
+    );
+    const acceptedAddition = addPackage();
+    await expect(
+      reconcileAndApplyProjectProjections({
+        targetRoot: initialized.repositoryRoot,
+        ...acceptedAddition.projectProjections,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      readFile(applicationTurboPath, "utf8").then((source) =>
+        JSON.parse(source),
+      ),
+    ).resolves.toMatchObject({
+      tasks: {
+        typecheck: {
+          dependsOn: [`${databaseName}#build`, "user:preflight"],
+        },
+        "user:report": { cache: false },
+      },
+    });
+  });
+
+  it("在 Package Addition 前拒绝破坏 consumer build 有效数据库排序，同时保留等价定制", async () => {
+    const initialized = await initializedRepository(
+      requireMultiPackageDefinition,
+    );
+    const deploymentCheck = initialized.plan.deploymentCheck;
+    if (deploymentCheck === undefined) {
+      throw new Error("Expected a deployment-capable multi-Package Definition");
+    }
+    const packagePath = (packageName: string) => {
+      const definition = initialized.plan.blueprint.packages.find(
+        (candidate) => candidate.name === packageName,
+      );
+      if (definition === undefined) {
+        throw new Error(`Expected Package ${packageName}`);
+      }
+      return definition.path;
+    };
+    const databaseName = deploymentCheck.databasePackageName;
+    const migrationName = deploymentCheck.migrationPackageName;
+    const applicationName = deploymentCheck.applicationPackageName;
+    const migrationTurboPath = path.join(
+      initialized.repositoryRoot,
+      packagePath(migrationName),
+      "turbo.json",
+    );
+    const applicationTurboPath = path.join(
+      initialized.repositoryRoot,
+      packagePath(applicationName),
+      "turbo.json",
+    );
+    const rootTurboPath = path.join(initialized.repositoryRoot, "turbo.json");
+    const addPackage = () =>
+      planGeneratedRepositoryPackageAddition({
+        definition: requireSharedLibraryAdditionDefinition(initialized.context),
+        localTemplateMetadata: loadLocalTemplateMetadata(
+          initialized.repositoryRoot,
+        ),
+        packageLeafName: "after-build-truth-change",
+      });
+    const readTurbo = async (turboPath: string) =>
+      JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<
+          string,
+          { dependsOn?: string[]; extends?: boolean; outputs?: string[] }
+        >;
+      };
+    const writeTurbo = async (
+      turboPath: string,
+      turbo: { tasks: Record<string, unknown> },
+    ) => writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+
+    const rootTurbo = await readTurbo(rootTurboPath);
+    rootTurbo.tasks.build = { dependsOn: [] };
+    await writeTurbo(rootTurboPath, rootTurbo);
+    const rootGenericBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      rootGenericBefore,
+    );
+
+    rootTurbo.tasks.build = { dependsOn: ["^build"] };
+    rootTurbo.tasks[`${migrationName}#build`] = { outputs: [] };
+    await writeTurbo(rootTurboPath, rootTurbo);
+    const migrationTurbo = await readTurbo(migrationTurboPath);
+    delete migrationTurbo.tasks.build?.dependsOn;
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    const qualifiedBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      qualifiedBefore,
+    );
+
+    rootTurbo.tasks[`${migrationName}#build`] = {
+      dependsOn: [`${databaseName}#build`],
+      outputs: [],
+    };
+    await writeTurbo(rootTurboPath, rootTurbo);
+    expect(addPackage).not.toThrow();
+
+    delete rootTurbo.tasks[`${migrationName}#build`];
+    migrationTurbo.tasks.build = { extends: false, outputs: [] };
+    await writeTurbo(rootTurboPath, rootTurbo);
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    const migrationResetBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      migrationResetBefore,
+    );
+
+    migrationTurbo.tasks.build = { dependsOn: [] };
+    await writeTurbo(rootTurboPath, rootTurbo);
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    const migrationOverrideBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      migrationOverrideBefore,
+    );
+
+    migrationTurbo.tasks.build = {
+      dependsOn: [`${databaseName}#build`, "user:preflight"],
+      outputs: [],
+    };
+    const applicationTurbo = await readTurbo(applicationTurboPath);
+    applicationTurbo.tasks.build = {
+      dependsOn: [],
+      outputs: ["dist/**"],
+    };
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    await writeTurbo(applicationTurboPath, applicationTurbo);
+    const applicationOverrideBefore = await workspaceByteSnapshot(
+      initialized.repositoryRoot,
+    );
+
+    expect(addPackage).toThrow(
+      `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+    );
+    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      applicationOverrideBefore,
+    );
+
+    applicationTurbo.tasks.build = {
+      dependsOn: [`${databaseName}#build`, "user:preflight"],
+      outputs: ["dist/**"],
+    };
+    applicationTurbo.tasks["user:report"] = { outputs: [] };
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    await writeTurbo(applicationTurboPath, applicationTurbo);
+
+    const acceptedAddition = addPackage();
+    await expect(
+      reconcileAndApplyProjectProjections({
+        targetRoot: initialized.repositoryRoot,
+        ...acceptedAddition.projectProjections,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(readFile(migrationTurboPath, "utf8")).resolves.toContain(
+      `${databaseName}#build`,
+    );
+    await expect(readFile(applicationTurboPath, "utf8")).resolves.toContain(
+      '"user:report"',
+    );
   });
 
   it("rejects an added contribution relabeled as initialization without writes", async () => {

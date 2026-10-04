@@ -2,24 +2,49 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import { materializeProjectProjection } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
 
+// 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
 const toolchain = {
   nodeLtsMajor: "24",
+  nodeVersion: releaseToolchainSnapshot.nodeVersion,
   packageManagerPin: "pnpm@11.11.0",
 } as const;
 
 describe("Generated Repository Node manifest publication policy", () => {
+  it("derives root lint fixer paths from root-owned joint E2E", () => {
+    for (const definition of builtInPresetRegistry.all()) {
+      const repositoryName = `manifest-lint-fix-${definition.metadata.name}`;
+      const plan = planGeneratedRepositoryInitialization({
+        definition,
+        context: createGenerationContext({
+          targetDir: path.join("generated-repository", repositoryName),
+          defaultPackageScope: "manifest-policy",
+          toolchain,
+        }),
+      });
+      const rootManifest = plan.manifests.find(
+        (manifest) => manifest.name === repositoryName,
+      ) as { readonly scripts?: Readonly<Record<string, string>> } | undefined;
+      const rootAutomationPaths =
+        plan.vueHonoJointE2e === undefined ? "scripts" : "scripts test";
+
+      expect(rootManifest?.scripts?.["lint:fix"]).toBe(
+        `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths} --fix`,
+      );
+    }
+  });
+
   it("omits versions from every initially private package", () => {
     const publicManifestNames = new Set<string>();
     for (const definition of builtInPresetRegistry.all()) {
@@ -150,7 +175,10 @@ describe("Generated Repository Node manifest publication policy", () => {
         plan.operations.filter(
           (operation) => "to" in operation && operation.to === "tsconfig.json",
         ),
-      ).toHaveLength(requiresPackingHook ? 2 : 1);
+      ).toHaveLength(
+        (requiresPackingHook ? 2 : 1) +
+          (plan.vueHonoJointE2e === undefined ? 0 : 1),
+      );
       expect(plan.generationRecord.templateVersion).toBe("0.0.0");
     }
 

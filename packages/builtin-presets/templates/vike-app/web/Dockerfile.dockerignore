@@ -6,9 +6,9 @@ node_modules
 **/dist
 **/playwright-report
 **/test-results
-apps/web/data
-apps/web/node_modules/.tmp
-packages/db/data
-packages/db/node_modules/.tmp
+{{APPLICATION_PACKAGE_PATH}}/data
+{{APPLICATION_PACKAGE_PATH}}/node_modules/.tmp
+{{DATABASE_PACKAGE_PATH}}/data
+{{DATABASE_PACKAGE_PATH}}/node_modules/.tmp
 *.sqlite
 *.sqlite-*

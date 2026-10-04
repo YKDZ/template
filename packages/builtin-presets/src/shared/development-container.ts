@@ -1,5 +1,5 @@
-import { loadTemplateDependencyCatalog } from "#template-core/dependency-catalog";
-import type { DevelopmentContainerToolLayer } from "#template-core/development-container-tool-layer";
+import { loadTemplateDependencyCatalog } from "@ykdz/template-core/dependency-catalog";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-core/development-container-tool-layer";
 
 import { templateSources } from "../template-sources.ts";
 

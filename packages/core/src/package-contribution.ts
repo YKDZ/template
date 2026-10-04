@@ -59,6 +59,35 @@ const reservedSystemToolNames = new Set([
 ]);
 
 export type FoundationContribution = {
+  /** Closed root-owned Vue-Hono page/API browser acceptance capability. */
+  readonly vueHonoJointE2e?: {
+    readonly kind: "vue-hono-joint-e2e";
+    readonly apiPackageName: string;
+  };
+  readonly databasePreparation?: {
+    readonly kind: "sqlite-database-preparation";
+    readonly migrationPackageName: string;
+    readonly consumers: readonly {
+      readonly kind: "application-dev" | "database-test" | "application-e2e";
+      readonly packageName: string;
+    }[];
+  };
+  /** A closed repository-context deployment capability projected by Foundation. */
+  readonly deploymentCheck?: {
+    readonly kind: "application-container-with-database-migrations";
+    readonly applicationPackageName: string;
+    readonly databasePackageName: string;
+    readonly migrationPackageName: string;
+    readonly environmentNeeds: readonly DeploymentEnvironmentNeed[];
+    readonly sources: {
+      readonly checker: FoundationTemplateAssetSource;
+      readonly controlScript: FoundationTemplateAssetSource;
+      readonly dockerfile: FoundationTemplateAssetSource;
+      readonly dockerIgnore: FoundationTemplateAssetSource;
+      readonly shellCheckDockerfile: FoundationTemplateAssetSource;
+      readonly dockerClientToolLayer: FoundationTemplateAssetSource;
+    };
+  };
   /** Closed publication capability consumed only by coordinated root policy. */
   readonly npmPublication?: {
     readonly kind: "public-cli-candidate";
@@ -68,6 +97,7 @@ export type FoundationContribution = {
     readonly rust?: {
       readonly toolchain: string;
       readonly components: readonly ("rustfmt" | "clippy")[];
+      readonly configurationSource: FoundationTemplateAssetSource;
     };
   };
   /** Editor capabilities the Foundation must project into its coordinated editor files. */
@@ -86,16 +116,11 @@ export type FoundationContribution = {
   readonly developmentContainerToolLayers?:
     | readonly DevelopmentContainerToolLayer[]
     | undefined;
-  /** Source-backed coordinated files projected by Foundation. */
-  readonly templateFiles?:
-    | readonly {
-        readonly identity: string;
-        readonly source: TemplateSourceHandle;
-        readonly from: string;
-        readonly to: string;
-        readonly replacements?: Readonly<Record<string, string>> | undefined;
-      }[]
-    | undefined;
+};
+
+export type FoundationTemplateAssetSource = {
+  readonly source: TemplateSourceHandle;
+  readonly from: string;
 };
 
 /** A preset-agnostic package-sized part of a Generated Repository Plan. */
@@ -112,8 +137,6 @@ export type PackageContribution = {
   readonly environmentNeeds: readonly CheckEnvironmentNeed[];
   /** Closed native CI evidence owned by this Package Boundary. */
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
-  /** Requirements prepared only by a focused deployment entrypoint. */
-  readonly deploymentEnvironmentNeeds?: readonly DeploymentEnvironmentNeed[];
 };
 
 /** Validates the portable executable name promised by a CLI Package Boundary. */

@@ -160,7 +160,19 @@ async function runJourneys(
           }),
         );
       }
-      await journey.assertions({ context, results });
+      try {
+        await journey.assertions({ context, results });
+      } catch (error) {
+        const commandSummary = results
+          .map(
+            (result) =>
+              `${result.commandName}: exit=${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+          )
+          .join("\n\n");
+        throw new Error(`旅程 ${journey.name} 验证失败。\n${commandSummary}`, {
+          cause: error,
+        });
+      }
       passed.push(`${target.mode}:${journey.name}:passed`);
     } finally {
       await rm(workDir, { recursive: true, force: true });

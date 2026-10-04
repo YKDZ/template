@@ -2,8 +2,6 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   createGenerationContext,
   builtInPresetRegistry,
@@ -11,19 +9,21 @@ import {
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
-} from "#template-builtin-presets";
-import type { DevelopmentContainerToolLayer } from "#template-core/development-container-tool-layer";
-import type { PackageContribution } from "#template-core/package-contribution";
+} from "@ykdz/template-builtin-presets";
+import type { DevelopmentContainerToolLayer } from "@ykdz/template-core/development-container-tool-layer";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type PackageContributionReplayAdapter,
   type PlannedPackageContribution,
-} from "#template-core/preset-definition";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
+} from "@ykdz/template-core/preset-definition";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   renderNewProject,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
 
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),
@@ -139,6 +139,7 @@ describe("Foundation Development Container composition", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         }),
       });
@@ -178,6 +179,7 @@ describe("Foundation Development Container composition", () => {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         });
@@ -233,6 +235,7 @@ describe("Foundation Development Container composition", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         });
         const plan = planGeneratedRepositoryInitialization({
@@ -284,6 +287,7 @@ describe("Foundation Development Container composition", () => {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });
       const contributions = builtInContributions(definition, context);
@@ -301,19 +305,19 @@ describe("Foundation Development Container composition", () => {
         ) {
           expect(layerIdentities).toContain("browser-test");
         }
-        if (
-          contribution.environmentNeeds.some(
-            (need) => need.kind === "shellcheck-command",
-          )
-        ) {
-          expect(layerIdentities).toContain("shellcheck");
-        }
-        if (
-          (contribution.deploymentEnvironmentNeeds ?? []).some(
-            (need) => need.kind === "docker-engine",
-          )
-        ) {
-          expect(layerIdentities).toContain("docker-client");
+        if (contribution.foundation.deploymentCheck !== undefined) {
+          expect(layerIdentities).not.toContain("shellcheck");
+          expect(layerIdentities).not.toContain("docker-client");
+          expect(contribution.foundation.deploymentCheck.sources).toMatchObject(
+            {
+              shellCheckDockerfile: {
+                from: "devcontainer/shellcheck.Dockerfile",
+              },
+              dockerClientToolLayer: {
+                from: "devcontainer/docker-client.Dockerfile",
+              },
+            },
+          );
         }
       }
     }
@@ -333,6 +337,7 @@ describe("Foundation Development Container composition", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         });
         const contributions = builtInContributions(definition, context);
@@ -377,6 +382,7 @@ describe("Foundation Development Container composition", () => {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });
       const plan = planGeneratedRepositoryInitialization({
@@ -403,6 +409,7 @@ describe("Foundation Development Container composition", () => {
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     });
     const rust = requireBuiltInContribution(
@@ -414,8 +421,16 @@ describe("Foundation Development Container composition", () => {
         (need) => need.kind === "playwright-browser-assets",
       ),
     );
+    const { deploymentCheck: _deploymentCheck, ...browserFoundation } =
+      browser.foundation;
+    const browserTooling = {
+      ...browser,
+      foundation: browserFoundation,
+    };
     const rustReplayAdapter = fixtureReplayAdapter(rust.definition.path);
-    const browserReplayAdapter = fixtureReplayAdapter(browser.definition.path);
+    const browserReplayAdapter = fixtureReplayAdapter(
+      browserTooling.definition.path,
+    );
     const definition: BuiltInPresetDefinition = {
       metadata: {
         name: "rust-browser-fixture",
@@ -430,7 +445,7 @@ describe("Foundation Development Container composition", () => {
       ],
       blueprint: () => ({
         schemaVersion: 3,
-        packages: [rust.definition, browser.definition],
+        packages: [rust.definition, browserTooling.definition],
       }),
       planInitialization: () => ({
         ...rust,
@@ -438,7 +453,10 @@ describe("Foundation Development Container composition", () => {
       }),
       planInitializationContributions: () => [
         { ...rust, planningIdentity: rustReplayAdapter.identity },
-        { ...browser, planningIdentity: browserReplayAdapter.identity },
+        {
+          ...browserTooling,
+          planningIdentity: browserReplayAdapter.identity,
+        },
       ],
     };
 
@@ -481,24 +499,20 @@ describe("Foundation Development Container composition", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         });
-        const contributions = builtInContributions(definition, context);
-        const needsDocker = contributions.some((contribution) =>
-          (contribution.deploymentEnvironmentNeeds ?? []).some(
-            (need) => need.kind === "docker-engine",
-          ),
-        );
-        const hasDockerClientLayer = contributions.some((contribution) =>
-          (contribution.foundation.developmentContainerToolLayers ?? []).some(
-            (layer) => layer.identity === "docker-client",
-          ),
-        );
-
         const plan = planGeneratedRepositoryInitialization({
           definition,
           context,
         });
+        const needsDocker =
+          plan.deploymentCheck?.environmentNeeds.some(
+            (need) => need.kind === "docker-engine",
+          ) ?? false;
+        const hasDockerClientLayer = plan.developmentContainer.toolLayers.some(
+          (layer) => layer.identity === "docker-client",
+        );
         await renderNewProject({
           targetRoot: targetDir,
           operations: [...plan.operations],
@@ -551,15 +565,17 @@ describe("Foundation Development Container composition", () => {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });
       const plan = planGeneratedRepositoryInitialization({
         definition,
         context,
       });
-      const needsDocker = plan.deploymentEnvironmentNeeds.some(
-        (need) => need.kind === "docker-engine",
-      );
+      const needsDocker =
+        plan.deploymentCheck?.environmentNeeds.some(
+          (need) => need.kind === "docker-engine",
+        ) ?? false;
       const dockerProbes = plan.developmentContainer.probes.filter(
         (probe) => probe.command === "docker",
       );
@@ -754,6 +770,7 @@ describe("Foundation Development Container composition", () => {
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     });
     const initialDefinition = requireBuiltInDefinition(
@@ -1085,6 +1102,7 @@ describe("Foundation Development Container composition", () => {
       toolchain: {
         nodeLtsMajor: "24",
         packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     });
     const plainDefinition = requireBuiltInDefinition(
@@ -1133,6 +1151,7 @@ describe("Foundation Development Container composition", () => {
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         });
         const initialization = planGeneratedRepositoryInitialization({

@@ -6,18 +6,15 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
 import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
-} from "#template-core/project-linking-v2";
+} from "@ykdz/template-core/project-linking-v2";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
-
-const fallbackEnvironment = {
-  TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-};
 
 function requireLinkableAddition(): {
   readonly presetName: string;
@@ -87,6 +84,41 @@ async function snapshot(
   return files.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
+type RootManifest = {
+  readonly engines?: { readonly node?: string };
+  readonly packageManager?: string;
+};
+
+async function readRootManifest(project: string): Promise<RootManifest> {
+  return JSON.parse(
+    await readFile(path.join(project, "package.json"), "utf8"),
+  ) as RootManifest;
+}
+
+async function rewriteRootManifest(
+  project: string,
+  toolchain: { readonly node: string; readonly packageManager: string },
+): Promise<void> {
+  const manifestPath = path.join(project, "package.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  manifest.engines = { node: toolchain.node };
+  manifest.packageManager = toolchain.packageManager;
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+async function readGenerationRecordToolchain(project: string) {
+  const record = JSON.parse(
+    await readFile(path.join(project, ".template/generation.json"), "utf8"),
+  ) as { readonly toolchain: { readonly nodeLtsMajor: string } };
+  return record.toolchain;
+}
+
+const upgradedNode = "22";
+const upgradedPackageManager = "pnpm@10.5.0";
+
 const journey: CliJourney = {
   name: "add-package",
   modes: ["source", "distribution", "packed"],
@@ -105,7 +137,6 @@ const journey: CliJourney = {
           "acme",
           "--yes",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "dry-run addition",
@@ -124,7 +155,6 @@ const journey: CliJourney = {
           "--dry-run",
           "--json",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "apply addition",
@@ -147,7 +177,6 @@ const journey: CliJourney = {
           consumerPath,
           "--json",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "repeat addition",
@@ -165,13 +194,42 @@ const journey: CliJourney = {
           consumerPath,
           "--json",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "missing required options",
         cwd: project,
         args: ["add", "package"],
-        env: fallbackEnvironment,
+      },
+      {
+        name: "add package on the target root current toolchain",
+        cwd: project,
+        async prepare() {
+          const record = await readGenerationRecordToolchain(project);
+          const root = await readRootManifest(project);
+          await writeFile(
+            path.join(context.workDir, "toolchain-history.json"),
+            JSON.stringify({
+              recordNodeLtsMajor: record.nodeLtsMajor,
+              rootNode: root.engines?.node,
+              rootPackageManager: root.packageManager,
+            }),
+          );
+          await rewriteRootManifest(project, {
+            node: upgradedNode,
+            packageManager: upgradedPackageManager,
+          });
+        },
+        args: [
+          "add",
+          "package",
+          "--preset",
+          addablePresetName,
+          "--name",
+          "upgraded",
+          "--path",
+          "packages/upgraded",
+          "--json",
+        ],
       },
       {
         name: "canonical metadata conflict",
@@ -189,6 +247,10 @@ const journey: CliJourney = {
             path.join(context.workDir, "conflict-before.json"),
             JSON.stringify(await snapshot(project)),
           );
+          await writeFile(
+            path.join(context.workDir, "root-after-current-addition.json"),
+            await readFile(path.join(project, "package.json"), "utf8"),
+          );
         },
         args: [
           "add",
@@ -201,7 +263,71 @@ const journey: CliJourney = {
           "packages/second",
           "--json",
         ],
-        env: fallbackEnvironment,
+      },
+      {
+        name: "add package on an unusable root toolchain declaration",
+        cwd: project,
+        async prepare() {
+          await writeFile(
+            path.join(context.workDir, "conflict-after.json"),
+            JSON.stringify(await snapshot(project)),
+          );
+          const manifestPath = path.join(project, "package.json");
+          await rewriteRootManifest(project, {
+            node: `>=${upgradedNode}`,
+            packageManager: upgradedPackageManager,
+          });
+          await writeFile(
+            path.join(context.workDir, "invalid-root-package.json"),
+            await readFile(manifestPath, "utf8"),
+          );
+        },
+        args: [
+          "add",
+          "package",
+          "--preset",
+          addablePresetName,
+          "--name",
+          "rejected",
+          "--path",
+          "packages/rejected",
+          "--json",
+        ],
+      },
+      {
+        name: "add package on a target root without a pnpm declaration",
+        cwd: project,
+        async prepare() {
+          // 先固化上一轮拒绝后未被写入的根字节，再构造 pnpm 缺失声明。
+          await writeFile(
+            path.join(context.workDir, "invalid-root-unchanged.json"),
+            await readFile(path.join(project, "package.json"), "utf8"),
+          );
+          const manifestPath = path.join(project, "package.json");
+          const manifest = JSON.parse(
+            await readFile(manifestPath, "utf8"),
+          ) as Record<string, unknown>;
+          manifest.engines = { node: upgradedNode };
+          delete manifest.packageManager;
+          await writeFile(
+            manifestPath,
+            `${JSON.stringify(manifest, null, 2)}\n`,
+          );
+          await writeFile(
+            path.join(context.workDir, "missing-pm-root-package.json"),
+            await readFile(manifestPath, "utf8"),
+          );
+        },
+        args: [
+          "add",
+          "package",
+          "--preset",
+          addablePresetName,
+          "--name",
+          "missing-pm",
+          "--path",
+          "packages/missing-pm",
+        ],
       },
     ];
   },
@@ -246,8 +372,135 @@ const journey: CliJourney = {
       /用法: template add package \[options\]/u,
     );
 
-    const conflict = JSON.parse(results[5]?.stdout ?? "");
-    assert.equal(results[5]?.exitCode, 1);
+    const project = path.join(context.workDir, "project");
+    const history = JSON.parse(
+      await readFile(
+        path.join(context.workDir, "toolchain-history.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly recordNodeLtsMajor: string;
+      readonly rootNode: string;
+      readonly rootPackageManager: string;
+    };
+    assert.equal(
+      history.rootNode,
+      releaseToolchainSnapshot.nodeVersion,
+      "初始化根 engines.node 应为 CLI 发版快照的精确 Node 值",
+    );
+    assert.equal(
+      history.rootPackageManager,
+      releaseToolchainSnapshot.packageManagerPin,
+      "初始化根 packageManager 应为 CLI 发版快照的精确 pnpm pin",
+    );
+    assert.equal(
+      history.recordNodeLtsMajor,
+      /^(\d+)\./.exec(history.rootNode)?.[1],
+      "Generation Record 只应保存由目标根现行精确值派生的大版本",
+    );
+    assert.notEqual(history.rootNode, upgradedNode);
+    assert.notEqual(history.rootPackageManager, upgradedPackageManager);
+    assert.notEqual(history.recordNodeLtsMajor, upgradedNode);
+
+    assert.equal(results[5]?.exitCode, 0);
+    assert.equal(JSON.parse(results[5]?.stdout ?? "").status, "success");
+    const upgradedManifest = JSON.parse(
+      await readFile(
+        path.join(project, "packages/upgraded/package.json"),
+        "utf8",
+      ),
+    ) as { readonly engines: { readonly node: string } };
+    assert.equal(upgradedManifest.engines.node, upgradedNode);
+    const rootAfterAddition = JSON.parse(
+      await readFile(
+        path.join(context.workDir, "root-after-current-addition.json"),
+        "utf8",
+      ),
+    ) as RootManifest;
+    assert.equal(rootAfterAddition.engines?.node, upgradedNode);
+    assert.equal(rootAfterAddition.packageManager, upgradedPackageManager);
+    assert.equal(
+      (await readGenerationRecordToolchain(project)).nodeLtsMajor,
+      history.recordNodeLtsMajor,
+    );
+
+    const rejected = JSON.parse(results[7]?.stdout ?? "") as {
+      readonly status: string;
+      readonly code: string;
+      readonly phase: string;
+      readonly error: { readonly message: string; readonly suggestion: string };
+    };
+    assert.equal(results[7]?.exitCode, 65);
+    assert.equal(rejected.status, "operation-failure");
+    assert.equal(rejected.code, "OPERATION_ADD_PACKAGE_FAILED");
+    assert.equal(rejected.phase, "metadata");
+    // JSON 输出必须点名无效字段与其实际值，并给出修正动作。
+    assert.match(rejected.error.message, /engines\.node/u);
+    assert.ok(
+      rejected.error.message.includes('">=22"'),
+      `JSON 诊断应包含实际声明值，实际消息：${rejected.error.message}`,
+    );
+    assert.match(rejected.error.suggestion, /package\.json 的 engines\.node/u);
+    await assert.rejects(stat(path.join(project, "packages/rejected")), {
+      code: "ENOENT",
+    });
+    assert.equal(
+      await readFile(
+        path.join(context.workDir, "invalid-root-unchanged.json"),
+        "utf8",
+      ),
+      await readFile(
+        path.join(context.workDir, "invalid-root-package.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      (await readGenerationRecordToolchain(project)).nodeLtsMajor,
+      history.recordNodeLtsMajor,
+    );
+
+    // 文本输出负例：缺失 packageManager 声明同样给出字段级可行动诊断。
+    const missingPm = results[8];
+    assert.equal(missingPm?.exitCode, 65);
+    assert.equal(missingPm?.stdout, "");
+    assert.match(
+      missingPm?.stderr ?? "",
+      /OPERATION_ADD_PACKAGE_FAILED/u,
+      "文本输出应包含失败类别",
+    );
+    assert.match(missingPm?.stderr ?? "", /阶段: metadata/u);
+    assert.match(
+      missingPm?.stderr ?? "",
+      /package\.json 的 packageManager/u,
+      "文本输出应点名 packageManager 字段",
+    );
+    assert.match(
+      missingPm?.stderr ?? "",
+      /实际收到 null/u,
+      "文本输出应给出实际值",
+    );
+    assert.match(
+      missingPm?.stderr ?? "",
+      /请先修改根 package\.json 的 packageManager 声明/u,
+      "文本输出应给出修正动作",
+    );
+    assert.ok(
+      !/添加 Package 时发生操作失败/u.test(missingPm?.stderr ?? ""),
+      "字段级诊断不应回退为通用提示",
+    );
+    await assert.rejects(stat(path.join(project, "packages/missing-pm")), {
+      code: "ENOENT",
+    });
+    assert.equal(
+      await readFile(path.join(project, "package.json"), "utf8"),
+      await readFile(
+        path.join(context.workDir, "missing-pm-root-package.json"),
+        "utf8",
+      ),
+    );
+
+    const conflict = JSON.parse(results[6]?.stdout ?? "");
+    assert.equal(results[6]?.exitCode, 1);
     assert.equal(conflict.status, "conflict");
     assert.deepEqual(conflict.actions, []);
     assert.ok(
@@ -258,13 +511,18 @@ const journey: CliJourney = {
       ),
     );
     assert.deepEqual(
-      await snapshot(path.join(context.workDir, "project")),
+      JSON.parse(
+        await readFile(
+          path.join(context.workDir, "conflict-after.json"),
+          "utf8",
+        ),
+      ) as unknown,
       JSON.parse(
         await readFile(
           path.join(context.workDir, "conflict-before.json"),
           "utf8",
         ),
-      ),
+      ) as unknown,
     );
   },
 };

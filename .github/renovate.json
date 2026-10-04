@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "description": "模板仓库自身的依赖与工具链更新 PR；已生成仓库保留各自的 Dependabot，不受本配置影响。",
+  "enabledManagers": [
+    "npm",
+    "rust-toolchain",
+    "cargo",
+    "github-actions",
+    "dockerfile"
+  ],
+  "dependencyDashboard": true,
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "跨 Node LTS 大版本（根 package.json engines.node）是显式维护决策，必须在 Dependency Dashboard 人工批准后才创建 PR。",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "`.devcontainer/Dockerfile` 的 node 基础镜像是根 engines.node 的静态投影，由 scripts/check-template-toolchain-versions.ts 漂移门约束，禁止机器人单独更新造成第二真源。",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["node"],
+      "enabled": false
+    }
+  ]
+}

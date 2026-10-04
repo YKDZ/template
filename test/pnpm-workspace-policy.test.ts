@@ -10,14 +10,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
 import {
   builtInPresetRegistry,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import { renderGeneratedPnpmWorkspaceYaml } from "#template-core/dependency-catalog";
-import type { GenerationContext } from "#template-core/preset-definition";
+} from "@ykdz/template-builtin-presets";
+import { renderGeneratedPnpmWorkspaceYaml } from "@ykdz/template-core/dependency-catalog";
+import type { GenerationContext } from "@ykdz/template-core/preset-definition";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
 
 const packageManagerPin = "pnpm@11.11.0";
 const repoRoot = path.resolve(
@@ -46,20 +46,6 @@ function definitionForPnpmPolicy(context: GenerationContext) {
 async function generateNodeOnlyProject(prefix: string): Promise<string> {
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const projectDir = path.join(workspace, "demo-lib");
-  const toolchainEnvironment = {
-    ...process.env,
-    TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL: `data:application/json,${encodeURIComponent(
-      JSON.stringify([{ version: "v24.11.0", lts: "Krypton" }]),
-    )}`,
-    TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL: `data:application/json,${encodeURIComponent(
-      JSON.stringify({
-        time: { "11.11.0": "2025-01-01T00:00:00.000Z" },
-        versions: {
-          "11.11.0": { engines: { node: ">=24.0.0" } },
-        },
-      }),
-    )}`,
-  };
   const context = {
     targetDir: projectDir,
     repositoryName: "demo-lib",
@@ -67,7 +53,12 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
     foundationPackages: {
       typescriptConfiguration: { name: "@demo-lib/typescript-config" },
     },
-    toolchain: { nodeLtsMajor: "24", packageManagerPin },
+    toolchain: {
+      nodeLtsMajor: "24",
+      packageManagerPin,
+      // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
+    },
   } satisfies GenerationContext;
 
   await execa(
@@ -81,7 +72,7 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
       definitionForPnpmPolicy(context).metadata.name,
       "--yes",
     ],
-    { cwd: repoRoot, env: toolchainEnvironment },
+    { cwd: repoRoot },
   );
   return projectDir;
 }
@@ -136,7 +127,11 @@ describe("pnpm Workspace Policy", () => {
           name: "@pnpm-policy-definition/typescript-config",
         },
       },
-      toolchain: { nodeLtsMajor: "24", packageManagerPin },
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin,
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      },
     } satisfies GenerationContext;
     const definition = definitionForPnpmPolicy(context);
     const contributions = planGeneratedRepositoryInitialization({
@@ -241,93 +236,245 @@ describe("pnpm Workspace Policy", () => {
 
     await execa(
       "corepack",
-      [packageManagerPin, "install", "--lockfile-only", "--prefer-offline"],
+      [
+        releaseToolchainSnapshot.packageManagerPin,
+        "install",
+        "--lockfile-only",
+        "--prefer-offline",
+      ],
       { cwd: projectDir, env: environment },
     );
     await execa(
       "corepack",
-      [packageManagerPin, "install", "--offline", "--frozen-lockfile"],
+      [
+        releaseToolchainSnapshot.packageManagerPin,
+        "install",
+        "--offline",
+        "--frozen-lockfile",
+      ],
       { cwd: projectDir, env: environment },
     );
-    await execa("corepack", [packageManagerPin, "run", "typecheck"], {
-      cwd: projectDir,
-      env: environment,
-    });
+    await execa(
+      "corepack",
+      [releaseToolchainSnapshot.packageManagerPin, "run", "typecheck"],
+      {
+        cwd: projectDir,
+        env: environment,
+      },
+    );
   }, 120_000);
 
-  it("exposes one generated devcontainer pnpm pin to root and non-root users", async (context) => {
+  it("resolves the generated root packageManager at runtime for root and non-root users via the native Corepack cache", async (context) => {
     if (!hasDocker) {
       context.skip();
       return;
     }
 
     const projectDir = await generateNodeOnlyProject("pnpm-corepack-users-");
-    const imageIdFile = path.join(projectDir, ".devcontainer-image-id");
-    let imageId: string | undefined;
+    // 期望的 pnpm / node 版本都取自*生成*的根 manifest 与 M1 槽位，不新增版本常量。
+    const generatedRootManifestText = await readFile(
+      path.join(projectDir, "package.json"),
+      "utf8",
+    );
+    const generatedRootManifest = JSON.parse(generatedRootManifestText) as {
+      packageManager?: string;
+      engines?: { node?: string };
+    };
+    const generatedPackageManager = generatedRootManifest.packageManager;
+    if (generatedPackageManager === undefined) {
+      throw new Error("generated root manifest is missing packageManager");
+    }
+    const expectedPnpmVersion = generatedPackageManager.replace(/^pnpm@/u, "");
+    // 根 engines.node 是 Node 版本的真源，容器内实际 node --version 必须与它一致。
+    const enginesNode = generatedRootManifest.engines?.node;
+    if (enginesNode === undefined) {
+      throw new Error("generated root manifest is missing engines.node");
+    }
+    const devcontainerConfig = JSON.parse(
+      await readFile(
+        path.join(projectDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    ) as { build?: { args?: Record<string, string> } };
+    const nodeBuildArg = devcontainerConfig.build?.args?.NODE_VERSION;
+    if (nodeBuildArg === undefined) {
+      throw new Error(
+        "generated devcontainer is missing build.args.NODE_VERSION",
+      );
+    }
+    // M1 的 build arg 也必须等于根 engines.node，不把潜在漂移当作 expected 真源。
+    expect(nodeBuildArg).toBe(enginesNode);
+
+    // 只用本测试独占、唯一命名的资源——绝不对共享 image id 用 --force，也绝不 prune。
+    const stamp = `${process.pid}-${Date.now()}`;
+    const imageTag = `t25-pnpm-corepack-users:${stamp}`;
+    const containerName = `t25-pnpm-corepack-users-run-${stamp}`;
 
     try {
+      // 不再传 PACKAGE_MANAGER_PIN build arg：devcontainer 已不烘焙 pnpm pin；
+      // pnpm 版本在运行时从挂载进来的根 manifest 解析（M3 已取消）。
       await execa(
         "docker",
         [
           "build",
-          "--iidfile",
-          imageIdFile,
+          "-t",
+          imageTag,
           "--build-arg",
-          "NODE_VERSION=24",
-          "--build-arg",
-          `PACKAGE_MANAGER_PIN=${packageManagerPin}`,
+          `NODE_VERSION=${nodeBuildArg}`,
           "--file",
           ".devcontainer/Dockerfile",
           ".",
         ],
         { cwd: projectDir },
       );
-      imageId = (await readFile(imageIdFile, "utf8")).trim();
 
-      for (const user of ["0", "node"]) {
+      await execa(
+        "docker",
+        [
+          "run",
+          "-d",
+          "--name",
+          containerName,
+          "-w",
+          "/workspace",
+          imageTag,
+          "sleep",
+          "infinity",
+        ],
+        { cwd: projectDir },
+      );
+      await execa(
+        "docker",
+        [
+          "exec",
+          "--user",
+          "root",
+          containerName,
+          "bash",
+          "-c",
+          "install -d -o node -g node /workspace",
+        ],
+        { cwd: projectDir },
+      );
+      // 通过 docker cp 供应 workspace——客户端/守护进程的 bind 路径未证实同构。
+      const supplyRootManifest = async (contents: string): Promise<void> => {
+        const transfer = path.join(projectDir, ".root-manifest-transfer.json");
+        await writeFile(transfer, contents);
+        await execa("docker", [
+          "cp",
+          transfer,
+          `${containerName}:/workspace/package.json`,
+        ]);
         await execa(
           "docker",
           [
-            "run",
-            "--rm",
+            "exec",
             "--user",
-            user,
-            imageId,
-            "bash",
-            "-lc",
-            "test -s /etc/ssl/certs/ca-certificates.crt && git --version >/dev/null",
+            "root",
+            containerName,
+            "chown",
+            "node:node",
+            "/workspace/package.json",
           ],
           { cwd: projectDir },
         );
-        const pnpmVersion = await execa(
-          "docker",
-          ["run", "--rm", "--user", user, imageId, "pnpm", "--version"],
-          { cwd: projectDir },
-        );
-        expect(pnpmVersion.stdout.trim()).toBe("11.11.0");
+      };
+      await supplyRootManifest(generatedRootManifestText);
 
-        const gitDefaultBranch = await execa(
+      // 先在容器内真实观测一次 node --version：Node 运行时版本必须与根 engines.node 一致，
+      // 不能只用 build arg 文本代替。
+      const nodeRuntime = await execa(
+        "docker",
+        [
+          "exec",
+          "--user",
+          "node",
+          containerName,
+          "bash",
+          "-c",
+          "node --version",
+        ],
+        { cwd: projectDir },
+      );
+      expect(nodeRuntime.stdout.trim().replace(/^v/u, "")).toBe(enginesNode);
+
+      // ★ 非 root 冷态先跑——移除全局 COREPACK_HOME 后 node 用自己的可写 home 缓存；
+      // 在任何 root pnpm 调用之前先跑 node，避免 root 预先下载掩盖非 root 冷态的权限失败。
+      const nodeCold = await execa(
+        "docker",
+        [
+          "exec",
+          "--user",
+          "node",
+          containerName,
+          "bash",
+          "-c",
+          "cd /workspace && pnpm --version",
+        ],
+        { cwd: projectDir },
+      );
+      expect(nodeCold.stdout.trim()).toBe(expectedPnpmVersion);
+
+      // ★ root 独立冷态——每个用户各自从自己的原生缓存解析。
+      const rootCold = await execa(
+        "docker",
+        [
+          "exec",
+          "--user",
+          "root",
+          containerName,
+          "bash",
+          "-c",
+          "cd /workspace && pnpm --version",
+        ],
+        { cwd: projectDir },
+      );
+      expect(rootCold.stdout.trim()).toBe(expectedPnpmVersion);
+
+      // ★ 版本从当前根 manifest 读取、并非烘焙：不重建镜像，改指向一个有限的旧夹具 pin。
+      await supplyRootManifest(
+        JSON.stringify({
+          ...generatedRootManifest,
+          packageManager: packageManagerPin,
+        }),
+      );
+      const nodeRepointed = await execa(
+        "docker",
+        [
+          "exec",
+          "--user",
+          "node",
+          containerName,
+          "bash",
+          "-c",
+          "cd /workspace && pnpm --version",
+        ],
+        { cwd: projectDir },
+      );
+      expect(nodeRepointed.stdout.trim()).toBe(
+        packageManagerPin.replace(/^pnpm@/u, ""),
+      );
+
+      // 共享工具层对两个用户都保持完好（系统 git 默认分支、TLS 证书库）。
+      for (const user of ["node", "root"]) {
+        const sanity = await execa(
           "docker",
           [
-            "run",
-            "--rm",
+            "exec",
             "--user",
             user,
-            imageId,
+            containerName,
             "bash",
-            "-lc",
-            "cd $(mktemp -d) && git init --quiet && git branch --show-current",
+            "-c",
+            "test -s /etc/ssl/certs/ca-certificates.crt && cd $(mktemp -d) && git init --quiet && git branch --show-current",
           ],
           { cwd: projectDir },
         );
-        expect(gitDefaultBranch.stdout.trim()).toBe("main");
+        expect(sanity.stdout.trim()).toBe("main");
       }
     } finally {
-      if (imageId !== undefined) {
-        await execa("docker", ["image", "rm", "--force", imageId], {
-          reject: false,
-        });
-      }
+      await execa("docker", ["rm", "-f", containerName], { reject: false });
+      await execa("docker", ["rmi", imageTag], { reject: false });
     }
-  }, 180_000);
+  }, 300_000);
 });

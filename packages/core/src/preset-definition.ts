@@ -19,6 +19,17 @@ export type GenerationContext = {
   readonly toolchain: {
     readonly nodeLtsMajor: string;
     readonly packageManagerPin: string;
+    /**
+     * 只有确实已知的精确三段 Node 版本才写入：初始化取自 CLI 发版快照，加包取自目标根现行精确声明。
+     * 纯大版本根保持缺省，不从 nodeLtsMajor 伪造 patch；该字段也不是任何版本回退的来源。
+     */
+    readonly nodeVersion?: string;
+    /**
+     * 只有确实已知的 Rust channel 才写入：初始化取自 CLI 发版快照的精确版本，已有 Rust 能力的
+     * 目标仓库在加包时取自其根 rust-toolchain.toml 的现行声明。该字段同样不是版本回退的来源，
+     * 也不进入 Environment Needs 或 Generation Record。
+     */
+    readonly rustVersion?: string;
   };
 };
 

@@ -165,7 +165,8 @@ export function isProtectedGeneratedPath(generatedPath: string): boolean {
   const fileName = normalizedPath.split("/").at(-1);
 
   return (
-    normalizedPath === ".devcontainer/Dockerfile" ||
+    normalizedPath === "scripts/check-standalone-deployment.ts" ||
+    normalizedPath === "scripts/container-entrypoint.sh" ||
     normalizedPath === ".devcontainer/devcontainer.json" ||
     normalizedPath === ".github/dependabot.yml" ||
     normalizedPath.startsWith(".github/workflows/") ||
@@ -173,6 +174,8 @@ export function isProtectedGeneratedPath(generatedPath: string): boolean {
     normalizedPath.startsWith("scripts/npm-publication/") ||
     normalizedPath.startsWith("scripts/npm-publication-setup/") ||
     fileName === "CHANGELOG.md" ||
+    fileName === ".dockerignore" ||
+    fileName === "Dockerfile" ||
     fileName === "LICENSE" ||
     fileName === "README.md" ||
     fileName === "RELEASING.md" ||
@@ -849,12 +852,15 @@ function isAllowedStructuralMachineDeclaration(
     return isDevelopmentContainerToolLayerMergeValue(operation.value);
   }
 
-  if (operation.kind !== "writeJson") {
-    return false;
+  if (
+    (operation.kind === "writeJson" || operation.kind === "mergeJson") &&
+    operation.to === "turbo.json"
+  ) {
+    return isStructuralTurboValue(operation.value);
   }
 
-  if (operation.to === "turbo.json") {
-    return isStructuralTurboValue(operation.value);
+  if (operation.kind !== "writeJson") {
+    return false;
   }
 
   if (operation.to === "tsconfig.config.json") {
@@ -1076,12 +1082,14 @@ function expectedDiagnosticOwnerPaths(options: {
       return { valid: false, value: "" };
     }
     const ownerPath = declaration.owner.path;
-    if (
-      declaration.owner.kind !== "package-boundary" ||
-      typeof ownerPath !== "string" ||
-      !isSafePackageBoundaryPath(ownerPath) ||
-      !blueprintOwners.has(ownerPath)
-    ) {
+    const workspaceOwner =
+      declaration.owner.kind === "workspace-orchestration" && ownerPath === ".";
+    const packageOwner =
+      declaration.owner.kind === "package-boundary" &&
+      typeof ownerPath === "string" &&
+      isSafePackageBoundaryPath(ownerPath) &&
+      blueprintOwners.has(ownerPath);
+    if (!workspaceOwner && !packageOwner) {
       return { valid: false, value: "" };
     }
     owners.add(ownerPath);

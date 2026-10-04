@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
+import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,

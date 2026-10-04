@@ -28,16 +28,6 @@
   ],
   "type": "module",
   "imports": {
-    "#template-builtin-presets": {
-      "source": "@ykdz/template-builtin-presets-source",
-      "types": "@ykdz/template-builtin-presets",
-      "default": "@ykdz/template-builtin-presets"
-    },
-    "#template-core/*": {
-      "source": "@ykdz/template-core-source/*",
-      "types": "@ykdz/template-core/*",
-      "default": "@ykdz/template-core/*"
-    },
     "#main": {
       "source": "./src/main.ts",
       "types": "./src/main.ts",
@@ -71,15 +61,20 @@
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
     "commander": "catalog:",
+    "hosted-git-info": "^9.0.3",
+    "lru-cache": "^11.5.2",
     "node-diff3": "catalog:",
+    "npm-package-arg": "^13.0.2",
+    "picomatch": "^4.0.5",
+    "proc-log": "^6.1.0",
     "semver": "catalog:",
     "typescript": "catalog:public-cli-runtime",
-    "valibot": "catalog:"
+    "valibot": "catalog:",
+    "validate-npm-package-name": "^7.0.2",
+    "yaml": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@ykdz/template-builtin-presets-source": "link:../builtin-presets",
-    "@ykdz/template-core-source": "link:../core",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
@@ -91,11 +86,18 @@
     "@ykdz/template-builtin-presets",
     "@ykdz/template-core",
     "commander",
+    "hosted-git-info",
+    "lru-cache",
     "node-diff3",
-    "typescript"
+    "npm-package-arg",
+    "picomatch",
+    "proc-log",
+    "typescript",
+    "validate-npm-package-name",
+    "yaml"
   ],
   "engines": {
-    "node": ">=24.0.0"
+    "node": "^24.16.0"
   },
   "turbo": {
     "tags": [

@@ -2,16 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import ts from "typescript";
-import { describe, expect, it } from "vitest";
-
 import type {
   PackageDefinition,
   PackageDefinitionId,
   PersistedPackageDefinition,
-} from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
-import { checkTemplateSourceBoundary } from "#template-core/template-boundary-check";
+} from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
+import { checkTemplateSourceBoundary } from "@ykdz/template-core/template-boundary-check";
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
 
 const workflowPath = ".github/workflows/check.yml";
 
@@ -39,8 +38,15 @@ function workflowOperation(
 }
 
 describe("Template Source Boundary", () => {
-  it.each(["packages/cli/README.md", "scripts/npm-publication/readiness.ts"])(
-    "rejects an inline publication body for %s with its planner owner",
+  it.each([
+    "packages/cli/README.md",
+    "scripts/npm-publication/readiness.ts",
+    "Dockerfile",
+    ".dockerignore",
+    "scripts/check-standalone-deployment.ts",
+    "scripts/container-entrypoint.sh",
+  ])(
+    "rejects an inline protected body for %s with its planner owner",
     async (generatedPath) => {
       const directory = await mkdtemp(
         path.join(tmpdir(), "template-boundary-publication-body-"),

@@ -2,16 +2,15 @@ import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-
 import {
   planDevelopmentContainerToolLayers,
   type DevelopmentContainerToolLayer,
-} from "#template-core/development-container-tool-layer";
+} from "@ykdz/template-core/development-container-tool-layer";
 import {
   createTemplateSourceHandle,
   renderProject,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
 
 const source = createTemplateSourceHandle(
   path.resolve("test/fixtures/development-container-tool-layers"),

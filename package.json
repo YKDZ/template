@@ -3,26 +3,9 @@
   "private": true,
   "description": "Repository workspace for the YKDZ template generator.",
   "type": "module",
-  "imports": {
-    "#template-builtin-presets": {
-      "source": "@ykdz/template-builtin-presets-source",
-      "types": "@ykdz/template-builtin-presets",
-      "default": "@ykdz/template-builtin-presets"
-    },
-    "#template-checks/*": {
-      "source": "@ykdz/template-checks-source/*",
-      "types": "@ykdz/template-checks/*",
-      "default": "@ykdz/template-checks/*"
-    },
-    "#template-core/*": {
-      "source": "@ykdz/template-core-source/*",
-      "types": "@ykdz/template-core/*",
-      "default": "@ykdz/template-core/*"
-    }
-  },
   "scripts": {
     "build": "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
-    "check": "pnpm run build && pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
+    "check": "pnpm run build && pnpm run boundaries && pnpm run check:toolchain:versions && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     "check:fixtures": "turbo run check:fixtures --output-logs=errors-only --log-order=grouped",
     "check:focused": "turbo run check:focused --output-logs=errors-only --log-order=grouped",
     "check:generated": "turbo run check:generated --output-logs=errors-only --log-order=grouped",
@@ -30,9 +13,7 @@
     "check:templates": "turbo run check:templates --output-logs=errors-only --log-order=grouped",
     "check:templates:boundary": "turbo run check:templates:boundary --output-logs=errors-only --log-order=grouped",
     "check:templates:github-yaml": "turbo run check:templates:github-yaml --output-logs=errors-only --log-order=grouped",
-    "check:toolchain:online": "turbo run check:toolchain:online --output-logs=errors-only --log-order=grouped",
-    "update:toolchain": "pnpm --filter @ykdz/template-checks update:toolchain",
-    "resolve:toolchain:update": "node --conditions=source packages/checks/src/update-toolchain-baseline.ts --print-workflow-outputs",
+    "check:toolchain:versions": "node --conditions=source scripts/check-template-toolchain-versions.ts",
     "fix": "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
     "boundaries": "turbo boundaries --no-color",
     "format:check": "oxfmt --list-different --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
@@ -43,18 +24,17 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "devDependencies": {
+    "@pnpm/workspace.package-patterns": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
-    "@ykdz/template-builtin-presets-source": "link:packages/builtin-presets",
     "@ykdz/template-checks": "workspace:*",
-    "@ykdz/template-checks-source": "link:packages/checks",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-core-source": "link:packages/core",
     "@ykdz/template-shared": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "shell-quote": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:",
@@ -63,9 +43,9 @@
     "yaml": "catalog:"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": "24.16.0"
   },
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@12.8.1",
   "turbo": {
     "tags": [
       "template-root"

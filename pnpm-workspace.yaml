@@ -5,7 +5,7 @@ nodeLinker: isolated
 
 autoInstallPeers: false
 
-injectWorkspacePackages: true
+injectWorkspacePackages: false
 
 dedupeInjectedDeps: false
 
@@ -24,11 +24,13 @@ catalog:
   "@devcontainers/cli": 0.88.0
   "@hono/node-server": ^2.0.12
   "@playwright/test": ^1.62.1
+  "@pnpm/workspace.package-patterns": 1100.0.1
   "@tailwindcss/vite": ^4.3.3
   "@types/node": ^24.13.3
   "@types/web-bluetooth": ^0.0.21
   "@vitejs/plugin-vue": ^6.0.8
   "@vikejs/hono": ^0.2.1
+  "@vue/compiler-sfc": ^3.5.40
   "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
   commander: ^15.0.0
@@ -43,6 +45,8 @@ catalog:
   oxlint-tsgolint: ^7.0.2001
   semver: ^7.8.5
   "@types/semver": ^7.7.1
+  shell-quote: 1.11.0
+  smol-toml: ^1.8.0
   spdx-expression-parse: ^5.0.0
   "@types/spdx-expression-parse": ^4.0.0
   pinia: ^4.0.2

@@ -3,6 +3,7 @@ packages:
 
 nodeLinker: isolated
 preferSymlinkedExecutables: true
+shellEmulator: true
 autoInstallPeers: false
 injectWorkspacePackages: false
 dedupeInjectedDeps: false

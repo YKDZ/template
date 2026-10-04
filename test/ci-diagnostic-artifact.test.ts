@@ -1,18 +1,17 @@
-import { describe, expect, it } from "vitest";
-
 import {
   composeCiDiagnosticArtifacts,
   type CiDiagnosticArtifactDeclaration,
-} from "#template-core/ci-diagnostic-artifact";
+} from "@ykdz/template-core/ci-diagnostic-artifact";
 import {
   assertPackageContribution,
   type PackageContribution,
-} from "#template-core/package-contribution";
+} from "@ykdz/template-core/package-contribution";
 import {
   projectCheckWorkflowPlan,
   projectCheckWorkflowTemplateSource,
   projectCheckWorkflowTemplateReplacements,
-} from "#template-core/project-github";
+} from "@ykdz/template-core/project-github";
+import { describe, expect, it } from "vitest";
 
 const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "playwright",

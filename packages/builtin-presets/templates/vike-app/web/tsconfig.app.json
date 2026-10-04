@@ -5,7 +5,6 @@
   ],
   "compilerOptions": {
     "composite": true,
-    "customConditions": ["source"],
     "exactOptionalPropertyTypes": false,
     "module": "esnext",
     "moduleResolution": "bundler",

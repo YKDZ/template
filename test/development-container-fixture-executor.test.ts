@@ -10,14 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it, vi } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   generatedScenariosFor,
@@ -111,6 +111,7 @@ function registryCapabilityProbes(root: string) {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         }).developmentContainer.probes,

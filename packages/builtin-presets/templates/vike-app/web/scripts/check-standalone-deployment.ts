@@ -1,9 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
-
-const webRoot = path.resolve(import.meta.dirname, "..");
-const repositoryRoot = path.resolve(webRoot, "../..");
+const repositoryRoot = process.cwd();
+const applicationPackageName = "{{APPLICATION_PACKAGE_NAME}}";
 const uniqueId = `${process.pid}-${Date.now()}`;
 const standaloneImage = `vike-deployment-check-standalone:${uniqueId}`;
 const runtimeImage = `vike-deployment-check-runtime:${uniqueId}`;
@@ -321,15 +319,19 @@ if (row.count !== 0) throw new Error(\`Fresh deployment must contain zero TODOs,
 }
 
 async function runPlaywright(baseUrl: string): Promise<void> {
-  await runCommand("pnpm", ["--dir", "apps/web", "run", "test:e2e"], {
-    cwd: repositoryRoot,
-    env: {
-      ...process.env,
-      PLAYWRIGHT_EXTERNAL_BASE_URL: baseUrl,
+  await runCommand(
+    "pnpm",
+    ["--filter", applicationPackageName, "run", "test:e2e"],
+    {
+      cwd: repositoryRoot,
+      env: {
+        ...process.env,
+        PLAYWRIGHT_EXTERNAL_BASE_URL: baseUrl,
+      },
+      signal: abortController.signal,
+      timeout: 120_000,
     },
-    signal: abortController.signal,
-    timeout: 120_000,
-  });
+  );
 }
 
 async function runStartedDeployment(
@@ -431,7 +433,7 @@ async function assertUnpreparedRuntimeFails(): Promise<void> {
           `Unprepared runtime exited successfully instead of rejecting startup.\n${logs}`,
         );
       }
-      if (!logs.includes("Database is not ready")) {
+      if (!logs.includes("DATABASE_NOT_READY")) {
         throw new Error(
           `Unprepared runtime did not report database readiness failure.\n${logs}`,
         );
@@ -462,7 +464,7 @@ try {
     docker(
       "build",
       "--file",
-      "apps/web/Dockerfile",
+      "Dockerfile",
       "--target",
       "standalone",
       "--build-arg",
@@ -476,7 +478,7 @@ try {
     docker(
       "build",
       "--file",
-      "apps/web/Dockerfile",
+      "Dockerfile",
       "--target",
       "runtime",
       "--build-arg",

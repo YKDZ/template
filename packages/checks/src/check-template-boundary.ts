@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 
-import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
+import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
 import {
   checkTemplateSourceBoundary,
   checkTemplateSourceContexts,
-} from "#template-core/template-boundary-check";
+} from "@ykdz/template-core/template-boundary-check";
 
 import {
   builtInPresetTemplateSourceContexts,
   deriveVerificationPlans,
+  validateRegistryMirrorSlotProjections,
 } from "./registry-checks.ts";
 
 /** Checks every real registry initialization and Package Addition plan. */
 export async function checkBuiltInPresetTemplateBoundary(): Promise<void> {
-  const verificationPlans = deriveVerificationPlans();
+  const verificationPlans = await deriveVerificationPlans();
   const result = await checkTemplateSourceBoundary({
     templateSourceContexts: await checkTemplateSourceContexts([
       ...builtInPresetTemplateSourceContexts(),
@@ -62,6 +63,8 @@ export async function checkBuiltInPresetTemplateBoundary(): Promise<void> {
       ].join("\n"),
     );
   }
+  // 镜像槽位自检与既有 source-body 边界门是两条独立职责：新门失败不关闭上面的检查。
+  await validateRegistryMirrorSlotProjections(verificationPlans);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

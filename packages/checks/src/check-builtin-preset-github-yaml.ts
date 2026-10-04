@@ -4,17 +4,17 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { parseDocument } from "yaml";
-
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
-} from "#template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { parseDocument } from "yaml";
 
 import { deriveFixtureMatrix } from "./registry-checks.ts";
 
@@ -67,11 +67,13 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
       readonly kind?: unknown;
       readonly path?: unknown;
     };
-    if (
-      ownerPath.kind !== "package-boundary" ||
-      typeof ownerPath.path !== "string" ||
-      !/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u.test(ownerPath.path) ||
-      [
+    const workspaceOwner =
+      ownerPath.kind === "workspace-orchestration" && ownerPath.path === ".";
+    const packageOwner =
+      ownerPath.kind === "package-boundary" &&
+      typeof ownerPath.path === "string" &&
+      /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/u.test(ownerPath.path) &&
+      ![
         ".git",
         ".github",
         ".devcontainer",
@@ -79,13 +81,13 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
         "node_modules",
         "dist",
         "target",
-      ].includes(ownerPath.path.split("/", 1)[0]!)
-    ) {
+      ].includes(ownerPath.path.split("/", 1)[0]!);
+    if (!workspaceOwner && !packageOwner) {
       throw new Error(
         "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
       );
     }
-    if (!packagePaths.has(ownerPath.path)) {
+    if (packageOwner && !packagePaths.has(ownerPath.path)) {
       throw new Error(
         `CI Diagnostic Artifact owner is not a declared Package Boundary: ${ownerPath.path}`,
       );
@@ -93,17 +95,10 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
     diagnosticOwnerPaths.add(ownerPath.path);
   }
 
-  const deployment = plan.manifests.some((manifest) => {
-    const scripts = manifest.scripts;
-    return (
-      typeof scripts === "object" &&
-      scripts !== null &&
-      typeof (scripts as Record<string, unknown>).deployment === "string"
-    );
-  });
+  const deployment = plan.deploymentCheck !== undefined;
   if (
     deployment &&
-    !plan.deploymentEnvironmentNeeds.some(
+    !plan.deploymentCheck.environmentNeeds.some(
       (need) => need.kind === "docker-engine",
     )
   ) {
@@ -998,44 +993,41 @@ function dependabotUpdateKey(update: DependabotUpdateOracle): string {
 function dependabotOracle(
   plan: GeneratedRepositoryPlan,
 ): readonly DependabotUpdateOracle[] {
-  const manifestByName = new Map(
-    plan.manifests.flatMap((manifest) =>
-      typeof manifest.name === "string" ? [[manifest.name, manifest]] : [],
-    ),
+  const declarations = plan.packageContributions.map(
+    (contribution) => contribution.foundation.dependencyMaintenance,
   );
-  const deploymentDirectories = plan.blueprint.packages.flatMap(
-    (definition) => {
-      const scripts = manifestByName.get(definition.name)?.scripts;
-      return typeof scripts === "object" &&
-        scripts !== null &&
-        typeof (scripts as Record<string, unknown>).deployment === "string"
-        ? [`/${definition.path}`]
-        : [];
-    },
-  );
-  const cargoDirectories = plan.blueprint.packages.flatMap((definition) =>
-    definition.role === "native-package" ? [`/${definition.path}`] : [],
-  );
-  return [
-    { ecosystem: "npm", directory: "/" },
-    { ecosystem: "github-actions", directory: "/" },
-    { ecosystem: "docker", directory: "/.devcontainer" },
-    ...deploymentDirectories.map(
-      (directory): DependabotUpdateOracle => ({
-        ecosystem: "docker",
-        directory: directory as `/${string}`,
-      }),
-    ),
-    ...cargoDirectories.map(
-      (directory): DependabotUpdateOracle => ({
-        ecosystem: "cargo",
-        directory: directory as `/${string}`,
-      }),
-    ),
-    ...(cargoDirectories.length === 0
-      ? []
-      : [{ ecosystem: "rust-toolchain" as const, directory: "/" as const }]),
+  const ecosystems = [
+    ...new Set([
+      ...declarations.flatMap((declaration) => declaration.ecosystems),
+      ...(plan.deploymentCheck === undefined ? [] : (["docker"] as const)),
+    ]),
   ];
+  return ecosystems.flatMap((ecosystem) => {
+    const declaredDirectories = [
+      ...new Set([
+        ...declarations.flatMap((declaration) => {
+          const primary = declaration.directories?.[ecosystem];
+          return [
+            ...(primary === undefined ? [] : [primary]),
+            ...(declaration.extraDirectories?.[ecosystem] ?? []),
+          ];
+        }),
+        ...(ecosystem === "docker" && plan.deploymentCheck !== undefined
+          ? (["/"] as const)
+          : []),
+      ]),
+    ];
+    const directories: readonly `/${string}`[] =
+      declaredDirectories.length === 0
+        ? [ecosystem === "docker" ? "/.devcontainer" : "/"]
+        : declaredDirectories;
+    return directories.map(
+      (directory): DependabotUpdateOracle => ({
+        ecosystem,
+        directory,
+      }),
+    );
+  });
 }
 
 function assertExactStringMembers(
@@ -1210,7 +1202,11 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
       const context = createGenerationContext({
         targetDir: projectDir,
         defaultPackageScope: "github-policy",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
       });
       const initialization = planGeneratedRepositoryInitialization({
         definition: scenario.base,

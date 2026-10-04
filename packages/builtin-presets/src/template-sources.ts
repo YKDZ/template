@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   createTemplateSourceHandle,
   type TemplateSourceHandle,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
 
 function templateRoot(...segments: string[]): string {
   const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));

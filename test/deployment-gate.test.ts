@@ -10,14 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import {
   generatedScenariosFor,
@@ -124,6 +124,7 @@ function deploymentPlan() {
         toolchain: {
           nodeLtsMajor: "24",
           packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     }).manifests.some(
@@ -140,7 +141,11 @@ function deploymentPlan() {
     definition,
     context: createGenerationContext({
       targetDir: path.join("generated-repository", "deployment-gate"),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      },
     }),
   });
 }
@@ -204,13 +209,7 @@ describe("deployment quality gate", () => {
           return args.includes("--dry-run=json")
             ? {
                 stdout: JSON.stringify({
-                  tasks: plan.manifests.flatMap((manifest) =>
-                    typeof manifest.name === "string" &&
-                    typeof (manifest.scripts as Record<string, unknown> | null)
-                      ?.deployment === "string"
-                      ? [{ taskId: `${manifest.name}#deployment` }]
-                      : [],
-                  ),
+                  tasks: [{ taskId: "//#deployment" }],
                 }),
               }
             : {};
@@ -442,6 +441,7 @@ describe("deployment quality gate", () => {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         }),
@@ -475,13 +475,7 @@ describe("deployment quality gate", () => {
           return args.includes("--dry-run=json")
             ? {
                 stdout: JSON.stringify({
-                  tasks: plan.manifests.flatMap((manifest) =>
-                    typeof manifest.name === "string" &&
-                    typeof (manifest.scripts as Record<string, unknown> | null)
-                      ?.deployment === "string"
-                      ? [{ taskId: `${manifest.name}#deployment` }]
-                      : [],
-                  ),
+                  tasks: [{ taskId: "//#deployment" }],
                 }),
               }
             : {};
@@ -583,14 +577,7 @@ describe("deployment quality gate", () => {
                 if (args.includes("--dry-run=json")) {
                   return {
                     stdout: JSON.stringify({
-                      tasks: plan.manifests.flatMap((manifest) =>
-                        typeof manifest.name === "string" &&
-                        typeof (
-                          manifest.scripts as Record<string, unknown> | null
-                        )?.deployment === "string"
-                          ? [{ taskId: `${manifest.name}#deployment` }]
-                          : [],
-                      ),
+                      tasks: [{ taskId: "//#deployment" }],
                     }),
                   };
                 }

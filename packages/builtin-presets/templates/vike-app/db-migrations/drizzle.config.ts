@@ -2,13 +2,13 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// oxfmt-ignore
+import { databaseStorageTarget } from "{{DB_PACKAGE_NAME}}/storage";
 import { defineConfig } from "drizzle-kit";
 
-const databasePackageName = process.env.DATABASE_PACKAGE_NAME ?? "@database";
-const schemaFile = fileURLToPath(
-  import.meta.resolve(`${databasePackageName}/schema`),
-);
-const databaseFile = process.env.DATABASE_FILE ?? "./data/app.sqlite";
+// oxfmt-ignore
+const schemaFile = fileURLToPath(import.meta.resolve("{{DB_PACKAGE_NAME}}/schema"));
+const databaseFile = databaseStorageTarget();
 mkdirSync(path.dirname(databaseFile), { recursive: true });
 
 export default defineConfig({

@@ -23,12 +23,10 @@
   },
   "dependencies": {
     "node-diff3": "catalog:",
-    "semver": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "@types/semver": "catalog:",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

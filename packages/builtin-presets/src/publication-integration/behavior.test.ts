@@ -19,11 +19,11 @@ import {
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import { describe, expect, it } from "vitest";
-
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
 
 import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
@@ -173,8 +173,12 @@ describe("ts-cli publication owner-fact integration", () => {
         targetDir: repositoryRoot,
         defaultPackageScope: "seed",
         toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.21.0",
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     });
@@ -218,8 +222,12 @@ describe("ts-cli publication owner-fact integration", () => {
         targetDir: repositoryRoot,
         defaultPackageScope: "seed",
         toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.21.0",
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     });
@@ -239,8 +247,12 @@ describe("ts-cli publication owner-fact integration", () => {
           "utf8",
         ),
       ) as { readonly engines?: { readonly node?: unknown } };
-      expect(rootManifest.engines?.node).toBe("24");
-      expect(publicManifest.engines?.node).toBe(">=24");
+      expect(rootManifest.engines?.node).toBe(
+        releaseToolchainSnapshot.nodeVersion,
+      );
+      expect(publicManifest.engines?.node).toBe(
+        `^${releaseToolchainSnapshot.nodeVersion}`,
+      );
       await expect(
         execa("pnpm", ["exec", "npm", "--version"], {
           cwd: repositoryRoot,
@@ -604,8 +616,12 @@ describe("ts-cli publication owner-fact integration", () => {
         targetDir: repositoryRoot,
         defaultPackageScope: "seed",
         toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.21.0",
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
     });

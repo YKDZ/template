@@ -51,7 +51,7 @@ async function loadMaintainedConfig(
 describe("maintained Playwright diagnostic configuration", () => {
   it.each([
     "packages/builtin-presets/templates/vue-app/playwright.config.ts",
-    "packages/builtin-presets/templates/vue-hono-app/web/playwright.config.ts",
+    "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
     "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
   ])("uses native failure diagnostics in %s", async (relativePath) => {
     const config = await loadMaintainedConfig(relativePath);

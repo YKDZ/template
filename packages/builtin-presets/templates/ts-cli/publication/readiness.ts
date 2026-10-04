@@ -86,6 +86,24 @@ const publicationFiles = [
 
 const canonicalPublicationPrepack = "pnpm exec turbo run build --filter=.";
 
+// 私有根 engines.node 允许两种形态：旧仓库的纯大版本（"24"）与初始化投影发版快照
+// 的精确三段版本（"24.16.0"），两者都能派生大版本；范围表达式、两段版本与 v 前缀
+// 等未声明形态一律拒绝。
+const nodeMajorOrExactVersionPattern = /^(\d+)(?:\.(\d+\.\d+))?$/u;
+
+// 公开候选范围与根声明形态配对：精确根只接受同一精确值的 caret 范围，旧大版本根
+// 只接受原有 `>=major`；精确根不得回退到无上界范围。
+function expectedPublicNodeRange(
+  rootNodeDeclaration: string,
+): string | undefined {
+  const parsed = nodeMajorOrExactVersionPattern.exec(rootNodeDeclaration);
+  if (parsed === null) return undefined;
+  const [, major, exactRemainder] = parsed;
+  return exactRemainder === undefined
+    ? `>=${major}`
+    : `^${major}.${exactRemainder}`;
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -548,12 +566,15 @@ function addManifestBlockers(options: {
     );
   }
 
-  const baseline =
+  const rootNodeDeclaration =
     isObject(rootManifest?.engines) &&
-    typeof rootManifest.engines.node === "string" &&
-    /^\d+$/u.test(rootManifest.engines.node)
+    typeof rootManifest.engines.node === "string"
       ? rootManifest.engines.node
       : undefined;
+  const expectedPublicNodeRangeFromRoot =
+    rootNodeDeclaration === undefined
+      ? undefined
+      : expectedPublicNodeRange(rootNodeDeclaration);
   const publishConfig = manifest.publishConfig;
   const scripts = manifest.scripts;
   const forbiddenFields = [
@@ -566,9 +587,9 @@ function addManifestBlockers(options: {
   const manifestContractValid =
     manifest.type === "module" &&
     exactStringSet(manifest.files, publicationFiles) &&
-    baseline !== undefined &&
+    expectedPublicNodeRangeFromRoot !== undefined &&
     isObject(manifest.engines) &&
-    manifest.engines.node === `>=${baseline}` &&
+    manifest.engines.node === expectedPublicNodeRangeFromRoot &&
     validRecordOfStrings(manifest.dependencies) &&
     typeof manifest.dependencies.commander === "string" &&
     manifest.dependencies.commander.trim().length > 0 &&

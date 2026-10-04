@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
 
@@ -442,7 +443,11 @@ describe("manual npm publication capability", () => {
       context: createGenerationContext({
         targetDir: path.join("generated", "cli"),
         defaultPackageScope: "demo",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.21.0" },
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.21.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
       }),
     });
 
@@ -905,7 +910,11 @@ describe("manual npm publication capability", () => {
       context: createGenerationContext({
         targetDir: path.join("generated", "cli"),
         defaultPackageScope: "demo",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.21.0" },
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.21.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
       }),
     });
     const source = await readFile(

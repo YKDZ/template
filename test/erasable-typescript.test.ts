@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -10,16 +11,23 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import ts from "typescript";
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import {
+  renderNewProject,
+  resolveTemplateSource,
+} from "@ykdz/template-core/renderer";
+import type {
+  CopyFileOperation,
+  RenderOperation,
+} from "@ykdz/template-core/renderer";
+import { execa } from "execa";
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
 
 type Manifest = {
   readonly name?: string;
@@ -51,6 +59,64 @@ async function uiTsconfigPaths(root: string): Promise<readonly string[]> {
   return configPaths.toSorted();
 }
 
+/** 语法树中是否出现仓库已命名的 TypeScript 6 编程 API 导入。 */
+function importsTypeScript6Api(sourceFile: ts.SourceFile): boolean {
+  let found = false;
+  function visitNode(node: ts.Node): void {
+    const isStaticImport =
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === "typescript";
+    const isDynamicImport =
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0]!) &&
+      node.arguments[0]!.text === "typescript";
+    const isTypeImport =
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal) &&
+      node.argument.literal.text === "typescript";
+    if (isStaticImport || isDynamicImport || isTypeImport) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(node, visitNode);
+  }
+  visitNode(sourceFile);
+  return found;
+}
+
+function readTypeScriptSource(absolutePath: string): ts.SourceFile {
+  return ts.createSourceFile(
+    absolutePath,
+    readFileSync(absolutePath, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+}
+
+/** 投影进 Generated Repository 且正文直接导入 TypeScript 6 编程 API 的脚本生成路径。 */
+function compilerApiScriptPaths(
+  operations: readonly RenderOperation[],
+): readonly string[] {
+  return operations
+    .filter(
+      (operation): operation is CopyFileOperation =>
+        operation.kind === "copyFile" && operation.to.endsWith(".ts"),
+    )
+    .filter((operation) =>
+      importsTypeScript6Api(
+        readTypeScriptSource(
+          resolveTemplateSource(operation.source, operation.from),
+        ),
+      ),
+    )
+    .map((operation) => operation.to);
+}
+
 async function compilerApiImports(
   packageRoot: string,
 ): Promise<readonly string[]> {
@@ -70,35 +136,9 @@ async function compilerApiImports(
 
   const imports: string[] = [];
   for (const sourcePath of sourcePaths) {
-    const sourceFile = ts.createSourceFile(
-      sourcePath,
-      await readFile(sourcePath, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TS,
-    );
-    function visitNode(node: ts.Node): void {
-      const isStaticImport =
-        ts.isImportDeclaration(node) &&
-        ts.isStringLiteral(node.moduleSpecifier) &&
-        node.moduleSpecifier.text === "typescript";
-      const isDynamicImport =
-        ts.isCallExpression(node) &&
-        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-        node.arguments.length === 1 &&
-        ts.isStringLiteral(node.arguments[0]!) &&
-        node.arguments[0]!.text === "typescript";
-      const isTypeImport =
-        ts.isImportTypeNode(node) &&
-        ts.isLiteralTypeNode(node.argument) &&
-        ts.isStringLiteral(node.argument.literal) &&
-        node.argument.literal.text === "typescript";
-      if (isStaticImport || isDynamicImport || isTypeImport) {
-        imports.push(path.relative(process.cwd(), sourcePath));
-      }
-      ts.forEachChild(node, visitNode);
+    if (importsTypeScript6Api(readTypeScriptSource(sourcePath))) {
+      imports.push(path.relative(process.cwd(), sourcePath));
     }
-    visitNode(sourceFile);
   }
   return [...new Set(imports)].toSorted();
 }
@@ -133,6 +173,7 @@ describe("Erasable TypeScript enforcement", () => {
               toolchain: {
                 nodeLtsMajor: "24",
                 packageManagerPin: "pnpm@11.11.0",
+                nodeVersion: releaseToolchainSnapshot.nodeVersion,
               },
             }),
           });
@@ -284,6 +325,7 @@ describe("Erasable TypeScript enforcement", () => {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         }).manifests as readonly Manifest[],
@@ -324,24 +366,35 @@ describe("Erasable TypeScript enforcement", () => {
         ) as Manifest,
       })),
     );
-    const generatedManifests = builtInPresetRegistry.all().flatMap(
-      (definition) =>
-        planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir: path.join(
-              "generated-repository",
-              "manifest-truth",
-              definition.metadata.name,
-            ),
-            defaultPackageScope: "manifest-truth",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-            },
-          }),
-        }).manifests as readonly Manifest[],
+    const generatedPlans = builtInPresetRegistry.all().map((definition) =>
+      planGeneratedRepositoryInitialization({
+        definition,
+        context: createGenerationContext({
+          targetDir: path.join(
+            "generated-repository",
+            "manifest-truth",
+            definition.metadata.name,
+          ),
+          defaultPackageScope: "manifest-truth",
+          toolchain: {
+            nodeLtsMajor: "24",
+            packageManagerPin: "pnpm@11.11.0",
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
+          },
+        }),
+      }),
     );
+    const generatedManifests = generatedPlans.flatMap(
+      ({ manifests }) => manifests as readonly Manifest[],
+    );
+    /** 由 checked Template Source 投影、正文直接导入 TypeScript 6 编程 API 的生成脚本路径。 */
+    const typescript6ApiScripts = [
+      ...new Set(
+        generatedPlans.flatMap(({ operations }) =>
+          compilerApiScriptPaths(operations),
+        ),
+      ),
+    ].toSorted();
 
     for (const manifest of [
       ...repositoryManifests.map(({ manifest }) => manifest),
@@ -352,6 +405,11 @@ describe("Erasable TypeScript enforcement", () => {
       );
       const ownsVueCompatibility = scripts.some((command) =>
         command.includes("scripts/run-vue-tsc.ts"),
+      );
+      const runsTypeScript6Api = scripts.some((command) =>
+        typescript6ApiScripts.some((scriptPath) =>
+          command.includes(scriptPath),
+        ),
       );
       if (scripts.some((command) => /\btsc(?:\s|$)/u.test(command))) {
         expect(
@@ -366,6 +424,11 @@ describe("Erasable TypeScript enforcement", () => {
         expect(
           manifest.devDependencies,
           `${manifest.name ?? "(unnamed)"} owns Vue's TypeScript 6 compatibility package`,
+        ).toHaveProperty("typescript");
+      } else if (runsTypeScript6Api) {
+        expect(
+          manifest.devDependencies,
+          `${manifest.name ?? "(unnamed)"} owns the TypeScript 6 API its own scripts run`,
         ).toHaveProperty("typescript");
       } else if (
         !new Set([

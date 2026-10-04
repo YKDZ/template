@@ -1,6 +1,5 @@
+import { renderRootCheckCommand } from "@ykdz/template-core/module-graph";
 import { describe, expect, it } from "vitest";
-
-import { renderRootCheckCommand } from "#template-core/module-graph";
 
 describe("Root Check command rendering", () => {
   it("appends caller-declared tasks without leaking orchestration policy", () => {

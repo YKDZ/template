@@ -1,13 +1,13 @@
 import { fileURLToPath } from "node:url";
 
-import type { PackageContribution } from "#template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
 import { templateSources } from "../template-sources.ts";

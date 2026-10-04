@@ -13,9 +13,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it, vi } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -26,14 +23,17 @@ import {
   type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
   type PackageContribution,
-} from "#template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
   createTemplateSourceHandle,
   renderNewProject,
   type RenderOperation,
   type TemplateSourceHandle,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
+import { execa } from "execa";
+import { describe, expect, it, vi } from "vitest";
 
 import { findFixtureEvidenceArchitectureFindings } from "../packages/checks/src/check-fixture-evidence-architecture.ts";
 import {
@@ -522,7 +522,11 @@ async function renderMatrixScenario(options: {
   const context = createGenerationContext({
     targetDir: projectDir,
     defaultPackageScope: "fixture",
-    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    toolchain: {
+      nodeLtsMajor: "24",
+      packageManagerPin: "pnpm@11.11.0",
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
+    },
   });
   const initialization = planGeneratedRepositoryInitialization({
     definition: options.scenario.base,
@@ -3398,6 +3402,7 @@ describe("Fixture Verification Evidence", () => {
             toolchain: {
               nodeLtsMajor: "24",
               packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           }),
         });
@@ -4740,6 +4745,7 @@ describe("Fixture Verification Evidence", () => {
                 toolchain: {
                   nodeLtsMajor: "24",
                   packageManagerPin: "pnpm@11.11.0",
+                  nodeVersion: releaseToolchainSnapshot.nodeVersion,
                 },
               }),
             }).blueprint.packages.some(
@@ -4796,6 +4802,7 @@ describe("Fixture Verification Evidence", () => {
               toolchain: {
                 nodeLtsMajor: "24",
                 packageManagerPin: "pnpm@11.11.0",
+                nodeVersion: releaseToolchainSnapshot.nodeVersion,
               },
             }),
           }).blueprint.packages.some(
@@ -4829,6 +4836,7 @@ describe("Fixture Verification Evidence", () => {
               toolchain: {
                 nodeLtsMajor: "24",
                 packageManagerPin: "pnpm@11.11.0",
+                nodeVersion: releaseToolchainSnapshot.nodeVersion,
               },
             }),
           }),

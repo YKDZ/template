@@ -4,17 +4,16 @@ import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { execa } from "execa";
-
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryPackageAddition,
+  prepareGeneratedRepositoryPackageAddition,
   type GeneratedRepositoryPlan,
-} from "#template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { execa } from "execa";
 
 import {
   deploymentQualityExecutionResources,
@@ -350,7 +349,15 @@ async function runScenario(
   const context = createGenerationContext({
     targetDir: projectDir,
     defaultPackageScope: "fixture",
-    toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    toolchain: {
+      nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+        0,
+        releaseToolchainSnapshot.nodeVersion.indexOf("."),
+      ),
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      rustVersion: releaseToolchainSnapshot.rustVersion,
+    },
   });
   const initialization = planGeneratedRepositoryInitialization({
     definition: scenario.base,
@@ -390,23 +397,29 @@ async function runScenario(
 
   let finalPlan: GeneratedRepositoryPlan = initialization;
   if (scenario.addition !== undefined) {
-    const additionPlan = planGeneratedRepositoryPackageAddition({
-      definition: scenario.addition,
-      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+    const preparation = prepareGeneratedRepositoryPackageAddition({
+      repositoryRoot: context.targetDir,
+      preset: scenario.addition.metadata.name,
       packageLeafName: `fixture-${scenario.addition.metadata.name}`,
       ...(scenario.linkFrom === undefined
         ? {}
         : { linkFrom: scenario.linkFrom }),
     });
-    finalPlan = additionPlan;
+    if (preparation.status !== "ready") {
+      // 加包验证现消费公开 CLI 的 prepare 接缝；非 ready 一律令场景失败，不回落旧 plan 或忽略错误。
+      throw new Error(
+        `Generated Package Addition prepare did not yield a plan (${preparation.status}): ${JSON.stringify(preparation)}`,
+      );
+    }
+    finalPlan = preparation.plan;
     await validatePlanSources({
       definition: scenario.addition,
-      plan: additionPlan,
+      plan: preparation.plan,
     });
-    validatePlanDependencyCatalog(additionPlan);
+    validatePlanDependencyCatalog(preparation.plan);
     const result = await reconcileAndApplyProjectProjections({
       targetRoot: projectDir,
-      ...additionPlan.projectProjections,
+      ...preparation.plan.projectProjections,
     });
     if (!result.ok) {
       throw new Error(

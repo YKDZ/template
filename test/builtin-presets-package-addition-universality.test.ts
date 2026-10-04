@@ -10,9 +10,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -20,12 +17,15 @@ import {
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   type BuiltInPresetDefinition,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
 import {
   materializeProjectProjection,
   reconcileAndApplyProjectProjections,
-} from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 describe("Built-in Preset Package Addition universality", () => {
   type FixedTopologyDefinition = Exclude<
@@ -33,6 +33,11 @@ describe("Built-in Preset Package Addition universality", () => {
     { readonly initialPrimaryPackage: object }
   >;
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
+  // 直接新建初始化会派生新建公开 ts-cli 候选，需要发版快照中与 major 一致的精确三段版本。
+  const initializationToolchain = {
+    ...toolchain,
+    nodeVersion: releaseToolchainSnapshot.nodeVersion,
+  } as const;
 
   function firstAddableDefinition() {
     const definition = builtInPresetRegistry
@@ -75,7 +80,7 @@ describe("Built-in Preset Package Addition universality", () => {
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "package-path-selection"),
       defaultPackageScope: "demo",
-      toolchain,
+      toolchain: initializationToolchain,
     });
     const definition = builtInPresetRegistry.all().find((candidate) =>
       planGeneratedRepositoryInitialization({
@@ -101,7 +106,7 @@ describe("Built-in Preset Package Addition universality", () => {
             definition.metadata.name,
           ),
           defaultPackageScope: "demo",
-          toolchain,
+          toolchain: initializationToolchain,
         }),
       });
       const workspace = plan.operations.find(
@@ -196,7 +201,7 @@ describe("Built-in Preset Package Addition universality", () => {
         const context = createGenerationContext({
           targetDir,
           defaultPackageScope: "demo",
-          toolchain,
+          toolchain: initializationToolchain,
         });
         const initialization = planGeneratedRepositoryInitialization({
           definition: baseDefinition,
@@ -285,7 +290,7 @@ describe("Built-in Preset Package Addition universality", () => {
       const context = createGenerationContext({
         targetDir,
         defaultPackageScope: "demo",
-        toolchain,
+        toolchain: initializationToolchain,
       });
       const initialization = planGeneratedRepositoryInitialization({
         definition: baseDefinition,
@@ -366,12 +371,17 @@ describe("Built-in Preset Package Addition universality", () => {
           >[0],
         ) {
           const contribution = rustDefinition.planPackageAddition!(options);
+          const rust = contribution.foundation.toolchains.rust;
+          if (rust === undefined) {
+            throw new Error("Expected the Rust Preset to declare a toolchain");
+          }
           return {
             ...contribution,
             foundation: {
               ...contribution.foundation,
               toolchains: {
                 rust: {
+                  ...rust,
                   toolchain: "nightly",
                   components: ["rustfmt", "clippy"] as const,
                 },
@@ -471,6 +481,133 @@ describe("Built-in Preset Package Addition universality", () => {
       )!.path;
       expect(dependabot).toContain(`directory: "/${initialRustPackagePath}"`);
       expect(dependabot).toContain('directory: "/packages/worker"');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the target root Rust declaration as the version owner across a real addition", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-rust-root-owned-channel-"),
+    );
+    const targetDir = path.join(workspace, "demo");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain: {
+        ...toolchain,
+        rustVersion: releaseToolchainSnapshot.rustVersion,
+      },
+    });
+    const rustDefinition = rustAddableDefinition();
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: rustDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const targetRootDeclaration = `[toolchain]\nchannel = "1.98.0"\ncomponents = ["rustfmt", "clippy"]\n`;
+      await writeFile(
+        path.join(targetDir, "rust-toolchain.toml"),
+        targetRootDeclaration,
+      );
+      expect(releaseToolchainSnapshot.rustVersion).not.toBe("1.98.0");
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: rustDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+        packageLeafName: "worker",
+      });
+      expect(addition.developmentContainer.buildArguments).toContainEqual({
+        name: "RUST_TOOLCHAIN",
+        value: "1.98.0",
+      });
+
+      const reconciliation = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+
+      if (!reconciliation.ok) {
+        throw new Error(
+          `Package Addition produced conflicts: ${JSON.stringify(reconciliation.conflicts)}`,
+        );
+      }
+      expect(reconciliation.actions.map((action) => action.path)).not.toContain(
+        "rust-toolchain.toml",
+      );
+      await expect(
+        readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
+      ).resolves.toBe(targetRootDeclaration);
+      await expect(
+        readFile(path.join(targetDir, "packages/worker/Cargo.toml"), "utf8"),
+      ).resolves.toContain('name = "worker"');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("still creates the default root declaration when a repository first adds Rust", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-first-rust-addition-"),
+    );
+    const targetDir = path.join(workspace, "demo");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain: initializationToolchain,
+    });
+    const baseDefinition = builtInPresetRegistry.all().find((candidate) =>
+      planGeneratedRepositoryInitialization({
+        definition: candidate,
+        context,
+      }).operations.every(
+        (operation) =>
+          !("to" in operation && operation.to === "rust-toolchain.toml"),
+      ),
+    );
+    if (baseDefinition === undefined) {
+      throw new Error(
+        "Expected a Built-in Preset Definition without a root Rust declaration",
+      );
+    }
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: baseDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: rustAddableDefinition(),
+        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+        packageLeafName: "native",
+      });
+      const rootDeclarationOperation = addition.operations.find(
+        (operation) =>
+          "to" in operation && operation.to === "rust-toolchain.toml",
+      );
+
+      expect(rootDeclarationOperation).toMatchObject({
+        kind: "writeTextTemplate",
+        replacements: { RUST_TOOLCHAIN: "stable" },
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+      await expect(
+        readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
+      ).resolves.toBe(
+        '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -748,7 +885,7 @@ describe("Built-in Preset Package Addition universality", () => {
     const context = createGenerationContext({
       targetDir: path.join(workspace, "explicit-needs"),
       defaultPackageScope: "demo",
-      toolchain,
+      toolchain: initializationToolchain,
     });
     const base = builtInPresetRegistry.all().find((candidate) => {
       const packageLeafName = "environment-probe";
@@ -767,7 +904,7 @@ describe("Built-in Preset Package Addition universality", () => {
       return (
         contribution !== undefined &&
         contribution.environmentNeeds.length === 0 &&
-        (contribution.deploymentEnvironmentNeeds?.length ?? 0) === 0
+        contribution.foundation.deploymentCheck === undefined
       );
     });
     if (base === undefined) {

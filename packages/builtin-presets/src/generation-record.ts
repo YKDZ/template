@@ -1,11 +1,5 @@
+import type { PackageDefinitionId } from "@ykdz/template-core/project-blueprint";
 import * as v from "valibot";
-
-import type { GenerationContext } from "#template-core/preset-definition";
-import type { PackageDefinitionId } from "#template-core/project-blueprint";
-import {
-  isValidNodeLtsMajor,
-  isValidPackageManagerPin,
-} from "#template-core/toolchain-resolution";
 
 export type GeneratedPackagePlanningRecord = {
   readonly packageDefinitionId: PackageDefinitionId;
@@ -18,19 +12,37 @@ export type GeneratedPackagePlanningRecord = {
   readonly contributionIdentity: string;
 };
 
+/**
+ * Generation Record v2 的工具链形状：只保存初始化时的历史 Node 大版本与 pnpm pin。
+ * 它刻意与 GenerationContext.toolchain 解耦，精确 Node 事实不得进入持久记录。
+ */
+export type GenerationRecordToolchain = {
+  readonly nodeLtsMajor: string;
+  readonly packageManagerPin: string;
+};
+
 export type GenerationRecord = {
   readonly schemaVersion: 2;
   readonly repositoryName: string;
   readonly defaultPackageScope: string;
   readonly preset: string;
   readonly templateVersion: "0.0.0";
-  readonly toolchain: GenerationContext["toolchain"];
+  readonly toolchain: GenerationRecordToolchain;
   readonly packages: readonly GeneratedPackagePlanningRecord[];
 };
 
 /** Canonical durable Generation Record contract for a default npm scope. */
 export function isValidDefaultPackageScope(value: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(value);
+}
+
+// 以下两条规则只校验历史 Generation Record 中已冻结的初始化事实，不是现行版本真源。
+function isNumericNodeLtsMajor(value: string): boolean {
+  return /^\d+$/.test(value);
+}
+
+function isExactPackageManagerPin(value: string): boolean {
+  return /^pnpm@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
 }
 
 function strictObjectMessage(
@@ -116,6 +128,7 @@ const missingFieldMessages = new Map<string, string>([
   ["toolchain", "toolchain must be an object"],
   ["packages", "packages must be an array"],
 ]);
+class GenerationRecordInputError extends Error {}
 
 function missingFieldMessage(path: string, fallback: string): string {
   const exact = missingFieldMessages.get(path);
@@ -144,8 +157,8 @@ function missingFieldMessage(path: string, fallback: string): string {
 
 function structuralError(
   issues: readonly v.InferIssue<typeof generationRecordSchema>[],
-): Error {
-  return new Error(
+): GenerationRecordInputError {
+  return new GenerationRecordInputError(
     `Generation Record ${issues
       .map((issue) => {
         const path = issuePath(issue);
@@ -203,10 +216,10 @@ export function parseGenerationRecord(value: unknown): GenerationRecord {
   if (record.preset.length === 0 || record.preset !== record.preset.trim()) {
     issues.push("preset must be a non-empty string");
   }
-  if (!isValidNodeLtsMajor(record.toolchain.nodeLtsMajor)) {
+  if (!isNumericNodeLtsMajor(record.toolchain.nodeLtsMajor)) {
     issues.push("toolchain.nodeLtsMajor must be a numeric Node major");
   }
-  if (!isValidPackageManagerPin(record.toolchain.packageManagerPin)) {
+  if (!isExactPackageManagerPin(record.toolchain.packageManagerPin)) {
     issues.push(
       "toolchain.packageManagerPin must be an exact pnpm version pin",
     );
@@ -238,7 +251,28 @@ export function parseGenerationRecord(value: unknown): GenerationRecord {
     issues.push("packages packageDefinitionId must be unique");
   }
   if (issues.length > 0) {
-    throw new Error(`Generation Record ${issues.join("; ")}`);
+    throw new GenerationRecordInputError(
+      `Generation Record ${issues.join("; ")}`,
+    );
   }
   return record;
+}
+
+/** Review callers need the same complete validation without interpreting Error text. */
+export function validateGenerationRecord(
+  value: unknown,
+):
+  | { readonly ok: true; readonly value: GenerationRecord }
+  | { readonly ok: false; readonly issues: readonly string[] } {
+  try {
+    return { ok: true, value: parseGenerationRecord(value) };
+  } catch (error) {
+    if (!(error instanceof GenerationRecordInputError)) throw error;
+    return {
+      ok: false,
+      issues: [
+        error instanceof Error ? error.message : "Generation Record 无法验证",
+      ],
+    };
+  }
 }

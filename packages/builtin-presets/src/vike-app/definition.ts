@@ -1,20 +1,18 @@
 import { fileURLToPath } from "node:url";
 
-import type { DevelopmentContainerToolLayer } from "#template-core/development-container-tool-layer";
 import {
   dockerEngineEnvironmentNeed,
   playwrightBrowserAssetsEnvironmentNeed,
-  shellCheckEnvironmentNeed,
-} from "#template-core/module-graph";
-import type { PackageContribution } from "#template-core/package-contribution";
+} from "@ykdz/template-core/module-graph";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
   type InitialPackageDefinitionLookup,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { browserTestDevelopmentContainerToolLayer } from "../shared/development-container.ts";
 import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
@@ -74,76 +72,24 @@ function foundation(
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
       directories: { npm: "/", docker: "/.devcontainer" },
-      extraDirectories: { docker: [`/${packageDefinitions.web.path}`] },
       interval: "weekly",
     },
     workspacePackageGlobs,
   };
 }
 
-function shellCheckDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
-  return {
-    identity: "shellcheck",
-    dockerfile: {
-      source: templateSources.vikeApp,
-      from: "devcontainer/shellcheck.Dockerfile",
-    },
-    requires: ["node-pnpm"],
-    probes: [
-      { identity: "shellcheck", command: "shellcheck", args: ["--version"] },
-    ],
-  };
-}
-
-function dockerClientDevelopmentContainerToolLayer(): DevelopmentContainerToolLayer {
-  return {
-    identity: "docker-client",
-    dockerfile: {
-      source: templateSources.vikeApp,
-      from: "devcontainer/docker-client.Dockerfile",
-    },
-    requires: ["node-pnpm"],
-    mounts: [
-      {
-        identity: "docker-socket",
-        type: "bind",
-        source: "/var/run/docker.sock",
-        target: "/var/run/docker.sock",
-      },
-    ],
-    probes: [
-      {
-        identity: "docker-cli",
-        command: "docker",
-        args: ["--version"],
-        failureMessage:
-          "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
-      },
-      {
-        identity: "docker-daemon",
-        command: "docker",
-        args: ["version"],
-        failureMessage:
-          "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
-      },
-    ],
-  };
-}
-
 function webScripts(): Record<string, string> {
   return {
     build: "vike build",
-    deployment:
-      "node --conditions=source scripts/check-standalone-deployment.ts",
-    dev: "vike dev",
+    dev: "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source vike dev",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
-    lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --type-aware .",
+    lint: "oxlint --quiet --format=unix --type-aware .",
     "lint:fix": "oxlint --type-aware --format=unix . --fix",
-    preview: "vike preview",
+    preview: "DATABASE_PROFILE=dev vike preview",
     start: "node ./dist/server/index.mjs",
     test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
-    "test:e2e": "playwright test",
+    "test:e2e": "DATABASE_PROFILE=e2e playwright test",
     typecheck:
       "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
   };
@@ -151,27 +97,28 @@ function webScripts(): Record<string, string> {
 
 function databaseScripts(): Record<string, string> {
   return {
-    build: "tsc -p tsconfig.build.json --noEmit",
+    build: "tsc -p tsconfig.build.json --pretty false",
     "db:seed:example": "node --conditions=source scripts/seed-example.ts",
+    "db:reset": "node --conditions=source scripts/reset.ts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    test: "vitest run --reporter=agent --silent=passed-only",
+    test: "DATABASE_PROFILE=test NODE_OPTIONS=--conditions=source vitest run --reporter=agent --silent=passed-only",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
 
-function migrationScripts(databasePackageName: string): Record<string, string> {
-  const withDatabasePackage = (command: string): string =>
-    `DATABASE_PACKAGE_NAME=${databasePackageName} ${command}`;
+function migrationScripts(): Record<string, string> {
   return {
     build: "tsc -p tsconfig.build.json --noEmit",
-    "db:generate": withDatabasePackage("drizzle-kit generate"),
-    "db:migrate": withDatabasePackage("drizzle-kit migrate"),
+    "db:generate":
+      "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
     "db:prepare:deploy": "pnpm run db:migrate",
-    "db:push": withDatabasePackage("drizzle-kit push"),
-    "db:studio": withDatabasePackage("drizzle-kit studio"),
+    "db:push": "NODE_OPTIONS=--conditions=source drizzle-kit push",
+    "db:studio":
+      "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit studio",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     lint: "oxlint --quiet --format=unix .",
@@ -217,7 +164,6 @@ function webContribution(
   const sourceFiles = [
     "web/+server.ts",
     "web/.env.example",
-    "web/Dockerfile.dockerignore",
     "web/assets/logo.svg",
     "web/components/CounterButton.vue",
     "web/components/PageShell.vue",
@@ -227,14 +173,11 @@ function webContribution(
     "web/pages/index/+Page.vue",
     "web/pages/tailwind.css",
     "web/playwright.config.ts",
-    "web/scripts/check-standalone-deployment.ts",
-    "web/scripts/container-entrypoint.sh",
     "web/server/api.ts",
     "web/test/playwright-teardown.ts",
     "web/test/e2e/app.spec.ts",
     "web/turbo.json",
     "web/types/env.d.ts",
-    "web/vite.config.ts",
     "web/vitest.config.ts",
     "web/tsconfig.json",
     "web/tsconfig.app.json",
@@ -252,15 +195,9 @@ function webContribution(
     {
       kind: "writeTextTemplate",
       source: templateSources.vikeApp,
-      from: "web/Dockerfile",
-      to: `${web.path}/Dockerfile`,
-      replacements: {
-        NODE_VERSION: context.toolchain.nodeLtsMajor,
-        PACKAGE_MANAGER_PIN: context.toolchain.packageManagerPin,
-        DB_PACKAGE_NAME: db.name,
-        DB_MIGRATIONS_PACKAGE_NAME: migrations.name,
-        WEB_PACKAGE_NAME: web.name,
-      },
+      from: "web/vite.config.ts",
+      to: `${web.path}/vite.config.ts`,
+      replacements: { DB_PACKAGE_NAME: db.name },
     },
     {
       kind: "copyFile",
@@ -305,11 +242,6 @@ function webContribution(
       },
     },
     vueTypecheckRunnerSourceOperation(web.path),
-    {
-      kind: "setExecutable",
-      path: `${web.path}/scripts/container-entrypoint.sh`,
-      executable: true,
-    },
   ];
   const owner = { kind: "package-boundary" as const, path: web.path };
   return {
@@ -372,16 +304,45 @@ function webContribution(
     operations,
     environmentNeeds: [
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
-      shellCheckEnvironmentNeed(owner),
     ],
     ciDiagnosticArtifacts: [{ kind: "playwright", owner }],
-    deploymentEnvironmentNeeds: [dockerEngineEnvironmentNeed()],
     foundation: {
       ...foundation(packageDefinitions),
+      deploymentCheck: {
+        kind: "application-container-with-database-migrations",
+        applicationPackageName: web.name,
+        databasePackageName: db.name,
+        migrationPackageName: migrations.name,
+        environmentNeeds: [dockerEngineEnvironmentNeed()],
+        sources: {
+          checker: {
+            source: templateSources.vikeApp,
+            from: "web/scripts/check-standalone-deployment.ts",
+          },
+          controlScript: {
+            source: templateSources.vikeApp,
+            from: "web/scripts/container-entrypoint.sh",
+          },
+          dockerfile: {
+            source: templateSources.vikeApp,
+            from: "web/Dockerfile",
+          },
+          dockerIgnore: {
+            source: templateSources.vikeApp,
+            from: "web/Dockerfile.dockerignore",
+          },
+          shellCheckDockerfile: {
+            source: templateSources.vikeApp,
+            from: "devcontainer/shellcheck.Dockerfile",
+          },
+          dockerClientToolLayer: {
+            source: templateSources.vikeApp,
+            from: "devcontainer/docker-client.Dockerfile",
+          },
+        },
+      },
       developmentContainerToolLayers: [
         browserTestDevelopmentContainerToolLayer(),
-        shellCheckDevelopmentContainerToolLayer(),
-        dockerClientDevelopmentContainerToolLayer(),
       ],
     },
   };
@@ -391,38 +352,62 @@ function databaseContribution(
   context: GenerationContext,
   packageDefinitions = definitions(context),
 ): PackageContribution {
-  const { db } = packageDefinitions;
+  const { db, migrations, web } = packageDefinitions;
   const sourceFiles = [
     "db/turbo.json",
     "db/tsconfig.json",
     "db/tsconfig.build.json",
     "db/scripts/seed-example.ts",
-    "db/vitest.config.ts",
-    "db/test/global-setup.ts",
+    "db/scripts/reset.ts",
     "db/src/db.ts",
     "db/src/index.ts",
     "db/src/queries/todos.ts",
     "db/src/readiness.ts",
+    "db/src/storage.ts",
     "db/src/seed/example.ts",
     "db/src/schema.ts",
-    "db/src/types.d.ts",
+    "db/src/types.ts",
     "db/test/todos.test.ts",
   ] as const;
   const exposure = {
     exports: {
-      ".": { default: "./src/index.ts", types: "./src/index.ts" },
-      "./schema": { default: "./src/schema.ts", types: "./src/schema.ts" },
-      "./types": { default: "./src/types.d.ts", types: "./src/types.d.ts" },
+      ".": {
+        source: "./src/index.ts",
+        types: "./dist/index.d.ts",
+        default: "./dist/index.js",
+      },
       "./queries/todos": {
-        default: "./src/queries/todos.ts",
-        types: "./src/queries/todos.ts",
+        source: "./src/queries/todos.ts",
+        types: "./dist/queries/todos.d.ts",
+        default: "./dist/queries/todos.js",
       },
       "./readiness": {
-        default: "./src/readiness.ts",
-        types: "./src/readiness.ts",
+        source: "./src/readiness.ts",
+        types: "./dist/readiness.d.ts",
+        default: "./dist/readiness.js",
+      },
+      "./schema": {
+        source: "./src/schema.ts",
+        types: "./dist/schema.d.ts",
+        default: "./dist/schema.js",
+      },
+      "./storage": {
+        source: "./src/storage.ts",
+        types: "./dist/storage.d.ts",
+        default: "./dist/storage.js",
+      },
+      "./types": {
+        source: "./src/types.ts",
+        types: "./dist/types.d.ts",
       },
     },
-    imports: { "#db/*": { default: "./src/*.ts", types: "./src/*.ts" } },
+    imports: {
+      "#db/*": {
+        source: "./src/*.ts",
+        types: "./dist/*.d.ts",
+        default: "./dist/*.js",
+      },
+    },
   };
   return {
     definition: db,
@@ -431,6 +416,7 @@ function databaseContribution(
       name: db.name,
       private: true,
       type: "module",
+      files: ["dist"],
       ...exposure,
       scripts: databaseScripts(),
       dependencies: { "drizzle-orm": "catalog:" },
@@ -445,11 +431,27 @@ function databaseContribution(
       engines: { node: context.toolchain.nodeLtsMajor },
     },
     operations: [
-      { kind: "writeJson", to: `${db.path}/package.json`, value: {} },
+      {
+        kind: "writeJson",
+        to: `${db.path}/package.json`,
+        value: {},
+        multilineArrays: ["files"],
+      },
       ...copyOperations(context, db.path, sourceFiles),
     ],
     environmentNeeds: [],
-    foundation: foundation(packageDefinitions),
+    foundation: {
+      ...foundation(packageDefinitions),
+      databasePreparation: {
+        kind: "sqlite-database-preparation",
+        migrationPackageName: migrations.name,
+        consumers: [
+          { kind: "application-dev", packageName: web.name },
+          { kind: "database-test", packageName: db.name },
+          { kind: "application-e2e", packageName: web.name },
+        ],
+      },
+    },
   };
 }
 
@@ -459,7 +461,6 @@ function migrationsContribution(
 ): PackageContribution {
   const { db, migrations } = packageDefinitions;
   const sourceFiles = [
-    "db-migrations/drizzle.config.ts",
     "db-migrations/tsconfig.json",
     "db-migrations/tsconfig.build.json",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
@@ -474,7 +475,7 @@ function migrationsContribution(
       private: true,
       type: "module",
       files: ["drizzle.config.ts", "drizzle/migrations"],
-      scripts: migrationScripts(db.name),
+      scripts: migrationScripts(),
       dependencies: { "drizzle-kit": "catalog:", "drizzle-orm": "catalog:" },
       devDependencies: {
         "@types/node": "catalog:",
@@ -493,6 +494,13 @@ function migrationsContribution(
         multilineArrays: ["files"],
       },
       ...copyOperations(context, migrations.path, sourceFiles),
+      {
+        kind: "writeTextTemplate",
+        source: templateSources.vikeApp,
+        from: "db-migrations/drizzle.config.ts",
+        to: `${migrations.path}/drizzle.config.ts`,
+        replacements: { DB_PACKAGE_NAME: db.name },
+      },
     ],
     environmentNeeds: [],
     foundation: foundation(packageDefinitions),
@@ -517,42 +525,58 @@ const migrationsReplayAdapter = definePackageContributionReplayAdapter({
     migrationsContribution(context, replayDefinitions(initialPackages)),
 });
 
-export const vikeAppDefinition = {
-  metadata: {
-    name: "vike-app",
-    title: "Vike 应用",
-    description:
-      "包含独立数据库和迁移包的 Vike、Hono、Telefunc、Drizzle 与 Vue 工作区。",
-  },
-  source: templateSources.vikeApp,
-  plannerSourceFile: fileURLToPath(import.meta.url),
-  packageContributionReplayAdapters: [
-    webReplayAdapter,
-    databaseReplayAdapter,
-    migrationsReplayAdapter,
-  ],
-  blueprint(context) {
-    const { web, db, migrations } = definitions(context);
-    return {
-      schemaVersion: 3,
-      packages: [web, db, migrations],
-      packageLinkIntents: [
-        { consumerPackagePath: web.path, providerPackagePath: db.path },
-        {
-          consumerPackagePath: migrations.path,
-          providerPackagePath: db.path,
-        },
-      ],
-    };
-  },
-  planInitialization(context) {
-    return webReplayAdapter.identify(webContribution(context));
-  },
-  planInitializationContributions(context) {
-    return [
-      webReplayAdapter.identify(webContribution(context)),
-      databaseReplayAdapter.identify(databaseContribution(context)),
-      migrationsReplayAdapter.identify(migrationsContribution(context)),
-    ];
-  },
-} satisfies BuiltInPresetDefinition;
+export function createVikeAppDefinition(
+  resolvePackageDefinitions: (
+    context: GenerationContext,
+  ) => VikePackageDefinitions = definitions,
+) {
+  return {
+    metadata: {
+      name: "vike-app",
+      title: "Vike 应用",
+      description:
+        "包含独立数据库和迁移包的 Vike、Hono、Telefunc、Drizzle 与 Vue 工作区。",
+    },
+    source: templateSources.vikeApp,
+    plannerSourceFile: fileURLToPath(import.meta.url),
+    packageContributionReplayAdapters: [
+      webReplayAdapter,
+      databaseReplayAdapter,
+      migrationsReplayAdapter,
+    ],
+    blueprint(context) {
+      const { web, db, migrations } = resolvePackageDefinitions(context);
+      return {
+        schemaVersion: 3,
+        packages: [web, db, migrations],
+        packageLinkIntents: [
+          { consumerPackagePath: web.path, providerPackagePath: db.path },
+          {
+            consumerPackagePath: migrations.path,
+            providerPackagePath: db.path,
+          },
+        ],
+      };
+    },
+    planInitialization(context) {
+      const packageDefinitions = resolvePackageDefinitions(context);
+      return webReplayAdapter.identify(
+        webContribution(context, packageDefinitions),
+      );
+    },
+    planInitializationContributions(context) {
+      const packageDefinitions = resolvePackageDefinitions(context);
+      return [
+        webReplayAdapter.identify(webContribution(context, packageDefinitions)),
+        databaseReplayAdapter.identify(
+          databaseContribution(context, packageDefinitions),
+        ),
+        migrationsReplayAdapter.identify(
+          migrationsContribution(context, packageDefinitions),
+        ),
+      ];
+    },
+  } satisfies BuiltInPresetDefinition;
+}
+
+export const vikeAppDefinition = createVikeAppDefinition();

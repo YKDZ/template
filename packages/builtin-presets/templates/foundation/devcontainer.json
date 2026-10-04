@@ -3,8 +3,7 @@
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
-      "NODE_VERSION": "{{NODE_LTS_MAJOR}}",
-      "PACKAGE_MANAGER_PIN": "{{PACKAGE_MANAGER_PIN}}"
+      "NODE_VERSION": "{{NODE_VERSION}}"
     }
   },
   "customizations": {

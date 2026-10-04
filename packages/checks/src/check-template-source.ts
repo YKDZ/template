@@ -4,11 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { resolveBuiltInTemplateSource } from "@ykdz/template-builtin-presets";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import type { TemplateSourceHandle } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-
-import { resolveBuiltInTemplateSource } from "#template-builtin-presets";
-import { renderNewProject } from "#template-core/renderer";
-import type { TemplateSourceHandle } from "#template-core/renderer";
 
 import {
   builtInPresetTemplateSourceCheckContexts,
@@ -113,7 +112,9 @@ async function checkContributionTemplateSource(
       operations: [...context.plan.operations],
     });
     await execa("pnpm", ["install"], { cwd: checkRoot });
-    await execa("pnpm", ["run", "typecheck"], { cwd: checkRoot });
+    await execa("pnpm", ["exec", "turbo", "run", "typecheck"], {
+      cwd: checkRoot,
+    });
     await execa("pnpm", ["run", "lint"], { cwd: checkRoot });
     for (const definition of context.plan.blueprint.packages) {
       const manifest = JSON.parse(
@@ -129,12 +130,6 @@ async function checkContributionTemplateSource(
           { cwd: checkRoot },
         );
       }
-      if (typeof manifest.scripts?.typecheck !== "string") continue;
-      await execa(
-        "pnpm",
-        ["--filter", `./${definition.path}`, "run", "typecheck"],
-        { cwd: checkRoot },
-      );
     }
   } finally {
     await rm(checkRoot, { recursive: true, force: true });

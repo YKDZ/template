@@ -10,14 +10,14 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { execa } from "execa";
-import { describe, expect, it } from "vitest";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-} from "#template-builtin-presets";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
+import { describe, expect, it } from "vitest";
 
 import {
   assertGeneratedTaskDiscovery,
@@ -335,6 +335,82 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
       ).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("derives the real run fixture toolchain from the release snapshot, not historical pins", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "fixture-runtime-snapshot-"),
+    );
+    const captured = new Map<
+      string,
+      {
+        packageManager: string;
+        node: string;
+        rustChannel?: string;
+      }
+    >();
+    const stopSentinel = "container execution stopped after runtime capture";
+
+    try {
+      // 真实初始化先渲染再调用 Git，因此可在 Git 接缝观察各场景的根 manifest。
+      // 在首个容器命令处停止；本测试证明运行夹具输入，不把它作为 Docker 成功结果。
+      await expect(
+        runGeneratedScenarioSet("init", {
+          workspace,
+          run: async (command, args, options) => {
+            if (command !== "git") {
+              throw new Error(stopSentinel);
+            }
+            const result = await execa(command, [...args], options);
+            if (args[0] !== "init") return result;
+            const manifest = JSON.parse(
+              await readFile(path.join(options.cwd, "package.json"), "utf8"),
+            ) as { packageManager: string; engines: { node: string } };
+            let rustChannel: string | undefined;
+            try {
+              const toml = await readFile(
+                path.join(options.cwd, "rust-toolchain.toml"),
+                "utf8",
+              );
+              rustChannel = /channel\s*=\s*"([^"]+)"/u.exec(toml)?.[1];
+            } catch {
+              rustChannel = undefined;
+            }
+            captured.set(path.basename(options.cwd), {
+              packageManager: manifest.packageManager,
+              node: manifest.engines.node,
+              ...(rustChannel === undefined ? {} : { rustChannel }),
+            });
+            return result;
+          },
+        }),
+      ).rejects.toThrow(stopSentinel);
+
+      expect(captured.size).toBeGreaterThan(0);
+      for (const [id, observed] of captured) {
+        expect(
+          observed.packageManager,
+          `root manifest for ${id} must consume the release snapshot pnpm pin`,
+        ).toBe(releaseToolchainSnapshot.packageManagerPin);
+        expect(
+          observed.node,
+          `root manifest for ${id} must consume the release snapshot Node version`,
+        ).toBe(releaseToolchainSnapshot.nodeVersion);
+      }
+
+      const rustScenarios = [...captured.values()].filter(
+        (observed) => observed.rustChannel !== undefined,
+      );
+      expect(rustScenarios.length).toBeGreaterThan(0);
+      for (const observed of rustScenarios) {
+        expect(
+          observed.rustChannel,
+          "a Rust scenario must observe the exact release snapshot Rust version",
+        ).toBe(releaseToolchainSnapshot.rustVersion);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 });

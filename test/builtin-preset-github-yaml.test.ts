@@ -2,16 +2,16 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
-
 import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
   type GeneratedRepositoryPlan,
-} from "#template-builtin-presets";
-import { renderNewProject } from "#template-core/renderer";
+} from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 import {
   assertDependabotContract,
@@ -27,14 +27,7 @@ function rootOnlyPlan(): GeneratedRepositoryPlan {
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
-    return !plan.manifests.some((manifest) => {
-      const scripts = manifest.scripts;
-      return (
-        typeof scripts === "object" &&
-        scripts !== null &&
-        typeof (scripts as Record<string, unknown>).deployment === "string"
-      );
-    });
+    return plan.deploymentCheck === undefined;
   });
   if (definition === undefined) {
     throw new Error("Expected a Root Check-only Built-in Preset Definition");
@@ -89,27 +82,21 @@ async function rootOnlyWorkflowSource(): Promise<string> {
 }
 
 function deploymentPlan(): GeneratedRepositoryPlan {
+  // 遍历全部 Definition 新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
+  const toolchain = {
+    nodeLtsMajor: "24",
+    packageManagerPin: "pnpm@11.11.0",
+    nodeVersion: releaseToolchainSnapshot.nodeVersion,
+  } as const;
   const definition = builtInPresetRegistry.all().find((candidate) => {
     const plan = planGeneratedRepositoryInitialization({
       definition: candidate,
       context: createGenerationContext({
         targetDir: path.join("generated-repository", "deployment"),
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+        toolchain,
       }),
     });
-    return (
-      plan.deploymentEnvironmentNeeds.some(
-        (need) => need.kind === "docker-engine",
-      ) &&
-      plan.manifests.some((manifest) => {
-        const scripts = manifest.scripts;
-        return (
-          typeof scripts === "object" &&
-          scripts !== null &&
-          typeof (scripts as Record<string, unknown>).deployment === "string"
-        );
-      })
-    );
+    return plan.deploymentCheck !== undefined;
   });
   if (definition === undefined) {
     throw new Error("Expected a deployment-capable Built-in Preset Definition");
@@ -118,7 +105,7 @@ function deploymentPlan(): GeneratedRepositoryPlan {
     definition,
     context: createGenerationContext({
       targetDir: path.join("generated-repository", "deployment"),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain,
     }),
   });
 }

@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures.ts";
 
-test("renders the web app and calls the API", async ({ page }) => {
-  await page.goto("/");
+test("renders the web app and calls the API", async ({ page, webUrl }) => {
+  await page.goto(webUrl);
 
   await expect(
     page.getByRole("heading", { name: "Vue 和 Hono 工作区" }),

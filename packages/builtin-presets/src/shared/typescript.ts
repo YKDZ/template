@@ -1,13 +1,13 @@
-import type { PackageContribution } from "#template-core/package-contribution";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type GenerationContext,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type {
   RenderOperation,
   TemplateSourceHandle,
-} from "#template-core/renderer";
+} from "@ykdz/template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 

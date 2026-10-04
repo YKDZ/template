@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_API_BASE_URL ??
     env.VITE_API_BASE_URL ??
     "http://localhost:3000";
+  const previewPort = process.env.PLAYWRIGHT_WEB_PORT;
 
   return {
     plugins: [vue(), tailwindcss()],
@@ -17,6 +18,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
+      ...(previewPort === undefined ? {} : { port: Number(previewPort) }),
       proxy: {
         "/api": apiBaseUrl,
       },

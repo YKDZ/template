@@ -1,10 +1,9 @@
-import { describe, expect, it } from "vitest";
-
 import {
   assertPackageContributionCommandNames,
   validateCliCommandName,
   type PackageContribution,
-} from "#template-core/package-contribution";
+} from "@ykdz/template-core/package-contribution";
+import { describe, expect, it } from "vitest";
 
 function contribution(options: {
   readonly name: string;

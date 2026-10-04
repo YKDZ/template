@@ -14,20 +14,16 @@ import {
   type ProjectBlueprint,
   type PublicationSetupHandoff,
   type ResolvedInitialization,
-} from "#template-builtin-presets";
-import { validateProjectBlueprint } from "#template-core/project-blueprint";
+} from "@ykdz/template-builtin-presets";
+import { validateProjectBlueprint } from "@ykdz/template-core/project-blueprint";
 import {
   reconcileAndApplyProjectProjections,
   materializeProjectProjection,
   type ProjectProjectionAction,
   type ProjectProjectionConflict,
-} from "#template-core/project-projection";
-import { renderNewProject } from "#template-core/renderer";
-import {
-  resolveToolchainVersions,
-  type ResolvedToolchainVersions,
-  type ToolchainResolutionSource,
-} from "#template-core/toolchain-resolution";
+} from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 
 export type ConfirmationRequest = {
   readonly message: string;
@@ -110,7 +106,6 @@ export type InitCommandResult =
       readonly status: "operation-failure";
       readonly code: "OPERATION_INIT_FAILED";
       readonly phase:
-        | "toolchain"
         | "preset"
         | "planning"
         | "preflight"
@@ -248,31 +243,13 @@ export function listPresetCatalog(): PresetCatalogCommandResult {
   };
 }
 
-function toolchainSourceFromEnv(
-  env: ApplicationRuntime["env"],
-): ToolchainResolutionSource | undefined {
-  const source = env.TEMPLATE_TOOLCHAIN_RESOLUTION;
-  return source === "online" || source === "bundled-fallback"
-    ? source
-    : undefined;
-}
-
-async function resolveToolchain(
-  env: ApplicationRuntime["env"],
-): Promise<ResolvedToolchainVersions> {
-  return await resolveToolchainVersions({
-    source: toolchainSourceFromEnv(env),
-    nodeReleaseIndexUrl: env.TEMPLATE_TOOLCHAIN_NODE_RELEASE_INDEX_URL,
-    pnpmRegistryUrl: env.TEMPLATE_TOOLCHAIN_PNPM_REGISTRY_URL,
-  });
-}
-
-function toolchainReport(toolchain: ResolvedToolchainVersions) {
+/**
+ * 初始化结果如实报告随 CLI 发版的不可变工具链快照：没有在线解析来源，也没有回退诊断。
+ */
+function toolchainReport() {
   return {
-    nodeLtsMajor: toolchain.nodeLtsMajor.value,
-    packageManagerPin: toolchain.packageManagerPin.value,
-    source: toolchain.source,
-    diagnostics: toolchain.diagnostics,
+    nodeVersion: releaseToolchainSnapshot.nodeVersion,
+    packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
   };
 }
 
@@ -397,17 +374,15 @@ function initOperationFailure(options: {
   readonly targetDir: string;
 }): Extract<InitCommandResult, { readonly status: "operation-failure" }> {
   const phase =
-    options.phase === "toolchain"
-      ? "工具链解析"
-      : options.phase === "preset"
-        ? "预设准备"
-        : options.phase === "planning"
-          ? "生成规划"
-          : options.phase === "preflight"
-            ? "生成预检"
-            : options.phase === "materialization"
-              ? "生成物料化"
-              : "目标目录渲染";
+    options.phase === "preset"
+      ? "预设准备"
+      : options.phase === "planning"
+        ? "生成规划"
+        : options.phase === "preflight"
+          ? "生成预检"
+          : options.phase === "materialization"
+            ? "生成物料化"
+            : "目标目录渲染";
   return {
     schemaVersion: 1,
     command: "init",
@@ -464,19 +439,9 @@ export async function runInit(
       issues: input.issues,
     };
   }
-  let toolchain: ResolvedToolchainVersions;
-  try {
-    toolchain = await resolveToolchain(runtime.env);
-  } catch {
-    return initOperationFailure({ phase: "toolchain", targetDir: options.dir });
-  }
   const preparation = prepareGeneratedRepositoryInitialization({
     preset: options.preset,
     targetDir,
-    toolchain: {
-      nodeLtsMajor: toolchain.nodeLtsMajor.value,
-      packageManagerPin: toolchain.packageManagerPin.value,
-    },
     ...(overrides === undefined ? {} : { overrides }),
   });
   if (preparation.status === "input-invalid") {
@@ -537,7 +502,7 @@ export async function runInit(
     resolved,
     blueprint: plan.blueprint,
     generationRecord: plan.generationRecord,
-    toolchain: toolchainReport(toolchain),
+    toolchain: toolchainReport(),
     nextSteps: plan.nextStepInstructions,
     publicationSetup,
     followUpDocument: {
@@ -611,7 +576,10 @@ export async function runAddPackage(
     };
   }
   if (preparation.status === "operation-failure") {
-    return packageAdditionOperationFailure(preparation.phase);
+    return packageAdditionOperationFailure(
+      preparation.phase,
+      preparation.diagnostic,
+    );
   }
   if (preparation.status === "conflict") {
     return {
@@ -673,6 +641,7 @@ export async function runAddPackage(
 
 function packageAdditionOperationFailure(
   phase: "metadata" | "default" | "planning" | "reconciliation",
+  diagnostic?: { readonly message: string; readonly suggestion: string },
 ): PackageAdditionCommandResult {
   return {
     schemaVersion: 1,
@@ -680,7 +649,7 @@ function packageAdditionOperationFailure(
     status: "operation-failure",
     code: "OPERATION_ADD_PACKAGE_FAILED",
     phase,
-    error: {
+    error: diagnostic ?? {
       message: "添加 Package 时发生操作失败。",
       suggestion:
         "检查生成仓库元数据与工作区状态后重试；若问题持续发生，请人工处理。",

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedRepositoryPlan } from "#template-builtin-presets";
+import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
 
 import {
   deriveFixtureGateContractIdentity,
@@ -10,7 +10,11 @@ import {
 } from "../../kernel/index.ts";
 
 export type DeploymentQualityPlanInput = {
-  readonly plan: GeneratedRepositoryPlan;
+  readonly plan: GeneratedRepositoryPlan & {
+    readonly deploymentCheck: NonNullable<
+      GeneratedRepositoryPlan["deploymentCheck"]
+    >;
+  };
 };
 
 function expectedDeploymentTaskIds(
@@ -35,21 +39,20 @@ function expectedDeploymentTaskIds(
 export function deriveDeploymentQualityPlanInput(
   plan: GeneratedRepositoryPlan,
 ): DeploymentQualityPlanInput | undefined {
-  const hasDeploymentEntrypoint = plan.manifests.some(
-    (manifest) =>
-      typeof manifest.scripts === "object" &&
-      manifest.scripts !== null &&
-      typeof (manifest.scripts as Record<string, unknown>)[
-        "check:deployment"
-      ] === "string",
-  );
-  return hasDeploymentEntrypoint ? { plan } : undefined;
+  return plan.deploymentCheck === undefined
+    ? undefined
+    : {
+        plan: {
+          ...plan,
+          deploymentCheck: plan.deploymentCheck,
+        },
+      };
 }
 
 export function deploymentQualityExecutionResources(
   deployment: DeploymentQualityPlanInput,
 ): readonly FixtureEvidenceExecutionResource[] {
-  return deployment.plan.deploymentEnvironmentNeeds.some(
+  return deployment.plan.deploymentCheck.environmentNeeds.some(
     (need) => need.kind === "docker-engine",
   )
     ? ["docker"]

@@ -1,14 +1,14 @@
 import { fileURLToPath } from "node:url";
 
-import { rustToolchainEnvironmentNeed } from "#template-core/module-graph";
-import type { PackageContribution } from "#template-core/package-contribution";
+import { rustToolchainEnvironmentNeed } from "@ykdz/template-core/module-graph";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
   type BuiltInPresetDefinition,
   type GenerationContext,
-} from "#template-core/preset-definition";
-import type { PackageDefinition } from "#template-core/project-blueprint";
-import type { RenderOperation } from "#template-core/renderer";
+} from "@ykdz/template-core/preset-definition";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 
 import { templateSources } from "../template-sources.ts";
 
@@ -36,6 +36,9 @@ function rustContribution(options: {
     path: options.packagePath,
     role: "native-package",
   };
+  // 根声明与容器初值共用同一个上下文 channel：初始化携带 CLI 发版快照的精确版本，加包携带目标根
+  // rust-toolchain.toml 的现行 channel；缺省只服务还没有根声明的首次建源路径。
+  const rustChannel = options.context.toolchain.rustVersion ?? "stable";
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
     {
@@ -89,7 +92,14 @@ function rustContribution(options: {
     ],
     foundation: {
       toolchains: {
-        rust: { toolchain: "stable", components: ["rustfmt", "clippy"] },
+        rust: {
+          toolchain: rustChannel,
+          components: ["rustfmt", "clippy"],
+          configurationSource: {
+            source: templateSources.rustBin,
+            from: "rust-toolchain.toml",
+          },
+        },
       },
       editorCapabilities: ["rust-tooling"],
       dependencyMaintenance: {
@@ -111,7 +121,7 @@ function rustContribution(options: {
             from: "devcontainer/rust.Dockerfile",
           },
           requires: ["node-pnpm"],
-          buildArguments: [{ name: "RUST_TOOLCHAIN", value: "stable" }],
+          buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustChannel }],
           mounts: [
             {
               identity: "cargo-registry",
@@ -130,15 +140,6 @@ function rustContribution(options: {
             { identity: "cargo", command: "cargo", args: ["--version"] },
             { identity: "rustc", command: "rustc", args: ["--version"] },
           ],
-        },
-      ],
-      templateFiles: [
-        {
-          identity: "rust-toolchain",
-          source: templateSources.rustBin,
-          from: "rust-toolchain.toml",
-          to: "rust-toolchain.toml",
-          replacements: { RUST_TOOLCHAIN: "stable" },
         },
       ],
     },

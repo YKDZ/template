@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { builtInPresetRegistry } from "#template-builtin-presets";
+import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 
 import type { CliJourney } from "../journey.ts";
 
-const fallbackEnvironment = {
-  TEMPLATE_TOOLCHAIN_RESOLUTION: "bundled-fallback",
-};
+const snapshotNodeMajor = releaseToolchainSnapshot.nodeVersion.slice(
+  0,
+  releaseToolchainSnapshot.nodeVersion.indexOf("."),
+);
 
 function requireAddablePresetName(): string {
   const definition = builtInPresetRegistry
@@ -62,7 +64,6 @@ const journey: CliJourney = {
           "--dry-run",
           "--json",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "fixed-topology identity override rejection",
@@ -75,12 +76,10 @@ const journey: CliJourney = {
           "renamed",
           "--yes",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "non-interactive rejection",
         args: ["init", "rejected", "--preset", addablePresetName],
-        env: fallbackEnvironment,
       },
       {
         name: "invalid durable scope rejection",
@@ -93,7 +92,6 @@ const journey: CliJourney = {
           ".bad",
           "--yes",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "successful JSON without TODO",
@@ -108,12 +106,10 @@ const journey: CliJourney = {
           "--json",
           "--no-todo",
         ],
-        env: fallbackEnvironment,
       },
       {
         name: "existing target conflict",
         args: ["init", "project", "--preset", addablePresetName, "--yes"],
-        env: fallbackEnvironment,
       },
     ];
   },
@@ -158,8 +154,38 @@ const journey: CliJourney = {
     });
 
     assert.equal(results[4]?.exitCode, 0);
-    assert.deepEqual(JSON.parse(results[4]?.stdout ?? "").followUpDocument, {
-      enabled: false,
+    const initialized = JSON.parse(results[4]?.stdout ?? "");
+    assert.deepEqual(initialized.followUpDocument, { enabled: false });
+    assert.deepEqual(initialized.toolchain, {
+      nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+    });
+    const rootManifest = JSON.parse(
+      await readFile(
+        path.join(context.workDir, "project/package.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly engines: { readonly node: string };
+      readonly packageManager: string;
+    };
+    assert.equal(
+      rootManifest.engines.node,
+      releaseToolchainSnapshot.nodeVersion,
+    );
+    assert.equal(
+      rootManifest.packageManager,
+      releaseToolchainSnapshot.packageManagerPin,
+    );
+    const generationRecord = JSON.parse(
+      await readFile(
+        path.join(context.workDir, "project/.template/generation.json"),
+        "utf8",
+      ),
+    ) as { readonly toolchain: Record<string, unknown> };
+    assert.deepEqual(generationRecord.toolchain, {
+      nodeLtsMajor: snapshotNodeMajor,
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     });
     assert.match(
       await readFile(
