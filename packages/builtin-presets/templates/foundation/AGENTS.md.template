@@ -1,4 +1,10 @@
-# 工作约定
+### 本地代理上下文
+
+`AGENTS.md`、`.agents/`、`docs/`、`.scratch/`、`.codex/`、`GLOSSARY*.md` 及其他代理本地规划或上下文文件均为本地工作区输入，不得纳入 Git 跟踪，也不得在 `.gitignore` 中为它们添加例外。
+
+### 工作约定
+
+若这些限制与 Spec、Ticket、ADR 等权威本地文档冲突，应该以权威本地文档为准。
 
 - 开发自动化：非临时维护脚本必须使用 `scripts/**/*.ts` 中可擦除的 TypeScript，而不是 `.mjs` 等 JavaScript 脚本（Node 24 支持原生直接执行）；归所属非构建 TypeScript 项目并受 format、lint、typecheck 覆盖，防止腐化；产品 build 不产出这些脚本。普通 Node 自动化使用原生 TypeScript 执行链。
 - 临时脚本：编写临时脚本时，应该将其放到有临时目录语义的位置
