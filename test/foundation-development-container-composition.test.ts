@@ -307,14 +307,10 @@ describe("Foundation Development Container composition", () => {
         }
         if (contribution.foundation.deploymentCheck !== undefined) {
           expect(layerIdentities).not.toContain("shellcheck");
-          expect(layerIdentities).not.toContain("docker-client");
           expect(contribution.foundation.deploymentCheck.sources).toMatchObject(
             {
               shellCheckDockerfile: {
                 from: "devcontainer/shellcheck.Dockerfile",
-              },
-              dockerClientToolLayer: {
-                from: "devcontainer/docker-client.Dockerfile",
               },
             },
           );
@@ -482,124 +478,6 @@ describe("Foundation Development Container composition", () => {
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  it("projects Docker client authority only for repositories with deployment Docker needs", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-foundation-deployment-tools-"),
-    );
-
-    try {
-      for (const definition of builtInPresetRegistry.all()) {
-        const targetDir = path.join(workspace, definition.metadata.name);
-        const context = createGenerationContext({
-          targetDir,
-          defaultPackageScope: "example",
-          toolchain: {
-            nodeLtsMajor: "24",
-            packageManagerPin: "pnpm@11.11.0",
-            nodeVersion: releaseToolchainSnapshot.nodeVersion,
-          },
-        });
-        const plan = planGeneratedRepositoryInitialization({
-          definition,
-          context,
-        });
-        const needsDocker =
-          plan.deploymentCheck?.environmentNeeds.some(
-            (need) => need.kind === "docker-engine",
-          ) ?? false;
-        const hasDockerClientLayer = plan.developmentContainer.toolLayers.some(
-          (layer) => layer.identity === "docker-client",
-        );
-        await renderNewProject({
-          targetRoot: targetDir,
-          operations: [...plan.operations],
-        });
-
-        const dockerfile = await readFile(
-          path.join(targetDir, ".devcontainer/Dockerfile"),
-          "utf8",
-        );
-        const devcontainer = JSON.parse(
-          await readFile(
-            path.join(targetDir, ".devcontainer/devcontainer.json"),
-            "utf8",
-          ),
-        ) as {
-          mounts: { type: string; source: string; target: string }[];
-        };
-        const dockerSocketMounts = devcontainer.mounts.filter(
-          (mount) =>
-            mount.source === "/var/run/docker.sock" ||
-            mount.target === "/var/run/docker.sock",
-        );
-
-        expect(hasDockerClientLayer).toBe(needsDocker);
-        expect(
-          dockerfile.includes("install -y --no-install-recommends docker.io"),
-        ).toBe(needsDocker);
-        expect(dockerSocketMounts).toEqual(
-          needsDocker
-            ? [
-                {
-                  type: "bind",
-                  source: "/var/run/docker.sock",
-                  target: "/var/run/docker.sock",
-                },
-              ]
-            : [],
-        );
-      }
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  it("plans ordered Docker capability probes only for deployment-capable repositories", () => {
-    for (const definition of builtInPresetRegistry.all()) {
-      const context = createGenerationContext({
-        targetDir: path.join("/tmp", definition.metadata.name),
-        defaultPackageScope: "example",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      });
-      const plan = planGeneratedRepositoryInitialization({
-        definition,
-        context,
-      });
-      const needsDocker =
-        plan.deploymentCheck?.environmentNeeds.some(
-          (need) => need.kind === "docker-engine",
-        ) ?? false;
-      const dockerProbes = plan.developmentContainer.probes.filter(
-        (probe) => probe.command === "docker",
-      );
-
-      expect(dockerProbes).toEqual(
-        needsDocker
-          ? [
-              {
-                identity: "docker-cli",
-                command: "docker",
-                args: ["--version"],
-                failureMessage:
-                  "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
-              },
-              {
-                identity: "docker-daemon",
-                command: "docker",
-                args: ["version"],
-                failureMessage:
-                  "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
-              },
-            ]
-          : [],
-      );
     }
   });
 

@@ -97,7 +97,7 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     });
   });
 
-  it("declares its browser, ShellCheck, and Docker Client Tool Layers", () => {
+  it("declares its browser and ShellCheck Tool Layers", () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: vikeAppDefinition,
       context: createGenerationContext({
@@ -110,10 +110,9 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     const byIdentity = new Map(layers.map((layer) => [layer.identity, layer]));
     const browser = byIdentity.get("browser-test")!;
     const shellCheck = byIdentity.get("shellcheck")!;
-    const dockerClient = byIdentity.get("docker-client")!;
 
     expect([...byIdentity.keys()]).toEqual(
-      expect.arrayContaining(["browser-test", "docker-client", "shellcheck"]),
+      expect.arrayContaining(["browser-test", "shellcheck"]),
     );
     expect(
       resolveTemplateSource(browser.dockerfile.source, browser.dockerfile.from),
@@ -144,44 +143,6 @@ describe("vike-app Built-in Preset Definition behavior", () => {
         "../../templates/vike-app/devcontainer/shellcheck.Dockerfile",
       ),
     );
-    expect(dockerClient).toMatchObject({
-      requires: ["node-pnpm"],
-      mounts: [
-        {
-          identity: "docker-socket",
-          type: "bind",
-          source: "/var/run/docker.sock",
-          target: "/var/run/docker.sock",
-        },
-      ],
-      probes: [
-        {
-          identity: "docker-cli",
-          command: "docker",
-          args: ["--version"],
-          failureMessage:
-            "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
-        },
-        {
-          identity: "docker-daemon",
-          command: "docker",
-          args: ["version"],
-          failureMessage:
-            "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
-        },
-      ],
-    });
-    expect(
-      resolveTemplateSource(
-        dockerClient.dockerfile.source,
-        dockerClient.dockerfile.from,
-      ),
-    ).toBe(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/vike-app/devcontainer/docker-client.Dockerfile",
-      ),
-    );
   });
 
   it("owns its Vike Template Source and deployment fragments through real handles", () => {
@@ -207,9 +168,6 @@ describe("vike-app Built-in Preset Definition behavior", () => {
             expect.objectContaining({ from: "browser-test.Dockerfile" }),
             expect.objectContaining({
               from: "devcontainer/shellcheck.Dockerfile",
-            }),
-            expect.objectContaining({
-              from: "devcontainer/docker-client.Dockerfile",
             }),
           ]),
         }),
@@ -678,9 +636,6 @@ describe("vike-app Built-in Preset Definition behavior", () => {
     expect(devcontainerDockerfile).toContain(
       "install -y --no-install-recommends shellcheck",
     );
-    expect(devcontainerDockerfile).toContain(
-      "install -y --no-install-recommends docker.io",
-    );
     expect(
       JSON.parse(
         await readFile(
@@ -699,11 +654,6 @@ describe("vike-app Built-in Preset Definition behavior", () => {
           type: "volume",
           source: "${devcontainerId}-pnpm-store",
           target: "/pnpm/store",
-        },
-        {
-          type: "bind",
-          source: "/var/run/docker.sock",
-          target: "/var/run/docker.sock",
         },
       ],
     });

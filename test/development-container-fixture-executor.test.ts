@@ -1709,7 +1709,7 @@ describe("Development Container Fixture Executor", () => {
           session.run("pnpm", ["run", "check"], { cwd: projectDir }),
         ).rejects.toThrow(
           new RegExp(
-            `Tool Layer capability ${identity}.*container capability is missing`,
+            `Development Container capability ${identity}.*container capability is missing`,
             "u",
           ),
         );
@@ -1964,7 +1964,7 @@ describe("Development Container Fixture Executor", () => {
       await expect(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
       ).rejects.toThrow(
-        /Tool Layer capability docker-client.*Docker daemon access is unavailable.*permission denied/u,
+        /Development Container capability docker-client.*Docker daemon access is unavailable.*permission denied/u,
       );
     } finally {
       await session.close();
@@ -2023,7 +2023,7 @@ describe("Development Container Fixture Executor", () => {
 
     expect(failure).toBeInstanceOf(AggregateError);
     expect((failure as AggregateError).message).toMatch(
-      /^Tool Layer capability docker-client.*permission denied/u,
+      /^Development Container capability docker-client.*permission denied/u,
     );
     expect((failure as AggregateError).message).toContain(
       "cleanup daemon stopped",

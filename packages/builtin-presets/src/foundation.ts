@@ -1344,7 +1344,30 @@ function contributedDevcontainerComposition(options: {
     toolLayers: layerPlan.layers,
     buildArguments: layerPlan.buildArguments,
     mounts: layerPlan.mounts,
-    probes: layerPlan.probes,
+    probes: [
+      ...layerPlan.probes,
+      {
+        identity: "docker-daemon",
+        command: "docker",
+        args: ["version"],
+        failureMessage:
+          "无法连接宿主 Docker；请检查宿主 daemon 是否运行，以及开发容器 Feature 的连接配置与权限。",
+      },
+      {
+        identity: "docker-buildx",
+        command: "docker",
+        args: ["buildx", "version"],
+        failureMessage:
+          "Buildx 不可用；请重建开发容器以完成官方 Feature 安装。",
+      },
+      {
+        identity: "docker-compose",
+        command: "docker",
+        args: ["compose", "version"],
+        failureMessage:
+          "Compose 不可用；请重建开发容器以完成官方 Feature 安装。",
+      },
+    ],
   };
 }
 
@@ -2681,35 +2704,6 @@ function deploymentCheckDevelopmentContainerToolLayers(
         },
       ],
     },
-    {
-      identity: "docker-client",
-      dockerfile: deploymentCheck.sources.dockerClientToolLayer,
-      requires: ["node-pnpm"],
-      mounts: [
-        {
-          identity: "docker-socket",
-          type: "bind",
-          source: "/var/run/docker.sock",
-          target: "/var/run/docker.sock",
-        },
-      ],
-      probes: [
-        {
-          identity: "docker-cli",
-          command: "docker",
-          args: ["--version"],
-          failureMessage:
-            "Docker CLI is unavailable; rebuild the Development Container to install the Docker Client Tool Layer.",
-        },
-        {
-          identity: "docker-daemon",
-          command: "docker",
-          args: ["version"],
-          failureMessage:
-            "Docker daemon is inaccessible through /var/run/docker.sock; verify the host daemon is running and the standard socket is accessible.",
-        },
-      ],
-    },
   ];
 }
 
@@ -2753,6 +2747,7 @@ function composeDependencyMaintenancePolicy(
 ): DependencyMaintenancePolicy {
   const ecosystems = [
     ...new Set([
+      "devcontainers" as const,
       ...contributions.flatMap(
         (contribution) =>
           contribution.foundation.dependencyMaintenance.ecosystems,

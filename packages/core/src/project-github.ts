@@ -61,6 +61,7 @@ export type DependencyEcosystem =
   | "cargo"
   | "github-actions"
   | "docker"
+  | "devcontainers"
   | "rust-toolchain";
 
 export type DependabotDirectory = `/${string}`;

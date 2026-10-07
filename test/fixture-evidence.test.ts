@@ -3101,12 +3101,14 @@ describe("Fixture Verification Evidence", () => {
       );
     }
     await expect(access(workspaceRoot)).resolves.toBeUndefined();
-    const remainingEntries = await readdir(workspaceRoot);
-    expect(
-      remainingEntries.filter((entry) =>
-        entry.startsWith("template-generated-check-"),
+    const ownedWorkspaces = new Set(
+      [...observedProjectDirectories].map((directory) =>
+        path.dirname(directory),
       ),
-    ).toEqual([]);
+    );
+    for (const workspace of ownedWorkspaces) {
+      await expect(access(workspace)).rejects.toMatchObject({ code: "ENOENT" });
+    }
   });
 
   it("rejects malformed concurrency at the real generated-registry CLI environment boundary", async () => {

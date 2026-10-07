@@ -335,10 +335,6 @@ function webContribution(
             source: templateSources.vikeApp,
             from: "devcontainer/shellcheck.Dockerfile",
           },
-          dockerClientToolLayer: {
-            source: templateSources.vikeApp,
-            from: "devcontainer/docker-client.Dockerfile",
-          },
         },
       },
       developmentContainerToolLayers: [

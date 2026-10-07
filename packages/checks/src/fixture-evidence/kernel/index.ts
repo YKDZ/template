@@ -806,7 +806,7 @@ export function createDevelopmentContainerFixtureSession(options: {
           await exec(probe.command, probe.args ?? []);
         } catch (error) {
           throw new Error(
-            `Tool Layer capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
+            `Development Container capability ${probe.identity} is unavailable${probe.failureMessage === undefined ? "" : `: ${probe.failureMessage}`}: ${errorMessage(error)}`,
             { cause: error },
           );
         }

@@ -968,6 +968,7 @@ type DependencyEcosystem =
   | "cargo"
   | "github-actions"
   | "docker"
+  | "devcontainers"
   | "rust-toolchain";
 
 type DependabotUpdateOracle = {
@@ -998,6 +999,7 @@ function dependabotOracle(
   );
   const ecosystems = [
     ...new Set([
+      "devcontainers" as const,
       ...declarations.flatMap((declaration) => declaration.ecosystems),
       ...(plan.deploymentCheck === undefined ? [] : (["docker"] as const)),
     ]),

@@ -171,7 +171,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     const mutations = [
       {
         source: baseline.source.replace("interval: weekly", "interval: daily"),
-        diagnostic: /npm.*weekly update schedule/u,
+        diagnostic: /weekly update schedule/u,
       },
       {
         source: baseline.source.replace(

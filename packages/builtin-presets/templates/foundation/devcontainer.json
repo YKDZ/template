@@ -6,6 +6,9 @@
       "NODE_VERSION": "{{NODE_VERSION}}"
     }
   },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
   "customizations": {
     "vscode": {
       "extensions": ["oxc.oxc-vscode"]
