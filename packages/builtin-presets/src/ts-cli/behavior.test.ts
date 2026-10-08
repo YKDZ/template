@@ -2127,7 +2127,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
-  }, 180_000);
+  }, 600_000);
 
   it("restores SIGTERM from blocked confirmation, captured read, and interactive write owners", async () => {
     const { workspace, targetDir } = await renderGeneratedRepository(

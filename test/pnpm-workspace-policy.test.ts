@@ -70,7 +70,6 @@ async function generateNodeOnlyProject(prefix: string): Promise<string> {
       projectDir,
       "--preset",
       definitionForPnpmPolicy(context).metadata.name,
-      "--yes",
     ],
     { cwd: repoRoot },
   );

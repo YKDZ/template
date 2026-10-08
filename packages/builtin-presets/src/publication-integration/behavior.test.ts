@@ -23,7 +23,7 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
@@ -477,6 +477,13 @@ describe("ts-cli publication owner-fact integration", () => {
         NPM_CONFIG_REGISTRY: process.env.NPM_CONFIG_REGISTRY,
         NODE_OPTIONS: process.env.NODE_OPTIONS,
       };
+      const restoreAmbient = () => {
+        for (const [key, value] of Object.entries(ambient)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      };
+      onTestFinished(restoreAmbient);
       process.env.NPM_CONFIG_BIN_LINKS = "false";
       process.env.npm_config_package_lock_only = "true";
       process.env.NPM_CONFIG_REGISTRY = "https://invalid.example/";
@@ -490,10 +497,7 @@ describe("ts-cli publication owner-fact integration", () => {
           outputDirectory,
         });
       } finally {
-        for (const [key, value] of Object.entries(ambient)) {
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
+        restoreAmbient();
       }
 
       expect(verified).toMatchObject({

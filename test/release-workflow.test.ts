@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { execa } from "execa";
+
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -20,26 +22,18 @@ describe("npm release workflow", () => {
   it("keeps the unreleased CLI version in one package manifest field", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(repoRoot, "packages/cli/package.json"), "utf8"),
-    ) as { readonly version: string };
-    const cliSource = await readFile(
+    ) as { readonly version: string; readonly bin: Record<string, string> };
+    const result = await execa(process.execPath, [
+      "--conditions=source",
       path.join(repoRoot, "packages/cli/src/cli.ts"),
-      "utf8",
-    );
-    const applicationSource = await readFile(
-      path.join(repoRoot, "packages/cli/src/application.ts"),
-      "utf8",
-    );
-    const controlSource = await readFile(
-      path.join(repoRoot, "packages/cli/src/main.ts"),
-      "utf8",
-    );
+      "--version",
+    ]);
 
     expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/u);
-    expect(cliSource).toContain('require("../package.json")');
-    expect(cliSource.match(/packageManifest\.version/gu)).toHaveLength(1);
-    expect(
-      `${cliSource}\n${applicationSource}\n${controlSource}`,
-    ).not.toContain(manifest.version);
+    expect(result.stdout).toBe(
+      `${Object.keys(manifest.bin)[0]} ${manifest.version}`,
+    );
+    expect(result.stderr).toBe("");
   });
 
   it("publishes through GitHub Actions OIDC without a long-lived npm token", async () => {
