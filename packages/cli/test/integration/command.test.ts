@@ -184,9 +184,11 @@ describe("template CLI command control", () => {
         kind: "data",
         variant: "listed",
         data: {
-          presets: expect.arrayContaining([
-            expect.objectContaining({ name: "ts-cli" }),
-          ]),
+          presets: builtInPresetRegistry
+            .all()
+            .map((definition) =>
+              expect.objectContaining({ name: definition.metadata.name }),
+            ),
         },
       });
       expect(jsonOutput.stderr()).toBe("");
