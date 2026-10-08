@@ -359,10 +359,33 @@ function createCliContract(runtime: CliRuntime) {
             text: ({ conflicts }) =>
               text.lines([
                 "新增包存在冲突，未写入变更。",
-                ...conflicts.map((conflict) =>
+                ...conflicts.flatMap((conflict) =>
                   "kind" in conflict
-                    ? `${conflict.requested.path}: 包身份或链接与当前仓库冲突。`
-                    : `${conflict.path}: ${conflict.reason}`,
+                    ? [
+                        `${conflict.requested.path}: 包身份或链接与当前仓库冲突。`,
+                        `现有包: ${conflict.existing.name} (${conflict.existing.path})`,
+                        `请求包: ${conflict.requested.name} (${conflict.requested.path})`,
+                      ]
+                    : [
+                        `${conflict.path} (${conflict.driver})`,
+                        ...(conflict.location === undefined
+                          ? []
+                          : [`位置: ${conflict.location || "<文档根>"}`]),
+                        ...(conflict.region === undefined
+                          ? []
+                          : [
+                              `区域: 生成前第 ${conflict.region.before.startLine} 行；当前第 ${conflict.region.current.startLine} 行；请求后第 ${conflict.region.after.startLine} 行`,
+                            ]),
+                        ...(conflict.attribute === undefined
+                          ? []
+                          : [`属性: ${conflict.attribute}`]),
+                        `原因: ${conflict.reason}`,
+                        `生成前: ${conflict.context.before}`,
+                        `当前: ${conflict.context.current}`,
+                        `请求后: ${conflict.context.after}`,
+                      ].flatMap((line) =>
+                        line.replaceAll("\0", "\\0").split(/\r\n|\r|\n/u),
+                      ),
                 ),
               ]),
           },

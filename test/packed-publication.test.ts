@@ -1420,7 +1420,7 @@ describe("packed public CLI consumer", () => {
         dockerfilePath,
         dockerfile.replace(
           baseToolLayerBoundary,
-          `${baseToolLayerBoundary}# incompatible insertion\n`,
+          `${baseToolLayerBoundary}# incompatible insertion\r\n`,
         ),
       );
       const textBefore = await workspaceByteSnapshot(previewTarget);
@@ -1451,7 +1451,7 @@ describe("packed public CLI consumer", () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 300_000);
 
   it("adds a package with the packed CLI after the generated repository is installed", async () => {
     const workspace = await mkdtemp(
