@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { CliJourney } from "../journey.ts";
@@ -32,111 +32,101 @@ const journey: CliJourney = {
   },
   commands() {
     return [
+      {
+        name: "list presets text",
+        args: ["presets", "--output-format", "text"],
+      },
       { name: "list presets", args: ["presets"] },
-      { name: "list presets JSON", args: ["presets", "--json"] },
+      {
+        name: "valid blueprint text",
+        args: [
+          "blueprint",
+          "validate",
+          "valid-blueprint.json",
+          "--output-format",
+          "text",
+        ],
+      },
       {
         name: "valid blueprint",
         args: ["blueprint", "validate", "valid-blueprint.json"],
       },
       {
-        name: "valid blueprint JSON",
-        args: ["blueprint", "validate", "valid-blueprint.json", "--json"],
+        name: "invalid blueprint text",
+        args: [
+          "blueprint",
+          "validate",
+          "legacy-blueprint.json",
+          "--output-format",
+          "text",
+        ],
       },
       {
-        name: "legacy blueprint",
+        name: "invalid blueprint",
         args: ["blueprint", "validate", "legacy-blueprint.json"],
       },
       {
-        name: "legacy blueprint JSON",
-        args: ["blueprint", "validate", "legacy-blueprint.json", "--json"],
+        name: "missing blueprint",
+        args: ["blueprint", "validate", "missing-blueprint.json"],
       },
       {
-        name: "missing blueprint JSON",
-        args: ["blueprint", "validate", "missing-blueprint.json", "--json"],
-      },
-      {
-        name: "malformed blueprint",
-        args: ["blueprint", "validate", "malformed-blueprint.json"],
+        name: "malformed blueprint text",
+        args: [
+          "blueprint",
+          "validate",
+          "malformed-blueprint.json",
+          "--output-format",
+          "text",
+        ],
       },
     ];
   },
   async assertions({ context, results }) {
-    const manifest = JSON.parse(
-      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
-    ) as { readonly version: string };
-    assert.equal(results[0]?.exitCode, 0);
-    assert.match(results[0]?.stdout ?? "", /^template .+\n内置预设/mu);
-    assert.match(results[0]?.stdout ?? "", /\n  ts-cli:/u);
-    assert.match(results[0]?.stdout ?? "", /\n  ts-lib:/u);
-    assert.equal(results[0]?.stderr, "");
-
-    const catalog = JSON.parse(results[1]?.stdout ?? "") as {
-      readonly schemaVersion: number;
-      readonly command: string;
-      readonly status: string;
-      readonly presets: readonly { readonly name: string }[];
-      readonly cliVersion: string;
-    };
-    assert.equal(catalog.schemaVersion, 1);
-    assert.equal(catalog.command, "presets");
-    assert.equal(catalog.status, "success");
-    const presetNames = catalog.presets.map((preset) => preset.name);
-    assert.ok(presetNames.length > 0);
-    assert.ok(presetNames.every((name) => name.length > 0));
-    assert.equal(new Set(presetNames).size, presetNames.length);
-    for (const name of presetNames) {
-      assert.ok((results[0]?.stdout ?? "").includes(`\n  ${name}:`));
+    for (const result of results.slice(0, 4)) {
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.stderr, "");
     }
-    assert.equal(catalog.cliVersion, manifest.version);
-    assert.equal(results[1]?.stderr, "");
-
-    assert.equal(results[2]?.exitCode, 0);
-    assert.match(results[2]?.stdout ?? "", /^template .+\n蓝图有效。/mu);
-    assert.equal(results[2]?.stderr, "");
+    for (const result of results.slice(4)) {
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.stdout, "");
+    }
+    assert.match(results[0]?.stdout ?? "", /内置预设/u);
+    const catalog = JSON.parse(results[1]?.stdout ?? "");
+    assert.equal(catalog.schemaVersion, "1");
+    assert.equal(catalog.kind, "data");
+    assert.equal(catalog.variant, "listed");
+    const names: string[] = catalog.data.presets.map(
+      (preset: { name: string }) => preset.name,
+    );
+    assert.ok(names.length > 0);
+    assert.equal(new Set(names).size, names.length);
+    for (const name of names)
+      assert.ok(results[0]?.stdout.includes(`${name}:`));
+    assert.match(results[2]?.stdout ?? "", /蓝图有效/u);
     assert.deepEqual(JSON.parse(results[3]?.stdout ?? ""), {
-      schemaVersion: 1,
-      command: "blueprint validate",
-      status: "success",
-      path: path.join(context.workDir, "valid-blueprint.json"),
-      cliVersion: manifest.version,
+      schemaVersion: "1",
+      command: "validateBlueprint",
+      kind: "data",
+      variant: "valid",
+      data: { path: path.join(context.workDir, "valid-blueprint.json") },
     });
-    assert.equal(results[3]?.stderr, "");
-
-    assert.equal(results[4]?.exitCode, 1);
-    assert.equal(results[4]?.stdout, "");
     assert.match(results[4]?.stderr ?? "", /蓝图无效/u);
-    assert.match(results[4]?.stderr ?? "", /建议:/u);
-    const invalid = JSON.parse(results[5]?.stdout ?? "") as {
-      readonly status: string;
-      readonly code: string;
-      readonly issues: readonly { readonly path: string }[];
-    };
-    assert.equal(results[5]?.exitCode, 1);
-    assert.equal(invalid.status, "invalid");
-    assert.equal(invalid.code, "BLUEPRINT_INVALID");
+    const invalid = JSON.parse(results[5]?.stderr ?? "");
+    assert.equal(invalid.kind, "failure");
+    assert.equal(invalid.variant, "invalid");
     assert.deepEqual(
-      invalid.issues.map((issue) => issue.path),
+      invalid.data.issues.map((issue: { path: string }) => issue.path),
       [".schemaVersion"],
     );
-    assert.equal(results[5]?.stderr, "");
-
-    const missing = JSON.parse(results[6]?.stdout ?? "") as {
-      readonly status: string;
-      readonly code: string;
-      readonly path: string;
-    };
-    assert.equal(results[6]?.exitCode, 65);
-    assert.equal(missing.status, "operation-failure");
-    assert.equal(missing.code, "OPERATION_BLUEPRINT_READ_FAILED");
+    const missing = JSON.parse(results[6]?.stderr ?? "");
+    assert.equal(missing.variant, "operationFailed");
+    assert.equal(missing.data.reason, "not-found");
     assert.equal(
-      missing.path,
+      missing.data.path,
       path.join(context.workDir, "missing-blueprint.json"),
     );
-    assert.equal(results[6]?.stderr, "");
-    assert.equal(results[7]?.exitCode, 65);
-    assert.equal(results[7]?.stdout, "");
-    assert.match(results[7]?.stderr ?? "", /OPERATION_BLUEPRINT_PARSE_FAILED/u);
-    assert.match(results[7]?.stderr ?? "", /建议:/u);
+    assert.match(results[7]?.stderr ?? "", /JSON 格式无效/u);
+    assert.match(results[7]?.stderr ?? "", /建议/u);
   },
 };
 

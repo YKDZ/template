@@ -21,6 +21,8 @@ overrides:
   "vue>typescript": "-"
 
 catalog:
+  "@ykdz/cli-contract": 0.2.1
+  "@valibot/to-json-schema": ^1.8.0
   "@devcontainers/cli": 0.89.0
   "@hono/node-server": ^2.0.12
   "@playwright/test": ^1.62.1
@@ -31,7 +33,6 @@ catalog:
   "@vikejs/hono": ^0.2.1
   "@vue/devtools-api": ^8.1.5
   "@vue/tsconfig": ^0.9.1
-  commander: ^15.0.0
   drizzle-kit: 1.0.0-rc.5-ab785fc
   drizzle-orm: 1.0.0-rc.5-ab785fc
   execa: ^10.0.1

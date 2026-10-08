@@ -5,79 +5,138 @@ import { describe, expect, it } from "vitest";
 import { cliCommandIdentity } from "../../src/cli-command-identity.ts";
 import { runCli, type CliRuntime } from "../../src/main.ts";
 
-const require = createRequire(import.meta.url);
-const packageManifest = require("../../package.json") as unknown;
-const identity = cliCommandIdentity(packageManifest);
+const identity = cliCommandIdentity(
+  createRequire(import.meta.url)("../../package.json"),
+);
 
-function testRuntime(args: readonly string[]): {
-  readonly runtime: CliRuntime;
-  readonly stdout: () => string;
-  readonly stderr: () => string;
-} {
+function testRuntime(args: readonly string[]) {
   let stdout = "";
   let stderr = "";
-  return {
-    runtime: {
-      argv: ["node", identity.commandName, ...args],
-      streams: {
-        stdin: {},
-        stdout: { write: (chunk) => (stdout += chunk) },
-        stderr: { write: (chunk) => (stderr += chunk) },
-      },
-      cwd: "/workspace",
-      env: { MODE: "test" },
-      tty: { stdin: false, stdout: false, stderr: false },
-      identity,
+  const runtime: CliRuntime = {
+    argv: ["node", identity.commandName, ...args],
+    identity,
+    write: ({ destination, chunk }) => {
+      if (destination === "stdout") stdout += chunk;
+      else stderr += chunk;
     },
-    stdout: () => stdout,
-    stderr: () => stderr,
   };
+  return { runtime, stdout: () => stdout, stderr: () => stderr };
 }
 
-describe("CLI command control", () => {
-  it("parses greet and writes business output to the injected stream", async () => {
-    const output = testRuntime(["greet", "  Ada Lovelace  "]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toBe("Hello, Ada Lovelace\n");
+describe("CLI 契约", () => {
+  it("查询成功默认返回结构化数据，也支持中文文本", async () => {
+    const output = testRuntime(["lookup", "ada"]);
+    expect(await runCli(output.runtime)).toBe(0);
+    expect(JSON.parse(output.stdout())).toEqual({
+      schemaVersion: "1",
+      command: "lookup",
+      kind: "data",
+      variant: "found",
+      data: { name: "ada", title: "Ada Lovelace" },
+    });
     expect(output.stderr()).toBe("");
+    const human = testRuntime(["lookup", "ada", "--output-format", "text"]);
+    expect(await runCli(human.runtime)).toBe(0);
+    expect(human.stdout()).toContain("找到记录");
+    expect(human.stdout()).toContain("Ada Lovelace");
   });
 
-  it("renders the version derived from the package manifest", async () => {
-    const output = testRuntime(["--version"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toBe(`${identity.version}\n`);
-    expect(output.stderr()).toBe("");
+  it("未找到记录是已声明失败，非法名称是用法错误", async () => {
+    const missing = testRuntime(["lookup", "missing"]);
+    expect(await runCli(missing.runtime)).toBe(1);
+    expect(missing.stdout()).toBe("");
+    expect(JSON.parse(missing.stderr())).toMatchObject({
+      kind: "failure",
+      variant: "notFound",
+      data: { name: "missing" },
+    });
+    for (const args of [["lookup"], ["lookup", "   "]]) {
+      const invalid = testRuntime([...args, "--output-format", "text"]);
+      expect(await runCli(invalid.runtime)).toBe(2);
+      expect(invalid.stdout()).toBe("");
+      expect(JSON.parse(invalid.stderr())).toMatchObject({
+        kind: "usageFailure",
+      });
+    }
   });
 
-  it("renders Commander help without exiting the process", async () => {
-    const output = testRuntime(["--help"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toContain(
-      `Usage: ${identity.commandName} [options] [command]`,
+  it("帮助和版本使用 manifest 身份，schema 导出完整契约", async () => {
+    const version = testRuntime(["--version"]);
+    expect(await runCli(version.runtime)).toBe(0);
+    expect(version.stdout()).toBe(
+      `${identity.commandName} ${identity.version}\n`,
     );
-    expect(output.stdout()).toContain("greet <name>");
-    expect(output.stderr()).toBe("");
+    const help = testRuntime(["--help"]);
+    expect(await runCli(help.runtime)).toBe(0);
+    expect(help.stdout()).toContain(identity.commandName);
+    expect(help.stdout()).toContain("lookup");
+    expect(help.stdout()).toContain("schema");
+    const schema = testRuntime(["schema"]);
+    expect(await runCli(schema.runtime)).toBe(0);
+    const humanSchema = testRuntime(["schema", "--output-format", "text"]);
+    expect(await runCli(humanSchema.runtime)).toBe(0);
+    expect(humanSchema.stdout()).toContain("CLI 契约");
+    expect(humanSchema.stdout()).toContain('"commands"');
+    const manifest = JSON.parse(schema.stdout()).data.manifest;
+    expect(manifest).toMatchObject({
+      commands: {
+        lookup: {
+          input: {
+            inputSchema: {
+              properties: { name: { pattern: "^[a-z]+$" } },
+              required: ["name"],
+            },
+          },
+          success: { variants: { found: { exitCode: 0 } } },
+          failures: { notFound: { exitCode: 1 } },
+        },
+        schema: { success: { variants: { exported: { exitCode: 0 } } } },
+      },
+      controls: {
+        output: {
+          defaultFormat: "structured",
+          formats: ["structured", "text"],
+        },
+      },
+      usageFailure: { exitCode: 2 },
+    });
   });
 
-  it("reports missing arguments as Commander usage errors", async () => {
-    const output = testRuntime(["greet"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(1);
-    expect(output.stdout()).toBe("");
-    expect(output.stderr()).toContain(
-      "error: missing required argument 'name'",
-    );
-    expect(output.stderr()).toContain(`Usage: ${identity.commandName} greet`);
-  });
-
-  it("adapts business validation into a testable command error", async () => {
-    const output = testRuntime(["greet", "   "]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(1);
-    expect(output.stdout()).toBe("");
-    expect(output.stderr()).toContain("error: Name must not be empty");
+  it("等待输出完成，仅 stdout EPIPE 安静成功", async () => {
+    const output = testRuntime(["lookup", "ada"]);
+    expect(
+      await runCli({
+        ...output.runtime,
+        write: async () => {
+          throw Object.assign(new Error("pipe"), { code: "EPIPE" });
+        },
+      }),
+    ).toBe(0);
+    expect(
+      await runCli({
+        ...output.runtime,
+        write: async () => {
+          throw new Error("disk");
+        },
+      }),
+    ).toBe(70);
+    const failure = testRuntime(["lookup", "missing"]);
+    expect(
+      await runCli({
+        ...failure.runtime,
+        write: async () => {
+          throw Object.assign(new Error("pipe"), { code: "EPIPE" });
+        },
+      }),
+    ).toBe(70);
+    const argv = ["node", identity.commandName];
+    Object.defineProperty(argv, "slice", {
+      value() {
+        throw new Error("内部细节");
+      },
+    });
+    expect(await runCli({ ...output.runtime, argv })).toBe(70);
+    expect(output.stderr()).toContain("命令执行失败");
+    expect(output.stderr()).not.toContain("内部细节");
   });
 });

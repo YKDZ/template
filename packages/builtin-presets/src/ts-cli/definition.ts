@@ -139,8 +139,8 @@ function cliContribution(
     {
       kind: "copyFile",
       source: templateSources.tsCli,
-      from: "test/unit/greet.test.ts",
-      to: `${definition.path}/test/unit/greet.test.ts`,
+      from: "src/standard-schema.ts",
+      to: `${definition.path}/src/standard-schema.ts`,
     },
     {
       kind: "copyFile",
@@ -169,8 +169,8 @@ function cliContribution(
     {
       kind: "copyFile",
       source: templateSources.tsCli,
-      from: "test/e2e/journeys/greet.journey.ts",
-      to: `${definition.path}/test/e2e/journeys/greet.journey.ts`,
+      from: "test/e2e/journeys/lookup.journey.ts",
+      to: `${definition.path}/test/e2e/journeys/lookup.journey.ts`,
     },
   ];
   return {
@@ -183,7 +183,11 @@ function cliContribution(
       type: "module",
       bin: { [options.packageLeafName]: "./dist/cli.js" },
       scripts: packageScripts(),
-      dependencies: { commander: "catalog:" },
+      dependencies: {
+        "@ykdz/cli-contract": "catalog:",
+        "@valibot/to-json-schema": "catalog:",
+        valibot: "catalog:",
+      },
       devDependencies: {
         "@types/node": "catalog:",
         oxfmt: "catalog:",

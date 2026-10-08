@@ -25,30 +25,15 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 
-export type ConfirmationRequest = {
-  readonly message: string;
-  readonly prompt: string;
-};
-
 export type ApplicationRuntime = {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string | undefined>>;
-  readonly tty: {
-    readonly stdin: boolean;
-    readonly stdout: boolean;
-    readonly stderr: boolean;
-  };
-  readonly confirmation: {
-    confirm(request: ConfirmationRequest): Promise<boolean>;
-  };
 };
 
 export type InitCommandOptions = {
   readonly dir: string;
   readonly preset: string;
-  readonly yes: boolean;
   readonly dryRun: boolean;
-  readonly json: boolean;
   readonly todo: boolean;
   readonly name?: string;
   readonly path?: string;
@@ -61,13 +46,10 @@ export type AddPackageCommandOptions = {
   readonly path?: string;
   readonly linkFrom: readonly string[];
   readonly dryRun: boolean;
-  readonly json: boolean;
 };
 
 export type InitCommandResult =
   | {
-      readonly schemaVersion: 1;
-      readonly command: "init";
       readonly status: "success";
       readonly dryRun: boolean;
       readonly targetDir: string;
@@ -83,28 +65,14 @@ export type InitCommandResult =
       };
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "init";
-      readonly status: "cancelled";
-      readonly code: "CANCELLED";
-      readonly targetDir: string;
-    }
-  | {
-      readonly schemaVersion: 1;
-      readonly command: "init";
       readonly status: "usage-error";
-      readonly code: "USAGE_INIT_INVALID";
+
       readonly targetDir: string;
-      readonly issues: readonly (
-        | InitializationInputIssue
-        | { readonly code: "NON_INTERACTIVE_CONFIRMATION_REQUIRED" }
-      )[];
+      readonly issues: readonly InitializationInputIssue[];
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "init";
       readonly status: "operation-failure";
-      readonly code: "OPERATION_INIT_FAILED";
+
       readonly phase:
         | "preset"
         | "planning"
@@ -122,24 +90,18 @@ type PresetCatalogEntry = {
 };
 
 export type PresetCatalogCommandResult = {
-  readonly schemaVersion: 1;
-  readonly command: "presets";
   readonly status: "success";
   readonly presets: readonly PresetCatalogEntry[];
 };
 
 export type BlueprintValidationCommandResult =
   | {
-      readonly schemaVersion: 1;
-      readonly command: "blueprint validate";
       readonly status: "success";
       readonly path: string;
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "blueprint validate";
       readonly status: "invalid";
-      readonly code: "BLUEPRINT_INVALID";
+
       readonly path: string;
       readonly issues: readonly {
         readonly path: string;
@@ -147,12 +109,7 @@ export type BlueprintValidationCommandResult =
       }[];
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "blueprint validate";
       readonly status: "operation-failure";
-      readonly code:
-        | "OPERATION_BLUEPRINT_READ_FAILED"
-        | "OPERATION_BLUEPRINT_PARSE_FAILED";
       readonly path: string;
       readonly reason:
         | "not-found"
@@ -197,15 +154,11 @@ type PackageAdditionBusinessConflict = {
 
 export type PackageAdditionCommandResult =
   | {
-      readonly schemaVersion: 1;
-      readonly command: "add package";
       readonly status: "success";
       readonly dryRun: boolean;
       readonly actions: readonly ProjectProjectionAction[];
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "add package";
       readonly status: "conflict";
       readonly dryRun: boolean;
       readonly actions: readonly [];
@@ -215,25 +168,19 @@ export type PackageAdditionCommandResult =
       )[];
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "add package";
       readonly status: "usage-error";
-      readonly code: "USAGE_ADD_PACKAGE_INVALID";
+
       readonly issues: readonly PackageAdditionInputIssue[];
     }
   | {
-      readonly schemaVersion: 1;
-      readonly command: "add package";
       readonly status: "operation-failure";
-      readonly code: "OPERATION_ADD_PACKAGE_FAILED";
+
       readonly phase: "metadata" | "default" | "planning" | "reconciliation";
       readonly error: { readonly message: string; readonly suggestion: string };
     };
 
 export function listPresetCatalog(): PresetCatalogCommandResult {
   return {
-    schemaVersion: 1,
-    command: "presets",
     status: "success",
     presets: builtInPresetRegistry.all().map((definition) => ({
       name: definition.metadata.name,
@@ -251,13 +198,6 @@ function toolchainReport() {
     nodeVersion: releaseToolchainSnapshot.nodeVersion,
     packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
   };
-}
-
-function formatRows(rows: readonly (readonly [string, string])[]): string[] {
-  const width = Math.max(...rows.map(([label]) => `${label}:`.length));
-  return rows.map(
-    ([label, value]) => `  ${`${label}:`.padEnd(width)} ${value}`,
-  );
 }
 
 function packageAdditionConflict(
@@ -286,10 +226,8 @@ export async function validateBlueprintFile(
     value = JSON.parse(source);
   } catch {
     return {
-      schemaVersion: 1,
-      command: "blueprint validate",
       status: "operation-failure",
-      code: "OPERATION_BLUEPRINT_PARSE_FAILED",
+
       path: resolvedPath,
       reason: "invalid-json",
       error: {
@@ -301,17 +239,13 @@ export async function validateBlueprintFile(
   const result = validateProjectBlueprint(value);
   if (!result.ok) {
     return {
-      schemaVersion: 1,
-      command: "blueprint validate",
       status: "invalid",
-      code: "BLUEPRINT_INVALID",
+
       path: resolvedPath,
       issues: result.issues,
     };
   }
   return {
-    schemaVersion: 1,
-    command: "blueprint validate",
     status: "success",
     path: resolvedPath,
   };
@@ -356,10 +290,8 @@ function readBlueprintFailure(
               "检查路径、文件权限和挂载状态后重试；若需要其他访问权限，请人工处理。",
             ];
   return {
-    schemaVersion: 1,
-    command: "blueprint validate",
     status: "operation-failure",
-    code: "OPERATION_BLUEPRINT_READ_FAILED",
+
     path: filePath,
     reason,
     error: { message, suggestion },
@@ -384,10 +316,8 @@ function initOperationFailure(options: {
             ? "生成物料化"
             : "目标目录渲染";
   return {
-    schemaVersion: 1,
-    command: "init",
     status: "operation-failure",
-    code: "OPERATION_INIT_FAILED",
+
     phase: options.phase,
     targetDir: options.targetDir,
     error: {
@@ -401,20 +331,6 @@ export async function runInit(
   options: InitCommandOptions,
   runtime: ApplicationRuntime,
 ): Promise<InitCommandResult> {
-  if (
-    !options.dryRun &&
-    !options.yes &&
-    (options.json || !runtime.tty.stdin || !runtime.tty.stdout)
-  ) {
-    return {
-      schemaVersion: 1,
-      command: "init",
-      status: "usage-error",
-      code: "USAGE_INIT_INVALID",
-      targetDir: options.dir,
-      issues: [{ code: "NON_INTERACTIVE_CONFIRMATION_REQUIRED" }],
-    };
-  }
   const targetDir = path.resolve(runtime.cwd, options.dir);
   const overrides =
     (options.name ?? options.path ?? options.scope) === undefined
@@ -431,10 +347,8 @@ export async function runInit(
   });
   if (input.status === "input-invalid") {
     return {
-      schemaVersion: 1,
-      command: "init",
       status: "usage-error",
-      code: "USAGE_INIT_INVALID",
+
       targetDir: options.dir,
       issues: input.issues,
     };
@@ -446,10 +360,8 @@ export async function runInit(
   });
   if (preparation.status === "input-invalid") {
     return {
-      schemaVersion: 1,
-      command: "init",
       status: "usage-error",
-      code: "USAGE_INIT_INVALID",
+
       targetDir: options.dir,
       issues: preparation.issues,
     };
@@ -494,8 +406,6 @@ export async function runInit(
     });
   }
   const output: Extract<InitCommandResult, { readonly status: "success" }> = {
-    schemaVersion: 1,
-    command: "init",
     status: "success",
     dryRun: options.dryRun,
     targetDir: options.dir,
@@ -511,38 +421,6 @@ export async function runInit(
     },
   };
   if (options.dryRun) return output;
-
-  if (
-    !options.yes &&
-    !(await runtime.confirmation.confirm({
-      message: [
-        "计划生成的项目",
-        "",
-        ...formatRows([
-          ["预设", resolved.preset],
-          ["名称", resolved.packages.map(({ name }) => name).join(", ")],
-          [
-            "路径",
-            resolved.packages
-              .map(({ path: packagePath }) => packagePath)
-              .join(", "),
-          ],
-          ["Scope", resolved.scope],
-          ["目标", options.dir],
-          ["包数量", String(plan.blueprint.packages.length)],
-        ]),
-      ].join("\n"),
-      prompt: "生成这个项目？[y/N] ",
-    }))
-  ) {
-    return {
-      schemaVersion: 1,
-      command: "init",
-      status: "cancelled",
-      code: "CANCELLED",
-      targetDir: options.dir,
-    };
-  }
 
   try {
     await renderNewProject({
@@ -568,10 +446,8 @@ export async function runAddPackage(
   });
   if (preparation.status === "input-invalid") {
     return {
-      schemaVersion: 1,
-      command: "add package",
       status: "usage-error",
-      code: "USAGE_ADD_PACKAGE_INVALID",
+
       issues: preparation.issues,
     };
   }
@@ -583,8 +459,6 @@ export async function runAddPackage(
   }
   if (preparation.status === "conflict") {
     return {
-      schemaVersion: 1,
-      command: "add package",
       status: "conflict",
       dryRun: options.dryRun,
       actions: [],
@@ -622,8 +496,6 @@ export async function runAddPackage(
   }
   if (!reconciliation.ok) {
     return {
-      schemaVersion: 1,
-      command: "add package",
       status: "conflict",
       dryRun: options.dryRun,
       actions: [],
@@ -631,8 +503,6 @@ export async function runAddPackage(
     };
   }
   return {
-    schemaVersion: 1,
-    command: "add package",
     status: "success",
     dryRun: options.dryRun,
     actions: reconciliation.actions,
@@ -644,10 +514,8 @@ function packageAdditionOperationFailure(
   diagnostic?: { readonly message: string; readonly suggestion: string },
 ): PackageAdditionCommandResult {
   return {
-    schemaVersion: 1,
-    command: "add package",
     status: "operation-failure",
-    code: "OPERATION_ADD_PACKAGE_FAILED",
+
     phase,
     error: diagnostic ?? {
       message: "添加 Package 时发生操作失败。",

@@ -4914,6 +4914,19 @@ function collectPackageAdditionInput(options: {
   return { status: "valid", definition, linkFrom };
 }
 
+/** 在读取仓库元数据前校验新增包调用参数，供 CLI 输入契约复用。 */
+export function validateGeneratedRepositoryPackageAdditionInput(
+  options: Parameters<typeof collectPackageAdditionInput>[0],
+):
+  | { readonly status: "valid" }
+  | {
+      readonly status: "input-invalid";
+      readonly issues: readonly PackageAdditionInputIssue[];
+    } {
+  const result = collectPackageAdditionInput(options);
+  return result.status === "input-invalid" ? result : { status: "valid" };
+}
+
 /**
  * Command-owned preparation: user input is checked before local metadata or any
  * Preset default/planner work; all remaining failures are deliberately bounded.

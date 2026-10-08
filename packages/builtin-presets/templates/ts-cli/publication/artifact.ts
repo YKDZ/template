@@ -17,10 +17,43 @@ import { pathToFileURL } from "node:url";
 import { validRange } from "semver";
 import { list } from "tar";
 
+import { hasLookupEvidence, hasSchemaEvidence } from "./handoff.ts";
 import {
   inspectNpmPublicationReadiness,
   type NpmPublicationReadiness,
 } from "./readiness.ts";
+
+function hasUsageFailure(source: string): boolean {
+  try {
+    const value: unknown = JSON.parse(source);
+    return (
+      isObject(value) &&
+      value.schemaVersion === "1" &&
+      value.kind === "usageFailure" &&
+      Array.isArray(value.issues) &&
+      value.issues.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+function hasNotFoundFailure(source: string): boolean {
+  try {
+    const value: unknown = JSON.parse(source);
+    return (
+      isObject(value) &&
+      value.schemaVersion === "1" &&
+      value.command === "lookup" &&
+      value.kind === "failure" &&
+      value.variant === "notFound" &&
+      isObject(value.data) &&
+      value.data.name === "missing"
+    );
+  } catch {
+    return false;
+  }
+}
 
 type JsonObject = Record<string, unknown>;
 
@@ -96,8 +129,13 @@ export type VerifiedPublicationArtifactReceipt = {
       readonly stdout: string;
     },
     {
-      readonly name: "greet";
-      readonly args: readonly ["greet", "  Ada Lovelace  "];
+      readonly name: "lookup";
+      readonly args: readonly ["lookup", "ada"];
+      readonly stdout: string;
+    },
+    {
+      readonly name: "schema";
+      readonly args: readonly ["schema"];
       readonly stdout: string;
     },
   ];
@@ -158,6 +196,7 @@ const expectedFiles = [
   "package/dist/cli-command-identity.js",
   "package/dist/cli.js",
   "package/dist/main.js",
+  "package/dist/standard-schema.js",
   "package/package.json",
 ] as const;
 
@@ -546,10 +585,15 @@ export function inspectPackedManifestContract(options: {
     bin[readiness.publication.commandName] === "./dist/cli.js";
   const exactDependencies =
     isObject(dependencies) &&
-    Object.keys(dependencies).length === 1 &&
-    typeof dependencies.commander === "string" &&
-    dependencies.commander.length > 0 &&
-    validRange(dependencies.commander) !== null;
+    ["@ykdz/cli-contract", "@valibot/to-json-schema", "valibot"].every(
+      (name) =>
+        typeof dependencies[name] === "string" &&
+        validRange(dependencies[name]) !== null,
+    ) &&
+    Object.values(dependencies).every(
+      (specifier) =>
+        typeof specifier === "string" && validRange(specifier) !== null,
+    );
   const validPublishConfig =
     publishConfig === undefined ||
     (isObject(publishConfig) &&
@@ -736,7 +780,7 @@ async function smokeCommand(options: {
   readonly env: NodeJS.ProcessEnv;
 }): Promise<CommandResult | PublicationArtifactFailure> {
   const result = await runCommand(options);
-  return result.exitCode === 0
+  return result.exitCode === 0 && result.stderr === ""
     ? result
     : commandFailure(
         "consumer-smoke-failed",
@@ -1032,8 +1076,9 @@ export async function verifyNpmPublicationArtifact(options: {
     }
     const helpArgs = ["--help"] as const;
     const versionArgs = ["--version"] as const;
-    const greetArgs = ["greet", "  Ada Lovelace  "] as const;
-    const invalidGreetArgs = ["greet", "   "] as const;
+    const lookupArgs = ["lookup", "ada"] as const;
+    const schemaArgs = ["schema"] as const;
+    const invalidLookupArgs = ["lookup", "   "] as const;
     const helpCommand = planInstalledBinCommand({
       platform: process.platform,
       binPath,
@@ -1066,27 +1111,46 @@ export async function verifyNpmPublicationArtifact(options: {
       result = { kind: "failed", failure: version };
       return result;
     }
-    const greetCommand = planInstalledBinCommand({
+    const lookupCommand = planInstalledBinCommand({
       platform: process.platform,
       binPath,
-      args: greetArgs,
+      args: lookupArgs,
       environment: childEnvironment,
     });
-    const greet = await smokeCommand({
-      executable: greetCommand.executable,
-      args: greetCommand.args,
+    const lookup = await smokeCommand({
+      executable: lookupCommand.executable,
+      args: lookupCommand.args,
       cwd: consumerDirectory,
-      env: greetCommand.environment,
+      env: lookupCommand.environment,
     });
-    if ("code" in greet) {
-      result = { kind: "failed", failure: greet };
+    if ("code" in lookup) {
+      result = { kind: "failed", failure: lookup };
+      return result;
+    }
+    const schemaCommand = planInstalledBinCommand({
+      platform: process.platform,
+      binPath,
+      args: schemaArgs,
+      environment: childEnvironment,
+    });
+    const schema = await smokeCommand({
+      executable: schemaCommand.executable,
+      args: schemaCommand.args,
+      cwd: consumerDirectory,
+      env: schemaCommand.environment,
+    });
+    if ("code" in schema) {
+      result = { kind: "failed", failure: schema };
       return result;
     }
     if (
-      !help.stdout.includes(`Usage: ${readiness.publication.commandName}`) ||
-      !help.stdout.includes("greet") ||
-      version.stdout !== `${readiness.publication.version}\n` ||
-      greet.stdout !== "Hello, Ada Lovelace\n"
+      !help.stdout.includes(readiness.publication.commandName) ||
+      !help.stdout.includes("lookup") ||
+      !help.stdout.includes("schema") ||
+      version.stdout !==
+        `${readiness.publication.commandName} ${readiness.publication.version}\n` ||
+      !hasLookupEvidence(lookup.stdout) ||
+      !hasSchemaEvidence(schema.stdout, readiness.publication.commandName)
     ) {
       result = {
         kind: "failed",
@@ -1095,51 +1159,55 @@ export async function verifyNpmPublicationArtifact(options: {
           JSON.stringify({
             help: help.stdout,
             version: version.stdout,
-            greet: greet.stdout,
+            lookup: lookup.stdout,
           }),
-          "Installed help, exact version, and greet behavior",
+          "Installed help, exact version, and lookup behavior",
           "Correct the packed command identity or behavior and retry.",
         ),
       };
       return result;
     }
-    const invalidGreetCommand = planInstalledBinCommand({
-      platform: process.platform,
-      binPath,
-      args: invalidGreetArgs,
-      environment: childEnvironment,
-    });
-    const invalidGreet = await runCommand({
-      executable: invalidGreetCommand.executable,
-      args: invalidGreetCommand.args,
-      cwd: consumerDirectory,
-      env: invalidGreetCommand.environment,
-    });
-    if (
-      invalidGreet.exitCode !== 1 ||
-      invalidGreet.stdout !== "" ||
-      !invalidGreet.stderr.startsWith("error: Name must not be empty\n")
-    ) {
-      result = {
-        kind: "failed",
-        failure: failure(
-          "consumer-smoke-failed",
-          JSON.stringify({
-            args: invalidGreetArgs,
-            exitCode: invalidGreet.exitCode,
-            stdout: invalidGreet.stdout,
-            stderr: invalidGreet.stderr,
-          }),
-          "Installed greet with a blank name to exit 1 with the stable validation error and no stdout",
-          "Correct the packed command validation behavior and retry.",
-          {
-            executable: invalidGreetCommand.executable,
-            args: invalidGreetCommand.args,
-            exitCode: invalidGreet.exitCode,
-          },
-        ),
-      };
-      return result;
+    for (const scenario of [
+      {
+        args: [...invalidLookupArgs, "--output-format", "text"],
+        exitCode: 2,
+        accepts: hasUsageFailure,
+      },
+      { args: ["lookup", "missing"], exitCode: 1, accepts: hasNotFoundFailure },
+    ]) {
+      const command = planInstalledBinCommand({
+        platform: process.platform,
+        binPath,
+        args: scenario.args,
+        environment: childEnvironment,
+      });
+      const observed = await runCommand({
+        executable: command.executable,
+        args: command.args,
+        cwd: consumerDirectory,
+        env: command.environment,
+      });
+      if (
+        observed.exitCode !== scenario.exitCode ||
+        observed.stdout !== "" ||
+        !scenario.accepts(observed.stderr)
+      ) {
+        result = {
+          kind: "failed",
+          failure: failure(
+            "consumer-smoke-failed",
+            JSON.stringify(observed),
+            "非法输入应退出 2，未找到记录应退出 1；均通过 stderr 返回原生结果。",
+            "修正安装后命令的失败协议并重试。",
+            {
+              executable: command.executable,
+              args: command.args,
+              exitCode: observed.exitCode,
+            },
+          ),
+        };
+        return result;
+      }
     }
 
     const artifactBytes = await readFile(packedArtifactPath);
@@ -1181,7 +1249,8 @@ export async function verifyNpmPublicationArtifact(options: {
         { name: "runtime-import", args: [], stdout: "" },
         { name: "help", args: helpArgs, stdout: help.stdout },
         { name: "version", args: versionArgs, stdout: version.stdout },
-        { name: "greet", args: greetArgs, stdout: greet.stdout },
+        { name: "lookup", args: lookupArgs, stdout: lookup.stdout },
+        { name: "schema", args: schemaArgs, stdout: schema.stdout },
       ],
     };
     try {

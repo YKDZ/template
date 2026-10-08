@@ -237,6 +237,7 @@ async function writeAcceptedFirstReleaseArtifact(options: {
           "package/dist/cli-command-identity.js",
           "package/dist/cli.js",
           "package/dist/main.js",
+          "package/dist/standard-schema.js",
           "package/package.json",
         ].map((entry, index) => ({
           path: entry,
@@ -254,13 +255,48 @@ async function writeAcceptedFirstReleaseArtifact(options: {
           {
             name: "help",
             args: ["--help"],
-            stdout: `Usage: ${options.commandName} greet`,
+            stdout: `${options.commandName} lookup schema\n`,
           },
-          { name: "version", args: ["--version"], stdout: "1.0.0\n" },
           {
-            name: "greet",
-            args: ["greet", "  Ada Lovelace  "],
-            stdout: "Hello, Ada Lovelace\n",
+            name: "version",
+            args: ["--version"],
+            stdout: `${options.commandName} ${"1.0.0"}\n`,
+          },
+          {
+            name: "lookup",
+            args: ["lookup", "ada"],
+            stdout: JSON.stringify({
+              schemaVersion: "1",
+              command: "lookup",
+              kind: "data",
+              variant: "found",
+              data: { name: "ada", title: "Ada Lovelace" },
+            }),
+          },
+          {
+            name: "schema",
+            args: ["schema"],
+            stdout: JSON.stringify({
+              schemaVersion: "1",
+              command: "schema",
+              kind: "data",
+              variant: "exported",
+              data: {
+                manifest: {
+                  root: "cli",
+                  commands: {
+                    cli: { name: options.commandName },
+                    schema: { name: "schema" },
+                    lookup: {
+                      name: "lookup",
+                      input: { inputSchema: { type: "object" } },
+                      success: { variants: { found: { exitCode: 0 } } },
+                      failures: { notFound: { exitCode: 1 } },
+                    },
+                  },
+                },
+              },
+            }),
           },
         ],
       },
@@ -451,7 +487,11 @@ esac
       files: ["dist"],
       type: "module",
       bin: { cli: "./dist/cli.js" },
-      dependencies: { commander: "catalog:" },
+      dependencies: {
+        "@ykdz/cli-contract": "catalog:",
+        "@valibot/to-json-schema": "catalog:",
+        valibot: "catalog:",
+      },
       engines: { node: "^24.16.0" },
       scripts: {
         build: "tsc -p tsconfig.build.json --pretty false",
@@ -3430,6 +3470,8 @@ syncBuiltinESMExports();
         "--conditions=source",
         path.join(repositoryRoot, "packages/cli/src/cli.ts"),
         "presets",
+        "--output-format",
+        "text",
       ],
       { cwd: repositoryRoot },
     );
@@ -3440,7 +3482,7 @@ syncBuiltinESMExports();
     );
   });
 
-  it("runs identity and greet unit tests from TypeScript source without a build", async () => {
+  it("runs identity unit tests from TypeScript source without a build", async () => {
     const project = await renderInstalledGeneratedRepository(
       "template-ts-cli-unit-",
     );
@@ -3496,7 +3538,7 @@ syncBuiltinESMExports();
     }
   }, 180_000);
 
-  it("runs Commander integration tests in process without a build", async () => {
+  it("runs CLI contract integration tests in process without a build", async () => {
     const project = await renderInstalledGeneratedRepository(
       "template-ts-cli-integration-",
     );
@@ -3525,7 +3567,7 @@ syncBuiltinESMExports();
     }
   }, 180_000);
 
-  it("discovers and runs the complete greet journey through source", async () => {
+  it("discovers and runs the complete lookup journey through source", async () => {
     const project = await renderInstalledGeneratedRepository(
       "template-ts-cli-source-e2e-",
     );
@@ -3539,7 +3581,7 @@ syncBuiltinESMExports();
         execa("node", ["--conditions=source", "src/cli.ts", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toBe("unpublished");
+      ).resolves.toBe("cli unpublished");
       await writeFile(
         manifestPath,
         `${JSON.stringify(
@@ -3556,25 +3598,19 @@ syncBuiltinESMExports();
         execa("node", ["--conditions=source", "src/cli.ts", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toBe("7.8.9");
+      ).resolves.toBe("release 7.8.9");
       await expect(
         execa("node", ["--conditions=source", "src/cli.ts", "--help"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toContain("Usage: release [options] [command]");
-      await expect(
-        readFile(
-          path.join(project.packageRoot, "test/e2e/run-journeys.ts"),
-          "utf8",
-        ),
-      ).resolves.not.toContain('"greet"');
+      ).resolves.toContain("release");
       const result = await execa(
         "node",
         ["--conditions=source", "test/e2e/run-journeys.ts", "source"],
         { cwd: project.packageRoot },
       );
 
-      expect(result.stdout).toBe("source:greet:passed");
+      expect(result.stdout).toBe("source:lookup:passed");
       await expect(
         stat(path.join(project.packageRoot, "dist")),
       ).rejects.toMatchObject({ code: "ENOENT" });
@@ -3630,7 +3666,7 @@ syncBuiltinESMExports();
         execa("node", ["dist/cli.js", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toBe("unpublished");
+      ).resolves.toBe("cli unpublished");
       const manifestPath = path.join(project.packageRoot, "package.json");
       const manifest = JSON.parse(
         await readFile(manifestPath, "utf8"),
@@ -3651,12 +3687,12 @@ syncBuiltinESMExports();
         execa("node", ["dist/cli.js", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toBe("4.5.6");
+      ).resolves.toBe("deliver 4.5.6");
       await expect(
         execa("node", ["dist/cli.js", "--help"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toContain("Usage: deliver [options] [command]");
+      ).resolves.toContain("deliver");
 
       const result = await execa("pnpm", ["run", "test:e2e"], {
         cwd: project.packageRoot,
@@ -3664,8 +3700,8 @@ syncBuiltinESMExports();
       expect(
         result.stdout
           .split("\n")
-          .filter((line) => line.endsWith(":greet:passed")),
-      ).toEqual(["source:greet:passed", "distribution:greet:passed"]);
+          .filter((line) => line.endsWith(":lookup:passed")),
+      ).toEqual(["source:lookup:passed", "distribution:lookup:passed"]);
     } finally {
       await rm(project.workspace, { recursive: true, force: true });
     }
@@ -3770,12 +3806,12 @@ syncBuiltinESMExports();
         execa(binPath, ["--version"], { cwd: consumerRoot }).then(
           ({ stdout }) => stdout,
         ),
-      ).resolves.toBe("unpublished");
+      ).resolves.toBe("cli unpublished");
       await expect(
-        execa(binPath, ["greet", "Ada"], { cwd: consumerRoot }).then(
-          ({ stdout }) => stdout,
-        ),
-      ).resolves.toBe("Hello, Ada");
+        execa(binPath, ["lookup", "ada", "--output-format", "text"], {
+          cwd: consumerRoot,
+        }).then(({ stdout }) => stdout),
+      ).resolves.toBe("找到记录：Ada Lovelace（ada）");
     } finally {
       await rm(project.workspace, { recursive: true, force: true });
     }
@@ -3835,7 +3871,7 @@ syncBuiltinESMExports();
         execa("node", ["dist/cli.js", "--version"], {
           cwd: project.packageRoot,
         }).then(({ stdout }) => stdout),
-      ).resolves.toBe("unpublished");
+      ).resolves.toBe("cli unpublished");
       for (const absentField of [
         "version",
         "main",

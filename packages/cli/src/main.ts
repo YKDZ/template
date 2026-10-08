@@ -1,557 +1,599 @@
-import { Command, CommanderError } from "commander";
+import {
+  CliWriteError,
+  type WriteCliOutput,
+  defineCli,
+  executeCli,
+  helpCapability,
+  outputCapability,
+  parseCliInvocation,
+  text,
+  versionCapability,
+} from "@ykdz/cli-contract";
+import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
+import * as v from "valibot";
 
 import {
   listPresetCatalog,
-  runAddPackage,
   runInit,
+  runAddPackage,
   validateBlueprintFile,
-  type AddPackageCommandOptions,
   type ApplicationRuntime,
-  type InitCommandOptions,
 } from "./application.ts";
 import {
-  projectCommandResult,
-  type TemplateCommandResult,
-} from "./command-result.ts";
+  initializationInputSchema,
+  packageAdditionInputSchema,
+} from "./input-schemas.ts";
+import {
+  initializationSchema,
+  packageAdditionSchema,
+  packageConflictSchema,
+} from "./result-schemas.ts";
+import { standardSchema } from "./standard-schema.ts";
 
 export type CliRuntime = ApplicationRuntime & {
   readonly argv: readonly string[];
-  readonly streams: {
-    readonly stdin: object;
-    readonly stdout: { write(chunk: string): unknown };
-    readonly stderr: { write(chunk: string): unknown };
-  };
+  readonly write: WriteCliOutput;
+  readonly commandName: string;
   readonly version: string;
 };
 
-type CliCommandName =
-  | "template"
-  | "init"
-  | "add"
-  | "add package"
-  | "presets"
-  | "blueprint"
-  | "blueprint validate";
-
-type CliFailure = {
-  readonly code: string;
-  readonly command: CliCommandName;
-  readonly message: string;
-  readonly suggestion?: string;
-  readonly usage?: string;
-};
-
-class HandledCliExit extends Error {
-  readonly exitCode: number;
-
-  constructor(exitCode: number) {
-    super(`CLI exited with status ${exitCode}`);
-    this.exitCode = exitCode;
-  }
+function initializationDetails(
+  result: NonNullable<
+    (typeof initializationSchema)["~standard"]["types"]
+  >["output"],
+): string[] {
+  return [
+    `预设: ${result.resolved.preset}`,
+    `Scope: ${result.resolved.scope}`,
+    ...result.resolved.packages.map(
+      ({ name, path }) => `包: ${name}（${path}）`,
+    ),
+    `工具链: Node ${result.toolchain.nodeVersion}；${result.toolchain.packageManagerPin}`,
+    `跟进文档: ${result.followUpDocument.enabled ? result.followUpDocument.path : "不生成"}`,
+  ];
 }
 
-class OutputFailure extends Error {
-  readonly destination: "stdout" | "stderr";
-  readonly epiped: boolean;
-
-  constructor(destination: "stdout" | "stderr", error: unknown) {
-    super("Unable to write CLI output");
-    this.destination = destination;
-    this.epiped =
-      typeof error === "object" && error !== null && "code" in error
-        ? error.code === "EPIPE"
-        : false;
-  }
-}
-
-class ConfirmationFailure extends Error {
-  constructor() {
-    super("Confirmation adapter failed");
-  }
-}
-
-function isConfirmationOutputResourceFailure(error: unknown): boolean {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return false;
-  }
-  return error.code === "EPIPE" || error.code === "ENOSPC";
-}
-
-class HumanCommandIdentity {
-  readonly #runtime: CliRuntime;
-  #written = false;
-
-  constructor(runtime: CliRuntime) {
-    this.#runtime = runtime;
-  }
-
-  write(destination: "stdout" | "stderr"): void {
-    if (this.#written) return;
-    this.#written = true;
-    this.#write(destination, `template ${this.#runtime.version}\n`);
-  }
-
-  writeText(destination: "stdout" | "stderr", text: string): void {
-    this.write(destination);
-    this.#write(destination, text);
-  }
-
-  #write(destination: "stdout" | "stderr", text: string): void {
-    try {
-      this.#runtime.streams[destination].write(text);
-    } catch (error) {
-      throw new OutputFailure(destination, error);
-    }
-  }
-}
-
-function commandName(argv: readonly string[]): CliCommandName {
-  const [first, second] = argv.slice(2);
-  if (first === "init" || first === "presets") return first;
-  if (first === "add") return second === "package" ? "add package" : "add";
-  if (first === "blueprint") {
-    return second === "validate" ? "blueprint validate" : "blueprint";
-  }
-  return "template";
-}
-
-function hasJsonControlIntent(argv: readonly string[]): boolean {
-  return argv.slice(2).includes("--json");
-}
-
-function localizeHelp(text: string): string {
-  return text
-    .replaceAll("Usage:", "用法:")
-    .replaceAll("Options:", "选项:")
-    .replaceAll("Commands:", "命令:")
-    .replaceAll("output the version number", "输出版本号")
-    .replaceAll("display help for command", "显示命令帮助")
-    .replaceAll(
-      "Resolve a Preset, initial package name and path, and package scope before initialization.",
-      "初始化前解析预设、初始包名称、路径和包 scope。",
-    )
-    .replaceAll("Project preset to generate", "要生成的项目预设")
-    .replaceAll(
-      "Unscoped leaf name when the Preset supports Primary Package Identity overrides",
-      "预设支持主包身份覆盖时使用的无 scope 叶名称",
-    )
-    .replaceAll(
-      "Two-segment path when the Preset supports Primary Package Identity overrides",
-      "预设支持主包身份覆盖时使用的两段路径",
-    )
-    .replaceAll("Resolved default package scope", "解析后的默认包 scope")
-    .replaceAll(
-      "Accept defaults for non-interactive generation",
-      "接受非交互式生成的默认值",
-    )
-    .replaceAll(
-      "Print the planned generation without writing files",
-      "打印生成计划而不写文件",
-    )
-    .replaceAll("Print machine-readable output", "输出机器可读结果")
-    .replaceAll(
-      "Do not write the generated follow-up TODO.md",
-      "不写入生成后的 TODO.md",
-    )
-    .replaceAll(
-      "Add to a Generated Repository; package supports --dry-run and --json.",
-      "向生成仓库添加内容；package 支持 --dry-run 和 --json。",
-    )
-    .replaceAll("Add a Package Boundary.", "添加一个 Package Boundary。")
-    .replaceAll("Package preset to add", "要添加的 Package 预设")
-    .replaceAll("Package name to add", "要添加的 Package 名称")
-    .replaceAll("Two-segment Package Path to add", "要添加的两段 Package Path")
-    .replaceAll(
-      "Existing consumer Package Path to link from; repeatable",
-      "要链接的现有 consumer Package Path；可重复传入",
-    )
-    .replaceAll(
-      "Preview the Addition Delta without writing files",
-      "预览 Addition Delta 而不写文件",
-    )
-    .replaceAll("List Built-in Presets.", "列出内置预设。")
-    .replaceAll("Work with Project Blueprints.", "处理 Project Blueprint。")
-    .replaceAll("Validate a Project Blueprint.", "校验 Project Blueprint。");
-}
-
-function commanderFailure(
-  error: CommanderError,
-  command: CliCommandName,
-  capturedError: string,
-): CliFailure {
-  const usage = capturedError
-    .split("\n")
-    .find((line) => line.startsWith("Usage:"));
-  const suggestion = error.message.match(/Did you mean (.+)\?/u)?.[1];
-  const message =
-    error.code === "commander.optionMissingArgument"
-      ? error.message.replace(
-          /option ('[^']+') argument missing/u,
-          "选项 $1 缺少参数。",
-        )
-      : error.code === "commander.excessArguments"
-        ? `命令 ${command} 参数过多。`
-        : error.message;
-  const localizedMessage = message
-    .replace(/^error:\s*/u, "")
-    .replace(/unknown command/u, "未知命令")
-    .replace(/unknown option/u, "未知选项")
-    .replace(/required option/u, "缺少必需选项")
-    .replace(/missing required argument/u, "缺少必需参数")
-    .replace(/ not specified$/u, "。");
-  let code = "USAGE_INVALID_INVOCATION";
-  if (error.code === "commander.unknownCommand") {
-    code = "USAGE_UNKNOWN_COMMAND";
-  } else if (error.code === "commander.unknownOption") {
-    code = "USAGE_UNKNOWN_OPTION";
-  } else if (error.code === "commander.optionMissingArgument") {
-    code = "USAGE_OPTION_MISSING_ARGUMENT";
-  } else if (error.code === "commander.excessArguments") {
-    code = "USAGE_EXCESS_ARGUMENTS";
-  } else if (error.message.includes("required option")) {
-    code = "USAGE_MISSING_REQUIRED_OPTION";
-  } else if (error.message.includes("required argument")) {
-    code = "USAGE_MISSING_REQUIRED_ARGUMENT";
-  }
-  return {
-    code,
-    command,
-    message: localizedMessage,
-    ...(suggestion === undefined
-      ? {}
-      : { suggestion: `Did you mean ${suggestion}?` }),
-    ...(usage === undefined
-      ? {}
-      : { usage: localizeHelp(usage).replace(/^用法:\s*/u, "") }),
-  };
-}
-
-function applicationFailure(
-  error: unknown,
-  command: CliCommandName,
-): CliFailure {
-  return {
-    code: "OPERATION_INTERNAL_ERROR",
-    command,
-    message: "命令遇到了内部错误；请重试，若持续发生请人工处理。",
-  };
-}
-
-function exitCodeForOutputFailure(error: OutputFailure): number {
-  return error.destination === "stdout" && error.epiped ? 0 : 65;
-}
-
-function writeFailure(
-  runtime: CliRuntime,
-  identity: HumanCommandIdentity,
-  json: boolean,
-  failure: CliFailure,
-): void {
-  if (json) {
-    try {
-      runtime.streams.stdout.write(
-        `${JSON.stringify({
-          schemaVersion: 1,
-          cliVersion: runtime.version,
-          command: failure.command,
-          code: failure.code,
-          status: "error",
-          error: {
-            message: failure.message,
-            ...(failure.suggestion === undefined
-              ? {}
-              : { suggestion: failure.suggestion }),
-            ...(failure.usage === undefined ? {} : { usage: failure.usage }),
-          },
-        })}\n`,
-      );
-      return;
-    } catch (error) {
-      throw new OutputFailure("stdout", error);
-    }
-  }
-  const lines = [`错误 [${failure.code}]: ${failure.message}`];
-  if (failure.suggestion !== undefined) {
-    lines.push(`建议: ${failure.suggestion}`);
-  }
-  if (failure.usage !== undefined) {
-    lines.push("", `用法: ${failure.usage}`);
-  }
-  identity.writeText("stderr", `${lines.join("\n")}\n`);
-}
-
-function writeOutput(
-  runtime: CliRuntime,
-  destination: "stdout" | "stderr",
-  text: string,
-): void {
-  try {
-    runtime.streams[destination].write(text);
-  } catch (error) {
-    if (error instanceof OutputFailure) throw error;
-    throw new OutputFailure(destination, error);
-  }
-}
-
-function writeClosedCommandResult(
-  runtime: CliRuntime,
-  result: TemplateCommandResult,
-  json: boolean,
-): void {
-  const presentation = projectCommandResult(result, json, runtime.version);
-  writeOutput(runtime, presentation.destination, presentation.text);
-  if (presentation.exitCode !== 0)
-    throw new HandledCliExit(presentation.exitCode);
-}
-
-function withHumanIdentity(
-  runtime: CliRuntime,
-  json: boolean,
-): {
-  readonly runtime: CliRuntime;
-  readonly identity: HumanCommandIdentity;
-} {
-  const identity = new HumanCommandIdentity(runtime);
-  if (json) return { runtime, identity };
-  return {
-    identity,
-    runtime: {
-      ...runtime,
-      streams: {
-        ...runtime.streams,
-        stdout: {
-          write(chunk) {
-            identity.writeText("stdout", chunk);
-          },
-        },
-        stderr: {
-          write(chunk) {
-            identity.writeText("stderr", chunk);
-          },
-        },
+function createCliContract(runtime: CliRuntime) {
+  const define = defineCli<
+    ApplicationRuntime & { getManifest(): Record<string, unknown> }
+  >();
+  return define({
+    root: "template",
+    help: helpCapability({
+      shortAlias: "-h",
+      headings: {
+        usage: "用法",
+        commands: "命令",
+        arguments: "参数",
+        options: "选项",
       },
-      confirmation: {
-        async confirm(request) {
-          identity.write("stdout");
-          try {
-            return await runtime.confirmation.confirm(request);
-          } catch (error) {
-            if (isConfirmationOutputResourceFailure(error)) {
-              throw new OutputFailure("stdout", error);
-            }
-            throw new ConfirmationFailure();
+      wording: {
+        commandPlaceholder: "命令",
+        choices: "候选：{choices}",
+        default: "默认：{value}",
+      },
+    }),
+    version: versionCapability({
+      value: text.line(`${runtime.commandName} ${runtime.version}`),
+      shortAlias: "-V",
+    }),
+    output: outputCapability({ defaultFormat: "structured", text: true }),
+    usageFailureExitCode: 2,
+    commands: {
+      template: {
+        kind: "rootGroup",
+        name: runtime.commandName,
+        description: "生成和维护项目仓库。",
+      },
+      ...define.command("init")({
+        kind: "command",
+        parent: "template",
+        name: "init",
+        description: "初始化项目仓库。",
+        input: initializationInputSchema(runtime.cwd),
+        fields: {
+          dir: { kind: "positional", description: "目标目录" },
+          preset: {
+            kind: "valueOption",
+            longOption: "--preset",
+            description: "项目预设",
+          },
+          name: {
+            kind: "valueOption",
+            longOption: "--name",
+            description: "无 scope 的 npm 包叶名称；仅可配置主包的预设支持覆盖",
+          },
+          path: {
+            kind: "valueOption",
+            longOption: "--path",
+            description:
+              "两个安全路径段，不能使用保留目录；仅可配置主包的预设支持覆盖",
+          },
+          scope: {
+            kind: "valueOption",
+            longOption: "--scope",
+            description: "有效 npm scope；省略时使用目标目录名",
+          },
+          dryRun: {
+            kind: "flag",
+            longOption: "--dry-run",
+            description: "预览生成计划",
+          },
+          todo: {
+            kind: "flag",
+            longOption: "--todo",
+            negatedLongOption: "--no-todo",
+            description: "生成后续步骤文档",
+          },
+        },
+        success: {
+          kind: "data",
+          variants: {
+            initialized: {
+              description: "已初始化仓库",
+              schema: initializationSchema,
+              exitCode: 0,
+              text: (data) =>
+                text.lines([
+                  `已初始化项目: ${data.targetDir}`,
+                  ...initializationDetails(data),
+                  "下一步",
+                  ...data.nextSteps.map(({ display }) => display),
+                  ...(data.publicationSetup === null
+                    ? []
+                    : ["一次性 npm 发布设置", data.publicationSetup.command]),
+                ]),
+            },
+            planned: {
+              description: "初始化预览",
+              schema: initializationSchema,
+              exitCode: 0,
+              text: (data) =>
+                text.lines([
+                  `项目生成预览: ${data.targetDir}`,
+                  ...initializationDetails(data),
+                ]),
+            },
+          },
+        },
+        failures: {
+          operationFailed: {
+            description: "初始化操作失败",
+            exitCode: 1,
+            schema: standardSchema(
+              v.object({
+                targetDir: v.string(),
+                phase: v.picklist([
+                  "preset",
+                  "planning",
+                  "preflight",
+                  "materialization",
+                  "render",
+                ]),
+                error: v.object({
+                  message: v.string(),
+                  suggestion: v.string(),
+                }),
+              }),
+            ),
+            text: ({ targetDir, error }) =>
+              text.lines([
+                error.message,
+                `目录: ${targetDir}`,
+                `建议: ${error.suggestion}`,
+              ]),
+          },
+        },
+        async handler({ input, dependencies, outcome }) {
+          const result = await runInit(
+            {
+              dir: input.dir,
+              preset: input.preset,
+              dryRun: input.dryRun,
+              todo: input.todo,
+              ...(input.name === undefined ? {} : { name: input.name }),
+              ...(input.path === undefined ? {} : { path: input.path }),
+              ...(input.scope === undefined ? {} : { scope: input.scope }),
+            },
+            dependencies,
+          );
+          if (result.status === "operation-failure")
+            return outcome.failure.operationFailed({
+              targetDir: result.targetDir,
+              phase: result.phase,
+              error: result.error,
+            });
+          if (result.status !== "success")
+            throw new Error("初始化输入校验与契约不一致");
+          const { status: _status, ...data } = result;
+          const payload = {
+            ...data,
+            resolved: {
+              ...data.resolved,
+              packages: [...data.resolved.packages],
+            },
+            nextSteps: [...data.nextSteps],
+            blueprint: {
+              schemaVersion: data.blueprint.schemaVersion,
+              packages: [...data.blueprint.packages],
+              ...(data.blueprint.packageLinkIntents === undefined
+                ? {}
+                : {
+                    packageLinkIntents: [...data.blueprint.packageLinkIntents],
+                  }),
+            },
+            generationRecord: {
+              ...data.generationRecord,
+              packages: [...data.generationRecord.packages],
+            },
+          };
+          return input.dryRun
+            ? outcome.data.planned(payload)
+            : outcome.data.initialized(payload);
+        },
+      }),
+      add: {
+        kind: "commandGroup",
+        parent: "template",
+        name: "add",
+        description: "扩展生成仓库。",
+      },
+      ...define.command("addPackage")({
+        kind: "command",
+        parent: "add",
+        name: "package",
+        description: "非破坏性地新增工作区包。",
+        input: packageAdditionInputSchema,
+        fields: {
+          preset: {
+            kind: "valueOption",
+            longOption: "--preset",
+            description: "支持新增包的预设",
+          },
+          name: {
+            kind: "valueOption",
+            longOption: "--name",
+            description: "无 scope 的 npm 包叶名称",
+          },
+          path: {
+            kind: "valueOption",
+            longOption: "--path",
+            description: "两个安全路径段，不能使用保留工作区目录",
+          },
+          linkFrom: {
+            kind: "repeatableOption",
+            longOption: "--link-from",
+            description:
+              "消费包的两个安全路径段，不能使用保留工作区目录；可重复",
+          },
+          dryRun: {
+            kind: "flag",
+            longOption: "--dry-run",
+            description: "预览变更",
+          },
+        },
+        success: {
+          kind: "data",
+          variants: {
+            planned: {
+              description: "新增包预览",
+              schema: packageAdditionSchema,
+              exitCode: 0,
+              text: ({ actions }) =>
+                text.lines([
+                  "新增包预览",
+                  ...actions.map(
+                    ({ path, action }) =>
+                      `${action === "create" ? "创建" : "更新"}: ${path}`,
+                  ),
+                ]),
+            },
+            added: {
+              description: "已新增包",
+              schema: packageAdditionSchema,
+              exitCode: 0,
+              text: ({ actions }) =>
+                text.lines([
+                  "已新增包",
+                  ...actions.map(
+                    ({ path, action }) =>
+                      `${action === "create" ? "创建" : "更新"}: ${path}`,
+                  ),
+                ]),
+            },
+            unchanged: {
+              description: "请求已满足，无需变更",
+              schema: packageAdditionSchema,
+              exitCode: 0,
+              text: () => text.line("请求已满足，无需变更。"),
+            },
+          },
+        },
+        failures: {
+          invalidRequest: {
+            description: "仓库不支持所请求的消费关系",
+            exitCode: 1,
+            schema: standardSchema(
+              v.object({
+                issues: v.array(
+                  v.object({
+                    code: v.picklist(["UNKNOWN_LINK_FROM", "UNSUPPORTED_LINK"]),
+                  }),
+                ),
+              }),
+            ),
+            text: ({ issues }) =>
+              text.lines([
+                "新增包请求无效。",
+                ...issues.map(({ code }) =>
+                  code === "UNKNOWN_LINK_FROM"
+                    ? "指定的消费包不存在，请检查 --link-from。"
+                    : "指定的包角色不支持此链接，请调整 --link-from。",
+                ),
+              ]),
+          },
+          operationFailed: {
+            description: "新增包操作失败",
+            exitCode: 1,
+            schema: standardSchema(
+              v.object({
+                phase: v.picklist([
+                  "metadata",
+                  "default",
+                  "planning",
+                  "reconciliation",
+                ]),
+                error: v.object({
+                  message: v.string(),
+                  suggestion: v.string(),
+                }),
+              }),
+            ),
+            text: ({ error }) =>
+              text.lines([error.message, `建议: ${error.suggestion}`]),
+          },
+          conflict: {
+            description: "新增包冲突，未写入变更",
+            exitCode: 1,
+            schema: packageConflictSchema,
+            text: ({ conflicts }) =>
+              text.lines([
+                "新增包存在冲突，未写入变更。",
+                ...conflicts.map((conflict) =>
+                  "kind" in conflict
+                    ? `${conflict.requested.path}: 包身份或链接与当前仓库冲突。`
+                    : `${conflict.path}: ${conflict.reason}`,
+                ),
+              ]),
+          },
+        },
+        async handler({ input, dependencies, outcome }) {
+          const result = await runAddPackage(
+            {
+              preset: input.preset,
+              name: input.name,
+              linkFrom: input.linkFrom,
+              dryRun: input.dryRun,
+              ...(input.path === undefined ? {} : { path: input.path }),
+            },
+            dependencies,
+          );
+          if (result.status === "operation-failure")
+            return outcome.failure.operationFailed({
+              phase: result.phase,
+              error: result.error,
+            });
+          if (result.status === "conflict")
+            return outcome.failure.conflict({
+              dryRun: result.dryRun,
+              actions: [],
+              conflicts: [...result.conflicts],
+            });
+          if (result.status === "usage-error") {
+            const issues = result.issues.map(({ code }) => {
+              if (code !== "UNKNOWN_LINK_FROM" && code !== "UNSUPPORTED_LINK")
+                throw new Error("新增包输入校验与契约不一致");
+              return { code };
+            });
+            return outcome.failure.invalidRequest({ issues });
           }
+          const data = { dryRun: result.dryRun, actions: [...result.actions] };
+          return result.dryRun
+            ? outcome.data.planned(data)
+            : result.actions.length === 0
+              ? outcome.data.unchanged(data)
+              : outcome.data.added(data);
         },
+      }),
+      blueprint: {
+        kind: "commandGroup",
+        parent: "template",
+        name: "blueprint",
+        description: "处理项目蓝图。",
       },
+      ...define.command("validateBlueprint")({
+        kind: "command",
+        parent: "blueprint",
+        name: "validate",
+        description: "只读校验项目蓝图。",
+        fields: { path: { kind: "positional", description: "蓝图文件路径" } },
+        input: standardSchema(
+          v.object({ path: v.pipe(v.string(), v.nonEmpty()) }),
+        ),
+        success: {
+          kind: "data",
+          variants: {
+            valid: {
+              description: "蓝图有效",
+              schema: standardSchema(v.object({ path: v.string() })),
+              exitCode: 0,
+              text: () => text.line("蓝图有效。"),
+            },
+          },
+        },
+        failures: {
+          operationFailed: {
+            description: "蓝图读取或解析失败",
+            schema: standardSchema(
+              v.object({
+                path: v.string(),
+                reason: v.picklist([
+                  "not-found",
+                  "permission-denied",
+                  "not-a-file",
+                  "unreadable",
+                  "invalid-json",
+                ]),
+                error: v.object({
+                  message: v.string(),
+                  suggestion: v.string(),
+                }),
+              }),
+            ),
+            exitCode: 1,
+            text: ({ path, error }) =>
+              text.lines([
+                error.message,
+                `路径: ${path}`,
+                `建议: ${error.suggestion}`,
+              ]),
+          },
+          invalid: {
+            description: "蓝图无效",
+            schema: standardSchema(
+              v.object({
+                path: v.string(),
+                issues: v.array(
+                  v.object({ path: v.string(), message: v.string() }),
+                ),
+              }),
+            ),
+            exitCode: 1,
+            text: ({ path, issues }) =>
+              text.lines([
+                "蓝图无效。",
+                `路径: ${path}`,
+                ...issues.map(
+                  (issue) => `${issue.path}: 该位置的蓝图定义不符合要求。`,
+                ),
+                "建议: 修正蓝图后重新验证。",
+              ]),
+          },
+        },
+        async handler({ input, dependencies, outcome }) {
+          const result = await validateBlueprintFile(input.path, dependencies);
+          if (result.status === "invalid")
+            return outcome.failure.invalid({
+              path: result.path,
+              issues: [...result.issues],
+            });
+          if (result.status === "operation-failure")
+            return outcome.failure.operationFailed({
+              path: result.path,
+              reason: result.reason,
+              error: result.error,
+            });
+          return outcome.data.valid({ path: result.path });
+        },
+      }),
+      ...define.command("schema")({
+        kind: "command",
+        parent: "template",
+        name: "schema",
+        description: "导出完整 CLI 契约及输入/输出 Schema。",
+        input: standardSchema(v.object({})),
+        fields: {},
+        success: {
+          kind: "data",
+          variants: {
+            exported: {
+              description: "完整 CLI 契约",
+              exitCode: 0,
+              schema: standardSchema(
+                v.object({ manifest: v.record(v.string(), v.unknown()) }),
+              ),
+              text: ({ manifest }) =>
+                text.lines([
+                  "CLI 契约",
+                  ...JSON.stringify(manifest, null, 2).split("\n"),
+                ]),
+            },
+          },
+        },
+        failures: {},
+        handler: ({ dependencies, outcome }) =>
+          outcome.data.exported({ manifest: dependencies.getManifest() }),
+      }),
+      ...define.command("presets")({
+        kind: "command",
+        parent: "template",
+        name: "presets",
+        description: "列出内置预设。",
+        fields: {},
+        input: standardSchema(v.object({})),
+        success: {
+          kind: "data",
+          variants: {
+            listed: {
+              description: "内置预设列表",
+              schema: standardSchema(
+                v.object({
+                  presets: v.array(
+                    v.object({
+                      name: v.string(),
+                      title: v.string(),
+                      description: v.string(),
+                    }),
+                  ),
+                }),
+              ),
+              exitCode: 0,
+              text: ({ presets }) =>
+                text.lines([
+                  "内置预设",
+                  ...presets.map(
+                    (preset) =>
+                      `  ${preset.name}: ${preset.title} - ${preset.description}`,
+                  ),
+                ]),
+            },
+          },
+        },
+        failures: {},
+        handler: ({ outcome }) =>
+          outcome.data.listed({ presets: [...listPresetCatalog().presets] }),
+      }),
     },
-  };
-}
-
-export function createCliCommand(
-  runtime: CliRuntime,
-  commanderOutput?: { stdout: string; stderr: string },
-): Command {
-  const command = new Command()
-    .name("template")
-    .description("从维护的项目预设创建仓库。")
-    .version(runtime.version)
-    .configureOutput({
-      writeOut: (text) => {
-        if (commanderOutput === undefined) runtime.streams.stdout.write(text);
-        else commanderOutput.stdout += text;
-      },
-      writeErr: (text) => {
-        if (commanderOutput === undefined) runtime.streams.stderr.write(text);
-        else commanderOutput.stderr += text;
-      },
-    })
-    .configureHelp({
-      subcommandTerm(subcommand) {
-        switch (subcommand.name()) {
-          case "init":
-            return "template init <dir>";
-          case "add":
-            return "template add package";
-          case "presets":
-            return "template presets";
-          case "blueprint":
-            return "template blueprint validate <path>";
-          default:
-            return `template ${subcommand.name()}`;
-        }
-      },
-    })
-    .showHelpAfterError()
-    .exitOverride();
-
-  command
-    .command("init <dir>")
-    .description("初始化前解析预设、初始包名称、路径和包 scope。")
-    .requiredOption("--preset <name>", "要生成的项目预设")
-    .option("--name <name>", "预设支持主包身份覆盖时使用的无 scope 叶名称")
-    .option("--path <path>", "预设支持主包身份覆盖时使用的两段路径")
-    .option("--scope <name>", "解析后的默认包 scope")
-    .option("-y, --yes", "接受非交互式生成的默认值")
-    .option("--dry-run", "打印生成计划而不写文件")
-    .option("--json", "输出机器可读结果")
-    .option("--no-todo", "不写入生成后的 TODO.md")
-    .action(
-      async (
-        dir: string,
-        options: {
-          readonly preset: string;
-          readonly scope?: string;
-          readonly name?: string;
-          readonly path?: string;
-          readonly yes?: boolean;
-          readonly dryRun?: boolean;
-          readonly json?: boolean;
-          readonly todo: boolean;
-        },
-      ) => {
-        const initOptions: InitCommandOptions = {
-          dir,
-          preset: options.preset,
-          yes: Boolean(options.yes),
-          dryRun: Boolean(options.dryRun),
-          json: Boolean(options.json),
-          todo: options.todo,
-          ...(options.name === undefined ? {} : { name: options.name }),
-          ...(options.path === undefined ? {} : { path: options.path }),
-          ...(options.scope === undefined ? {} : { scope: options.scope }),
-        };
-        writeClosedCommandResult(
-          runtime,
-          await runInit(initOptions, runtime),
-          initOptions.json,
-        );
-      },
-    );
-
-  const addCommand = command
-    .command("add")
-    .description("向生成仓库添加内容；package 支持 --dry-run 和 --json。");
-  addCommand
-    .command("package")
-    .description("添加一个 Package Boundary。")
-    .requiredOption("--preset <name>", "要添加的 Package 预设")
-    .requiredOption("--name <name>", "要添加的 Package 名称")
-    .option("--path <path>", "要添加的两段 Package Path")
-    .option(
-      "--link-from <path>",
-      "要链接的现有 consumer Package Path；可重复传入",
-      (value: string, previous: readonly string[]) => [...previous, value],
-      [],
-    )
-    .option("--dry-run", "预览 Addition Delta 而不写文件")
-    .option("--json", "输出机器可读结果")
-    .action(
-      async (options: {
-        readonly preset: string;
-        readonly name: string;
-        readonly path?: string;
-        readonly linkFrom: readonly string[];
-        readonly dryRun?: boolean;
-        readonly json?: boolean;
-      }) => {
-        const addOptions: AddPackageCommandOptions = {
-          preset: options.preset,
-          name: options.name,
-          ...(options.path === undefined ? {} : { path: options.path }),
-          linkFrom: options.linkFrom,
-          dryRun: Boolean(options.dryRun),
-          json: Boolean(options.json),
-        };
-        writeClosedCommandResult(
-          runtime,
-          await runAddPackage(addOptions, runtime),
-          addOptions.json,
-        );
-      },
-    );
-
-  command
-    .command("presets")
-    .description("列出内置预设。")
-    .option("--json", "输出机器可读结果")
-    .action((options: { readonly json?: boolean }) => {
-      writeClosedCommandResult(
-        runtime,
-        listPresetCatalog(),
-        Boolean(options.json),
-      );
-    });
-
-  command
-    .command("blueprint")
-    .description("处理 Project Blueprint。")
-    .command("validate <path>")
-    .description("校验 Project Blueprint。")
-    .option("--json", "输出机器可读结果")
-    .action(async (filePath: string, options: { readonly json?: boolean }) => {
-      writeClosedCommandResult(
-        runtime,
-        await validateBlueprintFile(filePath, runtime),
-        Boolean(options.json),
-      );
-    });
-
-  return command;
+  });
 }
 
 export async function runCli(runtime: CliRuntime): Promise<number> {
-  let command: CliCommandName = "template";
-  let json = false;
-  let commandRuntime = runtime;
-  let identity = new HumanCommandIdentity(runtime);
-  const commanderOutput = { stdout: "", stderr: "" };
   try {
-    command = commandName(runtime.argv);
-    json = hasJsonControlIntent(runtime.argv);
-    ({ runtime: commandRuntime, identity } = withHumanIdentity(runtime, json));
-    const cli = createCliCommand(commandRuntime, commanderOutput);
-    if (commandRuntime.argv.length <= 2) {
-      cli.outputHelp();
-      identity.writeText("stdout", localizeHelp(commanderOutput.stdout));
-      return 0;
-    }
-    await cli.parseAsync([...commandRuntime.argv], { from: "node" });
-    return 0;
+    const contract = createCliContract(runtime);
+    const result = await executeCli(contract, {
+      invocation: parseCliInvocation(contract, runtime.argv.slice(2)),
+      dependencies: {
+        ...runtime,
+        getManifest: () => ({ ...contract.manifest }),
+      },
+      write: runtime.write,
+    });
+    return result.exitCode;
   } catch (error) {
-    if (error instanceof OutputFailure) return exitCodeForOutputFailure(error);
-    if (error instanceof HandledCliExit) return error.exitCode;
     if (
-      error instanceof CommanderError &&
-      (error.code === "commander.helpDisplayed" ||
-        error.code === "commander.version")
-    ) {
-      try {
-        identity.writeText(
-          "stdout",
-          error.code === "commander.version"
-            ? ""
-            : localizeHelp(commanderOutput.stdout),
-        );
-      } catch (writeError) {
-        if (writeError instanceof OutputFailure) {
-          return exitCodeForOutputFailure(writeError);
-        }
-        return 65;
-      }
+      error instanceof CliWriteError &&
+      error.destination === "stdout" &&
+      isNodeBrokenPipe(error)
+    )
       return 0;
-    }
-    const failure =
-      error instanceof CommanderError
-        ? commanderFailure(error, command, commanderOutput.stderr)
-        : applicationFailure(error, command);
     try {
-      writeFailure(runtime, identity, json, failure);
-    } catch (writeError) {
-      if (writeError instanceof OutputFailure) {
-        return exitCodeForOutputFailure(writeError);
-      }
-      return 65;
+      await runtime.write({
+        destination: "stderr",
+        chunk: "命令执行失败；请检查运行环境或报告此问题。\n",
+      });
+    } catch {
+      // 诊断通道不可用时仍保留原始故障退出类别。
     }
-    return failure.code.startsWith("USAGE_") ? 64 : 65;
+    return 70;
   }
 }

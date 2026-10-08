@@ -20,8 +20,6 @@ function createRuntime(workspace: string): ApplicationRuntime {
   return {
     cwd: workspace,
     env: {},
-    tty: { stdin: true, stdout: true, stderr: true },
-    confirmation: { confirm: async () => true },
   };
 }
 
@@ -48,9 +46,7 @@ describe("init publication setup handoff", () => {
         {
           dir: "publication-setup-test",
           preset: publicationSetupPreset.metadata.name,
-          yes: true,
           dryRun: false,
-          json: false,
           todo: true,
         },
         runtime,
@@ -65,9 +61,7 @@ describe("init publication setup handoff", () => {
         {
           dir: "preview",
           preset: publicationSetupPreset.metadata.name,
-          yes: true,
           dryRun: true,
-          json: true,
           todo: false,
         },
         runtime,
@@ -105,9 +99,7 @@ describe("init toolchain snapshot consumption", () => {
         {
           dir: "project",
           preset: snapshotInitPreset.metadata.name,
-          yes: true,
           dryRun: false,
-          json: true,
           todo: false,
           scope: "acme",
         },

@@ -135,7 +135,6 @@ const journey: CliJourney = {
           addablePresetName,
           "--scope",
           "acme",
-          "--yes",
         ],
       },
       {
@@ -153,7 +152,6 @@ const journey: CliJourney = {
           "--link-from",
           consumerPath,
           "--dry-run",
-          "--json",
         ],
       },
       {
@@ -175,7 +173,6 @@ const journey: CliJourney = {
           "packages/utility",
           "--link-from",
           consumerPath,
-          "--json",
         ],
       },
       {
@@ -192,7 +189,6 @@ const journey: CliJourney = {
           "packages/utility",
           "--link-from",
           consumerPath,
-          "--json",
         ],
       },
       {
@@ -228,7 +224,6 @@ const journey: CliJourney = {
           "upgraded",
           "--path",
           "packages/upgraded",
-          "--json",
         ],
       },
       {
@@ -261,7 +256,6 @@ const journey: CliJourney = {
           "second",
           "--path",
           "packages/second",
-          "--json",
         ],
       },
       {
@@ -291,7 +285,6 @@ const journey: CliJourney = {
           "rejected",
           "--path",
           "packages/rejected",
-          "--json",
         ],
       },
       {
@@ -327,19 +320,19 @@ const journey: CliJourney = {
           "missing-pm",
           "--path",
           "packages/missing-pm",
+          "--output-format",
+          "text",
         ],
       },
     ];
   },
   async assertions({ context, results }) {
-    const manifest = JSON.parse(
-      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
-    ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
 
-    const preview = JSON.parse(results[1]?.stdout ?? "");
+    const previewResult = JSON.parse(results[1]?.stdout ?? "");
+    assert.equal(previewResult.variant, "planned");
+    const preview = previewResult.data;
     assert.equal(results[1]?.exitCode, 0);
-    assert.equal(preview.status, "success");
     assert.equal(preview.dryRun, true);
     assert.ok(
       preview.actions.some(
@@ -349,7 +342,7 @@ const journey: CliJourney = {
     );
 
     assert.equal(results[2]?.exitCode, 0);
-    assert.equal(JSON.parse(results[2]?.stdout ?? "").status, "success");
+    assert.equal(JSON.parse(results[2]?.stdout ?? "").kind, "data");
     assert.match(
       await readFile(
         path.join(context.workDir, "project/packages/utility/package.json"),
@@ -358,19 +351,10 @@ const journey: CliJourney = {
       /"name": "@acme\/utility"/u,
     );
 
-    assert.deepEqual(JSON.parse(results[3]?.stdout ?? "").actions, []);
-    assert.equal(results[4]?.exitCode, 64);
+    assert.deepEqual(JSON.parse(results[3]?.stdout ?? "").data.actions, []);
+    assert.equal(results[4]?.exitCode, 2);
     assert.equal(results[4]?.stdout, "");
-    assert.match(
-      results[4]?.stderr ?? "",
-      new RegExp(`^template ${manifest.version}\\n`, "u"),
-    );
-    assert.match(results[4]?.stderr ?? "", /USAGE_MISSING_REQUIRED_OPTION/u);
-    assert.match(results[4]?.stderr ?? "", /缺少必需选项/u);
-    assert.match(
-      results[4]?.stderr ?? "",
-      /用法: template add package \[options\]/u,
-    );
+    assert.equal(JSON.parse(results[4]?.stderr ?? "").kind, "usageFailure");
 
     const project = path.join(context.workDir, "project");
     const history = JSON.parse(
@@ -403,7 +387,7 @@ const journey: CliJourney = {
     assert.notEqual(history.recordNodeLtsMajor, upgradedNode);
 
     assert.equal(results[5]?.exitCode, 0);
-    assert.equal(JSON.parse(results[5]?.stdout ?? "").status, "success");
+    assert.equal(JSON.parse(results[5]?.stdout ?? "").kind, "data");
     const upgradedManifest = JSON.parse(
       await readFile(
         path.join(project, "packages/upgraded/package.json"),
@@ -424,15 +408,13 @@ const journey: CliJourney = {
       history.recordNodeLtsMajor,
     );
 
-    const rejected = JSON.parse(results[7]?.stdout ?? "") as {
-      readonly status: string;
-      readonly code: string;
+    const rejectedResult = JSON.parse(results[7]?.stderr ?? "");
+    assert.equal(rejectedResult.variant, "operationFailed");
+    const rejected = rejectedResult.data as {
       readonly phase: string;
       readonly error: { readonly message: string; readonly suggestion: string };
     };
-    assert.equal(results[7]?.exitCode, 65);
-    assert.equal(rejected.status, "operation-failure");
-    assert.equal(rejected.code, "OPERATION_ADD_PACKAGE_FAILED");
+    assert.equal(results[7]?.exitCode, 1);
     assert.equal(rejected.phase, "metadata");
     // JSON 输出必须点名无效字段与其实际值，并给出修正动作。
     assert.match(rejected.error.message, /engines\.node/u);
@@ -461,14 +443,8 @@ const journey: CliJourney = {
 
     // 文本输出负例：缺失 packageManager 声明同样给出字段级可行动诊断。
     const missingPm = results[8];
-    assert.equal(missingPm?.exitCode, 65);
+    assert.equal(missingPm?.exitCode, 1);
     assert.equal(missingPm?.stdout, "");
-    assert.match(
-      missingPm?.stderr ?? "",
-      /OPERATION_ADD_PACKAGE_FAILED/u,
-      "文本输出应包含失败类别",
-    );
-    assert.match(missingPm?.stderr ?? "", /阶段: metadata/u);
     assert.match(
       missingPm?.stderr ?? "",
       /package\.json 的 packageManager/u,
@@ -499,9 +475,10 @@ const journey: CliJourney = {
       ),
     );
 
-    const conflict = JSON.parse(results[6]?.stdout ?? "");
+    const conflictResult = JSON.parse(results[6]?.stderr ?? "");
+    assert.equal(conflictResult.variant, "conflict");
+    const conflict = conflictResult.data;
     assert.equal(results[6]?.exitCode, 1);
-    assert.equal(conflict.status, "conflict");
     assert.deepEqual(conflict.actions, []);
     assert.ok(
       conflict.conflicts.some(

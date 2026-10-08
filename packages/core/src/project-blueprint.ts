@@ -112,7 +112,7 @@ const packageLinkIntentSchema = v.strictObject(
       : "Package Link Intent must be an object",
 );
 
-const projectBlueprintSchema = v.strictObject(
+export const projectBlueprintSchema = v.strictObject(
   {
     schemaVersion: v.literal(
       3,

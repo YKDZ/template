@@ -62,7 +62,6 @@ const journey: CliJourney = {
           "--path",
           "tools/release",
           "--dry-run",
-          "--json",
         ],
       },
       {
@@ -74,12 +73,11 @@ const journey: CliJourney = {
           fixedTopologyPresetName,
           "--name",
           "renamed",
-          "--yes",
         ],
       },
       {
-        name: "non-interactive rejection",
-        args: ["init", "rejected", "--preset", addablePresetName],
+        name: "non-interactive initialization",
+        args: ["init", "automatic", "--preset", addablePresetName],
       },
       {
         name: "invalid durable scope rejection",
@@ -90,7 +88,6 @@ const journey: CliJourney = {
           addablePresetName,
           "--scope",
           ".bad",
-          "--yes",
         ],
       },
       {
@@ -102,26 +99,21 @@ const journey: CliJourney = {
           addablePresetName,
           "--scope",
           "acme",
-          "--yes",
-          "--json",
           "--no-todo",
         ],
       },
       {
         name: "existing target conflict",
-        args: ["init", "project", "--preset", addablePresetName, "--yes"],
+        args: ["init", "project", "--preset", addablePresetName],
       },
     ];
   },
   async assertions({ context, results }) {
-    const manifest = JSON.parse(
-      await readFile(path.join(context.packageRoot, "package.json"), "utf8"),
-    ) as { readonly version: string };
     assert.equal(results[0]?.exitCode, 0);
-    const preview = JSON.parse(results[0]?.stdout ?? "");
-    assert.equal(preview.command, "init");
-    assert.equal(preview.status, "success");
-    assert.equal(preview.cliVersion, manifest.version);
+    const envelope = JSON.parse(results[0]?.stdout ?? "");
+    assert.equal(envelope.command, "init");
+    assert.equal(envelope.variant, "planned");
+    const preview = envelope.data;
     assert.equal(preview.dryRun, true);
     assert.equal(preview.targetDir, "preview");
     assert.deepEqual(preview.resolved, {
@@ -138,16 +130,16 @@ const journey: CliJourney = {
       code: "ENOENT",
     });
 
-    assert.equal(results[1]?.exitCode, 64);
-    assert.match(results[1]?.stderr ?? "", /固定初始包拓扑/u);
+    assert.equal(results[1]?.exitCode, 2);
+    assert.match(results[1]?.stderr ?? "", /固定拓扑预设/u);
     await assert.rejects(stat(path.join(context.workDir, "fixed-rejected")), {
       code: "ENOENT",
     });
 
-    assert.equal(results[2]?.exitCode, 64);
-    assert.match(results[2]?.stderr ?? "", /非交互式初始化必须显式传入 --yes/u);
+    assert.equal(results[2]?.exitCode, 0);
+    assert.equal(JSON.parse(results[2]?.stdout ?? "").variant, "initialized");
 
-    assert.equal(results[3]?.exitCode, 64);
+    assert.equal(results[3]?.exitCode, 2);
     assert.match(
       results[3]?.stderr ?? "",
       /--scope 必须是不含空白字符的有效 npm scope/u,
@@ -157,7 +149,7 @@ const journey: CliJourney = {
     });
 
     assert.equal(results[4]?.exitCode, 0);
-    const initialized = JSON.parse(results[4]?.stdout ?? "");
+    const initialized = JSON.parse(results[4]?.stdout ?? "").data;
     assert.deepEqual(initialized.followUpDocument, { enabled: false });
     assert.deepEqual(initialized.toolchain, {
       nodeVersion: releaseToolchainSnapshot.nodeVersion,
@@ -204,8 +196,11 @@ const journey: CliJourney = {
       code: "ENOENT",
     });
 
-    assert.equal(results[5]?.exitCode, 65);
-    assert.match(results[5]?.stderr ?? "", /OPERATION_INIT_FAILED/u);
+    assert.equal(results[5]?.exitCode, 1);
+    assert.equal(
+      JSON.parse(results[5]?.stderr ?? "").variant,
+      "operationFailed",
+    );
   },
 };
 

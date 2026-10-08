@@ -68,7 +68,11 @@ async function generatedRepository(
       build: "tsc -p tsconfig.build.json --pretty false",
       prepack: "pnpm exec turbo run build --filter=.",
     },
-    dependencies: { commander: "catalog:" },
+    dependencies: {
+      "@ykdz/cli-contract": "catalog:",
+      "@valibot/to-json-schema": "catalog:",
+      valibot: "catalog:",
+    },
     engines: { node: ">=26" },
     ...options.manifest,
   });
@@ -95,7 +99,11 @@ function readyManifest(packageName: string): Readonly<Record<string, unknown>> {
       build: "tsc -p tsconfig.build.json --pretty false",
       prepack: "pnpm exec turbo run build --filter=.",
     },
-    dependencies: { commander: "catalog:" },
+    dependencies: {
+      "@ykdz/cli-contract": "catalog:",
+      "@valibot/to-json-schema": "catalog:",
+      valibot: "catalog:",
+    },
     engines: { node: ">=26" },
     publishConfig: {
       access: "public",
@@ -133,7 +141,7 @@ async function writeReadyFacts(
   await writeFile(path.join(repositoryRoot, "packages/cli/LICENSE"), license);
   await writeFile(
     path.join(repositoryRoot, "packages/cli/README.md"),
-    "# CLI\n\nInstall the package and run `cli greet Ada`.\n",
+    "# CLI\n\nInstall the package and run `cli lookup ada`.\n",
   );
   await writeFile(
     path.join(repositoryRoot, "packages/cli/CHANGELOG.md"),
@@ -330,7 +338,7 @@ describe("Generated Repository npm publication readiness", () => {
 
   it.each([
     ["removed", {}],
-    ["empty", { commander: "" }],
+    ["empty", { "@ykdz/cli-contract": "" }],
   ])(
     "blocks a $0 fixed CLI runtime dependency specifier",
     async (_state, dependencies) => {
@@ -815,7 +823,9 @@ describe("Generated Repository npm publication readiness", () => {
     await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
       ...readyManifest("@demo/cli"),
       dependencies: {
-        commander: "catalog:",
+        "@ykdz/cli-contract": "catalog:",
+        "@valibot/to-json-schema": "catalog:",
+        valibot: "catalog:",
         "@demo/runtime": "workspace:*",
       },
     });
@@ -866,7 +876,9 @@ describe("Generated Repository npm publication readiness", () => {
     await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
       ...readyManifest("@demo/cli"),
       dependencies: {
-        commander: "catalog:",
+        "@ykdz/cli-contract": "catalog:",
+        "@valibot/to-json-schema": "catalog:",
+        valibot: "catalog:",
         "@demo/runtime": "workspace:*",
       },
     });

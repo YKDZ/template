@@ -584,15 +584,19 @@ function addManifestBlockers(options: {
     "imports",
     "provenance",
   ].filter((field) => Object.hasOwn(manifest, field));
+  const runtimeDependencies = manifest.dependencies;
   const manifestContractValid =
     manifest.type === "module" &&
     exactStringSet(manifest.files, publicationFiles) &&
     expectedPublicNodeRangeFromRoot !== undefined &&
     isObject(manifest.engines) &&
     manifest.engines.node === expectedPublicNodeRangeFromRoot &&
-    validRecordOfStrings(manifest.dependencies) &&
-    typeof manifest.dependencies.commander === "string" &&
-    manifest.dependencies.commander.trim().length > 0 &&
+    validRecordOfStrings(runtimeDependencies) &&
+    ["@ykdz/cli-contract", "@valibot/to-json-schema", "valibot"].every(
+      (name) =>
+        typeof runtimeDependencies[name] === "string" &&
+        runtimeDependencies[name].trim().length > 0,
+    ) &&
     isObject(scripts) &&
     typeof scripts.build === "string" &&
     scripts.build.length > 0 &&

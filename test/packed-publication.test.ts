@@ -671,7 +671,7 @@ describe("packed public CLI consumer", () => {
           "package/dist/cli.js",
           "package/dist/main.d.ts",
           "package/dist/main.js",
-          "package/node_modules/commander/package.json",
+          "package/node_modules/@ykdz/cli-contract/package.json",
           "package/node_modules/@ykdz/template-core/package.json",
           "package/node_modules/@ykdz/template-builtin-presets/package.json",
           "package/node_modules/@ykdz/template-builtin-presets/templates/foundation/turbo.json",
@@ -730,11 +730,16 @@ describe("packed public CLI consumer", () => {
             default: "./dist/main.js",
           },
         },
-        dependencies: { commander: expect.any(String) },
+        dependencies: {
+          "@ykdz/cli-contract": expect.any(String),
+          "@valibot/to-json-schema": expect.any(String),
+          valibot: expect.any(String),
+        },
         bundleDependencies: expect.arrayContaining([
           "@ykdz/template-core",
           "@ykdz/template-builtin-presets",
-          "commander",
+          "@ykdz/cli-contract",
+          "@valibot/to-json-schema",
           "typescript",
         ]),
       });
@@ -819,27 +824,26 @@ describe("packed public CLI consumer", () => {
             "-e",
             [
               `const api = await import(${JSON.stringify(publicCliPackageName)});`,
-              'if (typeof api.runCli !== "function" || typeof api.createCliCommand !== "function") process.exit(1);',
+              'if (typeof api.runCli !== "function") process.exit(1);',
             ].join(""),
           ],
           { cwd: consumer },
         ),
       ).resolves.toMatchObject({ exitCode: 0 });
       const help = await execa(installedBin, ["--help"], { cwd: consumer });
-      expect(help.stdout).toContain("template init <dir>");
+      expect(help.stdout).toContain("init");
       const addHelp = await execa(installedBin, ["add", "package", "--help"], {
         cwd: consumer,
       });
       expect(addHelp.stdout).toContain("template add package");
-      expect(addHelp.stdout).toContain("--link-from <path>");
+      expect(addHelp.stdout).toContain("--link-from");
       expect(addHelp.stdout).not.toContain("template init <dir>");
       const presets = await execa(installedBin, ["presets"], {
         cwd: consumer,
       });
-      const definitions = presets.stdout.split("\n").flatMap((line) => {
-        const match = /^\s{2}([^:\s]+):/u.exec(line);
-        return match === null ? [] : [{ name: match[1]! }];
-      });
+      const definitions = JSON.parse(presets.stdout).data.presets as {
+        name: string;
+      }[];
       expect(definitions.length).toBeGreaterThan(0);
       for (const definition of definitions) {
         await execa(
@@ -849,7 +853,6 @@ describe("packed public CLI consumer", () => {
             path.join(consumer, "generated", definition.name),
             "--preset",
             definition.name,
-            "--yes",
           ],
           {
             cwd: consumer,
@@ -998,14 +1001,12 @@ describe("packed public CLI consumer", () => {
           "--name",
           "worker",
           "--dry-run",
-          "--json",
         ],
         {
           cwd: rustAdditionTarget,
         },
       );
-      const rustPreview = JSON.parse(rustPreviewResult.stdout) as {
-        readonly status: string;
+      const rustPreview = JSON.parse(rustPreviewResult.stdout).data as {
         readonly dryRun: boolean;
         readonly actions: readonly {
           readonly path: string;
@@ -1013,7 +1014,6 @@ describe("packed public CLI consumer", () => {
         }[];
         readonly conflicts?: readonly unknown[];
       };
-      expect(rustPreview.status).toBe("success");
       expect(rustPreview.dryRun).toBe(true);
       expect(rustPreview.conflicts ?? []).toEqual([]);
       expect(rustPreview.actions).toEqual(
@@ -1274,22 +1274,18 @@ describe("packed public CLI consumer", () => {
           "--path",
           "dist/evil",
           "--dry-run",
-          "--json",
         ],
         {
           cwd: previewTarget,
           reject: false,
         },
       );
-      expect(reservedPackagePath.exitCode).toBe(64);
-      expect(reservedPackagePath.stderr).toBe("");
-      expect(JSON.parse(reservedPackagePath.stdout)).toMatchObject({
-        cliVersion: sourceManifest.version,
-        command: "add package",
-        status: "usage-error",
-        code: "USAGE_ADD_PACKAGE_INVALID",
-        issues: [{ code: "RESERVED_PACKAGE_PATH" }],
+      expect(reservedPackagePath.exitCode).toBe(2);
+      expect(reservedPackagePath.stdout).toBe("");
+      expect(JSON.parse(reservedPackagePath.stderr)).toMatchObject({
+        kind: "usageFailure",
       });
+      expect(reservedPackagePath.stderr).toContain("保留工作区目录");
       expect(await workspaceByteSnapshot(previewTarget)).toEqual(
         reservedBefore,
       );
@@ -1313,7 +1309,6 @@ describe("packed public CLI consumer", () => {
           "existing",
           "--path",
           "services/existing",
-          "--json",
         ],
         {
           cwd: previewTarget,
@@ -1321,8 +1316,7 @@ describe("packed public CLI consumer", () => {
         },
       );
       expect(existingPackagePath.exitCode).not.toBe(0);
-      expect(JSON.parse(existingPackagePath.stdout)).toMatchObject({
-        status: "conflict",
+      expect(JSON.parse(existingPackagePath.stderr).data).toMatchObject({
         actions: [],
         conflicts: [
           {
@@ -1351,16 +1345,12 @@ describe("packed public CLI consumer", () => {
           "--path",
           "services/dashboard",
           "--dry-run",
-          "--json",
         ],
         {
           cwd: previewTarget,
         },
       );
-      expect(JSON.parse(preview.stdout)).toMatchObject({
-        schemaVersion: 1,
-        command: "add package",
-        status: "success",
+      expect(JSON.parse(preview.stdout).data).toMatchObject({
         dryRun: true,
         actions: expect.arrayContaining([
           {
@@ -1391,7 +1381,6 @@ describe("packed public CLI consumer", () => {
           "dashboard",
           "--path",
           "services/dashboard",
-          "--json",
         ],
         {
           cwd: previewTarget,
@@ -1399,8 +1388,7 @@ describe("packed public CLI consumer", () => {
         },
       );
       expect(structuredConflict.exitCode).not.toBe(0);
-      expect(JSON.parse(structuredConflict.stdout)).toMatchObject({
-        status: "conflict",
+      expect(JSON.parse(structuredConflict.stderr).data).toMatchObject({
         actions: [],
         conflicts: [
           {
@@ -1447,6 +1435,8 @@ describe("packed public CLI consumer", () => {
           "dashboard",
           "--path",
           "services/dashboard",
+          "--output-format",
+          "text",
         ],
         {
           cwd: previewTarget,
@@ -1492,7 +1482,6 @@ describe("packed public CLI consumer", () => {
           baseDefinition.metadata.name,
           "--scope",
           "demo",
-          "--yes",
         ],
         {
           cwd: consumer,

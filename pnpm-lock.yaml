@@ -188,6 +188,9 @@ catalogs:
     '@types/web-bluetooth':
       specifier: ^0.0.21
       version: 0.0.21
+    '@valibot/to-json-schema':
+      specifier: ^1.8.0
+      version: 1.8.0
     '@vikejs/hono':
       specifier: ^0.2.1
       version: 0.2.1
@@ -200,9 +203,9 @@ catalogs:
     '@vue/tsconfig':
       specifier: ^0.9.1
       version: 0.9.1
-    commander:
-      specifier: ^15.0.0
-      version: 15.0.0
+    '@ykdz/cli-contract':
+      specifier: 0.2.1
+      version: 0.2.1
     drizzle-kit:
       specifier: 1.0.0-rc.5-ab785fc
       version: 1.0.0-rc.5-ab785fc
@@ -394,6 +397,9 @@ importers:
       '@types/web-bluetooth':
         specifier: 'catalog:'
         version: 0.0.21
+      '@valibot/to-json-schema':
+        specifier: 'catalog:'
+        version: 1.8.0(valibot@1.5.0(@typescript/typescript6@6.0.2))
       '@vikejs/hono':
         specifier: 'catalog:'
         version: 0.2.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))
@@ -406,9 +412,9 @@ importers:
       '@vue/tsconfig':
         specifier: 'catalog:'
         version: 0.9.1(@typescript/typescript6@6.0.2)(vue@3.5.43)
-      commander:
+      '@ykdz/cli-contract':
         specifier: 'catalog:'
-        version: 15.0.0
+        version: 0.2.1
       drizzle-kit:
         specifier: 'catalog:'
         version: 1.0.0-rc.5-ab785fc
@@ -509,15 +515,18 @@ importers:
 
   packages/cli:
     dependencies:
+      '@valibot/to-json-schema':
+        specifier: 'catalog:'
+        version: 1.8.0(valibot@1.5.0(typescript@6.0.3))
+      '@ykdz/cli-contract':
+        specifier: 'catalog:'
+        version: 0.2.1
       '@ykdz/template-builtin-presets':
         specifier: workspace:*
         version: link:../builtin-presets
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:../core
-      commander:
-        specifier: 'catalog:'
-        version: 15.0.0
       hosted-git-info:
         specifier: ^10.0.0
         version: 10.1.1
@@ -1661,6 +1670,9 @@ packages:
     resolution: {integrity: sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==}
     engines: {node: '>=18'}
 
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==}
 
@@ -2007,6 +2019,11 @@ packages:
   '@universal-middleware/node@0.2.3':
     resolution: {integrity: sha512-eh0HuiLr81Jpe58NHLixLTm42GDeWuL/BW1hGM+yuudOAc19To+zrHnQDipVWmc2D+iIExr0wfuI71ruQ77hxg==}
 
+  '@valibot/to-json-schema@1.8.0':
+    resolution: {integrity: sha512-a0M+uwCuQZEPAo65NYkFSJ14O5c213KoSZmPdoCfuFvUhfULi4T2Z6Tpjv6lTVMW9RoLm74RpRAjNEa43KcN+g==}
+    peerDependencies:
+      valibot: ^1.5.0
+
   '@vikejs/hono@0.2.1':
     resolution: {integrity: sha512-p63PBM88spYeMe3nl8YKbgirsxlGptrBDrXb1SxqnOjXRsb7GWsmRbuGC8axDBguxHHLM8q8Zgi4pMSQPe3t2A==}
     peerDependencies:
@@ -2107,6 +2124,10 @@ packages:
       vue:
         optional: true
 
+  '@ykdz/cli-contract@0.2.1':
+    resolution: {integrity: sha512-1cp3+qQNHOW0fuIWOjkU5ozQbbTAuSqd7AAgqHp2Hs/p63b8oFOUzurgnrwAucWoVil7r2gkplB0klZg57dMRA==}
+    engines: {node: '>=24'}
+
   acorn@8.17.0:
     resolution: {integrity: sha512-xRQbDb9BnwDafYNn6Vwl839DYVjqXYb1XVGtWAZ1kcDc6iwAL4hg3B1dZlRiuENFeO2H53gFG3in621AdERVAg==}
     engines: {node: '>=0.4.0'}
@@ -2164,10 +2185,6 @@ packages:
 
   code-block-writer@13.0.3:
     resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
-
-  commander@15.0.0:
-    resolution: {integrity: sha512-z67u4ZhzCL/Tydu1lJARtEZYWbWaN7oYLHbsuzocr6y4N6WZAagG3RQ4FW61V1/0+jImpj293XfrcYnd1qxtPg==}
-    engines: {node: '>=22.12.0'}
 
   confbox@0.1.8:
     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
@@ -3812,6 +3829,8 @@ snapshots:
 
   '@sindresorhus/merge-streams@4.0.0': {}
 
+  '@standard-schema/spec@1.1.0': {}
+
   '@tailwindcss/node@4.3.3':
     dependencies:
       '@jridgewell/remapping': 2.3.5
@@ -4086,6 +4105,14 @@ snapshots:
       - hono
       - srvx
 
+  '@valibot/to-json-schema@1.8.0(valibot@1.5.0(@typescript/typescript6@6.0.2))':
+    dependencies:
+      valibot: 1.5.0(@typescript/typescript6@6.0.2)
+
+  '@valibot/to-json-schema@1.8.0(valibot@1.5.0(typescript@6.0.3))':
+    dependencies:
+      valibot: 1.5.0(typescript@6.0.3)
+
   '@vikejs/hono@0.2.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
       '@universal-middleware/hono': 0.4.21(hono@4.13.12)(srvx@0.11.21)
@@ -4229,6 +4256,11 @@ snapshots:
       typescript: '@typescript/typescript6@6.0.2'
       vue: 3.5.43
 
+  '@ykdz/cli-contract@0.2.1':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@types/node': 24.19.1
+
   acorn@8.17.0: {}
 
   alien-signals@3.2.1: {}
@@ -4268,8 +4300,6 @@ snapshots:
   chownr@3.0.0: {}
 
   code-block-writer@13.0.3: {}
-
-  commander@15.0.0: {}
 
   confbox@0.1.8: {}
 

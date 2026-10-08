@@ -74,7 +74,7 @@ const packagePlanningRecordSchema = v.strictObject(
     strictObjectMessage(issue, "package planning fact must be an object"),
 );
 
-const generationRecordSchema = v.strictObject(
+export const generationRecordSchema = v.strictObject(
   {
     schemaVersion: v.literal(
       2,

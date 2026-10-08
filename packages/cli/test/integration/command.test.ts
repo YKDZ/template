@@ -117,18 +117,14 @@ function testRuntime(
   return {
     runtime: {
       argv: ["node", "template", ...args],
-      streams: {
-        stdin: {},
-        stdout: { write: (chunk) => (stdout += chunk) },
-        stderr: { write: (chunk) => (stderr += chunk) },
+      commandName: "template",
+      write: ({ destination, chunk }) => {
+        if (destination === "stdout") stdout += chunk;
+        else stderr += chunk;
       },
       cwd: "/workspace",
       env: {},
-      tty: { stdin: false, stdout: false, stderr: false },
       version,
-      confirmation: {
-        confirm: async () => true,
-      },
     },
     stdout: () => stdout,
     stderr: () => stderr,
@@ -145,23 +141,14 @@ describe("template CLI command control", () => {
   });
 
   it("renders bare command and help as Chinese discoverability output", async () => {
-    const bare = testRuntime([]);
-    await expect(runCli(bare.runtime)).resolves.toBe(0);
-    expect(bare.stdout()).toMatch(/^template 1\.2\.3\n/u);
-    expect(bare.stdout()).toContain("用法: template [options] [command]");
-    expect(bare.stderr()).toBe("");
-
-    const output = testRuntime(["--help"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toMatch(/^template 1\.2\.3\n/u);
-    expect(output.stdout().match(/^template 1\.2\.3$/gmu)).toHaveLength(1);
-    expect(output.stdout()).toContain("用法: template [options] [command]");
-    expect(output.stdout()).toContain("init <dir>");
-    expect(output.stdout()).toContain("add");
-    expect(output.stdout()).toContain("presets");
-    expect(output.stdout()).toContain("blueprint");
-    expect(output.stderr()).toBe("");
+    for (const args of [[], ["--help", "--output-format", "structured"]]) {
+      const output = testRuntime(args);
+      expect(await runCli(output.runtime)).toBe(0);
+      expect(output.stdout()).toContain("用法");
+      for (const command of ["init", "add", "presets", "blueprint", "schema"])
+        expect(output.stdout()).toContain(command);
+      expect(output.stderr()).toBe("");
+    }
   });
 
   it("lists deterministic Presets through declared human and JSON modes without writes", async () => {
@@ -171,9 +158,9 @@ describe("template CLI command control", () => {
     try {
       await writeFile(path.join(workspace, "marker"), "unchanged");
       const before = await workspaceByteSnapshot(workspace);
-      const output = testRuntime(["presets"]);
-      const repeat = testRuntime(["presets"]);
-      const jsonOutput = testRuntime(["presets", "--json"], "9.8.7");
+      const output = testRuntime(["presets", "--output-format", "text"]);
+      const repeat = testRuntime(["presets", "--output-format", "text"]);
+      const jsonOutput = testRuntime(["presets"], "9.8.7");
 
       await expect(
         Promise.all([
@@ -182,7 +169,7 @@ describe("template CLI command control", () => {
           runCli({ ...jsonOutput.runtime, cwd: workspace }),
         ]),
       ).resolves.toEqual([0, 0, 0]);
-      expect(output.stdout()).toMatch(/^template 1\.2\.3\n内置预设/mu);
+      expect(output.stdout()).toMatch(/^内置预设/mu);
       expect(output.stdout()).toBe(repeat.stdout());
       expect(output.stdout()).toMatch(/\n  [^:\s]+:/u);
       expect(output.stdout()).toContain(
@@ -191,10 +178,15 @@ describe("template CLI command control", () => {
       expect(output.stdout()).not.toContain("TypeScript command-line package.");
       expect(output.stderr()).toBe("");
       expect(JSON.parse(jsonOutput.stdout())).toMatchObject({
-        schemaVersion: 1,
-        cliVersion: "9.8.7",
+        schemaVersion: "1",
         command: "presets",
-        status: "success",
+        kind: "data",
+        variant: "listed",
+        data: {
+          presets: expect.arrayContaining([
+            expect.objectContaining({ name: "ts-cli" }),
+          ]),
+        },
       });
       expect(jsonOutput.stderr()).toBe("");
       expect(await workspaceByteSnapshot(workspace)).toEqual(before);
@@ -223,9 +215,15 @@ describe("template CLI command control", () => {
           ],
         }),
       );
-      const output = testRuntime(["blueprint", "validate", blueprintPath]);
+      const output = testRuntime([
+        "blueprint",
+        "validate",
+        blueprintPath,
+        "--output-format",
+        "text",
+      ]);
       const jsonOutput = testRuntime(
-        ["blueprint", "validate", blueprintPath, "--json"],
+        ["blueprint", "validate", blueprintPath],
         "9.8.7",
       );
       const before = await workspaceByteSnapshot(workspace);
@@ -233,15 +231,14 @@ describe("template CLI command control", () => {
       await expect(
         Promise.all([runCli(output.runtime), runCli(jsonOutput.runtime)]),
       ).resolves.toEqual([0, 0]);
-      expect(output.stdout()).toMatch(/^template 1\.2\.3\n/u);
       expect(output.stdout()).toContain("蓝图有效。");
       expect(output.stderr()).toBe("");
       expect(JSON.parse(jsonOutput.stdout())).toEqual({
-        schemaVersion: 1,
-        command: "blueprint validate",
-        status: "success",
-        path: blueprintPath,
-        cliVersion: "9.8.7",
+        schemaVersion: "1",
+        command: "validateBlueprint",
+        kind: "data",
+        variant: "valid",
+        data: { path: blueprintPath },
       });
       expect(jsonOutput.stderr()).toBe("");
       expect(await workspaceByteSnapshot(workspace)).toEqual(before);
@@ -260,42 +257,28 @@ describe("template CLI command control", () => {
         blueprintPath,
         JSON.stringify({ schemaVersion: 1, packages: [] }),
       );
-      const output = testRuntime(["blueprint", "validate", blueprintPath]);
-      const jsonOutput = testRuntime([
+      const human = testRuntime([
         "blueprint",
         "validate",
         blueprintPath,
-        "--json",
+        "--output-format",
+        "text",
       ]);
-
+      const json = testRuntime(["blueprint", "validate", blueprintPath]);
       await expect(
-        Promise.all([runCli(output.runtime), runCli(jsonOutput.runtime)]),
+        Promise.all([runCli(human.runtime), runCli(json.runtime)]),
       ).resolves.toEqual([1, 1]);
-      expect(output.stdout()).toBe("");
-      expect(output.stderr()).toMatch(/^template 1\.2\.3\n/u);
-      expect(output.stderr()).toContain("蓝图无效。");
-      expect(output.stderr()).toContain(".schemaVersion:");
-      expect(output.stderr()).toContain("该位置的 Blueprint 定义不符合要求");
-      expect(output.stderr()).not.toContain(
-        "Unsupported Local Template Metadata schema version 1; expected 3",
-      );
-      expect(output.stderr()).toContain("建议:");
-      expect(output.stderr()).not.toContain("Run `template --help`");
-      expect(JSON.parse(jsonOutput.stdout())).toMatchObject({
-        schemaVersion: 1,
-        command: "blueprint validate",
-        status: "invalid",
-        code: "BLUEPRINT_INVALID",
-        path: blueprintPath,
-        issues: [
-          {
-            path: ".schemaVersion",
-            message:
-              "Unsupported Local Template Metadata schema version 1; expected 3",
-          },
-        ],
+      expect(human.stdout()).toBe("");
+      expect(human.stderr()).toContain("蓝图无效");
+      expect(human.stderr()).toContain(".schemaVersion");
+      expect(JSON.parse(json.stderr())).toMatchObject({
+        schemaVersion: "1",
+        command: "validateBlueprint",
+        kind: "failure",
+        variant: "invalid",
+        data: { path: blueprintPath, issues: [{ path: ".schemaVersion" }] },
       });
-      expect(jsonOutput.stderr()).toBe("");
+      expect(json.stdout()).toBe("");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -307,366 +290,176 @@ describe("template CLI command control", () => {
     );
     try {
       const malformedPath = path.join(workspace, "malformed.json");
-      const missingPath = path.join(workspace, "missing.json");
       await writeFile(malformedPath, "{ invalid-source-fragment");
       const before = await workspaceByteSnapshot(workspace);
-      const missing = testRuntime([
-        "blueprint",
-        "validate",
-        missingPath,
-        "--json",
-      ]);
-      const malformed = testRuntime([
-        "blueprint",
-        "validate",
-        malformedPath,
-        "--json",
-      ]);
-
-      await expect(
-        Promise.all([runCli(missing.runtime), runCli(malformed.runtime)]),
-      ).resolves.toEqual([65, 65]);
-      expect(JSON.parse(missing.stdout())).toMatchObject({
-        schemaVersion: 1,
-        command: "blueprint validate",
-        status: "operation-failure",
-        code: "OPERATION_BLUEPRINT_READ_FAILED",
-        path: missingPath,
-        reason: "not-found",
-        error: {
-          message: "找不到 Blueprint 文件。",
-          suggestion: "检查路径是否正确后重新验证。",
-        },
-      });
-      expect(missing.stderr()).toBe("");
-      expect(JSON.parse(malformed.stdout())).toMatchObject({
-        schemaVersion: 1,
-        command: "blueprint validate",
-        status: "operation-failure",
-        code: "OPERATION_BLUEPRINT_PARSE_FAILED",
-        path: malformedPath,
-        reason: "invalid-json",
-        error: {
-          message: "Blueprint JSON 格式无效。",
-          suggestion:
-            "修正 JSON 语法后重新验证；若文件来源不明确，请人工处理。",
-        },
-      });
-      expect(malformed.stdout()).not.toContain("SyntaxError");
-      expect(malformed.stdout()).not.toContain("Unexpected end");
-      expect(malformed.stdout()).not.toContain("invalid-source-fragment");
-      expect(malformed.stderr()).toBe("");
+      for (const [file, reason] of [
+        ["missing.json", "not-found"],
+        ["malformed.json", "invalid-json"],
+      ]) {
+        const output = testRuntime([
+          "blueprint",
+          "validate",
+          path.join(workspace, file!),
+        ]);
+        await expect(runCli(output.runtime)).resolves.toBe(1);
+        expect(JSON.parse(output.stderr())).toMatchObject({
+          kind: "failure",
+          variant: "operationFailed",
+          data: { reason },
+        });
+        expect(output.stdout()).toBe("");
+        expect(output.stderr()).not.toContain("invalid-source-fragment");
+      }
       expect(await workspaceByteSnapshot(workspace)).toEqual(before);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("converges injected boundary failures without leaking their message", async () => {
-    const output = testRuntime(["unknown"]);
-    const argv = ["node", "template", "unknown"];
-    Object.defineProperty(argv, Symbol.iterator, {
-      value() {
-        throw new Error("injected implementation detail");
-      },
-    });
-    const runtime: CliRuntime = {
-      ...output.runtime,
-      argv,
-    };
-
-    await expect(runCli(runtime)).resolves.toBe(65);
-    expect(output.stdout()).toBe("");
-    expect(output.stderr()).toMatch(/^template 1\.2\.3\n/u);
-    expect(output.stderr()).toContain("OPERATION_INTERNAL_ERROR");
-    expect(output.stderr()).not.toContain("injected implementation detail");
-  });
-
-  it("reports unknown commands from shared command facts", async () => {
-    const output = testRuntime(["preset"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(64);
-    expect(output.stdout()).toBe("");
-    expect(output.stderr()).toMatch(/^template 1\.2\.3\n/u);
-    expect(output.stderr()).toContain("USAGE_UNKNOWN_COMMAND");
-    expect(output.stderr()).toContain("Did you mean presets?");
-    expect(output.stderr()).toContain("用法: template");
-
-    const jsonOutput = testRuntime(["preset", "--json"], "9.8.7");
-    await expect(runCli(jsonOutput.runtime)).resolves.toBe(64);
-    expect(JSON.parse(jsonOutput.stdout())).toMatchObject({
-      schemaVersion: 1,
-      cliVersion: "9.8.7",
-      command: "template",
-      code: "USAGE_UNKNOWN_COMMAND",
-      status: "error",
-    });
-    expect(jsonOutput.stderr()).toBe("");
-  });
-
-  it("only treats stdout EPIPE from final control output as successful truncation", async () => {
-    const epiped = testRuntime(["--help"]);
-    const epipedRuntime: CliRuntime = {
-      ...epiped.runtime,
-      streams: {
-        ...epiped.runtime.streams,
-        stdout: {
-          write() {
-            throw Object.assign(new Error("closed pipe"), { code: "EPIPE" });
-          },
-        },
-      },
-    };
-    await expect(runCli(epipedRuntime)).resolves.toBe(0);
-
-    const closedResultEpiped = testRuntime(["presets"]);
-    const closedResultEpipedRuntime: CliRuntime = {
-      ...closedResultEpiped.runtime,
-      streams: {
-        ...closedResultEpiped.runtime.streams,
-        stdout: {
-          write() {
-            throw Object.assign(new Error("closed pipe"), { code: "EPIPE" });
-          },
-        },
-      },
-    };
-    await expect(runCli(closedResultEpipedRuntime)).resolves.toBe(0);
-
-    const broken = testRuntime(["--version"]);
-    const brokenRuntime: CliRuntime = {
-      ...broken.runtime,
-      streams: {
-        ...broken.runtime.streams,
-        stdout: {
-          write() {
-            throw Object.assign(new Error("disk failure"), { code: "ENOSPC" });
-          },
-        },
-      },
-    };
-    await expect(runCli(brokenRuntime)).resolves.toBe(65);
-
-    const stderrEpiped = testRuntime(["preset"]);
-    const stderrEpipedRuntime: CliRuntime = {
-      ...stderrEpiped.runtime,
-      streams: {
-        ...stderrEpiped.runtime.streams,
-        stderr: {
-          write() {
-            throw Object.assign(new Error("closed pipe"), { code: "EPIPE" });
-          },
-        },
-      },
-    };
-    await expect(runCli(stderrEpipedRuntime)).resolves.toBe(65);
-  });
-
-  it("reports missing required options and invalid options as usage errors", async () => {
-    const missingOptions = testRuntime(["add", "package"]);
-    await expect(runCli(missingOptions.runtime)).resolves.toBe(64);
-    expect(missingOptions.stderr()).toContain("USAGE_MISSING_REQUIRED_OPTION");
-    expect(missingOptions.stderr()).toContain("用法: template add package");
-
-    const invalidOption = testRuntime(["presets", "--machine"]);
-    await expect(runCli(invalidOption.runtime)).resolves.toBe(64);
-    expect(invalidOption.stderr()).toContain("USAGE_UNKNOWN_OPTION");
-
-    const optionMissingArgument = testRuntime([
-      "init",
-      "destination",
-      "--preset",
-    ]);
-    await expect(runCli(optionMissingArgument.runtime)).resolves.toBe(64);
-    expect(optionMissingArgument.stderr()).toContain(
-      "USAGE_OPTION_MISSING_ARGUMENT",
-    );
-    expect(optionMissingArgument.stderr()).toContain(
-      "选项 '--preset <name>' 缺少参数。",
-    );
-    expect(optionMissingArgument.stderr()).toContain(
-      "用法: template init [options] <dir>",
-    );
-
-    const excessArguments = testRuntime(["presets", "extra"]);
-    await expect(runCli(excessArguments.runtime)).resolves.toBe(64);
-    expect(excessArguments.stderr()).toContain("USAGE_EXCESS_ARGUMENTS");
-    expect(excessArguments.stderr()).toContain("命令 presets 参数过多。");
-    expect(excessArguments.stderr()).not.toMatch(
-      /too many arguments|Expected/u,
-    );
-    expect(excessArguments.stderr()).toContain(
-      "用法: template presets [options]",
-    );
-
-    const singleArgumentCommand = testRuntime([
-      "blueprint",
-      "validate",
-      "first",
-      "second",
-    ]);
-    await expect(runCli(singleArgumentCommand.runtime)).resolves.toBe(64);
-    expect(singleArgumentCommand.stderr()).toContain("USAGE_EXCESS_ARGUMENTS");
-    expect(singleArgumentCommand.stderr()).toContain(
-      "命令 blueprint validate 参数过多。",
-    );
-    expect(singleArgumentCommand.stderr()).not.toMatch(
-      /too many arguments|Expected/u,
-    );
-    expect(singleArgumentCommand.stderr()).toContain(
-      "用法: template blueprint validate [options] <path>",
-    );
-  });
-
-  it("converges argv derivation failures before command parsing", async () => {
-    const output = testRuntime(["unknown"]);
-    const argv = ["node", "template", "unknown"];
+  it("reports unexpected argv failures without leaking implementation details", async () => {
+    const output = testRuntime([]);
+    const argv = ["node", "template"];
     Object.defineProperty(argv, "slice", {
       value() {
-        throw new Error("argv derivation detail");
+        throw new Error("private detail");
       },
     });
-
-    await expect(
-      runCli({
-        ...output.runtime,
-        argv,
-      }),
-    ).resolves.toBe(65);
+    expect(await runCli({ ...output.runtime, argv })).toBe(70);
     expect(output.stdout()).toBe("");
-    expect(output.stderr()).toContain("OPERATION_INTERNAL_ERROR");
-    expect(output.stderr()).not.toContain("argv derivation detail");
+    expect(output.stderr()).toContain("命令执行失败");
+    expect(output.stderr()).not.toContain("private detail");
   });
 
-  it("converges interactive confirmation output failures", async () => {
-    const args = ["init", "destination", "--preset", addablePresetName];
-    const epiped = testRuntime(args);
-    await expect(
-      runCli({
-        ...epiped.runtime,
-        tty: { stdin: true, stdout: true, stderr: true },
-        confirmation: {
-          async confirm() {
-            throw Object.assign(new Error("closed pipe"), { code: "EPIPE" });
-          },
-        },
-      }),
-    ).resolves.toBe(0);
-
-    const broken = testRuntime(args);
-    await expect(
-      runCli({
-        ...broken.runtime,
-        tty: { stdin: true, stdout: true, stderr: true },
-        confirmation: {
-          async confirm() {
-            throw Object.assign(new Error("full device"), { code: "ENOSPC" });
-          },
-        },
-      }),
-    ).resolves.toBe(65);
-
-    const generic = testRuntime(args);
-    await expect(
-      runCli({
-        ...generic.runtime,
-        tty: { stdin: true, stdout: true, stderr: true },
-        confirmation: {
-          async confirm() {
-            throw new Error("prompt adapter implementation detail");
-          },
-        },
-      }),
-    ).resolves.toBe(65);
-    expect(generic.stderr()).toContain("OPERATION_INTERNAL_ERROR");
-    expect(generic.stderr()).not.toContain(
-      "prompt adapter implementation detail",
-    );
-
-    const codedGeneric = testRuntime(args);
-    await expect(
-      runCli({
-        ...codedGeneric.runtime,
-        tty: { stdin: true, stdout: true, stderr: true },
-        confirmation: {
-          async confirm() {
-            throw Object.assign(new Error("prompt adapter code detail"), {
-              code: "PROMPT_ADAPTER_FAILED",
-            });
-          },
-        },
-      }),
-    ).resolves.toBe(65);
-    expect(codedGeneric.stderr()).toContain("OPERATION_INTERNAL_ERROR");
-    expect(codedGeneric.stderr()).not.toContain("PROMPT_ADAPTER_FAILED");
-    expect(codedGeneric.stderr()).not.toContain("prompt adapter code detail");
+  it("reports malformed calls as stderr JSON even in text mode", async () => {
+    for (const args of [
+      ["preset"],
+      ["add", "package"],
+      ["presets", "--machine"],
+      ["init", "destination", "--preset"],
+      ["presets", "extra"],
+    ]) {
+      const output = testRuntime([...args, "--output-format", "text"]);
+      expect(await runCli(output.runtime)).toBe(2);
+      expect(output.stdout()).toBe("");
+      expect(JSON.parse(output.stderr())).toMatchObject({
+        schemaVersion: "1",
+        kind: "usageFailure",
+        issues: expect.any(Array),
+      });
+    }
   });
 
-  it("renders add package help from the nested command options", async () => {
-    const output = testRuntime(["add", "package", "--help"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toContain("用法: template add package [options]");
-    expect(output.stdout()).toContain("--preset <name>");
-    expect(output.stdout()).toContain("--name <name>");
-    expect(output.stdout()).toContain("--path <path>");
-    expect(output.stdout()).toContain("--link-from <path>");
-    expect(output.stdout()).toContain("--dry-run");
-    expect(output.stdout()).toContain("--json");
-    expect(output.stderr()).toBe("");
+  it("only accepts stdout EPIPE and awaits output failures", async () => {
+    for (const args of [["--help"], ["presets"]]) {
+      const output = testRuntime(args);
+      expect(
+        await runCli({
+          ...output.runtime,
+          write: async () => {
+            throw Object.assign(new Error("pipe"), { code: "EPIPE" });
+          },
+        }),
+      ).toBe(0);
+      expect(output.stderr()).toBe("");
+    }
+    const output = testRuntime(["--version"]);
+    expect(
+      await runCli({
+        ...output.runtime,
+        write: async (event) => {
+          if (event.destination === "stdout")
+            throw Object.assign(new Error("disk"), { code: "ENOSPC" });
+          await output.runtime.write(event);
+        },
+      }),
+    ).toBe(70);
+    expect(output.stderr()).toContain("命令执行失败");
+    const usage = testRuntime(["unknown"]);
+    expect(
+      await runCli({
+        ...usage.runtime,
+        write: async () => {
+          throw Object.assign(new Error("pipe"), { code: "EPIPE" });
+        },
+      }),
+    ).toBe(70);
   });
 
-  it("renders every init option from its command declaration", async () => {
-    const output = testRuntime(["init", "--help"]);
-
-    await expect(runCli(output.runtime)).resolves.toBe(0);
-    expect(output.stdout()).toContain("用法: template init [options] <dir>");
-    expect(output.stdout()).toContain("初始化前解析预设");
-    expect(output.stdout()).toContain("--preset <name>");
-    expect(output.stdout()).toContain("--name <name>");
-    expect(output.stdout()).toContain("--path <path>");
-    expect(output.stdout()).toContain("--scope <name>");
-    expect(output.stdout()).toContain("-y, --yes");
-    expect(output.stdout()).toContain("--dry-run");
-    expect(output.stdout()).toContain("--json");
-    expect(output.stdout()).toContain("--no-todo");
-    expect(output.stderr()).toBe("");
+  it("renders options and preset choices from the executable commands", async () => {
+    for (const args of [
+      ["add", "package", "--help"],
+      ["init", "--help"],
+    ]) {
+      const output = testRuntime(args);
+      expect(await runCli(output.runtime)).toBe(0);
+      for (const option of [
+        "--preset",
+        "--name",
+        "--path",
+        "--dry-run",
+        "--output-format",
+      ])
+        expect(output.stdout()).toContain(option);
+      expect(output.stdout()).toContain(addablePresetName);
+      expect(output.stderr()).toBe("");
+    }
   });
 
   it("runs init dry-run JSON through the injected cwd without writing", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
-    const output = testRuntime([
-      "init",
-      "demo",
-      "--preset",
-      addablePresetName,
-      "--scope",
-      "@acme",
-      "--dry-run",
-      "--json",
-    ]);
-    const runtime: CliRuntime = {
-      ...output.runtime,
-      cwd: workspace,
-    };
-
-    await expect(runCli(runtime)).resolves.toBe(0);
-    const json = JSON.parse(output.stdout());
-    expect(json).toMatchObject({
-      command: "init",
-      dryRun: true,
-      targetDir: "demo",
-      blueprint: { schemaVersion: 3 },
-      followUpDocument: { enabled: true, path: "TODO.md" },
-    });
-    expect(json).toMatchObject({
-      cliVersion: "1.2.3",
-      status: "success",
-    });
-    expect(output.stderr()).toBe("");
-    await expect(stat(path.join(workspace, "demo"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    try {
+      const output = testRuntime([
+        "init",
+        "demo",
+        "--preset",
+        addablePresetName,
+        "--scope",
+        "@acme",
+        "--dry-run",
+      ]);
+      await expect(runCli({ ...output.runtime, cwd: workspace })).resolves.toBe(
+        0,
+      );
+      expect(JSON.parse(output.stdout())).toMatchObject({
+        command: "init",
+        kind: "data",
+        variant: "planned",
+        data: {
+          dryRun: true,
+          targetDir: "demo",
+          blueprint: { schemaVersion: 3 },
+          resolved: { scope: "acme" },
+          followUpDocument: { enabled: true, path: "TODO.md" },
+        },
+      });
+      const human = testRuntime([
+        "init",
+        "demo",
+        "--preset",
+        addablePresetName,
+        "--scope",
+        "acme",
+        "--name",
+        "utility",
+        "--path",
+        "packages/utility",
+        "--dry-run",
+        "--output-format",
+        "text",
+      ]);
+      expect(await runCli({ ...human.runtime, cwd: workspace })).toBe(0);
+      expect(human.stdout()).toContain("@acme/utility");
+      expect(human.stdout()).toContain("packages/utility");
+      expect(human.stdout()).toContain(
+        releaseToolchainSnapshot.packageManagerPin,
+      );
+      expect(output.stderr()).toBe("");
+      await expect(stat(path.join(workspace, "demo"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   it("initializes the release snapshot without reading any environment fact", async () => {
@@ -680,8 +473,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
-      "--json",
     ]);
     const unreadableEnvironment = new Proxy(
       {},
@@ -699,7 +490,11 @@ describe("template CLI command control", () => {
         env: unreadableEnvironment,
       }),
     ).resolves.toBe(0);
-    expect(JSON.parse(output.stdout()).toolchain).toEqual({
+    expect(JSON.parse(output.stdout())).toMatchObject({
+      kind: "data",
+      variant: "initialized",
+    });
+    expect(JSON.parse(output.stdout()).data.toolchain).toEqual({
       nodeVersion: releaseToolchainSnapshot.nodeVersion,
       packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     });
@@ -717,178 +512,151 @@ describe("template CLI command control", () => {
     );
   });
 
-  it("uses the injected confirmation boundary and leaves a cancelled init untouched", async () => {
+  it("rejects invalid init identities through the input schema without writing", async () => {
     const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-cli-confirm-"),
+      path.join(tmpdir(), "template-cli-invalid-init-"),
     );
-    const output = testRuntime(["init", "demo", "--preset", addablePresetName]);
-    const requests: string[] = [];
-    const runtime: CliRuntime = {
-      ...output.runtime,
-      cwd: workspace,
-      tty: { stdin: true, stdout: true, stderr: true },
-      confirmation: {
-        async confirm(request) {
-          requests.push(`${request.message}\n${request.prompt}`);
-          return false;
-        },
-      },
-    };
-
-    await expect(runCli(runtime)).resolves.toBe(2);
-    expect(requests).toHaveLength(1);
-    expect(requests[0]).toContain("计划生成的项目");
-    expect(requests[0]).toContain("预设:");
-    expect(requests[0]).toContain("名称:");
-    expect(requests[0]).toContain("路径:");
-    expect(requests[0]).toContain("Scope:");
-    expect(requests[0]).toContain("生成这个项目？[y/N]");
-    expect(output.stdout()).toBe("template 1.2.3\n");
-    expect(output.stderr()).toContain("已取消初始化；没有写入目标目录。");
-    expect(output.stderr()).not.toMatch(/^template /u);
-    await expect(stat(path.join(workspace, "demo"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
+    try {
+      const output = testRuntime([
+        "init",
+        "invalid",
+        "--preset",
+        addablePresetName,
+        "--name",
+        "@acme/invalid",
+        "--path",
+        ".git/invalid/source",
+        "--scope",
+        "Bad Scope",
+        "--output-format",
+        "text",
+      ]);
+      expect(await runCli({ ...output.runtime, cwd: workspace })).toBe(2);
+      expect(output.stdout()).toBe("");
+      expect(JSON.parse(output.stderr())).toMatchObject({
+        kind: "usageFailure",
+      });
+      expect(output.stderr()).toContain("包叶名称");
+      expect(output.stderr()).toContain("安全路径段");
+      expect(output.stderr()).toContain("npm scope");
+      expect(await readdir(workspace)).toEqual([]);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
-  it("aggregates invalid init identity overrides with zero target writes", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-cli-invalid-init-identity-"),
-    );
-    const output = testRuntime([
-      "init",
-      "invalid",
-      "--preset",
-      builtInPresetRegistry
-        .all()
-        .find((definition) => definition.initialPrimaryPackage !== undefined)!
-        .metadata.name,
-      "--name",
-      "@acme/invalid",
-      "--path",
-      ".git/invalid/source",
-      "--scope",
-      "Bad Scope",
-      "--yes",
-    ]);
-
-    await expect(
-      runCli({
-        ...output.runtime,
-        cwd: workspace,
-      }),
-    ).resolves.toBe(64);
-    expect(output.stderr()).toContain("USAGE_INIT_INVALID");
-    expect(output.stderr()).toContain("--name 必须是有效的无 scope 包叶名称。");
-    expect(output.stderr()).toContain("--path 必须恰好包含两个安全路径段。");
-    expect(output.stderr()).toContain(
-      "--scope 必须是不含空白字符的有效 npm scope。",
-    );
-    await expect(stat(path.join(workspace, "invalid"))).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
-  it("projects unknown Presets and missing non-interactive confirmation as usage without target writes", async () => {
+  it("rejects unknown presets and fixed topology overrides without writing", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-init-usage-"),
     );
     try {
-      const downstreamAccess = new Proxy(
-        {},
-        {
-          get() {
-            throw new Error("init usage must not resolve toolchain");
-          },
-        },
-      );
-      const unknown = testRuntime([
-        "init",
-        "unknown",
-        "--preset",
-        "missing-preset",
-        "--yes",
-        "--json",
-      ]);
-      await expect(
-        runCli({
-          ...unknown.runtime,
-          cwd: workspace,
-          env: downstreamAccess,
-        }),
-      ).resolves.toBe(64);
-      expect(JSON.parse(unknown.stdout())).toEqual({
-        schemaVersion: 1,
-        cliVersion: "1.2.3",
-        command: "init",
-        status: "usage-error",
-        code: "USAGE_INIT_INVALID",
-        targetDir: "unknown",
-        issues: [{ code: "PRESET_UNKNOWN" }],
-      });
-      expect(unknown.stderr()).toBe("");
-
-      const fixedTopologyPreset = builtInPresetRegistry
+      const fixed = builtInPresetRegistry
         .all()
-        .find((definition) => definition.initialPrimaryPackage === undefined);
-      if (fixedTopologyPreset === undefined) {
-        throw new Error("Expected a fixed-topology Preset");
+        .find((definition) => definition.initialPrimaryPackage === undefined)!;
+      for (const args of [
+        ["init", "unknown", "--preset", "missing-preset"],
+        ["init", "fixed", "--preset", fixed.metadata.name, "--name", "renamed"],
+      ]) {
+        const output = testRuntime(args);
+        expect(await runCli({ ...output.runtime, cwd: workspace })).toBe(2);
+        expect(JSON.parse(output.stderr())).toMatchObject({
+          kind: "usageFailure",
+        });
+        expect(output.stdout()).toBe("");
       }
-      const fixedTopology = testRuntime([
-        "init",
-        "fixed",
-        "--preset",
-        fixedTopologyPreset.metadata.name,
-        "--name",
-        "renamed",
-        "--yes",
-        "--json",
-      ]);
-      await expect(
-        runCli({
-          ...fixedTopology.runtime,
-          cwd: workspace,
-          env: downstreamAccess,
-        }),
-      ).resolves.toBe(64);
-      expect(JSON.parse(fixedTopology.stdout())).toMatchObject({
-        cliVersion: "1.2.3",
-        command: "init",
-        status: "usage-error",
-        issues: [{ code: "FIXED_TOPOLOGY_OVERRIDE" }],
-      });
-
-      const missingConfirmation = testRuntime([
-        "init",
-        "confirmation",
-        "--preset",
-        addablePresetName,
-        "--json",
-      ]);
-      await expect(
-        runCli({
-          ...missingConfirmation.runtime,
-          cwd: workspace,
-          env: downstreamAccess,
-        }),
-      ).resolves.toBe(64);
-      expect(JSON.parse(missingConfirmation.stdout())).toMatchObject({
-        cliVersion: "1.2.3",
-        command: "init",
-        status: "usage-error",
-        issues: [{ code: "NON_INTERACTIVE_CONFIRMATION_REQUIRED" }],
-      });
-      await expect(stat(path.join(workspace, "unknown"))).rejects.toMatchObject(
-        {
-          code: "ENOENT",
-        },
-      );
-      await expect(
-        stat(path.join(workspace, "confirmation")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await readdir(workspace)).toEqual([]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("reports initialization target failure without modifying the target", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-init-conflict-"),
+    );
+    try {
+      await mkdir(path.join(workspace, "demo"));
+      await writeFile(path.join(workspace, "demo/keep.txt"), "keep");
+      const before = await workspaceByteSnapshot(workspace);
+      const output = testRuntime([
+        "init",
+        "demo",
+        "--preset",
+        addablePresetName,
+      ]);
+      expect(await runCli({ ...output.runtime, cwd: workspace })).toBe(1);
+      expect(output.stdout()).toBe("");
+      expect(JSON.parse(output.stderr())).toMatchObject({
+        kind: "failure",
+        variant: "operationFailed",
+        data: { phase: "render" },
+      });
+      expect(await workspaceByteSnapshot(workspace)).toEqual(before);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("exports the executable contract through schema", async () => {
+    const output = testRuntime(["schema"]);
+    expect(await runCli(output.runtime)).toBe(0);
+    expect(output.stderr()).toBe("");
+    const result = JSON.parse(output.stdout());
+    expect(result).toMatchObject({
+      schemaVersion: "1",
+      command: "schema",
+      kind: "data",
+      variant: "exported",
+    });
+    const humanSchema = testRuntime(["schema", "--output-format", "text"]);
+    expect(await runCli(humanSchema.runtime)).toBe(0);
+    expect(humanSchema.stdout()).toContain("CLI 契约");
+    expect(humanSchema.stdout()).toContain('"commands"');
+    expect(result.data.manifest).toMatchObject({
+      root: "template",
+      commands: {
+        init: {
+          input: {
+            inputSchema: {
+              required: expect.arrayContaining(["dir", "preset"]),
+            },
+          },
+          success: {
+            variants: {
+              initialized: { exitCode: 0 },
+              planned: { exitCode: 0 },
+            },
+          },
+        },
+        addPackage: {
+          fields: expect.arrayContaining([
+            expect.objectContaining({
+              key: "linkFrom",
+              kind: "repeatableOption",
+              longOption: "--link-from",
+              required: false,
+              description: expect.any(String),
+            }),
+          ]),
+          failures: { conflict: { exitCode: 1 } },
+        },
+        validateBlueprint: {
+          failures: {
+            invalid: { exitCode: 1 },
+            operationFailed: { exitCode: 1 },
+          },
+        },
+        presets: { success: { variants: { listed: { exitCode: 0 } } } },
+        schema: { success: { variants: { exported: { exitCode: 0 } } } },
+      },
+      controls: {
+        output: {
+          defaultFormat: "structured",
+          formats: ["structured", "text"],
+        },
+      },
+      usageFailure: { exitCode: 2 },
+    });
   });
 
   it("plans add package from injected cwd with path and link intent without writing", async () => {
@@ -900,7 +668,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
     ]);
     await expect(
       runCli({
@@ -908,12 +675,6 @@ describe("template CLI command control", () => {
         cwd: workspace,
       }),
     ).resolves.toBe(0);
-    expect(initOutput.stdout()).toContain("已初始化项目");
-    expect(initOutput.stdout()).toContain("预设:");
-    expect(initOutput.stdout()).toContain("名称:");
-    expect(initOutput.stdout()).toContain("路径:");
-    expect(initOutput.stdout()).toContain("Scope:");
-
     const target = path.join(workspace, "demo");
     const output = testRuntime([
       "add",
@@ -927,7 +688,6 @@ describe("template CLI command control", () => {
       "--link-from",
       consumerPath,
       "--dry-run",
-      "--json",
     ]);
     await expect(
       runCli({
@@ -936,11 +696,14 @@ describe("template CLI command control", () => {
       }),
     ).resolves.toBe(0);
 
-    const json = JSON.parse(output.stdout());
+    const result = JSON.parse(output.stdout());
+    expect(result).toMatchObject({
+      command: "addPackage",
+      kind: "data",
+      variant: "planned",
+    });
+    const json = result.data;
     expect(json).toMatchObject({
-      schemaVersion: 1,
-      command: "add package",
-      status: "success",
       dryRun: true,
       actions: expect.arrayContaining([
         expect.objectContaining({
@@ -949,7 +712,6 @@ describe("template CLI command control", () => {
         }),
       ]),
     });
-    expect(json).toHaveProperty("cliVersion", "1.2.3");
     expect(output.stderr()).toBe("");
     await expect(
       stat(path.join(target, "packages/utility")),
@@ -967,20 +729,19 @@ describe("template CLI command control", () => {
       "packages/utility",
       "--link-from",
       "packages/missing",
-      "--json",
     ]);
     await expect(
       runCli({
         ...unknownConsumer.runtime,
         cwd: target,
       }),
-    ).resolves.toBe(64);
-    expect(JSON.parse(unknownConsumer.stdout())).toMatchObject({
-      cliVersion: "1.2.3",
-      status: "usage-error",
-      issues: [{ code: "UNKNOWN_LINK_FROM" }],
+    ).resolves.toBe(1);
+    expect(JSON.parse(unknownConsumer.stderr())).toMatchObject({
+      kind: "failure",
+      variant: "invalidRequest",
+      data: { issues: [{ code: "UNKNOWN_LINK_FROM" }] },
     });
-    expect(unknownConsumer.stderr()).toBe("");
+    expect(unknownConsumer.stdout()).toBe("");
     expect(await workspaceByteSnapshot(target)).toEqual(beforeUnknownConsumer);
 
     const apply = testRuntime([
@@ -992,7 +753,6 @@ describe("template CLI command control", () => {
       "utility",
       "--path",
       "packages/utility",
-      "--json",
     ]);
     await expect(
       runCli({
@@ -1012,7 +772,6 @@ describe("template CLI command control", () => {
       "packages/utility",
       "--link-from",
       consumerPath,
-      "--json",
     ]);
     await expect(
       runCli({
@@ -1020,10 +779,13 @@ describe("template CLI command control", () => {
         cwd: target,
       }),
     ).resolves.toBe(1);
-    const missingLinkJson = JSON.parse(missingLink.stdout());
+    const missingLinkResult = JSON.parse(missingLink.stderr());
+    expect(missingLinkResult).toMatchObject({
+      kind: "failure",
+      variant: "conflict",
+    });
+    const missingLinkJson = missingLinkResult.data;
     expect(missingLinkJson).toMatchObject({
-      cliVersion: "1.2.3",
-      status: "conflict",
       conflicts: [
         {
           kind: "missing-link",
@@ -1050,7 +812,7 @@ describe("template CLI command control", () => {
     expect(
       Object.keys(missingLinkJson.conflicts[0].requested).toSorted(),
     ).toEqual(["name", "path", "role"]);
-    expect(missingLink.stderr()).toBe("");
+    expect(missingLink.stdout()).toBe("");
     expect(await workspaceByteSnapshot(target)).toEqual(beforeMissingLink);
 
     const retry = testRuntime([
@@ -1062,7 +824,6 @@ describe("template CLI command control", () => {
       "utility",
       "--path",
       "packages/utility",
-      "--json",
     ]);
     await expect(
       runCli({
@@ -1071,8 +832,9 @@ describe("template CLI command control", () => {
       }),
     ).resolves.toBe(0);
     expect(JSON.parse(retry.stdout())).toMatchObject({
-      status: "success",
-      actions: [],
+      kind: "data",
+      variant: "unchanged",
+      data: { actions: [] },
     });
   });
 
@@ -1086,15 +848,12 @@ describe("template CLI command control", () => {
       "utility",
       "--link-from",
       "dist/app",
-      "--json",
     ]);
     await expect(
       runCli({ ...json.runtime, cwd: "/not-a-generated-repository" }),
-    ).resolves.toBe(64);
-    expect(JSON.parse(json.stdout())).toMatchObject({
-      status: "usage-error",
-      issues: [{ code: "RESERVED_LINK_FROM" }],
-    });
+    ).resolves.toBe(2);
+    expect(JSON.parse(json.stderr())).toMatchObject({ kind: "usageFailure" });
+    expect(json.stderr()).toContain("不能使用保留工作区目录");
 
     const human = testRuntime([
       "add",
@@ -1108,8 +867,7 @@ describe("template CLI command control", () => {
     ]);
     await expect(
       runCli({ ...human.runtime, cwd: "/not-a-generated-repository" }),
-    ).resolves.toBe(64);
-    expect(human.stderr()).toContain("template 1.2.3");
+    ).resolves.toBe(2);
     expect(human.stderr()).toContain("不能使用保留工作区目录");
     expect(human.stdout()).toBe("");
   });
@@ -1125,7 +883,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
     ]);
     await expect(
       runCli({
@@ -1155,7 +912,6 @@ describe("template CLI command control", () => {
       "--path",
       "packages/utility",
       "--dry-run",
-      "--json",
     ]);
 
     const exitCode = await runCli({
@@ -1164,8 +920,7 @@ describe("template CLI command control", () => {
     });
     expect(exitCode).toBe(0);
     expect(output.stderr()).toBe("");
-    expect(JSON.parse(output.stdout())).toMatchObject({
-      status: "success",
+    expect(JSON.parse(output.stdout()).data).toMatchObject({
       dryRun: true,
       actions: expect.arrayContaining([
         expect.objectContaining({
@@ -1196,7 +951,6 @@ describe("template CLI command control", () => {
         addablePresetName,
         "--scope",
         "acme",
-        "--yes",
       ]);
       await expect(
         runCli({
@@ -1219,7 +973,6 @@ describe("template CLI command control", () => {
         "--path",
         "services/existing",
         ...(dryRun ? ["--dry-run"] : []),
-        "--json",
       ]);
 
       await expect(
@@ -1228,10 +981,7 @@ describe("template CLI command control", () => {
           cwd: target,
         }),
       ).resolves.toBe(1);
-      expect(JSON.parse(output.stdout())).toMatchObject({
-        schemaVersion: 1,
-        command: "add package",
-        status: "conflict",
+      expect(JSON.parse(output.stderr()).data).toMatchObject({
         dryRun,
         actions: [],
         conflicts: [
@@ -1244,7 +994,7 @@ describe("template CLI command control", () => {
           },
         ],
       });
-      expect(output.stderr()).toBe("");
+      expect(output.stdout()).toBe("");
       expect(await workspaceByteSnapshot(target)).toEqual(before);
     },
   );
@@ -1260,7 +1010,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
     ]);
     await expect(
       runCli({
@@ -1284,7 +1033,6 @@ describe("template CLI command control", () => {
       "linked",
       "--path",
       "services/linked",
-      "--json",
     ]);
 
     await expect(
@@ -1293,8 +1041,7 @@ describe("template CLI command control", () => {
         cwd: target,
       }),
     ).resolves.toBe(1);
-    expect(JSON.parse(output.stdout())).toMatchObject({
-      status: "conflict",
+    expect(JSON.parse(output.stderr()).data).toMatchObject({
       actions: [],
       conflicts: [
         {
@@ -1321,7 +1068,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
     ]);
     await expect(
       runCli({
@@ -1344,7 +1090,6 @@ describe("template CLI command control", () => {
       "--path",
       "services/occupied",
       "--dry-run",
-      "--json",
     ]);
 
     await expect(
@@ -1353,8 +1098,7 @@ describe("template CLI command control", () => {
         cwd: target,
       }),
     ).resolves.toBe(1);
-    expect(JSON.parse(output.stdout())).toMatchObject({
-      status: "conflict",
+    expect(JSON.parse(output.stderr()).data).toMatchObject({
       actions: [],
       conflicts: [
         {
@@ -1378,7 +1122,6 @@ describe("template CLI command control", () => {
       addablePresetName,
       "--scope",
       "acme",
-      "--yes",
     ]);
     await expect(
       runCli({
@@ -1399,7 +1142,6 @@ describe("template CLI command control", () => {
       "--path",
       "dist/evil",
       "--dry-run",
-      "--json",
     ]);
 
     await expect(
@@ -1407,13 +1149,10 @@ describe("template CLI command control", () => {
         ...output.runtime,
         cwd: target,
       }),
-    ).resolves.toBe(64);
-    expect(JSON.parse(output.stdout())).toMatchObject({
-      cliVersion: "1.2.3",
-      status: "usage-error",
-      issues: [{ code: "RESERVED_PACKAGE_PATH" }],
-    });
-    expect(output.stderr()).toBe("");
+    ).resolves.toBe(2);
+    expect(JSON.parse(output.stderr())).toMatchObject({ kind: "usageFailure" });
+    expect(output.stderr()).toContain("不能使用保留工作区目录");
+    expect(output.stdout()).toBe("");
     expect(await workspaceByteSnapshot(target)).toEqual(before);
   });
 });

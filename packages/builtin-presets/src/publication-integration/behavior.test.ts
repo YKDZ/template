@@ -120,7 +120,7 @@ async function configurePublicOwnerFacts(options: {
   );
   await writeFile(
     path.join(options.repositoryRoot, packagePath, "README.md"),
-    "# Tool\n\nInstall the package and run `ship greet Ada`.\n",
+    "# Tool\n\nInstall the package and run `ship lookup ada`.\n",
   );
   await writeFile(
     path.join(options.repositoryRoot, packagePath, "CHANGELOG.md"),
@@ -205,7 +205,13 @@ describe("ts-cli publication owner-fact integration", () => {
         cwd: repositoryRoot,
       });
 
-      expect(afterFix.stdout).toBe(beforeFix.stdout);
+      expect(
+        (
+          await execa("git", ["diff", beforeFix.stdout, afterFix.stdout], {
+            cwd: repositoryRoot,
+          })
+        ).stdout,
+      ).toBe("");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -434,10 +440,7 @@ describe("ts-cli publication owner-fact integration", () => {
       const mainSource = await readFile(mainSourcePath, "utf8");
       await writeFile(
         mainSourcePath,
-        mainSource.replace(
-          "if (normalizedName.length === 0)",
-          "if (normalizedName.length < 0)",
-        ),
+        mainSource.replace("/^[a-z]+$/", "/^[a-z ]+$/"),
       );
       const invalidBehaviorOutput = path.join(
         workspace,
@@ -509,6 +512,7 @@ describe("ts-cli publication owner-fact integration", () => {
             { path: "package/dist/cli-command-identity.js" },
             { path: "package/dist/cli.js" },
             { path: "package/dist/main.js" },
+            { path: "package/dist/standard-schema.js" },
             { path: "package/package.json" },
           ],
           bin: {
@@ -517,9 +521,10 @@ describe("ts-cli publication owner-fact integration", () => {
           },
           smokes: [
             { name: "runtime-import", stdout: "" },
-            { name: "help", stdout: expect.stringContaining("greet") },
-            { name: "version", stdout: "1.0.0\n" },
-            { name: "greet", stdout: "Hello, Ada Lovelace\n" },
+            { name: "help", stdout: expect.stringContaining("lookup") },
+            { name: "version", stdout: "ship 1.0.0\n" },
+            { name: "lookup", stdout: expect.stringContaining("Ada Lovelace") },
+            { name: "schema", stdout: expect.stringContaining("notFound") },
           ],
         },
       });

@@ -179,6 +179,7 @@ async function writeVerifiedArtifact(
         },
         { path: "package/dist/cli.js", mode: 493, size: 1 },
         { path: "package/dist/main.js", mode: 420, size: 1 },
+        { path: "package/dist/standard-schema.js", mode: 420, size: 1 },
         { path: "package/package.json", mode: 420, size: 1 },
       ],
       bin: {
@@ -189,12 +190,47 @@ async function writeVerifiedArtifact(
       },
       smokes: [
         { name: "runtime-import", args: [], stdout: "" },
-        { name: "help", args: ["--help"], stdout: "Usage: ship\ngreet\n" },
-        { name: "version", args: ["--version"], stdout: `${version}\n` },
+        { name: "help", args: ["--help"], stdout: `${"ship"} lookup schema\n` },
         {
-          name: "greet",
-          args: ["greet", "  Ada Lovelace  "],
-          stdout: "Hello, Ada Lovelace\n",
+          name: "version",
+          args: ["--version"],
+          stdout: `${"ship"} ${version}\n`,
+        },
+        {
+          name: "lookup",
+          args: ["lookup", "ada"],
+          stdout: JSON.stringify({
+            schemaVersion: "1",
+            command: "lookup",
+            kind: "data",
+            variant: "found",
+            data: { name: "ada", title: "Ada Lovelace" },
+          }),
+        },
+        {
+          name: "schema",
+          args: ["schema"],
+          stdout: JSON.stringify({
+            schemaVersion: "1",
+            command: "schema",
+            kind: "data",
+            variant: "exported",
+            data: {
+              manifest: {
+                root: "cli",
+                commands: {
+                  cli: { name: "ship" },
+                  schema: { name: "schema" },
+                  lookup: {
+                    name: "lookup",
+                    input: { inputSchema: { type: "object" } },
+                    success: { variants: { found: { exitCode: 0 } } },
+                    failures: { notFound: { exitCode: 1 } },
+                  },
+                },
+              },
+            },
+          }),
         },
       ],
     }),

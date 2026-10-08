@@ -58,9 +58,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "@valibot/to-json-schema": "catalog:",
+    "@ykdz/cli-contract": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "commander": "catalog:",
     "hosted-git-info": "^10.0.0",
     "lru-cache": "^11.5.3",
     "node-diff3": "catalog:",
@@ -83,9 +84,10 @@
     "vitest": "catalog:"
   },
   "bundleDependencies": [
+    "@valibot/to-json-schema",
+    "@ykdz/cli-contract",
     "@ykdz/template-builtin-presets",
     "@ykdz/template-core",
-    "commander",
     "hosted-git-info",
     "lru-cache",
     "node-diff3",

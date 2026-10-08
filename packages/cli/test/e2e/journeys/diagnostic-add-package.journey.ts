@@ -139,7 +139,6 @@ const journey: CliJourney = {
           scenario.basePreset,
           "--scope",
           "acme",
-          "--yes",
         ],
       },
       {
@@ -164,7 +163,6 @@ const journey: CliJourney = {
           "--path",
           scenario.firstPackagePath,
           "--dry-run",
-          "--json",
         ],
         cwd: project,
       },
@@ -190,7 +188,6 @@ const journey: CliJourney = {
           "web",
           "--path",
           scenario.firstPackagePath,
-          "--json",
         ],
         cwd: project,
       },
@@ -222,7 +219,6 @@ const journey: CliJourney = {
           "admin",
           "--path",
           scenario.secondPackagePath,
-          "--json",
         ],
         cwd: project,
       },
@@ -256,13 +252,11 @@ const journey: CliJourney = {
     const workflowPath = path.join(project, ".github/workflows/check.yml");
     assert.equal(results[0]?.exitCode, 0);
 
-    const preview = JSON.parse(results[1]?.stdout ?? "") as {
-      readonly status: string;
+    const preview = JSON.parse(results[1]?.stdout ?? "").data as {
       readonly dryRun: boolean;
       readonly actions: readonly { readonly path: string }[];
     };
     assert.equal(results[1]?.exitCode, 0);
-    assert.equal(preview.status, "success");
     assert.equal(preview.dryRun, true);
     assert.ok(
       preview.actions.some(
@@ -286,8 +280,7 @@ const journey: CliJourney = {
     assert.match(workflow, /name: Stage Root Check diagnostics/u);
     assert.match(workflow, /path: \.template-ci-diagnostics/u);
 
-    const conflict = JSON.parse(results[3]?.stdout ?? "") as {
-      readonly status: string;
+    const conflict = JSON.parse(results[3]?.stderr ?? "").data as {
       readonly actions: readonly unknown[];
       readonly conflicts: readonly {
         readonly path: string;
@@ -296,7 +289,6 @@ const journey: CliJourney = {
       }[];
     };
     assert.equal(results[3]?.exitCode, 1);
-    assert.equal(conflict.status, "conflict");
     assert.deepEqual(conflict.actions, []);
     assert.ok(
       conflict.conflicts.some(

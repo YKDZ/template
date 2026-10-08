@@ -31,6 +31,10 @@ async function loadArtifactModule(workspace: string): Promise<ArtifactModule> {
   await mkdir(moduleRoot);
   await Promise.all([
     cp(
+      path.join(templateRoot, "publication/handoff.ts"),
+      path.join(moduleRoot, "handoff.ts"),
+    ),
+    cp(
       path.join(templateRoot, "publication/artifact.ts"),
       path.join(moduleRoot, "artifact.ts"),
     ),
@@ -126,7 +130,11 @@ describe("verified publication artifact contracts", () => {
       type: "module",
       files: ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
       bin: { ship: "./dist/cli.js" },
-      dependencies: { commander: "^15.0.0" },
+      dependencies: {
+        "@ykdz/cli-contract": "0.2.1",
+        "@valibot/to-json-schema": "^1.8.0",
+        valibot: "^1.5.0",
+      },
       publishConfig: {
         access: "public",
         registry: "https://registry.npmjs.org/",

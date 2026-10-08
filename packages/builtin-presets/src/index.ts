@@ -4,6 +4,7 @@ export {
   loadLocalTemplateMetadata,
   prepareGeneratedRepositoryPackageAddition,
   validateGeneratedRepositoryInitializationInput,
+  validateGeneratedRepositoryPackageAdditionInput,
   prepareGeneratedRepositoryInitialization,
   planGeneratedRepositoryInitialization,
   planGeneratedRepositoryPackageAddition,
@@ -12,6 +13,7 @@ export {
   validateProjectBlueprint,
 } from "./foundation.ts";
 export { templateSources } from "./template-sources.ts";
+export { generationRecordSchema } from "./generation-record.ts";
 export type {
   BuiltInPresetDefinition,
   GeneratedRepositoryPlan,
