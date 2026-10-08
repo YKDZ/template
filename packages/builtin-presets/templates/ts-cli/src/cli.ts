@@ -6,11 +6,12 @@ import { nodeCliOutput } from "@ykdz/cli-contract/node";
 import { cliCommandIdentity } from "./cli-command-identity.ts";
 import { runCli } from "./main.ts";
 
-const packageManifest = createRequire(import.meta.url)(
-  "../package.json",
-) as unknown;
+const require = createRequire(import.meta.url);
 process.exitCode = await runCli({
   argv: process.argv,
   write: nodeCliOutput({ stdout: process.stdout, stderr: process.stderr }),
-  identity: cliCommandIdentity(packageManifest),
+  // 身份读取和校验也使用 runCli 的意外故障出口。
+  get identity() {
+    return cliCommandIdentity(require("../package.json"));
+  },
 });

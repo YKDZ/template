@@ -1161,8 +1161,8 @@ export async function verifyNpmPublicationArtifact(options: {
             version: version.stdout,
             lookup: lookup.stdout,
           }),
-          "Installed help, exact version, and lookup behavior",
-          "Correct the packed command identity or behavior and retry.",
+          "安装后的帮助、实际版本、lookup 查询及完整 schema 契约",
+          "修正制品中的命令身份或行为后重试。",
         ),
       };
       return result;

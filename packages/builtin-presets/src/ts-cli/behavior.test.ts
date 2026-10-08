@@ -3562,6 +3562,20 @@ syncBuiltinESMExports();
       await expect(
         stat(path.join(project.packageRoot, "dist")),
       ).rejects.toMatchObject({ code: "ENOENT" });
+      const manifestPath = path.join(project.packageRoot, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.bin = { node: "./dist/cli.js" };
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const invalidIdentity = await execa(
+        "node",
+        ["--conditions=source", "src/cli.ts", "lookup", "ada"],
+        { cwd: project.packageRoot, reject: false },
+      );
+      expect(invalidIdentity.exitCode).toBe(70);
+      expect(invalidIdentity.stdout).toBe("");
+      expect(invalidIdentity.stderr).toBe(
+        "命令执行失败；请检查运行环境或报告此问题。",
+      );
     } finally {
       await rm(project.workspace, { recursive: true, force: true });
     }

@@ -15,20 +15,25 @@ if (import.meta.url.endsWith(".ts")) {
 }
 
 const require = createRequire(import.meta.url);
-const packageManifest = require("../package.json") as {
-  version: string;
-  bin: Record<string, string>;
-};
-const commandNames = Object.keys(packageManifest.bin);
-if (commandNames.length !== 1) throw new Error("CLI 包必须声明唯一命令。");
-
 const runtime: CliRuntime = {
   argv: process.argv,
-  commandName: commandNames[0]!,
+  // 把进程事实的读取留在 runCli 的故障出口内。
+  get commandName() {
+    const manifest = require("../package.json") as {
+      bin: Record<string, string>;
+    };
+    const names = Object.keys(manifest.bin);
+    if (names.length !== 1) throw new Error("CLI 包必须声明唯一命令。");
+    return names[0]!;
+  },
   write: nodeCliOutput({ stdout: process.stdout, stderr: process.stderr }),
-  cwd: process.cwd(),
+  get cwd() {
+    return process.cwd();
+  },
   env: process.env,
-  version: packageManifest.version,
+  get version() {
+    return (require("../package.json") as { version: string }).version;
+  },
 };
 
 const { runCli } = await import("#main");

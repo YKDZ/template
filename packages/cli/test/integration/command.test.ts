@@ -23,6 +23,7 @@ import {
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-core/project-linking-v2";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
 import { describe, expect, it } from "vitest";
 
 import { runCli, type CliRuntime } from "../../src/main.ts";
@@ -314,6 +315,27 @@ describe("template CLI command control", () => {
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
+  });
+
+  it("contains process initialization failures in the real entry point", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-cli-deleted-cwd-"),
+    );
+    const result = await execa(
+      process.execPath,
+      [
+        "--conditions=source",
+        "--input-type=module",
+        "-e",
+        'import { rmdirSync } from "node:fs"; const target = process.argv[1]; const entry = process.argv[2]; process.chdir(target); rmdirSync(target); process.argv = ["node", "template", "presets"]; await import(entry);',
+        workspace,
+        new URL("../../src/cli.ts", import.meta.url).href,
+      ],
+      { reject: false },
+    );
+    expect(result.exitCode).toBe(70);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("命令执行失败；请检查运行环境或报告此问题。");
   });
 
   it("reports unexpected argv failures without leaking implementation details", async () => {
