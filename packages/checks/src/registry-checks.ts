@@ -15,7 +15,10 @@ import {
   type GeneratedRepositoryPlan,
   type PackageContribution,
 } from "@ykdz/template-builtin-presets";
-import { selectTemplateDependencyCatalogEntries } from "@ykdz/template-core/dependency-catalog";
+import {
+  loadTemplateDependencyCatalog,
+  selectTemplateDependencyCatalogEntries,
+} from "@ykdz/template-core/dependency-catalog";
 import {
   planExplicitProjectLinks,
   canConsumeNodePackageNameImport,
@@ -512,6 +515,7 @@ export async function validatePlanDependencyCatalog(
         configurationRecord?.packageDefinitionId &&
       definition.path === configurationRecord.path,
   );
+  const templateCatalog = loadTemplateDependencyCatalog();
   const references = new Set<string>();
   for (const [manifestPath, manifest] of manifests) {
     const packagePath = path.posix.dirname(manifestPath);
@@ -560,6 +564,7 @@ export async function validatePlanDependencyCatalog(
         if (
           specifier !== "catalog:" ||
           typeof entry !== "string" ||
+          templateCatalog[dependency] !== entry ||
           entry.trim().length === 0 ||
           /^(?:catalog|workspace|link):/.test(entry)
         ) {
@@ -571,7 +576,10 @@ export async function validatePlanDependencyCatalog(
       }
     }
   }
-  const expected = selectTemplateDependencyCatalogEntries([...references]);
+  const expected = selectTemplateDependencyCatalogEntries(
+    [...references],
+    templateCatalog,
+  );
   if (
     JSON.stringify(expected) !== JSON.stringify(plan.dependencyCatalog) ||
     Object.entries(expected).some(([name, value]) => catalog[name] !== value)
