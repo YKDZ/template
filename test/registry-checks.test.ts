@@ -222,6 +222,9 @@ describe("Preset Registry generated scenarios", () => {
           packageLeafName: `focused-${scenario.addition!.metadata.name}`,
           linkFrom: scenario.linkFrom!,
         });
+        await expect(
+          validatePlanDependencyCatalog(addition),
+        ).resolves.toBeUndefined();
         const consumerPath = scenario.linkFrom![0]!;
         const consumerRole = initialization.blueprint.packages.find(
           (definition) => definition.path === consumerPath,
@@ -464,7 +467,9 @@ describe("Preset Registry generated scenarios", () => {
           expect.objectContaining({ definitionName: definition.metadata.name }),
         ]),
       );
-      expect(() => validatePlanDependencyCatalog(plan)).not.toThrow();
+      await expect(
+        validatePlanDependencyCatalog(plan),
+      ).resolves.toBeUndefined();
     }
   });
 
@@ -1262,4 +1267,182 @@ describe("T26-3 checker carried mirror slot manifest gate", () => {
     ).rejects.toThrow(/未携带 plan 声明的槽位/u);
     await expect(checkCarried(richest)).resolves.toBeUndefined();
   });
+});
+
+describe("最终投影的外部依赖目录归属", () => {
+  const catalogPlan = () =>
+    planGeneratedRepositoryInitialization({
+      definition: builtInPresetRegistry
+        .all()
+        .find((definition) => definition.metadata.name === "ts-cli")!,
+      context: createGenerationContext({
+        targetDir: "generated-repository/catalog-policy",
+        toolchain,
+      }),
+    });
+
+  it("拒绝最终链接合并写入的外部版本并报告完整位置", async () => {
+    const plan = catalogPlan();
+    await expect(
+      validatePlanDependencyCatalog({
+        ...plan,
+        operations: [
+          ...plan.operations,
+          {
+            kind: "mergeJson",
+            to: "package.json",
+            value: { optionalDependencies: { rogue: "^1.0.0" } },
+          },
+        ],
+      }),
+    ).rejects.toThrow(/package\.json.*optionalDependencies.*rogue.*\^1\.0\.0/);
+  });
+  it.each([
+    ["dependencies", "1.0.0"],
+    ["devDependencies", "latest"],
+    ["optionalDependencies", "https://example.com/rogue.tgz"],
+    ["peerDependencies", ">=1 <2"],
+    ["dependencies", "workspace:*"],
+    ["devDependencies", "link:../typescript-config"],
+    ["dependencies", "catalog:other"],
+    ["dependencies", "catalog:"],
+  ])("拒绝 %s 中没有有效默认目录的声明 %s", async (field, specifier) => {
+    const plan = catalogPlan();
+    await expect(
+      validatePlanDependencyCatalog({
+        ...plan,
+        operations: [
+          ...plan.operations,
+          {
+            kind: "mergeJson",
+            to: "package.json",
+            value: { [field]: { rogue: specifier } },
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      `package.json ${field} rogue ${JSON.stringify(specifier)}`,
+    );
+  });
+
+  it("保留 catalog 别名以及真实内部配置链接", async () => {
+    const plan = catalogPlan();
+    await expect(validatePlanDependencyCatalog(plan)).resolves.toBeUndefined();
+  });
+
+  it("拒绝真实引用所需目录条目被后续投影移除", async () => {
+    const plan = catalogPlan();
+    await expect(
+      validatePlanDependencyCatalog({
+        ...plan,
+        operations: [
+          ...plan.operations.filter(
+            (operation) =>
+              !("to" in operation && operation.to === "pnpm-workspace.yaml"),
+          ),
+          {
+            kind: "writeText",
+            to: "pnpm-workspace.yaml",
+            text: "packages: []\ncatalog: {}\n",
+          },
+        ],
+      }),
+    ).rejects.toThrow(
+      /package\.json.*(?:dependencies|devDependencies).*catalog:/,
+    );
+  });
+
+  it("拒绝内部配置包身份正确而链接目标错误", async () => {
+    const plan = catalogPlan();
+    const consumer = plan.packageContributions.find(
+      (item) => item.foundation.typescriptConfigurationPackage !== undefined,
+    )!;
+    const configuration = plan.blueprint.packages.find(
+      (item) => item.path === "packages/typescript-config",
+    )!;
+    await expect(
+      validatePlanDependencyCatalog({
+        ...plan,
+        operations: [
+          ...plan.operations,
+          {
+            kind: "mergeJson",
+            to: `${consumer.definition.path}/package.json`,
+            value: {
+              devDependencies: { [configuration.name]: "link:../unrelated" },
+            },
+          },
+        ],
+      }),
+    ).rejects.toThrow(configuration.name);
+  });
+
+  it("真实新增包保留消费者清单中的无关手动版本", async () => {
+    const scenario = deriveFocusedProjectLinkScenarios()[0]!;
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-catalog-customization-"),
+    );
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, "consumer"),
+      toolchain,
+    });
+    try {
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: scenario.base,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: context.targetDir,
+        operations: [...initialization.operations],
+      });
+      const manifestPath = path.join(
+        context.targetDir,
+        scenario.linkFrom![0]!,
+        "package.json",
+      );
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      manifest.optionalDependencies = { "consumer-only": "^3.0.0" };
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: scenario.addition!,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+        packageLeafName: "catalog-provider",
+        linkFrom: scenario.linkFrom!,
+      });
+      await expect(
+        validatePlanDependencyCatalog(addition),
+      ).resolves.toBeUndefined();
+      const result = await reconcileAndApplyProjectProjections({
+        targetRoot: context.targetDir,
+        ...addition.projectProjections,
+      });
+      expect(result.ok).toBe(true);
+      expect(
+        JSON.parse(await readFile(manifestPath, "utf8")).optionalDependencies,
+      ).toEqual({ "consumer-only": "^3.0.0" });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+  it.each(["catalog:other", "^0.0.0"])(
+    "拒绝已有默认目录条目的绕过声明 %s",
+    async (specifier) => {
+      const plan = catalogPlan();
+      await expect(
+        validatePlanDependencyCatalog({
+          ...plan,
+          operations: [
+            ...plan.operations,
+            {
+              kind: "mergeJson",
+              to: "package.json",
+              value: { devDependencies: { oxfmt: specifier } },
+            },
+          ],
+        }),
+      ).rejects.toThrow(
+        `package.json devDependencies oxfmt ${JSON.stringify(specifier)}`,
+      );
+    },
+  );
 });

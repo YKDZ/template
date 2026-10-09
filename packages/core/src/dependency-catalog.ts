@@ -245,35 +245,6 @@ export function renderCargoDependencyTomlEntries(
   });
 }
 
-export function collectGeneratedManifestCatalogDependencies(
-  manifests: readonly GeneratedPackageManifestDependencies[],
-): string[] {
-  const dependencies = new Set<string>();
-
-  for (const manifest of manifests) {
-    for (const dependencyMap of [
-      manifest.dependencies,
-      manifest.devDependencies,
-      manifest.optionalDependencies,
-      manifest.peerDependencies,
-    ]) {
-      for (const [dependency, specifier] of Object.entries(
-        dependencyMap ?? {},
-      )) {
-        if (specifier !== "catalog:") {
-          throw new Error(
-            `Generated manifest dependency ${dependency} must use catalog:, got ${specifier}`,
-          );
-        }
-
-        dependencies.add(dependency);
-      }
-    }
-  }
-
-  return [...dependencies].toSorted();
-}
-
 export function collectGeneratedManifestCatalogReferences(
   manifests: readonly GeneratedPackageManifestDependencies[],
 ): string[] {
