@@ -13,6 +13,7 @@
     "check:templates": "turbo run check:templates --output-logs=errors-only --log-order=grouped",
     "check:templates:boundary": "turbo run check:templates:boundary --output-logs=errors-only --log-order=grouped",
     "check:templates:github-yaml": "turbo run check:templates:github-yaml --output-logs=errors-only --log-order=grouped",
+    "sync:toolchain": "node scripts/sync-template-toolchain.ts",
     "check:toolchain:versions": "node --conditions=source scripts/check-template-toolchain-versions.ts",
     "fix": "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
     "boundaries": "turbo boundaries --no-color",
