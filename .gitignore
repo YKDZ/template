@@ -3,7 +3,7 @@ dist
 .env
 docs/
 AGENTS.md
-CONTEXT.md
+GLOSSARY*.md
 .agents/
 .scratch/
 .template/
