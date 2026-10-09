@@ -11,7 +11,7 @@ export async function checkPresetRegistryContract(): Promise<void> {
   await discoverPresetLocalBehaviorTests();
   for (const { definition, plan } of await deriveVerificationPlans()) {
     await validatePlanSources({ definition, plan });
-    validatePlanDependencyCatalog(plan);
+    await validatePlanDependencyCatalog(plan);
   }
 }
 
