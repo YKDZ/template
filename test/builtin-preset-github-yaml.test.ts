@@ -8,16 +8,15 @@ import {
   planGeneratedRepositoryInitialization,
   type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
-
 import {
   assertDependabotContract,
   assertWorkflowContract,
   assertPublicationWorkflowContract,
-} from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
+} from "@ykdz/template-checks/workflow-contract";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {
   const definition = builtInPresetRegistry.all().find((candidate) => {
@@ -161,18 +160,30 @@ async function expectRootOnlyWorkflowRejected(source: string): Promise<void> {
 }
 
 function initializationPublicationPlan(): GeneratedRepositoryPlan {
-  return planGeneratedRepositoryInitialization({
-    definition: builtInPresetRegistry.require("ts-cli"),
-    context: createGenerationContext({
-      targetDir: "generated-publication",
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
-        nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      },
-    }),
-  });
+  for (const definition of builtInPresetRegistry.all()) {
+    const plan = planGeneratedRepositoryInitialization({
+      definition,
+      context: createGenerationContext({
+        targetDir: "generated-publication",
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
+      }),
+    });
+    if (
+      plan.packageContributions.some(
+        (contribution) =>
+          contribution.foundation.npmPublication?.kind ===
+          "public-cli-candidate",
+      )
+    ) {
+      return plan;
+    }
+  }
+  throw new Error("Expected a public CLI candidate capability");
 }
 
 describe("Built-in Preset GitHub YAML checker", () => {

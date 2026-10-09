@@ -5,9 +5,9 @@
   "exports": {
     "./check-generated-registry": null,
     "./workflow-contract": {
-      "source": "./src/check-builtin-preset-github-yaml.ts",
-      "types": "./dist/check-builtin-preset-github-yaml.d.ts",
-      "default": "./dist/check-builtin-preset-github-yaml.js"
+      "source": "./src/workflow-contract.ts",
+      "types": "./dist/workflow-contract.d.ts",
+      "default": "./dist/workflow-contract.js"
     }
   },
   "scripts": {

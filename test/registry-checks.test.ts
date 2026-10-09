@@ -1270,16 +1270,27 @@ describe("T26-3 checker carried mirror slot manifest gate", () => {
 });
 
 describe("最终投影的外部依赖目录归属", () => {
-  const catalogPlan = () =>
-    planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry
-        .all()
-        .find((definition) => definition.metadata.name === "ts-cli")!,
-      context: createGenerationContext({
-        targetDir: "generated-repository/catalog-policy",
-        toolchain,
-      }),
-    });
+  const catalogPlan = () => {
+    for (const definition of builtInPresetRegistry.all()) {
+      const plan = planGeneratedRepositoryInitialization({
+        definition,
+        context: createGenerationContext({
+          targetDir: "generated-repository/catalog-policy",
+          toolchain,
+        }),
+      });
+      if (
+        plan.packageContributions.some(
+          (contribution) =>
+            contribution.foundation.typescriptConfigurationPackage !==
+            undefined,
+        )
+      ) {
+        return plan;
+      }
+    }
+    throw new Error("Expected a TypeScript configuration package consumer");
+  };
 
   it("拒绝最终链接合并写入的外部版本并报告完整位置", async () => {
     const plan = catalogPlan();
