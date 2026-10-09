@@ -367,7 +367,7 @@ async function runScenario(
     definition: scenario.base,
     plan: initialization,
   });
-  validatePlanDependencyCatalog(initialization);
+  await validatePlanDependencyCatalog(initialization);
   await renderNewProject({
     targetRoot: projectDir,
     operations: [...initialization.operations],
@@ -416,7 +416,7 @@ async function runScenario(
       definition: scenario.addition,
       plan: preparation.plan,
     });
-    validatePlanDependencyCatalog(preparation.plan);
+    await validatePlanDependencyCatalog(preparation.plan);
     const result = await reconcileAndApplyProjectProjections({
       targetRoot: projectDir,
       ...preparation.plan.projectProjections,
