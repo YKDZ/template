@@ -1445,4 +1445,26 @@ describe("最终投影的外部依赖目录归属", () => {
       );
     },
   );
+  it("目录条目漂移时仍报告依赖清单和字段", async () => {
+    const plan = catalogPlan();
+    const operations = plan.operations.map((operation) =>
+      operation.kind === "writeTextTemplate" &&
+      operation.to === "pnpm-workspace.yaml"
+        ? {
+            ...operation,
+            replacements: {
+              ...operation.replacements,
+              DEPENDENCY_CATALOG:
+                operation.replacements.DEPENDENCY_CATALOG!.replace(
+                  /"?oxfmt"?: [^\n]*/,
+                  "oxfmt: latest",
+                ),
+            },
+          }
+        : operation,
+    );
+    await expect(
+      validatePlanDependencyCatalog({ ...plan, operations }),
+    ).rejects.toThrow(/package\.json devDependencies oxfmt "catalog:"/);
+  });
 });
