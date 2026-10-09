@@ -16,10 +16,11 @@ import {
   type PackageContribution,
 } from "@ykdz/template-builtin-presets";
 import {
-  collectGeneratedManifestCatalogReferences,
+  loadTemplateDependencyCatalog,
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
 import {
+  planExplicitProjectLinks,
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
@@ -28,6 +29,7 @@ import {
   materializeProjectProjection,
   readProjectedMirrorSlotScalar,
   type ProjectProjectionMirrorSlot,
+  type MaterializeProjectProjectionOptions,
 } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import {
@@ -35,6 +37,7 @@ import {
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
 import ts from "typescript";
+import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
 export type GeneratedScenario = {
@@ -460,16 +463,129 @@ export async function validateGeneratedDevelopmentContainerProjection(options: {
   }
 }
 
-/** Verifies the generated catalog is derived solely from structured manifests. */
-export function validatePlanDependencyCatalog(
-  plan: GeneratedRepositoryPlan,
-): void {
-  const expected = selectTemplateDependencyCatalogEntries(
-    collectGeneratedManifestCatalogReferences(plan.manifests),
+/** 检查真实模板规划的最终清单，不审计消费者工作树。 */
+export async function validatePlanDependencyCatalog(
+  plan: GeneratedRepositoryPlan & {
+    readonly projectProjections?: {
+      readonly after: MaterializeProjectProjectionOptions;
+    };
+  },
+): Promise<void> {
+  const projection = await materializeProjectProjection(
+    plan.projectProjections?.after ?? {
+      operations: plan.operations,
+    },
   );
-  if (JSON.stringify(expected) !== JSON.stringify(plan.dependencyCatalog)) {
+  const decoder = new TextDecoder();
+  const manifests = new Map(
+    projection.entries
+      .filter(
+        (entry) =>
+          entry.path === "package.json" || entry.path.endsWith("/package.json"),
+      )
+      .map((entry) => [
+        entry.path,
+        JSON.parse(decoder.decode(entry.content)) as Record<string, unknown>,
+      ]),
+  );
+  const workspace = projection.entries.find(
+    (entry) => entry.path === "pnpm-workspace.yaml",
+  );
+  const workspaceValue: unknown =
+    workspace === undefined
+      ? undefined
+      : parseYaml(decoder.decode(workspace.content));
+  const catalog =
+    isStructuredRecord(workspaceValue) &&
+    isStructuredRecord(workspaceValue.catalog)
+      ? workspaceValue.catalog
+      : {};
+  const links = planExplicitProjectLinks({
+    blueprint: plan.blueprint,
+    contributions: plan.packageContributions,
+  });
+  const configurationRecord = plan.generationRecord.packages.find(
+    (record) =>
+      record.definitionName === "foundation" &&
+      record.planningContribution === "foundationPlan",
+  );
+  const configuration = plan.blueprint.packages.find(
+    (definition) =>
+      definition.packageDefinitionId ===
+        configurationRecord?.packageDefinitionId &&
+      definition.path === configurationRecord.path,
+  );
+  const templateCatalog = loadTemplateDependencyCatalog();
+  const references = new Set<string>();
+  for (const [manifestPath, manifest] of manifests) {
+    const packagePath = path.posix.dirname(manifestPath);
+    const contribution = plan.packageContributions.find(
+      (item) =>
+        item.definition.path === packagePath &&
+        item.definition.name === manifest.name,
+    );
+    for (const field of [
+      "dependencies",
+      "devDependencies",
+      "optionalDependencies",
+      "peerDependencies",
+    ] as const) {
+      const dependencies = manifest[field];
+      if (!isStructuredRecord(dependencies)) continue;
+      for (const [dependency, specifier] of Object.entries(dependencies)) {
+        const provider = plan.blueprint.packages.find(
+          (definition) =>
+            definition.name === dependency &&
+            manifests.get(`${definition.path}/package.json`)?.name ===
+              dependency,
+        );
+        const explicitLink =
+          field === "dependencies" &&
+          links.manifestPatchesByPackagePath.get(packagePath)?.dependencies[
+            dependency
+          ] === "workspace:*";
+        const configurationLink =
+          contribution?.foundation.typescriptConfigurationPackage !==
+            undefined &&
+          configuration?.name === dependency &&
+          (field === "dependencies" || field === "devDependencies");
+        const internalWorkspace =
+          specifier === "workspace:*" &&
+          provider !== undefined &&
+          (explicitLink || configurationLink);
+        const internalConfiguration =
+          configurationLink &&
+          provider !== undefined &&
+          field === "devDependencies" &&
+          specifier ===
+            `link:${path.posix.relative(packagePath, provider.path)}`;
+        if (internalWorkspace || internalConfiguration) continue;
+        const entry = catalog[dependency];
+        if (
+          specifier !== "catalog:" ||
+          typeof entry !== "string" ||
+          templateCatalog[dependency] !== entry ||
+          entry.trim().length === 0 ||
+          /^(?:catalog|workspace|link):/.test(entry)
+        ) {
+          throw new Error(
+            `${plan.definitionName}: ${manifestPath} ${field} ${dependency} ${JSON.stringify(specifier)} 违反依赖目录归属：外部依赖必须引用有效的默认 catalog 条目`,
+          );
+        }
+        references.add(dependency);
+      }
+    }
+  }
+  const expected = selectTemplateDependencyCatalogEntries(
+    [...references],
+    templateCatalog,
+  );
+  if (
+    JSON.stringify(expected) !== JSON.stringify(plan.dependencyCatalog) ||
+    Object.entries(expected).some(([name, value]) => catalog[name] !== value)
+  ) {
     throw new Error(
-      `${plan.definitionName}: ${plan.plannerSourceFile} ${plan.planningContribution} violates Dependency Catalog ownership; generated manifests reference an undeclared dependency`,
+      `${plan.definitionName}: 最终投影的默认依赖目录与模板声明不一致`,
     );
   }
 }

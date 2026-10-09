@@ -536,7 +536,7 @@ async function renderMatrixScenario(options: {
     definition: options.scenario.base,
     plan: initialization,
   });
-  validatePlanDependencyCatalog(initialization);
+  await validatePlanDependencyCatalog(initialization);
   await renderNewProject({
     targetRoot: projectDir,
     operations: [...initialization.operations],
@@ -556,7 +556,7 @@ async function renderMatrixScenario(options: {
         : { linkFrom: options.scenario.linkFrom }),
     });
     await validatePlanSources({ definition: addition, plan: additionPlan });
-    validatePlanDependencyCatalog(additionPlan);
+    await validatePlanDependencyCatalog(additionPlan);
     const result = await reconcileAndApplyProjectProjections({
       targetRoot: projectDir,
       ...additionPlan.projectProjections,
