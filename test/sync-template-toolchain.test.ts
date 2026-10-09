@@ -81,7 +81,7 @@ it("直接 Node 入口离线同步三个目标并保留无关内容，重复执�
   }
 });
 
-it.each(["declaration", "missing", "shape"])(
+it.each(["node", "pnpm", "rust", "invalid-toml", "missing", "shape", "syntax"])(
   "预检失败 %s 时已经需要更新的其他目标也零写入",
   async (failure) => {
     const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
@@ -92,13 +92,17 @@ it.each(["declaration", "missing", "shape"])(
       await writeFile(
         path.join(root, "package.json"),
         JSON.stringify({
-          engines: { node: failure === "declaration" ? ">=26" : "26.1.2" },
-          packageManager: "pnpm@13.2.1",
+          engines: { node: failure === "node" ? ">=26" : "26.1.2" },
+          packageManager: failure === "pnpm" ? "pnpm@^13" : "pnpm@13.2.1",
         }),
       );
       await writeFile(
         path.join(root, "rust-toolchain.toml"),
-        '[toolchain]\nchannel = "1.100.2"\n',
+        failure === "rust"
+          ? '[toolchain]\nchannel = "stable"\n'
+          : failure === "invalid-toml"
+            ? '[toolchain]\nchannel = "1.100.2"\nchannel = "stable"\n'
+            : '[toolchain]\nchannel = "1.100.2"\n',
       );
       const cli = '{"engines":{"node":"^24.0.0"},"custom":true}\n';
       const docker = "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n";
@@ -107,7 +111,9 @@ it.each(["declaration", "missing", "shape"])(
       if (failure !== "missing")
         await writeFile(
           path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
-          "export const releaseToolchainSnapshot = compute();\n",
+          failure === "shape"
+            ? "export const releaseToolchainSnapshot = compute();\n"
+            : `export const releaseToolchainSnapshot = Object.freeze({nodeVersion:"24.0.0",packageManagerPin:"pnpm@12.0.0",rustVersion:"1.99.0"} as const${failure === "syntax" ? "" : ")"};\n`,
         );
       const result = await execa(
         process.execPath,

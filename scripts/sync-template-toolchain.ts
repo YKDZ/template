@@ -84,6 +84,19 @@ function projectSnapshot(
   contents: string,
   values: Readonly<Record<string, string>>,
 ): string {
+  const diagnostics =
+    ts.transpileModule(contents, {
+      reportDiagnostics: true,
+      compilerOptions: { target: ts.ScriptTarget.Latest },
+    }).diagnostics ?? [];
+  if (
+    diagnostics.some(
+      (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+    )
+  )
+    throw new Error(
+      "packages/core/src/release-toolchain-snapshot.ts: 无法解析静态快照语法",
+    );
   const source = ts.createSourceFile(
     "packages/core/src/release-toolchain-snapshot.ts",
     contents,

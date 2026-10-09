@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { parse as parseToml } from "smol-toml";
+
 export type TemplateToolchainDeclarations = {
   readonly rootNodeEngine: string;
   readonly packageManagerDeclaration: string;
@@ -58,7 +60,14 @@ export async function readTemplateToolchainDeclarations(
     readonly engines?: unknown;
     readonly packageManager?: unknown;
   };
-  const section = /\[toolchain\][^\S\n]*\n([^[]*)/u.exec(rustContents)?.[1];
+  const rustDeclaration = parseToml(rustContents);
+  const toolchain = rustDeclaration.toolchain;
+  const channel =
+    typeof toolchain === "object" &&
+    toolchain !== null &&
+    "channel" in toolchain
+      ? toolchain.channel
+      : undefined;
   return {
     rootNodeEngine: readNodeEngine(manifest),
     packageManagerDeclaration:
@@ -66,9 +75,8 @@ export async function readTemplateToolchainDeclarations(
         ? manifest.packageManager
         : "(缺失 packageManager)",
     rustToolchainChannel:
-      section === undefined
-        ? "(缺失 rust-toolchain.toml 的 channel)"
-        : (/^\s*channel\s*=\s*"([^"]*)"/mu.exec(section)?.[1] ??
-          "(缺失 rust-toolchain.toml 的 channel)"),
+      typeof channel === "string"
+        ? channel
+        : "(缺失 rust-toolchain.toml 的 channel)",
   };
 }

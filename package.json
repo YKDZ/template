@@ -34,6 +34,7 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:",
