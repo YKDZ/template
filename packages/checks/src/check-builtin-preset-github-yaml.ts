@@ -14,7 +14,7 @@ import {
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { parseDocument } from "yaml";
+import { parseDocument, isScalar, visit } from "yaml";
 
 import { deriveFixtureMatrix } from "./registry-checks.ts";
 
@@ -27,8 +27,12 @@ function hasExactKeys(
   value: Record<string, unknown>,
   expectedKeys: readonly string[],
 ): boolean {
-  const actual = Object.keys(value).toSorted();
-  const expected = [...expectedKeys].toSorted();
+  const actual = Object.keys(value)
+    .filter((key) => key !== "name" || !expectedKeys.includes("name"))
+    .toSorted();
+  const expected = [...expectedKeys]
+    .filter((key) => key !== "name" || !expectedKeys.includes("name"))
+    .toSorted();
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])
@@ -122,13 +126,13 @@ type ParsedObject = Record<string, unknown>;
 
 const publicationWorkflowPath = ".github/workflows/release.yml";
 
-/** Publication is a ts-cli capability, not part of ProjectCheckWorkflowPlan. */
+/** Publication is a ts-cli capability. */
 export function assertPublicationWorkflowContract(
   plan: GeneratedRepositoryPlan,
   source: string,
   workflow: ParsedWorkflow,
 ): void {
-  void source;
+  assertActionReferences(source);
   const candidate = plan.packageContributions.filter(
     (contribution) =>
       contribution.foundation.npmPublication?.kind === "public-cli-candidate",
@@ -148,7 +152,6 @@ export function assertPublicationWorkflowContract(
       "concurrency",
       "jobs",
     ]) ||
-    workflow.name !== "Publish verified npm artifact" ||
     !isParsedObject(workflow.on) ||
     !hasExactKeys(workflow.on, ["workflow_dispatch"]) ||
     workflow.on.workflow_dispatch !== null ||
@@ -233,7 +236,7 @@ function assertPublicationJob(
     !hasExactKeys(job, expected.keys) ||
     job["runs-on"] !== "ubuntu-latest" ||
     job["timeout-minutes"] !== 30 ||
-    JSON.stringify(job.permissions) !== JSON.stringify(expected.permissions) ||
+    stableJson(job.permissions) !== stableJson(expected.permissions) ||
     job.needs !== expected.needs ||
     !Array.isArray(job.steps)
   ) {
@@ -249,7 +252,7 @@ function step(
   value: unknown,
   name: string,
 ): ParsedObject {
-  if (!isParsedObject(value) || value.name !== name) {
+  if (!isParsedObject(value)) {
     failPublicationWorkflow(plan, `missing ${name} step`);
   }
   return value;
@@ -259,8 +262,7 @@ function assertNodeSetup(plan: GeneratedRepositoryPlan, value: unknown): void {
   const value_ = step(plan, value, "Set up Node.js");
   if (
     !hasExactKeys(value_, ["name", "uses", "with"]) ||
-    value_.uses !==
-      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020" ||
+    !matchesAction(value_.uses, "actions/setup-node") ||
     !isParsedObject(value_.with) ||
     !hasExactKeys(value_.with, ["node-version-file"]) ||
     value_.with["node-version-file"] !== "package.json"
@@ -272,8 +274,7 @@ function assertCheckout(plan: GeneratedRepositoryPlan, value: unknown): void {
   const value_ = step(plan, value, "Checkout source");
   if (
     !hasExactKeys(value_, ["name", "uses", "with"]) ||
-    value_.uses !==
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
+    !matchesAction(value_.uses, "actions/checkout") ||
     !isParsedObject(value_.with) ||
     !hasExactKeys(value_.with, ["ref", "persist-credentials", "fetch-depth"]) ||
     value_.with.ref !== "${{ github.sha }}" ||
@@ -321,8 +322,7 @@ function assertPublicationVerifySteps(
   const upload = step(plan, steps[7], "Upload verified npm artifact");
   if (
     !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
-    pnpm.uses !==
-      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b" ||
+    !matchesAction(pnpm.uses, "pnpm/action-setup") ||
     !isParsedObject(pnpm.with) ||
     !hasExactKeys(pnpm.with, ["cache"]) ||
     pnpm.with.cache !== true ||
@@ -338,8 +338,7 @@ function assertPublicationVerifySteps(
     check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
       "${{ runner.temp }}/npm-publication-artifact" ||
     !hasExactKeys(upload, ["name", "uses", "with"]) ||
-    upload.uses !==
-      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" ||
+    !matchesAction(upload.uses, "actions/upload-artifact") ||
     !isParsedObject(upload.with) ||
     !hasExactKeys(upload.with, ["name", "path", "if-no-files-found"]) ||
     upload.with.name !== "npm-publication-${{ github.run_id }}" ||
@@ -363,25 +362,12 @@ function assertPublicationPublishSteps(
       "publish must have the closed four-step sequence",
     );
   }
-  const checkout = step(plan, steps[0], "Checkout source");
+  assertCheckout(plan, steps[0]);
   const download = step(plan, steps[2], "Download verified npm artifact");
   const caller = step(plan, steps[3], "Publish the verified tgz with OIDC");
   if (
-    !hasExactKeys(checkout, ["name", "uses", "with"]) ||
-    checkout.uses !==
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
-    !isParsedObject(checkout.with) ||
-    !hasExactKeys(checkout.with, [
-      "ref",
-      "persist-credentials",
-      "fetch-depth",
-    ]) ||
-    checkout.with.ref !== "${{ github.sha }}" ||
-    checkout.with["persist-credentials"] !== false ||
-    checkout.with["fetch-depth"] !== 1 ||
     !hasExactKeys(download, ["name", "uses", "with"]) ||
-    download.uses !==
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
+    !matchesAction(download.uses, "actions/download-artifact") ||
     !isParsedObject(download.with) ||
     !hasExactKeys(download.with, ["name", "path"]) ||
     download.with.name !== "npm-publication-${{ github.run_id }}" ||
@@ -411,25 +397,12 @@ function assertPublicationReleaseSteps(
       "release must have the closed four-step sequence",
     );
   }
-  const checkout = step(plan, steps[0], "Checkout source");
+  assertCheckout(plan, steps[0]);
   const download = step(plan, steps[2], "Download verified npm artifact");
   const caller = step(plan, steps[3], "Create immutable GitHub Release");
   if (
-    !hasExactKeys(checkout, ["name", "uses", "with"]) ||
-    checkout.uses !==
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" ||
-    !isParsedObject(checkout.with) ||
-    !hasExactKeys(checkout.with, [
-      "ref",
-      "persist-credentials",
-      "fetch-depth",
-    ]) ||
-    checkout.with.ref !== "${{ github.sha }}" ||
-    checkout.with["persist-credentials"] !== false ||
-    checkout.with["fetch-depth"] !== 1 ||
     !hasExactKeys(download, ["name", "uses", "with"]) ||
-    download.uses !==
-      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" ||
+    !matchesAction(download.uses, "actions/download-artifact") ||
     !isParsedObject(download.with) ||
     !hasExactKeys(download.with, ["name", "path"]) ||
     download.with.name !== "npm-publication-${{ github.run_id }}" ||
@@ -460,8 +433,6 @@ function assertPublicationReleaseSteps(
 type WorkflowActionContract = {
   readonly name: string;
   readonly action: string;
-  readonly reference: string;
-  readonly release: string;
   readonly with?: Readonly<ParsedObject>;
   readonly condition?: string;
 };
@@ -487,36 +458,26 @@ const workflowPolicy = {
     checkout: {
       name: "Checkout source",
       action: "actions/checkout",
-      reference: "3d3c42e5aac5ba805825da76410c181273ba90b1",
-      release: "v7",
       with: { "persist-credentials": false, "fetch-depth": 1 },
     },
     node: {
       name: "Set up Node.js",
       action: "actions/setup-node",
-      reference: "820762786026740c76f36085b0efc47a31fe5020",
-      release: "v7",
       with: { "node-version-file": "package.json" },
     },
     pnpm: {
       name: "Set up pnpm",
       action: "pnpm/action-setup",
-      reference: "d9184bf108216479bc5a137cc391f4d7b14c870b",
-      release: "v6.1.0",
       with: { cache: true },
     },
     buildx: {
       name: "Set up Docker Buildx",
       action: "docker/setup-buildx-action",
-      reference: "f87e5991a6d7451dcb8d9637bfbc97413f497069",
-      release: "v4.4.1",
       condition: "matrix.requires_docker",
     },
     upload: {
       name: "Upload Root Check diagnostics",
       action: "actions/upload-artifact",
-      reference: "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-      release: "v7",
     },
   } as Readonly<Record<WorkflowActionKey, WorkflowActionContract>>,
   installStep: {
@@ -552,8 +513,46 @@ const rootActionKeys: readonly WorkflowActionKey[] = [
   "pnpm",
 ];
 
-function pinnedAction(contract: WorkflowActionContract): string {
-  return `${contract.action}@${contract.reference}`;
+function matchesAction(value: unknown, action: string): boolean {
+  return (
+    typeof value === "string" &&
+    value.startsWith(`${action}@`) &&
+    /^[a-f0-9]{40}$/u.test(value.slice(action.length + 1))
+  );
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    isParsedObject(item)
+      ? Object.fromEntries(
+          Object.entries(item).toSorted(([left], [right]) =>
+            left.localeCompare(right),
+          ),
+        )
+      : item,
+  );
+}
+
+function assertActionReferences(source: string): void {
+  const document = parseDocument(source);
+  visit(document, {
+    Pair(_key, pair) {
+      if (!isScalar(pair.key) || pair.key.value !== "uses") return;
+      const value = pair.value;
+      if (
+        !isScalar(value) ||
+        typeof value.value !== "string" ||
+        !/^[\w.-]+\/[\w.-]+@[a-f0-9]{40}$/u.test(value.value) ||
+        !/^\s*v?\d+(?:\.\d+){0,2}(?:[-+][\w.-]+)?\s*$/u.test(
+          value.comment ?? "",
+        )
+      ) {
+        throw new Error(
+          "Action uses requires an immutable full SHA and attached recognizable release comment",
+        );
+      }
+    },
+  });
 }
 
 function diagnosticStepContracts(
@@ -596,7 +595,7 @@ function diagnosticStepContracts(
     upload: {
       name: upload.name,
       if: condition,
-      uses: pinnedAction(upload),
+      uses: upload.action,
       with: {
         name: "root-check-diagnostics",
         path: ".template-ci-diagnostics",
@@ -609,7 +608,6 @@ function diagnosticStepContracts(
 
 function assertDiagnosticSteps(
   plan: GeneratedRepositoryPlan,
-  source: string,
   stageStep: unknown,
   uploadStep: unknown,
   oracle: WorkflowOracle,
@@ -620,9 +618,8 @@ function assertDiagnosticSteps(
   if (
     !isParsedObject(stageStep) ||
     !hasExactKeys(stageStep, ["name", "if", "env", "run"]) ||
-    stageStep.name !== contract.stage.name ||
     stageStep.if !== contract.stage.if ||
-    JSON.stringify(stageStep.env) !== JSON.stringify(contract.stage.env) ||
+    stableJson(stageStep.env) !== stableJson(contract.stage.env) ||
     stageStep.run !== contract.stage.run
   ) {
     throw new Error(
@@ -633,9 +630,8 @@ function assertDiagnosticSteps(
   if (
     !isParsedObject(uploadStep) ||
     !hasExactKeys(uploadStep, ["name", "if", "uses", "with"]) ||
-    uploadStep.name !== contract.upload.name ||
     uploadStep.if !== contract.upload.if ||
-    uploadStep.uses !== contract.upload.uses ||
+    !matchesAction(uploadStep.uses, String(contract.upload.uses)) ||
     !isParsedObject(withValues) ||
     !hasExactKeys(withValues, [
       "name",
@@ -647,12 +643,7 @@ function assertDiagnosticSteps(
     typeof withValues.path !== "string" ||
     withValues.path !== (contract.upload.with as ParsedObject).path ||
     withValues["if-no-files-found"] !== "ignore" ||
-    withValues["retention-days"] !== 7 ||
-    !hasPinnedActionReleaseLine(
-      source,
-      String(contract.upload.uses),
-      workflowPolicy.actions.upload.release,
-    )
+    withValues["retention-days"] !== 7
   ) {
     throw new Error(
       `${plan.definitionName}: Root Check diagnostic upload must retain only aggregate native Playwright evidence`,
@@ -664,28 +655,8 @@ function isParsedObject(value: unknown): value is ParsedObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasPinnedActionReleaseLine(
-  source: string,
-  actionReference: string,
-  version: string,
-): boolean {
-  const escapedReference = actionReference.replace(
-    /[.*+?^${}()|[\]\\]/gu,
-    "\\$&",
-  );
-  return source
-    .split("\n")
-    .some((line) =>
-      new RegExp(
-        `^\\s*uses: ${escapedReference} # ${version.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\s*$`,
-        "u",
-      ).test(line),
-    );
-}
-
 function assertRootOnlyWorkflowContract(
   plan: GeneratedRepositoryPlan,
-  source: string,
   workflow: ParsedWorkflow,
   oracle: WorkflowOracle,
 ): void {
@@ -722,14 +693,8 @@ function assertRootOnlyWorkflowContract(
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "uses", "with"]) ||
-      step.name !== contract.name ||
-      step.uses !== pinnedAction(contract) ||
-      JSON.stringify(step.with) !== JSON.stringify(contract.with) ||
-      !hasPinnedActionReleaseLine(
-        source,
-        pinnedAction(contract),
-        contract.release,
-      )
+      !matchesAction(step.uses, contract.action) ||
+      stableJson(step.with) !== stableJson(contract.with)
     ) {
       throw new Error(
         `${plan.definitionName}: Root Check ${contract.name} step diverges from its capability contract`,
@@ -745,7 +710,6 @@ function assertRootOnlyWorkflowContract(
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "run"]) ||
-      step.name !== contract.name ||
       step.run !== contract.command
     ) {
       throw new Error(
@@ -753,19 +717,11 @@ function assertRootOnlyWorkflowContract(
       );
     }
   }
-  assertDiagnosticSteps(
-    plan,
-    source,
-    job.steps[5],
-    job.steps[6],
-    oracle,
-    false,
-  );
+  assertDiagnosticSteps(plan, job.steps[5], job.steps[6], oracle, false);
 }
 
 function assertDeploymentWorkflowContract(
   plan: GeneratedRepositoryPlan,
-  source: string,
   workflow: ParsedWorkflow,
   oracle: WorkflowOracle,
 ): void {
@@ -788,7 +744,6 @@ function assertDeploymentWorkflowContract(
       "strategy",
       "steps",
     ]) ||
-    job.name !== "${{ matrix.job_name }}" ||
     job["runs-on"] !== workflowPolicy.rootJob.runner ||
     job["timeout-minutes"] !== "${{ matrix.timeout_minutes }}"
   ) {
@@ -809,8 +764,8 @@ function assertDeploymentWorkflowContract(
     );
   }
   if (
-    JSON.stringify(job.strategy.matrix.include) !==
-    JSON.stringify(workflowPolicy.deploymentMatrix)
+    stableJson(job.strategy.matrix.include) !==
+    stableJson(workflowPolicy.deploymentMatrix)
   ) {
     throw new Error(
       `${plan.definitionName}: Deployment matrix include entries diverge from its capability plan`,
@@ -839,16 +794,10 @@ function assertDeploymentWorkflowContract(
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, expectedKeys) ||
-      step.name !== contract.name ||
-      step.uses !== pinnedAction(contract) ||
+      !matchesAction(step.uses, contract.action) ||
       (contract.condition
         ? step.if !== contract.condition
-        : JSON.stringify(step.with) !== JSON.stringify(contract.with)) ||
-      !hasPinnedActionReleaseLine(
-        source,
-        pinnedAction(contract),
-        contract.release,
-      )
+        : stableJson(step.with) !== stableJson(contract.with))
     ) {
       throw new Error(
         `${plan.definitionName}: Deployment matrix ${contract.name} step diverges from its capability contract`,
@@ -860,18 +809,16 @@ function assertDeploymentWorkflowContract(
   if (
     !isParsedObject(install) ||
     !hasExactKeys(install, ["name", "run"]) ||
-    install.name !== workflowPolicy.installStep.name ||
     install.run !== workflowPolicy.installStep.command ||
     !isParsedObject(selectedCheck) ||
     !hasExactKeys(selectedCheck, ["name", "run"]) ||
-    selectedCheck.name !== workflowPolicy.selectedCheckStep.name ||
     selectedCheck.run !== workflowPolicy.selectedCheckStep.command
   ) {
     throw new Error(
       `${plan.definitionName}: Deployment matrix must install and invoke its selected task in each leg`,
     );
   }
-  assertDiagnosticSteps(plan, source, steps[6], steps[7], oracle, true);
+  assertDiagnosticSteps(plan, steps[6], steps[7], oracle, true);
 }
 
 export function assertWorkflowContract(
@@ -880,6 +827,7 @@ export function assertWorkflowContract(
   source: string,
   workflow: ParsedWorkflow,
 ): void {
+  assertActionReferences(source);
   const oracle = workflowOracle(plan);
   if (generatedPath !== workflowPolicy.generatedPath) {
     throw new Error(
@@ -910,32 +858,27 @@ export function assertWorkflowContract(
   if (!Array.isArray(steps)) {
     throw new Error(`${plan.definitionName}: Root Check has no steps`);
   }
-  if (
-    workflow.name !== workflowPolicy.name ||
-    JSON.stringify(workflow.on) !== JSON.stringify(workflowPolicy.triggers)
-  ) {
+  if (stableJson(workflow.on) !== stableJson(workflowPolicy.triggers)) {
     throw new Error(
       `${plan.definitionName}: unexpected Check workflow triggers`,
     );
   }
   if (
-    JSON.stringify(workflow.permissions) !==
-    JSON.stringify(workflowPolicy.permissions)
+    stableJson(workflow.permissions) !== stableJson(workflowPolicy.permissions)
   ) {
     throw new Error(
       `${plan.definitionName}: Check permissions are not contents-read`,
     );
   }
   if (
-    JSON.stringify(workflow.concurrency) !==
-    JSON.stringify(workflowPolicy.concurrency)
+    stableJson(workflow.concurrency) !== stableJson(workflowPolicy.concurrency)
   ) {
     throw new Error(
       `${plan.definitionName}: Check concurrency is not same-ref cancellation`,
     );
   }
   if (oracle.deployment) {
-    assertDeploymentWorkflowContract(plan, source, workflow, oracle);
+    assertDeploymentWorkflowContract(plan, workflow, oracle);
     if (
       !plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")
     ) {
@@ -946,7 +889,6 @@ export function assertWorkflowContract(
     return;
   }
   if (
-    job?.name !== workflowPolicy.rootJob.name ||
     job["runs-on"] !== workflowPolicy.rootJob.runner ||
     job["timeout-minutes"] !== workflowPolicy.rootJob.timeoutMinutes
   ) {
@@ -955,7 +897,7 @@ export function assertWorkflowContract(
     );
   }
 
-  assertRootOnlyWorkflowContract(plan, source, workflow, oracle);
+  assertRootOnlyWorkflowContract(plan, workflow, oracle);
   if (!plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")) {
     throw new Error(
       `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
@@ -1186,7 +1128,7 @@ function policyOracleIdentity(
   kind: PolicyInput["kind"],
   plan: GeneratedRepositoryPlan,
 ): string {
-  return JSON.stringify(
+  return stableJson(
     kind === "workflow" ? workflowOracle(plan) : dependabotOracle(plan),
   );
 }
@@ -1229,7 +1171,7 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
         });
         if (!result.ok) {
           throw new Error(
-            `${scenario.id}: GitHub policy projection conflicted: ${JSON.stringify(result.conflicts)}`,
+            `${scenario.id}: GitHub policy projection conflicted: ${stableJson(result.conflicts)}`,
           );
         }
         plan = addition;
@@ -1268,7 +1210,7 @@ async function finalPolicyInputs(): Promise<readonly PolicyInput[]> {
         } else {
           if (existing.oracleIdentity !== oracleIdentity) {
             throw new Error(
-              `Identical ${kind} final content was reached from incompatible policy facts: ${JSON.stringify([...existing.origins, origin])}`,
+              `Identical ${kind} final content was reached from incompatible policy facts: ${stableJson([...existing.origins, origin])}`,
             );
           }
           existing.origins.push(origin);

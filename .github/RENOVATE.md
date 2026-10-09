@@ -9,13 +9,19 @@
 - `npm`：根 `package.json` 的 `engines.node`、`packageManager`（pnpm）与依赖，含 `pnpm-workspace.yaml` catalog
 - `rust-toolchain`：根 `rust-toolchain.toml`
 - `cargo`：`Cargo.toml` / `Cargo.lock`
-- `github-actions`：`.github/workflows/`
+- `github-actions`：仓库自身 `.github/workflows/`、Foundation 嵌套工作流模板，以及 `packages/builtin-presets/templates/ts-cli/publication/release.yml` 发布模板
 - `dockerfile`：`FROM` 镜像；其中 `.devcontainer/Dockerfile` 的 node 镜像是根 `engines.node` 的静态投影，禁止机器人单独更新，由 `scripts/check-template-toolchain-versions.ts` 漂移门约束
 
 ## 审核语义
 
 - 更新 PR 一律不自动合并（`automerge: false`），是否接受以根 check、lint、typecheck 与人工审查为准。
 - 跨 Node LTS 大版本（`engines.node` 的 major 更新）必须在 Dependency Dashboard 中显式批准后才创建 PR，不会被普通更新隐式接受。
+
+## 工具链更新顺序
+
+根 Node、pnpm、Rust 原生声明更新后，维护者在同一更新 PR 中执行 `pnpm run sync:toolchain`，同步 CLI 的 Node 范围、开发容器 Node 镜像与发版工具链静态快照。也可用当前兼容 Node 直接执行 `node scripts/sync-template-toolchain.ts`，无需先安装目标 pnpm 或 Rust。
+
+同步完成后再准备目标工具链与依赖，运行根 `pnpm check` 并审阅变更。同步命令只处理本地已知副本，检查继续只读报告漂移与实际运行版本不符。
 
 ## 管理员后续操作（尚未执行）
 

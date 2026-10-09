@@ -43,5 +43,10 @@
       ],
       "allowedVersions": "<7"
     }
-  ]
+  ],
+  "github-actions": {
+    "managerFilePatterns": [
+      "/^packages/builtin-presets/templates/ts-cli/publication/release\\.yml$/"
+    ]
+  }
 }
