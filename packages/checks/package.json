@@ -3,7 +3,12 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./check-generated-registry": null
+    "./check-generated-registry": null,
+    "./workflow-contract": {
+      "source": "./src/check-builtin-preset-github-yaml.ts",
+      "types": "./dist/check-builtin-preset-github-yaml.d.ts",
+      "default": "./dist/check-builtin-preset-github-yaml.js"
+    }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",

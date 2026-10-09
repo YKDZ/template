@@ -17,7 +17,12 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
+import {
+  assertWorkflowContract,
+  assertPublicationWorkflowContract,
+} from "@ykdz/template-checks/workflow-contract";
 import type { PackageRole } from "@ykdz/template-core/project-blueprint";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { execa } from "execa";
@@ -408,192 +413,26 @@ async function expectPackedPlaywrightConfig(
 
 async function expectPackedHardenedRootCheckWorkflow(
   projectDir: string,
-  requiresDiagnostics?: boolean,
+  plan: GeneratedRepositoryPlan,
 ): Promise<void> {
-  const source = await readFile(
-    path.join(projectDir, ".github/workflows/check.yml"),
-    "utf8",
-  );
-  const workflow = parseYaml(source) as {
-    readonly name: string;
-    readonly on: {
-      readonly pull_request: null;
-      readonly push: { readonly branches: readonly string[] };
-    };
-    readonly permissions: { readonly contents: string };
-    readonly concurrency: {
-      readonly group: string;
-      readonly "cancel-in-progress": boolean;
-    };
-    readonly jobs: {
-      readonly check: {
-        readonly name: string;
-        readonly "runs-on": string;
-        readonly "timeout-minutes": number | string;
-        readonly permissions?: unknown;
-        readonly strategy?: {
-          readonly "fail-fast": boolean;
-          readonly matrix: {
-            readonly include: readonly {
-              readonly capability: string;
-              readonly job_name: string;
-              readonly task_entrypoint: string;
-              readonly timeout_minutes: number;
-              readonly requires_docker: boolean;
-            }[];
-          };
-        };
-        readonly steps: readonly {
-          readonly name?: string;
-          readonly uses?: string;
-          readonly run?: string;
-          readonly if?: string;
-          readonly with?: Record<string, unknown>;
-        }[];
-      };
-    };
-  };
-  const rootCheck = workflow.jobs.check;
-  expect(workflow.name).toBe("Check");
-  expect(workflow.on).toEqual({
-    pull_request: null,
-    push: { branches: ["main"] },
-  });
-  expect(workflow.permissions).toEqual({ contents: "read" });
-  expect(workflow.concurrency).toEqual({
-    group: "${{ github.workflow }}-${{ github.ref }}",
-    "cancel-in-progress": true,
-  });
-  expect(Object.keys(workflow.jobs)).toEqual(["check"]);
-  expect(rootCheck.permissions).toBeUndefined();
-
-  const deploymentWorkflow = rootCheck.strategy !== undefined;
-  expect(rootCheck).toMatchObject(
-    deploymentWorkflow
-      ? {
-          name: "${{ matrix.job_name }}",
-          "runs-on": "ubuntu-latest",
-          "timeout-minutes": "${{ matrix.timeout_minutes }}",
-        }
-      : {
-          name: "Root Check",
-          "runs-on": "ubuntu-latest",
-          "timeout-minutes": 30,
-        },
-  );
-  expect(Object.keys(rootCheck).toSorted()).toEqual(
-    deploymentWorkflow
-      ? ["name", "runs-on", "steps", "strategy", "timeout-minutes"]
-      : ["name", "runs-on", "steps", "timeout-minutes"],
-  );
-  if (deploymentWorkflow) {
-    expect(rootCheck.strategy).toEqual({
-      "fail-fast": false,
-      matrix: {
-        include: [
-          {
-            capability: "root",
-            job_name: "Root Check",
-            task_entrypoint: "pnpm run check",
-            timeout_minutes: 30,
-            requires_docker: false,
-          },
-          {
-            capability: "deployment",
-            job_name: "Deployment Check",
-            task_entrypoint: "pnpm run check:deployment",
-            timeout_minutes: 45,
-            requires_docker: true,
-          },
-        ],
-      },
-    });
-  }
-  const expectedSteps = [
-    {
-      name: "Checkout source",
-      uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-      with: { "persist-credentials": false, "fetch-depth": 1 },
-    },
-    {
-      name: "Set up Node.js",
-      uses: "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-      with: { "node-version-file": "package.json" },
-    },
-    {
-      name: "Set up pnpm",
-      uses: "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b",
-      with: { cache: true },
-    },
-    ...(deploymentWorkflow
-      ? [
-          {
-            name: "Set up Docker Buildx",
-            uses: "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
-            if: "matrix.requires_docker",
-          },
-        ]
-      : []),
-    { name: "Install dependencies", run: "pnpm install --frozen-lockfile" },
-    {
-      name: deploymentWorkflow ? "Run selected Check" : "Run Root Check",
-      run: deploymentWorkflow
-        ? "${{ matrix.task_entrypoint }}"
-        : "pnpm run check",
-    },
-  ];
-  expect(rootCheck.steps.slice(0, expectedSteps.length)).toEqual(expectedSteps);
-  const stage = rootCheck.steps[expectedSteps.length];
-  const diagnostic = rootCheck.steps[expectedSteps.length + 1];
-  if (requiresDiagnostics !== undefined) {
-    expect(diagnostic !== undefined).toBe(requiresDiagnostics);
-  }
-  if (diagnostic !== undefined) {
-    expect(stage).toMatchObject({
-      name: "Stage Root Check diagnostics",
-      if: deploymentWorkflow
-        ? "failure() && matrix.capability == 'root'"
-        : "failure()",
-      run: expect.stringContaining(".template-ci-diagnostics"),
-    });
-    expect(diagnostic).toMatchObject({
-      name: "Upload Root Check diagnostics",
-      if: deploymentWorkflow
-        ? "failure() && matrix.capability == 'root'"
-        : "failure()",
-      uses: "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-      with: {
-        name: "root-check-diagnostics",
-        "if-no-files-found": "ignore",
-        "retention-days": 7,
-      },
-    });
-    expect(diagnostic?.with?.path).toBe(".template-ci-diagnostics");
-  }
-
-  const actionVersions = [
-    ["actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "v7"],
-    ["actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", "v7"],
-    ["pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b", "v6.1.0"],
-    ...(deploymentWorkflow
-      ? [
-          [
-            "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
-            "v4.4.1",
-          ],
-        ]
-      : []),
-    ...(diagnostic === undefined
-      ? []
-      : [
-          [
-            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-            "v7",
-          ],
-        ]),
-  ];
-  for (const [action, version] of actionVersions) {
-    expect(source).toContain(`uses: ${action} # ${version}`);
+  const generatedPath = ".github/workflows/check.yml";
+  const source = await readFile(path.join(projectDir, generatedPath), "utf8");
+  assertWorkflowContract(plan, generatedPath, source, parseYaml(source));
+  if (
+    plan.packageContributions.some(
+      (contribution) =>
+        contribution.foundation.npmPublication?.kind === "public-cli-candidate",
+    )
+  ) {
+    const releaseSource = await readFile(
+      path.join(projectDir, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    assertPublicationWorkflowContract(
+      plan,
+      releaseSource,
+      parseYaml(releaseSource),
+    );
   }
 }
 
@@ -644,6 +483,41 @@ function archiveAdditionRequiresDiagnostics(definitionName: string): boolean {
       packagePath: "packages/archive-addition",
     }).ciDiagnosticArtifacts?.length ?? 0) > 0
   );
+}
+
+function archiveAdditionDiagnosticPlan(
+  definitionName: string,
+): GeneratedRepositoryPlan {
+  const initial = initializationDiagnosticPlan(definitionName);
+  const definition = builtInPresetRegistry.require(definitionName);
+  if (definition.planPackageAddition === undefined) return initial;
+  const addition = definition.planPackageAddition({
+    context: createGenerationContext({
+      targetDir: "generated-repository",
+      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+    }),
+    packageLeafName: "archive-addition",
+    packagePath: "packages/archive-addition",
+  });
+  return {
+    ...initial,
+    blueprint: {
+      ...initial.blueprint,
+      packages: [
+        ...initial.blueprint.packages,
+        {
+          packageDefinitionId: "package-archive-addition",
+          name: "@demo/archive-addition",
+          path: "packages/archive-addition",
+          role: "shared-library",
+        },
+      ],
+    },
+    ciDiagnosticArtifacts: [
+      ...initial.ciDiagnosticArtifacts,
+      ...(addition.ciDiagnosticArtifacts ?? []),
+    ],
+  };
 }
 
 describe("packed public CLI consumer", () => {
@@ -871,7 +745,7 @@ describe("packed public CLI consumer", () => {
         );
         await expectPackedHardenedRootCheckWorkflow(
           generatedProject,
-          requiresDiagnostics,
+          initializationDiagnosticPlan(definition.name),
         );
         await expectPackedPlaywrightConfig(
           generatedProject,
@@ -917,7 +791,7 @@ describe("packed public CLI consumer", () => {
           );
           await expectPackedHardenedRootCheckWorkflow(
             generatedProject,
-            requiresDiagnostics,
+            archiveAdditionDiagnosticPlan(candidate.name),
           );
           await expectPackedPlaywrightConfig(
             generatedProject,
@@ -1191,7 +1065,10 @@ describe("packed public CLI consumer", () => {
 
       await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
       await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });
-      await expectPackedHardenedRootCheckWorkflow(rustAdditionTarget);
+      await expectPackedHardenedRootCheckWorkflow(
+        rustAdditionTarget,
+        initializationDiagnosticPlan(rustDefinition.metadata.name),
+      );
 
       const cliAdditionDefinition =
         addableDefinitionWithPackageRole("cli-tool");
@@ -1230,7 +1107,10 @@ describe("packed public CLI consumer", () => {
         );
       };
       await addSecondCli();
-      await expectPackedHardenedRootCheckWorkflow(cliTarget);
+      await expectPackedHardenedRootCheckWorkflow(
+        cliTarget,
+        initializationDiagnosticPlan(cliAdditionDefinition.metadata.name),
+      );
       const secondCliManifest = JSON.parse(
         await readFile(
           path.join(cliTarget, "packages/default-command/package.json"),
@@ -1249,7 +1129,10 @@ describe("packed public CLI consumer", () => {
       expect(secondCliManifest).not.toHaveProperty("imports");
       const secondCliSnapshot = await workspaceByteSnapshot(cliTarget);
       await addSecondCli();
-      await expectPackedHardenedRootCheckWorkflow(cliTarget);
+      await expectPackedHardenedRootCheckWorkflow(
+        cliTarget,
+        initializationDiagnosticPlan(cliAdditionDefinition.metadata.name),
+      );
       expect(await workspaceByteSnapshot(cliTarget)).toEqual(secondCliSnapshot);
 
       const previewBaseDefinition =

@@ -6,42 +6,16 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
+import { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-type WorkflowStep = {
-  readonly name?: string;
-  readonly uses?: string;
-  readonly run?: string;
-  readonly with?: Readonly<Record<string, unknown>>;
-};
-
-type CheckWorkflow = {
-  readonly name: string;
-  readonly on: {
-    readonly pull_request: Record<string, never> | null;
-    readonly push: { readonly branches: readonly string[] };
-  };
-  readonly permissions: { readonly contents: "read" };
-  readonly concurrency: {
-    readonly group: "${{ github.workflow }}-${{ github.ref }}";
-    readonly "cancel-in-progress": true;
-  };
-  readonly jobs: {
-    readonly check: {
-      readonly name: string;
-      readonly "runs-on": string;
-      readonly "timeout-minutes": number;
-      readonly steps: readonly WorkflowStep[];
-    };
-  };
-};
-
 async function renderRootCheckWorkflow(): Promise<{
   readonly source: string;
-  readonly workflow: CheckWorkflow;
+  readonly plan: GeneratedRepositoryPlan;
 }> {
   const workspace = await mkdtemp(
     path.join(tmpdir(), "template-root-check-workflow-"),
@@ -81,7 +55,7 @@ async function renderRootCheckWorkflow(): Promise<{
       path.join(targetRoot, ".github/workflows/check.yml"),
       "utf8",
     );
-    return { source, workflow: parse(source) as CheckWorkflow };
+    return { source, plan };
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -104,68 +78,15 @@ describe("Generated Root Check workflow", () => {
     expect(plan).not.toHaveProperty("ciDiagnosticArtifactDeclarations");
   });
 
-  it("runs the hardened Root Check through its one quality entrypoint", async () => {
-    const { source, workflow } = await renderRootCheckWorkflow();
-    const job = workflow.jobs.check;
-
-    expect(workflow.name).toBe("Check");
-    expect(workflow.on).toEqual({
-      pull_request: null,
-      push: { branches: ["main"] },
-    });
-    expect(workflow.permissions).toEqual({ contents: "read" });
-    expect(workflow.concurrency).toEqual({
-      group: "${{ github.workflow }}-${{ github.ref }}",
-      "cancel-in-progress": true,
-    });
-    expect(job).toMatchObject({
-      name: "Root Check",
-      "runs-on": "ubuntu-latest",
-      "timeout-minutes": 30,
-    });
-
-    const actionSteps = job.steps.filter(
-      (step): step is WorkflowStep & { readonly uses: string } =>
-        step.uses !== undefined,
-    );
-    expect(actionSteps.map((step) => step.name)).toEqual([
-      "Checkout source",
-      "Set up Node.js",
-      "Set up pnpm",
-    ]);
-    expect(actionSteps.map((step) => step.uses)).toEqual([
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b",
-    ]);
-    expect(source).toContain(
-      "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7",
-    );
-    expect(source).toContain(
-      "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7",
-    );
-    expect(source).toContain(
-      "pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0",
-    );
-    expect(actionSteps[0]?.with).toEqual({
-      "persist-credentials": false,
-      "fetch-depth": 1,
-    });
-    expect(actionSteps[1]?.with).toEqual({
-      "node-version-file": "package.json",
-    });
-    expect(actionSteps[2]?.with).toEqual({ cache: true });
-
-    expect(job.steps.map((step) => step.run).filter(Boolean)).toEqual([
-      "pnpm install --frozen-lockfile",
-      "pnpm run check",
-    ]);
-    expect(job.steps.map((step) => step.name)).toEqual([
-      "Checkout source",
-      "Set up Node.js",
-      "Set up pnpm",
-      "Install dependencies",
-      "Run Root Check",
-    ]);
+  it("runs the Root Check contract through real generated files", async () => {
+    const { source, plan } = await renderRootCheckWorkflow();
+    expect(() =>
+      assertWorkflowContract(
+        plan,
+        ".github/workflows/check.yml",
+        source,
+        parse(source),
+      ),
+    ).not.toThrow();
   });
 });

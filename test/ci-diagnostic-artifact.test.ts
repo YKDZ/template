@@ -7,7 +7,6 @@ import {
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
 import {
-  projectCheckWorkflowPlan,
   projectCheckWorkflowTemplateSource,
   projectCheckWorkflowTemplateReplacements,
 } from "@ykdz/template-core/project-github";
@@ -86,12 +85,6 @@ describe("CI Diagnostic Artifact contract", () => {
   it("derives only ordered owner facts from actual Package Boundary paths", () => {
     const packagePaths = ["apps/web"];
     expect(
-      projectCheckWorkflowPlan({
-        packagePaths,
-        diagnosticArtifacts: [playwright("apps/web")],
-      }).packagePaths,
-    ).toEqual(packagePaths);
-    expect(
       projectCheckWorkflowTemplateSource({
         packagePaths,
         diagnosticArtifacts: [playwright("apps/web")],
@@ -107,11 +100,6 @@ describe("CI Diagnostic Artifact contract", () => {
 
   it("requires exact Package Boundary membership at every public workflow entrypoint", () => {
     for (const entrypoint of [
-      () =>
-        projectCheckWorkflowPlan({
-          packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("packages/private")],
-        }),
       () =>
         projectCheckWorkflowTemplateSource({
           packagePaths: ["apps/web"],
@@ -137,7 +125,7 @@ describe("CI Diagnostic Artifact contract", () => {
 
     for (const entrypoint of [
       () =>
-        projectCheckWorkflowPlan({
+        projectCheckWorkflowTemplateSource({
           packagePaths: ["apps/web"],
           diagnosticArtifacts: [declarationWithPath],
         }),
@@ -149,11 +137,6 @@ describe("CI Diagnostic Artifact contract", () => {
       () =>
         projectCheckWorkflowTemplateReplacements({
           packagePaths: ["apps/web"],
-          diagnosticArtifacts: [playwright("node_modules/private")],
-        }),
-      () =>
-        projectCheckWorkflowPlan({
-          packagePaths: ["node_modules/private"],
           diagnosticArtifacts: [playwright("node_modules/private")],
         }),
       () =>

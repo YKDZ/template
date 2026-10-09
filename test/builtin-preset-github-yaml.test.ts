@@ -16,6 +16,7 @@ import { parse } from "yaml";
 import {
   assertDependabotContract,
   assertWorkflowContract,
+  assertPublicationWorkflowContract,
 } from "../packages/checks/src/check-builtin-preset-github-yaml.ts";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {
@@ -43,7 +44,10 @@ function rootOnlyPlan(): GeneratedRepositoryPlan {
 
 async function renderedGithubSource(
   plan: GeneratedRepositoryPlan,
-  sourcePath: ".github/dependabot.yml" | ".github/workflows/check.yml",
+  sourcePath:
+    | ".github/dependabot.yml"
+    | ".github/workflows/check.yml"
+    | ".github/workflows/release.yml",
 ): Promise<{
   readonly sourcePath: string;
   readonly source: string;
@@ -156,7 +160,60 @@ async function expectRootOnlyWorkflowRejected(source: string): Promise<void> {
   ).toThrow();
 }
 
+function initializationPublicationPlan(): GeneratedRepositoryPlan {
+  return planGeneratedRepositoryInitialization({
+    definition: builtInPresetRegistry.require("ts-cli"),
+    context: createGenerationContext({
+      targetDir: "generated-publication",
+      defaultPackageScope: "demo",
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: "pnpm@11.11.0",
+        nodeVersion: releaseToolchainSnapshot.nodeVersion,
+      },
+    }),
+  });
+}
+
 describe("Built-in Preset GitHub YAML checker", () => {
+  it("accepts independent immutable upgrades and presentation-only YAML edits", async () => {
+    for (const plan of [rootOnlyPlan(), deploymentPlan()]) {
+      const baseline = await renderedWorkflow(plan);
+      const source = baseline.source
+        .replace(
+          /@[a-f0-9]{40} # v[^\n]+/gu,
+          "@" + "a".repeat(40) + " # v123.4.5",
+        )
+        .replace(/- name: [^\n]+/gu, "- name: 自定义展示名称")
+        .replace("contents: read", "contents: read  ");
+      const workflow = parse(source);
+      workflow.concurrency = Object.fromEntries(
+        Object.entries(workflow.concurrency).toReversed(),
+      );
+      expect(() =>
+        assertWorkflowContract(plan, baseline.sourcePath, source, workflow),
+      ).not.toThrow();
+    }
+  });
+
+  it("accepts publication Action upgrades and presentation changes from a real generation", async () => {
+    const plan = initializationPublicationPlan();
+    const baseline = await renderedGithubSource(
+      plan,
+      ".github/workflows/release.yml",
+    );
+    const source = baseline.source
+      .replace(/@[a-f0-9]{40} # v[^\n]+/gu, "@" + "c".repeat(40) + " # v456")
+      .replace(/- name: [^\n]+/gu, "- name: 发布展示文字");
+    const workflow = parse(source);
+    workflow.jobs.publish.permissions = Object.fromEntries(
+      Object.entries(workflow.jobs.publish.permissions).toReversed(),
+    );
+    expect(() =>
+      assertPublicationWorkflowContract(plan, source, workflow),
+    ).not.toThrow();
+  });
+
   it("rejects damaged Dependabot update, ignore, and directory semantics from a real generated file", async () => {
     const plan = rootOnlyPlan();
     const baseline = await renderedDependabot(plan);
@@ -234,22 +291,37 @@ describe("Built-in Preset GitHub YAML checker", () => {
     await expectRootOnlyWorkflowRejected(
       source.replace(
         "      - name: Install dependencies\n",
-        "      - name: Checkout another repository\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n      - name: Install dependencies\n",
+        "      - name: Checkout another repository\n        uses: actions/checkout@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v123\n      - name: Install dependencies\n",
       ),
     );
   });
 
-  it("rejects an action pin or release comment outside the checked contract", async () => {
+  it("rejects mutable references, wrong Action identities, and detached release comments", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
-      source.replace(
-        "d9184bf108216479bc5a137cc391f4d7b14c870b",
-        "0000000000000000000000000000000000000000",
-      ),
+      source.replace(/(uses: pnpm\/action-setup)@[a-f0-9]{40}/u, "$1@main"),
     );
     await expectRootOnlyWorkflowRejected(
-      source.replace("# v6.1.0", "# v6.1.1"),
+      source.replace("uses: pnpm/action-setup@", "uses: unexpected/setup@"),
     );
+    await expectRootOnlyWorkflowRejected(
+      source.replace(/(uses: pnpm\/action-setup@[^ #]+) #[^\n]+/u, "$1") +
+        "\n# v123\n",
+    );
+  });
+
+  it("rejects lost setup configuration, credentials, and frozen installation before the check", async () => {
+    const source = await rootOnlyWorkflowSource();
+    for (const mutated of [
+      source.replace("persist-credentials: false", "persist-credentials: true"),
+      source.replace("node-version-file: package.json", "node-version: latest"),
+      source.replace("pnpm install --frozen-lockfile", "pnpm install"),
+      source.replace(
+        "run: pnpm install --frozen-lockfile",
+        "run: pnpm run check",
+      ),
+    ])
+      await expectRootOnlyWorkflowRejected(mutated);
   });
 
   it("rejects deployment matrices without independent bounded capability legs", async () => {
@@ -286,10 +358,10 @@ describe("Built-in Preset GitHub YAML checker", () => {
       ),
     );
     await expectDeploymentWorkflowRejected(
-      `${source.replace(
-        "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1",
-        "uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
-      )}\n# uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1\n`,
+      source.replace(
+        /(uses: docker\/setup-buildx-action@[^ #]+) #[^\n]+/u,
+        "$1",
+      ) + "\n# v123\n",
     );
   });
 
