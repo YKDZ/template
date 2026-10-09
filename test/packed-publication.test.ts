@@ -17,6 +17,8 @@ import {
   builtInPresetRegistry,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
+  planGeneratedRepositoryPackageAddition,
+  loadLocalTemplateMetadata,
   type GeneratedRepositoryPlan,
 } from "@ykdz/template-builtin-presets";
 import {
@@ -462,64 +464,6 @@ function initializationDiagnosticPlan(definitionName: string) {
   });
 }
 
-function archiveAdditionRequiresDiagnostics(definitionName: string): boolean {
-  const definition = builtInPresetRegistry.require(definitionName);
-  const initialPlan = initializationDiagnosticPlan(definitionName);
-  if (definition.planPackageAddition === undefined) {
-    return initialPlan.ciDiagnosticArtifacts.length > 0;
-  }
-  return (
-    initialPlan.ciDiagnosticArtifacts.length > 0 ||
-    (definition.planPackageAddition({
-      context: createGenerationContext({
-        targetDir: path.join(
-          "generated-repository",
-          "packed-diagnostic-addition-expectation",
-          definitionName,
-        ),
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-      }),
-      packageLeafName: "archive-addition",
-      packagePath: "packages/archive-addition",
-    }).ciDiagnosticArtifacts?.length ?? 0) > 0
-  );
-}
-
-function archiveAdditionDiagnosticPlan(
-  definitionName: string,
-): GeneratedRepositoryPlan {
-  const initial = initializationDiagnosticPlan(definitionName);
-  const definition = builtInPresetRegistry.require(definitionName);
-  if (definition.planPackageAddition === undefined) return initial;
-  const addition = definition.planPackageAddition({
-    context: createGenerationContext({
-      targetDir: "generated-repository",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-    }),
-    packageLeafName: "archive-addition",
-    packagePath: "packages/archive-addition",
-  });
-  return {
-    ...initial,
-    blueprint: {
-      ...initial.blueprint,
-      packages: [
-        ...initial.blueprint.packages,
-        {
-          packageDefinitionId: "package-archive-addition",
-          name: "@demo/archive-addition",
-          path: "packages/archive-addition",
-          role: "shared-library",
-        },
-      ],
-    },
-    ciDiagnosticArtifacts: [
-      ...initial.ciDiagnosticArtifacts,
-      ...(addition.ciDiagnosticArtifacts ?? []),
-    ],
-  };
-}
-
 describe("packed public CLI consumer", () => {
   it("runs the archive alone: import, help, every initialization, and package addition", async () => {
     const workspace = await mkdtemp(
@@ -759,6 +703,22 @@ describe("packed public CLI consumer", () => {
         .toSorted();
       const completedAdditions: string[] = [];
       for (const candidate of definitions) {
+        const definition = builtInPresetRegistry.require(candidate.name);
+        const generatedProject = path.join(
+          consumer,
+          "generated",
+          candidate.name,
+        );
+        const additionPlan =
+          definition.planPackageAddition === undefined
+            ? undefined
+            : planGeneratedRepositoryPackageAddition({
+                definition,
+                localTemplateMetadata:
+                  loadLocalTemplateMetadata(generatedProject),
+                packageLeafName: "archive-addition",
+                packagePath: "packages/archive-addition",
+              });
         const result = await execa(
           installedBin,
           [
@@ -786,12 +746,12 @@ describe("packed public CLI consumer", () => {
             "generated",
             candidate.name,
           );
-          const requiresDiagnostics = archiveAdditionRequiresDiagnostics(
-            candidate.name,
-          );
+          expect(additionPlan).toBeDefined();
+          const requiresDiagnostics =
+            additionPlan!.ciDiagnosticArtifacts.length > 0;
           await expectPackedHardenedRootCheckWorkflow(
             generatedProject,
-            archiveAdditionDiagnosticPlan(candidate.name),
+            additionPlan!,
           );
           await expectPackedPlaywrightConfig(
             generatedProject,

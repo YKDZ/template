@@ -236,6 +236,9 @@ catalogs:
     semver:
       specifier: ^7.8.5
       version: 7.8.5
+    smol-toml:
+      specifier: ^1.8.0
+      version: 1.9.0
     spdx-expression-parse:
       specifier: ^5.0.0
       version: 5.0.0
@@ -321,6 +324,9 @@ importers:
       oxlint-tsgolint:
         specifier: 'catalog:'
         version: 7.0.2003
+      smol-toml:
+        specifier: 'catalog:'
+        version: 1.9.0
       turbo:
         specifier: 'catalog:'
         version: 2.11.7
