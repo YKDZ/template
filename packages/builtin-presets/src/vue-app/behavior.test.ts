@@ -16,6 +16,7 @@ import {
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import semver from "semver";
 import { describe, expect, it } from "vitest";
 
 import { vueAppDefinition } from "./definition.ts";
@@ -95,7 +96,12 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       layer?.buildArguments?.find(
         (argument) => argument.name === "PLAYWRIGHT_CLI_PACKAGE",
       )?.value ?? "";
+    const playwrightVersion = playwrightCliPackage.replace(
+      /^@playwright\/test@/u,
+      "",
+    );
 
+    expect(semver.valid(playwrightVersion)).toBe(playwrightVersion);
     expect(layer).toMatchObject({
       identity: "browser-test",
       requires: ["node-pnpm"],
