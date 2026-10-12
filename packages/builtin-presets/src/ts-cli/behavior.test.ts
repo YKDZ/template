@@ -895,7 +895,6 @@ esac
       for (const [flag, value] of [
         ["--package-name", "@demo/UPPER"],
         ["--bin", "BAD"],
-        ["--bin", "node"],
         ["--repository", "https://credential@github.com/demo/ship"],
       ] as const) {
         const invalidPublicFact = await execa(
@@ -3392,16 +3391,6 @@ syncBuiltinESMExports();
     expect(replayCandidate("24.16.0").manifest.engines).toEqual({
       node: "^24.16.0",
     });
-  });
-
-  it("rejects a reserved command identity before initialization writes", () => {
-    expect(
-      prepareGeneratedRepositoryInitialization({
-        definition: tsCliDefinition,
-        targetDir: path.join("generated-repository", "demo-cli"),
-        overrides: { name: "node" },
-      }),
-    ).toEqual({ status: "operation-failure", phase: "planning" });
   });
 
   it("rejects an added command that conflicts with an existing manifest fact before writes", async () => {

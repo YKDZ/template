@@ -714,7 +714,7 @@ async function configure() {
     stop(
       "public-fact-invalid",
       "invalid command name",
-      "a portable unreserved CLI command name",
+      "符合命名格式的 CLI 命令名",
       "Correct --bin and retry.",
       2,
     );

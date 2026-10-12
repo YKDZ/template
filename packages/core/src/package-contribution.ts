@@ -18,46 +18,6 @@ const operationPath = (operation: RenderOperation): string => {
   return "";
 };
 
-const reservedSystemToolNames = new Set([
-  "aux",
-  "bash",
-  "bun",
-  "cmd",
-  "com1",
-  "com2",
-  "com3",
-  "com4",
-  "com5",
-  "com6",
-  "com7",
-  "com8",
-  "com9",
-  "con",
-  "corepack",
-  "deno",
-  "git",
-  "lpt1",
-  "lpt2",
-  "lpt3",
-  "lpt4",
-  "lpt5",
-  "lpt6",
-  "lpt7",
-  "lpt8",
-  "lpt9",
-  "node",
-  "nul",
-  "npm",
-  "npx",
-  "pnpm",
-  "powershell",
-  "prn",
-  "pwsh",
-  "sh",
-  "yarn",
-  "zsh",
-]);
-
 export type FoundationContribution = {
   /** Closed root-owned Vue-Hono page/API browser acceptance capability. */
   readonly vueHonoJointE2e?: {
@@ -138,7 +98,7 @@ export type PackageContribution = {
   readonly ciDiagnosticArtifacts?: readonly CiDiagnosticArtifactDeclaration[];
 };
 
-/** Validates the portable executable name promised by a CLI Package Boundary. */
+/** 校验 CLI 命令名的格式及工作区内是否重名。 */
 export function validateCliCommandName(
   commandName: string,
   occupiedCommandNames: readonly string[] = [],
@@ -168,11 +128,6 @@ export function validateCliCommandName(
       `CLI command name must use lowercase ASCII letters, digits, and single hyphens; received ${JSON.stringify(commandName)}`,
     );
   }
-  if (reservedSystemToolNames.has(commandName)) {
-    throw new Error(
-      `CLI command name is a reserved system tool; received ${JSON.stringify(commandName)}`,
-    );
-  }
   if (occupiedCommandNames.includes(commandName)) {
     throw new Error(
       `CLI command name is already used by another workspace package; received ${JSON.stringify(commandName)}`,
@@ -191,7 +146,7 @@ function manifestBinEntries(
   return Object.entries(bin);
 }
 
-/** Validates command portability and uniqueness across one complete plan. */
+/** 校验完整生成计划中的命令名格式和唯一性。 */
 export function assertPackageContributionCommandNames(
   contributions: readonly PackageContribution[],
 ): readonly PackageContribution[] {

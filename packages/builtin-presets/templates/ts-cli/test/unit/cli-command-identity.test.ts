@@ -14,28 +14,11 @@ describe("CLI command identity", () => {
     { name: "leading hyphen", command: "-release", message: "leading hyphen" },
     { name: "uppercase ASCII", command: "Release", message: "lowercase ASCII" },
     { name: "non-ASCII", command: "发布", message: "lowercase ASCII" },
-    { name: "system tool", command: "node", message: "reserved system tool" },
-    { name: "Windows device", command: "con", message: "reserved system tool" },
-    {
-      name: "Windows null device",
-      command: "nul",
-      message: "reserved system tool",
-    },
-    {
-      name: "Windows serial device",
-      command: "com1",
-      message: "reserved system tool",
-    },
-    {
-      name: "Windows printer device",
-      command: "lpt9",
-      message: "reserved system tool",
-    },
-  ])("rejects an unsafe command name: $name", ({ command, message }) => {
+  ])("拒绝格式不合法的命令名：$name", ({ command, message }) => {
     expect(() => validateCliCommandName(command)).toThrow(message);
   });
 
-  it("accepts a portable name unless another workspace command occupies it", () => {
+  it("接受符合格式的命令名，并拒绝工作区中已使用的名称", () => {
     expect(validateCliCommandName("release-tool", [])).toBe("release-tool");
     expect(() =>
       validateCliCommandName("release-tool", ["release-tool"]),

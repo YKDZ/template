@@ -41,16 +41,11 @@ describe("CLI command contribution policy", () => {
     ["-release", "leading hyphen"],
     ["Release", "lowercase ASCII"],
     ["发布", "lowercase ASCII"],
-    ["node", "reserved system tool"],
-    ["con", "reserved system tool"],
-    ["nul", "reserved system tool"],
-    ["com1", "reserved system tool"],
-    ["lpt9", "reserved system tool"],
-  ])("rejects unsafe CLI command %j", (commandName, message) => {
+  ])("拒绝格式不合法的命令名 %j", (commandName, message) => {
     expect(() => validateCliCommandName(commandName)).toThrow(message);
   });
 
-  it("accepts one portable command and rejects an occupied command", () => {
+  it("接受符合格式的命令名，并拒绝工作区中已使用的名称", () => {
     expect(validateCliCommandName("release-tool")).toBe("release-tool");
     expect(() =>
       validateCliCommandName("release-tool", ["release-tool"]),
