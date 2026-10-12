@@ -172,9 +172,6 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       "utf8",
     );
     expect(devcontainerDockerfile).toContain(
-      "apt-get install -y --no-install-recommends ca-certificates git",
-    );
-    expect(devcontainerDockerfile).toContain(
       'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
     );
     expect(devcontainerDockerfile).toContain(

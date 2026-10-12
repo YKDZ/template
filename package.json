@@ -29,7 +29,6 @@
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-checks": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-shared": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

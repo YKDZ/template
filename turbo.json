@@ -9,7 +9,6 @@
         "dependencies": {
           "allow": [
             "template-checks",
-            "template-shared",
             "template-core",
             "template-builtin-presets"
           ]
@@ -20,7 +19,6 @@
           "allow": [
             "template-builtin-presets",
             "template-core",
-            "template-shared",
             "template-checks"
           ]
         }
@@ -31,7 +29,6 @@
             "template-cli",
             "template-builtin-presets",
             "template-core",
-            "template-shared",
             "template-checks"
           ]
         }
@@ -39,17 +36,6 @@
       "template-core": {
         "dependencies": {
           "allow": [
-            "template-core",
-            "template-shared",
-            "template-builtin-presets",
-            "template-checks"
-          ]
-        }
-      },
-      "template-shared": {
-        "dependencies": {
-          "allow": [
-            "template-shared",
             "template-core",
             "template-builtin-presets",
             "template-checks"
@@ -63,8 +49,7 @@
             "template-checks",
             "template-cli",
             "template-builtin-presets",
-            "template-core",
-            "template-shared"
+            "template-core"
           ]
         }
       }

@@ -49,13 +49,7 @@ try {
     },
   });
   const packageRoot = path.join(repositoryRoot, "packages", "cli");
-  for (const packageName of [
-    "builtin-presets",
-    "checks",
-    "cli",
-    "core",
-    "shared",
-  ]) {
+  for (const packageName of ["builtin-presets", "checks", "cli", "core"]) {
     await rm(path.join(repositoryRoot, "packages", packageName, "dist"), {
       recursive: true,
       force: true,

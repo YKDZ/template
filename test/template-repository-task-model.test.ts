@@ -277,7 +277,6 @@ describe("Template Repository native task model", () => {
       "@ykdz/template-builtin-presets",
       "@ykdz/template-checks",
       "@ykdz/template-core",
-      "@ykdz/template-shared",
     ]) {
       expect(taskIds).toContain(`${packageName}#build`);
     }

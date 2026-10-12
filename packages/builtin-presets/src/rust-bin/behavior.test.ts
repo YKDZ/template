@@ -401,9 +401,6 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
     );
     expect(devcontainerDockerfile).toContain(
-      "apt-get install -y --no-install-recommends ca-certificates git",
-    );
-    expect(devcontainerDockerfile).toContain(
       'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
     );
     expect(devcontainerDockerfile).toContain(
@@ -412,7 +409,6 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     expect(devcontainerDockerfile).not.toContain("corepack prepare");
     expect(devcontainerDockerfile).not.toContain("PACKAGE_MANAGER_PIN");
     expect(devcontainerDockerfile).not.toContain("COREPACK_HOME");
-    expect(devcontainerDockerfile).toContain("    git \\");
     expect(devcontainerDockerfile).toContain(
       "git config --system init.defaultBranch main",
     );

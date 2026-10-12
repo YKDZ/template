@@ -309,9 +309,6 @@ importers:
       '@ykdz/template-core':
         specifier: workspace:*
         version: link:packages/core
-      '@ykdz/template-shared':
-        specifier: workspace:*
-        version: link:packages/shared
       execa:
         specifier: 'catalog:'
         version: 10.0.1
@@ -616,28 +613,6 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: '@typescript/typescript6@6.0.2'
-      typescript-7:
-        specifier: 'catalog:'
-        version: typescript@7.0.2
-
-  packages/shared:
-    dependencies:
-      valibot:
-        specifier: 'catalog:'
-        version: 1.5.0(typescript@7.0.2)
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.19.1
-      oxfmt:
-        specifier: 'catalog:'
-        version: 0.71.0
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.86.0(oxlint-tsgolint@7.0.2003)
-      oxlint-tsgolint:
-        specifier: 'catalog:'
-        version: 7.0.2003
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
@@ -5044,10 +5019,6 @@ snapshots:
   valibot@1.5.0(typescript@6.0.3):
     optionalDependencies:
       typescript: 6.0.3
-
-  valibot@1.5.0(typescript@7.0.2):
-    optionalDependencies:
-      typescript: 7.0.2
 
   validate-npm-package-name@8.0.0: {}
 

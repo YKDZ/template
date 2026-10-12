@@ -1254,8 +1254,8 @@ function contributedDevcontainerComposition(options: {
     baseLayer: {
       identity: "node-pnpm",
       dockerfile: {
-        source: templateSources.sharedDevcontainer,
-        from: "node-pnpm.Dockerfile",
+        source: templateSources.foundation,
+        from: "devcontainer/base.Dockerfile",
       },
       buildArguments: [
         {
@@ -1267,6 +1267,37 @@ function contributedDevcontainerComposition(options: {
       probes: [
         { identity: "procps", command: "ps", args: ["--version"] },
         { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
+        {
+          identity: "awk",
+          command: "awk",
+          args: ["BEGIN { exit (6 * 7 != 42) }"],
+        },
+        { identity: "ripgrep", command: "rg", args: ["--version"] },
+        {
+          identity: "jq",
+          command: "jq",
+          args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
+        },
+        {
+          identity: "python3",
+          command: "python3",
+          args: [
+            "-c",
+            'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
+          ],
+        },
+        {
+          identity: "python",
+          command: "python",
+          args: [
+            "-c",
+            'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
+          ],
+        },
+        { identity: "openssh-client", command: "ssh", args: ["-V"] },
+        { identity: "unzip", command: "unzip", args: ["-v"] },
+        { identity: "file", command: "file", args: ["--version"] },
+        { identity: "iproute2", command: "ss", args: ["--version"] },
       ],
       mounts: [
         {

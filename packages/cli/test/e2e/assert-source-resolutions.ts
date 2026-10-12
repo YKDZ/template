@@ -5,7 +5,6 @@ const publicSourceResolutions = [
   ["@ykdz/template", "/packages/cli/src/main.ts"],
   ["@ykdz/template-builtin-presets", "/src/index.ts"],
   ["@ykdz/template-core/renderer", "/src/renderer.ts"],
-  ["@ykdz/template-shared", "/src/index.ts"],
 ] as const;
 
 function portablePath(value: string): string {

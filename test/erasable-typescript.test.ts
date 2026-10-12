@@ -305,7 +305,6 @@ describe("Erasable TypeScript enforcement", () => {
         "packages/checks/package.json",
         "packages/cli/package.json",
         "packages/core/package.json",
-        "packages/shared/package.json",
       ].map(
         async (manifestPath) =>
           JSON.parse(await readFile(manifestPath, "utf8")) as Manifest,
@@ -356,7 +355,6 @@ describe("Erasable TypeScript enforcement", () => {
       "packages/checks",
       "packages/cli",
       "packages/core",
-      "packages/shared",
     ];
     const repositoryManifests = await Promise.all(
       repositoryPackages.map(async (packageRoot) => ({

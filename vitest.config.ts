@@ -13,7 +13,6 @@ export default defineConfig({
     noExternal: [
       "@ykdz/template-builtin-presets",
       "@ykdz/template-core",
-      "@ykdz/template-shared",
       /^@ykdz\/template-builtin-presets\//,
       /^@ykdz\/template-core\//,
     ],

@@ -222,7 +222,6 @@ function isHistoricalAdr(relativePath: string): boolean {
 function isGenericSurface(relativePath: string): boolean {
   return (
     relativePath.startsWith("packages/core/") ||
-    relativePath.startsWith("packages/shared/") ||
     relativePath.startsWith("packages/cli/") ||
     relativePath.startsWith("packages/checks/") ||
     relativePath.startsWith("test/")

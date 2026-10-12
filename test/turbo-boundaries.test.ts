@@ -14,11 +14,6 @@ type TurboBoundaries = {
 };
 
 const packages = {
-  shared: {
-    directory: "packages/shared",
-    name: "@ykdz/template-shared",
-    mayImport: [] as const,
-  },
   core: {
     directory: "packages/core",
     name: "@ykdz/template-core",
@@ -151,11 +146,7 @@ describe("Template Repository dependency DAG", () => {
       await readFile("turbo.json", "utf8"),
     ) as TurboBoundaries;
     const tags = turbo.boundaries.tags;
-    for (const tag of [
-      "template-shared",
-      "template-core",
-      "template-builtin-presets",
-    ]) {
+    for (const tag of ["template-core", "template-builtin-presets"]) {
       expect(tags[tag]?.dependencies.allow).not.toContain("template-cli");
     }
     expect(tags["template-checks"]?.dependencies.allow).not.toContain(
