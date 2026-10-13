@@ -1,0 +1,13 @@
+{
+  "tasks": {
+    "//#deployment": {
+      "dependsOn": [
+        "{{APPLICATION_PACKAGE}}#build",
+        "{{DATABASE_PACKAGE}}#build",
+        "{{MIGRATION_PACKAGE}}#build"
+      ],
+      "cache": false,
+      "tags": ["quality:heavy"]
+    }
+  }
+}

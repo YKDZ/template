@@ -93,6 +93,7 @@ export type MergeJsonTemplateOperation = {
   from: string;
   to: string;
   source: TemplateSourceHandle;
+  replacements?: Record<string, string>;
   multilineArrays?: string[];
   keyOrder?: readonly string[];
   nestedKeyOrder?: readonly string[];
@@ -377,15 +378,17 @@ async function renderMergeJsonTemplate(
   options: RenderProjectOptions,
 ): Promise<void> {
   const sourcePath = resolveTemplateSource(operation.source, operation.from);
+  const sourceText = await readFile(sourcePath, "utf8");
   let patch: unknown;
   try {
-    patch = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
+    patch = JSON.parse(sourceText) as unknown;
   } catch (error) {
     throw new Error(
       `Invalid JSON Template Source ${operation.from}: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
     );
   }
+  patch = replaceJsonTemplateVariables(patch, operation.replacements ?? {});
   await mergeJsonIntoFile({
     options,
     patch,
@@ -394,6 +397,52 @@ async function renderMergeJsonTemplate(
     keyOrder: operation.keyOrder,
     nestedKeyOrder: operation.nestedKeyOrder,
   });
+}
+
+function replaceJsonTemplateVariables(
+  value: unknown,
+  replacements: Record<string, string>,
+): unknown {
+  const used = new Set<string>();
+  const replaceString = (source: string): string =>
+    source.replaceAll(
+      /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g,
+      (_placeholder, name: string) => {
+        const replacement = replacements[name];
+        if (replacement === undefined) {
+          throw new Error(`JSON 模板缺少变量：${name}`);
+        }
+        used.add(name);
+        return replacement;
+      },
+    );
+  const visit = (current: unknown): unknown => {
+    if (typeof current === "string") {
+      return replaceString(current);
+    }
+    if (Array.isArray(current)) {
+      return current.map(visit);
+    }
+    if (typeof current === "object" && current !== null) {
+      const entries = Object.entries(current).map(
+        ([key, nestedValue]) =>
+          [replaceString(key), visit(nestedValue)] as const,
+      );
+      if (new Set(entries.map(([key]) => key)).size !== entries.length) {
+        throw new Error("JSON 模板变量替换后产生重复对象键");
+      }
+      return Object.fromEntries(entries);
+    }
+    return current;
+  };
+
+  const rendered = visit(value);
+  for (const name of Object.keys(replacements)) {
+    if (!used.has(name)) {
+      throw new Error(`JSON 模板替换项未被使用：${name}`);
+    }
+  }
+  return rendered;
 }
 
 async function mergeJsonIntoFile(options: {
