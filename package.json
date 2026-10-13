@@ -19,8 +19,8 @@
     "boundaries": "turbo boundaries --no-color",
     "format:check": "oxfmt --list-different --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "format:write": "oxfmt --write --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
-    "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts scripts test",
-    "lint:fix": "oxlint --format=unix --config oxlint.config.ts oxlint.config.ts oxfmt.config.ts scripts test --fix",
+    "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test",
+    "lint:fix": "oxlint --format=unix --config oxlint.config.ts oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test --fix",
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
