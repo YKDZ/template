@@ -549,20 +549,53 @@ async function runScenario(
   const run: GeneratedCommandRunner = async (command, args, runOptions) => {
     const cancelSignal = runOptions.cancelSignal ?? options.cancelSignal;
     cancelSignal?.throwIfAborted();
+    const commandOutput = { stdout: "", stderr: "" };
+    const commandExecution = rawRun(command, args, {
+      ...runOptions,
+      ...(cancelSignal === undefined ? {} : { cancelSignal }),
+      timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
+      killDescendants: runOptions.killDescendants ?? true,
+    }) as Promise<unknown> & {
+      readonly stdout?: {
+        on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+      };
+      readonly stderr?: {
+        on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+      };
+    };
+    commandExecution.stdout?.on("data", (chunk) => {
+      commandOutput.stdout +=
+        typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
+    commandExecution.stderr?.on("data", (chunk) => {
+      commandOutput.stderr +=
+        typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
     try {
-      return await rawRun(command, args, {
-        ...runOptions,
-        ...(cancelSignal === undefined ? {} : { cancelSignal }),
-        timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
-        killDescendants: runOptions.killDescendants ?? true,
-      });
+      return await commandExecution;
     } catch (error) {
       if (!cancelSignal?.aborted) throw error;
       const reason =
         cancelSignal.reason instanceof Error
           ? cancelSignal.reason
           : new Error("Fixture command cancelled");
-      if (error === reason) throw reason;
+      if (error === reason) {
+        const commandError = new Error(
+          `${failureMessage(reason)}; command stopped during cancellation`,
+          { cause: reason },
+        );
+        Object.assign(commandError, {
+          command,
+          cwd: runOptions.cwd,
+          ...(commandOutput.stdout.length === 0
+            ? {}
+            : { stdout: commandOutput.stdout }),
+          ...(commandOutput.stderr.length === 0
+            ? {}
+            : { stderr: commandOutput.stderr }),
+        });
+        throw commandError;
+      }
       throw new AggregateError(
         [reason, error],
         `${redactFixtureFailureText(failureMessage(reason), options.failureSecrets ?? [])}; command stopped during cancellation: ${redactFixtureFailureText(failureMessage(error), options.failureSecrets ?? [])}`,
