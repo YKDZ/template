@@ -28,7 +28,6 @@ import {
 import {
   deriveDeploymentQualityContractIdentity,
   deriveDeploymentQualityPlanInput,
-  executeDeploymentQuality,
   normalizedDeploymentQualityPlan,
 } from "../packages/checks/src/fixture-evidence/gates/deployment-quality/index.ts";
 import {
@@ -130,7 +129,7 @@ function deploymentPlan() {
     }).manifests.some(
       (manifest) =>
         (manifest.scripts as Record<string, unknown> | undefined)?.[
-          "check:deployment"
+          "deployment"
         ] !== undefined,
     ),
   );
@@ -151,110 +150,70 @@ function deploymentPlan() {
 }
 
 void describe("deployment quality gate", () => {
-  void it("owns the normalized Deployment Quality contract and complete executor", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "deployment-contract-"));
+  void it("owns the normalized Deployment contract covered by Root full quality", async () => {
     const plan = deploymentPlan();
     const deployment = deriveDeploymentQualityPlanInput(plan);
-    const projectDir = path.join(root, "project");
-    const fixtureWorkspace = path.join(root, "workspace");
-    try {
-      assert.notStrictEqual(deployment, undefined);
-      const normalized = normalizedDeploymentQualityPlan(deployment!) as {
-        readonly executionResources: readonly unknown[];
-        readonly dependencyInstallation: {
-          readonly commands: readonly {
-            readonly args: readonly unknown[];
-          }[];
-        };
-        readonly generatedDeployment: { readonly args: readonly unknown[] };
+    assert.notStrictEqual(deployment, undefined);
+    const normalized = normalizedDeploymentQualityPlan(deployment!) as {
+      readonly executionResources: readonly unknown[];
+      readonly taskDiscovery: {
+        readonly args: readonly unknown[];
+        readonly expectedTaskIds: readonly unknown[];
       };
-      assert.partialDeepStrictEqual(normalized, {
-        gate: "deployment-quality",
-        executionResources: ["docker"],
-        dependencyInstallation: {
-          storeDir: "/pnpm/store",
-          commands: [
-            {
-              command: "pnpm",
-              args: [
-                "install",
-                "--lockfile-only",
-                "--store-dir",
-                "/pnpm/store",
-              ],
-            },
-            {
-              command: "pnpm",
-              args: ["fetch", "--store-dir", "/pnpm/store"],
-            },
-            {
-              command: "pnpm",
-              args: [
-                "install",
-                "--offline",
-                "--frozen-lockfile",
-                "--store-dir",
-                "/pnpm/store",
-              ],
-            },
-          ],
-        },
-        generatedDeployment: {
-          command: "pnpm",
-          args: ["run", "check:deployment"],
-        },
-      });
-      assert.strictEqual(normalized.executionResources.length, 1);
-      assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
-      assert.strictEqual(
-        normalized.dependencyInstallation.commands[0]?.args.length,
-        4,
-      );
-      assert.strictEqual(
-        normalized.dependencyInstallation.commands[1]?.args.length,
-        3,
-      );
-      assert.strictEqual(
-        normalized.dependencyInstallation.commands[2]?.args.length,
-        5,
-      );
-      assert.strictEqual(normalized.generatedDeployment.args.length, 2);
-      assert.match(
-        await deriveDeploymentQualityContractIdentity(deployment!),
-        /^[0-9a-f]{64}$/u,
-      );
-
-      const calls: Array<{ command: string; args: readonly string[] }> = [];
-      await executeDeploymentQuality({
-        deployment: deployment!,
-        projectDir,
-        fixtureWorkspace,
-        run: async (command, args) => {
-          calls.push({ command, args });
-          return args.includes("--dry-run=json")
-            ? {
-                stdout: JSON.stringify({
-                  tasks: [{ taskId: "//#deployment" }],
-                }),
-              }
-            : {};
-        },
-      });
-
-      assert.deepStrictEqual(calls, [
-        {
-          command: "pnpm",
-          args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-        },
-        { command: "pnpm", args: ["run", "check:deployment"] },
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
+      readonly dependencyInstallation: {
+        readonly commands: readonly {
+          readonly args: readonly unknown[];
+        }[];
+      };
+      readonly generatedDeployment: { readonly args: readonly unknown[] };
+    };
+    assert.partialDeepStrictEqual(normalized, {
+      gate: "deployment-quality",
+      executionResources: ["docker"],
+      dependencyInstallation: {
+        storeDir: "/pnpm/store",
+        commands: [
+          {
+            command: "pnpm",
+            args: ["install", "--lockfile-only", "--store-dir", "/pnpm/store"],
+          },
+          {
+            command: "pnpm",
+            args: ["fetch", "--store-dir", "/pnpm/store"],
+          },
+          {
+            command: "pnpm",
+            args: [
+              "install",
+              "--offline",
+              "--frozen-lockfile",
+              "--store-dir",
+              "/pnpm/store",
+            ],
+          },
+        ],
+      },
+      generatedDeployment: {
+        command: "pnpm",
+        args: ["run", "check:full"],
+      },
+      taskDiscovery: {
+        command: "pnpm",
+        args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
+        expectedTaskIds: ["//#deployment"],
+      },
+    });
+    assert.strictEqual(normalized.executionResources.length, 1);
+    assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
+    assert.strictEqual(normalized.generatedDeployment.args.length, 2);
+    assert.match(
+      await deriveDeploymentQualityContractIdentity(deployment!),
+      /^[0-9a-f]{64}$/u,
+    );
   });
 
   void it(
-    "establishes Root proof for real matrix-derived Deployment evidence and skips every warm executor",
+    "derives Deployment evidence from Root full and skips the repeated full path on a Deployment miss",
     { timeout: 180_000 },
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "deployment-evidence-"));
@@ -310,6 +269,7 @@ void describe("deployment quality gate", () => {
       const deploymentMissCommands: Command[] = [];
       const warmCommands: Command[] = [];
       const coldEvents: FixtureEvidenceLifecycleEvent[] = [];
+      const deploymentMissEvents: FixtureEvidenceLifecycleEvent[] = [];
       const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
       const clock = () => new Date("2026-07-28T00:00:00.000Z");
       try {
@@ -346,6 +306,9 @@ void describe("deployment quality gate", () => {
             clock,
             writeEnabled: true,
             producerCommit: "deployment-miss",
+            recordLifecycle: (event) => {
+              deploymentMissEvents.push(event);
+            },
           },
         });
         await runGeneratedScenarioSet("deployment", {
@@ -363,41 +326,75 @@ void describe("deployment quality gate", () => {
           },
         });
 
-        const deploymentCommands = coldCommands.filter(
+        const standaloneDeploymentCommands = coldCommands.filter(
           ({ command, args }) =>
             command === "pnpm" &&
             args[0] === "run" &&
             args[1] === "check:deployment",
         );
-        assert.ok(deploymentCommands.length > 0);
+        assert.deepStrictEqual(standaloneDeploymentCommands, []);
+        const rootFullCommands = coldCommands.filter(
+          ({ command, args }) =>
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+        );
+        const coldRootExecutions = coldEvents.filter(
+          (event) =>
+            event.type === "execution" &&
+            event.gate === "generated-root-quality" &&
+            event.outcome === "started",
+        ).length;
+        const coldRootLookups = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" && event.gate === "generated-root-quality",
+        ).length;
+        const coldDeploymentLookups = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" && event.gate === "deployment-quality",
+        ).length;
+        assert.ok(coldRootExecutions > 0);
+        assert.strictEqual(rootFullCommands.length, coldRootExecutions * 2);
         assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) => command === "pnpm" && args[0] === "install",
           ).length,
-          deploymentCommands.length,
+          coldRootExecutions,
         );
-        const deploymentMissExecutions = deploymentMissCommands.filter(
-          ({ command, args }) =>
-            command === "pnpm" &&
-            args[0] === "run" &&
-            args[1] === "check:deployment",
-        );
-        assert.strictEqual(
-          deploymentMissExecutions.length,
-          deploymentCommands.length,
-        );
-        assert.strictEqual(
-          deploymentMissCommands.filter(
-            ({ command, args }) => command === "pnpm" && args[0] === "install",
-          ).length,
-          deploymentMissExecutions.length,
-        );
+        const coldDeploymentMisses = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" &&
+            event.gate === "deployment-quality" &&
+            event.outcome === "miss",
+        ).length;
         assert.deepStrictEqual(
-          deploymentMissCommands.filter(
-            ({ command, args }) =>
-              command === "pnpm" && args[0] === "run" && args[1] === "check",
-          ),
+          deploymentMissCommands.filter(({ command }) => command !== "git"),
           [],
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "lookup" &&
+              event.gate === "generated-root-quality" &&
+              event.outcome === "hit",
+          ).length,
+          coldRootLookups,
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "derivation" &&
+              event.gate === "deployment-quality",
+          ).length,
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "lookup" &&
+              event.gate === "deployment-quality" &&
+              event.outcome === "miss",
+          ).length,
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter((event) => event.type === "execution")
+            .length,
+          0,
         );
         assert.deepStrictEqual(
           warmCommands.filter(({ command }) => command !== "git"),
@@ -416,7 +413,15 @@ void describe("deployment quality gate", () => {
             event.gate === "deployment-quality" &&
             event.outcome === "issued",
         );
-        assert.strictEqual(deploymentIssues.length, deploymentCommands.length);
+        assert.strictEqual(deploymentIssues.length, coldDeploymentMisses);
+        assert.strictEqual(
+          coldEvents.filter(
+            (event) =>
+              event.type === "derivation" &&
+              event.gate === "deployment-quality",
+          ).length,
+          coldDeploymentMisses,
+        );
         assert.strictEqual(
           warmEvents.filter(
             (event) =>
@@ -424,7 +429,7 @@ void describe("deployment quality gate", () => {
               event.gate === "deployment-quality" &&
               event.outcome === "hit",
           ).length,
-          deploymentCommands.length,
+          coldDeploymentLookups,
         );
         assert.deepStrictEqual(
           warmEvents.filter((event) => event.type === "execution"),
@@ -485,53 +490,12 @@ void describe("deployment quality gate", () => {
           }),
         }),
       )
-      .find(
-        (plan) =>
-          !plan.manifests.some(
-            (manifest) =>
-              typeof (manifest.scripts as Record<string, unknown> | null)?.[
-                "check:deployment"
-              ] === "string",
-          ),
-      );
+      .find((plan) => plan.deploymentCheck === undefined);
     assert.notStrictEqual(planWithoutDeployment, undefined);
     assert.strictEqual(
       deriveDeploymentQualityPlanInput(planWithoutDeployment!),
       undefined,
     );
-  });
-
-  void it("runs the generated deployment gate after task discovery", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "deployment-success-"));
-    const plan = deploymentPlan();
-    const calls: Array<{ command: string; args: readonly string[] }> = [];
-    try {
-      await executeDeploymentQuality({
-        deployment: deriveDeploymentQualityPlanInput(plan)!,
-        projectDir: path.join(root, "project"),
-        fixtureWorkspace: root,
-        run: async (command, args) => {
-          calls.push({ command, args });
-          return args.includes("--dry-run=json")
-            ? {
-                stdout: JSON.stringify({
-                  tasks: [{ taskId: "//#deployment" }],
-                }),
-              }
-            : {};
-        },
-      });
-
-      assert.deepStrictEqual(calls, [
-        {
-          command: "pnpm",
-          args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-        },
-        { command: "pnpm", args: ["run", "check:deployment"] },
-      ]);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
   });
 
   void it("fails the deployment scenario set explicitly when Docker is unavailable", async () => {
@@ -573,33 +537,20 @@ void describe("deployment quality gate", () => {
     }
   });
 
-  void it("issues no Deployment evidence after a partially completed command is cancelled", async () => {
+  void it("issues no evidence when Root full is cancelled before Deployment derivation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "deployment-cancelled-"));
     const storage = new FileFixtureEvidenceStorage(path.join(root, "evidence"));
-    const plan = deploymentPlan();
     const generatedContentIdentity = "c".repeat(40);
+    const deploymentContractIdentity = "e".repeat(64);
+    const cancel = new AbortController();
     const events: FixtureEvidenceLifecycleEvent[] = [];
     try {
-      const rootEvidence = await runFixtureEvidenceGate({
-        gate: "generated-root-quality",
-        generatedContentIdentity,
-        contractIdentity: "d".repeat(64),
-        scenario: {
-          id: "deployment-cancelled",
-          label: "deployment cancelled",
-          presetIdentities: ["deployment"],
-        },
-        producerCommit: "test",
-        readEnabled: false,
-        writeEnabled: false,
-        execute: async () => undefined,
-      });
       await assert.rejects(
         runFixtureEvidenceGate({
-          gate: "deployment-quality",
-          rootEvidence,
+          gate: "generated-root-quality",
           generatedContentIdentity,
-          contractIdentity: "e".repeat(64),
+          contractIdentity: "d".repeat(64),
+          coversDeploymentContractIdentity: deploymentContractIdentity,
           scenario: {
             id: "deployment-cancelled",
             label: "deployment cancelled",
@@ -608,38 +559,24 @@ void describe("deployment quality gate", () => {
           producerCommit: "test",
           storage,
           writeEnabled: true,
+          cancelSignal: cancel.signal,
           recordLifecycle: (event) => {
             events.push(event);
           },
-          execute: async () =>
-            await executeDeploymentQuality({
-              deployment: deriveDeploymentQualityPlanInput(plan)!,
-              projectDir: path.join(root, "project"),
-              fixtureWorkspace: root,
-              run: async (command, args) => {
-                if (args.includes("--dry-run=json")) {
-                  return {
-                    stdout: JSON.stringify({
-                      tasks: [{ taskId: "//#deployment" }],
-                    }),
-                  };
-                }
-                if (args[0] === "install") return {};
-                if (command === "docker") return {};
-                throw new Error("deployment command cancelled");
-              },
-            }),
+          execute: async () => {
+            cancel.abort(new Error("Root full command cancelled"));
+          },
         }),
         (error) =>
           error instanceof Error &&
-          error.message.includes("deployment command cancelled"),
+          error.message === "Root full command cancelled",
       );
 
       assert.ok(
         events.some(
           (event) =>
             event.type === "execution" &&
-            event.gate === "deployment-quality" &&
+            event.gate === "generated-root-quality" &&
             event.outcome === "failed",
         ),
       );
@@ -647,8 +584,12 @@ void describe("deployment quality gate", () => {
         events.filter((event) => event.type === "issuance"),
         [],
       );
+      assert.deepStrictEqual(
+        events.filter((event) => event.type === "derivation"),
+        [],
+      );
       await assert.rejects(
-        readdir(path.join(root, "evidence", "deployment-quality")),
+        readdir(path.join(root, "evidence", "generated-root-quality")),
         (error) => {
           return (
             typeof error === "object" &&

@@ -45,8 +45,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/npm-publication-artifact"
           test -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"
-      - name: Run Root Check once
-        run: pnpm run check
+      - name: Run Full Check once
+        run: pnpm run check:full
         env:
           PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/npm-publication-artifact
       - name: Upload verified npm artifact

@@ -289,6 +289,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             "//#database:prepare:e2e",
             "@demo/data-store#build",
             "build",
+            "browser:prepare",
           ],
         },
       },
@@ -303,7 +304,12 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     );
     assert.deepStrictEqual(
       turboConfiguration.tasks["@demo/frontend#test:e2e"].dependsOn,
-      ["//#database:prepare:e2e", "@demo/data-store#build", "build"],
+      [
+        "//#database:prepare:e2e",
+        "@demo/data-store#build",
+        "build",
+        "browser:prepare",
+      ],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
@@ -501,7 +507,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     };
     assert.strictEqual(
       dbManifest.scripts.test,
-      "DATABASE_PROFILE=test node --conditions=source --test test/todos.test.ts",
+      "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     );
     assert.strictEqual(
       dbManifest.scripts["db:reset"],
@@ -673,14 +679,19 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     assert.partialDeepStrictEqual(rootTurboConfig, {
       tasks: {
         "@demo/web#test:e2e": {
-          dependsOn: ["//#database:prepare:e2e", "@demo/db#build", "build"],
+          dependsOn: [
+            "//#database:prepare:e2e",
+            "@demo/db#build",
+            "build",
+            "browser:prepare",
+          ],
           cache: false,
         },
       },
     });
     assert.deepStrictEqual(
       rootTurboConfig.tasks["@demo/web#test:e2e"].dependsOn,
-      ["//#database:prepare:e2e", "@demo/db#build", "build"],
+      ["//#database:prepare:e2e", "@demo/db#build", "build", "browser:prepare"],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
@@ -823,15 +834,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const workflow = parseYaml(checkWorkflow) as {
       readonly jobs: {
         readonly check: {
-          readonly strategy: {
-            readonly matrix: {
-              readonly include: readonly {
-                readonly capability: string;
-                readonly job_name: string;
-                readonly timeout_minutes: number;
-              }[];
-            };
-          };
+          readonly name: string;
+          readonly "timeout-minutes": number;
           readonly steps: readonly {
             readonly name?: string;
             readonly uses?: string;
@@ -843,22 +847,30 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         };
       };
     };
-    const deploymentJob = workflow.jobs.check.strategy.matrix.include.find(
-      (job) => job.capability === "deployment",
-    );
-    assert.strictEqual(deploymentJob?.job_name, "Deployment Check");
-    assert.strictEqual(deploymentJob?.timeout_minutes, 45);
+    assert.strictEqual(workflow.jobs.check.name, "Full Check");
+    assert.strictEqual(workflow.jobs.check["timeout-minutes"], 45);
     const steps = workflow.jobs.check.steps;
-    const buildxSetup = steps.find(({ uses }) =>
+    const lightCheckIndex = steps.findIndex(
+      ({ name }) => name === "Run Light Check",
+    );
+    const buildxSetupIndex = steps.findIndex(({ uses }) =>
       uses?.startsWith("docker/setup-buildx-action@"),
     );
+    const heavyCheckIndex = steps.findIndex(
+      ({ name }) => name === "Run Heavy Check",
+    );
+    const buildxSetup = steps[buildxSetupIndex];
+    assert.ok(lightCheckIndex >= 0);
+    assert.ok(buildxSetupIndex > lightCheckIndex);
+    assert.ok(heavyCheckIndex > buildxSetupIndex);
+    assert.strictEqual(steps[lightCheckIndex]?.run, "pnpm run check");
+    assert.strictEqual(steps[heavyCheckIndex]?.run, "pnpm run check:heavy");
     assert.match(
       buildxSetup?.uses ?? "",
       /^docker\/setup-buildx-action@[a-f0-9]{40}$/u,
     );
-    assert.strictEqual(buildxSetup?.if, "matrix.requires_docker");
     const diagnosticStaging = steps.find(
-      ({ name }) => name === "Stage Root Check diagnostics",
+      ({ name }) => name === "Stage Check diagnostics",
     );
     assert.strictEqual(
       diagnosticStaging?.env?.PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS,
@@ -874,7 +886,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
     );
     const diagnosticUpload = steps.find(
-      ({ name }) => name === "Upload Root Check diagnostics",
+      ({ name }) => name === "Upload Check diagnostics",
     );
     assert.strictEqual(
       diagnosticUpload?.with?.path,
@@ -886,8 +898,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         scripts: {
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
-          "check:deployment":
-            "turbo run deployment --output-logs=errors-only --log-order=grouped --log-prefix=task",
+          check: "node --conditions=source scripts/quality-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/quality-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/quality-gates.ts check:full",
           "database:prepare:dev":
             "DATABASE_PROFILE=dev pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/db run db:seed:example",
           "database:prepare:test":
@@ -896,8 +911,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             "DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:reset && DATABASE_PROFILE=e2e pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:seed:example",
           dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/web",
           lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
-          check:
-            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
           fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
         },
       },
@@ -1021,13 +1034,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         deploymentTask?.dependencies.includes("@demo/db-migrations#build"),
       );
       assert.ok(deploymentTask?.dependencies.includes("@demo/web#build"));
-      await execa(
-        "pnpm",
-        ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-        { cwd: targetDir },
-      );
       for (const _run of [1, 2]) {
-        await execa("pnpm", ["run", "check"], {
+        await execa("pnpm", ["run", "check:full"], {
           cwd: targetDir,
         });
       }

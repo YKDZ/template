@@ -31,10 +31,7 @@ import {
   normalizeEnvironmentNeeds,
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
-  renderDeploymentCheckCommand,
   renderFixCommand,
-  renderRootCheckCommand,
-  renderTurboRunCommand,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
@@ -1509,6 +1506,7 @@ type TurboTaskTruth = Readonly<{
   outputs?: readonly string[];
   cache?: boolean;
   persistent?: boolean;
+  tags?: readonly string[];
 }>;
 
 type TurboTaskTruthByName = Readonly<Record<string, TurboTaskTruth>>;
@@ -1517,30 +1515,45 @@ function databasePreparationTurboTasks(
   preparation: NormalizedDatabasePreparation,
 ): TurboTaskTruthByName {
   return {
-    "//#database:prepare:dev": { cache: false },
-    "//#database:prepare:test": { cache: false },
-    "//#database:prepare:e2e": { cache: false },
+    "//#database:prepare:dev": {
+      cache: false,
+      tags: ["work:preparation"],
+    },
+    "//#database:prepare:test": {
+      cache: false,
+      tags: ["work:preparation"],
+    },
+    "//#database:prepare:e2e": {
+      cache: false,
+      tags: ["work:preparation"],
+    },
     [`${preparation.databasePackageName}#test`]: {
       dependsOn: ["//#database:prepare:test"],
+      tags: ["quality:light"],
     },
     [`${preparation.migrationPackageName}#typecheck`]: {
       dependsOn: [`${preparation.databasePackageName}#build`],
+      tags: ["quality:light"],
     },
     [`${preparation.consumers["application-dev"]}#typecheck`]: {
       dependsOn: [`${preparation.databasePackageName}#build`],
+      tags: ["quality:light"],
     },
     [`${preparation.consumers["application-dev"]}#dev`]: {
       dependsOn: [`${preparation.databasePackageName}#build`],
       cache: false,
       persistent: true,
+      tags: ["work:development"],
     },
     [`${preparation.consumers["application-e2e"]}#test:e2e`]: {
       dependsOn: [
         "//#database:prepare:e2e",
         `${preparation.databasePackageName}#build`,
         "build",
+        "browser:prepare",
       ],
       cache: false,
+      tags: ["quality:heavy"],
     },
   };
 }
@@ -1556,6 +1569,7 @@ function deploymentTurboTasks(
         `${deploymentCheck.migrationPackageName}#build`,
       ],
       cache: false,
+      tags: ["quality:heavy"],
     },
   };
 }
@@ -1563,8 +1577,13 @@ function deploymentTurboTasks(
 function vueHonoJointE2eTurboTasks(e2e: VueHonoJointE2e): TurboTaskTruthByName {
   return {
     "//#test:e2e": {
-      dependsOn: [`${e2e.apiPackageName}#build`, `${e2e.webPackageName}#build`],
+      dependsOn: [
+        `${e2e.apiPackageName}#build`,
+        `${e2e.webPackageName}#build`,
+        `${e2e.webPackageName}#browser:prepare`,
+      ],
       cache: false,
+      tags: ["quality:heavy"],
     },
   };
 }
@@ -2019,7 +2038,6 @@ function assertRootCapabilityManifestTruth(options: {
       : {
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
-          "check:deployment": renderDeploymentCheckCommand(),
         }),
     ...(options.vueHonoJointE2e === undefined
       ? {}
@@ -2858,24 +2876,6 @@ function publicCliCandidate(
   return candidate;
 }
 
-function renderPublicationRootCheckCommand(
-  candidatePackagePath: string,
-): string {
-  return [
-    "pnpm run boundaries",
-    renderTurboRunCommand(["format:check", "lint", "typecheck", "test"], [], {
-      continueAfterFailure: true,
-      taskPrefix: true,
-    }),
-    renderTurboRunCommand(
-      ["build", "test:e2e"],
-      [`--filter=!./${candidatePackagePath}`],
-      { continueAfterFailure: true, taskPrefix: true },
-    ),
-    "pnpm run publication:artifact",
-  ].join(" && ");
-}
-
 /**
  * 票 26 清单单源：把 plan 声明的镜像槽位集合投影成生成检查器携带的清单文本。
  * 转义 `$` 是必要的：清单文本注入模板字面量，未转义的 `$` 会被当成 TypeScript 插值。
@@ -3268,18 +3268,17 @@ function foundationPlan(options: {
           },
         }),
     scripts: {
-      check:
-        publicationCandidate === undefined
-          ? renderRootCheckCommand()
-          : renderPublicationRootCheckCommand(
-              publicationCandidate.definition.path,
-            ),
+      check: "node --conditions=source scripts/quality-gates.ts check",
+      "check:heavy":
+        "node --conditions=source scripts/quality-gates.ts check:heavy",
+      "check:full":
+        "node --conditions=source scripts/quality-gates.ts check:full",
       // Cargo 会在首次代理调用时按根 rust-toolchain.toml 安装版本与组件；先经唯一根任务完成解析，再并行运行各 Rust 包的 Cargo 检查。
       ...(rustToolchain === undefined
         ? {}
         : { "toolchain:prepare": "cargo --version" }),
       boundaries:
-        "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
+        "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
       ...(databasePreparation === undefined
         ? {}
         : databasePreparationCommands(databasePreparation)),
@@ -3296,7 +3295,6 @@ function foundationPlan(options: {
         : {
             deployment:
               "node --conditions=source scripts/check-standalone-deployment.ts",
-            "check:deployment": renderDeploymentCheckCommand(),
           }),
       ...(rootOwnedE2e ? { "test:e2e": "playwright test" } : {}),
       fix: renderFixCommand(),
@@ -3582,8 +3580,19 @@ function foundationPlan(options: {
       source: templateSources.foundation,
       from: `turbo-boundary-tags/${tag}.json`,
       to: "turbo.json",
-      multilineArrays:
-        deploymentCheck === undefined ? [] : ["tasks.//#deployment.dependsOn"],
+      multilineArrays: [
+        ...(deploymentCheck === undefined
+          ? []
+          : ["tasks.//#deployment.dependsOn"]),
+        ...(vueHonoJointE2e === undefined
+          ? []
+          : ["tasks.//#test:e2e.dependsOn"]),
+        ...(databasePreparation === undefined
+          ? []
+          : [
+              `tasks.${databasePreparation.consumers["application-e2e"]}#test:e2e.dependsOn`,
+            ]),
+      ],
     })),
     {
       kind: "writeTextTemplate",
@@ -3593,6 +3602,18 @@ function foundationPlan(options: {
       replacements: {
         TOOLCHAIN_MIRROR_SLOT_MANIFEST: toolchainMirrorSlotManifest,
       },
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/quality-gates.ts",
+      to: "scripts/quality-gates.ts",
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/run-turbo-boundaries.ts",
+      to: "scripts/run-turbo-boundaries.ts",
     },
     {
       kind: "copyFile",

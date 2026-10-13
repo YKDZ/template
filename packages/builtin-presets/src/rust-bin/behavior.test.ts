@@ -171,9 +171,11 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     assert.partialDeepStrictEqual(contribution.manifest, {
       name: "@demo/app",
       scripts: {
-        "format:check": "cargo fmt --all -- --check",
-        lint: "cargo clippy --workspace --all-targets -- -D warnings",
-        test: "cargo test --workspace",
+        "format:check":
+          "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+        lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+        test: "node --conditions=source scripts/run-rust-tests.ts",
+        typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
       },
     });
     assert.ok(
@@ -182,6 +184,14 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
           operation.kind === "copyFile" &&
           operation.from === "src/main.rs" &&
           operation.to === "packages/app/src/main.rs",
+      ),
+    );
+    assert.ok(
+      contribution.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.from === "scripts/run-rust-tests.ts" &&
+          operation.to === "packages/app/scripts/run-rust-tests.ts",
       ),
     );
     assert.ok(
@@ -505,7 +515,18 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       const rootManifest = JSON.parse(
         await readFile(path.join(targetDir, "package.json"), "utf8"),
       );
-      assert.ok(rootManifest.scripts.check.includes("test"));
+      assert.strictEqual(
+        rootManifest.scripts.check,
+        "node --conditions=source scripts/quality-gates.ts check",
+      );
+      assert.strictEqual(
+        rootManifest.scripts["check:heavy"],
+        "node --conditions=source scripts/quality-gates.ts check:heavy",
+      );
+      assert.strictEqual(
+        rootManifest.scripts["check:full"],
+        "node --conditions=source scripts/quality-gates.ts check:full",
+      );
       assert.strictEqual(
         rootManifest.scripts.fix,
         "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
@@ -654,6 +675,9 @@ if [ ! -e "${"$"}prepared" ]; then
   exit 90
 fi
 printf '%s\\n' "${"$"}*" >> "${"$"}state"
+if [ "${"$"}1" = "test" ]; then
+  printf '%s\\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'
+fi
 `,
         { mode: 0o755 },
       );
@@ -720,7 +744,7 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
       );
       await execa("pnpm", ["install"], { cwd: targetDir });
 
-      const failure = await execa("pnpm", ["run", "check"], {
+      const failure = await execa("pnpm", ["run", "check:full"], {
         cwd: targetDir,
         reject: false,
       });

@@ -345,7 +345,7 @@ void describe("ts-cli Preset Definition behavior", () => {
     );
     assert.strictEqual(
       sourceManifest.scripts.typecheck,
-      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.quality-gates.json --noEmit --pretty false",
+      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false",
     );
     const publicationSpecifiers = [
       ...bridge.matchAll(/from "([^"]*(?:npm-)?publication[^"]*)"/gu),
@@ -665,6 +665,11 @@ esac
         "#npm-publication/*": "./scripts/npm-publication/*.ts",
       },
       scripts: {
+        check: "node --conditions=source scripts/quality-gates.ts check",
+        "check:heavy":
+          "node --conditions=source scripts/quality-gates.ts check:heavy",
+        "check:full":
+          "node --conditions=source scripts/quality-gates.ts check:full",
         "publication:artifact":
           "node --conditions=source scripts/npm-publication/check-artifact.ts",
         "publication:readiness":
@@ -685,15 +690,9 @@ esac
     assert.ok(rootScripts);
     assert.ok(Object.hasOwn(rootScripts, "check"));
     const rootCheck = rootScripts.check;
-    assert.ok(
-      typeof rootCheck === "string" &&
-        rootCheck.includes("publication:artifact") &&
-        rootCheck.includes("build test:e2e --filter=!./packages/cli"),
-    );
     assert.strictEqual(
-      typeof rootCheck === "string" &&
-        rootCheck.includes("publication:readiness --continue"),
-      false,
+      rootCheck,
+      "node --conditions=source scripts/quality-gates.ts check",
     );
     assert.ok(
       plan.operations.some(
@@ -3809,7 +3808,7 @@ syncBuiltinESMExports();
       );
 
       try {
-        const rootCheck = await execa("pnpm", ["run", "check"], {
+        const rootCheck = await execa("pnpm", ["run", "check:full"], {
           cwd: project.targetDir,
           reject: false,
         });

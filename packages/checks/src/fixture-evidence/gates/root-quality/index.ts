@@ -17,6 +17,7 @@ const qualityTaskNames = [
   "build",
   "test",
   "test:e2e",
+  "deployment",
 ] as const;
 
 const fixTaskNames = ["lint:fix", "format:write"] as const;
@@ -64,10 +65,16 @@ export function generatedRootQualityExecutionResources(
 
 export function normalizedGeneratedRootQualityPlan(
   plan: GeneratedRepositoryPlan,
-  options: { readonly includeFix?: boolean } = {},
+  options: {
+    readonly includeFix?: boolean;
+    readonly deploymentContractIdentity?: string;
+  } = {},
 ): unknown {
   return {
     gate: "generated-root-quality",
+    ...(options.deploymentContractIdentity === undefined
+      ? {}
+      : { deploymentContractIdentity: options.deploymentContractIdentity }),
     executionResources: generatedRootQualityExecutionResources(plan),
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     taskDiscovery: {
@@ -106,14 +113,17 @@ export function normalizedGeneratedRootQualityPlan(
         : null,
     rootCheck: {
       command: "pnpm",
-      args: ["run", "check"],
+      args: ["run", "check:full"],
     },
   };
 }
 
 export async function deriveGeneratedRootQualityContractIdentity(
   plan: GeneratedRepositoryPlan,
-  options: { readonly includeFix?: boolean } = {},
+  options: {
+    readonly includeFix?: boolean;
+    readonly deploymentContractIdentity?: string;
+  } = {},
 ): Promise<string> {
   return await deriveFixtureGateContractIdentity({
     normalizedPlan: normalizedGeneratedRootQualityPlan(plan, options),
@@ -194,7 +204,7 @@ export async function executeGeneratedRootQuality(options: {
       run: options.run,
     });
   }
-  await options.run("pnpm", ["run", "check"], {
+  await options.run("pnpm", ["run", "check:full"], {
     cwd: options.projectDir,
     stdio: "inherit",
   });
@@ -222,7 +232,7 @@ export async function executeGeneratedRootQuality(options: {
         `Generated Repository Fix Command changed the working-tree identity from ${beforeFix} to ${afterFix}`,
       );
     }
-    await options.run("pnpm", ["run", "check"], {
+    await options.run("pnpm", ["run", "check:full"], {
       cwd: options.projectDir,
       stdio: "inherit",
     });

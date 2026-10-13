@@ -7,7 +7,7 @@
     },
     "test:e2e": {
       "cache": false,
-      "dependsOn": ["build"]
+      "dependsOn": ["build", "browser:prepare"]
     }
   }
 }

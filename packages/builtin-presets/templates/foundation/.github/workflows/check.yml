@@ -34,5 +34,7 @@ jobs:
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run Root Check
+      - name: Run Light Check
         run: pnpm run check
+      - name: Run Heavy Check
+        run: pnpm run check:heavy
