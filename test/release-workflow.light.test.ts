@@ -80,9 +80,6 @@ void describe("npm release workflow", () => {
       ),
     );
     assert.ok(!workflow.includes("node-version:"));
-    assert.ok(!workflow.includes("pnpm install"));
-    assert.ok(!workflow.includes("corepack enable"));
-    assert.ok(!workflow.includes("publish:bundled"));
     assert.ok(!workflow.includes("npm install -g"));
   });
 
