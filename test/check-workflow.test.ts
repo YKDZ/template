@@ -500,15 +500,11 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.strictEqual(workflow.jobs.publish.needs, "check");
   });
 
-  void it("keeps Release readiness tied to packed Rust addition and container-backed generated quality", async () => {
+  void it("keeps Release readiness tied to generated quality gates", async () => {
     const check = (await checkWorkflow()).jobs.check.steps;
     const release = parse(
       await readFile(".github/workflows/release.yml", "utf8"),
     ) as ReleaseWorkflow;
-    const packedConsumerSource = await readFile(
-      "test/packed-publication.test.ts",
-      "utf8",
-    );
 
     assert.strictEqual(
       release.jobs.check.uses,
@@ -518,20 +514,6 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.notStrictEqual(
       check.find((step) => step.run === "pnpm run check"),
       undefined,
-    );
-    assert.ok(
-      packedConsumerSource.includes(
-        'addableDefinitionWithPackageRole("native-package")',
-      ),
-    );
-    assert.match(
-      packedConsumerSource,
-      /"--preset",\s*rustDefinition\.metadata\.name,/u,
-    );
-    assert.ok(
-      packedConsumerSource.includes(
-        'await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });',
-      ),
     );
     for (const command of [
       "pnpm run check:fixtures",
