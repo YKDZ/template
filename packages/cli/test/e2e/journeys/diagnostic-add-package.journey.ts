@@ -273,7 +273,11 @@ const journey: CliJourney = {
     assert.match(workflow, /^# user workflow policy\n/u);
     assert.match(
       workflow,
-      /name: Run Root Check\n        run: pnpm run check/u,
+      /name: Run Light Check\n        run: pnpm run check/u,
+    );
+    assert.match(
+      workflow,
+      /name: Run Heavy Check\n        run: pnpm run check:heavy/u,
     );
     assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/u);
     assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: \|-/u);

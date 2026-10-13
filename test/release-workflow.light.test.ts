@@ -10,8 +10,8 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const publicCliPackageName = ["@ykdz", "template"].join("/");
-const publishCommand = `pnpm --filter ${publicCliPackageName} run publish:bundled --no-git-checks --access public --provenance`;
+const publishCommand =
+  'npm publish "$archive_path" --access public --provenance --ignore-scripts';
 
 function expectWorkflowUsesVersionedAction(
   workflow: string,
@@ -39,7 +39,7 @@ void describe("npm release workflow", () => {
     assert.strictEqual(result.stderr, "");
   });
 
-  void it("publishes through GitHub Actions OIDC without a long-lived npm token", async () => {
+  void it("publishes the checked packed candidate through OIDC", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),
       "utf8",
@@ -49,12 +49,15 @@ void describe("npm release workflow", () => {
     assert.ok(workflow.includes("contents: read"));
     assert.ok(workflow.includes("needs: check"));
     assert.ok(workflow.includes(publishCommand));
+    assert.ok(workflow.includes("publish_verified_candidate: true"));
+    assert.ok(workflow.includes("actions/download-artifact@v8"));
+    assert.ok(workflow.includes("sha512sum --check --strict SHA512SUMS"));
     assert.ok(!workflow.includes("PNPM_CONFIG_NODE_LINKER"));
     assert.ok(!workflow.includes("NPM_TOKEN"));
     assert.ok(!workflow.includes("NODE_AUTH_TOKEN"));
   });
 
-  void it("uses package metadata and pnpm for publishing", async () => {
+  void it("publishes one exact checksummed tarball without running lifecycle scripts", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/release.yml"),
       "utf8",
@@ -63,12 +66,24 @@ void describe("npm release workflow", () => {
     expectWorkflowUsesVersionedAction(workflow, "actions/checkout");
     expectWorkflowUsesVersionedAction(workflow, "actions/setup-node");
     assert.ok(workflow.includes("node-version-file: package.json"));
-    assert.ok(workflow.includes("run: corepack enable"));
-    assert.ok(workflow.includes("run: pnpm install --frozen-lockfile"));
-    assert.ok(workflow.includes(`run: ${publishCommand}`));
+    assert.ok(workflow.includes('test "${#archive_paths[@]}" -eq 1'));
+    assert.ok(
+      workflow.includes(
+        'test "$(wc -l < "$artifact_directory/SHA512SUMS")" -eq 1',
+      ),
+    );
+    assert.ok(workflow.includes(`          ${publishCommand}`));
+    assert.ok(workflow.includes("--ignore-scripts"));
+    assert.ok(
+      workflow.includes(
+        "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
+      ),
+    );
     assert.ok(!workflow.includes("node-version:"));
+    assert.ok(!workflow.includes("pnpm install"));
+    assert.ok(!workflow.includes("corepack enable"));
+    assert.ok(!workflow.includes("publish:bundled"));
     assert.ok(!workflow.includes("npm install -g"));
-    assert.doesNotMatch(workflow, /run:\s+npm publish/);
   });
 
   void it("reuses the repository check workflow before publishing", async () => {
