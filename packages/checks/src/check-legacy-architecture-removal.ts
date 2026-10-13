@@ -311,13 +311,19 @@ function usesManualDependencyBuildChain(command: string): boolean {
 }
 
 function isAssertionArgument(node: ts.Node): boolean {
+  if (
+    !ts.isCallExpression(node.parent) ||
+    !node.parent.arguments.includes(node as ts.Expression)
+  ) {
+    return false;
+  }
+  const expression = node.parent.expression;
+  if (ts.isIdentifier(expression)) {
+    return expression.text === "assertLacksProperty";
+  }
   return (
-    ts.isCallExpression(node.parent) &&
-    node.parent.arguments.includes(node as ts.Expression) &&
-    ts.isPropertyAccessExpression(node.parent.expression) &&
-    /^(?:toContain|toEqual|toHaveProperty|toMatch)$/u.test(
-      node.parent.expression.name.text,
-    )
+    ts.isPropertyAccessExpression(expression) &&
+    /^(?:toContain|toEqual|toHaveProperty|toMatch)$/u.test(expression.name.text)
   );
 }
 

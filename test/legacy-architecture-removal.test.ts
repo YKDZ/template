@@ -902,8 +902,20 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
+      await writeFile(
+        path.join(root, "packages/builtin-presets/src/behavior.test.ts"),
+        'import { assertLacksProperty } from "../../test-support/assertions.ts";\nassertLacksProperty({}, "tsc-alias");\n',
+      );
+
+      const findings = await findLegacyArchitectureFindings(root);
+      assert.deepStrictEqual(
+        findings.filter((entry) =>
+          entry.file.endsWith("packages/builtin-presets/src/behavior.test.ts"),
+        ),
+        [],
+      );
       assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
+        findings,
         arrayContaining([
           objectContaining({
             rule: "typescript-path-alias",
