@@ -11,14 +11,6 @@ import {
   findLegacyArchitectureTarballFindings,
   findPackedTaskVocabularyFindings,
 } from "../packages/checks/src/check-legacy-architecture-removal.ts";
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertRejectsMatching,
-  objectContaining,
-  stringContaining,
-} from "./assertions.ts";
 
 async function fixture(): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), "template-removal-audit-"));
@@ -70,31 +62,32 @@ void describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({
-            rule: "retired-fixture-replay-symbol",
-            file: "packages/checks/src/replay-compat.ts",
-          }),
-          objectContaining({
-            rule: "retired-fixture-replay-surface",
-            file: "packages/checks/src/replay-compat.ts",
-          }),
-          objectContaining({
-            rule: "retired-fixture-replay-marker",
-            file: "packages/checks/src/replay-compat.ts",
-          }),
-          objectContaining({
-            rule: "retired-fixture-replay-surface",
-            file: ".github/workflows/check.yml",
-          }),
-          objectContaining({
-            rule: "retired-fixture-replay-surface",
-            file: "turbo.json",
-          }),
-        ]),
-      );
+      for (const [rule, file] of [
+        [
+          "retired-fixture-replay-symbol",
+          "packages/checks/src/replay-compat.ts",
+        ],
+        [
+          "retired-fixture-replay-surface",
+          "packages/checks/src/replay-compat.ts",
+        ],
+        [
+          "retired-fixture-replay-marker",
+          "packages/checks/src/replay-compat.ts",
+        ],
+        ["retired-fixture-replay-surface", ".github/workflows/check.yml"],
+        ["retired-fixture-replay-surface", "turbo.json"],
+      ] as const) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === rule &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -133,22 +126,28 @@ void describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({ rule: "retired-path" }),
-          objectContaining({ rule: "legacy-import-export" }),
-          objectContaining({ rule: "retired-symbol" }),
-          objectContaining({ rule: "generic-preset-identity" }),
-          objectContaining({ rule: "retired-vocabulary" }),
-          objectContaining({ rule: "retired-cli-command" }),
-          objectContaining({ rule: "identity-branch" }),
-          objectContaining({ rule: "foundation-output-branch" }),
-        ]),
-      );
-      await assertRejectsMatching(
+      for (const rule of [
+        "retired-path",
+        "legacy-import-export",
+        "retired-symbol",
+        "generic-preset-identity",
+        "retired-vocabulary",
+        "retired-cli-command",
+        "identity-branch",
+        "foundation-output-branch",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
+      await assert.rejects(
         checkLegacyArchitectureRemoval(root),
-        /\[retired-symbol\].*old\.ts/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /\[retired-symbol\].*old\.ts/u.test(error.message),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -189,15 +188,19 @@ void describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({ rule: "retired-symbol" }),
-          objectContaining({ rule: "closed-identity-catalog" }),
-          objectContaining({ rule: "identity-branch" }),
-          objectContaining({ rule: "retired-cli-command" }),
-        ]),
-      );
+      for (const rule of [
+        "retired-symbol",
+        "closed-identity-catalog",
+        "identity-branch",
+        "retired-cli-command",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -208,9 +211,11 @@ void describe("Legacy Architecture Removal Check", () => {
     try {
       await mkdir(path.join(root, "docs/adr"), { recursive: true });
       await writeFile(path.join(root, "docs/adr/0001-old.md"), `Preset Source`);
-      await assertRejectsMatching(
+      await assert.rejects(
         checkLegacyArchitectureRemoval(root),
-        /historical-adr-status/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /historical-adr-status/u.test(error.message),
       );
       await writeFile(
         path.join(root, "docs/adr/0001-old.md"),
@@ -223,13 +228,16 @@ void describe("Legacy Architecture Removal Check", () => {
   });
 
   void it("rejects retired runtime and test paths in a packed public artifact", () => {
-    assertDeepStrictEqualWithMatchers(
-      findLegacyArchitectureTarballFindings([
-        "package/dist/cli.js",
-        `package/node_modules/@ykdz/template-builtin-source/index.js`,
-        "package/node_modules/@ykdz/template-builtin-presets/dist/src/example/behavior.test.js",
-      ]),
-      arrayContaining([objectContaining({ rule: "packed-artifact" })]),
+    const findings = findLegacyArchitectureTarballFindings([
+      "package/dist/cli.js",
+      `package/node_modules/@ykdz/template-builtin-source/index.js`,
+      "package/node_modules/@ykdz/template-builtin-presets/dist/src/example/behavior.test.js",
+    ]);
+    assert.ok(
+      findings.some(
+        (finding) =>
+          Object.hasOwn(finding, "rule") && finding.rule === "packed-artifact",
+      ),
     );
   });
 
@@ -261,13 +269,15 @@ void describe("Legacy Architecture Removal Check", () => {
           "export {};",
         ),
       ]);
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureDistributionFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "package-manifest-export" }),
-          objectContaining({ rule: "built-artifact" }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureDistributionFindings(root);
+      for (const rule of ["package-manifest-export", "built-artifact"]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -409,19 +419,24 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "retired-task-symbol" }),
-          objectContaining({ rule: "deployment-owner-registration" }),
-          objectContaining({ rule: "task-model-compatibility" }),
-          objectContaining({ rule: "generated-task-filter" }),
-          objectContaining({ rule: "retired-task-script" }),
-          objectContaining({ rule: "retired-task-vocabulary" }),
-          objectContaining({ rule: "historical-task-adr-status" }),
-          objectContaining({ rule: "built-artifact-task-vocabulary" }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const rule of [
+        "retired-task-symbol",
+        "deployment-owner-registration",
+        "task-model-compatibility",
+        "generated-task-filter",
+        "retired-task-script",
+        "retired-task-vocabulary",
+        "historical-task-adr-status",
+        "built-artifact-task-vocabulary",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -457,14 +472,19 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "retired-task-plan-field" }),
-          objectContaining({ rule: "retired-task-render-parameter" }),
-          objectContaining({ rule: "generated-task-filter" }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const rule of [
+        "retired-task-plan-field",
+        "retired-task-render-parameter",
+        "generated-task-filter",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -553,47 +573,55 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "retired-development-container-path",
-            file: "packages/core/src/devcontainer.ts",
-          }),
-          objectContaining({
-            rule: "retired-development-container-symbol",
-            file: "packages/core/src/devcontainer.ts",
-          }),
-          objectContaining({
-            rule: "retired-development-container-switch",
-            file: "packages/core/src/devcontainer.ts",
-          }),
-          objectContaining({
-            rule: "retired-development-container-compatibility",
-            file: "packages/core/src/devcontainer.ts",
-          }),
-          objectContaining({
-            rule: "retired-development-container-path",
-            file: "packages/builtin-presets/templates/foundation/rust",
-          }),
-          objectContaining({
-            rule: "retired-development-container-path",
-            file: "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
-          }),
-          objectContaining({
-            rule: "retired-development-container-path",
-            file: "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
-          }),
-          objectContaining({
-            rule: "retired-development-container-path",
-            file: "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
-          }),
-          objectContaining({
-            rule: "host-prepared-fixture-execution",
-            file: "packages/checks/src/check-generated-registry.ts",
-          }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const [rule, file] of [
+        [
+          "retired-development-container-path",
+          "packages/core/src/devcontainer.ts",
+        ],
+        [
+          "retired-development-container-symbol",
+          "packages/core/src/devcontainer.ts",
+        ],
+        [
+          "retired-development-container-switch",
+          "packages/core/src/devcontainer.ts",
+        ],
+        [
+          "retired-development-container-compatibility",
+          "packages/core/src/devcontainer.ts",
+        ],
+        [
+          "retired-development-container-path",
+          "packages/builtin-presets/templates/foundation/rust",
+        ],
+        [
+          "retired-development-container-path",
+          "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
+        ],
+        [
+          "retired-development-container-path",
+          "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
+        ],
+        [
+          "retired-development-container-path",
+          "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
+        ],
+        [
+          "host-prepared-fixture-execution",
+          "packages/checks/src/check-generated-registry.ts",
+        ],
+      ] as const) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === rule &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -610,14 +638,16 @@ void describe("Legacy Architecture Removal Check", () => {
         `import { vueAppDefinition } from "../vue-app/definition.ts"; void vueAppDefinition;`,
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "preset-sibling-import",
-            file: "packages/builtin-presets/src/vike-app/definition.ts",
-          }),
-        ]),
+      const findings = await findLegacyArchitectureFindings(root);
+      assert.ok(
+        findings.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "preset-sibling-import" &&
+            Object.hasOwn(finding, "file") &&
+            finding.file ===
+              "packages/builtin-presets/src/vike-app/definition.ts",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -684,14 +714,19 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "hand-written-cli-parser" }),
-          objectContaining({ rule: "manual-prepack-chain" }),
-          objectContaining({ rule: "packed-lifecycle-bypass" }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const rule of [
+        "hand-written-cli-parser",
+        "manual-prepack-chain",
+        "packed-lifecycle-bypass",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") && finding.rule === rule,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -743,19 +778,21 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "non-erasable-typescript-config",
-            file: "packages/missing/tsconfig.json",
-          }),
-          objectContaining({
-            rule: "non-erasable-typescript-config",
-            file: "packages/disabled/tsconfig.json",
-          }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const file of [
+        "packages/missing/tsconfig.json",
+        "packages/disabled/tsconfig.json",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === "non-erasable-typescript-config" &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -779,10 +816,9 @@ void describe("Legacy Architecture Removal Check", () => {
       );
 
       const findings = await findLegacyArchitectureFindings(root);
-      assertLength(
-        findings.filter(
-          ({ rule }) => rule === "non-erasable-typescript-syntax",
-        ),
+      assert.strictEqual(
+        findings.filter(({ rule }) => rule === "non-erasable-typescript-syntax")
+          .length,
         3,
       );
     } finally {
@@ -850,19 +886,21 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "typescript-runtime-loader",
-            file: "packages/cli/package.json",
-          }),
-          objectContaining({
-            rule: "typescript-runtime-loader",
-            file: "packages/builtin-presets/src/definition.ts",
-          }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const file of [
+        "packages/cli/package.json",
+        "packages/builtin-presets/src/definition.ts",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === "typescript-runtime-loader" &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -904,7 +942,7 @@ void describe("Legacy Architecture Removal Check", () => {
 
       await writeFile(
         path.join(root, "packages/builtin-presets/src/behavior.test.ts"),
-        'import { assertLacksProperty } from "../../test-support/assertions.ts";\nassertLacksProperty({}, "tsc-alias");\n',
+        'import assert from "node:assert/strict";\nassert.ok(!Object.hasOwn({}, "tsc-alias"));\n',
       );
 
       const findings = await findLegacyArchitectureFindings(root);
@@ -914,23 +952,21 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
         [],
       );
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({
-            rule: "typescript-path-alias",
-            file: "packages/api/tsconfig.json",
-          }),
-          objectContaining({
-            rule: "typescript-path-alias",
-            file: "packages/api/package.json",
-          }),
-          objectContaining({
-            rule: "typescript-path-alias",
-            file: "packages/builtin-presets/src/definition.ts",
-          }),
-        ]),
-      );
+      for (const file of [
+        "packages/api/tsconfig.json",
+        "packages/api/package.json",
+        "packages/builtin-presets/src/definition.ts",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === "typescript-path-alias" &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -968,14 +1004,14 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        [
-          objectContaining({
-            rule: "vitest-resolver-alias",
-            file: "packages/builtin-presets/templates/vue-app/vitest.config.ts",
-          }),
-        ],
+      const findings = await findLegacyArchitectureFindings(root);
+      assert.strictEqual(findings.length, 1);
+      assert.ok(
+        Object.hasOwn(findings[0]!, "rule") &&
+          findings[0]!.rule === "vitest-resolver-alias" &&
+          Object.hasOwn(findings[0]!, "file") &&
+          findings[0]!.file ===
+            "packages/builtin-presets/templates/vue-app/vitest.config.ts",
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1007,19 +1043,21 @@ void describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "manual-dependency-build-chain",
-            file: "packages/web/package.json",
-          }),
-          objectContaining({
-            rule: "manual-dependency-build-chain",
-            file: "packages/builtin-presets/src/definition.ts",
-          }),
-        ]),
-      );
+      const findings = await findLegacyArchitectureFindings(root);
+      for (const file of [
+        "packages/web/package.json",
+        "packages/builtin-presets/src/definition.ts",
+      ]) {
+        assert.ok(
+          findings.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === "manual-dependency-build-chain" &&
+              Object.hasOwn(finding, "file") &&
+              finding.file === file,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1035,14 +1073,16 @@ void describe("Legacy Architecture Removal Check", () => {
         'const installArgs = ["install", "--ignore-scripts"];\n',
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findLegacyArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "packed-lifecycle-bypass",
-            file: "packages/builtin-presets/src/check-template-source.ts",
-          }),
-        ]),
+      const findings = await findLegacyArchitectureFindings(root);
+      assert.ok(
+        findings.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "packed-lifecycle-bypass" &&
+            Object.hasOwn(finding, "file") &&
+            finding.file ===
+              "packages/builtin-presets/src/check-template-source.ts",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1068,20 +1108,23 @@ void describe("Legacy Architecture Removal Check", () => {
         path.join(root, "docs/adr/0001-old.md"),
         "ADR-0094 describes this old `check:run` command.",
       );
-      await assertRejectsMatching(
+      await assert.rejects(
         checkLegacyArchitectureRemoval(root),
-        /historical-task-adr-status/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /historical-task-adr-status/u.test(error.message),
       );
       await writeFile(
         path.join(root, "docs/adr/0001-old.md"),
         "Superseded by ADR-0094.\n\nOld `check:run` command.",
       );
       const findings = await findLegacyArchitectureFindings(root);
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({ rule: "retired-task-vocabulary" }),
-        ]),
+      assert.ok(
+        findings.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "retired-task-vocabulary",
+        ),
       );
       assert.deepStrictEqual(
         findings.filter((entry) => entry.file.endsWith("0001-old.md")),
@@ -1150,18 +1193,23 @@ void describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findPackedTaskVocabularyFindings(root);
-      assertDeepStrictEqualWithMatchers(
-        findings,
-        arrayContaining([
-          objectContaining({
-            rule: "packed-artifact-task-vocabulary",
-            file: stringContaining("templates/web/Dockerfile"),
-          }),
-          objectContaining({
-            rule: "packed-bundled-root",
-            file: "node_modules/@ykdz/template-core",
-          }),
-        ]),
+      assert.ok(
+        findings.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "packed-artifact-task-vocabulary" &&
+            Object.hasOwn(finding, "file") &&
+            finding.file.includes("templates/web/Dockerfile"),
+        ),
+      );
+      assert.ok(
+        findings.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "packed-bundled-root" &&
+            Object.hasOwn(finding, "file") &&
+            finding.file === "node_modules/@ykdz/template-core",
+        ),
       );
       assert.strictEqual(
         findings.some(({ file }) => file.includes("node_modules/typescript")),

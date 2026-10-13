@@ -5,11 +5,6 @@ import { describe, it } from "node:test";
 import { execa } from "execa";
 import { parse } from "yaml";
 
-import {
-  assertDeepStrictEqualWithMatchers,
-  objectContaining,
-} from "./assertions.ts";
-
 type Manifest = {
   readonly packageManager?: string;
   readonly scripts: Record<string, string>;
@@ -272,11 +267,11 @@ void describe("Template Repository native task model", () => {
         taskId.endsWith("#check:templates") && command !== "<NONEXISTENT>",
     );
 
-    assertDeepStrictEqualWithMatchers(executableTemplateChecks, [
-      objectContaining({
-        taskId: "@ykdz/template-checks#check:templates",
-      }),
-    ]);
+    assert.strictEqual(executableTemplateChecks.length, 1);
+    assert.strictEqual(
+      executableTemplateChecks[0]?.taskId,
+      "@ykdz/template-checks#check:templates",
+    );
     assert.ok(
       !taskIds.includes(
         "@ykdz/template-builtin-presets#check:templates:boundary",

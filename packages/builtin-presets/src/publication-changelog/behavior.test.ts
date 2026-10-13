@@ -3,13 +3,6 @@ import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
 import { inspectPackageReleaseChangelog } from "../../templates/ts-cli/publication/changelog.ts";
-import {
-  any,
-  assertContains,
-  assertLacksProperty,
-  assertMatches,
-  testEach,
-} from "../../test-support/assertions.ts";
 
 const standardCategories = [
   "Added",
@@ -49,13 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ),
       true,
     );
-    assertContains(
-      template,
-      "[Unreleased]: {{REPOSITORY_URL}}/compare/v{{PACKAGE_VERSION}}...HEAD",
+    assert.ok(
+      template.includes(
+        "[Unreleased]: {{REPOSITORY_URL}}/compare/v{{PACKAGE_VERSION}}...HEAD",
+      ),
     );
-    assertContains(
-      template,
-      "[{{PACKAGE_VERSION}}]: {{REPOSITORY_URL}}/releases/tag/v{{PACKAGE_VERSION}}",
+    assert.ok(
+      template.includes(
+        "[{{PACKAGE_VERSION}}]: {{REPOSITORY_URL}}/releases/tag/v{{PACKAGE_VERSION}}",
+      ),
     );
     assert.deepStrictEqual(
       inspectPackageReleaseChangelog(
@@ -121,18 +116,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     });
   });
 
-  testEach(
-    [
-      "0000-01-01",
-      "1900-02-29",
-      "2025-02-29",
-      "2026-04-31",
-      "2026-00-01",
-      "2026-13-01",
-      "2026-8-01",
-    ],
-    "rejects a non-existent Gregorian release date: %s",
-    (releaseDate) => {
+  for (const releaseDate of [
+    "0000-01-01",
+    "1900-02-29",
+    "2025-02-29",
+    "2026-04-31",
+    "2026-00-01",
+    "2026-13-01",
+    "2026-8-01",
+  ]) {
+    void it(`rejects a non-existent Gregorian release date: ${releaseDate}`, () => {
       const inspection = inspectPackageReleaseChangelog(
         `## [Unreleased]
 
@@ -147,24 +140,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
         inspection.blockers.map(({ code }) => code),
         ["changelog-target-release-date-invalid"],
       );
-      assertLacksProperty(inspection, "releaseDate");
-      assertLacksProperty(inspection, "releaseNotes");
-    },
-  );
+      assert.ok(!("releaseDate" in inspection));
+      assert.ok(!("releaseNotes" in inspection));
+    });
+  }
 
-  testEach(
-    [
-      {
-        name: "missing Unreleased",
-        source: `## [1.0.0] - 2026-08-26
+  for (const testCase of [
+    {
+      name: "missing Unreleased",
+      source: `## [1.0.0] - 2026-08-26
 
 - Publish the first release.
 `,
-        code: "changelog-unreleased-missing",
-      },
-      {
-        name: "duplicate Unreleased",
-        source: `## [Unreleased]
+      code: "changelog-unreleased-missing",
+    },
+    {
+      name: "duplicate Unreleased",
+      source: `## [Unreleased]
 
 ## [Unreleased]
 
@@ -172,58 +164,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Publish the first release.
 `,
-        code: "changelog-unreleased-duplicate",
-      },
-      {
-        name: "missing exact target",
-        source: `## [Unreleased]
+      code: "changelog-unreleased-duplicate",
+    },
+    {
+      name: "missing exact target",
+      source: `## [Unreleased]
 
 ## [v1.0.0] - 2026-08-26
 
 - Publish the first release.
 `,
-        code: "changelog-target-release-missing",
-      },
-      {
-        name: "duplicate target",
-        source: `## [Unreleased]
+      code: "changelog-target-release-missing",
+    },
+    {
+      name: "duplicate target",
+      source: `## [Unreleased]
 
 ## [1.0.0] - not-a-date
 
 ## [1.0.0] - 2026-08-26
 `,
-        code: "changelog-target-release-duplicate",
-      },
-      {
-        name: "empty target body after footer removal",
-        source: `## [Unreleased]
+      code: "changelog-target-release-duplicate",
+    },
+    {
+      name: "empty target body after footer removal",
+      source: `## [Unreleased]
 
 ## [1.0.0] - 2026-08-26
 
 [Unreleased]: https://example.test/compare/v1.0.0...HEAD
 [1.0.0]: https://example.test/releases/tag/v1.0.0
 `,
-        code: "changelog-target-release-body-empty",
-      },
-    ] as const,
-    "returns the stable blocker for $name",
-    ({ source, code }) => {
+      code: "changelog-target-release-body-empty",
+    },
+  ] as const) {
+    const { name, source, code } = testCase;
+    void it(`returns the stable blocker for ${name}`, () => {
       const inspection = inspectPackageReleaseChangelog(source, "1.0.0");
 
       assert.deepStrictEqual(
         inspection.blockers.map((item) => item.code),
         [code],
       );
-      assertMatches(inspection.blockers[0], {
-        code,
-        observed: any(String),
-        expected: any(String),
-        nextAction: any(String),
-      });
-      assertLacksProperty(inspection, "releaseDate");
-      assertLacksProperty(inspection, "releaseNotes");
-    },
-  );
+      const [blocker] = inspection.blockers;
+      assert.ok(blocker !== undefined);
+      assert.deepStrictEqual(Object.keys(blocker).toSorted(), [
+        "code",
+        "expected",
+        "nextAction",
+        "observed",
+      ]);
+      assert.strictEqual(blocker.code, code);
+      assert.strictEqual(typeof blocker.observed, "string");
+      assert.strictEqual(typeof blocker.expected, "string");
+      assert.strictEqual(typeof blocker.nextAction, "string");
+      assert.ok(!("releaseDate" in inspection));
+      assert.ok(!("releaseNotes" in inspection));
+    });
+  }
 
   void it("reports independent missing sections in deterministic contract order", () => {
     assert.deepStrictEqual(
@@ -303,10 +301,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     });
   });
 
-  testEach(
-    standardCategories,
-    "accepts the fixed KAC category without requiring every category: %s",
-    (category) => {
+  for (const category of standardCategories) {
+    void it(`accepts the fixed KAC category without requiring every category: ${category}`, () => {
       const inspection = inspectPackageReleaseChangelog(
         `## [Unreleased]
 
@@ -320,8 +316,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       );
 
       assert.deepStrictEqual(inspection.blockers, []);
-    },
-  );
+    });
+  }
 
   void it("does not expand profile style into release-critical blockers", () => {
     const inspection = inspectPackageReleaseChangelog(

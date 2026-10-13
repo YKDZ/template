@@ -34,19 +34,7 @@ import {
 import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertDoesNotContain,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-} from "../../test-support/assertions.ts";
 import { createVikeAppDefinition, vikeAppDefinition } from "./definition.ts";
-
 async function assertDockerCopyInputsExist(
   repositoryRoot: string,
   dockerfile: string,
@@ -62,7 +50,6 @@ async function assertDockerCopyInputsExist(
     }
   }
 }
-
 function prunerManifestCopyInputs(dockerfile: string): string[] {
   const lines = dockerfile.split("\n");
   const stageStart = lines.indexOf("FROM base AS pruner");
@@ -78,7 +65,6 @@ function prunerManifestCopyInputs(dockerfile: string): string[] {
     .map((line) => line.trim().split(/\s+/u)[1] ?? "")
     .filter((input) => input.endsWith("/package.json"));
 }
-
 // 冻结安装按 lockfile 的 importer 逐项校验，pruner 声明的包 manifest 集合必须恰好覆盖全部 workspace 成员。
 function expectPrunerWorkspaceManifests(
   dockerfile: string,
@@ -89,7 +75,6 @@ function expectPrunerWorkspaceManifests(
     new Set(packagePaths.map((packagePath) => `${packagePath}/package.json`)),
   );
 }
-
 /**
  * 运行夹具：真正渲染并执行生成仓库自身检查的现场必须携带发版快照的精确 Node 事实，
  * 因为该检查要求根 engines.node 是精确三段版本。发版快照是固定副本里的既有真源，
@@ -103,15 +88,16 @@ const runtimeToolchain = {
   packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
   nodeVersion: releaseToolchainSnapshot.nodeVersion,
 };
-
 void describe("vike-app Built-in Preset Definition behavior", () => {
   void it("registers the complete Vike application Definition", () => {
-    assertMatchesPartial(builtInPresetRegistry.require("vike-app").metadata, {
-      name: "vike-app",
-      title: "Vike 应用",
-    });
+    assert.partialDeepStrictEqual(
+      builtInPresetRegistry.require("vike-app").metadata,
+      {
+        name: "vike-app",
+        title: "Vike 应用",
+      },
+    );
   });
-
   void it("declares its browser and ShellCheck Tool Layers", () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: vikeAppDefinition,
@@ -125,11 +111,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const byIdentity = new Map(layers.map((layer) => [layer.identity, layer]));
     const browser = byIdentity.get("browser-test")!;
     const shellCheck = byIdentity.get("shellcheck")!;
-
-    assertMatches(
-      [...byIdentity.keys()],
-      arrayContaining(["browser-test", "shellcheck"]),
-    );
+    assert.ok(byIdentity.has("browser-test"));
+    assert.ok(byIdentity.has("shellcheck"));
     assert.strictEqual(
       resolveTemplateSource(browser.dockerfile.source, browser.dockerfile.from),
       path.resolve(
@@ -137,7 +120,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         "../../templates/shared/devcontainer/browser-test.Dockerfile",
       ),
     );
-    assertMatchesPartial(shellCheck, {
+    assert.partialDeepStrictEqual(shellCheck, {
       requires: ["node-pnpm"],
       probes: [
         {
@@ -147,6 +130,9 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
+    assert.deepStrictEqual(shellCheck.requires, ["node-pnpm"]);
+    assert.strictEqual(shellCheck.probes?.length, 1);
+    assert.deepStrictEqual(shellCheck.probes?.[0]?.args, ["--version"]);
     assert.strictEqual(
       resolveTemplateSource(
         shellCheck.dockerfile.source,
@@ -158,7 +144,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
     );
   });
-
   void it("owns its Vike Template Source and deployment fragments through real handles", () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: builtInPresetRegistry.require("vike-app"),
@@ -168,28 +153,29 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
-    assertMatches(
-      plan.operations,
-      arrayContaining([
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "web/Dockerfile",
-          to: "Dockerfile",
-        }),
-        objectContaining({
-          kind: "writeTextFromFragments",
-          to: ".devcontainer/Dockerfile",
-          fragments: arrayContaining([
-            objectContaining({ from: "browser-test.Dockerfile" }),
-            objectContaining({
-              from: "devcontainer/shellcheck.Dockerfile",
-            }),
-          ]),
-        }),
-      ]),
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          operation.from === "web/Dockerfile" &&
+          operation.to === "Dockerfile",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextFromFragments" &&
+          operation.to === ".devcontainer/Dockerfile" &&
+          operation.fragments.some(
+            (fragment) => fragment.from === "browser-test.Dockerfile",
+          ) &&
+          operation.fragments.some(
+            (fragment) =>
+              fragment.from === "devcontainer/shellcheck.Dockerfile",
+          ),
+      ),
     );
   });
-
   void it("keeps source-linked workspaces while injecting pnpm 11 deploy closures", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vike-deploy-policy-")),
@@ -203,26 +189,25 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
-
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...plan.operations],
     });
-
     const [workspace, dockerfile] = await Promise.all([
       readFile(path.join(targetDir, "pnpm-workspace.yaml"), "utf8"),
       readFile(path.join(targetDir, "Dockerfile"), "utf8"),
     ]);
-
-    assertContains(
-      dockerfile,
-      "pnpm --config.inject-workspace-packages=true --filter @demo/web deploy --prod /runtime-deploy",
+    assert.ok(
+      dockerfile.includes(
+        "pnpm --config.inject-workspace-packages=true --filter @demo/web deploy --prod /runtime-deploy",
+      ),
     );
-    assertContains(
-      dockerfile,
-      "pnpm --config.inject-workspace-packages=true --filter @demo/db-migrations deploy --prod /migration-deploy",
+    assert.ok(
+      dockerfile.includes(
+        "pnpm --config.inject-workspace-packages=true --filter @demo/db-migrations deploy --prod /migration-deploy",
+      ),
     );
-    assertDoesNotContain(dockerfile, "--legacy");
+    assert.ok(!dockerfile.includes("--legacy"));
     const workspaceConfiguration = parseYaml(workspace) as {
       readonly injectWorkspacePackages: boolean;
       readonly syncInjectedDepsAfterScripts: readonly string[];
@@ -233,7 +218,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ["build"],
     );
   });
-
   void it("derives cross-package contracts from Package identities instead of sibling paths", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vike-relocated-")),
@@ -264,12 +248,10 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
       }),
     });
-
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...plan.operations],
     });
-
     assert.deepStrictEqual(plan.blueprint.packageLinkIntents, [
       {
         consumerPackagePath: "services/frontend",
@@ -282,97 +264,119 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     ]);
     const rootManifest = JSON.parse(
       await readFile(path.join(targetDir, "package.json"), "utf8"),
-    ) as { readonly scripts: Readonly<Record<string, string>> };
-    assertMatchesPartial(rootManifest.scripts, {
+    ) as {
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    assert.partialDeepStrictEqual(rootManifest.scripts, {
       "database:prepare:dev":
         "DATABASE_PROFILE=dev pnpm --filter @demo/schema-tool run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/data-store run db:seed:example",
       dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/frontend",
     });
-    assertMatchesPartial(
-      JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-      {
-        tasks: {
-          "//#deployment": {
-            dependsOn: [
-              "@demo/frontend#build",
-              "@demo/data-store#build",
-              "@demo/schema-tool#build",
-            ],
-          },
-          "@demo/frontend#test:e2e": {
-            dependsOn: [
-              "//#database:prepare:e2e",
-              "@demo/data-store#build",
-              "build",
-            ],
-          },
+    const turboConfiguration = JSON.parse(
+      await readFile(path.join(targetDir, "turbo.json"), "utf8"),
+    );
+    assert.partialDeepStrictEqual(turboConfiguration, {
+      tasks: {
+        "//#deployment": {
+          dependsOn: [
+            "@demo/frontend#build",
+            "@demo/data-store#build",
+            "@demo/schema-tool#build",
+          ],
+        },
+        "@demo/frontend#test:e2e": {
+          dependsOn: [
+            "//#database:prepare:e2e",
+            "@demo/data-store#build",
+            "build",
+          ],
         },
       },
+    });
+    assert.deepStrictEqual(
+      turboConfiguration.tasks["//#deployment"].dependsOn,
+      [
+        "@demo/frontend#build",
+        "@demo/data-store#build",
+        "@demo/schema-tool#build",
+      ],
+    );
+    assert.deepStrictEqual(
+      turboConfiguration.tasks["@demo/frontend#test:e2e"].dependsOn,
+      ["//#database:prepare:e2e", "@demo/data-store#build", "build"],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
       "utf8",
     );
-    assertContains(
-      dockerfile,
-      "COPY services/frontend/package.json services/frontend/package.json",
+    assert.ok(
+      dockerfile.includes(
+        "COPY services/frontend/package.json services/frontend/package.json",
+      ),
     );
-    assertContains(
-      dockerfile,
-      "COPY modules/data-store/package.json modules/data-store/package.json",
+    assert.ok(
+      dockerfile.includes(
+        "COPY modules/data-store/package.json modules/data-store/package.json",
+      ),
     );
-    assertContains(
-      dockerfile,
-      "COPY tooling/schema-tool/package.json tooling/schema-tool/package.json",
+    assert.ok(
+      dockerfile.includes(
+        "COPY tooling/schema-tool/package.json tooling/schema-tool/package.json",
+      ),
     );
-    assertContains(
-      dockerfile,
-      "pnpm exec turbo prune @demo/frontend @demo/schema-tool --docker",
+    assert.ok(
+      dockerfile.includes(
+        "pnpm exec turbo prune @demo/frontend @demo/schema-tool --docker",
+      ),
     );
-    assertDoesNotContain(dockerfile, "apps/web");
-    assertDoesNotContain(dockerfile, "packages/db");
+    assert.ok(!dockerfile.includes("apps/web"));
+    assert.ok(!dockerfile.includes("packages/db"));
     expectPrunerWorkspaceManifests(
       dockerfile,
       plan.blueprint.packages.map((package_) => package_.path),
     );
-    assertContains(
-      await readFile(
-        path.join(targetDir, "services/frontend/vite.config.ts"),
-        "utf8",
-      ),
-      'external: ["@demo/data-store"]',
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "services/frontend/vite.config.ts"),
+          "utf8",
+        )
+      ).includes('external: ["@demo/data-store"]'),
     );
-    assertContains(
-      await readFile(
-        path.join(targetDir, "tooling/schema-tool/drizzle.config.ts"),
-        "utf8",
-      ),
-      'from "@demo/data-store/storage"',
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "tooling/schema-tool/drizzle.config.ts"),
+          "utf8",
+        )
+      ).includes('from "@demo/data-store/storage"'),
     );
-    assertContains(
-      await readFile(
-        path.join(targetDir, "services/frontend/server/app.ts"),
-        "utf8",
-      ),
-      'from "@demo/data-store"',
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "services/frontend/server/app.ts"),
+          "utf8",
+        )
+      ).includes('from "@demo/data-store"'),
     );
-
     const addition = planGeneratedRepositoryPackageAddition({
       definition: builtInPresetRegistry.require("ts-lib"),
       localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
       packageLeafName: "shared-probe",
     });
-    assertMatches(
-      addition.blueprint.packages,
-      arrayContaining([
-        objectContaining({ path: "services/frontend" }),
-        objectContaining({ path: "modules/data-store" }),
-        objectContaining({ path: "tooling/schema-tool" }),
-        objectContaining({ path: "packages/shared-probe" }),
-      ]),
-    );
+    for (const packagePath of [
+      "services/frontend",
+      "modules/data-store",
+      "tooling/schema-tool",
+      "packages/shared-probe",
+    ]) {
+      assert.ok(
+        addition.blueprint.packages.some(
+          (package_) => package_.path === packagePath,
+        ),
+      );
+    }
   });
-
   void it("projects linked web, database, migration, and deployment boundaries", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vike-")),
@@ -387,10 +391,14 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         toolchain: runtimeToolchain,
       }),
     });
-
-    assertMatchesPartial(plan.blueprint, {
-      schemaVersion: 3,
-      packages: [
+    assert.strictEqual(plan.blueprint.schemaVersion, 3);
+    assert.deepStrictEqual(
+      plan.blueprint.packages.map(({ name, path: packagePath, role }) => ({
+        name,
+        path: packagePath,
+        role,
+      })),
+      [
         { name: "@demo/web", path: "apps/web", role: "runtime-service" },
         { name: "@demo/db", path: "packages/db", role: "shared-library" },
         {
@@ -404,38 +412,36 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           role: "shared-library",
         },
       ],
-      packageLinkIntents: [
-        { consumerPackagePath: "apps/web", providerPackagePath: "packages/db" },
-        {
-          consumerPackagePath: "packages/db-migrations",
-          providerPackagePath: "packages/db",
-        },
-      ],
-    });
-    assertLacksProperty(plan, "deploymentChecks");
-    assertMatches(
-      plan.deploymentEnvironmentNeeds,
-      arrayContaining([objectContaining({ kind: "docker-engine" })]),
+    );
+    assert.deepStrictEqual(plan.blueprint.packageLinkIntents, [
+      { consumerPackagePath: "apps/web", providerPackagePath: "packages/db" },
+      {
+        consumerPackagePath: "packages/db-migrations",
+        providerPackagePath: "packages/db",
+      },
+    ]);
+    assert.ok(!("deploymentChecks" in plan));
+    assert.ok(
+      plan.deploymentEnvironmentNeeds.some(
+        (need) => need.kind === "docker-engine",
+      ),
     );
     assert.deepStrictEqual(
       plan.nextStepInstructions.map((step) => step.display),
       ["pnpm install", "pnpm run fix", "pnpm run check"],
     );
-
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...plan.operations],
     });
-
     await assert.rejects(
       stat(path.join(targetDir, ".pnpmfile.cts")),
       (error) => {
-        assertMatchesPartial(error, { code: "ENOENT" });
+        assert.partialDeepStrictEqual(error, { code: "ENOENT" });
         return true;
       },
     );
-
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
       ),
@@ -444,13 +450,15 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         imports: { "#db/*": { default: "@demo/db/*", types: "@demo/db/*" } },
       },
     );
-    assertLacksProperty(
-      JSON.parse(
-        await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
-      ).dependencies,
-      "drizzle-orm",
+    assert.ok(
+      !(
+        "drizzle-orm" in
+        (JSON.parse(
+          await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
+        ).dependencies ?? {})
+      ),
     );
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/db-migrations/package.json"),
@@ -459,7 +467,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ).dependencies,
       { "@demo/db": "workspace:*" },
     );
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/db/package.json"),
@@ -472,8 +480,10 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     );
     const webManifest = JSON.parse(
       await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
-    ) as { readonly scripts: Readonly<Record<string, string>> };
-    assertMatchesPartial(webManifest.scripts, {
+    ) as {
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    assert.partialDeepStrictEqual(webManifest.scripts, {
       dev: "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source vike dev",
       preview: "DATABASE_PROFILE=dev vike preview",
       "test:e2e": "DATABASE_PROFILE=e2e playwright test",
@@ -501,7 +511,9 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         path.join(targetDir, "packages/db-migrations/package.json"),
         "utf8",
       ),
-    ) as { readonly scripts: Readonly<Record<string, string>> };
+    ) as {
+      readonly scripts: Readonly<Record<string, string>>;
+    };
     assert.strictEqual(
       migrationsManifest.scripts["db:push"],
       "NODE_OPTIONS=--conditions=source drizzle-kit push",
@@ -510,61 +522,70 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       migrationsManifest.scripts["db:generate"],
       "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit generate",
     );
-    assertLacksProperty(migrationsManifest.scripts, "db:prepare:dev");
-    assertLacksProperty(migrationsManifest.scripts, "db:prepare:test");
+    assert.ok(!("db:prepare:dev" in (migrationsManifest.scripts ?? {})));
+    assert.ok(!("db:prepare:test" in (migrationsManifest.scripts ?? {})));
     const playwrightConfig = await readFile(
       path.join(targetDir, "apps/web/playwright.config.ts"),
       "utf8",
     );
-    assertContains(playwrightConfig, "availablePort");
-    assertContains(playwrightConfig, "node dist/server/index.mjs");
-    assertContains(playwrightConfig, "globalTeardown");
+    assert.ok(playwrightConfig.includes("availablePort"));
+    assert.ok(playwrightConfig.includes("node dist/server/index.mjs"));
+    assert.ok(playwrightConfig.includes("globalTeardown"));
     const viteConfig = await readFile(
       path.join(targetDir, "apps/web/vite.config.ts"),
       "utf8",
     );
-    assertContains(viteConfig, "vike");
-    assertContains(viteConfig, 'external: ["@demo/db"]');
-    assertDoesNotContain(viteConfig, "externalConditions");
+    assert.ok(viteConfig.includes("vike"));
+    assert.ok(viteConfig.includes('external: ["@demo/db"]'));
+    assert.ok(!viteConfig.includes("externalConditions"));
     const drizzleConfig = await readFile(
       path.join(targetDir, "packages/db-migrations/drizzle.config.ts"),
       "utf8",
     );
-    assertContains(drizzleConfig, "mkdirSync");
-    assertContains(
-      await readFile(
-        path.join(targetDir, "apps/web/pages/index/+Page.vue"),
-        "utf8",
-      ),
-      'import type { Todo } from "#db/types";',
+    assert.ok(drizzleConfig.includes("mkdirSync"));
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "apps/web/pages/index/+Page.vue"),
+          "utf8",
+        )
+      ).includes('import type { Todo } from "#db/types";'),
     );
-    assertDoesNotContain(
-      await readFile(
-        path.join(targetDir, "apps/web/pages/index/+Page.telefunc.ts"),
-        "utf8",
-      ),
-      "export type Todo",
+    assert.ok(
+      !(
+        await readFile(
+          path.join(targetDir, "apps/web/pages/index/+Page.telefunc.ts"),
+          "utf8",
+        )
+      ).includes("export type Todo"),
     );
     const webNodeConfig = JSON.parse(
       await readFile(
         path.join(targetDir, "apps/web/tsconfig.node.json"),
         "utf8",
       ),
-    ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
-    assertLacksProperty(webNodeConfig.compilerOptions, "paths");
-    assertLacksProperty(webNodeConfig.compilerOptions, "customConditions");
-    assertMatchesPartial(webNodeConfig.compilerOptions, {
+    ) as {
+      readonly compilerOptions?: Readonly<Record<string, unknown>>;
+    };
+    assert.ok(!("paths" in (webNodeConfig.compilerOptions ?? {})));
+    assert.ok(!("customConditions" in (webNodeConfig.compilerOptions ?? {})));
+    assert.partialDeepStrictEqual(webNodeConfig.compilerOptions, {
       erasableSyntaxOnly: true,
     });
     const databaseConfig = JSON.parse(
       await readFile(path.join(targetDir, "packages/db/tsconfig.json"), "utf8"),
-    ) as { readonly compilerOptions?: Readonly<Record<string, unknown>> };
-    assertLacksProperty(databaseConfig.compilerOptions, "paths");
-    assertMatchesPartial(databaseConfig.compilerOptions, {
+    ) as {
+      readonly compilerOptions?: Readonly<Record<string, unknown>>;
+    };
+    assert.ok(!("paths" in (databaseConfig.compilerOptions ?? {})));
+    assert.partialDeepStrictEqual(databaseConfig.compilerOptions, {
       customConditions: ["source"],
       erasableSyntaxOnly: true,
     });
-    assertMatchesPartial(
+    assert.deepStrictEqual(databaseConfig.compilerOptions?.customConditions, [
+      "source",
+    ]);
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/db-migrations/tsconfig.json"),
@@ -583,18 +604,18 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         readonly compilerOptions?: Readonly<Record<string, unknown>>;
         readonly extends?: string;
       };
-      assertLacksProperty(config.compilerOptions, "paths");
-      assertLacksProperty(config.compilerOptions, "customConditions");
-      assertLacksProperty(config.compilerOptions, "erasableSyntaxOnly");
+      assert.ok(!("paths" in (config.compilerOptions ?? {})));
+      assert.ok(!("customConditions" in (config.compilerOptions ?? {})));
+      assert.ok(!("erasableSyntaxOnly" in (config.compilerOptions ?? {})));
       if (configPath.endsWith("tsconfig.app.json")) {
-        assertMatchesPartial(config.compilerOptions, {
+        assert.partialDeepStrictEqual(config.compilerOptions, {
           exactOptionalPropertyTypes: false,
         });
       } else {
         assert.strictEqual(config.extends, "./tsconfig.app.json");
       }
     }
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/db/tsconfig.build.json"),
@@ -608,7 +629,17 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         },
       },
     );
-    assertMatchesPartial(
+    const databaseBuildConfig = JSON.parse(
+      await readFile(
+        path.join(targetDir, "packages/db/tsconfig.build.json"),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(
+      databaseBuildConfig.compilerOptions.customConditions,
+      ["source"],
+    );
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/db-migrations/tsconfig.build.json"),
@@ -617,104 +648,126 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
       { compilerOptions: { customConditions: [] } },
     );
-    assertDoesNotContain(
-      await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8"),
-      "alias:",
+    assert.deepStrictEqual(
+      JSON.parse(
+        await readFile(
+          path.join(targetDir, "packages/db-migrations/tsconfig.build.json"),
+          "utf8",
+        ),
+      ).compilerOptions.customConditions,
+      [],
     );
-    assertMatchesPartial(
-      JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-      {
-        tasks: {
-          "@demo/web#test:e2e": {
-            dependsOn: ["//#database:prepare:e2e", "@demo/db#build", "build"],
-            cache: false,
-          },
+    assert.ok(
+      !(
+        await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8")
+      ).includes("alias:"),
+    );
+    const rootTurboConfig = JSON.parse(
+      await readFile(path.join(targetDir, "turbo.json"), "utf8"),
+    );
+    assert.partialDeepStrictEqual(rootTurboConfig, {
+      tasks: {
+        "@demo/web#test:e2e": {
+          dependsOn: ["//#database:prepare:e2e", "@demo/db#build", "build"],
+          cache: false,
         },
       },
+    });
+    assert.deepStrictEqual(
+      rootTurboConfig.tasks["@demo/web#test:e2e"].dependsOn,
+      ["//#database:prepare:e2e", "@demo/db#build", "build"],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
       "utf8",
     );
-    assertContains(
-      dockerfile,
-      "pnpm exec turbo prune @demo/web @demo/db-migrations --docker",
+    assert.ok(
+      dockerfile.includes(
+        "pnpm exec turbo prune @demo/web @demo/db-migrations --docker",
+      ),
     );
     expectPrunerWorkspaceManifests(
       dockerfile,
       plan.blueprint.packages.map((package_) => package_.path),
     );
-    assertContains(
-      dockerfile,
-      "COPY --from=pruner /repo/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh",
-    );
-    assertDoesNotContain(dockerfile, ".pnpmfile.cts");
-    assertDoesNotContain(dockerfile, "DATABASE_PACKAGE_NAME");
-    assertContains(dockerfile, "for attempt in 1 2 3; do");
-    assertContains(dockerfile, 'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"');
-    assertContains(
-      await readFile(
-        path.join(targetDir, "scripts/container-entrypoint.sh"),
-        "utf8",
+    assert.ok(
+      dockerfile.includes(
+        "COPY --from=pruner /repo/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh",
       ),
-      "cd /migration",
+    );
+    assert.ok(!dockerfile.includes(".pnpmfile.cts"));
+    assert.ok(!dockerfile.includes("DATABASE_PACKAGE_NAME"));
+    assert.ok(dockerfile.includes("for attempt in 1 2 3; do"));
+    assert.ok(
+      dockerfile.includes('ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"'),
+    );
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "scripts/container-entrypoint.sh"),
+          "utf8",
+        )
+      ).includes("cd /migration"),
     );
     const deploymentCheckScript = await readFile(
       path.join(targetDir, "scripts/check-standalone-deployment.ts"),
       "utf8",
     );
-    assertContains(deploymentCheckScript, '"0.0.0.0::3000"');
-    assertContains(deploymentCheckScript, "dockerHostGatewayAddress");
-    assertContains(deploymentCheckScript, "return baseUrl;");
+    assert.ok(deploymentCheckScript.includes('"0.0.0.0::3000"'));
+    assert.ok(deploymentCheckScript.includes("dockerHostGatewayAddress"));
+    assert.ok(deploymentCheckScript.includes("return baseUrl;"));
     await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
     await assertDockerCopyInputsExist(targetDir, dockerfile);
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
-    assertContains(
-      devcontainerDockerfile,
-      'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
-    );
-    assertContains(
-      devcontainerDockerfile,
-      'install -d -m 0755 "$PNPM_HOME" "$PNPM_HOME/bin"',
-    );
-    assertDoesNotContain(devcontainerDockerfile, "COREPACK_HOME");
-    assertContains(
-      devcontainerDockerfile,
-      "git config --system init.defaultBranch main",
-    );
-    assertContains(
-      devcontainerDockerfile,
-      "playwright install --with-deps chromium",
-    );
-    assertContains(
-      devcontainerDockerfile,
-      "install -y --no-install-recommends shellcheck",
-    );
-    assertMatchesPartial(
-      JSON.parse(
-        await readFile(
-          path.join(targetDir, ".devcontainer/devcontainer.json"),
-          "utf8",
-        ),
+    assert.ok(
+      devcontainerDockerfile.includes(
+        'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
       ),
-      {
-        build: {
-          args: {
-            PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
-          },
-        },
-        mounts: [
-          {
-            type: "volume",
-            source: "${devcontainerId}-pnpm-store",
-            target: "/pnpm/store",
-          },
-        ],
-      },
     );
+    assert.ok(
+      devcontainerDockerfile.includes(
+        'install -d -m 0755 "$PNPM_HOME" "$PNPM_HOME/bin"',
+      ),
+    );
+    assert.ok(!devcontainerDockerfile.includes("COREPACK_HOME"));
+    assert.ok(
+      devcontainerDockerfile.includes(
+        "git config --system init.defaultBranch main",
+      ),
+    );
+    assert.ok(
+      devcontainerDockerfile.includes(
+        "playwright install --with-deps chromium",
+      ),
+    );
+    assert.ok(
+      devcontainerDockerfile.includes(
+        "install -y --no-install-recommends shellcheck",
+      ),
+    );
+    const devcontainerConfiguration = JSON.parse(
+      await readFile(
+        path.join(targetDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    );
+    assert.match(
+      devcontainerConfiguration.build.args.PLAYWRIGHT_CLI_PACKAGE,
+      /^@playwright\/test@/u,
+    );
+    assert.partialDeepStrictEqual(devcontainerConfiguration, {
+      mounts: [
+        {
+          type: "volume",
+          source: "${devcontainerId}-pnpm-store",
+          target: "/pnpm/store",
+        },
+      ],
+    });
+    assert.strictEqual(devcontainerConfiguration.mounts.length, 1);
     const dependabot = await readFile(
       path.join(targetDir, ".github/dependabot.yml"),
       "utf8",
@@ -738,21 +791,25 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         ),
       );
     }
-    assertContains(
-      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-      ".pnpm-store/",
+    assert.ok(
+      (await readFile(path.join(targetDir, ".gitignore"), "utf8")).includes(
+        ".pnpm-store/",
+      ),
     );
-    assertContains(
-      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-      "playwright-report",
+    assert.ok(
+      (await readFile(path.join(targetDir, ".gitignore"), "utf8")).includes(
+        "playwright-report",
+      ),
     );
-    assertContains(
-      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-      "test-results",
+    assert.ok(
+      (await readFile(path.join(targetDir, ".gitignore"), "utf8")).includes(
+        "test-results",
+      ),
     );
-    assertContains(
-      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-      ".template/",
+    assert.ok(
+      (await readFile(path.join(targetDir, ".gitignore"), "utf8")).includes(
+        ".template/",
+      ),
     );
     const checkWorkflow = await readFile(
       path.join(targetDir, ".github/workflows/check.yml"),
@@ -806,9 +863,10 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       diagnosticStaging?.env?.VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS,
       "apps/web",
     );
-    assertContains(
-      diagnosticStaging?.run ?? "",
-      "for diagnostic_directory in test-results playwright-report; do",
+    assert.ok(
+      (diagnosticStaging?.run ?? "").includes(
+        "for diagnostic_directory in test-results playwright-report; do",
+      ),
     );
     const diagnosticUpload = steps.find(
       ({ name }) => name === "Upload Root Check diagnostics",
@@ -817,7 +875,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       diagnosticUpload?.with?.path,
       ".template-ci-diagnostics",
     );
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
       {
         scripts: {
@@ -840,10 +898,9 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       },
     );
   });
-
   void it(
     "passes the generated database, browser, and repository checks",
-    { timeout: 300_000 },
+    { timeout: 300000 },
     async () => {
       const targetDir = path.join(
         await mkdtemp(path.join(tmpdir(), "template-vike-check-")),
@@ -861,7 +918,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         targetRoot: targetDir,
         operations: [...plan.operations],
       });
-
       for (const [packagePath, label] of [
         ["apps/web", "web"],
         ["packages/db", "db"],
@@ -878,7 +934,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           'import { automationOwner } from "./automation-helper.ts";\n\nconsole.log(automationOwner);\n',
         );
       }
-
       await execa("pnpm", ["install"], { cwd: targetDir });
       const resolveDatabaseStorage = (args: readonly string[] = []) =>
         execa(
@@ -924,7 +979,13 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             cwd: targetDir,
           }),
           (error) => {
-            assertMatchesPartial(error, { stdout: stringContaining("TS2307") });
+            assert.ok(
+              typeof error === "object" &&
+                error !== null &&
+                Object.hasOwn(error, "stdout"),
+            );
+            const stdout = (error as { readonly stdout: unknown }).stdout;
+            assert.ok(typeof stdout === "string" && stdout.includes("TS2307"));
             return true;
           },
         );
@@ -950,14 +1011,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         (task) => task.taskId === "//#deployment",
       );
       assert.strictEqual(deploymentTask?.dependencies.length, 3);
-      assertMatches(
-        deploymentTask?.dependencies,
-        arrayContaining([
-          "@demo/db#build",
-          "@demo/db-migrations#build",
-          "@demo/web#build",
-        ]),
+      assert.ok(deploymentTask?.dependencies.includes("@demo/db#build"));
+      assert.ok(
+        deploymentTask?.dependencies.includes("@demo/db-migrations#build"),
       );
+      assert.ok(deploymentTask?.dependencies.includes("@demo/web#build"));
       await execa(
         "pnpm",
         ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
@@ -971,13 +1029,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     },
   );
 });
-
 const deploymentPath = "Dockerfile";
 const mirrorStartMarker = "# @template-mirror NODE_VERSION";
 const mirrorEndMarker = "# @end-template-mirror";
 const additionTargetNode = "22.2.2";
 const additionTargetPnpm = "pnpm@10.9.0";
-
 async function initVikeRepository(
   workspace: string,
   nodeLtsMajor = "24",
@@ -997,7 +1053,6 @@ async function initVikeRepository(
   });
   return targetDir;
 }
-
 function mirrorRegionContent(text: string): readonly string[] {
   const lines = text.split("\n");
   const start = lines.findIndex((line) => line.trim() === mirrorStartMarker);
@@ -1008,35 +1063,30 @@ function mirrorRegionContent(text: string): readonly string[] {
   if (end === -1) return [];
   return lines.slice(start + 1, end);
 }
-
 function anchoredArgValue(text: string): string | undefined {
   const [line] = mirrorRegionContent(text);
   const match =
     line === undefined ? undefined : /^ARG NODE_VERSION="([^"]*)"$/.exec(line);
   return match?.[1];
 }
-
 function maskAnchoredArg(text: string, value: string): string {
   return text.replace(
     `ARG NODE_VERSION="${value}"`,
     'ARG NODE_VERSION="«masked»"',
   );
 }
-
 function baseStageRunBlock(text: string): string {
   const baseIndex = text.indexOf("AS base");
   const runIndex = text.indexOf("RUN ", baseIndex);
   const nextFrom = text.indexOf("\nFROM ", runIndex);
   return text.slice(runIndex, nextFrom === -1 ? undefined : nextFrom);
 }
-
 function actionsFor(
   actions: readonly ProjectProjectionAction[],
   targetPath: string,
 ): readonly ProjectProjectionAction[] {
   return actions.filter((action) => action.path === targetPath);
 }
-
 async function treeFingerprint(root: string): Promise<string> {
   const hash = createHash("sha256");
   async function walk(directory: string): Promise<void> {
@@ -1068,7 +1118,6 @@ async function treeFingerprint(root: string): Promise<string> {
   await walk(root);
   return hash.digest("hex");
 }
-
 async function writeVikeRootManifest(
   targetDir: string,
   patch: (manifest: Record<string, unknown>) => void,
@@ -1081,10 +1130,14 @@ async function writeVikeRootManifest(
   patch(manifest);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
-
-async function prepareVikeAddition(
-  targetDir: string,
-): Promise<Extract<PackageAdditionPreparation, { readonly status: "ready" }>> {
+async function prepareVikeAddition(targetDir: string): Promise<
+  Extract<
+    PackageAdditionPreparation,
+    {
+      readonly status: "ready";
+    }
+  >
+> {
   const preparation = prepareGeneratedRepositoryPackageAddition({
     repositoryRoot: targetDir,
     preset: "ts-lib",
@@ -1097,7 +1150,6 @@ async function prepareVikeAddition(
   }
   return preparation;
 }
-
 void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像槽位", () => {
   void it("初始化的 M2 由锚定 ARG 驱动两处 FROM，取根 engines.node 原文且无烘焙副本", async () => {
     const workspace = await mkdtemp(
@@ -1111,7 +1163,11 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       );
       const rootManifest = JSON.parse(
         await readFile(path.join(targetDir, "package.json"), "utf8"),
-      ) as { engines?: { node?: string } };
+      ) as {
+        engines?: {
+          node?: string;
+        };
+      };
       const rootDeclaration = rootManifest.engines?.node;
       assert.notStrictEqual(rootDeclaration, undefined);
       // M2 与根声明取同一 rootNodeDeclaration，不另作真源。
@@ -1127,23 +1183,24 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
         .filter((line) => line.startsWith("FROM node:"));
       assert.strictEqual(fromLines.length, 2);
       for (const fromLine of fromLines) {
-        assertContains(fromLine, "${NODE_VERSION}");
+        assert.ok(fromLine.includes("${NODE_VERSION}"));
       }
-      assertDoesNotContain(dockerfile, "PACKAGE_MANAGER_PIN");
+      assert.ok(!dockerfile.includes("PACKAGE_MANAGER_PIN"));
       // base stage 首次 pnpm 调用之前把根 manifest 复制到 workspace 外固定位置。
-      assertContains(dockerfile, "COPY package.json /root-manifest.json");
+      assert.ok(dockerfile.includes("COPY package.json /root-manifest.json"));
       const baseRun = baseStageRunBlock(dockerfile);
       // 原生读取 packageManager 交给现有 prepare 重试，并在同条 RUN 内删除复制文件。
-      assertContains(baseRun, "corepack enable --install-directory");
-      assertContains(baseRun, "require('/root-manifest.json').packageManager");
-      assertContains(baseRun, "rm /root-manifest.json");
-      assertContains(baseRun, 'corepack prepare "$package_manager"');
-      assertDoesNotContain(baseRun, "PACKAGE_MANAGER_PIN");
+      assert.ok(baseRun.includes("corepack enable --install-directory"));
+      assert.ok(
+        baseRun.includes("require('/root-manifest.json').packageManager"),
+      );
+      assert.ok(baseRun.includes("rm /root-manifest.json"));
+      assert.ok(baseRun.includes('corepack prepare "$package_manager"'));
+      assert.ok(!baseRun.includes("PACKAGE_MANAGER_PIN"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
-
   void it("改根后加包把漂移的锚点协调回根原文，区域外用户字节保留且 dry-run 与执行一致", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-mirror2-reconcile-"),
@@ -1175,7 +1232,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
           'WORKDIR /repo\nENV USER_EXTRA_ENV="keep-me"',
         );
       await writeFile(dockerfilePath, drifted);
-
       const addition = await prepareVikeAddition(targetDir);
       const treeBeforeDryRun = await treeFingerprint(workspace);
       const dryRun = await reconcileAndApplyProjectProjections({
@@ -1190,7 +1246,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       ]);
       assert.strictEqual(await treeFingerprint(workspace), treeBeforeDryRun);
       assert.strictEqual(await readFile(dockerfilePath, "utf8"), drifted);
-
       const applied = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...addition.plan.projectProjections,
@@ -1199,7 +1254,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       assert.strictEqual(applied.ok, true);
       assert.deepStrictEqual(applied.actions, dryRun.actions);
       assert.deepStrictEqual(applied.changedPaths, dryRun.changedPaths);
-
       const reconciled = await readFile(dockerfilePath, "utf8");
       // 锚点协调回根 engines.node 原文，而不是用户漂移值。
       assert.strictEqual(anchoredArgValue(reconciled), additionTargetNode);
@@ -1211,7 +1265,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
         maskAnchoredArg(reconciled, additionTargetNode),
         maskAnchoredArg(drifted, "999"),
       );
-
       // 重复加包不再触碰已对齐的锚点。
       const replayed = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
@@ -1220,12 +1273,11 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       if (!replayed.ok) throw new Error(JSON.stringify(replayed));
       assert.strictEqual(replayed.ok, true);
       assert.deepStrictEqual(actionsFor(replayed.actions, deploymentPath), []);
-      assertDoesNotContain(replayed.changedPaths, deploymentPath);
+      assert.ok(!replayed.changedPaths.includes(deploymentPath));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
-
   void it("锚点已等于根原文时加包对部署 Dockerfile 零写入", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-mirror2-noop-"),
@@ -1251,7 +1303,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
         ),
       );
       const aligned = await readFile(dockerfilePath, "utf8");
-
       const applied = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
@@ -1259,13 +1310,12 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       if (!applied.ok) throw new Error(JSON.stringify(applied));
       assert.strictEqual(applied.ok, true);
       assert.deepStrictEqual(actionsFor(applied.actions, deploymentPath), []);
-      assertDoesNotContain(applied.changedPaths, deploymentPath);
+      assert.ok(!applied.changedPaths.includes(deploymentPath));
       assert.strictEqual(await readFile(dockerfilePath, "utf8"), aligned);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
-
   void it("只删成对标记保留承载 ARG 时整次加包在写入前原子失败且零半成品", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-mirror2-atomic-"),
@@ -1287,7 +1337,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
         .join("\n");
       await writeFile(dockerfilePath, corrupted);
       const before = await treeFingerprint(workspace);
-
       const applied = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
@@ -1311,7 +1360,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       await rm(workspace, { recursive: true, force: true });
     }
   });
-
   void it("连标记、承载 ARG 与引用一并删除时加包成功且绝不重新加回", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-mirror2-carrier-gone-"),
@@ -1335,7 +1383,6 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
         .join("\n")
         .replaceAll("${NODE_VERSION}", "20-slim");
       await writeFile(dockerfilePath, removed);
-
       const applied = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
@@ -1343,16 +1390,15 @@ void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像
       if (!applied.ok) throw new Error(JSON.stringify(applied));
       assert.strictEqual(applied.ok, true);
       assert.deepStrictEqual(actionsFor(applied.actions, deploymentPath), []);
-      assertDoesNotContain(applied.changedPaths, deploymentPath);
+      assert.ok(!applied.changedPaths.includes(deploymentPath));
       const after = await readFile(dockerfilePath, "utf8");
       assert.strictEqual(after, removed);
-      assertDoesNotContain(after, "@template-mirror");
-      assertDoesNotContain(after, "ARG NODE_VERSION");
+      assert.ok(!after.includes("@template-mirror"));
+      assert.ok(!after.includes("ARG NODE_VERSION"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
-
   void it("改变根声明只影响部署 Dockerfile，生成的 dependabot.yml 逐字不变", async () => {
     const workspaceA = await mkdtemp(
       path.join(tmpdir(), "template-mirror2-dep-a-"),

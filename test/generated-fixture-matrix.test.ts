@@ -26,15 +26,6 @@ import {
 } from "../packages/checks/src/check-generated-registry.ts";
 import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
 import { fixtureDependencyInstallationPlan } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertPartialDeepStrictEqual,
-  assertRejectsContaining,
-  not,
-  testEach,
-} from "./assertions.ts";
-
 void describe("registry-derived Package Addition Fixture Matrix", () => {
   type GeneratedDevelopmentContainerConfig = {
     build: { args: Record<string, string> };
@@ -105,39 +96,38 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
     });
   });
 
-  testEach(
-    [
-      {
-        protectedField: "build argument",
-        mutate: (config: GeneratedDevelopmentContainerConfig) => {
-          config.build.args.NODE_VERSION = "999";
-        },
-        expectedError: "build arguments do not match the final Tool Layer plan",
+  for (const testCase of [
+    {
+      protectedField: "build argument",
+      mutate: (config: GeneratedDevelopmentContainerConfig) => {
+        config.build.args.NODE_VERSION = "999";
       },
-      {
-        protectedField: "mount",
-        mutate: (config: GeneratedDevelopmentContainerConfig) => {
-          const mount = config.mounts.find(
-            (candidate) => candidate.target === "/pnpm/store",
-          );
-          if (mount === undefined) {
-            throw new Error("Expected projected pnpm store mount");
-          }
-          mount.source = "user-overlap";
-        },
-        expectedError:
-          "mount pnpm-store does not match the final Tool Layer plan",
+      expectedError: "build arguments do not match the final Tool Layer plan",
+    },
+    {
+      protectedField: "mount",
+      mutate: (config: GeneratedDevelopmentContainerConfig) => {
+        const mount = config.mounts.find(
+          (candidate) => candidate.target === "/pnpm/store",
+        );
+        if (mount === undefined) {
+          throw new Error("Expected projected pnpm store mount");
+        }
+        mount.source = "user-overlap";
       },
-    ],
-    "rejects a protected Development Container $protectedField mismatch before evidence lookup",
-    async ({ mutate, expectedError }) => {
+      expectedError:
+        "mount pnpm-store does not match the final Tool Layer plan",
+    },
+  ] as const) {
+    const { mutate, expectedError, protectedField } = testCase;
+    void it(`rejects a protected Development Container ${protectedField} mismatch before evidence lookup`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "fixture-final-projection-validation-"),
       );
       const evidenceEvents: Array<{ readonly type: string }> = [];
 
       try {
-        await assertRejectsContaining(
+        await assert.rejects(
           runGeneratedScenarioSet("init", {
             workspace,
             evidence: {
@@ -170,19 +160,18 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
               return result;
             },
           }),
-          expectedError,
+          (error: unknown) =>
+            error instanceof Error && error.message.includes(expectedError),
         );
         assert.deepStrictEqual(evidenceEvents, []);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
-  testEach(
-    ["root", "package"] as const,
-    "rejects a private %s manifest version before container-backed fixture gates",
-    async (manifestOwner) => {
+  for (const manifestOwner of ["root", "package"] as const) {
+    void it(`rejects a private ${manifestOwner} manifest version before container-backed fixture gates`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "fixture-private-manifest-version-"),
       );
@@ -249,8 +238,8 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("consumes manifest-derived provider source and distribution exports by package name", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "focused-provider-probe-"));
@@ -340,8 +329,12 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
       await assert.rejects(
         readFile(path.join(providerRoot, sourceTarget), "utf8"),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
-          return true;
+          return (
+            typeof error === "object" &&
+            error !== null &&
+            Object.hasOwn(error, "code") &&
+            (error as { readonly code?: unknown }).code === "ENOENT"
+          );
         },
       );
       assert.ok(
@@ -349,15 +342,12 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
           await readFile(path.join(providerRoot, defaultTarget), "utf8")
         ).includes("templateFocusedExport"),
       );
-      assertDeepStrictEqualWithMatchers(
-        calls
-          .filter(({ command }) => command === "node")
-          .map(({ args }) => args),
-        [
-          arrayContaining(["--conditions=source"]),
-          not(arrayContaining(["--conditions=source"])),
-        ],
-      );
+      const nodeCalls = calls
+        .filter(({ command }) => command === "node")
+        .map(({ args }) => args);
+      assert.strictEqual(nodeCalls.length, 2);
+      assert.ok(nodeCalls[0]?.includes("--conditions=source"));
+      assert.ok(!nodeCalls[1]?.includes("--conditions=source"));
       assert.deepStrictEqual(
         (await readdir(consumerRoot)).filter((entry) =>
           entry.includes("focused-provider-probe"),
@@ -386,7 +376,7 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
     try {
       // 真实初始化先渲染再调用 Git，因此可在 Git 接缝观察各场景的根 manifest。
       // 在首个容器命令处停止；本测试证明运行夹具输入，不把它作为 Docker 成功结果。
-      await assertRejectsContaining(
+      await assert.rejects(
         runGeneratedScenarioSet("init", {
           workspace,
           run: async (command, args, options) => {
@@ -416,7 +406,8 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
             return result;
           },
         }),
-        stopSentinel,
+        (error: unknown) =>
+          error instanceof Error && error.message.includes(stopSentinel),
       );
 
       assert.ok(captured.size > 0);

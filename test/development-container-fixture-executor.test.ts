@@ -35,23 +35,6 @@ import {
   runFixtureEvidenceGate,
   type FixtureCommandRunner,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-import {
-  any,
-  arrayContaining,
-  assertContainsEqual,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotDeepStrictEqualWithMatchers,
-  assertPartialDeepStrictEqual,
-  assertRejectsContaining,
-  assertRejectsMatching,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-  testEach,
-  waitFor,
-} from "./assertions.ts";
-
 type Command = {
   readonly command: string;
   readonly args: readonly string[];
@@ -321,6 +304,11 @@ void describe("Development Container Fixture Executor", () => {
         cwd: projectDir,
       },
       {
+        command: "docker",
+        args: ["ps", "-aq", "--filter", `label=${idLabel}`],
+        cwd: projectDir,
+      },
+      {
         command: "devcontainer",
         args: [
           "exec",
@@ -333,11 +321,6 @@ void describe("Development Container Fixture Executor", () => {
           `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
           ".",
         ],
-        cwd: projectDir,
-      },
-      {
-        command: "docker",
-        args: ["ps", "-aq", "--filter", `label=${idLabel}`],
         cwd: projectDir,
       },
       {
@@ -371,15 +354,15 @@ void describe("Development Container Fixture Executor", () => {
       ({ command, args }) => command === "devcontainer" && args[0] === "up",
     );
     const identityCache = path.join(cacheDirectory, buildIdentity);
-    assertDeepStrictEqualWithMatchers(
-      up?.args,
-      arrayContaining([
-        "--cache-from",
-        `type=local,src=${identityCache}`,
-        "--cache-to",
-        `type=local,dest=${identityCache},mode=max`,
-      ]),
-    );
+    assert.ok(up);
+    for (const requiredArgument of [
+      "--cache-from",
+      `type=local,src=${identityCache}`,
+      "--cache-to",
+      `type=local,dest=${identityCache},mode=max`,
+    ]) {
+      assert.ok(up.args.includes(requiredArgument));
+    }
     assert.strictEqual(
       calls.some(
         ({ command, args }) =>
@@ -433,19 +416,17 @@ void describe("Development Container Fixture Executor", () => {
       )
       .map(({ env }) => env?.TMPDIR);
 
-    assertLength(upTempDirectories, 2);
-    assertLength(new Set(upTempDirectories), 2);
-    assertDeepStrictEqualWithMatchers(
-      upTempDirectories,
-      arrayContaining([
-        stringContaining(
-          `template-devcontainer-${fixtureProjectIdentity(projectDirs[0]!)}-`,
+    assert.strictEqual(upTempDirectories.length, 2);
+    assert.strictEqual(new Set(upTempDirectories).size, 2);
+    for (const projectDir of projectDirs) {
+      const prefix = `template-devcontainer-${fixtureProjectIdentity(projectDir)}-`;
+      assert.ok(
+        upTempDirectories.some(
+          (directory) =>
+            typeof directory === "string" && directory.includes(prefix),
         ),
-        stringContaining(
-          `template-devcontainer-${fixtureProjectIdentity(projectDirs[1]!)}-`,
-        ),
-      ]),
-    );
+      );
+    }
   });
 
   void it("binds only dependency-download caches into the Development Container", async () => {
@@ -557,9 +538,9 @@ void describe("Development Container Fixture Executor", () => {
       await session.close();
 
       await assert.rejects(readFile(overridePath!, "utf8"), (error) => {
-        assertPartialDeepStrictEqual(error, {
-          code: "ENOENT",
-        });
+        assert.ok(typeof error === "object" && error !== null);
+        assert.ok(Object.hasOwn(error, "code"));
+        assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
         return true;
       });
     } finally {
@@ -599,10 +580,7 @@ void describe("Development Container Fixture Executor", () => {
           ],
         })}\n`,
       );
-      const cacheActivity: Array<{
-        readonly cache: string;
-        readonly outcome: string;
-      }> = [];
+      const cacheActivity: Array<Record<string, unknown>> = [];
       const session = createDevelopmentContainerFixtureSession({
         projectDir,
         probes: [],
@@ -633,35 +611,27 @@ void describe("Development Container Fixture Executor", () => {
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        cacheActivity,
-        arrayContaining([
-          {
-            type: "cache",
-            cache: "buildkit",
-            outcome: "configured",
-            at: any(String),
-          },
-          {
-            type: "cache",
-            cache: "pnpm-downloads",
-            outcome: "mounted",
-            at: any(String),
-          },
-          {
-            type: "cache",
-            cache: "cargo-downloads",
-            outcome: "mounted",
-            at: any(String),
-          },
-          {
-            type: "cache",
-            cache: "turbo",
-            outcome: "configured",
-            at: any(String),
-          },
-        ]),
-      );
+      for (const expected of [
+        { cache: "buildkit", outcome: "configured" },
+        { cache: "pnpm-downloads", outcome: "mounted" },
+        { cache: "cargo-downloads", outcome: "mounted" },
+        { cache: "turbo", outcome: "configured" },
+      ]) {
+        const event = cacheActivity.find(
+          (candidate) =>
+            candidate.cache === expected.cache &&
+            candidate.outcome === expected.outcome,
+        );
+        assert.ok(event);
+        assert.strictEqual(Object.getPrototypeOf(event), Object.prototype);
+        assert.strictEqual(Reflect.ownKeys(event).length, 4);
+        assert.ok(Object.hasOwn(event, "type"));
+        assert.ok(Object.hasOwn(event, "cache"));
+        assert.ok(Object.hasOwn(event, "outcome"));
+        assert.ok(Object.hasOwn(event, "at"));
+        assert.strictEqual(event.type, "cache");
+        assert.strictEqual(typeof event.at, "string");
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -753,36 +723,33 @@ void describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    assertLength(upCalls, 2);
+    assert.strictEqual(upCalls.length, 2);
     assert.deepStrictEqual(upCalls[1], upCalls[0]);
-    assertDeepStrictEqualWithMatchers(
-      activity.filter(
-        (event) =>
-          event.type === "phase" && event.phase === "container-preparation",
-      ),
-      [
-        objectContaining({
-          outcome: "started",
-        }),
-        objectContaining({
-          outcome: "succeeded",
-        }),
-      ],
+    const preparationPhases = activity.filter(
+      (event) =>
+        event.type === "phase" && event.phase === "container-preparation",
     );
-    assertDeepStrictEqualWithMatchers(
-      activity.filter(
-        (event) =>
-          event.type === "retry" && event.phase === "container-preparation",
-      ),
-      [
-        objectContaining({
-          outcome: "started",
-          classification: "docker-registry-transport-transient",
-          firstError: stringContaining("registry-1.docker.io"),
-        }),
-        objectContaining({ outcome: "recovered" }),
-      ],
+    assert.strictEqual(preparationPhases.length, 2);
+    assert.partialDeepStrictEqual(preparationPhases[0], { outcome: "started" });
+    assert.partialDeepStrictEqual(preparationPhases[1], {
+      outcome: "succeeded",
+    });
+    const preparationRetries = activity.filter(
+      (event) =>
+        event.type === "retry" && event.phase === "container-preparation",
     );
+    assert.strictEqual(preparationRetries.length, 2);
+    assert.partialDeepStrictEqual(preparationRetries[0], {
+      outcome: "started",
+      classification: "docker-registry-transport-transient",
+    });
+    assert.ok(
+      typeof preparationRetries[0]!.firstError === "string" &&
+        preparationRetries[0]!.firstError.includes("registry-1.docker.io"),
+    );
+    assert.partialDeepStrictEqual(preparationRetries[1], {
+      outcome: "recovered",
+    });
   });
 
   void it("retries one npm registry transport failure found in command stderr", async () => {
@@ -827,57 +794,58 @@ void describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    assertLength(installCalls, 2);
+    assert.strictEqual(installCalls.length, 2);
     assert.deepStrictEqual(installCalls[1], installCalls[0]);
-    assertDeepStrictEqualWithMatchers(
-      activity.filter(
-        (event) =>
-          event.type === "phase" && event.phase === "dependency-installation",
-      ),
-      [
-        objectContaining({ outcome: "started" }),
-        objectContaining({ outcome: "succeeded" }),
-      ],
+    const installationPhases = activity.filter(
+      (event) =>
+        event.type === "phase" && event.phase === "dependency-installation",
     );
-    assertDeepStrictEqualWithMatchers(
-      activity.filter(
-        (event) =>
-          event.type === "retry" && event.phase === "dependency-installation",
-      ),
-      [
-        objectContaining({
-          outcome: "started",
-          classification: "npm-registry-transport-transient",
-          firstError: stringContaining("registry.npmjs.org"),
-        }),
-        objectContaining({ outcome: "recovered" }),
-      ],
+    assert.strictEqual(installationPhases.length, 2);
+    assert.partialDeepStrictEqual(installationPhases[0], {
+      outcome: "started",
+    });
+    assert.partialDeepStrictEqual(installationPhases[1], {
+      outcome: "succeeded",
+    });
+    const installationRetries = activity.filter(
+      (event) =>
+        event.type === "retry" && event.phase === "dependency-installation",
     );
+    assert.strictEqual(installationRetries.length, 2);
+    assert.partialDeepStrictEqual(installationRetries[0], {
+      outcome: "started",
+      classification: "npm-registry-transport-transient",
+    });
+    assert.ok(
+      typeof installationRetries[0]!.firstError === "string" &&
+        installationRetries[0]!.firstError.includes("registry.npmjs.org"),
+    );
+    assert.partialDeepStrictEqual(installationRetries[1], {
+      outcome: "recovered",
+    });
   });
 
-  testEach(
+  for (const [caseName, diagnostic] of [
     [
-      [
-        "unknown registry host",
-        "GET https://registry.example.com/v2/library/node: read ECONNRESET",
-      ],
-      [
-        "deterministic Dockerfile failure",
-        "registry-1.docker.io returned Dockerfile parse error on line 4",
-      ],
-      [
-        "lookalike Docker registry host",
-        "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
-      ],
-      [
-        "unrelated transport marker on another line",
-        "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
-      ],
+      "unknown registry host",
+      "GET https://registry.example.com/v2/library/node: read ECONNRESET",
     ],
-    "does not retry a %s",
-    async (_case, diagnostic) => {
+    [
+      "deterministic Dockerfile failure",
+      "registry-1.docker.io returned Dockerfile parse error on line 4",
+    ],
+    [
+      "lookalike Docker registry host",
+      "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
+    ],
+    [
+      "unrelated transport marker on another line",
+      "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
+    ],
+  ] as const) {
+    void it(`does not retry a ${caseName}`, async () => {
       const projectDir = path.resolve(
-        `/fixture/non-retryable-${_case.replaceAll(" ", "-")}`,
+        `/fixture/non-retryable-${caseName.replaceAll(" ", "-")}`,
       );
       let upAttempts = 0;
       const activity: Array<Record<string, unknown>> = [];
@@ -896,30 +864,29 @@ void describe("Development Container Fixture Executor", () => {
         },
       });
 
-      await assertRejectsContaining(
+      await assert.rejects(
         session.execute(
           async (run) =>
             await run("pnpm", ["run", "check"], { cwd: projectDir }),
         ),
-        diagnostic,
+        (error) => error instanceof Error && error.message.includes(diagnostic),
       );
 
       assert.strictEqual(upAttempts, 1);
-      assertDeepStrictEqualWithMatchers(
-        activity.filter(
-          (event) =>
-            event.type === "phase" && event.phase === "container-preparation",
-        ),
-        [
-          objectContaining({ outcome: "started" }),
-          objectContaining({
-            outcome: "failed",
-            classification: "not-retryable",
-          }),
-        ],
+      const preparationPhases = activity.filter(
+        (event) =>
+          event.type === "phase" && event.phase === "container-preparation",
       );
-    },
-  );
+      assert.strictEqual(preparationPhases.length, 2);
+      assert.partialDeepStrictEqual(preparationPhases[0], {
+        outcome: "started",
+      });
+      assert.partialDeepStrictEqual(preparationPhases[1], {
+        outcome: "failed",
+        classification: "not-retryable",
+      });
+    });
+  }
 
   void it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
     const projectDir = path.resolve("/fixture/semantic-no-retry");
@@ -1026,38 +993,45 @@ void describe("Development Container Fixture Executor", () => {
       },
     });
 
-    await assertRejectsMatching(
+    await assert.rejects(
       session.execute(
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       ),
-      /container-preparation failed after docker-registry-transport-transient retry.*First failure:.*attempt 1.*Retry failure:.*attempt 2/u,
+      (error) =>
+        error instanceof Error &&
+        /container-preparation failed after docker-registry-transport-transient retry.*First failure:.*attempt 1.*Retry failure:.*attempt 2/u.test(
+          error.message,
+        ),
     );
 
     assert.strictEqual(upAttempts, 2);
-    assertDeepStrictEqualWithMatchers(
-      activity.filter(
-        (event) =>
-          event.type === "retry" && event.phase === "container-preparation",
-      ),
-      [
-        objectContaining({
-          outcome: "started",
-          firstError: stringContaining("attempt 1"),
-        }),
-        objectContaining({
-          outcome: "failed",
-          error: stringContaining("attempt 2"),
-        }),
-      ],
+    const preparationRetries = activity.filter(
+      (event) =>
+        event.type === "retry" && event.phase === "container-preparation",
     );
-    assertContainsEqual(
-      activity,
-      objectContaining({
-        type: "phase",
-        phase: "container-preparation",
-        outcome: "failed",
-        classification: "docker-registry-transport-transient",
-      }),
+    assert.strictEqual(preparationRetries.length, 2);
+    assert.partialDeepStrictEqual(preparationRetries[0], {
+      outcome: "started",
+    });
+    assert.ok(
+      typeof preparationRetries[0]!.firstError === "string" &&
+        preparationRetries[0]!.firstError.includes("attempt 1"),
+    );
+    assert.partialDeepStrictEqual(preparationRetries[1], {
+      outcome: "failed",
+    });
+    assert.ok(
+      typeof preparationRetries[1]!.error === "string" &&
+        preparationRetries[1]!.error.includes("attempt 2"),
+    );
+    assert.ok(
+      activity.some(
+        (event) =>
+          event.type === "phase" &&
+          event.phase === "container-preparation" &&
+          event.outcome === "failed" &&
+          event.classification === "docker-registry-transport-transient",
+      ),
     );
   });
 
@@ -1156,19 +1130,13 @@ void describe("Development Container Fixture Executor", () => {
         enabledScenarioSets: ["init"],
       });
       assert.strictEqual(report.healthy, false);
-      assertDeepStrictEqualWithMatchers(
-        report.failures,
-        arrayContaining([
-          objectContaining({ code: "failed-retry" }),
-          objectContaining({ code: "failed-phase" }),
-          objectContaining({ code: "failed-execution" }),
-        ]),
-      );
-      assertNotDeepStrictEqualWithMatchers(
-        report.failures,
-        arrayContaining([
-          objectContaining({ code: "invalid-retry-lifecycle" }),
-        ]),
+      for (const code of ["failed-retry", "failed-phase", "failed-execution"]) {
+        assert.ok(report.failures.some((entry) => entry.code === code));
+      }
+      assert.ok(
+        report.failures.every(
+          (entry) => entry.code !== "invalid-retry-lifecycle",
+        ),
       );
       const retryFailure = report.failures.find(
         (entry) => entry.code === "failed-retry",
@@ -1178,13 +1146,12 @@ void describe("Development Container Fixture Executor", () => {
         retryFailure.detail,
         /First failure:.*registry-1\.docker\.io.*Retry failure:/u,
       );
-      assertDeepStrictEqualWithMatchers(
-        formatFixtureEvidenceHealthReport(report),
-        arrayContaining([
-          stringMatching(
-            /failure code=failed-retry .*scenario=retry-final-failure .*Fixture retry for container-preparation failed after docker-registry-transport-transient.*Retry failure:/u,
+      assert.ok(
+        formatFixtureEvidenceHealthReport(report).some((line) =>
+          /failure code=failed-retry .*scenario=retry-final-failure .*Fixture retry for container-preparation failed after docker-registry-transport-transient.*Retry failure:/u.test(
+            line,
           ),
-        ]),
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1196,12 +1163,17 @@ void describe("Development Container Fixture Executor", () => {
     const buildIdentity = "b".repeat(64);
     const calls: Command[] = [];
     let releaseBuild: (() => void) | undefined;
+    let signalBuildStarted!: () => void;
+    const buildStarted = new Promise<void>((resolve) => {
+      signalBuildStarted = resolve;
+    });
     const run: FixtureCommandRunner = async (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd });
       if (command === "devcontainer" && args[0] === "up") {
         if (releaseBuild === undefined) {
           await new Promise<void>((resolve) => {
             releaseBuild = resolve;
+            signalBuildStarted();
           });
         }
       }
@@ -1232,57 +1204,86 @@ void describe("Development Container Fixture Executor", () => {
             }),
         ),
     );
-    await waitFor(() => {
-      assert.notStrictEqual(releaseBuild, undefined);
-    });
-    releaseBuild!();
+    await buildStarted;
+    assert.ok(releaseBuild);
+    releaseBuild();
     await Promise.all(executions);
 
-    assertLength(
+    assert.strictEqual(
       calls.filter(
         ({ command, args }) => command === "devcontainer" && args[0] === "up",
-      ),
+      ).length,
       2,
     );
     for (const projectDir of projectDirs) {
-      assertContainsEqual(calls, {
-        command: "devcontainer",
-        args: arrayContaining([
-          "up",
-          "--workspace-folder",
-          projectDir,
-          "--id-label",
-          fixtureIdLabel(projectDir),
-        ]),
-        cwd: projectDir,
-      });
+      const requiredUpArguments = [
+        "up",
+        "--workspace-folder",
+        projectDir,
+        "--id-label",
+        fixtureIdLabel(projectDir),
+      ];
+      assert.ok(
+        calls.some(
+          (call) =>
+            call.command === "devcontainer" &&
+            call.cwd === projectDir &&
+            requiredUpArguments.every((argument) =>
+              call.args.includes(argument),
+            ),
+        ),
+      );
     }
     for (const projectDir of projectDirs) {
       const idLabel = fixtureIdLabel(projectDir);
-      assertContainsEqual(calls, {
-        command: "devcontainer",
-        args: arrayContaining([
-          "exec",
-          "--workspace-folder",
-          projectDir,
-          "--id-label",
-          idLabel,
-          "pnpm",
-          "run",
-          "check",
-        ]),
-        cwd: projectDir,
-      });
-      assertContainsEqual(calls, {
-        command: "docker",
-        args: ["ps", "-aq", "--filter", `label=${idLabel}`],
-        cwd: projectDir,
-      });
-      assertContainsEqual(calls, {
-        command: "docker",
-        args: ["rm", "-f", `container-${path.basename(projectDir)}`],
-        cwd: projectDir,
-      });
+      const requiredExecArguments = [
+        "exec",
+        "--workspace-folder",
+        projectDir,
+        "--id-label",
+        idLabel,
+        "pnpm",
+        "run",
+        "check",
+      ];
+      assert.ok(
+        calls.some(
+          (call) =>
+            call.command === "devcontainer" &&
+            call.cwd === projectDir &&
+            requiredExecArguments.every((argument) =>
+              call.args.includes(argument),
+            ),
+        ),
+      );
+      const inspectArguments = ["ps", "-aq", "--filter", `label=${idLabel}`];
+      assert.ok(
+        calls.some(
+          (call) =>
+            call.command === "docker" &&
+            call.cwd === projectDir &&
+            call.args.length === inspectArguments.length &&
+            call.args.every(
+              (argument, index) => argument === inspectArguments[index],
+            ),
+        ),
+      );
+      const removeArguments = [
+        "rm",
+        "-f",
+        `container-${path.basename(projectDir)}`,
+      ];
+      assert.ok(
+        calls.some(
+          (call) =>
+            call.command === "docker" &&
+            call.cwd === projectDir &&
+            call.args.length === removeArguments.length &&
+            call.args.every(
+              (argument, index) => argument === removeArguments[index],
+            ),
+        ),
+      );
     }
   });
 
@@ -1350,42 +1351,40 @@ void describe("Development Container Fixture Executor", () => {
     );
 
     assert.strictEqual(upAttempts, 2);
-    assertDeepStrictEqualWithMatchers(
-      activities.flat().filter((event) => event.type === "retry"),
-      [
-        objectContaining({ outcome: "started" }),
-        objectContaining({ outcome: "recovered" }),
-      ],
-    );
-    assertDeepStrictEqualWithMatchers(
-      activities.map((activity) =>
-        activity.filter(
-          (event) =>
-            event.type === "phase" &&
-            event.phase === "container-preparation" &&
-            event.outcome === "succeeded",
-        ),
+    const retries = activities.flat().filter((event) => event.type === "retry");
+    assert.strictEqual(retries.length, 2);
+    assert.partialDeepStrictEqual(retries[0], { outcome: "started" });
+    assert.partialDeepStrictEqual(retries[1], { outcome: "recovered" });
+    const preparationSuccesses = activities.map((activity) =>
+      activity.filter(
+        (event) =>
+          event.type === "phase" &&
+          event.phase === "container-preparation" &&
+          event.outcome === "succeeded",
       ),
-      [[any(Object)], [any(Object)]],
     );
+    assert.strictEqual(preparationSuccesses.length, 2);
+    for (const successes of preparationSuccesses) {
+      assert.strictEqual(successes.length, 1);
+      assert.ok(typeof successes[0] === "object" && successes[0] !== null);
+    }
     const label = fixtureIdLabel(projectDir);
-    assertDeepStrictEqualWithMatchers(
-      calls.filter(
-        ({ command, args }) => command === "docker" && args[0] === "ps",
-      ),
-      [
-        objectContaining({
-          args: ["ps", "-aq", "--filter", `label=${label}`],
-        }),
-        objectContaining({
-          args: ["ps", "-aq", "--filter", `label=${label}`],
-        }),
-      ],
+    const inspectCalls = calls.filter(
+      ({ command, args }) => command === "docker" && args[0] === "ps",
     );
-    assertLength(
+    assert.strictEqual(inspectCalls.length, 2);
+    for (const call of inspectCalls) {
+      assert.deepStrictEqual(call.args, [
+        "ps",
+        "-aq",
+        "--filter",
+        `label=${label}`,
+      ]);
+    }
+    assert.strictEqual(
       calls.filter(
         ({ command, args }) => command === "docker" && args[0] === "rm",
-      ),
+      ).length,
       2,
     );
   });
@@ -1478,7 +1477,7 @@ void describe("Development Container Fixture Executor", () => {
     let treeWrites = 0;
     let rootChecks = 0;
 
-    await assertRejectsMatching(
+    await assert.rejects(
       executeGeneratedRootQuality({
         plan,
         projectDir,
@@ -1496,7 +1495,11 @@ void describe("Development Container Fixture Executor", () => {
           return {};
         },
       }),
-      /Fix Command changed the working-tree identity from 1111.* to 2222/u,
+      (error) =>
+        error instanceof Error &&
+        /Fix Command changed the working-tree identity from 1111.* to 2222/u.test(
+          error.message,
+        ),
     );
     assert.strictEqual(rootChecks, 1);
   });
@@ -1637,42 +1640,37 @@ void describe("Development Container Fixture Executor", () => {
       const phases = records.flatMap((record) =>
         record.event.type === "phase" ? [record.event] : [],
       );
-      assertLength(
-        phases.filter((event) => event.outcome === "started"),
+      assert.strictEqual(
+        phases.filter((event) => event.outcome === "started").length,
         scenarioCount * 5,
       );
-      assertLength(
-        phases.filter((event) => event.outcome === "succeeded"),
+      assert.strictEqual(
+        phases.filter((event) => event.outcome === "succeeded").length,
         scenarioCount * 5,
       );
       assert.deepStrictEqual(
         records.filter((record) => record.event.type === "retry"),
         [],
       );
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "cold-registry-phases",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: true,
-          stages: [
-            objectContaining({
-              retries: 0,
-              recoveries: 0,
-            }),
-          ],
-        },
-      );
-      assertLength(
+      const health = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "cold-registry-phases",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(health.healthy, true);
+      assert.strictEqual(health.stages.length, 1);
+      assert.partialDeepStrictEqual(health.stages[0], {
+        retries: 0,
+        recoveries: 0,
+      });
+      assert.strictEqual(
         calls.filter(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         calls.filter(({ command, args }) => {
           if (command !== "devcontainer" || args[0] !== "exec") return false;
           const nested = nestedDevcontainerCommand(args);
@@ -1685,7 +1683,7 @@ void describe("Development Container Fixture Executor", () => {
             nested.command === "git" &&
             (nestedGitArgs[0] === "add" || nestedGitArgs[0] === "write-tree")
           );
-        }),
+        }).length,
         scenarioCount * 4,
       );
       const buildCacheSources = calls
@@ -1699,16 +1697,16 @@ void describe("Development Container Fixture Executor", () => {
           return args[cacheFrom + 1];
         });
       assert.ok(new Set(buildCacheSources).size < buildCacheSources.length);
-      assertLength(
+      assert.strictEqual(
         calls.filter(
           ({ command, args }) => command === "docker" && args[0] === "ps",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         calls.filter(
           ({ command, args }) => command === "docker" && args[0] === "rm",
-        ),
+        ).length,
         scenarioCount,
       );
       assert.strictEqual(
@@ -1751,10 +1749,8 @@ void describe("Development Container Fixture Executor", () => {
     }
   });
 
-  testEach(
-    [...requiredCapabilityProbeIdentities],
-    "does not let a host-prepared %s capability mask its missing container probe",
-    async (identity) => {
+  for (const identity of requiredCapabilityProbeIdentities) {
+    void it(`does not let a host-prepared ${identity} capability mask its missing container probe`, async () => {
       const projectDir = path.resolve(`/fixture/container-${identity}-missing`);
       const probe = registryCapabilityProbes(projectDir).find(
         (candidate) => candidate.identity === identity,
@@ -1782,12 +1778,14 @@ void describe("Development Container Fixture Executor", () => {
       });
 
       try {
-        await assertRejectsMatching(
+        await assert.rejects(
           session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-          new RegExp(
-            `Development Container capability ${identity}.*container capability is missing`,
-            "u",
-          ),
+          (error) =>
+            error instanceof Error &&
+            new RegExp(
+              `Development Container capability ${identity}.*container capability is missing`,
+              "u",
+            ).test(error.message),
         );
       } finally {
         await session.close();
@@ -1810,8 +1808,8 @@ void describe("Development Container Fixture Executor", () => {
         calls.some(({ args }) => args.includes("--lockfile-only")),
         false,
       );
-    },
-  );
+    });
+  }
 
   void it("shares one cold container session across independent Root and Deployment gates", async () => {
     const workspace = path.resolve(
@@ -1890,20 +1888,20 @@ void describe("Development Container Fixture Executor", () => {
         assert.notStrictEqual(root, undefined);
         assert.notStrictEqual(root?.identity, deployment.identity);
         const projectDir = path.join(workspace, deployment.scenario!.id);
-        assertLength(
+        assert.strictEqual(
           calls.filter(
             ({ command, args, cwd }) =>
               cwd === projectDir &&
               command === "devcontainer" &&
               args[0] === "up",
-          ),
+          ).length,
           1,
         );
-        assertLength(
+        assert.strictEqual(
           calls.filter(
             ({ command, args, cwd }) =>
               cwd === projectDir && command === "docker" && args[0] === "ps",
-          ),
+          ).length,
           1,
         );
       }
@@ -1950,19 +1948,23 @@ void describe("Development Container Fixture Executor", () => {
         (failure as AggregateError).message,
         /^Dependency preparation failed during pnpm fetch.*fixture registry unavailable/u,
       );
-      assert.ok(
-        (failure as AggregateError).message.includes(
-          "fixture cleanup daemon stopped",
-        ),
+      assert.strictEqual(
+        (failure as AggregateError).cause,
+        (failure as AggregateError).errors[0],
       );
-      assertLength((failure as AggregateError).errors, 2);
-      assertDeepStrictEqualWithMatchers(
-        reports,
-        arrayContaining([
-          stringMatching(
-            /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u,
+      assert.strictEqual((failure as AggregateError).errors.length, 3);
+      const cleanupFailure = (failure as AggregateError).errors[1];
+      assert.ok(cleanupFailure instanceof AggregateError);
+      assert.equal(
+        (cleanupFailure.errors[0] as Error).message,
+        "fixture cleanup daemon stopped",
+      );
+      assert.ok(
+        reports.some((report) =>
+          /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u.test(
+            report,
           ),
-        ]),
+        ),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2050,9 +2052,13 @@ void describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await assertRejectsMatching(
+      await assert.rejects(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-        /Development Container capability docker-client.*Docker daemon access is unavailable.*permission denied/u,
+        (error) =>
+          error instanceof Error &&
+          /Development Container capability docker-client.*Docker daemon access is unavailable.*permission denied/u.test(
+            error.message,
+          ),
       );
     } finally {
       await session.close();
@@ -2116,10 +2122,17 @@ void describe("Development Container Fixture Executor", () => {
       (failure as AggregateError).message,
       /^Development Container capability docker-client.*permission denied/u,
     );
-    assert.ok(
-      (failure as AggregateError).message.includes("cleanup daemon stopped"),
+    assert.strictEqual(
+      (failure as AggregateError).cause,
+      (failure as AggregateError).errors[0],
     );
-    assertLength((failure as AggregateError).errors, 2);
+    assert.strictEqual((failure as AggregateError).errors.length, 3);
+    const cleanupFailure = (failure as AggregateError).errors[1];
+    assert.ok(cleanupFailure instanceof AggregateError);
+    assert.equal(
+      (cleanupFailure.errors[0] as Error).message,
+      "cleanup daemon stopped",
+    );
   });
 
   void it("fails a successful scenario when cleanup fails", async () => {
@@ -2142,13 +2155,21 @@ void describe("Development Container Fixture Executor", () => {
       .catch((error: unknown) => error);
 
     assert.ok(failure instanceof AggregateError);
-    assert.strictEqual(
+    assert.match(
       (failure as AggregateError).message,
-      "Development Container Fixture cleanup failed",
+      /^Development Container Fixture cleanup retry failed/u,
     );
-    assertDeepStrictEqualWithMatchers((failure as AggregateError).errors, [
-      objectContaining({ message: "cleanup daemon stopped" }),
-    ]);
+    assert.strictEqual(
+      (failure as AggregateError).cause,
+      (failure as AggregateError).errors[0],
+    );
+    assert.strictEqual((failure as AggregateError).errors.length, 2);
+    const firstCleanupFailure = (failure as AggregateError).errors[0];
+    assert.ok(firstCleanupFailure instanceof AggregateError);
+    assert.equal(
+      (firstCleanupFailure.errors[0] as Error).message,
+      "cleanup daemon stopped",
+    );
   });
 
   void it("attributes dependency preparation failures and still cleans up", async () => {
@@ -2172,9 +2193,13 @@ void describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await assertRejectsMatching(
+      await assert.rejects(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-        /Dependency preparation failed during pnpm fetch.*registry unavailable/u,
+        (error) =>
+          error instanceof Error &&
+          /Dependency preparation failed during pnpm fetch.*registry unavailable/u.test(
+            error.message,
+          ),
       );
     } finally {
       await session.close();
@@ -2201,28 +2226,24 @@ void describe("Development Container Fixture Executor", () => {
     );
   });
 
-  testEach(
-    [
-      {
-        unavailable: "docker",
-        expected:
-          /Docker is required for Generated Repository Fixture quality/u,
-        expectedCalls: [
-          ["docker", "version", "--format", "{{.Server.Version}}"],
-        ],
-      },
-      {
-        unavailable: "devcontainer",
-        expected:
-          /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
-        expectedCalls: [
-          ["docker", "version", "--format", "{{.Server.Version}}"],
-          ["devcontainer", "--version"],
-        ],
-      },
-    ],
-    "reports a clear $unavailable prerequisite error without host fallback",
-    async ({ unavailable, expected, expectedCalls }) => {
+  for (const scenario of [
+    {
+      unavailable: "docker",
+      expected: /Docker is required for Generated Repository Fixture quality/u,
+      expectedCalls: [["docker", "version", "--format", "{{.Server.Version}}"]],
+    },
+    {
+      unavailable: "devcontainer",
+      expected:
+        /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
+      expectedCalls: [
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        ["devcontainer", "--version"],
+      ],
+    },
+  ] as const) {
+    void it(`reports a clear ${scenario.unavailable} prerequisite error without host fallback`, async () => {
+      const { unavailable, expected, expectedCalls } = scenario;
       const projectDir = path.resolve(`/fixture/missing-${unavailable}`);
       const calls: Command[] = [];
       const session = createDevelopmentContainerFixtureSession({
@@ -2260,8 +2281,8 @@ void describe("Development Container Fixture Executor", () => {
         ),
         false,
       );
-    },
-  );
+    });
+  }
 
   void it("removes the labeled container and exactly the declared scenario volumes after a command failure", async () => {
     const projectDir = path.resolve("/fixture/command-failure");
@@ -2410,17 +2431,20 @@ void describe("Development Container Fixture Executor", () => {
         args[0] === "exec" &&
         args.includes("check"),
     );
-    assertDeepStrictEqualWithMatchers(
-      execCall?.args,
-      arrayContaining([
-        "--remote-env",
-        stringMatching(/^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u),
-        "--remote-env",
-        "TURBO_TEAM=fixture-team",
-        "TURBO_TOKEN=fixture-token",
-        "TURBO_REMOTE_CACHE_SIGNATURE_KEY=fixture-signature",
-        "TURBO_REMOTE_CACHE_READ_ONLY=true",
-      ]),
+    assert.ok(execCall);
+    for (const expectedArgument of [
+      "--remote-env",
+      "TURBO_TEAM=fixture-team",
+      "TURBO_TOKEN=fixture-token",
+      "TURBO_REMOTE_CACHE_SIGNATURE_KEY=fixture-signature",
+      "TURBO_REMOTE_CACHE_READ_ONLY=true",
+    ]) {
+      assert.ok(execCall.args.includes(expectedArgument));
+    }
+    assert.ok(
+      execCall.args.some((argument) =>
+        /^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u.test(argument),
+      ),
     );
     assert.ok(!execCall?.args.join("\n").includes("UNRELATED_SECRET"));
     assert.ok(
