@@ -437,7 +437,12 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     await assert.rejects(
       stat(path.join(targetDir, ".pnpmfile.cts")),
       (error) => {
-        assert.partialDeepStrictEqual(error, { code: "ENOENT" });
+        assert.ok(typeof error === "object" && error !== null);
+        assert.ok(Object.hasOwn(error, "code"));
+        assert.strictEqual(
+          (error as { readonly code?: unknown }).code,
+          "ENOENT",
+        );
         return true;
       },
     );

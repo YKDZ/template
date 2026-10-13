@@ -1743,7 +1743,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           calls.some(
             (call) =>
               call.includes("publish") &&
-              call.some((argument) => /\.tgz$/u.test(argument)) &&
+              call.some((argument) => argument.endsWith(".tgz")) &&
               call.includes("--access=public") &&
               call.includes("--tag=latest"),
           ),
