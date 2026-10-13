@@ -1167,13 +1167,32 @@ export async function runGeneratedScenarioSet(
   const rejected = results.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
-  const failed =
+  const preferredFailure =
     rejected.find(
       (result) =>
         !cleanupFailureObserved ||
         !hasFailureCause(result.reason, cleanupFailure),
     ) ?? rejected[0];
-  if (failed !== undefined) scenarioFailure = failed.reason;
+  if (preferredFailure !== undefined) {
+    const preferredReason = preferredFailure.reason;
+    const additionalFailures = [
+      ...new Set(
+        rejected
+          .map((result) => result.reason)
+          .filter((reason) => reason !== preferredReason),
+      ),
+    ];
+    scenarioFailure =
+      scenarioCancelSignal.aborted &&
+      preferredReason === scenarioCancelSignal.reason &&
+      additionalFailures.length > 0
+        ? new AggregateError(
+            additionalFailures,
+            `Fixture scenario set was cancelled: ${failureMessage(preferredReason)}`,
+            { cause: preferredReason },
+          )
+        : preferredReason;
+  }
   if (set !== "init" && options.evidence?.writeEnabled === true) {
     try {
       await options.evidence.storage?.prune?.({
@@ -1242,6 +1261,7 @@ export async function runGeneratedRegistryCli(options: {
   readonly workspace?: string;
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
+  readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
   readonly cancelSignal?: AbortSignal;
 }): Promise<void> {
   const set = options.scenarioSet;
@@ -1317,6 +1337,9 @@ export async function runGeneratedRegistryCli(options: {
       ...(options.cancelSignal === undefined
         ? {}
         : { cancelSignal: options.cancelSignal }),
+      ...(options.schedulerFactory === undefined
+        ? {}
+        : { schedulerFactory: options.schedulerFactory }),
       scheduling,
       buildKitCacheDirectory: path.resolve(buildKitCacheDirectory),
       containerEnvironment: fixtureContainerEnvironmentFromEnvironment(
