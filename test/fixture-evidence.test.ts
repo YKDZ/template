@@ -3376,108 +3376,115 @@ void describe("Fixture Verification Evidence", () => {
     }
   });
 
-  void it("applies CLI ordinary concurrency to every scenario set", async () => {
-    const root = await temporaryRepository("fixture-cli-resource-caps-");
-    const sets = [
-      "init",
-      "package-addition-matrix",
-      "focused",
-      "deployment",
-    ] as const;
-    const maxActiveInstalls = new Map<(typeof sets)[number], number>();
-    const expectedMaxActiveInstalls = new Map<(typeof sets)[number], number>();
-    try {
-      for (const scenarioSet of sets) {
-        const installs = createBlockedConcurrencyProbe();
-        const cli = runGeneratedRegistryCli({
-          scenarioSet,
-          environment: {
-            TEMPLATE_FIXTURE_CONCURRENCY: "4",
-            TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "4",
-          },
-          workspace: path.join(root, scenarioSet),
-          reporter: { info: () => undefined },
-          run: async (command, args, options) => {
-            if (command === "git") {
-              return await execa(command, [...args], options);
-            }
-            if (args[0] === "install") {
-              await installs.enter();
-            }
-            if (args.includes("--dry-run=json")) {
-              return {
-                stdout: JSON.stringify({
-                  tasks: (await generatedTaskIds(options.cwd)).map(
-                    (taskId) => ({ taskId }),
-                  ),
-                }),
-              };
-            }
-            if (
-              command === "pnpm" &&
-              args.includes("build") &&
-              args.includes("--force")
-            ) {
-              await materializeFocusedProviderBuild(options.cwd);
-            }
-            if (command === "node") {
-              return {
-                stdout: await focusedMarker(
-                  path.dirname(path.dirname(options.cwd)),
-                ),
-              };
-            }
-            return {};
-          },
-        });
-        const scenarios = await generatedScenariosFor(scenarioSet);
-        const renderedScenarios = await Promise.all(
-          scenarios.map(
-            async (scenario) =>
-              await renderMatrixScenario({
-                scenario,
-                workspace: path.join(root, "resource-oracle", scenarioSet),
-              }),
-          ),
-        );
-        const browserConstrained = renderedScenarios.filter(({ plan }) =>
-          generatedRootQualityExecutionResources(plan).includes("browser"),
-        ).length;
-        const ordinaryOnly = scenarios.length - browserConstrained;
-        const expected =
-          scenarioSet === "deployment"
-            ? 1
-            : Math.min(4, ordinaryOnly + Math.min(browserConstrained, 1));
-        expectedMaxActiveInstalls.set(scenarioSet, expected);
-        let observationFailure: unknown;
-        try {
-          await waitFor(
-            () => {
-              assert.deepStrictEqual(
-                { scenarioSet, active: installs.active() },
-                {
-                  scenarioSet,
-                  active: expected,
-                },
-              );
+  void it(
+    "applies CLI ordinary concurrency to every scenario set",
+    { timeout: 180_000 },
+    async () => {
+      const root = await temporaryRepository("fixture-cli-resource-caps-");
+      const sets = [
+        "init",
+        "package-addition-matrix",
+        "focused",
+        "deployment",
+      ] as const;
+      const maxActiveInstalls = new Map<(typeof sets)[number], number>();
+      const expectedMaxActiveInstalls = new Map<
+        (typeof sets)[number],
+        number
+      >();
+      try {
+        for (const scenarioSet of sets) {
+          const installs = createBlockedConcurrencyProbe();
+          const cli = runGeneratedRegistryCli({
+            scenarioSet,
+            environment: {
+              TEMPLATE_FIXTURE_CONCURRENCY: "4",
+              TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "4",
             },
-            { timeout: 30_000 },
+            workspace: path.join(root, scenarioSet),
+            reporter: { info: () => undefined },
+            run: async (command, args, options) => {
+              if (command === "git") {
+                return await execa(command, [...args], options);
+              }
+              if (args[0] === "install") {
+                await installs.enter();
+              }
+              if (args.includes("--dry-run=json")) {
+                return {
+                  stdout: JSON.stringify({
+                    tasks: (await generatedTaskIds(options.cwd)).map(
+                      (taskId) => ({ taskId }),
+                    ),
+                  }),
+                };
+              }
+              if (
+                command === "pnpm" &&
+                args.includes("build") &&
+                args.includes("--force")
+              ) {
+                await materializeFocusedProviderBuild(options.cwd);
+              }
+              if (command === "node") {
+                return {
+                  stdout: await focusedMarker(
+                    path.dirname(path.dirname(options.cwd)),
+                  ),
+                };
+              }
+              return {};
+            },
+          });
+          const scenarios = await generatedScenariosFor(scenarioSet);
+          const renderedScenarios = await Promise.all(
+            scenarios.map(
+              async (scenario) =>
+                await renderMatrixScenario({
+                  scenario,
+                  workspace: path.join(root, "resource-oracle", scenarioSet),
+                }),
+            ),
           );
-        } catch (error) {
-          observationFailure = error;
-        } finally {
-          installs.release();
+          const browserConstrained = renderedScenarios.filter(({ plan }) =>
+            generatedRootQualityExecutionResources(plan).includes("browser"),
+          ).length;
+          const ordinaryOnly = scenarios.length - browserConstrained;
+          const expected =
+            scenarioSet === "deployment"
+              ? 1
+              : Math.min(4, ordinaryOnly + Math.min(browserConstrained, 1));
+          expectedMaxActiveInstalls.set(scenarioSet, expected);
+          let observationFailure: unknown;
+          try {
+            await waitFor(
+              () => {
+                assert.deepStrictEqual(
+                  { scenarioSet, active: installs.active() },
+                  {
+                    scenarioSet,
+                    active: expected,
+                  },
+                );
+              },
+              { timeout: 30_000 },
+            );
+          } catch (error) {
+            observationFailure = error;
+          } finally {
+            installs.release();
+          }
+          await cli;
+          if (observationFailure !== undefined) throw observationFailure;
+          maxActiveInstalls.set(scenarioSet, installs.maximum());
         }
-        await cli;
-        if (observationFailure !== undefined) throw observationFailure;
-        maxActiveInstalls.set(scenarioSet, installs.maximum());
-      }
 
-      assert.deepStrictEqual(maxActiveInstalls, expectedMaxActiveInstalls);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+        assert.deepStrictEqual(maxActiveInstalls, expectedMaxActiveInstalls);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   void it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
     const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
@@ -5845,235 +5852,239 @@ void describe("Fixture Verification Evidence", () => {
     }
   });
 
-  void it("reconciles the complete Package Addition Matrix before warm Root Quality lookup", async () => {
-    const root = await temporaryRepository("fixture-matrix-evidence-");
-    const evidenceRoot = path.join(root, "evidence");
-    const firstWorkspace = path.join(root, "cold");
-    const secondWorkspace = path.join(root, "warm");
-    const storage = new FileFixtureEvidenceStorage(evidenceRoot);
-    const clock = () => new Date("2026-07-28T00:00:00.000Z");
-    const gitSubcommand = (args: readonly string[]) =>
-      args[0] === "-c" && args[1]?.startsWith("safe.directory=")
-        ? args[2]
-        : args[0];
+  void it(
+    "reconciles the complete Package Addition Matrix before warm Root Quality lookup",
+    { timeout: 180_000 },
+    async () => {
+      const root = await temporaryRepository("fixture-matrix-evidence-");
+      const evidenceRoot = path.join(root, "evidence");
+      const firstWorkspace = path.join(root, "cold");
+      const secondWorkspace = path.join(root, "warm");
+      const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+      const clock = () => new Date("2026-07-28T00:00:00.000Z");
+      const gitSubcommand = (args: readonly string[]) =>
+        args[0] === "-c" && args[1]?.startsWith("safe.directory=")
+          ? args[2]
+          : args[0];
 
-    const createRunner =
-      (
-        commands: Array<{
-          command: string;
-          args: readonly string[];
-          cwd: string;
-        }>,
-      ) =>
-      async (
-        command: string,
-        args: readonly string[],
-        options: { readonly cwd: string; readonly stdio?: "inherit" },
-      ): Promise<unknown> => {
-        commands.push({ command, args, cwd: options.cwd });
-        if (command === "git") {
-          return await execa(command, [...args], options);
-        }
-        if (args[0] === "install") {
-          await mkdir(path.join(options.cwd, "node_modules"), {
-            recursive: true,
-          });
-          await writeFile(
-            path.join(options.cwd, "pnpm-lock.yaml"),
-            "fixture-created: true\n",
-          );
-        }
-        if (args.includes("--dry-run=json")) {
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
-            }),
-          };
-        }
-        return {};
-      };
+      const createRunner =
+        (
+          commands: Array<{
+            command: string;
+            args: readonly string[];
+            cwd: string;
+          }>,
+        ) =>
+        async (
+          command: string,
+          args: readonly string[],
+          options: { readonly cwd: string; readonly stdio?: "inherit" },
+        ): Promise<unknown> => {
+          commands.push({ command, args, cwd: options.cwd });
+          if (command === "git") {
+            return await execa(command, [...args], options);
+          }
+          if (args[0] === "install") {
+            await mkdir(path.join(options.cwd, "node_modules"), {
+              recursive: true,
+            });
+            await writeFile(
+              path.join(options.cwd, "pnpm-lock.yaml"),
+              "fixture-created: true\n",
+            );
+          }
+          if (args.includes("--dry-run=json")) {
+            return {
+              stdout: JSON.stringify({
+                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                  taskId,
+                })),
+              }),
+            };
+          }
+          return {};
+        };
 
-    const coldCommands: Array<{
-      command: string;
-      args: readonly string[];
-      cwd: string;
-    }> = [];
-    const warmCommands: typeof coldCommands = [];
-    const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
-    try {
-      await runGeneratedScenarioSet("package-addition-matrix", {
-        workspace: firstWorkspace,
-        run: createRunner(coldCommands),
-        evidence: {
-          storage,
-          clock,
-          writeEnabled: true,
-          producerCommit: "cold-producer",
-        },
-      });
-      const invalidRecordPath = path.join(
-        evidenceRoot,
-        "generated-root-quality",
-        "invalid.json",
-      );
-      await writeFile(invalidRecordPath, '{"schema":');
-      await runGeneratedScenarioSet("package-addition-matrix", {
-        workspace: secondWorkspace,
-        run: createRunner(warmCommands),
-        evidence: {
-          storage,
-          clock,
-          writeEnabled: true,
-          producerCommit: "warm-producer",
-          recordLifecycle: (event) => {
-            warmEvents.push(event);
+      const coldCommands: Array<{
+        command: string;
+        args: readonly string[];
+        cwd: string;
+      }> = [];
+      const warmCommands: typeof coldCommands = [];
+      const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
+      try {
+        await runGeneratedScenarioSet("package-addition-matrix", {
+          workspace: firstWorkspace,
+          run: createRunner(coldCommands),
+          evidence: {
+            storage,
+            clock,
+            writeEnabled: true,
+            producerCommit: "cold-producer",
           },
-        },
-      });
-
-      const scenarioCount = (
-        await generatedScenariosFor("package-addition-matrix")
-      ).length;
-      assertLength(
-        coldCommands.filter(
-          ({ command, args }) =>
-            command === "git" && gitSubcommand(args) === "init",
-        ),
-        scenarioCount,
-      );
-      assertLength(
-        coldCommands.filter(
-          ({ command, args }) =>
-            command === "git" && gitSubcommand(args) === "add",
-        ),
-        scenarioCount * 4,
-      );
-      assertLength(
-        coldCommands.filter(
-          ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "fix",
-        ),
-        scenarioCount,
-      );
-      const coldInstalls = coldCommands.filter(
-        ({ command, args }) => command === "pnpm" && args[0] === "install",
-      );
-      assertLength(coldInstalls, scenarioCount);
-      assert.strictEqual(
-        new Set(coldInstalls.map(({ cwd }) => cwd)).size,
-        scenarioCount,
-      );
-      for (const install of coldInstalls) {
-        assert.strictEqual(path.dirname(install.cwd), firstWorkspace);
-        assert.deepStrictEqual(install.args, [
-          "install",
-          "--store-dir",
-          path.join(firstWorkspace, ".pnpm-store"),
-        ]);
-        const scenarioCommands = coldCommands.filter(
-          ({ cwd }) => cwd === install.cwd,
+        });
+        const invalidRecordPath = path.join(
+          evidenceRoot,
+          "generated-root-quality",
+          "invalid.json",
         );
-        assert.ok(
-          scenarioCommands.findIndex(
+        await writeFile(invalidRecordPath, '{"schema":');
+        await runGeneratedScenarioSet("package-addition-matrix", {
+          workspace: secondWorkspace,
+          run: createRunner(warmCommands),
+          evidence: {
+            storage,
+            clock,
+            writeEnabled: true,
+            producerCommit: "warm-producer",
+            recordLifecycle: (event) => {
+              warmEvents.push(event);
+            },
+          },
+        });
+
+        const scenarioCount = (
+          await generatedScenariosFor("package-addition-matrix")
+        ).length;
+        assertLength(
+          coldCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "init",
-          ) <
+          ),
+          scenarioCount,
+        );
+        assertLength(
+          coldCommands.filter(
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "add",
+          ),
+          scenarioCount * 4,
+        );
+        assertLength(
+          coldCommands.filter(
+            ({ command, args }) =>
+              command === "pnpm" && args[0] === "run" && args[1] === "fix",
+          ),
+          scenarioCount,
+        );
+        const coldInstalls = coldCommands.filter(
+          ({ command, args }) => command === "pnpm" && args[0] === "install",
+        );
+        assertLength(coldInstalls, scenarioCount);
+        assert.strictEqual(
+          new Set(coldInstalls.map(({ cwd }) => cwd)).size,
+          scenarioCount,
+        );
+        for (const install of coldInstalls) {
+          assert.strictEqual(path.dirname(install.cwd), firstWorkspace);
+          assert.deepStrictEqual(install.args, [
+            "install",
+            "--store-dir",
+            path.join(firstWorkspace, ".pnpm-store"),
+          ]);
+          const scenarioCommands = coldCommands.filter(
+            ({ cwd }) => cwd === install.cwd,
+          );
+          assert.ok(
             scenarioCommands.findIndex(
               ({ command, args }) =>
-                command === "git" && gitSubcommand(args) === "add",
-            ),
+                command === "git" && gitSubcommand(args) === "init",
+            ) <
+              scenarioCommands.findIndex(
+                ({ command, args }) =>
+                  command === "git" && gitSubcommand(args) === "add",
+              ),
+          );
+        }
+        assert.deepStrictEqual(
+          warmCommands.filter(({ command }) => command === "pnpm"),
+          [],
         );
-      }
-      assert.deepStrictEqual(
-        warmCommands.filter(({ command }) => command === "pnpm"),
-        [],
-      );
-      assert.deepStrictEqual(
-        new Set(warmCommands.map(({ command }) => command)),
-        new Set(["git"]),
-      );
-      assertLength(
-        warmCommands.filter(
-          ({ command, args }) =>
-            command === "git" && gitSubcommand(args) === "init",
-        ),
-        scenarioCount,
-      );
-      assertLength(
-        warmCommands.filter(
-          ({ command, args }) =>
-            command === "git" && gitSubcommand(args) === "add",
-        ),
-        scenarioCount * 2,
-      );
-      assertLength(
-        warmCommands.filter(
-          ({ command, args }) =>
-            command === "git" && gitSubcommand(args) === "write-tree",
-        ),
-        scenarioCount,
-      );
-      assertLength(
-        warmEvents.filter(
-          (event) => event.type === "lookup" && event.outcome === "hit",
-        ),
-        scenarioCount,
-      );
-      assert.deepStrictEqual(
-        warmEvents.filter((event) => event.type === "execution"),
-        [],
-      );
-      await assert.rejects(readFile(invalidRecordPath, "utf8"), (error) => {
-        assertPartialDeepStrictEqual(error, {
-          code: "ENOENT",
-        });
-        return true;
-      });
-      for (const scenario of await generatedScenariosFor(
-        "package-addition-matrix",
-      )) {
-        const generation = JSON.parse(
-          await readFile(
-            path.join(
-              secondWorkspace,
-              scenario.id,
-              ".template/generation.json",
-            ),
-            "utf8",
+        assert.deepStrictEqual(
+          new Set(warmCommands.map(({ command }) => command)),
+          new Set(["git"]),
+        );
+        assertLength(
+          warmCommands.filter(
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "init",
           ),
-        ) as {
-          readonly packages: readonly {
-            readonly path: string;
-            readonly definitionName: string;
-          }[];
-        };
-        assert.ok(
-          generation.packages
-            .map(({ definitionName }) => definitionName)
-            .includes(
-              scenario.addition?.metadata.name ?? scenario.base.metadata.name,
-            ),
+          scenarioCount,
         );
-        assert.ok(
-          (
+        assertLength(
+          warmCommands.filter(
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "add",
+          ),
+          scenarioCount * 2,
+        );
+        assertLength(
+          warmCommands.filter(
+            ({ command, args }) =>
+              command === "git" && gitSubcommand(args) === "write-tree",
+          ),
+          scenarioCount,
+        );
+        assertLength(
+          warmEvents.filter(
+            (event) => event.type === "lookup" && event.outcome === "hit",
+          ),
+          scenarioCount,
+        );
+        assert.deepStrictEqual(
+          warmEvents.filter((event) => event.type === "execution"),
+          [],
+        );
+        await assert.rejects(readFile(invalidRecordPath, "utf8"), (error) => {
+          assertPartialDeepStrictEqual(error, {
+            code: "ENOENT",
+          });
+          return true;
+        });
+        for (const scenario of await generatedScenariosFor(
+          "package-addition-matrix",
+        )) {
+          const generation = JSON.parse(
             await readFile(
               path.join(
                 secondWorkspace,
                 scenario.id,
-                generation.packages.at(-1)!.path,
-                "package.json",
+                ".template/generation.json",
               ),
               "utf8",
-            )
-          ).includes('"name"'),
-        );
+            ),
+          ) as {
+            readonly packages: readonly {
+              readonly path: string;
+              readonly definitionName: string;
+            }[];
+          };
+          assert.ok(
+            generation.packages
+              .map(({ definitionName }) => definitionName)
+              .includes(
+                scenario.addition?.metadata.name ?? scenario.base.metadata.name,
+              ),
+          );
+          assert.ok(
+            (
+              await readFile(
+                path.join(
+                  secondWorkspace,
+                  scenario.id,
+                  generation.packages.at(-1)!.path,
+                  "package.json",
+                ),
+                "utf8",
+              )
+            ).includes('"name"'),
+          );
+        }
+      } finally {
+        await rm(root, { recursive: true, force: true });
       }
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   void it("keeps stale and invalid records untouched in a read-only matrix run", async () => {
     const root = await temporaryRepository("fixture-read-only-matrix-");
@@ -6256,7 +6267,7 @@ void describe("Fixture Verification Evidence", () => {
 
   void it(
     "invalidates only final matrix states changed by a Preset-local addition output",
-    { timeout: 180000 },
+    { timeout: 300_000 },
     async () => {
       const root = await temporaryRepository("fixture-matrix-invalidation-");
       const evidenceRoot = path.join(root, "evidence");

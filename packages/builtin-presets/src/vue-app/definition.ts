@@ -42,7 +42,6 @@ function appContribution(options: {
     "index.html",
     "playwright.config.ts",
     "vite.config.ts",
-    "vitest.config.ts",
     "turbo.json",
     "src/App.vue",
     "test/e2e/app.spec.ts",
@@ -70,6 +69,10 @@ function appContribution(options: {
     ciDiagnosticArtifacts: [
       {
         kind: "playwright",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+      {
+        kind: "vitest-browser",
         owner: { kind: "package-boundary", path: definition.path },
       },
     ],

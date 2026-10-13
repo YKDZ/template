@@ -2,7 +2,7 @@ import type { ComponentOwner } from "./module-graph.ts";
 
 /** Closed, owner-scoped native evidence a Package Contribution may retain in CI. */
 export type CiDiagnosticArtifactDeclaration = {
-  readonly kind: "playwright";
+  readonly kind: "playwright" | "vitest-browser";
   readonly owner: ComponentOwner;
 };
 
@@ -51,7 +51,7 @@ export function assertCiDiagnosticArtifactDeclaration(
       "CI Diagnostic Artifact declarations may contain only kind and owner",
     );
   }
-  if (value.kind !== "playwright") {
+  if (value.kind !== "playwright" && value.kind !== "vitest-browser") {
     throw new Error("Unsupported CI Diagnostic Artifact kind");
   }
   if (!isRecord(value.owner) || !hasExactKeys(value.owner, ["kind", "path"])) {
@@ -69,7 +69,7 @@ export function assertCiDiagnosticArtifactDeclaration(
     );
   }
   return {
-    kind: "playwright",
+    kind: value.kind,
     owner:
       value.owner.kind === "workspace-orchestration"
         ? { kind: "workspace-orchestration", path: "." }
@@ -107,7 +107,8 @@ export function composeCiDiagnosticArtifacts(options: {
     const key = `${declaration.kind}:${declaration.owner.path}`;
     artifacts.set(key, declaration);
   }
-  return [...artifacts.values()].toSorted((left, right) =>
-    left.owner.path.localeCompare(right.owner.path),
-  );
+  return [...artifacts.values()].toSorted((left, right) => {
+    const ownerOrder = left.owner.path.localeCompare(right.owner.path);
+    return ownerOrder === 0 ? left.kind.localeCompare(right.kind) : ownerOrder;
+  });
 }

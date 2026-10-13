@@ -3,7 +3,9 @@ import { parseDocument, isScalar, visit } from "yaml";
 
 type WorkflowOracle = {
   readonly deployment: boolean;
-  readonly diagnosticOwnerPaths: readonly string[];
+  readonly diagnosticOwnerPaths: Readonly<
+    Record<"playwright" | "vitest-browser", readonly string[]>
+  >;
 };
 
 function hasExactKeys(
@@ -26,7 +28,10 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
   const packagePaths = new Set(
     plan.blueprint.packages.map((definition) => definition.path),
   );
-  const diagnosticOwnerPaths = new Set<string>();
+  const diagnosticOwnerPaths = {
+    playwright: new Set<string>(),
+    "vitest-browser": new Set<string>(),
+  };
   for (const declaration of plan.ciDiagnosticArtifacts) {
     if (
       typeof declaration !== "object" ||
@@ -40,7 +45,8 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
     }
     const owner = (declaration as { readonly owner?: unknown }).owner;
     if (
-      declaration.kind !== "playwright" ||
+      (declaration.kind !== "playwright" &&
+        declaration.kind !== "vitest-browser") ||
       typeof owner !== "object" ||
       owner === null ||
       Array.isArray(owner) ||
@@ -79,7 +85,7 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
         `CI Diagnostic Artifact owner is not a declared Package Boundary: ${ownerPath.path}`,
       );
     }
-    diagnosticOwnerPaths.add(ownerPath.path);
+    diagnosticOwnerPaths[declaration.kind].add(ownerPath.path);
   }
 
   const deployment = plan.deploymentCheck !== undefined;
@@ -93,7 +99,10 @@ function workflowOracle(plan: GeneratedRepositoryPlan): WorkflowOracle {
   }
   return {
     deployment,
-    diagnosticOwnerPaths: [...diagnosticOwnerPaths].toSorted(),
+    diagnosticOwnerPaths: {
+      playwright: [...diagnosticOwnerPaths.playwright].toSorted(),
+      "vitest-browser": [...diagnosticOwnerPaths["vitest-browser"]].toSorted(),
+    },
   };
 }
 
@@ -545,7 +554,12 @@ function diagnosticStepContracts(
       readonly upload: ParsedObject;
     }
   | undefined {
-  if (oracle.diagnosticOwnerPaths.length === 0) return undefined;
+  if (
+    oracle.diagnosticOwnerPaths.playwright.length === 0 &&
+    oracle.diagnosticOwnerPaths["vitest-browser"].length === 0
+  ) {
+    return undefined;
+  }
   const condition = deploymentMatrix
     ? "failure() && matrix.capability == 'root'"
     : "failure()";
@@ -555,12 +569,16 @@ function diagnosticStepContracts(
       name: "Stage Root Check diagnostics",
       if: condition,
       env: {
-        DIAGNOSTIC_OWNER_PATHS: oracle.diagnosticOwnerPaths.join("\n"),
+        PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS:
+          oracle.diagnosticOwnerPaths.playwright.join("\n"),
+        VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS:
+          oracle.diagnosticOwnerPaths["vitest-browser"].join("\n"),
       },
       run: [
         "rm -rf .template-ci-diagnostics",
         "mkdir -p .template-ci-diagnostics",
-        "printf '%s\\n' \"$DIAGNOSTIC_OWNER_PATHS\" | while IFS= read -r owner_path; do",
+        "printf '%s\\n' \"$PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS\" | while IFS= read -r owner_path; do",
+        '  [ -n "$owner_path" ] || continue',
         "  for diagnostic_directory in test-results playwright-report; do",
         '    source_path="$owner_path/$diagnostic_directory"',
         '    destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"',
@@ -569,6 +587,16 @@ function diagnosticStepContracts(
         '      cp -R "$source_path" "$destination_path"',
         "    fi",
         "  done",
+        "done",
+        "printf '%s\\n' \"$VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS\" | while IFS= read -r owner_path; do",
+        '  [ -n "$owner_path" ] || continue',
+        '  diagnostic_directory=".vitest/attachments/failure-screenshots"',
+        '  source_path="$owner_path/$diagnostic_directory"',
+        '  destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"',
+        '  if [ -d "$source_path" ]; then',
+        '    mkdir -p "$(dirname "$destination_path")"',
+        '    cp -R "$source_path" "$destination_path"',
+        "  fi",
         "done",
         "",
       ].join("\n"),
@@ -580,6 +608,7 @@ function diagnosticStepContracts(
       with: {
         name: "root-check-diagnostics",
         path: ".template-ci-diagnostics",
+        "include-hidden-files": true,
         "if-no-files-found": "ignore",
         "retention-days": 7,
       },
@@ -604,7 +633,7 @@ function assertDiagnosticSteps(
     stageStep.run !== contract.stage.run
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check diagnostics must stage only closed native Playwright evidence before upload`,
+      `${plan.definitionName}: Root Check diagnostics must stage only closed native evidence before upload`,
     );
   }
   const withValues = isParsedObject(uploadStep) ? uploadStep.with : undefined;
@@ -617,17 +646,19 @@ function assertDiagnosticSteps(
     !hasExactKeys(withValues, [
       "name",
       "path",
+      "include-hidden-files",
       "if-no-files-found",
       "retention-days",
     ]) ||
     withValues.name !== (contract.upload.with as ParsedObject).name ||
     typeof withValues.path !== "string" ||
     withValues.path !== (contract.upload.with as ParsedObject).path ||
+    withValues["include-hidden-files"] !== true ||
     withValues["if-no-files-found"] !== "ignore" ||
     withValues["retention-days"] !== 7
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check diagnostic upload must retain only aggregate native Playwright evidence`,
+      `${plan.definitionName}: Root Check diagnostic upload must retain only aggregate native evidence`,
     );
   }
 }

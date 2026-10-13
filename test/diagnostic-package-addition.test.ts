@@ -204,7 +204,7 @@ void describe("diagnostic Package Addition", () => {
       assert.match(firstWorkflow, /^# user workflow policy\n/u);
       assert.ok(
         firstWorkflow.includes(
-          "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+          "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
         ),
       );
       assert.ok(
@@ -231,11 +231,18 @@ void describe("diagnostic Package Addition", () => {
         { ok: true },
       );
       const secondWorkflow = await readFile(workflowPath, "utf8");
-      assertLength(secondWorkflow.match(/DIAGNOSTIC_OWNER_PATHS: \|-/gu), 1);
-      assertLength(secondWorkflow.match(/apps\/admin/gu), 1);
+      assertLength(
+        secondWorkflow.match(/PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/gu),
+        1,
+      );
+      assertLength(
+        secondWorkflow.match(/VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: \|-/gu),
+        1,
+      );
+      assertLength(secondWorkflow.match(/apps\/admin/gu), 2);
       assert.ok(
         secondWorkflow.includes(
-          "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+          "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
         ),
       );
       assertLength(secondWorkflow.match(/Upload Root Check diagnostics/gu), 1);

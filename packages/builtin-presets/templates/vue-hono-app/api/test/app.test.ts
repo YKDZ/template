@@ -1,10 +1,11 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+
 import { app } from "#/runtime";
 
-describe("Hono API", () => {
-  it("responds to the health route", async () => {
-    const response = await app.request("/api/health");
+void it("responds to the health route", async () => {
+  const response = await app.request("/api/health");
 
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ status: "ok" });
-  });
+  assert.equal(response.status, 200);
+  assert.deepStrictEqual(await response.json(), { status: "ok" });
 });

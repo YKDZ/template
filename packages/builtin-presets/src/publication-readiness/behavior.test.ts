@@ -268,6 +268,7 @@ async function runReadinessThroughPnpm(
   await runReadinessCaller(repositoryRoot);
   return await execa("pnpm", ["run", "publication:readiness", ...args], {
     cwd: repositoryRoot,
+    env: { ...process.env, pnpm_config_verify_deps_before_run: "warn" },
     reject: false,
     all: true,
   });

@@ -1008,14 +1008,20 @@ const workflowTemplateVariants = new Map<
     ".github/workflows/check-diagnostics.yml",
     {
       operationKind: "writeTextTemplate",
-      replacementKeys: ["DIAGNOSTIC_OWNER_PATHS"],
+      replacementKeys: [
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS",
+        "VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS",
+      ],
     },
   ],
   [
     ".github/workflows/check-deployment-diagnostics.yml",
     {
       operationKind: "writeTextTemplate",
-      replacementKeys: ["DIAGNOSTIC_OWNER_PATHS"],
+      replacementKeys: [
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS",
+        "VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS",
+      ],
     },
   ],
 ]);
@@ -1058,28 +1064,39 @@ function isSafePackageBoundaryPath(value: string): boolean {
 function expectedDiagnosticOwnerPaths(options: {
   readonly blueprint: ProjectBlueprint;
   readonly diagnosticArtifactDeclarations: readonly unknown[];
-}): { readonly valid: boolean; readonly value: string } {
+}): {
+  readonly valid: boolean;
+  readonly playwright: string;
+  readonly vitestBrowser: string;
+} {
   const blueprintPackagePaths = options.blueprint.packages.map(
     (packageDefinition) => packageDefinition.path,
   );
   if (!blueprintPackagePaths.every(isSafePackageBoundaryPath)) {
-    return { valid: false, value: "" };
+    return { valid: false, playwright: "", vitestBrowser: "" };
   }
 
   const blueprintOwners = new Set(blueprintPackagePaths);
-  const owners = new Set<string>();
+  const owners = {
+    playwright: new Set<string>(),
+    "vitest-browser": new Set<string>(),
+  };
   for (const declaration of options.diagnosticArtifactDeclarations) {
     if (
       !isRecord(declaration) ||
       !hasExactKeys(declaration, ["kind", "owner"])
     ) {
-      return { valid: false, value: "" };
+      return { valid: false, playwright: "", vitestBrowser: "" };
     }
-    if (declaration.kind !== "playwright" || !isRecord(declaration.owner)) {
-      return { valid: false, value: "" };
+    if (
+      (declaration.kind !== "playwright" &&
+        declaration.kind !== "vitest-browser") ||
+      !isRecord(declaration.owner)
+    ) {
+      return { valid: false, playwright: "", vitestBrowser: "" };
     }
     if (!hasExactKeys(declaration.owner, ["kind", "path"])) {
-      return { valid: false, value: "" };
+      return { valid: false, playwright: "", vitestBrowser: "" };
     }
     const ownerPath = declaration.owner.path;
     const workspaceOwner =
@@ -1090,14 +1107,17 @@ function expectedDiagnosticOwnerPaths(options: {
       isSafePackageBoundaryPath(ownerPath) &&
       blueprintOwners.has(ownerPath);
     if (!workspaceOwner && !packageOwner) {
-      return { valid: false, value: "" };
+      return { valid: false, playwright: "", vitestBrowser: "" };
     }
-    owners.add(ownerPath);
+    owners[declaration.kind].add(ownerPath);
   }
 
   return {
     valid: true,
-    value: [...owners].toSorted().join("\n            "),
+    playwright: [...owners.playwright].toSorted().join("\n            "),
+    vitestBrowser: [...owners["vitest-browser"]]
+      .toSorted()
+      .join("\n            "),
   };
 }
 
@@ -1168,15 +1188,20 @@ async function protectedWorkflowProjectionViolations(
     const replacementValid =
       operation?.kind === "writeTextTemplate" &&
       hasExactReplacementKeys(operation.replacements, [
-        "DIAGNOSTIC_OWNER_PATHS",
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS",
+        "VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS",
       ]) &&
-      operation.replacements.DIAGNOSTIC_OWNER_PATHS ===
-        expectedDiagnosticOwners.value;
+      operation.replacements.PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS ===
+        expectedDiagnosticOwners.playwright &&
+      operation.replacements.VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS ===
+        expectedDiagnosticOwners.vitestBrowser;
     const sourceBackedExactlyOnce =
       matchingOperations.length === 1 &&
       operation !== undefined &&
       (operation.kind === "copyFile" || operation.kind === "writeTextTemplate");
-    const diagnosticsExpected = expectedDiagnosticOwners.value !== "";
+    const diagnosticsExpected =
+      expectedDiagnosticOwners.playwright !== "" ||
+      expectedDiagnosticOwners.vitestBrowser !== "";
     const operationValid =
       expectedDiagnosticOwners.valid &&
       sourceBackedExactlyOnce &&
@@ -1184,7 +1209,7 @@ async function protectedWorkflowProjectionViolations(
       operation?.kind === variant.operationKind &&
       (operation.kind === "copyFile"
         ? variant.replacementKeys.length === 0 && !diagnosticsExpected
-        : variant.replacementKeys.length === 1 &&
+        : variant.replacementKeys.length === 2 &&
           diagnosticsExpected &&
           replacementValid);
 

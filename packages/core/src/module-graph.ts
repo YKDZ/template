@@ -281,10 +281,15 @@ export function renderRootCheckCommand(
 ): string {
   return [
     "pnpm run boundaries",
-    renderTurboRunCommand([...qualityTaskVocabulary, ...additionalTasks], [], {
-      continueAfterFailure: true,
-      taskPrefix: true,
-    }),
+    // Several UI packages may each start a Chromium process in Browser Mode.
+    renderTurboRunCommand(
+      [...qualityTaskVocabulary, ...additionalTasks],
+      ["--concurrency=2"],
+      {
+        continueAfterFailure: true,
+        taskPrefix: true,
+      },
+    ),
   ].join(" && ");
 }
 

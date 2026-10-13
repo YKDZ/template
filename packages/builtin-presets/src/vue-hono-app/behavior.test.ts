@@ -296,10 +296,7 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
       await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8"),
       "alias:",
     );
-    for (const configPath of [
-      "apps/api/vitest.config.ts",
-      "apps/web/vitest.config.ts",
-    ]) {
+    for (const configPath of ["apps/web/vitest.config.ts"]) {
       assertDoesNotContain(
         await readFile(path.join(targetDir, configPath), "utf8"),
         "alias:",

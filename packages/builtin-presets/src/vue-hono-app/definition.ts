@@ -26,7 +26,7 @@ function apiScripts(): Record<string, string> {
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     start: "node dist/server.js",
-    test: "vitest run --reporter=agent --silent=passed-only",
+    test: "node --conditions=source --test test/app.test.ts",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -45,10 +45,14 @@ function webScripts(): Record<string, string> {
 
 function packageFoundation(
   packagePath: string,
+  includeFrontendTools = false,
 ): PackageContribution["foundation"] {
   return {
     toolchains: {},
-    editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    editorCapabilities: [
+      "oxc-format-lint",
+      ...(includeFrontendTools ? ["vue", "tailwind", "vitest"] : []),
+    ],
     typescriptConfigurationPackage: { dependency: "required" },
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
@@ -80,7 +84,6 @@ function apiContribution(
   };
   const sourceFiles = [
     "turbo.json",
-    "vitest.config.ts",
     "tsconfig.json",
     "tsconfig.build.json",
     "src/index.ts",
@@ -122,8 +125,6 @@ function apiContribution(
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
-        vite: "catalog:",
-        vitest: "catalog:",
       },
       engines: { node: context.toolchain.nodeLtsMajor },
     },
@@ -147,7 +148,6 @@ function webContribution(
     "env.d.ts",
     "index.html",
     "vite.config.ts",
-    "vitest.config.ts",
     "turbo.json",
     "src/api.ts",
     "src/App.vue",
@@ -173,8 +173,14 @@ function webContribution(
     }),
     operations,
     environmentNeeds: [],
+    ciDiagnosticArtifacts: [
+      {
+        kind: "vitest-browser",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+    ],
     foundation: {
-      ...packageFoundation(definition.path),
+      ...packageFoundation(definition.path, true),
       vueHonoJointE2e: {
         kind: "vue-hono-joint-e2e",
         apiPackageName: apiDefinition.name,

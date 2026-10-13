@@ -39,12 +39,15 @@ jobs:
       - name: Stage Root Check diagnostics
         if: failure()
         env:
-          DIAGNOSTIC_OWNER_PATHS: |-
-            {{DIAGNOSTIC_OWNER_PATHS}}
+          PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-
+            {{PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS}}
+          VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: |-
+            {{VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS}}
         run: |
           rm -rf .template-ci-diagnostics
           mkdir -p .template-ci-diagnostics
-          printf '%s\n' "$DIAGNOSTIC_OWNER_PATHS" | while IFS= read -r owner_path; do
+          printf '%s\n' "$PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS" | while IFS= read -r owner_path; do
+            [ -n "$owner_path" ] || continue
             for diagnostic_directory in test-results playwright-report; do
               source_path="$owner_path/$diagnostic_directory"
               destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"
@@ -54,11 +57,22 @@ jobs:
               fi
             done
           done
+          printf '%s\n' "$VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS" | while IFS= read -r owner_path; do
+            [ -n "$owner_path" ] || continue
+            diagnostic_directory=".vitest/attachments/failure-screenshots"
+            source_path="$owner_path/$diagnostic_directory"
+            destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"
+            if [ -d "$source_path" ]; then
+              mkdir -p "$(dirname "$destination_path")"
+              cp -R "$source_path" "$destination_path"
+            fi
+          done
       - name: Upload Root Check diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: root-check-diagnostics
           path: .template-ci-diagnostics
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

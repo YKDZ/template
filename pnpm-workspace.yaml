@@ -26,6 +26,7 @@ catalog:
   "@devcontainers/cli": 0.89.0
   "@hono/node-server": ^2.0.12
   "@playwright/test": 1.64.0
+  "@vitest/browser-playwright": ^5.0.0
   "@tailwindcss/vite": ^4.3.3
   "@types/node": ^24.13.3
   "@types/web-bluetooth": ^0.0.21
@@ -48,6 +49,7 @@ catalog:
   spdx-expression-parse: ^5.0.0
   "@types/spdx-expression-parse": ^4.0.0
   pinia: ^4.0.2
+  playwright: 1.64.0
   srvx: ^1.0.0
   tailwindcss: ^4.3.3
   tar: ^7.5.22
@@ -60,6 +62,7 @@ catalog:
   vike: ^0.4.260
   vike-vue: ^0.9.12
   vitest: ^5.0.0
+  vitest-browser-vue: ^3.1.0
   vue: ^3.5.40
   vue-tsc: ^3.3.9
   yaml: ^2.9.0

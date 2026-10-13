@@ -24,11 +24,15 @@ const sharedVueSourceFiles = [
   "tsconfig.app.json",
   "tsconfig.test.json",
   "tsconfig.node.json",
+  "vitest.config.ts",
   "typescript/run-vue-tsc.ts",
   "src/main.ts",
   "src/style.css",
+  "src/components/CounterButton.vue",
   "src/stores/counter.ts",
-  "test/app.test.ts",
+  "test/counter.browser.test.ts",
+  "test/counter.node.test.ts",
+  "TESTING.md",
 ] as const;
 
 export function vueApplicationScripts(): Record<string, string> {
@@ -126,6 +130,9 @@ export function vueApplicationManifest(options: {
       typescript: "catalog:",
       vite: "catalog:",
       vitest: "catalog:",
+      "@vitest/browser-playwright": "catalog:",
+      playwright: "catalog:",
+      "vitest-browser-vue": "catalog:",
       "vue-tsc": "catalog:",
     },
     engines: { node: options.context.toolchain.nodeLtsMajor },

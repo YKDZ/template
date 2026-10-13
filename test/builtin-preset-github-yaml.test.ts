@@ -397,8 +397,8 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
-        "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
-        "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web\n            apps/admin",
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+        "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web\n            apps/admin",
       ),
     );
   });
@@ -501,10 +501,14 @@ void describe("Built-in Preset GitHub YAML checker", () => {
         kind: "playwright" as const,
         owner: { kind: "package-boundary" as const, path: "apps/web" },
       },
+      {
+        kind: "vitest-browser" as const,
+        owner: { kind: "package-boundary" as const, path: "apps/web" },
+      },
     ];
     const source = baseline.source.replace(
-      "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
-      "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+      "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+      "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
     );
     const multipleOwnersPlan = {
       ...plan,
@@ -533,7 +537,10 @@ void describe("Built-in Preset GitHub YAML checker", () => {
             readonly steps: readonly {
               readonly run?: string;
               readonly with?: { readonly path?: string };
-              readonly env?: { readonly DIAGNOSTIC_OWNER_PATHS?: string };
+              readonly env?: {
+                readonly PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS?: string;
+                readonly VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS?: string;
+              };
             }[];
           };
         };
@@ -555,7 +562,8 @@ void describe("Built-in Preset GitHub YAML checker", () => {
         ),
     );
     assert.deepStrictEqual(steps.at(-2)?.env, {
-      DIAGNOSTIC_OWNER_PATHS: "apps/admin\napps/web",
+      PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/admin\napps/web",
+      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
     });
   });
 });

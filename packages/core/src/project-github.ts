@@ -86,10 +86,15 @@ export function projectCheckWorkflowTemplateReplacements(
     artifacts: options.diagnosticArtifacts ?? [],
   });
   if (declarations.length === 0) return {};
-  return {
-    DIAGNOSTIC_OWNER_PATHS: declarations
+  const ownerPaths = (kind: CiDiagnosticArtifactDeclaration["kind"]) =>
+    declarations
+      .filter((declaration) => declaration.kind === kind)
       .map((declaration) => declaration.owner.path)
-      .join("\n            "),
+      .toSorted()
+      .join("\n            ");
+  return {
+    PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: ownerPaths("playwright"),
+    VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: ownerPaths("vitest-browser"),
   };
 }
 

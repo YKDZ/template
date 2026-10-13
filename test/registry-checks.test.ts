@@ -777,14 +777,18 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
       "",
     ].join("\n");
 
-  void it("passes every real registry initialization and addition plan", async () => {
-    assert.strictEqual(
-      await validateRegistryMirrorSlotProjections(
-        await deriveVerificationPlans(),
-      ),
-      undefined,
-    );
-  });
+  void it(
+    "passes every real registry initialization and addition plan",
+    { timeout: 180_000 },
+    async () => {
+      assert.strictEqual(
+        await validateRegistryMirrorSlotProjections(
+          await deriveVerificationPlans(),
+        ),
+        undefined,
+      );
+    },
+  );
 
   void it("counts real declared-and-projected mirror slots so the self-check is not vacuous", async () => {
     // 复现自检的过滤条件（driver 非 canonical、声明了槽位、且路径被该 plan 投影），

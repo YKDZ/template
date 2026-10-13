@@ -61,9 +61,9 @@ function packageScripts(): Record<string, string> {
     postbuild:
       "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
-    test: "vitest run test/unit test/integration --reporter=verbose",
+    test: "node --conditions=source --test test/unit/*.test.ts test/integration/*.test.ts",
     "test:e2e":
-      "node --conditions=source test/e2e/run-journeys.ts source distribution",
+      "node --conditions=source --test --test-timeout=180000 test/e2e/run-journeys.test.ts",
     prepack: "pnpm exec turbo run build --filter=.",
   };
 }
@@ -169,6 +169,12 @@ function cliContribution(
     {
       kind: "copyFile",
       source: templateSources.tsCli,
+      from: "test/e2e/run-journeys.test.ts",
+      to: `${definition.path}/test/e2e/run-journeys.test.ts`,
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.tsCli,
       from: "test/e2e/journeys/lookup.journey.ts",
       to: `${definition.path}/test/e2e/journeys/lookup.journey.ts`,
     },
@@ -194,8 +200,6 @@ function cliContribution(
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
-        vite: "catalog:",
-        vitest: "catalog:",
       },
       engines: {
         node: options.publicationCandidate

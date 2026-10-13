@@ -19,6 +19,11 @@ const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   owner: { kind: "package-boundary", path },
 });
 
+const vitestBrowser = (path: string): CiDiagnosticArtifactDeclaration => ({
+  kind: "vitest-browser",
+  owner: { kind: "package-boundary", path },
+});
+
 function packageContribution(
   path: string,
   artifacts: readonly CiDiagnosticArtifactDeclaration[],
@@ -97,9 +102,15 @@ void describe("CI Diagnostic Artifact contract", () => {
     assert.deepStrictEqual(
       projectCheckWorkflowTemplateReplacements({
         packagePaths,
-        diagnosticArtifacts: [playwright("apps/web")],
+        diagnosticArtifacts: [
+          playwright("apps/web"),
+          vitestBrowser("apps/web"),
+        ],
       }),
-      { DIAGNOSTIC_OWNER_PATHS: "apps/web" },
+      {
+        PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+        VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+      },
     );
   });
 

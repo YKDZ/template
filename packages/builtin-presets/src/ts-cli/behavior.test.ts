@@ -3638,7 +3638,15 @@ syncBuiltinESMExports();
         );
         await execa(
           "pnpm",
-          ["--dir", project.packageRoot, "exec", "vitest", "run", "test/unit"],
+          [
+            "--dir",
+            project.packageRoot,
+            "exec",
+            "node",
+            "--conditions=source",
+            "--test",
+            "test/unit/cli-command-identity.test.ts",
+          ],
           { cwd: project.targetDir },
         );
         await assert.rejects(
@@ -3715,8 +3723,9 @@ syncBuiltinESMExports();
             "--dir",
             project.packageRoot,
             "exec",
-            "vitest",
-            "run",
+            "node",
+            "--conditions=source",
+            "--test",
             "test/integration/command.test.ts",
           ],
           { cwd: project.targetDir },
@@ -3730,7 +3739,7 @@ syncBuiltinESMExports();
         );
         const manifestPath = path.join(project.packageRoot, "package.json");
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        manifest.bin = { node: "./dist/cli.js" };
+        manifest.bin = { "not a valid command": "./dist/cli.js" };
         await writeFile(manifestPath, JSON.stringify(manifest));
         const invalidIdentity = await execa(
           "node",
@@ -3906,13 +3915,11 @@ syncBuiltinESMExports();
 
         const result = await execa("pnpm", ["run", "test:e2e"], {
           cwd: project.packageRoot,
+          env: { ...process.env, NODE_TEST_CONTEXT: undefined },
         });
-        assert.deepStrictEqual(
-          result.stdout
-            .split("\n")
-            .filter((line) => line.endsWith(":lookup:passed")),
-          ["source:lookup:passed", "distribution:lookup:passed"],
-        );
+        const output = `${result.stdout}\n${result.stderr}`;
+        assertContains(output, "runs all source CLI journeys");
+        assertContains(output, "runs all distribution CLI journeys");
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
       }

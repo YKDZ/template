@@ -275,7 +275,8 @@ const journey: CliJourney = {
       workflow,
       /name: Run Root Check\n        run: pnpm run check/u,
     );
-    assert.match(workflow, /DIAGNOSTIC_OWNER_PATHS: \|-/u);
+    assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: \|-/u);
+    assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: \|-/u);
     assert.match(workflow, new RegExp(scenario.firstPackagePath, "u"));
     assert.match(workflow, /name: Stage Root Check diagnostics/u);
     assert.match(workflow, /path: \.template-ci-diagnostics/u);

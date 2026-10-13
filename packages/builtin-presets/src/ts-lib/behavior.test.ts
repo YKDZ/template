@@ -129,7 +129,7 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       value: {
         scripts: {
           check:
-            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --concurrency=2 --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
           fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
         },
       },

@@ -23,6 +23,7 @@ function packageScripts(): Record<string, string> {
     lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
     build: "tsc -p tsconfig.build.json --pretty false",
+    test: "node --conditions=source --test test/greet.test.ts",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -85,6 +86,12 @@ function libraryContribution(options: {
       source: templateSources.tsLib,
       from: "turbo.json",
       to: `${definition.path}/turbo.json`,
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.tsLib,
+      from: "test/greet.test.ts",
+      to: `${definition.path}/test/greet.test.ts`,
     },
   ];
   return {

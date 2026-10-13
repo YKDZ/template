@@ -178,7 +178,10 @@ void describe("Template Source Boundary", () => {
               },
               diagnosticArtifactDeclarations: [declaration],
               operations: [
-                workflowOperation({ DIAGNOSTIC_OWNER_PATHS: "apps/web" }),
+                workflowOperation({
+                  PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+                  VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "",
+                }),
               ],
             },
           ],
@@ -247,7 +250,9 @@ void describe("Template Source Boundary", () => {
             ],
             operations: [
               workflowOperation({
-                DIAGNOSTIC_OWNER_PATHS: "apps/admin\n            apps/web",
+                PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS:
+                  "apps/admin\n            apps/web",
+                VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "",
               }),
             ],
           },
@@ -324,7 +329,10 @@ void describe("Template Source Boundary", () => {
               },
             ],
             operations: [
-              workflowOperation({ DIAGNOSTIC_OWNER_PATHS: "apps/web" }),
+              workflowOperation({
+                PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+                VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "",
+              }),
             ],
           },
         ],
@@ -350,7 +358,8 @@ void describe("Template Source Boundary", () => {
         '    from: ".github/workflows/check-diagnostics.yml",',
         '    to: ".github/workflows/check.yml",',
         "    replacements: {",
-        '      DIAGNOSTIC_OWNER_PATHS: ["rm -rf .template-ci-diagnostics", "mkdir -p .template-ci-diagnostics"].join("\\n"),',
+        '      PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: ["rm -rf .template-ci-diagnostics", "mkdir -p .template-ci-diagnostics"].join("\\n"),',
+        '      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "",',
         "    },",
         "  };",
         "}",
@@ -384,8 +393,9 @@ void describe("Template Source Boundary", () => {
             ],
             operations: [
               workflowOperation({
-                DIAGNOSTIC_OWNER_PATHS:
+                PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS:
                   "rm -rf .template-ci-diagnostics\nmkdir -p .template-ci-diagnostics",
+                VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "",
               }),
             ],
           },

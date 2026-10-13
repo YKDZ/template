@@ -57,6 +57,7 @@ function replayDefinitions(
 
 function foundation(
   packageDefinitions: VikePackageDefinitions,
+  includeFrontendTools = false,
 ): PackageContribution["foundation"] {
   const workspacePackageGlobs = [
     ...new Set(
@@ -67,7 +68,10 @@ function foundation(
   ];
   return {
     toolchains: {},
-    editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    editorCapabilities: [
+      "oxc-format-lint",
+      ...(includeFrontendTools ? ["vue", "tailwind", "vitest"] : []),
+    ],
     typescriptConfigurationPackage: { dependency: "required" },
     dependencyMaintenance: {
       ecosystems: ["npm", "github-actions", "docker"],
@@ -104,7 +108,7 @@ function databaseScripts(): Record<string, string> {
     "format:write": "oxfmt --write .",
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    test: "DATABASE_PROFILE=test NODE_OPTIONS=--conditions=source vitest run --reporter=agent --silent=passed-only",
+    test: "DATABASE_PROFILE=test node --conditions=source --test test/todos.test.ts",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -176,6 +180,7 @@ function webContribution(
     "web/server/api.ts",
     "web/test/playwright-teardown.ts",
     "web/test/e2e/app.spec.ts",
+    "web/test/counter.browser.test.ts",
     "web/turbo.json",
     "web/types/env.d.ts",
     "web/vitest.config.ts",
@@ -192,6 +197,12 @@ function webContribution(
       multilineArrays: ["files"],
     },
     ...copyOperations(context, web.path, sourceFiles),
+    {
+      kind: "copyFile",
+      source: templateSources.vue,
+      from: "TESTING.md",
+      to: `${web.path}/TESTING.md`,
+    },
     {
       kind: "writeTextTemplate",
       source: templateSources.vikeApp,
@@ -296,6 +307,9 @@ function webContribution(
         typescript: "catalog:",
         vite: "catalog:",
         vitest: "catalog:",
+        "@vitest/browser-playwright": "catalog:",
+        playwright: "catalog:",
+        "vitest-browser-vue": "catalog:",
         "vue-tsc": "catalog:",
       },
       engines: { node: context.toolchain.nodeLtsMajor },
@@ -305,9 +319,12 @@ function webContribution(
     environmentNeeds: [
       playwrightBrowserAssetsEnvironmentNeed({ browser: "chromium", owner }),
     ],
-    ciDiagnosticArtifacts: [{ kind: "playwright", owner }],
+    ciDiagnosticArtifacts: [
+      { kind: "playwright", owner },
+      { kind: "vitest-browser", owner },
+    ],
     foundation: {
-      ...foundation(packageDefinitions),
+      ...foundation(packageDefinitions, true),
       deploymentCheck: {
         kind: "application-container-with-database-migrations",
         applicationPackageName: web.name,
@@ -422,8 +439,6 @@ function databaseContribution(
         oxlint: "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript-7": "catalog:",
-        vite: "catalog:",
-        vitest: "catalog:",
       },
       engines: { node: context.toolchain.nodeLtsMajor },
     },

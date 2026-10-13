@@ -50,6 +50,7 @@
     "@valibot/to-json-schema": "catalog:",
     "@vikejs/hono": "catalog:",
     "@vitejs/plugin-vue": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
     "@vue/devtools-api": "catalog:",
     "@vue/tsconfig": "catalog:",
     "@ykdz/cli-contract": "catalog:",
@@ -70,6 +71,8 @@
     "vike": "catalog:",
     "vike-vue": "catalog:",
     "vite": "catalog:",
+    "vitest": "catalog:",
+    "vitest-browser-vue": "catalog:",
     "vue": "catalog:",
     "vue-tsc": "catalog:"
   },

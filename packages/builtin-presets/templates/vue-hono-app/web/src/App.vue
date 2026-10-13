@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { storeToRefs } from "pinia";
 import { onMounted, onUnmounted, ref } from "vue";
 
 import { getHealth } from "#/api";
-import { useCounterStore } from "#/stores/counter";
 
-const counter = useCounterStore();
-const { count } = storeToRefs(counter);
+import CounterButton from "./components/CounterButton.vue";
 const themeLabel = ref<"深色" | "浅色">("浅色");
 const apiStatus = ref("检查中");
 
@@ -45,13 +42,7 @@ onMounted(async () => {
         Web 和 API 是独立应用包，共享代码应放入 packages/*。
       </p>
       <div class="mt-8 flex flex-wrap items-center gap-4">
-        <button
-          class="rounded bg-cyan-300 px-4 py-2 font-semibold text-slate-950 hover:bg-cyan-200"
-          type="button"
-          @click="counter.increment()"
-        >
-          计数：{{ count }}
-        </button>
+        <CounterButton />
         <span class="text-sm text-slate-400">系统主题：{{ themeLabel }}</span>
         <span class="text-sm text-slate-400">API 状态：{{ apiStatus }}</span>
       </div>
