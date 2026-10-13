@@ -130,6 +130,7 @@ function rustContribution(options: {
         },
       },
       editorCapabilities: ["rust-tooling"],
+      typescriptConfigurationPackage: { dependency: "required" },
       dependencyMaintenance: {
         ecosystems: [
           "npm",

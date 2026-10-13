@@ -5,7 +5,6 @@ import type { GeneratedRepositoryPlan } from "@ykdz/template-builtin-presets";
 import {
   deriveFixtureGateContractIdentity,
   normalizedFixtureDependencyInstallationPlan,
-  type FixtureCommandRunner,
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
 
@@ -73,7 +72,7 @@ export function normalizedDeploymentQualityPlan(
     },
     generatedDeployment: {
       command: "pnpm",
-      args: ["run", "check:deployment"],
+      args: ["run", "check:full"],
     },
   };
 }
@@ -93,69 +92,5 @@ export async function deriveDeploymentQualityContractIdentity(
         root: fileURLToPath(new URL("../../kernel/", import.meta.url)),
       },
     ],
-  });
-}
-
-function commandStdout(result: unknown): string {
-  return typeof result === "object" &&
-    result !== null &&
-    "stdout" in result &&
-    typeof result.stdout === "string"
-    ? result.stdout
-    : "";
-}
-
-async function assertDeploymentTaskDiscovery(options: {
-  readonly deployment: DeploymentQualityPlanInput;
-  readonly projectDir: string;
-  readonly run: FixtureCommandRunner;
-}): Promise<void> {
-  const result = await options.run(
-    "pnpm",
-    ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-    { cwd: options.projectDir },
-  );
-  let taskIds: Set<string>;
-  try {
-    const dryRun = JSON.parse(commandStdout(result)) as {
-      readonly tasks?: readonly { readonly taskId?: unknown }[];
-    };
-    if (!Array.isArray(dryRun.tasks)) throw new Error("tasks is missing");
-    taskIds = new Set(
-      dryRun.tasks.flatMap((task) =>
-        typeof task.taskId === "string" ? [task.taskId] : [],
-      ),
-    );
-  } catch (error) {
-    throw new Error(
-      `Turbo dry-run did not return a Deployment task graph: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-  const missing = expectedDeploymentTaskIds(options.deployment.plan).filter(
-    (taskId) => !taskIds.has(taskId),
-  );
-  if (missing.length > 0) {
-    throw new Error(
-      `Turbo dry-run omitted generated Deployment task(s): ${missing.join(", ")}`,
-    );
-  }
-}
-
-export async function executeDeploymentQuality(options: {
-  readonly deployment: DeploymentQualityPlanInput;
-  readonly projectDir: string;
-  readonly fixtureWorkspace: string;
-  readonly run: FixtureCommandRunner;
-}): Promise<void> {
-  const run = options.run;
-  await assertDeploymentTaskDiscovery({
-    deployment: options.deployment,
-    projectDir: options.projectDir,
-    run,
-  });
-  await run("pnpm", ["run", "check:deployment"], {
-    cwd: options.projectDir,
-    stdio: "inherit",
   });
 }
