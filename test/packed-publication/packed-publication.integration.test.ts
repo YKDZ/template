@@ -91,6 +91,16 @@ const execa = runExeca({
   forceKillAfterDelay: packedJourneyKillGracePeriodMs,
 });
 
+function throwIfPackedCommandWasCancelled(
+  result: { readonly isCanceled: boolean },
+  commandDescription: string,
+): void {
+  if (!result.isCanceled && receivedPackedSignal === undefined) return;
+  throw new Error(`packed 验收命令已取消：${commandDescription}`, {
+    cause: packedCancellationController.signal.reason,
+  });
+}
+
 function errorDetails(error: unknown, seen = new Set<unknown>()): unknown {
   if (error instanceof Error) {
     if (seen.has(error)) return { name: error.name, message: "[循环 cause]" };
@@ -1032,6 +1042,7 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
     cwd: projectDir,
     reject: false,
   });
+  throwIfPackedCommandWasCancelled(retiredBuild, "检查已移除的构建命令");
   assert.notStrictEqual(retiredBuild.exitCode, 0);
 }
 
@@ -1547,6 +1558,7 @@ void describe("packed public CLI consumer", () => {
                   packageLeafName: "archive-addition",
                   packagePath: "packages/archive-addition",
                 });
+          activeRun.stage = `添加 ${candidate.name} 预设包`;
           const result = await execa(
             installedBin,
             [
@@ -1563,6 +1575,10 @@ void describe("packed public CLI consumer", () => {
               cwd: path.join(consumer, "generated", candidate.name),
               reject: false,
             },
+          );
+          throwIfPackedCommandWasCancelled(
+            result,
+            `向 ${candidate.name} 预设添加包`,
           );
           if (result.exitCode === 0) {
             completedAdditions.push(candidate.name);
@@ -1984,6 +2000,10 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(
+          reservedPackagePath,
+          "检查保留目录拒绝行为",
+        );
         assert.strictEqual(reservedPackagePath.exitCode, 2);
         assert.strictEqual(reservedPackagePath.stdout, "");
         assert.partialDeepStrictEqual(JSON.parse(reservedPackagePath.stderr), {
@@ -2019,6 +2039,10 @@ void describe("packed public CLI consumer", () => {
             cwd: previewTarget,
             reject: false,
           },
+        );
+        throwIfPackedCommandWasCancelled(
+          existingPackagePath,
+          "检查已存在目录冲突",
         );
         assert.notStrictEqual(existingPackagePath.exitCode, 0);
         const existingPackageFailure = JSON.parse(
@@ -2099,6 +2123,10 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(
+          structuredConflict,
+          "检查结构化配置冲突",
+        );
         assert.notStrictEqual(structuredConflict.exitCode, 0);
         const structuredFailure = JSON.parse(structuredConflict.stderr).data;
         assert.strictEqual(structuredFailure.actions.length, 0);
@@ -2156,6 +2184,7 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(textConflict, "检查文本文件冲突");
         assert.notStrictEqual(textConflict.exitCode, 0);
         assert.ok(
           textConflict.stderr.includes(".devcontainer/Dockerfile (text)"),
@@ -2206,163 +2235,256 @@ void describe("packed public CLI consumer", () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-packed-ready-add-"),
       );
+      const consumer = path.join(workspace, "consumer");
+      const generated = path.join(workspace, "digital");
+      const activeRun: ActivePackedRun = {
+        archiveWorkspace: archiveWorkspace!,
+        workspace,
+        consumer,
+        diagnostics: journeyDiagnosticsRoot,
+        stage: "准备 packed CLI 消费者",
+      };
+      activePackedRun = activeRun;
+      let failed = false;
+      let failure: unknown;
       try {
-        assert.ok(packedArchivePath);
-        const archivePath = packedArchivePath;
-        const consumer = path.join(workspace, "consumer");
-        const generated = path.join(workspace, "digital");
-        const baseDefinition = definitionWithPackagePath("packages/db");
-        const additionDefinition = firstAddableDefinition();
-        await mkdir(consumer, { recursive: true });
-        await execa("npm", ["init", "--yes"], { cwd: consumer });
-        await execa("pnpm", ["add", archivePath], { cwd: consumer });
+        try {
+          assert.ok(packedArchivePath);
+          const archivePath = packedArchivePath;
+          activeRun.archivePath = archivePath;
+          const baseDefinition = definitionWithPackagePath("packages/db");
+          const additionDefinition = firstAddableDefinition();
+          await mkdir(consumer, { recursive: true });
+          activeRun.stage = "初始化 packed 消费者";
+          await execa("npm", ["init", "--yes"], { cwd: consumer });
+          activeRun.stage = "安装 packed CLI";
+          await execa("pnpm", ["add", archivePath], { cwd: consumer });
 
-        const installedBin = path.join(
-          consumer,
-          "node_modules",
-          ".bin",
-          "template",
-        );
-        await execa(
-          installedBin,
-          [
-            "init",
-            generated,
-            "--preset",
-            baseDefinition.metadata.name,
-            "--scope",
-            "demo",
-          ],
-          {
-            cwd: consumer,
-          },
-        );
-        const gitignorePath = path.join(generated, ".gitignore");
-        const workspaceManifestPath = path.join(
-          generated,
-          "pnpm-workspace.yaml",
-        );
-        await Promise.all([
-          writeFile(gitignorePath, "private-artifacts/\n", { flag: "a" }),
-          writeFile(workspaceManifestPath, "# private workspace policy\n", {
-            flag: "a",
-          }),
-        ]);
-        await execa("pnpm", ["install"], { cwd: generated });
-        assert.strictEqual(
-          (
-            await lstat(
-              path.join(generated, "packages/db/node_modules/drizzle-orm"),
-            )
-          ).isSymbolicLink(),
-          true,
-        );
-
-        const addPackage = async (packageName: string): Promise<void> => {
+          const installedBin = path.join(
+            consumer,
+            "node_modules",
+            ".bin",
+            "template",
+          );
+          activeRun.packedBin = installedBin;
+          activeRun.stage = `生成 ${baseDefinition.metadata.name} 仓库`;
           await execa(
             installedBin,
             [
-              "add",
-              "package",
+              "init",
+              generated,
               "--preset",
-              additionDefinition.metadata.name,
-              "--name",
-              packageName,
-              "--path",
-              `services/${packageName}`,
+              baseDefinition.metadata.name,
+              "--scope",
+              "demo",
             ],
             {
-              cwd: generated,
+              cwd: consumer,
             },
           );
-        };
+          const gitignorePath = path.join(generated, ".gitignore");
+          const workspaceManifestPath = path.join(
+            generated,
+            "pnpm-workspace.yaml",
+          );
+          await Promise.all([
+            writeFile(gitignorePath, "private-artifacts/\n", { flag: "a" }),
+            writeFile(workspaceManifestPath, "# private workspace policy\n", {
+              flag: "a",
+            }),
+          ]);
+          activeRun.stage = "安装生成仓库";
+          await execa("pnpm", ["install"], { cwd: generated });
+          assert.strictEqual(
+            (
+              await lstat(
+                path.join(generated, "packages/db/node_modules/drizzle-orm"),
+              )
+            ).isSymbolicLink(),
+            true,
+          );
 
-        await addPackage("domain");
-        const firstAdditionManifest = await readFile(
-          path.join(generated, "services/domain/package.json"),
-          "utf8",
-        );
-        const firstRootManifest = await readFile(
-          path.join(generated, "package.json"),
-          "utf8",
-        );
-        const firstWorkspaceManifest = await readFile(
-          workspaceManifestPath,
-          "utf8",
-        );
-        assert.ok(
-          firstWorkspaceManifest.includes("# private workspace policy"),
-        );
-        assert.ok(
-          (await readFile(gitignorePath, "utf8")).includes(
-            "private-artifacts/",
-          ),
-        );
-        const workspaceBeforeRepeat = (
-          await generatedTextFiles(generated)
-        ).toSorted((left, right) => left.path.localeCompare(right.path));
-        assert.strictEqual(
-          workspaceBeforeRepeat.some(
-            (file) => file.path === ".template/blueprint.json",
-          ),
-          true,
-        );
+          const addPackage = async (packageName: string): Promise<void> => {
+            activeRun.stage = `添加 ${packageName} 包`;
+            try {
+              await execa(
+                installedBin,
+                [
+                  "add",
+                  "package",
+                  "--preset",
+                  additionDefinition.metadata.name,
+                  "--name",
+                  packageName,
+                  "--path",
+                  `services/${packageName}`,
+                ],
+                {
+                  cwd: generated,
+                },
+              );
+            } catch (error) {
+              if (
+                receivedPackedSignal !== undefined &&
+                typeof error === "object" &&
+                error !== null &&
+                "isCanceled" in error &&
+                error.isCanceled === true
+              ) {
+                throw new Error(`packed CLI 添加 ${packageName} 包时已取消。`, {
+                  cause: packedCancellationController.signal.reason ?? error,
+                });
+              }
+              throw error;
+            }
+          };
 
-        await addPackage("domain");
-        assert.deepStrictEqual(
-          (await generatedTextFiles(generated)).toSorted((left, right) =>
-            left.path.localeCompare(right.path),
-          ),
-          workspaceBeforeRepeat,
-        );
-        assert.strictEqual(
-          await readFile(
+          await addPackage("domain");
+          const firstAdditionManifest = await readFile(
             path.join(generated, "services/domain/package.json"),
             "utf8",
-          ),
-          firstAdditionManifest,
-        );
+          );
+          const firstRootManifest = await readFile(
+            path.join(generated, "package.json"),
+            "utf8",
+          );
+          const firstWorkspaceManifest = await readFile(
+            workspaceManifestPath,
+            "utf8",
+          );
+          assert.ok(
+            firstWorkspaceManifest.includes("# private workspace policy"),
+          );
+          assert.ok(
+            (await readFile(gitignorePath, "utf8")).includes(
+              "private-artifacts/",
+            ),
+          );
+          const workspaceBeforeRepeat = (
+            await generatedTextFiles(generated)
+          ).toSorted((left, right) => left.path.localeCompare(right.path));
+          assert.strictEqual(
+            workspaceBeforeRepeat.some(
+              (file) => file.path === ".template/blueprint.json",
+            ),
+            true,
+          );
 
-        await addPackage("domain-two");
-        assert.ok(
-          (
+          await addPackage("domain");
+          assert.deepStrictEqual(
+            (await generatedTextFiles(generated)).toSorted((left, right) =>
+              left.path.localeCompare(right.path),
+            ),
+            workspaceBeforeRepeat,
+          );
+          assert.strictEqual(
             await readFile(
-              path.join(generated, "services/domain-two/package.json"),
+              path.join(generated, "services/domain/package.json"),
               "utf8",
-            )
-          ).includes('"name": "@demo/domain-two"'),
-        );
-        assert.strictEqual(
-          await readFile(
-            path.join(generated, "services/domain/package.json"),
-            "utf8",
-          ),
-          firstAdditionManifest,
-        );
-        assert.strictEqual(
-          await readFile(path.join(generated, "package.json"), "utf8"),
-          firstRootManifest,
-        );
-        assert.strictEqual(
-          await readFile(workspaceManifestPath, "utf8"),
-          firstWorkspaceManifest,
-        );
-        const finalGitignore = await readFile(gitignorePath, "utf8");
-        assert.strictEqual(
-          finalGitignore.match(/^private-artifacts\/$/gmu)?.length,
-          1,
-        );
-        assert.strictEqual(
-          (
-            await lstat(
-              path.join(generated, "packages/db/node_modules/drizzle-orm"),
-            )
-          ).isSymbolicLink(),
-          true,
-        );
-        await execa("pnpm", ["exec", "oxfmt", "--version"], { cwd: generated });
+            ),
+            firstAdditionManifest,
+          );
+
+          await addPackage("domain-two");
+          assert.ok(
+            (
+              await readFile(
+                path.join(generated, "services/domain-two/package.json"),
+                "utf8",
+              )
+            ).includes('"name": "@demo/domain-two"'),
+          );
+          assert.strictEqual(
+            await readFile(
+              path.join(generated, "services/domain/package.json"),
+              "utf8",
+            ),
+            firstAdditionManifest,
+          );
+          assert.strictEqual(
+            await readFile(path.join(generated, "package.json"), "utf8"),
+            firstRootManifest,
+          );
+          assert.strictEqual(
+            await readFile(workspaceManifestPath, "utf8"),
+            firstWorkspaceManifest,
+          );
+          const finalGitignore = await readFile(gitignorePath, "utf8");
+          assert.strictEqual(
+            finalGitignore.match(/^private-artifacts\/$/gmu)?.length,
+            1,
+          );
+          assert.strictEqual(
+            (
+              await lstat(
+                path.join(generated, "packages/db/node_modules/drizzle-orm"),
+              )
+            ).isSymbolicLink(),
+            true,
+          );
+          await execa("pnpm", ["exec", "oxfmt", "--version"], {
+            cwd: generated,
+          });
+        } catch (error) {
+          failed = true;
+          failure = error;
+          try {
+            const diagnostics = await preservePackedFailure({
+              ...(activeRun.archivePath === undefined
+                ? {}
+                : { archivePath: activeRun.archivePath }),
+              archiveWorkspace: activeRun.archiveWorkspace,
+              workspace,
+              error,
+            });
+            process.stderr.write(`\nPACKED_CLI_DIAGNOSTICS=${diagnostics}\n`);
+          } catch (preservationError) {
+            preservePackedWorkspaceAfterSignal = true;
+            failure = new AggregateError(
+              [error, preservationError],
+              "packed CLI 失败，保存诊断材料时又发生错误。",
+              { cause: error },
+            );
+          }
+        }
+
+        try {
+          if (!preservePackedWorkspaceAfterSignal) {
+            await rm(workspace, { recursive: true, force: true });
+          }
+        } catch (cleanupError) {
+          if (failed) {
+            failure = new AggregateError(
+              [failure, cleanupError],
+              "packed CLI 失败，清理消费者临时目录时又发生错误。",
+              { cause: failure },
+            );
+          } else {
+            failed = true;
+            failure = cleanupError;
+            try {
+              const diagnostics = await preservePackedFailure({
+                ...(activeRun.archivePath === undefined
+                  ? {}
+                  : { archivePath: activeRun.archivePath }),
+                archiveWorkspace: activeRun.archiveWorkspace,
+                workspace,
+                error: cleanupError,
+              });
+              process.stderr.write(`\nPACKED_CLI_DIAGNOSTICS=${diagnostics}\n`);
+            } catch (preservationError) {
+              preservePackedWorkspaceAfterSignal = true;
+              failure = new AggregateError(
+                [cleanupError, preservationError],
+                "packed CLI 清理失败，保存诊断材料时又发生错误。",
+                { cause: cleanupError },
+              );
+            }
+          }
+        }
+        if (failed) throw failure;
       } finally {
-        await rm(workspace, { recursive: true, force: true });
+        activePackedRun = undefined;
       }
     },
   );
