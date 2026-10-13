@@ -53,7 +53,7 @@
     "prepack": "pnpm exec turbo run build --filter=.",
     "pack:bundled": "pnpm --config.node-linker=hoisted pack",
     "publish:bundled": "pnpm --config.node-linker=hoisted publish",
-    "test": "vitest run --config vitest.config.ts test/unit test/integration --reporter=verbose",
+    "test": "node --conditions=source --test test/unit/application.test.ts test/integration/command.test.ts",
     "test:e2e": "node --conditions=source test/e2e/check-source-and-distribution.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
@@ -80,8 +80,7 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript-7": "catalog:",
-    "vitest": "catalog:"
+    "typescript-7": "catalog:"
   },
   "bundleDependencies": [
     "@valibot/to-json-schema",
