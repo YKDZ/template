@@ -145,7 +145,7 @@ jobs:
             printf 'apt_get_install_invocations=1\n'
             printf 'apt_packages=shellcheck,strace\n'
             printf 'playwright_chromium_install_invocations=1\n'
-            printf 'formal_gate_host_pnpm_install_counts=recorded_per_gate_by_strace\n'
+            printf 'formal_gate_host_pnpm_dependency_install_calls=recorded_per_gate_by_strace\n'
             printf 'fixture_dependency_installation_events=recorded_by_native_activity_ledger\n'
             printf '\n--- runner ---\n'
             date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
@@ -253,11 +253,11 @@ jobs:
               strace -f -qq -e trace=execve -P "$pnpm_executable" \
                 -o "$phase_dir/$name.execve.log" -- "$@" > "$phase_dir/$name.log" 2>&1
             status=$?
-            pnpm_install_invocations=$(awk \
-              '/execve\(/ && /\["[^"]*", "(install|i)"(,|\])/ { count++ } END { print count + 0 }' \
+            pnpm_dependency_install_calls=$(awk \
+              '/execve\(/ && /\["[^"]*", "(install|i|add)"(,|\])/ && /= 0$/ { count++ } END { print count + 0 }' \
               "$phase_dir/$name.execve.log")
-            printf 'pnpm_install_execve_invocations=%s\npnpm_executable=%s\n' \
-              "$pnpm_install_invocations" "$pnpm_executable" > "$phase_dir/$name.pnpm-install-count.txt"
+            printf 'host_pnpm_dependency_install_execve_successes=%s\npnpm_executable=%s\n' \
+              "$pnpm_dependency_install_calls" "$pnpm_executable" > "$phase_dir/$name.pnpm-dependency-install-count.txt"
             ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             ended_ms=$(date +%s%3N)
             elapsed=$((ended_ms - started_ms))
@@ -332,12 +332,12 @@ jobs:
             git rev-parse HEAD
             printf '`\n\n'
             printf 'Both phases ran the five formal CI commands from the same checkout and preparation, in this order.\n\n'
-            printf '| Phase | Gate | Exit | Wall ms | Observer wrapper CPU (user+sys) | Host pnpm install execve |\n|---|---|---:|---:|---:|---:|\n'
+            printf '| Phase | Gate | Exit | Wall ms | Observer wrapper CPU (user+sys) | Host pnpm dependency-install execve |\n|---|---|---:|---:|---:|---:|\n'
             while IFS=$'\t' read -r phase gate status started ended elapsed command; do
               [[ "$phase" == phase ]] && continue
               time_file="$records/$phase/$gate.time"
               cpu=$(sed -n 's/.*observer_wrapper_user_seconds=\([^ ]*\) observer_wrapper_sys_seconds=\([^ ]*\).*/user=\1s + sys=\2s/p' "$time_file" 2>/dev/null || true)
-              install_count=$(sed -n 's/^pnpm_install_execve_invocations=//p' "$records/$phase/$gate.pnpm-install-count.txt" 2>/dev/null || true)
+              install_count=$(sed -n 's/^host_pnpm_dependency_install_execve_successes=//p' "$records/$phase/$gate.pnpm-dependency-install-count.txt" 2>/dev/null || true)
               printf '| %s | `%s` | %s | %s | %s | %s |\n' "$phase" "$gate" "$status" "$elapsed" "${cpu:-unavailable}" "${install_count:-unavailable}"
             done < "$records/steps.tsv"
             printf '\nThe observed command wall/CPU includes the `strace` wrapper; CPU excludes Docker daemon and container CPU. The per-gate execve trace is filtered to the resolved host `pnpm` executable. Fixture-internal dependency installation phases remain recorded in the native activity JSONL. `docker-stats.jsonl` contains 5-second instantaneous container snapshots.\n'
