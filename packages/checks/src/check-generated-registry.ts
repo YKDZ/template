@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +44,8 @@ import {
   createFixtureEvidenceScheduler,
   defaultDevelopmentContainerSessionConcurrency,
   deriveDevelopmentContainerBuildIdentity,
+  fixtureCommandTimeoutMilliseconds,
+  fixtureCleanupTimeoutMilliseconds,
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   formatFixtureEvidenceHealthReport,
@@ -45,6 +54,7 @@ import {
   stageFixtureGitRepository,
   writeGeneratedRepositoryTree,
   type FixtureEvidenceActivityLedger,
+  type FixtureCommandOptions,
   type DevelopmentContainerFixtureDependencyCaches,
   type FixtureEvidenceInvocationEvent,
   type FixtureEvidenceLifecycleEvent,
@@ -84,6 +94,8 @@ const scenarioSetReproductionCommands: Record<GeneratedScenarioSet, string> = {
   deployment: "pnpm --filter @ykdz/template-checks check:deployment",
 };
 
+const fixtureFailureReportName = "fixture-failure.json";
+
 const defaultRepositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -95,6 +107,7 @@ export type GeneratedScenarioRunOptions = {
   readonly workspace: string;
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
+  readonly cancelSignal?: AbortSignal;
   readonly scheduling?: FixtureEvidenceSchedulingOptions;
   readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
   readonly buildKitCacheDirectory?: string;
@@ -121,6 +134,8 @@ export type GeneratedScenarioRunOptions = {
 };
 
 type InternalGeneratedScenarioRunOptions = GeneratedScenarioRunOptions & {
+  readonly failureSecrets?: readonly string[];
+  readonly onCleanupFailure?: (error: unknown) => void;
   readonly recordActivity?: (
     event: FixtureEvidenceScenarioActivityEvent,
   ) => void | Promise<void>;
@@ -129,7 +144,7 @@ type InternalGeneratedScenarioRunOptions = GeneratedScenarioRunOptions & {
 export type GeneratedCommandRunner = (
   command: string,
   args: readonly string[],
-  options: { readonly cwd: string; readonly stdio?: "inherit" },
+  options: FixtureCommandOptions,
 ) => Promise<unknown>;
 
 const fixtureEnvironment = {
@@ -147,6 +162,21 @@ const fixtureEnvironment = {
   pnpmCacheDirectory: "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
   workspaceDirectory: "TEMPLATE_FIXTURE_WORKSPACE_DIR",
 } as const;
+
+const fixtureFailureEnvironmentNames = [
+  fixtureEnvironment.concurrency,
+  fixtureEnvironment.developmentContainerSessions,
+  fixtureEnvironment.directory,
+  fixtureEnvironment.read,
+  fixtureEnvironment.write,
+  fixtureEnvironment.activityDirectory,
+  fixtureEnvironment.runId,
+  fixtureEnvironment.runAttempt,
+  fixtureEnvironment.buildKitCacheDirectory,
+  fixtureEnvironment.pnpmCacheDirectory,
+  fixtureEnvironment.cargoCacheDirectory,
+  fixtureEnvironment.workspaceDirectory,
+] as const;
 
 const defaultFixtureWorkspaceDirectory = path.join(
   defaultRepositoryRoot,
@@ -249,6 +279,177 @@ function failureMessage(error: unknown): string {
   }
 }
 
+function hasFailureCause(
+  error: unknown,
+  expected: unknown,
+  depth = 0,
+): boolean {
+  if (error === expected) return true;
+  if (depth >= 12 || !(error instanceof Error) || error.cause === undefined) {
+    return false;
+  }
+  return hasFailureCause(error.cause, expected, depth + 1);
+}
+
+function fixtureFailureSecretValues(
+  environment: NodeJS.ProcessEnv,
+): readonly string[] {
+  return Object.entries(environment)
+    .filter(
+      ([name, value]) =>
+        value !== undefined &&
+        value.length > 0 &&
+        /(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|SIGNATURE_KEY|CREDENTIAL)/iu.test(
+          name,
+        ),
+    )
+    .map(([, value]) => value!)
+    .sort((left, right) => right.length - left.length);
+}
+
+function redactFixtureFailureText(
+  value: string,
+  secrets: readonly string[],
+): string {
+  return secrets.reduce(
+    (redacted, secret) => redacted.split(secret).join("[REDACTED]"),
+    value,
+  );
+}
+
+function describeFixtureFailure(
+  error: unknown,
+  secrets: readonly string[],
+  depth = 0,
+): Record<string, unknown> {
+  if (depth > 8) return { message: "Failure nesting exceeded report limit" };
+  if (!(error instanceof Error)) {
+    return {
+      message: redactFixtureFailureText(failureMessage(error), secrets),
+      type: typeof error,
+    };
+  }
+  const description: Record<string, unknown> = {
+    name: error.name,
+    message: redactFixtureFailureText(error.message, secrets),
+    ...(error.stack === undefined
+      ? {}
+      : { stack: redactFixtureFailureText(error.stack, secrets) }),
+  };
+  for (const property of [
+    "code",
+    "signal",
+    "timedOut",
+    "isCanceled",
+    "exitCode",
+    "killed",
+  ] as const) {
+    const value = (error as Error & Record<string, unknown>)[property];
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      description[property] = value;
+    }
+  }
+  for (const property of [
+    "shortMessage",
+    "command",
+    "cwd",
+    "stdout",
+    "stderr",
+  ] as const) {
+    const value = (error as Error & Record<string, unknown>)[property];
+    if (typeof value === "string") {
+      const redacted = redactFixtureFailureText(value, secrets);
+      const outputLimit = 64 * 1024;
+      description[property] =
+        (property === "stdout" || property === "stderr") &&
+        redacted.length > outputLimit
+          ? `[leading output truncated: ${redacted.length - outputLimit} characters]\n${redacted.slice(-outputLimit)}`
+          : redacted;
+    }
+  }
+  if (error instanceof AggregateError) {
+    description.errors = error.errors.map((nested) =>
+      describeFixtureFailure(nested, secrets, depth + 1),
+    );
+  }
+  if (error.cause !== undefined) {
+    description.cause = describeFixtureFailure(error.cause, secrets, depth + 1);
+  }
+  return description;
+}
+
+function reportFixtureFailure(
+  reporter: GeneratedScenarioRunOptions["reporter"],
+  message: string,
+): void {
+  try {
+    reporter?.info?.(message);
+  } catch {
+    // 诊断输出失败时仍保留 Fixture 原始失败。
+  }
+}
+
+async function persistFixtureFailureReport(options: {
+  readonly scenarioSet: GeneratedScenarioSet;
+  readonly workspace: string;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly error: unknown;
+  readonly reporter?: GeneratedScenarioRunOptions["reporter"];
+}): Promise<void> {
+  const reportPath = path.join(options.workspace, fixtureFailureReportName);
+  const secrets = fixtureFailureSecretValues(options.environment);
+  const report = {
+    schema: "template-fixture-failure/v1",
+    scenarioSet: options.scenarioSet,
+    reproductionCommand: scenarioSetReproductionCommands[options.scenarioSet],
+    repositoryDirectory: defaultRepositoryRoot,
+    generatedWorkspace: options.workspace,
+    generatedArtifactDirectory: options.workspace,
+    failureReport: reportPath,
+    capturedAt: new Date().toISOString(),
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      architecture: process.arch,
+    },
+    fixtureCommandTimeoutMilliseconds,
+    fixtureCleanupTimeoutMilliseconds,
+    environment: Object.fromEntries(
+      fixtureFailureEnvironmentNames.flatMap((name) =>
+        options.environment[name] === undefined
+          ? []
+          : [[name, options.environment[name]]],
+      ),
+    ),
+    failure: describeFixtureFailure(options.error, secrets),
+  };
+  try {
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  } catch (reportError) {
+    reportFixtureFailure(
+      options.reporter,
+      `[Fixture Evidence] Could not write failure report ${reportPath}: ${redactFixtureFailureText(failureMessage(reportError), secrets)}`,
+    );
+    return;
+  }
+  reportFixtureFailure(
+    options.reporter,
+    `[Fixture Evidence] Failure workspace retained: ${options.workspace}`,
+  );
+  reportFixtureFailure(
+    options.reporter,
+    `[Fixture Evidence] Failure report: ${reportPath}`,
+  );
+  reportFixtureFailure(
+    options.reporter,
+    `[Fixture Evidence] Reproduce with: ${scenarioSetReproductionCommands[options.scenarioSet]}`,
+  );
+}
+
 function fixtureEvidenceFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): GeneratedScenarioRunOptions["evidence"] | undefined {
@@ -342,9 +543,33 @@ async function runScenario(
   mode: GeneratedScenarioSet,
   evidenceScheduler?: FixtureEvidenceScheduler,
 ): Promise<"completed" | "not-applicable"> {
-  const run =
+  const rawRun =
     options.run ??
     ((command, args, runOptions) => execa(command, [...args], runOptions));
+  const run: GeneratedCommandRunner = async (command, args, runOptions) => {
+    const cancelSignal = runOptions.cancelSignal ?? options.cancelSignal;
+    cancelSignal?.throwIfAborted();
+    try {
+      return await rawRun(command, args, {
+        ...runOptions,
+        ...(cancelSignal === undefined ? {} : { cancelSignal }),
+        timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
+        killDescendants: runOptions.killDescendants ?? true,
+      });
+    } catch (error) {
+      if (!cancelSignal?.aborted) throw error;
+      const reason =
+        cancelSignal.reason instanceof Error
+          ? cancelSignal.reason
+          : new Error("Fixture command cancelled");
+      if (error === reason) throw reason;
+      throw new AggregateError(
+        [reason, error],
+        `${redactFixtureFailureText(failureMessage(reason), options.failureSecrets ?? [])}; command stopped during cancellation: ${redactFixtureFailureText(failureMessage(error), options.failureSecrets ?? [])}`,
+        { cause: reason },
+      );
+    }
+  };
   const projectDir = path.join(options.workspace, scenario.id);
   const context = createGenerationContext({
     targetDir: projectDir,
@@ -359,6 +584,7 @@ async function runScenario(
       rustVersion: releaseToolchainSnapshot.rustVersion,
     },
   });
+  options.cancelSignal?.throwIfAborted();
   const initialization = planGeneratedRepositoryInitialization({
     definition: scenario.base,
     context,
@@ -373,6 +599,7 @@ async function runScenario(
     operations: [...initialization.operations],
   });
   await prepareGeneratedRepositoryForContainerWrites(projectDir);
+  options.cancelSignal?.throwIfAborted();
   if (
     mode === "init" ||
     mode === "package-addition-matrix" ||
@@ -494,7 +721,10 @@ async function runScenario(
         : {
             outcome: "failed",
             classification: "not-retryable",
-            error: failureMessage(result.error),
+            error: redactFixtureFailureText(
+              failureMessage(result.error),
+              options.failureSecrets ?? [],
+            ),
           }),
     });
   };
@@ -514,6 +744,12 @@ async function runScenario(
   const containerSession = createDevelopmentContainerFixtureSession({
     projectDir,
     probes: finalPlan.developmentContainer.probes,
+    ...(options.cancelSignal === undefined
+      ? {}
+      : { cancelSignal: options.cancelSignal }),
+    ...(options.onCleanupFailure === undefined
+      ? {}
+      : { onCleanupFailure: options.onCleanupFailure }),
     build: {
       identity: buildIdentity,
       cacheDirectory:
@@ -530,7 +766,7 @@ async function runScenario(
     ...(evidenceScheduler === undefined
       ? {}
       : {
-          acquireSession: async () => {
+          acquireSession: async (cancelSignal) => {
             const queue = await startPhase(
               "scheduler-queue",
               "development-container-session",
@@ -538,6 +774,7 @@ async function runScenario(
             try {
               const release = await evidenceScheduler.acquire(
                 containerSessionResources,
+                cancelSignal === undefined ? undefined : { cancelSignal },
               );
               await finishPhase(queue, { outcome: "succeeded" });
               return release;
@@ -565,7 +802,7 @@ async function runScenario(
       options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
     }
     const includeFix = true;
-    const executeSemanticGate = async (options: {
+    const executeSemanticGate = async (gateOptions: {
       readonly gate: FixtureEvidenceGate;
       readonly resources: Parameters<FixtureEvidenceScheduler["run"]>[0];
       readonly execute: () => Promise<void>;
@@ -573,9 +810,9 @@ async function runScenario(
       await containerSession.reserve();
       const semantic = async (): Promise<void> => {
         await containerSession.prepare();
-        const phase = await startPhase("semantic-gate", options.gate);
+        const phase = await startPhase("semantic-gate", gateOptions.gate);
         try {
-          await options.execute();
+          await gateOptions.execute();
           await finishPhase(phase, { outcome: "succeeded" });
         } catch (error) {
           await finishPhase(phase, { outcome: "failed", error });
@@ -586,17 +823,23 @@ async function runScenario(
         await semantic();
         return;
       }
-      const queue = await startPhase("scheduler-queue", options.gate);
-      const gateResources = options.resources.filter(
+      const queue = await startPhase("scheduler-queue", gateOptions.gate);
+      const gateResources = gateOptions.resources.filter(
         (resource) => !containerSessionResources.includes(resource),
       );
       let entered = false;
       try {
-        await evidenceScheduler.run(gateResources, async () => {
-          entered = true;
-          await finishPhase(queue, { outcome: "succeeded" });
-          await semantic();
-        });
+        await evidenceScheduler.run(
+          gateResources,
+          async () => {
+            entered = true;
+            await finishPhase(queue, { outcome: "succeeded" });
+            await semantic();
+          },
+          options.cancelSignal === undefined
+            ? undefined
+            : { cancelSignal: options.cancelSignal },
+        );
       } catch (error) {
         if (!entered) {
           await finishPhase(queue, { outcome: "failed", error });
@@ -642,6 +885,9 @@ async function runScenario(
       ...(options.evidence?.readEnabled === undefined
         ? {}
         : { readEnabled: options.evidence.readEnabled }),
+      ...(options.cancelSignal === undefined
+        ? {}
+        : { cancelSignal: options.cancelSignal }),
       writeEnabled: options.evidence?.writeEnabled ?? false,
       ...(options.evidence?.recordLifecycle === undefined
         ? {}
@@ -771,7 +1017,12 @@ export async function runGeneratedScenarioSet(
   set: GeneratedScenarioSet,
   options: GeneratedScenarioRunOptions,
 ): Promise<void> {
+  options.cancelSignal?.throwIfAborted();
   const scenarios = await generatedScenariosFor(set);
+  const failureSecrets = fixtureFailureSecretValues({
+    ...process.env,
+    ...options.containerEnvironment,
+  });
   const activity = options.evidence?.activity;
   const invocation = activity?.ledger.invocation({
     runId: activity.runId,
@@ -784,6 +1035,16 @@ export async function runGeneratedScenarioSet(
       : { clock: options.evidence.clock }),
   });
   const activityErrors: string[] = [];
+  const cleanupFailureController = new AbortController();
+  let cleanupFailure: unknown;
+  let cleanupFailureObserved = false;
+  const scenarioCancelSignal =
+    options.cancelSignal === undefined
+      ? cleanupFailureController.signal
+      : AbortSignal.any([
+          options.cancelSignal,
+          cleanupFailureController.signal,
+        ]);
   const recordActivity = async (
     event: FixtureEvidenceInvocationEvent,
   ): Promise<void> => {
@@ -791,7 +1052,9 @@ export async function runGeneratedScenarioSet(
     try {
       await invocation.record(event);
     } catch (error) {
-      activityErrors.push(failureMessage(error));
+      activityErrors.push(
+        redactFixtureFailureText(failureMessage(error), failureSecrets),
+      );
     }
   };
   await recordActivity({
@@ -802,6 +1065,14 @@ export async function runGeneratedScenarioSet(
   const callerRecordLifecycle = options.evidence?.recordLifecycle;
   const scenarioOptions: InternalGeneratedScenarioRunOptions = {
     ...options,
+    cancelSignal: scenarioCancelSignal,
+    onCleanupFailure: (error) => {
+      if (cleanupFailureObserved) return;
+      cleanupFailureObserved = true;
+      cleanupFailure = error;
+      cleanupFailureController.abort(error);
+    },
+    failureSecrets,
     recordActivity,
     ...(options.evidence === undefined
       ? {}
@@ -835,14 +1106,19 @@ export async function runGeneratedScenarioSet(
         outcome,
       });
     } catch (error) {
-      options.reporter?.info?.(
-        `[Fixture Evidence] ${set} ${scenario.label} (${scenario.id}) failed: ${failureMessage(error)}. Reproduce the scenario set with ${scenarioSetReproductionCommands[set]}; generated artifact: ${path.join(options.workspace, scenario.id)}`,
+      const diagnostic = redactFixtureFailureText(
+        failureMessage(error),
+        failureSecrets,
+      );
+      reportFixtureFailure(
+        options.reporter,
+        `[Fixture Evidence] ${set} ${scenario.label} (${scenario.id}) failed: ${diagnostic}. Reproduce the scenario set with ${scenarioSetReproductionCommands[set]}; generated artifact: ${path.join(options.workspace, scenario.id)}`,
       );
       await recordActivity({
         type: "scenario",
         scenario: scenarioDiagnostics(scenario),
         outcome: "failed",
-        error: failureMessage(error),
+        error: diagnostic,
       });
       throw error;
     }
@@ -855,9 +1131,15 @@ export async function runGeneratedScenarioSet(
       async (scenario) => await executeScenario(scenario, scheduler),
     ),
   );
-  const failed = results.find(
+  const rejected = results.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
+  const failed =
+    rejected.find(
+      (result) =>
+        !cleanupFailureObserved ||
+        !hasFailureCause(result.reason, cleanupFailure),
+    ) ?? rejected[0];
   if (failed !== undefined) scenarioFailure = failed.reason;
   if (set !== "init" && options.evidence?.writeEnabled === true) {
     try {
@@ -876,7 +1158,7 @@ export async function runGeneratedScenarioSet(
         type: "lifecycle-error",
         stage: "prune",
         at: (options.evidence.clock ?? (() => new Date()))().toISOString(),
-        error: failureMessage(error),
+        error: redactFixtureFailureText(failureMessage(error), failureSecrets),
       });
       scenarioFailure ??= error;
     }
@@ -899,7 +1181,10 @@ export async function runGeneratedScenarioSet(
       : {
           type: "invocation",
           outcome: "failed",
-          error: failureMessage(scenarioFailure),
+          error: redactFixtureFailureText(
+            failureMessage(scenarioFailure),
+            failureSecrets,
+          ),
         },
   );
   if (activity !== undefined) {
@@ -924,6 +1209,7 @@ export async function runGeneratedRegistryCli(options: {
   readonly workspace?: string;
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
+  readonly cancelSignal?: AbortSignal;
 }): Promise<void> {
   const set = options.scenarioSet;
   if (
@@ -988,11 +1274,16 @@ export async function runGeneratedRegistryCli(options: {
       );
     }
   }
+  let failed = false;
+  let failure: unknown;
   try {
     await runGeneratedScenarioSet(set, {
       workspace,
       reporter: options.reporter ?? console,
       ...(options.run === undefined ? {} : { run: options.run }),
+      ...(options.cancelSignal === undefined
+        ? {}
+        : { cancelSignal: options.cancelSignal }),
       scheduling,
       buildKitCacheDirectory: path.resolve(buildKitCacheDirectory),
       containerEnvironment: fixtureContainerEnvironmentFromEnvironment(
@@ -1001,18 +1292,91 @@ export async function runGeneratedRegistryCli(options: {
       ...(dependencyCaches === undefined ? {} : { dependencyCaches }),
       ...(evidence === undefined ? {} : { evidence }),
     });
-  } finally {
-    if (managesWorkspace) {
+    options.cancelSignal?.throwIfAborted();
+  } catch (error) {
+    failed = true;
+    failure = error;
+    await persistFixtureFailureReport({
+      scenarioSet: set,
+      workspace,
+      environment: options.environment,
+      error,
+      reporter: options.reporter ?? console,
+    });
+  }
+  if (failed) throw failure;
+  if (managesWorkspace) {
+    try {
       await rm(workspace, { recursive: true, force: true });
+    } catch (error) {
+      await persistFixtureFailureReport({
+        scenarioSet: set,
+        workspace,
+        environment: options.environment,
+        error,
+        reporter: options.reporter ?? console,
+      });
+      throw error;
     }
   }
 }
 
+class FixtureCliCancellationError extends Error {
+  readonly signal: "SIGINT" | "SIGTERM";
+  readonly exitCode: number;
+
+  constructor(signal: "SIGINT" | "SIGTERM") {
+    super(`Fixture scenario set cancelled by ${signal}`);
+    this.name = "FixtureCliCancellationError";
+    this.signal = signal;
+    this.exitCode = signal === "SIGINT" ? 130 : 143;
+  }
+}
+
+function findFixtureCliCancellation(
+  error: unknown,
+  depth = 0,
+): FixtureCliCancellationError | undefined {
+  if (depth > 12) return undefined;
+  if (error instanceof FixtureCliCancellationError) return error;
+  if (error instanceof AggregateError) {
+    for (const nested of error.errors) {
+      const cancellation = findFixtureCliCancellation(nested, depth + 1);
+      if (cancellation !== undefined) return cancellation;
+    }
+  }
+  if (error instanceof Error && error.cause !== undefined) {
+    return findFixtureCliCancellation(error.cause, depth + 1);
+  }
+  return undefined;
+}
+
 async function main(): Promise<void> {
-  await runGeneratedRegistryCli({
-    scenarioSet: process.argv[2],
-    environment: process.env,
-  });
+  const cancellation = new AbortController();
+  const onSignal = (signal: "SIGINT" | "SIGTERM") => {
+    if (!cancellation.signal.aborted) {
+      cancellation.abort(new FixtureCliCancellationError(signal));
+    }
+  };
+  const onInterrupt = () => onSignal("SIGINT");
+  const onTerminate = () => onSignal("SIGTERM");
+  process.on("SIGINT", onInterrupt);
+  process.on("SIGTERM", onTerminate);
+  try {
+    await runGeneratedRegistryCli({
+      scenarioSet: process.argv[2],
+      environment: process.env,
+      cancelSignal: cancellation.signal,
+    });
+  } catch (error) {
+    const reason = findFixtureCliCancellation(error);
+    if (reason === undefined) throw error;
+    console.error(`[Fixture Evidence] ${reason.message}`);
+    process.exitCode = reason.exitCode;
+  } finally {
+    process.off("SIGINT", onInterrupt);
+    process.off("SIGTERM", onTerminate);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

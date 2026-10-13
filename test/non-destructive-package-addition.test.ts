@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -30,20 +31,6 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotDeepStrictEqualWithMatchers,
-  assertNotPartialDeepStrictEqual,
-  assertPartialDeepStrictEqual,
-  assertThrowsMatching,
-  hasProperty,
-  objectContaining,
-  stringContaining,
-  assertThrowsContaining,
-} from "./assertions.ts";
 
 function requireAddableDefinitionForRole(
   context: BuiltInGenerationContext,
@@ -166,19 +153,31 @@ void describe("Non-Destructive Package Addition", () => {
         await assert.rejects(
           stat(path.join(targetDir, ".pnpmfile.mjs")),
           (error) => {
-            assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+            assert.ok(typeof error === "object" && error !== null);
+            assert.ok(Object.hasOwn(error, "code"));
+            assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
             return true;
           },
         );
-        assertNotPartialDeepStrictEqual(
-          await readFile(path.join(targetDir, "tsconfig.json"), "utf8").then(
-            (source) => JSON.parse(source),
-          ),
-          {
-            compilerOptions: { allowJs: true, checkJs: true },
-            include: arrayContaining([".pnpmfile.mjs"]),
-          },
-        );
+        const initialTsconfig = JSON.parse(
+          await readFile(path.join(targetDir, "tsconfig.json"), "utf8"),
+        ) as Record<string, unknown>;
+        const initialCompilerOptions = initialTsconfig.compilerOptions;
+        const initialIncludes = initialTsconfig.include;
+        const alreadyIncludesPnpmfile =
+          typeof initialCompilerOptions === "object" &&
+          initialCompilerOptions !== null &&
+          Object.hasOwn(initialTsconfig, "compilerOptions") &&
+          Object.hasOwn(initialCompilerOptions, "allowJs") &&
+          (initialCompilerOptions as Record<string, unknown>).allowJs ===
+            true &&
+          Object.hasOwn(initialCompilerOptions, "checkJs") &&
+          (initialCompilerOptions as Record<string, unknown>).checkJs ===
+            true &&
+          Object.hasOwn(initialTsconfig, "include") &&
+          Array.isArray(initialIncludes) &&
+          initialIncludes.includes(".pnpmfile.mjs");
+        assert.ok(!alreadyIncludesPnpmfile);
 
         const addition = planGeneratedRepositoryPackageAddition({
           definition: publicDefinition,
@@ -192,13 +191,16 @@ void describe("Non-Destructive Package Addition", () => {
 
         assert.strictEqual(result.ok, true);
         if (!result.ok) return;
-        assertDeepStrictEqualWithMatchers(
-          result.actions,
-          arrayContaining([
-            { path: ".pnpmfile.mjs", driver: "text", action: "create" },
-            { path: "tsconfig.json", driver: "structured", action: "update" },
-          ]),
-        );
+        for (const expectedAction of [
+          { path: ".pnpmfile.mjs", driver: "text", action: "create" },
+          { path: "tsconfig.json", driver: "structured", action: "update" },
+        ]) {
+          assert.ok(
+            result.actions.some((action) =>
+              isDeepStrictEqual(action, expectedAction),
+            ),
+          );
+        }
         const addedPackage = addition.blueprint.packages.find(
           (definition) => definition.path === "packages/release",
         );
@@ -228,16 +230,17 @@ void describe("Non-Destructive Package Addition", () => {
           ),
           provider!.path,
         );
-        assertPartialDeepStrictEqual(
-          await readFile(path.join(targetDir, "tsconfig.json"), "utf8").then(
-            (source) => JSON.parse(source),
-          ),
-          {
-            compilerOptions: { allowJs: true, checkJs: true },
-            files: [".pnpmfile.mjs"],
-            include: ["*.config.ts", "scripts/**/*.ts"],
-          },
-        );
+        const addedTsconfig = JSON.parse(
+          await readFile(path.join(targetDir, "tsconfig.json"), "utf8"),
+        ) as Record<string, unknown>;
+        assert.partialDeepStrictEqual(addedTsconfig, {
+          compilerOptions: { allowJs: true, checkJs: true },
+        });
+        assert.deepStrictEqual(addedTsconfig.files, [".pnpmfile.mjs"]);
+        assert.deepStrictEqual(addedTsconfig.include, [
+          "*.config.ts",
+          "scripts/**/*.ts",
+        ]);
 
         await execa("pnpm", ["install"], { cwd: targetDir });
         const packDestination = path.join(workspace, "packs");
@@ -248,13 +251,13 @@ void describe("Non-Destructive Package Addition", () => {
         const archives = (await readdir(packDestination)).filter((file) =>
           file.endsWith(".tgz"),
         );
-        assertLength(archives, 1);
+        assert.strictEqual(archives.length, 1);
         const packedManifest = await execa("tar", [
           "-xOf",
           path.join(packDestination, archives[0]!),
           "package/package.json",
         ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
-        assert.ok(!hasProperty(packedManifest, "devDependencies"));
+        assert.ok(!Object.hasOwn(packedManifest, "devDependencies"));
         assert.ok(!JSON.stringify(packedManifest).includes("link:"));
         assert.ok(!JSON.stringify(packedManifest).includes("workspace:"));
       } finally {
@@ -360,43 +363,46 @@ void describe("Non-Destructive Package Addition", () => {
 
       assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      assertDeepStrictEqualWithMatchers(
-        result.actions,
-        arrayContaining([
-          {
-            path: ".devcontainer/devcontainer.json",
-            driver: "structured",
-            action: "update",
-          },
-          {
-            path: `${consumerPath}/package.json`,
-            driver: "structured",
-            action: "update",
-          },
-          {
-            path: "services/dashboard/package.json",
-            driver: "structured",
-            action: "create",
-          },
-        ]),
-      );
-      assertNotDeepStrictEqualWithMatchers(
-        result.actions.map((action) => action.path),
-        arrayContaining([
+      for (const expectedAction of [
+        {
+          path: ".devcontainer/devcontainer.json",
+          driver: "structured",
+          action: "update",
+        },
+        {
+          path: `${consumerPath}/package.json`,
+          driver: "structured",
+          action: "update",
+        },
+        {
+          path: "services/dashboard/package.json",
+          driver: "structured",
+          action: "create",
+        },
+      ]) {
+        assert.ok(
+          result.actions.some((action) =>
+            isDeepStrictEqual(action, expectedAction),
+          ),
+        );
+      }
+      const actionPaths = result.actions.map((action) => action.path);
+      assert.ok(
+        ![
           ".gitignore",
           ".github/dependabot.yml",
           ".vscode/settings.json",
           "oxlint.config.ts",
           "package.json",
-        ]),
+        ].every((expectedPath) => actionPaths.includes(expectedPath)),
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await readFile(path.join(targetDir, "package.json"), "utf8").then(
           (source) => JSON.parse(source),
         ),
         { userRoot: { retained: true } },
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await readFile(
           path.join(targetDir, consumerPath, "package.json"),
           "utf8",
@@ -409,19 +415,30 @@ void describe("Non-Destructive Package Addition", () => {
           },
         },
       );
-      assertPartialDeepStrictEqual(
+      const updatedDevcontainer = JSON.parse(
         await readFile(
           path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
-        ).then((source) => JSON.parse(source)),
-        {
-          userCustomization: { retained: true },
-          build: {
-            args: {
-              PLAYWRIGHT_CLI_PACKAGE: stringContaining("@playwright/test"),
-            },
-          },
-        },
+        ),
+      ) as Record<string, unknown> & {
+        build: { args: Record<string, unknown> };
+      };
+      assert.partialDeepStrictEqual(updatedDevcontainer, {
+        userCustomization: { retained: true },
+      });
+      assert.ok(Object.hasOwn(updatedDevcontainer, "build"));
+      assert.ok(Object.hasOwn(updatedDevcontainer.build, "args"));
+      assert.ok(
+        Object.hasOwn(updatedDevcontainer.build.args, "PLAYWRIGHT_CLI_PACKAGE"),
+      );
+      assert.ok(
+        typeof updatedDevcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE ===
+          "string",
+      );
+      assert.ok(
+        updatedDevcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE.includes(
+          "@playwright/test",
+        ),
       );
       for (const [relativePath, prefix] of textCustomizations) {
         assert.ok(
@@ -443,29 +460,25 @@ void describe("Non-Destructive Package Addition", () => {
           )
         ).includes("playwright install"),
       );
-      assertPartialDeepStrictEqual(
-        await readFile(
-          path.join(targetDir, ".vscode/extensions.json"),
-          "utf8",
-        ).then((source) => JSON.parse(source)),
-        {
-          recommendations: arrayContaining(["user.first", "Vue.volar"]),
-        },
-      );
-      assertPartialDeepStrictEqual(
+      const extensions = JSON.parse(
+        await readFile(path.join(targetDir, ".vscode/extensions.json"), "utf8"),
+      ) as { recommendations: string[] };
+      assert.ok(extensions.recommendations.includes("user.first"));
+      assert.ok(extensions.recommendations.includes("Vue.volar"));
+      const generation = JSON.parse(
         await readFile(
           path.join(targetDir, ".template/generation.json"),
           "utf8",
-        ).then((source) => JSON.parse(source)),
-        {
-          schemaVersion: 2,
-          packages: [
-            objectContaining({ path: consumerPath }),
-            objectContaining({ path: "packages/typescript-config" }),
-            objectContaining({ path: "services/dashboard" }),
-          ],
-        },
+        ),
+      ) as { schemaVersion: number; packages: { path: string }[] };
+      assert.strictEqual(generation.schemaVersion, 2);
+      assert.strictEqual(generation.packages.length, 3);
+      assert.strictEqual(generation.packages[0]?.path, consumerPath);
+      assert.strictEqual(
+        generation.packages[1]?.path,
+        "packages/typescript-config",
       );
+      assert.strictEqual(generation.packages[2]?.path, "services/dashboard");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -505,7 +518,7 @@ void describe("Non-Destructive Package Addition", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       const before = await workspaceByteSnapshot(targetDir);
 
-      assertThrowsContaining(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition: additionDefinition,
@@ -514,7 +527,11 @@ void describe("Non-Destructive Package Addition", () => {
             packagePath: "services/dashboard",
             linkFrom: [consumerPath],
           }),
-        `Package Link ${consumerPath} (shared-library) cannot depend on services/dashboard (runtime-service) under Package Role boundaries`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `Package Link ${consumerPath} (shared-library) cannot depend on services/dashboard (runtime-service) under Package Role boundaries`,
+          ),
       );
       assert.deepStrictEqual(await workspaceByteSnapshot(targetDir), before);
     } finally {
@@ -602,26 +619,26 @@ void describe("Non-Destructive Package Addition", () => {
         };
 
       assert.ok(
-        !hasProperty(manifestFrom(before, consumerPath), "dependenciesMeta"),
+        !Object.hasOwn(manifestFrom(before, consumerPath), "dependenciesMeta"),
       );
       assert.deepStrictEqual(
         manifestFrom(after, consumerPath).dependenciesMeta?.["@demo/provider"],
         { injected: true },
       );
       assert.ok(
-        !hasProperty(
-          manifestFrom(after, consumerPath).dependenciesMeta,
+        !Object.hasOwn(
+          (manifestFrom(after, consumerPath).dependenciesMeta ?? {}) as object,
           "@demo/next-provider",
         ),
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...secondAddition.projectProjections,
         }),
         { ok: true },
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await readFile(providerManifestPath, "utf8").then((source) =>
           JSON.parse(source),
         ),
@@ -695,7 +712,7 @@ void describe("Non-Destructive Package Addition", () => {
           .map((action) => action.path)
           .includes(`${existingPath}/package.json`),
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await readFile(existingManifestPath, "utf8").then((source) =>
           JSON.parse(source),
         ),
@@ -769,9 +786,9 @@ void describe("Non-Destructive Package Addition", () => {
           .includes(`${existingPath}/package.json`),
       );
       await assert.rejects(stat(existingManifestPath), (error) => {
-        assertPartialDeepStrictEqual(error, {
-          code: "ENOENT",
-        });
+        assert.ok(typeof error === "object" && error !== null);
+        assert.ok(Object.hasOwn(error, "code"));
+        assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
         return true;
       });
       assert.ok(
@@ -817,7 +834,7 @@ void describe("Non-Destructive Package Addition", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       await unlink(path.join(targetDir, consumerPath, "package.json"));
 
-      assertThrowsContaining(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition,
@@ -825,12 +842,18 @@ void describe("Non-Destructive Package Addition", () => {
             packageLeafName: "provider",
             linkFrom: [consumerPath],
           }),
-        `Package Addition requires manifest truth for ${consumerPath}:`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `Package Addition requires manifest truth for ${consumerPath}:`,
+          ),
       );
       await assert.rejects(
         stat(path.join(targetDir, "packages/provider")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );
@@ -966,17 +989,17 @@ void describe("Non-Destructive Package Addition", () => {
       assert.strictEqual(result.ok, true);
       if (!result.ok) return;
       assert.ok(result.changedPaths.includes("turbo.json"));
-      assertPartialDeepStrictEqual(
-        await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
-        {
-          boundaries: {
-            tags: {
-              app: { dependencies: { allow: ["app", "library"] } },
-            },
-          },
-          tasks: { "user:report": { cache: false } },
-        },
+      const updatedTurbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        boundaries: { tags: { app: { dependencies: { allow: string[] } } } };
+        tasks: Record<string, unknown>;
+      };
+      assert.deepStrictEqual(
+        updatedTurbo.boundaries.tags.app.dependencies.allow,
+        ["app", "library"],
       );
+      assert.partialDeepStrictEqual(updatedTurbo, {
+        tasks: { "user:report": { cache: false } },
+      });
 
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
@@ -991,7 +1014,9 @@ void describe("Non-Destructive Package Addition", () => {
         { ok: true, changedPaths: [], actions: [] },
       );
       const repeatedTurbo = await readFile(turboPath, "utf8");
-      assertLength(repeatedTurbo.match(/"user:report"/gu), 1);
+      const userReportOccurrences = repeatedTurbo.match(/"user:report"/gu);
+      assert.ok(userReportOccurrences);
+      assert.strictEqual(userReportOccurrences.length, 1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -1088,7 +1113,11 @@ void describe("Non-Destructive Package Addition", () => {
         actions: [],
       });
       const gitignore = await readFile(gitignorePath, "utf8");
-      assertLength(gitignore.match(/^private-artifacts\/$/gmu), 1);
+      const privateArtifactsEntries = gitignore.match(
+        /^private-artifacts\/$/gmu,
+      );
+      assert.ok(privateArtifactsEntries);
+      assert.strictEqual(privateArtifactsEntries.length, 1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -1138,16 +1167,15 @@ void describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      assertDeepStrictEqualWithMatchers(result, {
-        ok: false,
-        conflicts: [
-          objectContaining({
-            path: ".template/generation.json",
-            driver: "canonical",
-            reason: "Current tool-owned state is stale",
-          }),
-        ],
-      });
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.conflicts.length, 1);
+      const conflict = result.conflicts[0]!;
+      assert.ok(Object.hasOwn(conflict, "path"));
+      assert.strictEqual(conflict.path, ".template/generation.json");
+      assert.ok(Object.hasOwn(conflict, "driver"));
+      assert.strictEqual(conflict.driver, "canonical");
+      assert.ok(Object.hasOwn(conflict, "reason"));
+      assert.strictEqual(conflict.reason, "Current tool-owned state is stale");
       assert.deepStrictEqual(await workspaceByteSnapshot(targetDir), before);
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -1190,14 +1218,18 @@ void describe("Non-Destructive Package Addition", () => {
         JSON.stringify({ ...generation, historicalFiles: {} }),
       );
 
-      assertThrowsMatching(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition,
             localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName: "utilities",
           }),
-        /^Generation Record contains unknown field: historicalFiles; historicalFiles: contains unknown Generation Record field$/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /^Generation Record contains unknown field: historicalFiles; historicalFiles: contains unknown Generation Record field$/u.test(
+            error.message,
+          ),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -1259,7 +1291,9 @@ void describe("Non-Destructive Package Addition", () => {
       await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );
@@ -1322,7 +1356,9 @@ void describe("Non-Destructive Package Addition", () => {
       await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );
@@ -1441,7 +1477,9 @@ void describe("Non-Destructive Package Addition", () => {
       await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );
@@ -1501,14 +1539,18 @@ void describe("Non-Destructive Package Addition", () => {
         }),
       );
 
-      assertThrowsContaining(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition,
             localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName: "utilities",
           }),
-        `Package Addition Generation Record preset ${conflictingDefinition.metadata.name} conflicts with initial Package provenance ${definition.metadata.name} for Blueprint package ${initialization.blueprint.packages[0]!.path}`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `Package Addition Generation Record preset ${conflictingDefinition.metadata.name} conflicts with initial Package provenance ${definition.metadata.name} for Blueprint package ${initialization.blueprint.packages[0]!.path}`,
+          ),
       );
       await writeFile(
         generationPath,
@@ -1525,19 +1567,25 @@ void describe("Non-Destructive Package Addition", () => {
           })),
         }),
       );
-      assertThrowsContaining(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition,
             localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
             packageLeafName: "utilities",
           }),
-        `Package Planning Provenance ${conflictingDefinition.metadata.name}:library (planInitialization) at ${initialization.blueprint.packages[0]!.path} failed: unknown Package Contribution replay adapter library; expected binary for ${conflictingDefinition.metadata.name}`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `Package Planning Provenance ${conflictingDefinition.metadata.name}:library (planInitialization) at ${initialization.blueprint.packages[0]!.path} failed: unknown Package Contribution replay adapter library; expected binary for ${conflictingDefinition.metadata.name}`,
+          ),
       );
       await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );

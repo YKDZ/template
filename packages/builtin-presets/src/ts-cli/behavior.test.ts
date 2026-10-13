@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -31,21 +32,6 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
-import {
-  any,
-  arrayContaining,
-  assertContains,
-  assertDoesNotMatch,
-  assertDoesNotContain,
-  assertHasProperty,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  assertThrows,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-} from "../../test-support/assertions.ts";
 import { tsCliDefinition } from "./definition.ts";
 
 function requireReadyInitialization(
@@ -339,9 +325,8 @@ void describe("ts-cli Preset Definition behavior", () => {
     assert.strictEqual(config.compilerOptions.erasableSyntaxOnly, true);
     assert.strictEqual(config.compilerOptions.module, "nodenext");
     assert.strictEqual(config.compilerOptions.moduleResolution, "nodenext");
-    assertContains(
-      config.files,
-      "./templates/ts-cli/publication-setup/bridge.ts",
+    assert.ok(
+      config.files.includes("./templates/ts-cli/publication-setup/bridge.ts"),
     );
     const bridge = await readFile(
       path.join(packageRoot, "templates/ts-cli/publication-setup/bridge.ts"),
@@ -350,10 +335,13 @@ void describe("ts-cli Preset Definition behavior", () => {
     const sourceManifest = JSON.parse(
       await readFile(path.join(packageRoot, "package.json"), "utf8"),
     ) as { readonly scripts: Record<string, string> };
-    assertContains(sourceManifest.scripts["format:check"], " .");
-    assertContains(
-      sourceManifest.scripts.lint,
-      "templates/ts-cli/publication-setup/bridge.ts",
+    const formatCheck = sourceManifest.scripts["format:check"];
+    assert.ok(typeof formatCheck === "string" && formatCheck.includes(" ."));
+    assert.ok(
+      typeof sourceManifest.scripts.lint === "string" &&
+        sourceManifest.scripts.lint.includes(
+          "templates/ts-cli/publication-setup/bridge.ts",
+        ),
     );
     assert.strictEqual(
       sourceManifest.scripts.typecheck,
@@ -425,18 +413,13 @@ esac
     );
     try {
       const configured = await configureRunner(runner, "runner");
-      assertMatches(
-        {
-          exitCode: configured.exitCode,
-          stderr: configured.stderr,
-        },
-        {
-          exitCode: 3,
-          stderr: stringContaining("git-handoff-required"),
-        },
+      assert.strictEqual(configured.exitCode, 3);
+      assert.ok(configured.stderr.includes("git-handoff-required"));
+      assert.strictEqual(
+        configured.stderr.includes("owner-fact-conflict"),
+        false,
       );
-      assertDoesNotContain(configured.stderr, "owner-fact-conflict");
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         JSON.parse(
           await readFile(path.join(runner.packageRoot, "package.json"), "utf8"),
         ),
@@ -453,17 +436,9 @@ esac
     );
     try {
       const configured = await configureRunner(overridden, "launch");
-      assertMatches(
-        {
-          exitCode: configured.exitCode,
-          stderr: configured.stderr,
-        },
-        {
-          exitCode: 3,
-          stderr: stringContaining("git-handoff-required"),
-        },
-      );
-      assertMatchesPartial(
+      assert.strictEqual(configured.exitCode, 3);
+      assert.ok(configured.stderr.includes("git-handoff-required"));
+      assert.partialDeepStrictEqual(
         JSON.parse(
           await readFile(
             path.join(overridden.packageRoot, "package.json"),
@@ -513,10 +488,9 @@ esac
       path: "packages/cli",
       role: "cli-tool",
     });
-    assertMatchesPartial(contribution.manifest, {
+    assert.partialDeepStrictEqual(contribution.manifest, {
       name: "@demo/cli",
       private: true,
-      files: ["dist"],
       type: "module",
       bin: { cli: "./dist/cli.js" },
       dependencies: {
@@ -528,12 +502,29 @@ esac
       scripts: {
         build: "tsc -p tsconfig.build.json --pretty false",
         prepack: "pnpm exec turbo run build --filter=.",
-        test: any(String),
-        "test:e2e": any(String),
-        postbuild: stringContaining("chmodSync('dist/cli.js', 0o755)"),
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
+    assert.deepStrictEqual(contribution.manifest.files, ["dist"]);
+    const generatedScripts = contribution.manifest.scripts as Record<
+      string,
+      string
+    >;
+    assert.ok(
+      Object.hasOwn(generatedScripts, "test") &&
+        typeof generatedScripts.test === "string",
+    );
+    assert.strictEqual(
+      Object.hasOwn(generatedScripts, "test:e2e") &&
+        typeof generatedScripts["test:e2e"] === "string",
+      true,
+    );
+    const postbuild = generatedScripts.postbuild;
+    assert.ok(
+      Object.hasOwn(generatedScripts, "postbuild") &&
+        typeof postbuild === "string" &&
+        postbuild.includes("chmodSync('dist/cli.js', 0o755)"),
+    );
     assert.deepStrictEqual(contribution.exposure, { exports: {}, imports: {} });
     assert.strictEqual(
       contribution.planningIdentity,
@@ -550,34 +541,45 @@ esac
       "publishConfig",
       "version",
     ]) {
-      assertLacksProperty(contribution.manifest, publicProgrammaticField);
+      assert.strictEqual(
+        publicProgrammaticField in contribution.manifest,
+        false,
+      );
     }
-    assertMatches(
-      contribution.operations,
-      arrayContaining([
-        {
-          kind: "copyFile",
-          source: tsCliDefinition.source,
-          from: "src/cli.ts",
-          to: "packages/cli/src/cli.ts",
-        },
-        {
-          kind: "copyFile",
-          source: tsCliDefinition.source,
-          from: "src/cli-command-identity.ts",
-          to: "packages/cli/src/cli-command-identity.ts",
-        },
-        {
-          kind: "copyFile",
-          source: tsCliDefinition.source,
-          from: "src/main.ts",
-          to: "packages/cli/src/main.ts",
-        },
-      ]),
-    );
-    assertDoesNotMatch(
-      contribution.operations,
-      arrayContaining([objectContaining({ kind: "replaceAnchors" })]),
+    const expectedCopiedFiles = [
+      {
+        kind: "copyFile",
+        source: tsCliDefinition.source,
+        from: "src/cli.ts",
+        to: "packages/cli/src/cli.ts",
+      },
+      {
+        kind: "copyFile",
+        source: tsCliDefinition.source,
+        from: "src/cli-command-identity.ts",
+        to: "packages/cli/src/cli-command-identity.ts",
+      },
+      {
+        kind: "copyFile",
+        source: tsCliDefinition.source,
+        from: "src/main.ts",
+        to: "packages/cli/src/main.ts",
+      },
+    ] as const;
+    for (const expectedOperation of expectedCopiedFiles) {
+      assert.ok(
+        contribution.operations.some((operation) =>
+          isDeepStrictEqual(operation, expectedOperation),
+        ),
+      );
+    }
+    assert.strictEqual(
+      contribution.operations.some(
+        (operation) =>
+          Object.hasOwn(operation, "kind") &&
+          operation.kind === "replaceAnchors",
+      ),
+      false,
     );
 
     assert.strictEqual(
@@ -646,10 +648,10 @@ esac
       (manifest) => manifest.name === "demo-cli",
     );
 
-    assertMatchesPartial(candidate?.manifest.devDependencies, {
+    assert.partialDeepStrictEqual(candidate?.manifest.devDependencies, {
       "@demo/typescript-config": "link:../typescript-config",
     });
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       plan.generationRecord.packages.find(
         (record) => record.path === "packages/cli",
       ),
@@ -658,7 +660,7 @@ esac
         planningContribution: "planInitialization",
       },
     );
-    assertMatchesPartial(rootManifest, {
+    assert.partialDeepStrictEqual(rootManifest, {
       imports: {
         "#npm-publication/*": "./scripts/npm-publication/*.ts",
       },
@@ -682,58 +684,123 @@ esac
         tar: "catalog:",
       },
     });
-    const rootScripts = rootManifest?.scripts as Record<string, string>;
-    assertDoesNotContain(rootScripts.check, "publication:readiness");
-    assertMatches(
-      plan.operations,
-      arrayContaining([
-        objectContaining({ to: ".pnpmfile.mjs" }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication/check-readiness.ts",
-          to: "scripts/npm-publication/check-readiness.ts",
-          replacements: {
+    const rootScripts = rootManifest?.scripts as
+      | Record<string, string>
+      | undefined;
+    assert.ok(rootScripts);
+    assert.ok(Object.hasOwn(rootScripts, "check"));
+    const rootCheck = rootScripts.check;
+    assert.strictEqual(
+      rootCheck,
+      "node --conditions=source scripts/quality-gates.ts check",
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          "to" in operation &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === ".pnpmfile.mjs",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          Object.hasOwn(operation, "kind") &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication/check-readiness.ts" &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/check-readiness.ts" &&
+          Object.hasOwn(operation, "replacements") &&
+          isDeepStrictEqual(operation.replacements, {
             PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          },
-        }),
-        objectContaining({
-          from: "publication/readiness.ts",
-          to: "scripts/npm-publication/readiness.ts",
-        }),
-        objectContaining({
-          from: "publication/artifact.ts",
-          to: "scripts/npm-publication/artifact.ts",
-        }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication/check-artifact.ts",
-          to: "scripts/npm-publication/check-artifact.ts",
-          replacements: {
+          }),
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          "from" in operation &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication/readiness.ts" &&
+          "to" in operation &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/readiness.ts",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          "from" in operation &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication/artifact.ts" &&
+          "to" in operation &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/artifact.ts",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          Object.hasOwn(operation, "kind") &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication/check-artifact.ts" &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/check-artifact.ts" &&
+          Object.hasOwn(operation, "replacements") &&
+          isDeepStrictEqual(operation.replacements, {
             PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          },
-        }),
-        objectContaining({
-          from: "publication/changelog.ts",
-          to: "scripts/npm-publication/changelog.ts",
-        }),
-        objectContaining({
-          from: "src/cli-command-identity.ts",
-          to: "scripts/npm-publication/cli-command-identity.ts",
-        }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication-setup/setup.sh",
-          to: "scripts/npm-publication-setup/setup.sh",
-        }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication-setup/bridge.ts",
-          to: "scripts/npm-publication-setup/bridge.ts",
-          replacements: {
+          }),
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          "from" in operation &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication/changelog.ts" &&
+          "to" in operation &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/changelog.ts",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          "from" in operation &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "src/cli-command-identity.ts" &&
+          "to" in operation &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication/cli-command-identity.ts",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          Object.hasOwn(operation, "kind") &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication-setup/setup.sh" &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication-setup/setup.sh",
+      ),
+    );
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          Object.hasOwn(operation, "kind") &&
+          Object.hasOwn(operation, "from") &&
+          operation.from === "publication-setup/bridge.ts" &&
+          Object.hasOwn(operation, "to") &&
+          operation.to === "scripts/npm-publication-setup/bridge.ts" &&
+          Object.hasOwn(operation, "replacements") &&
+          isDeepStrictEqual(operation.replacements, {
             PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          },
-        }),
-      ]),
+          }),
+      ),
     );
     assert.strictEqual(
       plan.operations.some(
@@ -756,9 +823,11 @@ esac
       command: "./scripts/npm-publication-setup/setup.sh",
     });
     assert.strictEqual(preparation.plan.nextStepInstructions.length, 3);
-    assertDoesNotContain(
-      preparation.plan.nextStepInstructions.map(({ display }) => display),
-      "./scripts/npm-publication-setup/setup.sh",
+    assert.strictEqual(
+      preparation.plan.nextStepInstructions
+        .map(({ display }) => display)
+        .includes("./scripts/npm-publication-setup/setup.sh"),
+      false,
     );
   });
 
@@ -838,14 +907,14 @@ esac
         },
       );
       assert.strictEqual(missingPnpm.exitCode, 5);
-      assertContains(missingPnpm.stdout, "STAGE 1/9 Check prerequisites");
-      assertContains(missingPnpm.stdout, "CHECK local-toolchain");
-      assertDoesNotContain(
-        missingPnpm.stdout,
-        "STAGE 2/9 Configure the public package",
+      assert.ok(missingPnpm.stdout.includes("STAGE 1/9 Check prerequisites"));
+      assert.ok(missingPnpm.stdout.includes("CHECK local-toolchain"));
+      assert.strictEqual(
+        missingPnpm.stdout.includes("STAGE 2/9 Configure the public package"),
+        false,
       );
-      assertContains(missingPnpm.stderr, "ERROR prerequisite-command");
-      assertContains(missingPnpm.stderr, "pnpm is unavailable");
+      assert.ok(missingPnpm.stderr.includes("ERROR prerequisite-command"));
+      assert.ok(missingPnpm.stderr.includes("pnpm is unavailable"));
 
       const result = await execa(
         "./scripts/npm-publication-setup/setup.sh",
@@ -854,7 +923,7 @@ esac
       );
 
       assert.strictEqual(result.exitCode, 0);
-      assertMatchesPartial(JSON.parse(result.stdout), {
+      assert.partialDeepStrictEqual(JSON.parse(result.stdout), {
         schemaVersion: 1,
         currentStage: { id: "configure-public-package", number: 2 },
         observations: {
@@ -871,9 +940,8 @@ esac
         { cwd: targetDir, reject: false, input: "unexpected stdin\n" },
       );
       assert.strictEqual(missingFacts.exitCode, 3);
-      assertContains(
-        missingFacts.stderr,
-        "ACTION REQUIRED public-fact-required",
+      assert.ok(
+        missingFacts.stderr.includes("ACTION REQUIRED public-fact-required"),
       );
 
       const promptEof = await execa(
@@ -882,8 +950,10 @@ esac
         { cwd: targetDir, input: "", reject: false },
       );
       assert.strictEqual(promptEof.exitCode, 3);
-      assertContains(promptEof.stderr, "ACTION REQUIRED public-fact-required");
-      assertContains(promptEof.stderr, "Observed: end of input");
+      assert.ok(
+        promptEof.stderr.includes("ACTION REQUIRED public-fact-required"),
+      );
+      assert.ok(promptEof.stderr.includes("Observed: end of input"));
 
       for (const args of [
         ["--status"],
@@ -897,7 +967,7 @@ esac
           { cwd: targetDir, reject: false, input: "must not be read\n" },
         );
         assert.strictEqual(rejected.exitCode, 2);
-        assertContains(rejected.stderr, "ERROR publication-setup-usage");
+        assert.ok(rejected.stderr.includes("ERROR publication-setup-usage"));
       }
 
       const invalidStatus = await execa(
@@ -907,10 +977,20 @@ esac
       );
       assert.strictEqual(invalidStatus.exitCode, 2);
       assert.strictEqual(invalidStatus.stderr, "");
-      assertMatchesPartial(JSON.parse(invalidStatus.stdout), {
+      assert.partialDeepStrictEqual(JSON.parse(invalidStatus.stdout), {
         schemaVersion: 1,
-        blockers: [objectContaining({ code: "publication-setup-usage" })],
       });
+      const invalidStatusBody = JSON.parse(invalidStatus.stdout) as {
+        readonly blockers: readonly { readonly code: string }[];
+      };
+      assert.strictEqual(invalidStatusBody.blockers.length, 1);
+      const [publicationSetupBlocker] = invalidStatusBody.blockers;
+      assert.ok(publicationSetupBlocker);
+      assert.strictEqual(Object.hasOwn(publicationSetupBlocker, "code"), true);
+      assert.strictEqual(
+        publicationSetupBlocker.code,
+        "publication-setup-usage",
+      );
 
       const invalidLicense = await execa(
         "./scripts/npm-publication-setup/setup.sh",
@@ -932,7 +1012,7 @@ esac
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(invalidLicense.exitCode, 2);
-      assertContains(invalidLicense.stderr, "ERROR public-fact-invalid");
+      assert.ok(invalidLicense.stderr.includes("ERROR public-fact-invalid"));
 
       for (const [flag, value] of [
         ["--package-name", "@demo/UPPER"],
@@ -961,7 +1041,7 @@ esac
           { cwd: targetDir, reject: false },
         );
         assert.strictEqual(invalidPublicFact.exitCode, 2);
-        assertContains(invalidPublicFact.stderr, "public-fact-invalid");
+        assert.ok(invalidPublicFact.stderr.includes("public-fact-invalid"));
       }
 
       const partialInteractive = await execa(
@@ -975,8 +1055,11 @@ esac
         },
       );
       assert.strictEqual(partialInteractive.exitCode, 5);
-      assertContains(partialInteractive.stdout, "Command name:");
-      assertDoesNotContain(partialInteractive.stdout, "Package name:");
+      assert.ok(partialInteractive.stdout.includes("Command name:"));
+      assert.strictEqual(
+        partialInteractive.stdout.includes("Package name:"),
+        false,
+      );
 
       const configured = await execa(
         "./scripts/npm-publication-setup/setup.sh",
@@ -1002,24 +1085,26 @@ esac
         5,
         `${configured.stdout}\n${configured.stderr}`,
       );
-      assertContains(
-        configured.stdout,
-        "STAGE 2/9 Configure the public package",
+      assert.ok(
+        configured.stdout.includes("STAGE 2/9 Configure the public package"),
       );
-      assertDoesNotContain(configured.stdout, String.fromCharCode(27));
-      assertDoesNotContain(configured.stdout, "\r");
-      assertDoesNotContain(configured.stderr, "not-read");
+      assert.strictEqual(
+        configured.stdout.includes(String.fromCharCode(27)),
+        false,
+      );
+      assert.strictEqual(configured.stdout.includes("\r"), false);
+      assert.strictEqual(configured.stderr.includes("not-read"), false);
       const configuredManifest = JSON.parse(
         await readFile(
           path.join(targetDir, "packages/cli/package.json"),
           "utf8",
         ),
       );
-      assertMatchesPartial(configuredManifest, {
+      assert.partialDeepStrictEqual(configuredManifest, {
         name: "@demo/ship",
         version: "1.0.0",
       });
-      assertLacksProperty(configuredManifest, "private");
+      assert.strictEqual("private" in configuredManifest, false);
 
       const holderConflict = await execa(
         "./scripts/npm-publication-setup/setup.sh",
@@ -1027,10 +1112,11 @@ esac
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(holderConflict.exitCode, 4);
-      assertContains(holderConflict.stderr, "owner-fact-conflict");
-      assertContains(
-        await readFile(path.join(targetDir, "LICENSE"), "utf8"),
-        "Ada Lovelace",
+      assert.ok(holderConflict.stderr.includes("owner-fact-conflict"));
+      assert.ok(
+        (await readFile(path.join(targetDir, "LICENSE"), "utf8")).includes(
+          "Ada Lovelace",
+        ),
       );
 
       const fakeBin = path.join(workspace, "fake-bin");
@@ -1053,7 +1139,7 @@ exit 97
         },
       );
       assert.strictEqual(dirty.exitCode, 3);
-      assertContains(dirty.stderr, "ACTION REQUIRED git-handoff-required");
+      assert.ok(dirty.stderr.includes("ACTION REQUIRED git-handoff-required"));
       assert.strictEqual(
         await readFile(gitLedger, "utf8"),
         "status --porcelain\n",
@@ -1069,7 +1155,7 @@ exit 97
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(conflict.exitCode, 4);
-      assertContains(conflict.stderr, "ERROR owner-fact-conflict");
+      assert.ok(conflict.stderr.includes("ERROR owner-fact-conflict"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -1123,9 +1209,11 @@ exit 97
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(unsafeUsage.exitCode, 2);
-      assertDoesNotContain(
-        `${unsafeUsage.stdout}\n${unsafeUsage.stderr}`,
-        "closure-secret",
+      assert.strictEqual(
+        `${unsafeUsage.stdout}\n${unsafeUsage.stderr}`.includes(
+          "closure-secret",
+        ),
+        false,
       );
       expectNoControlCharacters(`${unsafeUsage.stdout}\n${unsafeUsage.stderr}`);
 
@@ -1138,12 +1226,18 @@ exit 97
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(corruptMetadata.exitCode, 4);
-      assertContains(corruptMetadata.stderr, "local-template-metadata-invalid");
-      assertDoesNotContain(
-        corruptMetadata.stdout,
-        "STAGE 2/9 Configure the public package",
+      assert.ok(
+        corruptMetadata.stderr.includes("local-template-metadata-invalid"),
       );
-      assertContains(corruptMetadata.stdout, "STAGE 1/9 Check prerequisites");
+      assert.strictEqual(
+        corruptMetadata.stdout.includes(
+          "STAGE 2/9 Configure the public package",
+        ),
+        false,
+      );
+      assert.ok(
+        corruptMetadata.stdout.includes("STAGE 1/9 Check prerequisites"),
+      );
       const corruptStatus = await execa(
         "./scripts/npm-publication-setup/setup.sh",
         ["--status", "--json"],
@@ -1154,18 +1248,19 @@ exit 97
         readonly currentStage: { readonly id: string; readonly number: number };
         readonly blockers: readonly { readonly code: string }[];
       };
-      assertMatchesPartial(corruptStatusBody.currentStage, {
+      assert.partialDeepStrictEqual(corruptStatusBody.currentStage, {
         id: "check-prerequisites",
         number: 1,
       });
-      assertMatchesPartial(corruptStatusBody, {
+      assert.partialDeepStrictEqual(corruptStatusBody, {
         nextAction: { kind: "retry-external-check" },
       });
-      assertMatches(
-        corruptStatusBody.blockers,
-        arrayContaining([
-          objectContaining({ code: "local-template-metadata-invalid" }),
-        ]),
+      assert.ok(
+        corruptStatusBody.blockers.some(
+          (blocker) =>
+            Object.hasOwn(blocker, "code") &&
+            blocker.code === "local-template-metadata-invalid",
+        ),
       );
       await writeFile(generationPath, originalGeneration);
 
@@ -1179,7 +1274,7 @@ exit 97
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(reviewedReadme.exitCode, 4);
-      assertContains(reviewedReadme.stderr, "owner-fact-conflict");
+      assert.ok(reviewedReadme.stderr.includes("owner-fact-conflict"));
       assert.strictEqual(
         await readFile(readmePath, "utf8"),
         "Reviewed public README.\n",
@@ -1210,7 +1305,9 @@ syncBuiltinESMExports();
         },
       );
       assert.strictEqual(renameFailure.exitCode, 5);
-      assertContains(renameFailure.stderr, "configuration-platform-failure");
+      assert.ok(
+        renameFailure.stderr.includes("configuration-platform-failure"),
+      );
       assert.deepStrictEqual(
         (await readdir(path.join(targetDir, "packages/cli"))).filter((entry) =>
           entry.includes(".npm-publication-setup-"),
@@ -1274,11 +1371,11 @@ exit 19
         },
       );
       assert.strictEqual(result.exitCode, 5);
-      assertContains(result.stderr, "ERROR artifact-pack-failed");
-      assertContains(result.stderr, "TOKEN=[REDACTED]");
-      assertDoesNotContain(
-        `${result.stdout}\n${result.stderr}`,
-        "artifact-secret",
+      assert.ok(result.stderr.includes("ERROR artifact-pack-failed"));
+      assert.ok(result.stderr.includes("TOKEN=[REDACTED]"));
+      assert.strictEqual(
+        `${result.stdout}\n${result.stderr}`.includes("artifact-secret"),
+        false,
       );
       expectNoControlCharacters(`${result.stdout}\n${result.stderr}`);
     } finally {
@@ -1607,22 +1704,23 @@ exec ${JSON.stringify(process.execPath)} "$@"
           0,
           `${firstRun.stdout}\n${firstRun.stderr}`,
         );
-        assertContains(firstRun.stdout, "STAGE 5/9 Authenticate with npm");
-        assertContains(firstRun.stdout, "INTERACTIVE npm-login BEGIN");
-        assertContains(firstRun.stdout, "INTERACTIVE npm-publish END 0");
-        assertContains(firstRun.stdout, "INTERACTIVE npm-trust-write END 0");
-        assertContains(
-          firstRun.stdout,
-          "STAGE 7/9 Configure trusted publishing",
+        assert.ok(firstRun.stdout.includes("STAGE 5/9 Authenticate with npm"));
+        assert.ok(firstRun.stdout.includes("INTERACTIVE npm-login BEGIN"));
+        assert.ok(firstRun.stdout.includes("INTERACTIVE npm-publish END 0"));
+        assert.ok(
+          firstRun.stdout.includes("INTERACTIVE npm-trust-write END 0"),
         );
-        assertContains(
-          firstRun.stdout,
-          "STAGE 8/9 Create the first GitHub release",
+        assert.ok(
+          firstRun.stdout.includes("STAGE 7/9 Configure trusted publishing"),
+        );
+        assert.ok(
+          firstRun.stdout.includes("STAGE 8/9 Create the first GitHub release"),
         );
         const firstTranscript = firstRun.stdout.replace(/\r/g, "");
-        assertContains(
-          firstTranscript,
-          "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.",
+        assert.ok(
+          firstTranscript.includes(
+            "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.",
+          ),
         );
         const calls = (
           JSON.parse(await readFile(statePath, "utf8")) as {
@@ -1634,20 +1732,31 @@ exec ${JSON.stringify(process.execPath)} "$@"
             corepackCalls: string[][];
           }
         ).corepackCalls;
-        assertMatches(
-          calls,
-          arrayContaining([
-            arrayContaining(["login", "--auth-type=web"]),
-            arrayContaining([
-              "publish",
-              stringMatching(/\.tgz$/u),
-              "--access=public",
-              "--tag=latest",
-            ]),
-            arrayContaining(["trust", "github", "@demo/ship", "--yes"]),
-            arrayContaining(["logout"]),
-          ]),
+        assert.ok(
+          calls.some(
+            (call) =>
+              call.includes("login") && call.includes("--auth-type=web"),
+          ),
         );
+        assert.ok(
+          calls.some(
+            (call) =>
+              call.includes("publish") &&
+              call.some((argument) => argument.endsWith(".tgz")) &&
+              call.includes("--access=public") &&
+              call.includes("--tag=latest"),
+          ),
+        );
+        assert.ok(
+          calls.some(
+            (call) =>
+              call.includes("trust") &&
+              call.includes("github") &&
+              call.includes("@demo/ship") &&
+              call.includes("--yes"),
+          ),
+        );
+        assert.ok(calls.some((call) => call.includes("logout")));
         assert.strictEqual(
           (
             JSON.parse(await readFile(statePath, "utf8")) as {
@@ -1656,26 +1765,27 @@ exec ${JSON.stringify(process.execPath)} "$@"
           ).interactiveTty,
           true,
         );
-        assertMatches(
-          corepackCalls,
-          arrayContaining([
-            arrayContaining([
-              "pnpm",
-              "--dir",
-              targetDir,
-              "exec",
-              "npm",
-              "login",
-            ]),
-            arrayContaining([
-              "pnpm",
-              "--dir",
-              targetDir,
-              "exec",
-              "npm",
-              "publish",
-            ]),
-          ]),
+        assert.ok(
+          corepackCalls.some(
+            (call) =>
+              call.includes("pnpm") &&
+              call.includes("--dir") &&
+              call.includes(targetDir) &&
+              call.includes("exec") &&
+              call.includes("npm") &&
+              call.includes("login"),
+          ),
+        );
+        assert.ok(
+          corepackCalls.some(
+            (call) =>
+              call.includes("pnpm") &&
+              call.includes("--dir") &&
+              call.includes(targetDir) &&
+              call.includes("exec") &&
+              call.includes("npm") &&
+              call.includes("publish"),
+          ),
         );
         assert.strictEqual(
           calls
@@ -1721,7 +1831,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           0,
           `${resumeRun.stdout}\n${resumeRun.stderr}`,
         );
-        assertContains(resumeRun.stdout, "OK npm-publish-resumed-exact");
+        assert.ok(resumeRun.stdout.includes("OK npm-publish-resumed-exact"));
         assert.deepStrictEqual(await readdir(isolatedTemporaryParent), []);
         const afterResume = JSON.parse(await readFile(statePath, "utf8")) as {
           calls: string[][];
@@ -1814,10 +1924,12 @@ exec ${JSON.stringify(process.execPath)} "$@"
         });
         const tagOnlyResult = await resumeGithub(tagOnlyArtifact);
         assert.strictEqual(tagOnlyResult.exitCode, 0);
-        assertMatches(githubWrites((await readGithub()).calls), [
-          arrayContaining(["release", "create"]),
-          arrayContaining(["release", "edit"]),
-        ]);
+        const tagOnlyWrites = githubWrites((await readGithub()).calls);
+        assert.strictEqual(tagOnlyWrites.length, 2);
+        assert.ok(tagOnlyWrites[0]?.includes("release"));
+        assert.ok(tagOnlyWrites[0]?.includes("create"));
+        assert.ok(tagOnlyWrites[1]?.includes("release"));
+        assert.ok(tagOnlyWrites[1]?.includes("edit"));
 
         const drafted = await readGithub();
         const exactDraft = {
@@ -1840,9 +1952,10 @@ exec ${JSON.stringify(process.execPath)} "$@"
         });
         const draftResult = await resumeGithub(draftArtifact);
         assert.strictEqual(draftResult.exitCode, 0);
-        assertMatches(githubWrites((await readGithub()).calls), [
-          arrayContaining(["release", "edit"]),
-        ]);
+        const draftWrites = githubWrites((await readGithub()).calls);
+        assert.strictEqual(draftWrites.length, 1);
+        assert.ok(draftWrites[0]?.includes("release"));
+        assert.ok(draftWrites[0]?.includes("edit"));
 
         const partial = await readGithub();
         const partialAssets = Array.isArray(partial.release?.assets)
@@ -1929,7 +2042,7 @@ exec ${JSON.stringify(process.execPath)} "$@"
           const deadline = Date.now() + 20_000;
           while (!receiptTranscript.includes(prompt) && Date.now() < deadline)
             await new Promise((resolve) => setTimeout(resolve, 20));
-          assertContains(receiptTranscript, prompt);
+          assert.ok(receiptTranscript.includes(prompt));
         };
         await waitForReceiptPrompt("Acceptance: ");
         receiptRaceRun.stdin?.write(
@@ -1969,12 +2082,13 @@ exec ${JSON.stringify(process.execPath)} "$@"
           const driftResult = await resumeGithub(driftArtifact);
           assert.strictEqual(driftResult.exitCode, 4);
           const writes = githubWrites((await readGithub()).calls);
-          assertMatches(
-            writes,
-            drift === "pre-public-drift"
-              ? []
-              : [arrayContaining(["release", "edit"])],
-          );
+          if (drift === "pre-public-drift") {
+            assert.deepStrictEqual(writes, []);
+          } else {
+            assert.strictEqual(writes.length, 1);
+            assert.ok(writes[0]?.includes("release"));
+            assert.ok(writes[0]?.includes("edit"));
+          }
         }
 
         await writeGithub({
@@ -2014,21 +2128,26 @@ exec ${JSON.stringify(process.execPath)} "$@"
           malformedTagObjectArtifact,
         );
         assert.strictEqual(malformedTagObjectResult.exitCode, 4);
-        assertContains(
-          malformedTagObjectResult.stdout,
-          "github-release-write-failed",
+        assert.ok(
+          malformedTagObjectResult.stdout.includes(
+            "github-release-write-failed",
+          ),
         );
         const malformedTagObjectCalls = (await readGithub()).calls;
-        assertMatches(githubWrites(malformedTagObjectCalls), [
-          arrayContaining(["api", "POST", "repos/demo/ship/git/tags"]),
-        ]);
-        assertMatches(
-          malformedTagObjectCalls.slice(
-            malformedTagObjectCalls.findIndex(
-              (args) => args[0] === "api" && args.includes("POST"),
-            ) + 1,
+        const malformedTagWrites = githubWrites(malformedTagObjectCalls);
+        assert.strictEqual(malformedTagWrites.length, 1);
+        assert.ok(malformedTagWrites[0]?.includes("api"));
+        assert.ok(malformedTagWrites[0]?.includes("POST"));
+        assert.ok(malformedTagWrites[0]?.includes("repos/demo/ship/git/tags"));
+        const callsAfterMalformedTagWrite = malformedTagObjectCalls.slice(
+          malformedTagObjectCalls.findIndex(
+            (args) => args[0] === "api" && args.includes("POST"),
+          ) + 1,
+        );
+        assert.ok(
+          callsAfterMalformedTagWrite.some(
+            (call) => call.includes("api") && call.includes("GET"),
           ),
-          arrayContaining([arrayContaining(["api", "GET"])]),
         );
         assert.strictEqual(
           (
@@ -2061,10 +2180,13 @@ exec ${JSON.stringify(process.execPath)} "$@"
             publicWriteFailureArtifact,
           );
           assert.strictEqual(publicWriteFailureResult.exitCode, 4);
-          assertContains(publicWriteFailureResult.stdout, diagnosis);
-          assertMatches(githubWrites((await readGithub()).calls), [
-            arrayContaining(["release", "edit"]),
-          ]);
+          assert.ok(publicWriteFailureResult.stdout.includes(diagnosis));
+          const failureWrites = githubWrites((await readGithub()).calls);
+          assert.ok(
+            failureWrites.some(
+              (call) => call.includes("release") && call.includes("edit"),
+            ),
+          );
         }
 
         await writeGithub({ ...tagOnly, branch: "release", calls: [] });
@@ -2101,9 +2223,10 @@ exec ${JSON.stringify(process.execPath)} "$@"
                 (args) => args[0] === "api" && args.includes("POST"),
               ) + 1,
             );
-            assertMatches(
-              callsAfterFailure,
-              arrayContaining([arrayContaining(["api", "GET"])]),
+            assert.ok(
+              callsAfterFailure.some(
+                (call) => call.includes("api") && call.includes("GET"),
+              ),
             );
             assert.deepStrictEqual(githubWrites(callsAfterFailure), []);
           } else assert.deepStrictEqual(writes, []);
@@ -3065,9 +3188,12 @@ syncBuiltinESMExports();
         path.join(targetDir, "LICENSE"),
         "utf8",
       );
-      assertContains(rootLicense, "Apache License");
-      assertContains(rootLicense, "Copyright (c) Ada Lovelace");
-      assertDoesNotContain(rootLicense, "[name of copyright owner]");
+      assert.ok(rootLicense.includes("Apache License"));
+      assert.ok(rootLicense.includes("Copyright (c) Ada Lovelace"));
+      assert.strictEqual(
+        rootLicense.includes("[name of copyright owner]"),
+        false,
+      );
       assert.strictEqual(
         await readFile(path.join(targetDir, "packages/cli/LICENSE"), "utf8"),
         rootLicense,
@@ -3135,7 +3261,10 @@ syncBuiltinESMExports();
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(resumed.exitCode, 5);
-      assertDoesNotContain(resumed.stderr, "public-fact-required");
+      assert.strictEqual(
+        resumed.stderr.includes("public-fact-required"),
+        false,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -3215,7 +3344,7 @@ syncBuiltinESMExports();
         },
       );
       assert.strictEqual(raced.exitCode, 4);
-      assertContains(raced.stderr, "configuration-preimage-changed");
+      assert.ok(raced.stderr.includes("configuration-preimage-changed"));
       assert.strictEqual(await readFile(racePath, "utf8"), "");
       assert.strictEqual(
         await readFile(blueprintPath, "utf8"),
@@ -3290,9 +3419,10 @@ syncBuiltinESMExports();
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(resumed.exitCode, 5);
-      assertContains(
-        await readFile(changelogPath, "utf8"),
-        `## [1.0.0] - ${oldDate}`,
+      assert.ok(
+        (await readFile(changelogPath, "utf8")).includes(
+          `## [1.0.0] - ${oldDate}`,
+        ),
       );
       const validPartial = await readFile(changelogPath, "utf8");
       await writeFile(
@@ -3305,11 +3435,10 @@ syncBuiltinESMExports();
         { cwd: targetDir, reject: false },
       );
       assert.strictEqual(invalidDate.exitCode, 4);
-      assertContains(
-        invalidDate.stderr,
-        "changelog-target-release-date-invalid",
+      assert.ok(
+        invalidDate.stderr.includes("changelog-target-release-date-invalid"),
       );
-      assertContains(await readFile(changelogPath, "utf8"), "2020-02-30");
+      assert.ok((await readFile(changelogPath, "utf8")).includes("2020-02-30"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -3352,7 +3481,7 @@ syncBuiltinESMExports();
         ).length,
         1,
       );
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         addition.generationRecord.packages.find(
           (record) => record.path === "packages/release",
         ),
@@ -3373,9 +3502,12 @@ syncBuiltinESMExports();
         generationPath,
         `${JSON.stringify(generation, null, 2)}\n`,
       );
-      assertThrows(
+      assert.throws(
         () => loadLocalTemplateMetadata(targetDir),
-        "cli-package-addition replay identity requires planPackageAddition provenance",
+        (error: unknown) =>
+          (error instanceof Error ? error.message : String(error)).includes(
+            "cli-package-addition replay identity requires planPackageAddition provenance",
+          ),
       );
 
       candidate.contributionIdentity = "cli-publication-candidate";
@@ -3399,9 +3531,12 @@ syncBuiltinESMExports();
         generationPath,
         `${JSON.stringify(addedGeneration, null, 2)}\n`,
       );
-      assertThrows(
+      assert.throws(
         () => loadLocalTemplateMetadata(targetDir),
-        "cli-publication-candidate replay identity requires planInitialization provenance",
+        (error: unknown) =>
+          (error instanceof Error ? error.message : String(error)).includes(
+            "cli-publication-candidate replay identity requires planInitialization provenance",
+          ),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -3457,40 +3592,52 @@ syncBuiltinESMExports();
         },
       });
 
-    assertThrows(
+    assert.throws(
       () =>
         planNewCandidate({
           nodeLtsMajor: "26",
           packageManagerPin: "pnpm@11.11.0",
         }),
-      "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
+      (error: unknown) =>
+        (error instanceof Error ? error.message : String(error)).includes(
+          "新建公开 ts-cli 发布候选要求 Generation Context 提供精确三段 toolchain.nodeVersion，实际缺失；不能从 nodeLtsMajor 猜 patch 派生公开 caret 范围。",
+        ),
     );
-    assertThrows(
+    assert.throws(
       () =>
         planNewCandidate({
           nodeLtsMajor: "26",
           packageManagerPin: "pnpm@11.11.0",
           nodeVersion: "26.4",
         }),
-      '实际收到 "26.4"',
+      (error: unknown) =>
+        (error instanceof Error ? error.message : String(error)).includes(
+          '实际收到 "26.4"',
+        ),
     );
-    assertThrows(
+    assert.throws(
       () =>
         planNewCandidate({
           nodeLtsMajor: "26",
           packageManagerPin: "pnpm@11.11.0",
           nodeVersion: ">=26.4.2",
         }),
-      '实际收到 ">=26.4.2"',
+      (error: unknown) =>
+        (error instanceof Error ? error.message : String(error)).includes(
+          '实际收到 ">=26.4.2"',
+        ),
     );
-    assertThrows(
+    assert.throws(
       () =>
         planNewCandidate({
           nodeLtsMajor: "26",
           packageManagerPin: "pnpm@11.11.0",
           nodeVersion: "24.16.0",
         }),
-      "与 nodeLtsMajor 26 大版本不一致",
+      (error: unknown) =>
+        (error instanceof Error ? error.message : String(error)).includes(
+          "与 nodeLtsMajor 26 大版本不一致",
+        ),
     );
   });
 
@@ -3574,22 +3721,21 @@ syncBuiltinESMExports();
         )}\n`,
       );
 
-      assertThrows(
+      assert.throws(
         () =>
           planGeneratedRepositoryPackageAddition({
             definition: tsCliDefinition,
             localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
             packageLeafName: "release",
           }),
-        'CLI command name "release" from @demo/release is already used by @demo/cli',
+        (error: unknown) =>
+          (error instanceof Error ? error.message : String(error)).includes(
+            'CLI command name "release" from @demo/release is already used by @demo/cli',
+          ),
       );
-      await assert.rejects(
-        stat(path.join(targetDir, "packages/release")),
-        (error) => {
-          assertMatchesPartial(error, { code: "ENOENT" });
-          return true;
-        },
-      );
+      await assert.rejects(stat(path.join(targetDir, "packages/release")), {
+        code: "ENOENT",
+      });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -3597,8 +3743,8 @@ syncBuiltinESMExports();
 
   void it("appears in the public CLI Preset Catalog without exporting planner internals", async () => {
     const publicApi = await import("../index.ts");
-    assertLacksProperty(publicApi, "tsCliDefinition");
-    assertHasProperty(publicApi.templateSources, "tsCli");
+    assert.strictEqual("tsCliDefinition" in publicApi, false);
+    assert.strictEqual("tsCli" in publicApi.templateSources, true);
 
     const repositoryRoot = path.resolve(process.cwd(), "..", "..");
     const result = await execa(
@@ -3612,11 +3758,10 @@ syncBuiltinESMExports();
       ],
       { cwd: repositoryRoot },
     );
-    assertContains(result.stdout, "内置预设");
+    assert.ok(result.stdout.includes("内置预设"));
     assert.match(result.stdout, /\bts-cli\b/u);
-    assertContains(
-      result.stdout,
-      "TypeScript 命令行工具 - TypeScript 命令行包。",
+    assert.ok(
+      result.stdout.includes("TypeScript 命令行工具 - TypeScript 命令行包。"),
     );
   });
 
@@ -3629,13 +3774,9 @@ syncBuiltinESMExports();
       );
 
       try {
-        await assert.rejects(
-          stat(path.join(project.packageRoot, "dist")),
-          (error) => {
-            assertMatchesPartial(error, { code: "ENOENT" });
-            return true;
-          },
-        );
+        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+          code: "ENOENT",
+        });
         await execa(
           "pnpm",
           [
@@ -3649,13 +3790,9 @@ syncBuiltinESMExports();
           ],
           { cwd: project.targetDir },
         );
-        await assert.rejects(
-          stat(path.join(project.packageRoot, "dist")),
-          (error) => {
-            assertMatchesPartial(error, { code: "ENOENT" });
-            return true;
-          },
-        );
+        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+          code: "ENOENT",
+        });
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
       }
@@ -3671,7 +3808,7 @@ syncBuiltinESMExports();
       );
 
       try {
-        const rootCheck = await execa("pnpm", ["run", "check:full"], {
+        const rootCheck = await execa("pnpm", ["run", "check"], {
           cwd: project.targetDir,
           reject: false,
         });
@@ -3686,7 +3823,9 @@ syncBuiltinESMExports();
           reject: false,
         });
         assert.strictEqual(baseline.exitCode, 0);
-        assertContains(baseline.stdout, "npm publication readiness: blocked");
+        assert.ok(
+          baseline.stdout.includes("npm publication readiness: blocked"),
+        );
 
         const required = await execa(
           "pnpm",
@@ -3694,7 +3833,9 @@ syncBuiltinESMExports();
           { cwd: project.targetDir, reject: false },
         );
         assert.strictEqual(required.exitCode, 1);
-        assertContains(required.stdout, "npm publication readiness: blocked");
+        assert.ok(
+          required.stdout.includes("npm publication readiness: blocked"),
+        );
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
       }
@@ -3710,13 +3851,9 @@ syncBuiltinESMExports();
       );
 
       try {
-        await assert.rejects(
-          stat(path.join(project.packageRoot, "dist")),
-          (error) => {
-            assertMatchesPartial(error, { code: "ENOENT" });
-            return true;
-          },
-        );
+        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+          code: "ENOENT",
+        });
         await execa(
           "pnpm",
           [
@@ -3730,13 +3867,9 @@ syncBuiltinESMExports();
           ],
           { cwd: project.targetDir },
         );
-        await assert.rejects(
-          stat(path.join(project.packageRoot, "dist")),
-          (error) => {
-            assertMatchesPartial(error, { code: "ENOENT" });
-            return true;
-          },
-        );
+        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+          code: "ENOENT",
+        });
         const manifestPath = path.join(project.packageRoot, "package.json");
         const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
         manifest.bin = { "not a valid command": "./dist/cli.js" };
@@ -3803,11 +3936,16 @@ syncBuiltinESMExports();
           ).then(({ stdout }) => stdout),
           "release 7.8.9",
         );
-        assertContains(
-          await execa("node", ["--conditions=source", "src/cli.ts", "--help"], {
-            cwd: project.packageRoot,
-          }).then(({ stdout }) => stdout),
-          "release",
+        assert.ok(
+          (
+            await execa(
+              "node",
+              ["--conditions=source", "src/cli.ts", "--help"],
+              {
+                cwd: project.packageRoot,
+              },
+            ).then(({ stdout }) => stdout)
+          ).includes("release"),
         );
         const result = await execa(
           "node",
@@ -3816,13 +3954,9 @@ syncBuiltinESMExports();
         );
 
         assert.strictEqual(result.stdout, "source:lookup:passed");
-        await assert.rejects(
-          stat(path.join(project.packageRoot, "dist")),
-          (error) => {
-            assertMatchesPartial(error, { code: "ENOENT" });
-            return true;
-          },
-        );
+        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+          code: "ENOENT",
+        });
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
       }
@@ -3859,15 +3993,19 @@ syncBuiltinESMExports();
             }[];
           }
         ).tasks;
-        assertDoesNotContain(
-          tasks.find(({ taskId }) => taskId === "@demo/cli#test")?.dependencies,
-          "@demo/cli#build",
+        const nodeTestTask = tasks.find(
+          ({ taskId }) => taskId === "@demo/cli#test",
         );
-        assertContains(
-          tasks.find(({ taskId }) => taskId === "@demo/cli#test:e2e")
-            ?.dependencies,
-          "@demo/cli#build",
+        assert.ok(nodeTestTask);
+        assert.strictEqual(
+          nodeTestTask.dependencies.includes("@demo/cli#build"),
+          false,
         );
+        const endToEndTestTask = tasks.find(
+          ({ taskId }) => taskId === "@demo/cli#test:e2e",
+        );
+        assert.ok(endToEndTestTask);
+        assert.ok(endToEndTestTask.dependencies.includes("@demo/cli#build"));
 
         await execa(
           "pnpm",
@@ -3906,11 +4044,12 @@ syncBuiltinESMExports();
           }).then(({ stdout }) => stdout),
           "deliver 4.5.6",
         );
-        assertContains(
-          await execa("node", ["dist/cli.js", "--help"], {
-            cwd: project.packageRoot,
-          }).then(({ stdout }) => stdout),
-          "deliver",
+        assert.ok(
+          (
+            await execa("node", ["dist/cli.js", "--help"], {
+              cwd: project.packageRoot,
+            }).then(({ stdout }) => stdout)
+          ).includes("deliver"),
         );
 
         const result = await execa("pnpm", ["run", "test:e2e"], {
@@ -3918,8 +4057,8 @@ syncBuiltinESMExports();
           env: { ...process.env, NODE_TEST_CONTEXT: undefined },
         });
         const output = `${result.stdout}\n${result.stderr}`;
-        assertContains(output, "runs all source CLI journeys");
-        assertContains(output, "runs all distribution CLI journeys");
+        assert.ok(output.includes("runs all source CLI journeys"));
+        assert.ok(output.includes("runs all distribution CLI journeys"));
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
       }
@@ -3983,8 +4122,8 @@ syncBuiltinESMExports();
             { cwd: project.packageRoot, reject: false },
           );
           assert.notStrictEqual(result.exitCode, 0);
-          assertContains(result.stderr, invalidCase.message);
-          assertDoesNotContain(result.stdout, ":passed");
+          assert.ok(result.stderr.includes(invalidCase.message));
+          assert.strictEqual(result.stdout.includes(":passed"), false);
         }
       } finally {
         await rm(project.workspace, { recursive: true, force: true });
@@ -4025,9 +4164,9 @@ syncBuiltinESMExports();
         );
 
         const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
-        assertMatchesPartial(await stat(binPath), {
-          mode: any(Number),
-        });
+        const binStat = await stat(binPath);
+        assert.strictEqual(Object.hasOwn(binStat, "mode"), true);
+        assert.strictEqual(typeof binStat.mode, "number");
         assert.strictEqual(
           await execa(binPath, ["--version"], { cwd: consumerRoot }).then(
             ({ stdout }) => stdout,
@@ -4068,18 +4207,19 @@ syncBuiltinESMExports();
           string,
           unknown
         >;
-        assertMatchesPartial(sourceManifest, {
+        assert.partialDeepStrictEqual(sourceManifest, {
           private: true,
           bin: { cli: "./dist/cli.js" },
           devDependencies: {
             "@demo/typescript-config": "link:../typescript-config",
           },
         });
-        assertLacksProperty(sourceManifest, "version");
-        assertMatchesPartial(
-          await stat(path.join(project.targetDir, ".pnpmfile.mjs")),
-          { mode: any(Number) },
+        assert.strictEqual("version" in sourceManifest, false);
+        const pnpmfileStat = await stat(
+          path.join(project.targetDir, ".pnpmfile.mjs"),
         );
+        assert.strictEqual(Object.hasOwn(pnpmfileStat, "mode"), true);
+        assert.strictEqual(typeof pnpmfileStat.mode, "number");
 
         const packDestination = path.join(project.workspace, "packs");
         await mkdir(packDestination);
@@ -4089,9 +4229,10 @@ syncBuiltinESMExports();
           { cwd: project.packageRoot, reject: false },
         );
         assert.strictEqual(pack.exitCode, 1);
-        assertContains(
-          `${pack.stdout}\n${pack.stderr}`,
-          "ERR_PNPM_PACKAGE_VERSION_NOT_FOUND",
+        assert.ok(
+          `${pack.stdout}\n${pack.stderr}`.includes(
+            "ERR_PNPM_PACKAGE_VERSION_NOT_FOUND",
+          ),
         );
         assert.strictEqual(
           await readFile(sourceManifestPath, "utf8"),
@@ -4121,7 +4262,7 @@ syncBuiltinESMExports();
           "imports",
           "publishConfig",
         ]) {
-          assertLacksProperty(sourceManifest, absentField);
+          assert.strictEqual(absentField in sourceManifest, false);
         }
       } finally {
         await rm(project.workspace, { recursive: true, force: true });

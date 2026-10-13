@@ -7,7 +7,6 @@ import {
   validateNewPackagePath,
   validateProjectBlueprint,
 } from "../packages/core/src/project-blueprint.ts";
-import { testEach } from "./assertions.ts";
 
 const packageDefinitionId = `package-${"1".repeat(64)}` as const;
 
@@ -41,50 +40,46 @@ void describe("Project Blueprint v3 Package Definitions", () => {
     assert.strictEqual(isValidNewNpmPackageName("@acme/http"), true);
   });
 
-  testEach(
-    [
-      "some-package",
-      "example.com",
-      "under_score",
-      "123numeric",
-      "@npm/thingy",
-      "@jane/foo.js",
-      "@scope/_hidden",
-      "@scope/-hidden",
-    ],
-    "accepts the npm new-package name %s",
-    (name) => {
+  for (const name of [
+    "some-package",
+    "example.com",
+    "under_score",
+    "123numeric",
+    "@npm/thingy",
+    "@jane/foo.js",
+    "@scope/_hidden",
+    "@scope/-hidden",
+  ]) {
+    void it(`accepts the npm new-package name ${name}`, () => {
       const blueprint = blueprintWithPackage(name);
 
       assert.deepStrictEqual(validateProjectBlueprint(blueprint), {
         ok: true,
         value: blueprint,
       });
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      "Uppercase",
-      "@scope/Uppercase",
-      " leading-space",
-      "trailing-space ",
-      "contain:colons",
-      "excited!",
-      ".hidden",
-      "_hidden",
-      "-hidden",
-      "@scope/.hidden",
-      "node_modules",
-      "http",
-      "inspector",
-      "@scope",
-      "@scope/",
-      "@scope/name/extra",
-      `@scope/${"a".repeat(208)}`,
-    ],
-    "rejects the npm new-package name %s",
-    (name) => {
+  for (const name of [
+    "Uppercase",
+    "@scope/Uppercase",
+    " leading-space",
+    "trailing-space ",
+    "contain:colons",
+    "excited!",
+    ".hidden",
+    "_hidden",
+    "-hidden",
+    "@scope/.hidden",
+    "node_modules",
+    "http",
+    "inspector",
+    "@scope",
+    "@scope/",
+    "@scope/name/extra",
+    `@scope/${"a".repeat(208)}`,
+  ]) {
+    void it(`rejects the npm new-package name ${name}`, () => {
       assert.deepStrictEqual(
         validateProjectBlueprint(blueprintWithPackage(name)),
         {
@@ -98,8 +93,8 @@ void describe("Project Blueprint v3 Package Definitions", () => {
           ],
         },
       );
-    },
-  );
+    });
+  }
 
   void it("accepts the CLI Tool Package Role as a distinct Package Definition intent", () => {
     const blueprint = blueprintWithPackage("@demo/tool");
@@ -136,13 +131,11 @@ void describe("Project Blueprint v3 Package Definitions", () => {
     );
   });
 
-  testEach(
-    [
-      ["name", "@demo/tool", "Package name must be unique: @demo/tool"],
-      ["path", "packages/tool", "Package Path must be unique: packages/tool"],
-    ] as const,
-    "rejects duplicate Package Definition %s",
-    (property, value, message) => {
+  for (const [property, value, message] of [
+    ["name", "@demo/tool", "Package name must be unique: @demo/tool"],
+    ["path", "packages/tool", "Package Path must be unique: packages/tool"],
+  ] as const) {
+    void it(`rejects duplicate Package Definition ${property}`, () => {
       const original = blueprintWithPackage("@demo/tool");
       const duplicate = {
         ...original.packages[0],
@@ -161,24 +154,22 @@ void describe("Project Blueprint v3 Package Definitions", () => {
           issues: [{ path: ".packages", message }],
         },
       );
-    },
-  );
+    });
+  }
 
-  testEach(
+  for (const [id, message] of [
+    [undefined, "Package Definition ID must use the package-<sha256> format"],
+    ["", "Package Definition ID must use the package-<sha256> format"],
     [
-      [undefined, "Package Definition ID must use the package-<sha256> format"],
-      ["", "Package Definition ID must use the package-<sha256> format"],
-      [
-        "package-short",
-        "Package Definition ID must use the package-<sha256> format",
-      ],
-      [
-        `package-${"G".repeat(64)}`,
-        "Package Definition ID must use the package-<sha256> format",
-      ],
+      "package-short",
+      "Package Definition ID must use the package-<sha256> format",
     ],
-    "rejects the invalid persisted Package Definition ID %s",
-    (id, message) => {
+    [
+      `package-${"G".repeat(64)}`,
+      "Package Definition ID must use the package-<sha256> format",
+    ],
+  ] as const) {
+    void it(`rejects the invalid persisted Package Definition ID ${id}`, () => {
       const definition = {
         ...blueprintWithPackage("@demo/tool").packages[0],
       } as {
@@ -194,8 +185,8 @@ void describe("Project Blueprint v3 Package Definitions", () => {
           issues: [{ path: ".packages[0].packageDefinitionId", message }],
         },
       );
-    },
-  );
+    });
+  }
 
   void it("rejects duplicate opaque Package Definition IDs independently of names and paths", () => {
     const original = blueprintWithPackage("@demo/tool").packages[0];
@@ -239,18 +230,16 @@ void describe("Project Blueprint v3 Package Paths", () => {
     });
   });
 
-  testEach(
-    [
-      ".git",
-      ".github",
-      ".devcontainer",
-      ".template",
-      "node_modules",
-      "dist",
-      "target",
-    ],
-    "rejects the ADR0063 reserved workspace collection %s",
-    (workspaceCollection) => {
+  for (const workspaceCollection of [
+    ".git",
+    ".github",
+    ".devcontainer",
+    ".template",
+    "node_modules",
+    "dist",
+    "target",
+  ]) {
+    void it(`rejects the ADR0063 reserved workspace collection ${workspaceCollection}`, () => {
       const packagePath = `${workspaceCollection}/evil`;
 
       assert.deepStrictEqual(
@@ -275,8 +264,8 @@ void describe("Project Blueprint v3 Package Paths", () => {
           ],
         },
       );
-    },
-  );
+    });
+  }
 });
 
 void describe("Project Blueprint draft semantics", () => {
@@ -303,27 +292,25 @@ void describe("Project Blueprint draft semantics", () => {
 });
 
 void describe("Project Blueprint v3 schema", () => {
-  testEach(
+  for (const [value, path, message] of [
     [
-      [
-        { schemaVersion: 3, packages: [42] },
-        ".packages[0]",
-        "Package Definition must be an object",
-      ],
-      [
-        { schemaVersion: 3, packages: [], packageLinkIntents: [42] },
-        ".packageLinkIntents[0]",
-        "Package Link Intent must be an object",
-      ],
+      { schemaVersion: 3, packages: [42] },
+      ".packages[0]",
+      "Package Definition must be an object",
     ],
-    "preserves actionable object diagnostics",
-    (value, path, message) => {
+    [
+      { schemaVersion: 3, packages: [], packageLinkIntents: [42] },
+      ".packageLinkIntents[0]",
+      "Package Link Intent must be an object",
+    ],
+  ] as const) {
+    void it("preserves actionable object diagnostics", () => {
       assert.deepStrictEqual(validateProjectBlueprint(value), {
         ok: false,
         issues: [{ path, message }],
       });
-    },
-  );
+    });
+  }
 
   void it("reports structural issues before running cross-document semantics", () => {
     assert.deepStrictEqual(

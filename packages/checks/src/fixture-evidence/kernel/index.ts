@@ -18,15 +18,23 @@ import path from "node:path";
 
 import { execa } from "execa";
 
+export type FixtureCommandOptions = {
+  readonly cwd: string;
+  readonly stdio?: "inherit";
+  readonly env?: NodeJS.ProcessEnv;
+  readonly cancelSignal?: AbortSignal;
+  readonly timeout?: number;
+  readonly killDescendants?: boolean;
+};
+
 export type FixtureCommandRunner = (
   command: string,
   args: readonly string[],
-  options: {
-    readonly cwd: string;
-    readonly stdio?: "inherit";
-    readonly env?: NodeJS.ProcessEnv;
-  },
+  options: FixtureCommandOptions,
 ) => Promise<unknown>;
+
+export const fixtureCommandTimeoutMilliseconds = 60 * 60 * 1_000;
+export const fixtureCleanupTimeoutMilliseconds = 5 * 60 * 1_000;
 
 export type DevelopmentContainerFixtureProbe = {
   readonly identity: string;
@@ -272,13 +280,43 @@ function elapsedMilliseconds(startedAt: Date, finishedAt: Date): number {
   return duration;
 }
 
+function awaitWithCancellation<Result>(
+  promise: Promise<Result>,
+  cancelSignal?: AbortSignal,
+): Promise<Result> {
+  if (cancelSignal === undefined) return promise;
+  cancelSignal.throwIfAborted();
+  return new Promise<Result>((resolve, reject) => {
+    const onAbort = () => {
+      cancelSignal.removeEventListener("abort", onAbort);
+      reject(cancelSignal.reason ?? new Error("Fixture work cancelled"));
+    };
+    cancelSignal.addEventListener("abort", onAbort, { once: true });
+    if (cancelSignal.aborted) {
+      onAbort();
+      return;
+    }
+    void promise.then(
+      (value) => {
+        cancelSignal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        cancelSignal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function runDevelopmentContainerBuildFlight(
   key: string,
   execute: () => Promise<unknown>,
+  cancelSignal?: AbortSignal,
 ): Promise<void> {
   const existing = developmentContainerBuildFlights.get(key);
   if (existing !== undefined) {
-    await existing;
+    await awaitWithCancellation(existing, cancelSignal);
     return;
   }
   const current = (async () => {
@@ -365,6 +403,9 @@ export async function deriveDevelopmentContainerBuildIdentity(options: {
 export function createDevelopmentContainerFixtureSession(options: {
   readonly projectDir: string;
   readonly probes: readonly DevelopmentContainerFixtureProbe[];
+  readonly cancelSignal?: AbortSignal;
+  readonly commandTimeoutMilliseconds?: number;
+  readonly cleanupTimeoutMilliseconds?: number;
   readonly ownedVolumes?: readonly string[] | undefined;
   readonly dependencyCaches?:
     | DevelopmentContainerFixtureDependencyCaches
@@ -375,7 +416,10 @@ export function createDevelopmentContainerFixtureSession(options: {
         readonly cacheDirectory: string;
       }
     | undefined;
-  readonly acquireSession?: (() => Promise<() => void>) | undefined;
+  readonly acquireSession?:
+    | ((cancelSignal?: AbortSignal) => Promise<() => void>)
+    | undefined;
+  readonly onCleanupFailure?: ((error: unknown) => void) | undefined;
   readonly environment?: NodeJS.ProcessEnv | undefined;
   readonly run?: FixtureCommandRunner;
   readonly clock?: (() => Date) | undefined;
@@ -412,19 +456,50 @@ export function createDevelopmentContainerFixtureSession(options: {
   };
   const run: FixtureCommandRunner = async (command, args, runOptions) => {
     try {
+      const cancelSignal = runOptions.cancelSignal ?? options.cancelSignal;
+      cancelSignal?.throwIfAborted();
       const commandOptions =
         command === "devcontainer"
           ? {
               ...runOptions,
+              ...(cancelSignal === undefined ? {} : { cancelSignal }),
+              timeout:
+                runOptions.timeout ??
+                options.commandTimeoutMilliseconds ??
+                fixtureCommandTimeoutMilliseconds,
+              killDescendants: runOptions.killDescendants ?? true,
               env: {
                 ...runOptions.env,
                 TMPDIR: await ensureDevcontainerTempDirectory(),
               },
             }
-          : runOptions;
+          : {
+              ...runOptions,
+              ...(cancelSignal === undefined ? {} : { cancelSignal }),
+              timeout:
+                runOptions.timeout ??
+                options.commandTimeoutMilliseconds ??
+                fixtureCommandTimeoutMilliseconds,
+              killDescendants: runOptions.killDescendants ?? true,
+            };
+      cancelSignal?.throwIfAborted();
       return await rawRun(command, args, commandOptions);
     } catch (error) {
-      throw redactCommandError(error, secretValues);
+      const diagnostic = redactCommandError(error, secretValues);
+      const cancelSignal = runOptions.cancelSignal ?? options.cancelSignal;
+      if (cancelSignal?.aborted) {
+        const reason =
+          cancelSignal.reason instanceof Error
+            ? cancelSignal.reason
+            : new Error("Fixture command cancelled");
+        if (diagnostic === reason) throw reason;
+        throw new AggregateError(
+          [reason, diagnostic],
+          `${errorMessage(reason)}; command stopped during cancellation: ${errorMessage(diagnostic)}`,
+          { cause: reason },
+        );
+      }
+      throw diagnostic;
     }
   };
   const remoteEnvironmentArgs = turboCacheEnvironmentNames.flatMap((name) => {
@@ -510,6 +585,7 @@ export function createDevelopmentContainerFixtureSession(options: {
     try {
       return await retryOptions.operation();
     } catch (firstError) {
+      if (options.cancelSignal?.aborted) throw firstError;
       const classification = classifyRegistryTransportFailure(
         firstError,
         retryOptions.registry,
@@ -659,9 +735,19 @@ export function createDevelopmentContainerFixtureSession(options: {
   let upAttempted = false;
   let upSucceeded = false;
   let closed = false;
+  let closing: Promise<void> | undefined;
   let releaseSession: (() => void) | undefined;
   let dependencyCacheOverridePath: string | undefined;
   let retryUsed = false;
+  let containerCleanupComplete = false;
+  let dependencyCacheOverrideRemoved = false;
+  let devcontainerTempDirectoryRemoved = false;
+  const removedOwnedVolumes = new Set<string>();
+  const releaseSessionReservation = (): void => {
+    const release = releaseSession;
+    releaseSession = undefined;
+    release?.();
+  };
 
   const exec = async (
     command: string,
@@ -669,8 +755,12 @@ export function createDevelopmentContainerFixtureSession(options: {
     execOptions: {
       readonly cwd?: string;
       readonly stdio?: "inherit";
+      readonly cancelSignal?: AbortSignal;
+      readonly timeout?: number;
     } = {},
   ): Promise<unknown> => {
+    const cancelSignal = execOptions.cancelSignal ?? options.cancelSignal;
+    cancelSignal?.throwIfAborted();
     const commandCwd = path.resolve(execOptions.cwd ?? options.projectDir);
     const relativeCwd = path.relative(options.projectDir, commandCwd);
     if (
@@ -718,19 +808,27 @@ export function createDevelopmentContainerFixtureSession(options: {
         ...(execOptions.stdio === undefined
           ? {}
           : { stdio: execOptions.stdio }),
+        ...(cancelSignal === undefined ? {} : { cancelSignal }),
+        timeout:
+          execOptions.timeout ??
+          options.commandTimeoutMilliseconds ??
+          fixtureCommandTimeoutMilliseconds,
+        killDescendants: true,
       },
     );
   };
 
   const reserve = async (): Promise<void> => {
+    options.cancelSignal?.throwIfAborted();
     reservation ??= (async () => {
-      releaseSession = await options.acquireSession?.();
+      releaseSession = await options.acquireSession?.(options.cancelSignal);
     })();
     await reservation;
   };
 
   const start = async (): Promise<void> => {
     await reserve();
+    options.cancelSignal?.throwIfAborted();
     const containerAttempt = await startPhase("container-preparation");
     let containerFailureClassification: FixtureExternalFailureClassification =
       "not-retryable";
@@ -790,6 +888,7 @@ export function createDevelopmentContainerFixtureSession(options: {
           await runDevelopmentContainerBuildFlight(
             `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
             upWithRetry,
+            options.cancelSignal,
           );
         }
       } catch (error) {
@@ -846,6 +945,7 @@ export function createDevelopmentContainerFixtureSession(options: {
           }
           const failure = new Error(
             `Dependency preparation failed during ${command.command} ${command.args[0]}: ${errorMessage(error)}`,
+            { cause: error },
           );
           throw failure;
         }
@@ -881,84 +981,118 @@ export function createDevelopmentContainerFixtureSession(options: {
     await startup;
   };
 
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
+  const cleanup = async (): Promise<void> => {
     const cleanupErrors: unknown[] = [];
+    const cleanupSignal = AbortSignal.timeout(
+      options.cleanupTimeoutMilliseconds ?? fixtureCleanupTimeoutMilliseconds,
+    );
     const cleanupDevcontainerTempDirectory = async (): Promise<void> => {
-      if (devcontainerTempDirectory === undefined) return;
+      if (devcontainerTempDirectoryRemoved) return;
+      if (devcontainerTempDirectory === undefined) {
+        devcontainerTempDirectoryRemoved = true;
+        return;
+      }
       try {
         await rm(devcontainerTempDirectory, { recursive: true, force: true });
+        devcontainerTempDirectoryRemoved = true;
       } catch (error) {
         cleanupErrors.push(error);
       }
     };
-    if (!upAttempted) {
-      await cleanupDevcontainerTempDirectory();
-      releaseSession?.();
-      if (cleanupErrors.length > 0) {
-        throw new AggregateError(
-          cleanupErrors,
-          "Development Container Fixture cleanup failed",
-        );
-      }
-      return;
-    }
-    const restoreUid = process.getuid?.();
-    const restoreGid = process.getgid?.();
-    if (upSucceeded && restoreUid !== undefined && restoreGid !== undefined) {
+    if (upAttempted && !containerCleanupComplete) {
       try {
-        await run(
-          "devcontainer",
-          [
-            "exec",
-            ...workspaceArgs,
-            ...identityArgs,
-            "chown",
-            "-R",
-            `${restoreUid}:${restoreGid}`,
-            ".",
-          ],
-          { cwd: options.projectDir },
+        const result = await run(
+          "docker",
+          ["ps", "-aq", "--filter", `label=${idLabel}`],
+          {
+            cwd: options.projectDir,
+            cancelSignal: cleanupSignal,
+            timeout:
+              options.cleanupTimeoutMilliseconds ??
+              fixtureCleanupTimeoutMilliseconds,
+          },
         );
+        const stdout =
+          typeof result === "object" &&
+          result !== null &&
+          "stdout" in result &&
+          typeof result.stdout === "string"
+            ? result.stdout
+            : "";
+        const containerIds = stdout.trim().split(/\s+/u).filter(Boolean);
+        if (containerIds.length === 0) {
+          containerCleanupComplete = true;
+        } else {
+          const restoreUid = process.getuid?.();
+          const restoreGid = process.getgid?.();
+          if (
+            upSucceeded &&
+            restoreUid !== undefined &&
+            restoreGid !== undefined
+          ) {
+            try {
+              await run(
+                "devcontainer",
+                [
+                  "exec",
+                  ...workspaceArgs,
+                  ...identityArgs,
+                  "chown",
+                  "-R",
+                  `${restoreUid}:${restoreGid}`,
+                  ".",
+                ],
+                {
+                  cwd: options.projectDir,
+                  cancelSignal: cleanupSignal,
+                  timeout:
+                    options.cleanupTimeoutMilliseconds ??
+                    fixtureCleanupTimeoutMilliseconds,
+                },
+              );
+            } catch (error) {
+              cleanupErrors.push(error);
+            }
+          }
+          try {
+            await run("docker", ["rm", "-f", ...containerIds], {
+              cwd: options.projectDir,
+              cancelSignal: cleanupSignal,
+              timeout:
+                options.cleanupTimeoutMilliseconds ??
+                fixtureCleanupTimeoutMilliseconds,
+            });
+            containerCleanupComplete = true;
+          } catch (error) {
+            cleanupErrors.push(error);
+          }
+        }
       } catch (error) {
         cleanupErrors.push(error);
       }
     }
-    try {
-      const result = await run(
-        "docker",
-        ["ps", "-aq", "--filter", `label=${idLabel}`],
-        { cwd: options.projectDir },
-      );
-      const stdout =
-        typeof result === "object" &&
-        result !== null &&
-        "stdout" in result &&
-        typeof result.stdout === "string"
-          ? result.stdout
-          : "";
-      const containerIds = stdout.trim().split(/\s+/u).filter(Boolean);
-      if (containerIds.length > 0) {
-        await run("docker", ["rm", "-f", ...containerIds], {
-          cwd: options.projectDir,
-        });
-      }
-    } catch (error) {
-      cleanupErrors.push(error);
-    }
     for (const volume of options.ownedVolumes ?? []) {
+      if (removedOwnedVolumes.has(volume)) continue;
       try {
         await run("docker", ["volume", "rm", volume], {
           cwd: options.projectDir,
+          cancelSignal: cleanupSignal,
+          timeout:
+            options.cleanupTimeoutMilliseconds ??
+            fixtureCleanupTimeoutMilliseconds,
         });
+        removedOwnedVolumes.add(volume);
       } catch (error) {
         cleanupErrors.push(error);
       }
     }
-    if (dependencyCacheOverridePath !== undefined) {
+    if (
+      dependencyCacheOverridePath !== undefined &&
+      !dependencyCacheOverrideRemoved
+    ) {
       try {
         await unlink(dependencyCacheOverridePath);
+        dependencyCacheOverrideRemoved = true;
       } catch (error) {
         if (
           typeof error !== "object" ||
@@ -967,16 +1101,32 @@ export function createDevelopmentContainerFixtureSession(options: {
           error.code !== "ENOENT"
         ) {
           cleanupErrors.push(error);
+        } else {
+          dependencyCacheOverrideRemoved = true;
         }
       }
     }
-    await cleanupDevcontainerTempDirectory();
-    releaseSession?.();
+    if (!upAttempted || containerCleanupComplete) {
+      await cleanupDevcontainerTempDirectory();
+    }
     if (cleanupErrors.length > 0) {
       throw new AggregateError(
         cleanupErrors,
         "Development Container Fixture cleanup failed",
       );
+    }
+  };
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    if (closing !== undefined) return await closing;
+    const attempt = cleanup();
+    closing = attempt;
+    try {
+      await attempt;
+      closed = true;
+      releaseSessionReservation();
+    } finally {
+      if (closing === attempt) closing = undefined;
     }
   };
 
@@ -1004,8 +1154,27 @@ export function createDevelopmentContainerFixtureSession(options: {
       try {
         await close();
         cleanup = { succeeded: true };
-      } catch (error) {
-        cleanup = { succeeded: false, error };
+      } catch (firstError) {
+        try {
+          await close();
+          cleanup = { succeeded: false, error: firstError };
+        } catch (retryError) {
+          cleanup = {
+            succeeded: false,
+            error: new AggregateError(
+              [firstError, retryError],
+              `Development Container Fixture cleanup retry failed: ${errorMessage(retryError)}`,
+              { cause: firstError },
+            ),
+          };
+        }
+      }
+      if (!cleanup.succeeded && !closed) {
+        try {
+          options.onCleanupFailure?.(cleanup.error);
+        } catch {
+          // 生命周期通知失败不能覆盖清理原因。
+        }
       }
       if (!execution.succeeded) {
         if (cleanup.succeeded) throw execution.error;
@@ -1353,10 +1522,12 @@ export type FixtureEvidenceSchedulingOptions = {
 export type FixtureEvidenceScheduler = {
   readonly acquire: (
     resources: readonly FixtureEvidenceExecutionResource[],
+    options?: { readonly cancelSignal?: AbortSignal },
   ) => Promise<() => void>;
   readonly run: <Result>(
     resources: readonly FixtureEvidenceExecutionResource[],
     execute: () => Promise<Result>,
+    options?: { readonly cancelSignal?: AbortSignal },
   ) => Promise<Result>;
 };
 
@@ -1370,10 +1541,17 @@ export function defaultDevelopmentContainerSessionConcurrency(): number {
   return Math.max(1, Math.min(2, Math.floor(availableParallelism() / 2)));
 }
 
+type CapacityWaiter = {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  readonly cancelSignal?: AbortSignal;
+  readonly onAbort?: () => void;
+};
+
 class CapacityLimiter {
   readonly #capacity: number;
   #active = 0;
-  readonly #waiting: Array<() => void> = [];
+  readonly #waiting: CapacityWaiter[] = [];
 
   constructor(capacity: number, label: string) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) {
@@ -1382,8 +1560,11 @@ class CapacityLimiter {
     this.#capacity = capacity;
   }
 
-  async run<Result>(execute: () => Promise<Result>): Promise<Result> {
-    const release = await this.acquire();
+  async run<Result>(
+    execute: () => Promise<Result>,
+    cancelSignal?: AbortSignal,
+  ): Promise<Result> {
+    const release = await this.acquire(cancelSignal);
     try {
       return await execute();
     } finally {
@@ -1391,12 +1572,34 @@ class CapacityLimiter {
     }
   }
 
-  async acquire(): Promise<() => void> {
+  async acquire(cancelSignal?: AbortSignal): Promise<() => void> {
+    cancelSignal?.throwIfAborted();
     if (this.#active < this.#capacity) {
       this.#active += 1;
     } else {
-      await new Promise<void>((resolve) => {
-        this.#waiting.push(resolve);
+      await new Promise<void>((resolve, reject) => {
+        const waiting: {
+          resolve: () => void;
+          reject: (error: unknown) => void;
+          cancelSignal?: AbortSignal;
+          onAbort?: () => void;
+        } = { resolve, reject };
+        if (cancelSignal !== undefined) {
+          waiting.cancelSignal = cancelSignal;
+          waiting.onAbort = () => {
+            const index = this.#waiting.indexOf(waiting);
+            if (index >= 0) this.#waiting.splice(index, 1);
+            cancelSignal.removeEventListener("abort", waiting.onAbort!);
+            reject(cancelSignal.reason ?? new Error("Fixture work cancelled"));
+          };
+        }
+        this.#waiting.push(waiting);
+        if (cancelSignal !== undefined && waiting.onAbort !== undefined) {
+          cancelSignal.addEventListener("abort", waiting.onAbort, {
+            once: true,
+          });
+          if (cancelSignal.aborted) waiting.onAbort();
+        }
       });
     }
     let released = false;
@@ -1412,7 +1615,10 @@ class CapacityLimiter {
     if (next === undefined) {
       this.#active -= 1;
     } else {
-      next();
+      if (next.cancelSignal !== undefined && next.onAbort !== undefined) {
+        next.cancelSignal.removeEventListener("abort", next.onAbort);
+      }
+      next.resolve();
     }
   }
 }
@@ -1433,17 +1639,22 @@ export function createFixtureEvidenceScheduler(
   const docker = new CapacityLimiter(1, "Docker");
   const acquire = async (
     resources: readonly FixtureEvidenceExecutionResource[],
+    acquireOptions: { readonly cancelSignal?: AbortSignal } = {},
   ): Promise<() => void> => {
     const releases: Array<() => void> = [];
     try {
       if (resources.includes("docker")) {
-        releases.push(await docker.acquire());
+        releases.push(await docker.acquire(acquireOptions.cancelSignal));
       }
       if (resources.includes("browser")) {
-        releases.push(await browser.acquire());
+        releases.push(await browser.acquire(acquireOptions.cancelSignal));
       }
       if (resources.includes("development-container-session")) {
-        releases.push(await developmentContainerSession.acquire());
+        releases.push(
+          await developmentContainerSession.acquire(
+            acquireOptions.cancelSignal,
+          ),
+        );
       }
     } catch (error) {
       for (const release of releases.reverse()) release();
@@ -1458,10 +1669,10 @@ export function createFixtureEvidenceScheduler(
   };
   return {
     acquire,
-    run: async (resources, execute) => {
-      const release = await acquire(resources);
+    run: async (resources, execute, runOptions = {}) => {
+      const release = await acquire(resources, runOptions);
       try {
-        return await ordinary.run(execute);
+        return await ordinary.run(execute, runOptions.cancelSignal);
       } finally {
         release();
       }
@@ -3290,6 +3501,7 @@ type FixtureEvidenceGateOptions = {
   readonly freshnessMilliseconds?: number;
   readonly readEnabled?: boolean;
   readonly writeEnabled?: boolean;
+  readonly cancelSignal?: AbortSignal;
   readonly recordLifecycle?: (
     event: FixtureEvidenceLifecycleEvent,
   ) => void | Promise<void>;
@@ -3342,6 +3554,7 @@ export async function runFixtureEvidenceGate(
     | FocusedPackageLinkEvidenceOptions
     | DeploymentQualityEvidenceOptions,
 ): Promise<FixtureEvidenceGateResult> {
+  options.cancelSignal?.throwIfAborted();
   const clock = options.clock ?? (() => new Date());
   const rootEvidenceIdentity =
     options.gate === "generated-root-quality"
@@ -3410,6 +3623,7 @@ export async function runFixtureEvidenceGate(
               at: now.toISOString(),
               outcome: "hit",
             });
+            options.cancelSignal?.throwIfAborted();
             return {
               [fixtureEvidenceProof]: true,
               gate: options.gate,
@@ -3433,6 +3647,7 @@ export async function runFixtureEvidenceGate(
     }
   }
 
+  options.cancelSignal?.throwIfAborted();
   if (missReason !== undefined) {
     await emitLifecycle(options.recordLifecycle, {
       ...baseEvent,
@@ -3448,14 +3663,17 @@ export async function runFixtureEvidenceGate(
     at: clock().toISOString(),
     outcome: "started",
   });
+  options.cancelSignal?.throwIfAborted();
   try {
     await options.execute();
+    options.cancelSignal?.throwIfAborted();
     await emitLifecycle(options.recordLifecycle, {
       ...baseEvent,
       type: "execution",
       at: clock().toISOString(),
       outcome: "succeeded",
     });
+    options.cancelSignal?.throwIfAborted();
   } catch (error) {
     await emitLifecycle(options.recordLifecycle, {
       ...baseEvent,
@@ -3467,6 +3685,7 @@ export async function runFixtureEvidenceGate(
     throw error;
   }
 
+  options.cancelSignal?.throwIfAborted();
   if (!(options.writeEnabled ?? false) || options.storage === undefined) {
     return {
       [fixtureEvidenceProof]: true,
@@ -3493,6 +3712,7 @@ export async function runFixtureEvidenceGate(
     scenario: options.scenario,
     producerCommit: options.producerCommit,
   };
+  options.cancelSignal?.throwIfAborted();
   try {
     await options.storage.writeAtomically(record);
     await emitLifecycle(options.recordLifecycle, {

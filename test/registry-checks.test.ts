@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -39,18 +40,6 @@ import {
   validatePlanSources,
   validateRegistryMirrorSlotProjections,
 } from "../packages/checks/src/registry-checks.ts";
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertPartialDeepStrictEqual,
-  assertRejectsContaining,
-  assertRejectsMatching,
-  assertThrowsContaining,
-  objectContaining,
-  testEach,
-} from "./assertions.ts";
-
 const rustPresetName = ["rust", "bin"].join("-");
 
 // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照中与 major 一致的精确三段版本。
@@ -102,9 +91,12 @@ void describe("Preset Registry generated scenarios", () => {
       initialization.map((scenario) => scenario.base.metadata.name),
       definitions.map((definition) => definition.metadata.name),
     );
-    assertLength(matrix, definitions.length * (addableDefinitions.length + 1));
-    assertLength(
-      matrix.filter((scenario) => scenario.addition === undefined),
+    assert.strictEqual(
+      matrix.length,
+      definitions.length * (addableDefinitions.length + 1),
+    );
+    assert.strictEqual(
+      matrix.filter((scenario) => scenario.addition === undefined).length,
       definitions.length,
     );
     assert.deepStrictEqual(
@@ -146,14 +138,14 @@ void describe("Preset Registry generated scenarios", () => {
 
   void it("derives packed-source verification from every initialization and addition plan", async () => {
     const verificationPlans = await deriveVerificationPlans();
-    assertLength(
-      verificationPlans,
+    assert.strictEqual(
+      verificationPlans.length,
       deriveFixtureMatrix().length +
         deriveFixtureMatrix().filter(
           (scenario) => scenario.addition !== undefined,
         ).length,
     );
-    await assertRejectsMatching(
+    await assert.rejects(
       validatePlanPublicationSources({
         packageRoot: path.resolve(
           resolveBuiltInTemplateSource(
@@ -166,7 +158,9 @@ void describe("Preset Registry generated scenarios", () => {
         packedPaths: [],
         verificationPlans,
       }),
-      /packed Built-in Presets artifact omits/,
+      (error: unknown) =>
+        error instanceof Error &&
+        /packed Built-in Presets artifact omits/.test(error.message),
     );
   });
 
@@ -180,13 +174,15 @@ void describe("Preset Registry generated scenarios", () => {
       "package/.turbo/cache/abcdef.tar.zst",
     ];
     for (const packedPath of debris) {
-      await assertRejectsMatching(
+      await assert.rejects(
         validatePlanPublicationSources({
           packageRoot: process.cwd(),
           packedPaths: [packedPath],
           verificationPlans: [],
         }),
-        /generated or test artifact/,
+        (error: unknown) =>
+          error instanceof Error &&
+          /generated or test artifact/.test(error.message),
       );
     }
   });
@@ -220,7 +216,8 @@ void describe("Preset Registry generated scenarios", () => {
           scenario.addition?.planPackageAddition !== undefined,
           true,
         );
-        assertLength(scenario.linkFrom, 1);
+        assert.ok(scenario.linkFrom);
+        assert.strictEqual(scenario.linkFrom.length, 1);
         assert.ok(scenario.id.includes(scenario.base.metadata.name));
 
         const context = createGenerationContext({
@@ -263,29 +260,25 @@ void describe("Preset Registry generated scenarios", () => {
         );
         assert.strictEqual(provider?.role, "shared-library");
         providerRoles.add(provider!.role);
-        assertDeepStrictEqualWithMatchers(
-          addition.blueprint.packageLinkIntents,
-          arrayContaining([
-            {
+        assert.ok(addition.blueprint.packageLinkIntents);
+        assert.ok(
+          addition.blueprint.packageLinkIntents.some((intent) =>
+            isDeepStrictEqual(intent, {
               consumerPackagePath: consumerPath,
               providerPackagePath: provider?.path,
-            },
-          ]),
-        );
-        assertDeepStrictEqualWithMatchers(
-          addition.operations,
-          arrayContaining([
-            objectContaining({
-              kind: "mergeJson",
-              to: `${consumerPath}/package.json`,
-              value: objectContaining({
-                dependencies: objectContaining({
-                  [provider!.name]: "workspace:*",
-                }),
-              }),
             }),
-          ]),
+          ),
         );
+        const consumerManifestMerge = addition.operations.find(
+          (operation) =>
+            operation.kind === "mergeJson" &&
+            operation.to === `${consumerPath}/package.json`,
+        );
+        assert.ok(consumerManifestMerge);
+        assert.ok(consumerManifestMerge.kind === "mergeJson");
+        assert.partialDeepStrictEqual(consumerManifestMerge.value, {
+          dependencies: { [provider!.name]: "workspace:*" },
+        });
       }
       assert.ok(consumerRoles.has("cli-tool"));
       assert.deepStrictEqual(providerRoles, new Set(["shared-library"]));
@@ -408,18 +401,23 @@ void describe("Preset Registry generated scenarios", () => {
         identityConflict = error;
       }
       assert.notStrictEqual(identityConflict, undefined);
-      assertPartialDeepStrictEqual(identityConflict, {
-        kind: "identity",
-        existing: {
-          name: contribution.definition.name,
-          path: contribution.definition.path,
-          role: "native-package",
-        },
-        requested: {
-          name: contribution.definition.name,
-          path: contribution.definition.path,
-          role: contribution.definition.role,
-        },
+      assert.ok(
+        typeof identityConflict === "object" && identityConflict !== null,
+      );
+      const identityRecord = identityConflict as Record<string, unknown>;
+      assert.ok(Object.hasOwn(identityRecord, "kind"));
+      assert.strictEqual(identityRecord.kind, "identity");
+      assert.ok(Object.hasOwn(identityRecord, "existing"));
+      assert.partialDeepStrictEqual(identityRecord.existing, {
+        name: contribution.definition.name,
+        path: contribution.definition.path,
+        role: "native-package",
+      });
+      assert.ok(Object.hasOwn(identityRecord, "requested"));
+      assert.partialDeepStrictEqual(identityRecord.requested, {
+        name: contribution.definition.name,
+        path: contribution.definition.path,
+        role: contribution.definition.role,
       });
 
       await writeFile(
@@ -438,22 +436,28 @@ void describe("Preset Registry generated scenarios", () => {
         missingLinkConflict = error;
       }
       assert.notStrictEqual(missingLinkConflict, undefined);
-      assertPartialDeepStrictEqual(missingLinkConflict, {
-        kind: "missing-link",
-        existing: {
-          name: contribution.definition.name,
-          path: contribution.definition.path,
-          role: contribution.definition.role,
-        },
-        requested: {
-          name: contribution.definition.name,
-          path: contribution.definition.path,
-          role: contribution.definition.role,
-        },
-        missingLink: {
-          consumerPackagePath: scenario.linkFrom![0],
-          providerPackagePath: contribution.definition.path,
-        },
+      assert.ok(
+        typeof missingLinkConflict === "object" && missingLinkConflict !== null,
+      );
+      const missingLinkRecord = missingLinkConflict as Record<string, unknown>;
+      assert.ok(Object.hasOwn(missingLinkRecord, "kind"));
+      assert.strictEqual(missingLinkRecord.kind, "missing-link");
+      assert.ok(Object.hasOwn(missingLinkRecord, "existing"));
+      assert.partialDeepStrictEqual(missingLinkRecord.existing, {
+        name: contribution.definition.name,
+        path: contribution.definition.path,
+        role: contribution.definition.role,
+      });
+      assert.ok(Object.hasOwn(missingLinkRecord, "requested"));
+      assert.partialDeepStrictEqual(missingLinkRecord.requested, {
+        name: contribution.definition.name,
+        path: contribution.definition.path,
+        role: contribution.definition.role,
+      });
+      assert.ok(Object.hasOwn(missingLinkRecord, "missingLink"));
+      assert.partialDeepStrictEqual(missingLinkRecord.missingLink, {
+        consumerPackagePath: scenario.linkFrom![0],
+        providerPackagePath: contribution.definition.path,
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -475,7 +479,10 @@ void describe("Preset Registry generated scenarios", () => {
 
   void it("discovers every owned behavior test and derives source and catalog checks from real plans", async () => {
     const definitions = builtInPresetRegistry.all();
-    assertLength(await discoverPresetLocalBehaviorTests(), definitions.length);
+    assert.strictEqual(
+      (await discoverPresetLocalBehaviorTests()).length,
+      definitions.length,
+    );
 
     for (const definition of definitions) {
       const plan = planGeneratedRepositoryInitialization({
@@ -488,11 +495,13 @@ void describe("Preset Registry generated scenarios", () => {
           toolchain,
         }),
       });
-      assertDeepStrictEqualWithMatchers(
-        await validatePlanSources({ definition, plan }),
-        arrayContaining([
-          objectContaining({ definitionName: definition.metadata.name }),
-        ]),
+      const diagnostics = await validatePlanSources({ definition, plan });
+      assert.ok(
+        diagnostics.some(
+          (diagnostic) =>
+            Object.hasOwn(diagnostic, "definitionName") &&
+            diagnostic.definitionName === definition.metadata.name,
+        ),
       );
       assert.strictEqual(await validatePlanDependencyCatalog(plan), undefined);
     }
@@ -600,11 +609,15 @@ void describe("Preset Registry generated scenarios", () => {
         },
       ],
     };
-    await assertRejectsContaining(
+    await assert.rejects(
       validatePlanSources({ definition, plan: invalidPlan }),
-      `${definition.metadata.name}: ${definition.plannerSourceFile} references undeclared or escaping Template Source for a generated output: generated packages/demo-lib/escape.ts`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `${definition.metadata.name}: ${definition.plannerSourceFile} references undeclared or escaping Template Source for a generated output: generated packages/demo-lib/escape.ts`,
+        ),
     );
-    await assertRejectsContaining(
+    await assert.rejects(
       validatePlanSources({
         definition,
         plan: {
@@ -620,14 +633,18 @@ void describe("Preset Registry generated scenarios", () => {
           ],
         },
       }),
-      `${definition.metadata.name}: ${definition.plannerSourceFile} references missing Template Source`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `${definition.metadata.name}: ${definition.plannerSourceFile} references missing Template Source`,
+        ),
     );
 
     const contribution = planGeneratedRepositoryInitialization({
       definition,
       context,
     }).packageContributions[0]!;
-    assertThrowsContaining(
+    assert.throws(
       () =>
         assertPackageContribution(
           {
@@ -641,9 +658,13 @@ void describe("Preset Registry generated scenarios", () => {
             planner: "planInitialization",
           },
         ),
-      `${definition.metadata.name}: planInitialization Package Contribution may not write a sibling Package Boundary; ${contribution.definition.path} attempted apps/sibling/package.json`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `${definition.metadata.name}: planInitialization Package Contribution may not write a sibling Package Boundary; ${contribution.definition.path} attempted apps/sibling/package.json`,
+        ),
     );
-    assertThrowsContaining(
+    assert.throws(
       () =>
         assertPackageContribution(
           {
@@ -655,7 +676,11 @@ void describe("Preset Registry generated scenarios", () => {
             planner: "planPackageAddition",
           },
         ),
-      `${definition.metadata.name}: planPackageAddition Package Contribution may not write a coordinated root output; ${contribution.definition.path} attempted turbo.json`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `${definition.metadata.name}: planPackageAddition Package Contribution may not write a coordinated root output; ${contribution.definition.path} attempted turbo.json`,
+        ),
     );
   });
 });
@@ -819,16 +844,18 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
   });
 
   void it("fails when a declared JSON pointer has no position in the real projection", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(structuredPlan("24.16.0", "24.16.0", "/build/args/MISSING")),
-      /声明位置在真实投影中不存在/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /声明位置在真实投影中不存在/u.test(error.message),
     );
   });
 
   void it("fails when the structured projection drifts from the root engines.node", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(structuredPlan("24.16.0", "22.2.2")),
-      /漂移/u,
+      (error: unknown) => error instanceof Error && /漂移/u.test(error.message),
     );
   });
 
@@ -840,21 +867,23 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
   });
 
   void it("fails when the text anchor markers are missing", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(textPlan("24.16.0", 'ARG NODE_VERSION="24.16.0"\n')),
-      /锚点区域缺失/u,
+      (error: unknown) =>
+        error instanceof Error && /锚点区域缺失/u.test(error.message),
     );
   });
 
   void it("fails when the text anchor region is duplicated", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(textPlan("24.16.0", carrier("24.16.0") + carrier("24.16.0"))),
-      /锚点区域缺失、重复/u,
+      (error: unknown) =>
+        error instanceof Error && /锚点区域缺失、重复/u.test(error.message),
     );
   });
 
   void it("rejects extra body inside the owned text anchor region", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(
         textPlan(
           "24.16.0",
@@ -867,12 +896,13 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
           ].join("\n"),
         ),
       ),
-      /含额外正文/u,
+      (error: unknown) =>
+        error instanceof Error && /含额外正文/u.test(error.message),
     );
   });
 
   void it("rejects a text anchor whose region is not the protocol ARG carrier", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(
         textPlan(
           "24.16.0",
@@ -884,29 +914,31 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
           ].join("\n"),
         ),
       ),
-      /不是协议定义的 ARG NODE_VERSION 承载行/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /不是协议定义的 ARG NODE_VERSION 承载行/u.test(error.message),
     );
   });
 
   void it("fails when the text anchor ARG default drifts from the root value", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(textPlan("24.16.0", carrier("22.2.2"))),
-      /漂移/u,
+      (error: unknown) => error instanceof Error && /漂移/u.test(error.message),
     );
   });
 
   void it("restores passing after reverting a controlled drift mutation", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(structuredPlan("24.16.0", "22.2.2")),
-      /漂移/u,
+      (error: unknown) => error instanceof Error && /漂移/u.test(error.message),
     );
     assert.strictEqual(
       await check(structuredPlan("24.16.0", "24.16.0")),
       undefined,
     );
-    await assertRejectsMatching(
+    await assert.rejects(
       check(textPlan("24.16.0", carrier("22.2.2"))),
-      /漂移/u,
+      (error: unknown) => error instanceof Error && /漂移/u.test(error.message),
     );
     assert.strictEqual(
       await check(textPlan("24.16.0", carrier("24.16.0"))),
@@ -1004,16 +1036,19 @@ void describe("V-8 plan-derived mirror slot self-check", () => {
   });
 
   void it("fails when a Rust slot is declared but the root rust-toolchain.toml is absent", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(rustPlan("24.16.0", undefined, "1.97.1")),
-      /缺少根 rust-toolchain\.toml 真源/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /缺少根 rust-toolchain\.toml 真源/u.test(error.message),
     );
   });
 
   void it("fails when the root channel is unexplainable", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       check(rustPlan("24.16.0", "[other]\nformat = true\n", "1.97.1")),
-      /不可解释/u,
+      (error: unknown) =>
+        error instanceof Error && /不可解释/u.test(error.message),
     );
   });
 
@@ -1103,13 +1138,15 @@ void describe("T28 first-Rust mirror slot reconciliation extends monotonically",
       RUST_TOOLCHAIN: "stable",
     });
     const after = projection([nodeSlot], { NODE_VERSION: "24.16.0" });
-    await assertRejectsMatching(
+    await assert.rejects(
       reconcileProjectProjections({
         after,
         before,
         readCurrent: async () => before.entries[0],
       }),
-      /reconciliation policy changed/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /reconciliation policy changed/u.test(error.message),
     );
   });
 
@@ -1122,13 +1159,15 @@ void describe("T28 first-Rust mirror slot reconciliation extends monotonically",
       NODE_VERSION: "24.16.0",
       RUST_TOOLCHAIN: "stable",
     });
-    await assertRejectsMatching(
+    await assert.rejects(
       reconcileProjectProjections({
         after,
         before,
         readCurrent: async () => before.entries[0],
       }),
-      /reconciliation policy changed/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /reconciliation policy changed/u.test(error.message),
     );
   });
 });
@@ -1242,7 +1281,7 @@ void describe("T26-3 checker carried mirror slot manifest gate", () => {
   });
 
   void it("fails when the checker drops a slot the plan declares", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: richest.definition,
         plan: withCarriedSlots(
@@ -1250,7 +1289,8 @@ void describe("T26-3 checker carried mirror slot manifest gate", () => {
           carriedSlots(richest.plan).slice(1),
         ),
       }),
-      /未携带 plan 声明的槽位/u,
+      (error: unknown) =>
+        error instanceof Error && /未携带 plan 声明的槽位/u.test(error.message),
     );
   });
 
@@ -1266,27 +1306,31 @@ void describe("T26-3 checker carried mirror slot manifest gate", () => {
           }
         : slot,
     );
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: pointerCarrier.definition,
         plan: withCarriedSlots(pointerCarrier.plan, mutated),
       }),
-      /携带了 plan 未声明的槽位/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /携带了 plan 未声明的槽位/u.test(error.message),
     );
   });
 
   void it("fails when the projection has no checker script at all", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: richest.definition,
         plan: withoutChecker(richest.plan),
       }),
-      /真实投影缺少生成仓库工具链检查器/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /真实投影缺少生成仓库工具链检查器/u.test(error.message),
     );
   });
 
   void it("fails when the checker no longer carries exactly one parsed manifest", async () => {
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: richest.definition,
         plan: {
@@ -1298,7 +1342,8 @@ void describe("T26-3 checker carried mirror slot manifest gate", () => {
           ),
         },
       }),
-      /恰好以一份/u,
+      (error: unknown) =>
+        error instanceof Error && /恰好以一份/u.test(error.message),
     );
   });
 
@@ -1308,23 +1353,25 @@ void describe("T26-3 checker carried mirror slot manifest gate", () => {
         ? { ...slot, location: { kind: "regex", pattern: "NODE_VERSION" } }
         : slot,
     );
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: pointerCarrier.definition,
         plan: withCarriedSlots(pointerCarrier.plan, malformed),
       }),
-      /location 形制非法/u,
+      (error: unknown) =>
+        error instanceof Error && /location 形制非法/u.test(error.message),
     );
   });
 
   void it("restores passing after reverting a carried manifest mutation", async () => {
     const carried = carriedSlots(richest.plan);
-    await assertRejectsMatching(
+    await assert.rejects(
       checkCarried({
         definition: richest.definition,
         plan: withCarriedSlots(richest.plan, carried.slice(1)),
       }),
-      /未携带 plan 声明的槽位/u,
+      (error: unknown) =>
+        error instanceof Error && /未携带 plan 声明的槽位/u.test(error.message),
     );
     assert.strictEqual(await checkCarried(richest), undefined);
   });
@@ -1355,7 +1402,7 @@ void describe("最终投影的外部依赖目录归属", () => {
 
   void it("拒绝最终链接合并写入的外部版本并报告完整位置", async () => {
     const plan = catalogPlan();
-    await assertRejectsMatching(
+    await assert.rejects(
       validatePlanDependencyCatalog({
         ...plan,
         operations: [
@@ -1367,24 +1414,26 @@ void describe("最终投影的外部依赖目录归属", () => {
           },
         ],
       }),
-      /package\.json.*optionalDependencies.*rogue.*\^1\.0\.0/,
+      (error: unknown) =>
+        error instanceof Error &&
+        /package\.json.*optionalDependencies.*rogue.*\^1\.0\.0/.test(
+          error.message,
+        ),
     );
   });
-  testEach(
-    [
-      ["dependencies", "1.0.0"],
-      ["devDependencies", "latest"],
-      ["optionalDependencies", "https://example.com/rogue.tgz"],
-      ["peerDependencies", ">=1 <2"],
-      ["dependencies", "workspace:*"],
-      ["devDependencies", "link:../typescript-config"],
-      ["dependencies", "catalog:other"],
-      ["dependencies", "catalog:"],
-    ],
-    "拒绝 %s 中没有有效默认目录的声明 %s",
-    async (field, specifier) => {
+  for (const [field, specifier] of [
+    ["dependencies", "1.0.0"],
+    ["devDependencies", "latest"],
+    ["optionalDependencies", "https://example.com/rogue.tgz"],
+    ["peerDependencies", ">=1 <2"],
+    ["dependencies", "workspace:*"],
+    ["devDependencies", "link:../typescript-config"],
+    ["dependencies", "catalog:other"],
+    ["dependencies", "catalog:"],
+  ] as const) {
+    void it(`拒绝 ${field} 中没有有效默认目录的声明 ${specifier}`, async () => {
       const plan = catalogPlan();
-      await assertRejectsContaining(
+      await assert.rejects(
         validatePlanDependencyCatalog({
           ...plan,
           operations: [
@@ -1396,10 +1445,14 @@ void describe("最终投影的外部依赖目录归属", () => {
             },
           ],
         }),
-        `package.json ${field} rogue ${JSON.stringify(specifier)}`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `package.json ${field} rogue ${JSON.stringify(specifier)}`,
+          ),
       );
-    },
-  );
+    });
+  }
 
   void it("保留 catalog 别名以及真实内部配置链接", async () => {
     const plan = catalogPlan();
@@ -1408,7 +1461,7 @@ void describe("最终投影的外部依赖目录归属", () => {
 
   void it("拒绝真实引用所需目录条目被后续投影移除", async () => {
     const plan = catalogPlan();
-    await assertRejectsMatching(
+    await assert.rejects(
       validatePlanDependencyCatalog({
         ...plan,
         operations: [
@@ -1423,7 +1476,11 @@ void describe("最终投影的外部依赖目录归属", () => {
           },
         ],
       }),
-      /package\.json.*(?:dependencies|devDependencies).*catalog:/,
+      (error: unknown) =>
+        error instanceof Error &&
+        /package\.json.*(?:dependencies|devDependencies).*catalog:/.test(
+          error.message,
+        ),
     );
   });
 
@@ -1502,12 +1559,10 @@ void describe("最终投影的外部依赖目录归属", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
-  testEach(
-    ["catalog:other", "^0.0.0"],
-    "拒绝已有默认目录条目的绕过声明 %s",
-    async (specifier) => {
+  for (const specifier of ["catalog:other", "^0.0.0"]) {
+    void it(`拒绝已有默认目录条目的绕过声明 ${specifier}`, async () => {
       const plan = catalogPlan();
-      await assertRejectsContaining(
+      await assert.rejects(
         validatePlanDependencyCatalog({
           ...plan,
           operations: [
@@ -1519,10 +1574,14 @@ void describe("最终投影的外部依赖目录归属", () => {
             },
           ],
         }),
-        `package.json devDependencies oxfmt ${JSON.stringify(specifier)}`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `package.json devDependencies oxfmt ${JSON.stringify(specifier)}`,
+          ),
       );
-    },
-  );
+    });
+  }
   void it("目录条目漂移时仍报告依赖清单和字段", async () => {
     const plan = catalogPlan();
     const operations = plan.operations.map((operation) =>
@@ -1541,9 +1600,11 @@ void describe("最终投影的外部依赖目录归属", () => {
           }
         : operation,
     );
-    await assertRejectsMatching(
+    await assert.rejects(
       validatePlanDependencyCatalog({ ...plan, operations }),
-      /package\.json devDependencies oxfmt "catalog:"/,
+      (error: unknown) =>
+        error instanceof Error &&
+        /package\.json devDependencies oxfmt "catalog:"/.test(error.message),
     );
   });
 });

@@ -12,12 +12,6 @@ import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { checkTemplateSourceBoundary } from "@ykdz/template-core/template-boundary-check";
 import ts from "typescript";
 
-import {
-  assertDeepStrictEqualWithMatchers,
-  objectContaining,
-  testEach,
-} from "./assertions.ts";
-
 const workflowPath = ".github/workflows/check.yml";
 
 function persistedDefinition(
@@ -43,17 +37,15 @@ function workflowOperation(
 }
 
 void describe("Template Source Boundary", () => {
-  testEach(
-    [
-      "packages/cli/README.md",
-      "scripts/npm-publication/readiness.ts",
-      "Dockerfile",
-      ".dockerignore",
-      "scripts/check-standalone-deployment.ts",
-      "scripts/container-entrypoint.sh",
-    ],
-    "rejects an inline protected body for %s with its planner owner",
-    async (generatedPath) => {
+  for (const generatedPath of [
+    "packages/cli/README.md",
+    "scripts/npm-publication/readiness.ts",
+    "Dockerfile",
+    ".dockerignore",
+    "scripts/check-standalone-deployment.ts",
+    "scripts/container-entrypoint.sh",
+  ]) {
+    void it(`rejects an inline protected body for ${generatedPath} with its planner owner`, async () => {
       const directory = await mkdtemp(
         path.join(tmpdir(), "template-boundary-publication-body-"),
       );
@@ -93,61 +85,53 @@ void describe("Template Source Boundary", () => {
           ],
         });
 
-        assertDeepStrictEqualWithMatchers(result, {
-          ok: false,
-          violations: [
-            objectContaining({
-              generatedPath,
-              owningFunction: "planPublicationBody",
-              operationKind: "writeText",
-              sourceFilePath,
-            }),
-          ],
+        assert.strictEqual(result.ok, false);
+        assert.strictEqual(result.violations.length, 1);
+        assert.partialDeepStrictEqual(result.violations[0], {
+          generatedPath,
+          owningFunction: "planPublicationBody",
+          operationKind: "writeText",
+          sourceFilePath,
         });
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
-  testEach(
+  for (const [label, declaration] of [
     [
-      [
-        "an extra declaration key",
-        {
-          kind: "playwright",
-          owner: { kind: "package-boundary", path: "apps/web" },
-          paths: ["test-results"],
-        },
-      ],
-      [
-        "a wrong diagnostic kind",
-        {
-          kind: "coverage",
-          owner: { kind: "package-boundary", path: "apps/web" },
-        },
-      ],
-      [
-        "a malformed owner",
-        { kind: "playwright", owner: { path: "apps/web" } },
-      ],
-      [
-        "an unsafe owner path",
-        {
-          kind: "playwright",
-          owner: { kind: "package-boundary", path: "../secrets" },
-        },
-      ],
-      [
-        "an owner absent from the Blueprint",
-        {
-          kind: "playwright",
-          owner: { kind: "package-boundary", path: "apps/admin" },
-        },
-      ],
+      "an extra declaration key",
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: "apps/web" },
+        paths: ["test-results"],
+      },
     ],
-    "rejects %s in a protected workflow declaration",
-    async (_label, declaration) => {
+    [
+      "a wrong diagnostic kind",
+      {
+        kind: "coverage",
+        owner: { kind: "package-boundary", path: "apps/web" },
+      },
+    ],
+    ["a malformed owner", { kind: "playwright", owner: { path: "apps/web" } }],
+    [
+      "an unsafe owner path",
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: "../secrets" },
+      },
+    ],
+    [
+      "an owner absent from the Blueprint",
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: "apps/admin" },
+      },
+    ],
+  ] as const) {
+    void it(`rejects ${label} in a protected workflow declaration`, async () => {
       const directory = await mkdtemp(
         path.join(tmpdir(), "template-boundary-workflow-contract-"),
       );
@@ -188,17 +172,16 @@ void describe("Template Source Boundary", () => {
         });
 
         assert.strictEqual(result.ok, false);
-        assertDeepStrictEqualWithMatchers(result.violations, [
-          objectContaining({
-            generatedPath: workflowPath,
-            sourceFilePath,
-          }),
-        ]);
+        assert.strictEqual(result.violations.length, 1);
+        assert.partialDeepStrictEqual(result.violations[0], {
+          generatedPath: workflowPath,
+          sourceFilePath,
+        });
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("derives diagnostic owner facts from raw Blueprint declarations without the production composer", async () => {
     const directory = await mkdtemp(
@@ -402,15 +385,12 @@ void describe("Template Source Boundary", () => {
         ],
       });
 
-      assertDeepStrictEqualWithMatchers(result, {
-        ok: false,
-        violations: [
-          objectContaining({
-            generatedPath: workflowPath,
-            owningFunction: "planWorkflow",
-            sourceFilePath,
-          }),
-        ],
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.violations.length, 1);
+      assert.partialDeepStrictEqual(result.violations[0], {
+        generatedPath: workflowPath,
+        owningFunction: "planWorkflow",
+        sourceFilePath,
       });
     } finally {
       await rm(directory, { recursive: true, force: true });

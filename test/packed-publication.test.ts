@@ -34,19 +34,6 @@ import { execa } from "execa";
 import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
-import {
-  any,
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotDeepStrictEqualWithMatchers,
-  assertPartialDeepStrictEqual,
-  hasProperty,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-} from "./assertions.ts";
-
 const publicCliPackageName = ["@ykdz", "template"].join("/");
 
 async function packTemplateArchive(workspace: string): Promise<string> {
@@ -183,7 +170,7 @@ async function expectPackedProjectionRollback(
     await readFile(canonicalPath, "utf8"),
     '{\n  "state": "before"\n}\n',
   );
-  assertLength(committedPaths, 2);
+  assert.strictEqual(committedPaths?.length, 2);
 }
 
 function definitionWithPackagePath(packagePath: string) {
@@ -345,10 +332,9 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
     throw new Error("Generated Repository root manifest must define check");
   }
 
-  assertNotDeepStrictEqualWithMatchers(
-    Object.keys(manifest.scripts),
-    arrayContaining([stringMatching(/:(?:run|root)$/u), "transit"]),
-  );
+  const scriptNames = Object.keys(manifest.scripts);
+  assert.ok(!scriptNames.some((name) => /:(?:run|root)$/u.test(name)));
+  assert.ok(!scriptNames.includes("transit"));
   for (const command of [
     manifest.scripts.fix,
     manifest.scripts["check:deployment"],
@@ -361,7 +347,7 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
     const publicationExclusions = checkCommand.match(
       /--filter=!\.\/[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*/gu,
     );
-    assertLength(publicationExclusions, 1);
+    assert.strictEqual(publicationExclusions?.length, 1);
     assert.ok(
       !checkCommand.replace(publicationExclusions![0], "").includes("--filter"),
     );
@@ -562,24 +548,23 @@ void describe("packed public CLI consumer", () => {
           ),
           true,
         );
-        assertDeepStrictEqualWithMatchers(
-          packedPaths,
-          arrayContaining([
-            "package/dist/application.d.ts",
-            "package/dist/application.js",
-            "package/dist/cli.d.ts",
-            "package/dist/cli.js",
-            "package/dist/main.d.ts",
-            "package/dist/main.js",
-            "package/node_modules/@ykdz/cli-contract/package.json",
-            "package/node_modules/@ykdz/template-core/package.json",
-            "package/node_modules/@ykdz/template-builtin-presets/package.json",
-            "package/node_modules/@ykdz/template-builtin-presets/templates/foundation/turbo.json",
-            "package/node_modules/@ykdz/template-builtin-presets/dist/src/ts-cli/definition.js",
-            "package/node_modules/@ykdz/template-builtin-presets/templates/ts-cli/src/cli.ts",
-            "package/node_modules/typescript/package.json",
-          ]),
-        );
+        for (const expectedPath of [
+          "package/dist/application.d.ts",
+          "package/dist/application.js",
+          "package/dist/cli.d.ts",
+          "package/dist/cli.js",
+          "package/dist/main.d.ts",
+          "package/dist/main.js",
+          "package/node_modules/@ykdz/cli-contract/package.json",
+          "package/node_modules/@ykdz/template-core/package.json",
+          "package/node_modules/@ykdz/template-builtin-presets/package.json",
+          "package/node_modules/@ykdz/template-builtin-presets/templates/foundation/turbo.json",
+          "package/node_modules/@ykdz/template-builtin-presets/dist/src/ts-cli/definition.js",
+          "package/node_modules/@ykdz/template-builtin-presets/templates/ts-cli/src/cli.ts",
+          "package/node_modules/typescript/package.json",
+        ]) {
+          assert.ok(packedPaths.includes(expectedPath));
+        }
         assert.strictEqual(
           packedPaths.some((entry) => entry.startsWith("package/src/")),
           false,
@@ -623,7 +608,7 @@ void describe("packed public CLI consumer", () => {
           sourceManifest.scripts.prepack,
           "pnpm exec turbo run build --filter=.",
         );
-        assertPartialDeepStrictEqual(packedManifest, {
+        assert.partialDeepStrictEqual(packedManifest, {
           version: sourceManifest.version,
           bin: { template: "dist/cli.js" },
           exports: {
@@ -633,23 +618,47 @@ void describe("packed public CLI consumer", () => {
               default: "./dist/main.js",
             },
           },
-          dependencies: {
-            "@ykdz/cli-contract": any(String),
-            "@valibot/to-json-schema": any(String),
-            valibot: any(String),
-          },
-          bundleDependencies: arrayContaining([
-            "@ykdz/template-core",
-            "@ykdz/template-builtin-presets",
-            "@ykdz/cli-contract",
-            "@valibot/to-json-schema",
-            "typescript",
-          ]),
         });
-        assert.ok(hasProperty(packedManifest.dependencies, "typescript"));
-        assert.ok(!hasProperty(packedCoreManifest.dependencies, "typescript"));
         assert.ok(
-          hasProperty(packedCoreManifest.peerDependencies, "typescript"),
+          typeof packedManifest.dependencies === "object" &&
+            packedManifest.dependencies !== null,
+        );
+        const packedDependencies = packedManifest.dependencies as Record<
+          string,
+          unknown
+        >;
+        for (const dependencyName of [
+          "@ykdz/cli-contract",
+          "@valibot/to-json-schema",
+          "valibot",
+        ]) {
+          assert.ok(Object.hasOwn(packedDependencies, dependencyName));
+          assert.strictEqual(
+            typeof packedDependencies[dependencyName],
+            "string",
+          );
+        }
+        assert.ok(Array.isArray(packedManifest.bundleDependencies));
+        const bundledDependencies =
+          packedManifest.bundleDependencies as string[];
+        for (const dependencyName of [
+          "@ykdz/template-core",
+          "@ykdz/template-builtin-presets",
+          "@ykdz/cli-contract",
+          "@valibot/to-json-schema",
+          "typescript",
+        ]) {
+          assert.ok(bundledDependencies.includes(dependencyName));
+        }
+        assert.ok(Object.hasOwn(packedDependencies, "typescript"));
+        assert.ok(
+          !Object.hasOwn(packedCoreManifest.dependencies ?? {}, "typescript"),
+        );
+        assert.ok(
+          Object.hasOwn(
+            packedCoreManifest.peerDependencies ?? {},
+            "typescript",
+          ),
         );
         await mkdir(consumer, { recursive: true });
         await execa("npm", ["init", "--yes"], { cwd: consumer });
@@ -710,7 +719,7 @@ void describe("packed public CLI consumer", () => {
           "template-builtin-presets",
           "dist/src/index.js",
         );
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await execa(
             "node",
             [
@@ -725,7 +734,7 @@ void describe("packed public CLI consumer", () => {
           ),
           { exitCode: 0 },
         );
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await execa(
             "node",
             [
@@ -916,18 +925,20 @@ void describe("packed public CLI consumer", () => {
         const dependabotBeforeRust = await readFile(dependabotPath, "utf8");
         assert.ok(!dockerfileBeforeRust.includes("ARG RUST_TOOLCHAIN"));
         assert.ok(
-          !hasProperty(devcontainerBeforeRust.build.args, "RUST_TOOLCHAIN"),
+          !Object.hasOwn(devcontainerBeforeRust.build.args, "RUST_TOOLCHAIN"),
         );
-        assertNotDeepStrictEqualWithMatchers(
-          devcontainerBeforeRust.mounts,
-          arrayContaining([
-            objectContaining({ target: "/usr/local/cargo/registry" }),
-          ]),
+        assert.ok(
+          !devcontainerBeforeRust.mounts.some(
+            (mount) => mount.target === "/usr/local/cargo/registry",
+          ),
         );
         await assert.rejects(stat(rustToolchainPath), (error) => {
-          assertPartialDeepStrictEqual(error, {
-            code: "ENOENT",
-          });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { readonly code?: unknown }).code,
+            "ENOENT",
+          );
           return true;
         });
         assert.ok(!dependabotBeforeRust.includes("package-ecosystem: cargo"));
@@ -959,35 +970,22 @@ void describe("packed public CLI consumer", () => {
         };
         assert.strictEqual(rustPreview.dryRun, true);
         assert.deepStrictEqual(rustPreview.conflicts ?? [], []);
-        assertDeepStrictEqualWithMatchers(
-          rustPreview.actions,
-          arrayContaining([
-            objectContaining({
-              path: ".devcontainer/Dockerfile",
-              action: "update",
-            }),
-            objectContaining({
-              path: ".devcontainer/devcontainer.json",
-              action: "update",
-            }),
-            objectContaining({
-              path: "rust-toolchain.toml",
-              action: "create",
-            }),
-            objectContaining({
-              path: ".github/dependabot.yml",
-              action: "update",
-            }),
-            objectContaining({
-              path: "packages/worker/package.json",
-              action: "create",
-            }),
-            objectContaining({
-              path: "packages/worker/Cargo.toml",
-              action: "create",
-            }),
-          ]),
-        );
+        for (const [expectedPath, expectedAction] of [
+          [".devcontainer/Dockerfile", "update"],
+          [".devcontainer/devcontainer.json", "update"],
+          ["rust-toolchain.toml", "create"],
+          [".github/dependabot.yml", "update"],
+          ["packages/worker/package.json", "create"],
+          ["packages/worker/Cargo.toml", "create"],
+        ] as const) {
+          assert.ok(
+            rustPreview.actions.some(
+              (action) =>
+                action.path === expectedPath &&
+                action.action === expectedAction,
+            ),
+          );
+        }
         assert.deepStrictEqual(
           await workspaceByteSnapshot(rustAdditionTarget),
           beforeRustPreview,
@@ -1007,7 +1005,7 @@ void describe("packed public CLI consumer", () => {
             cwd: rustAdditionTarget,
           },
         );
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await readFile(
             path.join(rustAdditionTarget, "packages/worker/package.json"),
             "utf8",
@@ -1063,36 +1061,40 @@ void describe("packed public CLI consumer", () => {
           rootRustChannel,
           releaseToolchainSnapshot.rustVersion,
         );
-        assertPartialDeepStrictEqual(devcontainerAfterRust.build.args, {
+        assert.partialDeepStrictEqual(devcontainerAfterRust.build.args, {
           RUST_TOOLCHAIN: rootRustChannel,
         });
-        assertDeepStrictEqualWithMatchers(
-          devcontainerAfterRust.mounts,
-          arrayContaining([
-            {
-              type: "volume",
-              source: "${devcontainerId}-pnpm-store",
-              target: "/pnpm/store",
-            },
-            {
-              type: "volume",
-              source: "${devcontainerId}-cargo-git",
-              target: "/usr/local/cargo/git",
-            },
-            {
-              type: "volume",
-              source: "${devcontainerId}-cargo-registry",
-              target: "/usr/local/cargo/registry",
-            },
-          ]),
-        );
-        assertNotDeepStrictEqualWithMatchers(
-          devcontainerAfterRust.mounts,
-          arrayContaining([
-            objectContaining({
-              target: stringContaining("${containerWorkspaceFolder}"),
-            }),
-          ]),
+        for (const expectedMount of [
+          {
+            type: "volume",
+            source: "${devcontainerId}-pnpm-store",
+            target: "/pnpm/store",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-git",
+            target: "/usr/local/cargo/git",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-registry",
+            target: "/usr/local/cargo/registry",
+          },
+        ]) {
+          assert.ok(
+            devcontainerAfterRust.mounts.some(
+              (mount) =>
+                Object.keys(mount).length === 3 &&
+                mount.type === expectedMount.type &&
+                mount.source === expectedMount.source &&
+                mount.target === expectedMount.target,
+            ),
+          );
+        }
+        assert.ok(
+          !devcontainerAfterRust.mounts.some((mount) =>
+            mount.target.includes("${containerWorkspaceFolder}"),
+          ),
         );
         assert.strictEqual(
           rustToolchainAfterRust,
@@ -1179,10 +1181,10 @@ void describe("packed public CLI consumer", () => {
         assert.deepStrictEqual(explicitCliManifest.bin, {
           "archive-addition": "./dist/cli.js",
         });
-        assertPartialDeepStrictEqual(explicitCliManifest, { private: true });
-        assert.ok(!hasProperty(explicitCliManifest, "version"));
-        assert.ok(!hasProperty(explicitCliManifest, "exports"));
-        assert.ok(!hasProperty(explicitCliManifest, "imports"));
+        assert.partialDeepStrictEqual(explicitCliManifest, { private: true });
+        assert.ok(!Object.hasOwn(explicitCliManifest, "version"));
+        assert.ok(!Object.hasOwn(explicitCliManifest, "exports"));
+        assert.ok(!Object.hasOwn(explicitCliManifest, "imports"));
         const addSecondCli = async (): Promise<void> => {
           await execa(
             installedBin,
@@ -1216,10 +1218,10 @@ void describe("packed public CLI consumer", () => {
         assert.deepStrictEqual(secondCliManifest.bin, {
           "default-command": "./dist/cli.js",
         });
-        assertPartialDeepStrictEqual(secondCliManifest, { private: true });
-        assert.ok(!hasProperty(secondCliManifest, "version"));
-        assert.ok(!hasProperty(secondCliManifest, "exports"));
-        assert.ok(!hasProperty(secondCliManifest, "imports"));
+        assert.partialDeepStrictEqual(secondCliManifest, { private: true });
+        assert.ok(!Object.hasOwn(secondCliManifest, "version"));
+        assert.ok(!Object.hasOwn(secondCliManifest, "exports"));
+        assert.ok(!Object.hasOwn(secondCliManifest, "imports"));
         const secondCliSnapshot = await workspaceByteSnapshot(cliTarget);
         await addSecondCli();
         await expectPackedHardenedRootCheckWorkflow(
@@ -1261,7 +1263,7 @@ void describe("packed public CLI consumer", () => {
         );
         assert.strictEqual(reservedPackagePath.exitCode, 2);
         assert.strictEqual(reservedPackagePath.stdout, "");
-        assertPartialDeepStrictEqual(JSON.parse(reservedPackagePath.stderr), {
+        assert.partialDeepStrictEqual(JSON.parse(reservedPackagePath.stderr), {
           kind: "usageFailure",
         });
         assert.ok(reservedPackagePath.stderr.includes("保留工作区目录"));
@@ -1296,20 +1298,19 @@ void describe("packed public CLI consumer", () => {
           },
         );
         assert.notStrictEqual(existingPackagePath.exitCode, 0);
-        assertPartialDeepStrictEqual(
-          JSON.parse(existingPackagePath.stderr).data,
-          {
-            actions: [],
-            conflicts: [
-              {
-                path: "services/existing",
-                driver: "precondition",
-                reason: stringContaining(
-                  "Package Path services/existing already exists",
-                ),
-              },
-            ],
-          },
+        const existingPackageFailure = JSON.parse(
+          existingPackagePath.stderr,
+        ).data;
+        assert.strictEqual(existingPackageFailure.actions.length, 0);
+        assert.strictEqual(existingPackageFailure.conflicts.length, 1);
+        assert.partialDeepStrictEqual(existingPackageFailure.conflicts[0], {
+          path: "services/existing",
+          driver: "precondition",
+        });
+        assert.ok(
+          existingPackageFailure.conflicts[0].reason.includes(
+            "Package Path services/existing already exists",
+          ),
         );
         assert.deepStrictEqual(
           await workspaceByteSnapshot(previewTarget),
@@ -1334,16 +1335,17 @@ void describe("packed public CLI consumer", () => {
             cwd: previewTarget,
           },
         );
-        assertPartialDeepStrictEqual(JSON.parse(preview.stdout).data, {
-          dryRun: true,
-          actions: arrayContaining([
-            {
-              path: "services/dashboard/package.json",
-              driver: "structured",
-              action: "create",
-            },
-          ]),
-        });
+        const previewData = JSON.parse(preview.stdout).data;
+        assert.strictEqual(previewData.dryRun, true);
+        assert.ok(
+          previewData.actions.some(
+            (action: Record<string, unknown>) =>
+              Object.keys(action).length === 3 &&
+              action.path === "services/dashboard/package.json" &&
+              action.driver === "structured" &&
+              action.action === "create",
+          ),
+        );
         assert.deepStrictEqual(
           await workspaceByteSnapshot(previewTarget),
           previewBefore,
@@ -1375,24 +1377,21 @@ void describe("packed public CLI consumer", () => {
           },
         );
         assert.notStrictEqual(structuredConflict.exitCode, 0);
-        assertPartialDeepStrictEqual(
-          JSON.parse(structuredConflict.stderr).data,
-          {
-            actions: [],
-            conflicts: [
-              {
-                path: "turbo.json",
-                driver: "structured",
-                location: "/boundaries/tags/app/dependencies/allow",
-                context: {
-                  before: any(String),
-                  current: any(String),
-                  after: any(String),
-                },
-              },
-            ],
-          },
-        );
+        const structuredFailure = JSON.parse(structuredConflict.stderr).data;
+        assert.strictEqual(structuredFailure.actions.length, 0);
+        assert.strictEqual(structuredFailure.conflicts.length, 1);
+        const [structuredConflictDetail] = structuredFailure.conflicts;
+        assert.partialDeepStrictEqual(structuredConflictDetail, {
+          path: "turbo.json",
+          driver: "structured",
+          location: "/boundaries/tags/app/dependencies/allow",
+        });
+        for (const key of ["before", "current", "after"] as const) {
+          assert.strictEqual(
+            typeof structuredConflictDetail.context[key],
+            "string",
+          );
+        }
         assert.deepStrictEqual(
           await workspaceByteSnapshot(previewTarget),
           structuredBefore,
@@ -1599,7 +1598,10 @@ void describe("packed public CLI consumer", () => {
           firstWorkspaceManifest,
         );
         const finalGitignore = await readFile(gitignorePath, "utf8");
-        assertLength(finalGitignore.match(/^private-artifacts\/$/gmu), 1);
+        assert.strictEqual(
+          finalGitignore.match(/^private-artifacts\/$/gmu)?.length,
+          1,
+        );
         assert.strictEqual(
           (
             await lstat(

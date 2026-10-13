@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { describe } from "node:test";
+import { describe, it } from "node:test";
 
 import ts from "typescript";
-
-import { testEach } from "./assertions.ts";
 
 function property(
   object: ts.ObjectLiteralExpression,
@@ -52,14 +50,12 @@ async function loadMaintainedConfig(
 }
 
 void describe("maintained Playwright diagnostic configuration", () => {
-  testEach(
-    [
-      "packages/builtin-presets/templates/vue-app/playwright.config.ts",
-      "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
-      "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
-    ],
-    "uses native failure diagnostics in %s",
-    async (relativePath) => {
+  for (const relativePath of [
+    "packages/builtin-presets/templates/vue-app/playwright.config.ts",
+    "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
+    "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
+  ]) {
+    void it(`uses native failure diagnostics in ${relativePath}`, async () => {
       const config = await loadMaintainedConfig(relativePath);
       const use = property(config, "use");
 
@@ -93,6 +89,6 @@ void describe("maintained Playwright diagnostic configuration", () => {
       );
       assert.strictEqual(property(config, "retries"), undefined);
       assert.strictEqual(property(use, "video"), undefined);
-    },
-  );
+    });
+  }
 });

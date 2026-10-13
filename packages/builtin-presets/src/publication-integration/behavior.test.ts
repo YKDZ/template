@@ -26,14 +26,6 @@ import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
-import {
-  any,
-  arrayContaining,
-  assertContains,
-  assertMatchesPartial,
-  objectContaining,
-  stringContaining,
-} from "../../test-support/assertions.ts";
 import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
 
@@ -160,17 +152,8 @@ async function requireReady(repositoryRoot: string): Promise<void> {
     ["run", "publication:readiness", "--require-ready"],
     { cwd: repositoryRoot, reject: false },
   );
-  assertMatchesPartial(
-    {
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
-    },
-    {
-      exitCode: 0,
-      stdout: stringContaining("npm publication readiness: ready"),
-    },
-  );
+  assert.strictEqual(result.exitCode, 0);
+  assert.ok(result.stdout.includes("npm publication readiness: ready"));
 }
 
 void describe("ts-cli publication owner-fact integration", () => {
@@ -277,11 +260,13 @@ void describe("ts-cli publication owner-fact integration", () => {
           publicManifest.engines?.node,
           `^${releaseToolchainSnapshot.nodeVersion}`,
         );
-        assertMatchesPartial(
-          await execa("pnpm", ["exec", "npm", "--version"], {
-            cwd: repositoryRoot,
-          }),
-          { stdout: "12.2.0" },
+        assert.strictEqual(
+          (
+            await execa("pnpm", ["exec", "npm", "--version"], {
+              cwd: repositoryRoot,
+            })
+          ).stdout,
+          "12.2.0",
         );
         const npmSession = path.join(workspace, "isolated-npm-session");
         await mkdir(npmSession);
@@ -303,35 +288,39 @@ void describe("ts-cli publication owner-fact integration", () => {
           `--globalconfig=${globalConfig}`,
           `--cache=${npmCache}`,
         ];
-        assertMatchesPartial(
-          await execa(
-            "pnpm",
-            [
-              "exec",
-              "npm",
-              ...sessionConfigArguments,
-              "config",
-              "get",
-              "fetch-retries",
-            ],
-            { cwd: repositoryRoot },
-          ),
-          { stdout: "1" },
+        assert.strictEqual(
+          (
+            await execa(
+              "pnpm",
+              [
+                "exec",
+                "npm",
+                ...sessionConfigArguments,
+                "config",
+                "get",
+                "fetch-retries",
+              ],
+              { cwd: repositoryRoot },
+            )
+          ).stdout,
+          "1",
         );
-        assertMatchesPartial(
-          await execa(
-            "pnpm",
-            [
-              "exec",
-              "npm",
-              ...sessionConfigArguments,
-              "config",
-              "get",
-              "registry",
-            ],
-            { cwd: repositoryRoot },
-          ),
-          { stdout: "https://registry.npmjs.org/" },
+        assert.strictEqual(
+          (
+            await execa(
+              "pnpm",
+              [
+                "exec",
+                "npm",
+                ...sessionConfigArguments,
+                "config",
+                "get",
+                "registry",
+              ],
+              { cwd: repositoryRoot },
+            )
+          ).stdout,
+          "https://registry.npmjs.org/",
         );
         const consumer = path.join(npmSession, "consumer");
         await mkdir(consumer);
@@ -339,23 +328,25 @@ void describe("ts-cli publication owner-fact integration", () => {
           path.join(consumer, ".npmrc"),
           "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
         );
-        assertMatchesPartial(
-          await execa(
-            "pnpm",
-            [
-              "exec",
-              "npm",
-              `--prefix=${consumer}`,
-              `--userconfig=${userConfig}`,
-              `--globalconfig=${globalConfig}`,
-              `--cache=${npmCache}`,
-              "config",
-              "get",
-              "fetch-retries",
-            ],
-            { cwd: repositoryRoot },
-          ),
-          { stdout: "1" },
+        assert.strictEqual(
+          (
+            await execa(
+              "pnpm",
+              [
+                "exec",
+                "npm",
+                `--prefix=${consumer}`,
+                `--userconfig=${userConfig}`,
+                `--globalconfig=${globalConfig}`,
+                `--cache=${npmCache}`,
+                "config",
+                "get",
+                "fetch-retries",
+              ],
+              { cwd: repositoryRoot },
+            )
+          ).stdout,
+          "1",
         );
         const artifactModule = (await import(
           `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
@@ -368,7 +359,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           packagePath: "packages/cli",
           outputDirectory: safeOutput,
         });
-        assertMatchesPartial(safe, {
+        assert.partialDeepStrictEqual(safe, {
           kind: "blocked",
           readiness: { mode: "safe-unconfigured" },
         });
@@ -378,7 +369,7 @@ void describe("ts-cli publication owner-fact integration", () => {
         await mkdir(overlappingTarget);
         const overlappingOutput = path.join(workspace, "overlapping-output");
         await symlink(overlappingTarget, overlappingOutput, "dir");
-        assertMatchesPartial(
+        assert.partialDeepStrictEqual(
           await artifactModule.verifyNpmPublicationArtifact({
             repositoryRoot,
             packagePath: "packages/cli",
@@ -406,7 +397,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           packagePath: "packages/cli",
           outputDirectory: publicIntentOutput,
         });
-        assertMatchesPartial(publicIntent, {
+        assert.partialDeepStrictEqual(publicIntent, {
           kind: "blocked",
           readiness: { mode: "public-intent" },
         });
@@ -433,22 +424,21 @@ void describe("ts-cli publication owner-fact integration", () => {
           "invalid-prepack-output",
         );
         await mkdir(invalidPrepackOutput);
-        assertMatchesPartial(
+        const invalidPrepack =
           await artifactModule.verifyNpmPublicationArtifact({
             repositoryRoot,
             packagePath: "packages/cli",
             outputDirectory: invalidPrepackOutput,
-          }),
-          {
-            kind: "blocked",
-            readiness: {
-              mode: "public-intent",
-              blockers: arrayContaining([
-                objectContaining({ code: "manifest-contract" }),
-              ]),
-            },
-          },
-        );
+          });
+        assert.strictEqual(invalidPrepack.kind, "blocked");
+        if (invalidPrepack.kind === "blocked") {
+          assert.strictEqual(invalidPrepack.readiness.mode, "public-intent");
+          assert.ok(
+            invalidPrepack.readiness.blockers.some(
+              (blocker) => blocker.code === "manifest-contract",
+            ),
+          );
+        }
         assert.deepStrictEqual(await readdir(invalidPrepackOutput), []);
 
         scripts.prepack = canonicalPrepack;
@@ -471,7 +461,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           "invalid-behavior-output",
         );
         await mkdir(invalidBehaviorOutput);
-        assertMatchesPartial(
+        assert.partialDeepStrictEqual(
           await artifactModule.verifyNpmPublicationArtifact({
             repositoryRoot,
             packagePath: "packages/cli",
@@ -526,7 +516,8 @@ void describe("ts-cli publication owner-fact integration", () => {
           restoreAmbient();
         }
 
-        assertMatchesPartial(verified, {
+        assert.ok(verified?.kind === "verified");
+        assert.partialDeepStrictEqual(verified, {
           kind: "verified",
           receipt: {
             schemaVersion: 1,
@@ -549,20 +540,24 @@ void describe("ts-cli publication owner-fact integration", () => {
               path: "package/dist/cli.js",
               shebang: "#!/usr/bin/env node",
             },
-            smokes: [
-              { name: "runtime-import", stdout: "" },
-              { name: "help", stdout: stringContaining("lookup") },
-              { name: "version", stdout: "ship 1.0.0\n" },
-              { name: "lookup", stdout: stringContaining("Ada Lovelace") },
-              { name: "schema", stdout: stringContaining("notFound") },
-            ],
           },
         });
-        if (verified?.kind !== "verified")
-          throw new Error("Expected verified artifact");
+        assert.strictEqual(verified.receipt.files.length, 8);
+        assert.strictEqual(verified.receipt.smokes.length, 5);
+        assert.deepStrictEqual(
+          verified.receipt.smokes.map(({ name }) => name),
+          ["runtime-import", "help", "version", "lookup", "schema"],
+        );
+        const [runtimeImport, help, version, lookup, schema] =
+          verified.receipt.smokes;
+        assert.strictEqual(runtimeImport?.stdout, "");
+        assert.ok(help?.stdout.includes("lookup"));
+        assert.strictEqual(version?.stdout, "ship 1.0.0\n");
+        assert.ok(lookup?.stdout.includes("Ada Lovelace"));
+        assert.ok(schema?.stdout.includes("notFound"));
         const artifactBytes = await readFile(verified.artifactPath);
         const digest = createHash("sha512").update(artifactBytes).digest();
-        assertMatchesPartial(verified.receipt.artifact, {
+        assert.partialDeepStrictEqual(verified.receipt.artifact, {
           size: artifactBytes.byteLength,
           integrity: `sha512-${digest.toString("base64")}`,
         });
@@ -589,11 +584,11 @@ void describe("ts-cli publication owner-fact integration", () => {
           ),
           "build\n",
         );
-        assertMatchesPartial(
+        assert.partialDeepStrictEqual(
           JSON.parse(await readFile(sourceManifestPath, "utf8")),
           { description: "Changed after pack" },
         );
-        assertMatchesPartial(verified.receipt.packedManifest, {
+        assert.partialDeepStrictEqual(verified.receipt.packedManifest, {
           description: "A focused command-line release tool.",
         });
 
@@ -611,7 +606,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           { cwd: repositoryRoot, reject: false },
         );
         assert.strictEqual(caller.exitCode, 0);
-        assertContains(caller.stdout, "npm publication artifact: verified");
+        assert.ok(caller.stdout.includes("npm publication artifact: verified"));
         assert.strictEqual((await readdir(callerOutput)).length, 3);
 
         const workflowOutput = path.join(workspace, "workflow-output");
@@ -636,10 +631,10 @@ void describe("ts-cli publication owner-fact integration", () => {
           ["run", "publication:artifact", "--", "--output-directory"],
           { cwd: repositoryRoot, reject: false },
         );
-        assertMatchesPartial(invalidCaller, {
-          exitCode: 2,
-          stderr: stringContaining("ERROR publication-artifact-usage"),
-        });
+        assert.strictEqual(invalidCaller.exitCode, 2);
+        assert.ok(
+          invalidCaller.stderr.includes("ERROR publication-artifact-usage"),
+        );
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
@@ -715,7 +710,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           await readFile(publicManifestPath, "utf8"),
           publicManifestBytes,
         );
-        assertMatchesPartial(
+        assert.partialDeepStrictEqual(
           JSON.parse(
             await readFile(
               path.join(repositoryRoot, "packages/lib/package.json"),
@@ -744,7 +739,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           readonly defaultPackageScope: string;
           readonly packages: readonly Record<string, unknown>[];
         };
-        assertMatchesPartial(generation, {
+        assert.partialDeepStrictEqual(generation, {
           repositoryName: "recorded-repository",
           defaultPackageScope: "seed",
         });
@@ -775,9 +770,11 @@ void describe("ts-cli publication owner-fact integration", () => {
           0,
           `${rootCheck.stdout}\n${rootCheck.stderr}`,
         );
-        assertMatchesPartial(
-          await stat(path.join(repositoryRoot, "packages/lib/dist/index.js")),
-          { mode: any(Number) },
+        assert.strictEqual(
+          typeof (
+            await stat(path.join(repositoryRoot, "packages/lib/dist/index.js"))
+          ).mode,
+          "number",
         );
         assert.strictEqual(
           await readFile(

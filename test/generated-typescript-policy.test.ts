@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe } from "node:test";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -11,12 +11,6 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-
-import {
-  assertContainsEqual,
-  objectContaining,
-  testEach,
-} from "./assertions.ts";
 
 type Tsconfig = {
   readonly compilerOptions?: Readonly<Record<string, unknown>>;
@@ -88,100 +82,100 @@ async function localExtendsChain(
 }
 
 void describe("Generated Repository TypeScript policy", () => {
-  testEach(
-    builtInPresetRegistry.all().map((definition) => definition.metadata.name),
-    "%s inherits one strict policy with explicit ecosystem exceptions",
-    async (presetName) => {
-      const workspace = await mkdtemp(
-        path.join(tmpdir(), `template-typescript-policy-${presetName}-`),
-      );
-      const targetDir = path.join(workspace, "repository");
-      try {
-        const definition = builtInPresetRegistry.require(presetName);
-        const plan = planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir,
-            defaultPackageScope: "policy",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        });
-        await renderNewProject({
-          targetRoot: targetDir,
-          operations: [...plan.operations],
-        });
-
-        const configPackageName = "@policy/typescript-config";
-        const configReference = `${configPackageName}/base.json`;
-        const baselinePath = path.join(
-          targetDir,
-          "packages/typescript-config/base.json",
+  for (const definition of builtInPresetRegistry.all()) {
+    const presetName = definition.metadata.name;
+    void describe(`${presetName} generated repository TypeScript policy`, () => {
+      void it("inherits one strict policy with explicit ecosystem exceptions", async () => {
+        const workspace = await mkdtemp(
+          path.join(tmpdir(), `template-typescript-policy-${presetName}-`),
         );
-        assert.deepStrictEqual(await readTsconfig(baselinePath), {
-          compilerOptions: policyOptions,
-        });
-        assertContainsEqual(
-          plan.blueprint.packages,
-          objectContaining({
-            name: configPackageName,
-            path: "packages/typescript-config",
-            role: "shared-library",
-          }),
-        );
-
-        for (const configPath of await tsconfigPaths(targetDir)) {
-          const config = await readTsconfig(configPath);
-          const relativePath = path.relative(targetDir, configPath);
-          const isSolutionConfig =
-            config.compilerOptions === undefined &&
-            config.files?.length === 0 &&
-            config.references !== undefined;
-          if (!isSolutionConfig) {
-            const chain = await localExtendsChain(configPath);
-            assert.deepStrictEqual(
-              {
-                inheritsPolicy:
-                  chain.has(path.resolve(baselinePath)) ||
-                  chain.has(configReference),
-                relativePath,
+        const targetDir = path.join(workspace, "repository");
+        try {
+          const plan = planGeneratedRepositoryInitialization({
+            definition,
+            context: createGenerationContext({
+              targetDir,
+              defaultPackageScope: "policy",
+              toolchain: {
+                nodeLtsMajor: "24",
+                packageManagerPin: "pnpm@11.11.0",
+                nodeVersion: releaseToolchainSnapshot.nodeVersion,
               },
-              { inheritsPolicy: true, relativePath },
+            }),
+          });
+          await renderNewProject({
+            targetRoot: targetDir,
+            operations: [...plan.operations],
+          });
+
+          const configPackageName = "@policy/typescript-config";
+          const configReference = `${configPackageName}/base.json`;
+          const baselinePath = path.join(
+            targetDir,
+            "packages/typescript-config/base.json",
+          );
+          assert.deepStrictEqual(await readTsconfig(baselinePath), {
+            compilerOptions: policyOptions,
+          });
+          assert.ok(
+            plan.blueprint.packages.some(
+              (pkg) =>
+                pkg.name === configPackageName &&
+                pkg.path === "packages/typescript-config" &&
+                pkg.role === "shared-library",
+            ),
+          );
+
+          for (const configPath of await tsconfigPaths(targetDir)) {
+            const config = await readTsconfig(configPath);
+            const relativePath = path.relative(targetDir, configPath);
+            const isSolutionConfig =
+              config.compilerOptions === undefined &&
+              config.files?.length === 0 &&
+              config.references !== undefined;
+            if (!isSolutionConfig) {
+              const chain = await localExtendsChain(configPath);
+              assert.deepStrictEqual(
+                {
+                  inheritsPolicy:
+                    chain.has(path.resolve(baselinePath)) ||
+                    chain.has(configReference),
+                  relativePath,
+                },
+                { inheritsPolicy: true, relativePath },
+              );
+            }
+
+            const repeatedPolicyOptions = Object.keys(
+              config.compilerOptions ?? {},
+            ).filter((option) => Object.hasOwn(policyOptions, option));
+            const inherited = Array.isArray(config.extends)
+              ? config.extends
+              : config.extends === undefined
+                ? []
+                : [config.extends];
+            const allowedOverrides = [
+              ...(config.compilerOptions?.exactOptionalPropertyTypes ===
+                false && inherited.includes("@vue/tsconfig/tsconfig.dom.json")
+                ? ["exactOptionalPropertyTypes"]
+                : []),
+              ...(config.compilerOptions?.skipLibCheck === true &&
+              config.compilerOptions.moduleResolution === "bundler"
+                ? ["skipLibCheck"]
+                : []),
+            ];
+            assert.deepStrictEqual(
+              { relativePath, repeatedPolicyOptions },
+              {
+                relativePath,
+                repeatedPolicyOptions: allowedOverrides,
+              },
             );
           }
-
-          const repeatedPolicyOptions = Object.keys(
-            config.compilerOptions ?? {},
-          ).filter((option) => Object.hasOwn(policyOptions, option));
-          const inherited = Array.isArray(config.extends)
-            ? config.extends
-            : config.extends === undefined
-              ? []
-              : [config.extends];
-          const allowedOverrides = [
-            ...(config.compilerOptions?.exactOptionalPropertyTypes === false &&
-            inherited.includes("@vue/tsconfig/tsconfig.dom.json")
-              ? ["exactOptionalPropertyTypes"]
-              : []),
-            ...(config.compilerOptions?.skipLibCheck === true &&
-            config.compilerOptions.moduleResolution === "bundler"
-              ? ["skipLibCheck"]
-              : []),
-          ];
-          assert.deepStrictEqual(
-            { relativePath, repeatedPolicyOptions },
-            {
-              relativePath,
-              repeatedPolicyOptions: allowedOverrides,
-            },
-          );
+        } finally {
+          await rm(workspace, { recursive: true, force: true });
         }
-      } finally {
-        await rm(workspace, { recursive: true, force: true });
-      }
-    },
-  );
+      });
+    });
+  }
 });

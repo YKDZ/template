@@ -318,8 +318,26 @@ function isAssertionArgument(node: ts.Node): boolean {
     return false;
   }
   const expression = node.parent.expression;
-  if (ts.isIdentifier(expression)) {
-    return expression.text === "assertLacksProperty";
+  if (
+    ts.isPropertyAccessExpression(expression) &&
+    expression.name.text === "hasOwn" &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === "Object" &&
+    node.parent.arguments[1] === node
+  ) {
+    const negation = node.parent.parent;
+    if (
+      ts.isPrefixUnaryExpression(negation) &&
+      negation.operator === ts.SyntaxKind.ExclamationToken &&
+      ts.isCallExpression(negation.parent) &&
+      negation.parent.arguments.includes(negation) &&
+      ts.isPropertyAccessExpression(negation.parent.expression) &&
+      negation.parent.expression.name.text === "ok" &&
+      ts.isIdentifier(negation.parent.expression.expression) &&
+      negation.parent.expression.expression.text === "assert"
+    ) {
+      return true;
+    }
   }
   return (
     ts.isPropertyAccessExpression(expression) &&

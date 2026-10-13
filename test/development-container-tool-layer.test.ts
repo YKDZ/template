@@ -13,12 +13,6 @@ import {
   renderProject,
 } from "@ykdz/template-core/renderer";
 
-import {
-  assertPartialDeepStrictEqual,
-  testEach,
-  assertRejectsContaining,
-} from "./assertions.ts";
-
 const source = createTemplateSourceHandle(
   path.resolve("test/fixtures/development-container-tool-layers"),
 );
@@ -97,14 +91,12 @@ void describe("Development Container Tool Layer Contract", () => {
     );
   });
 
-  testEach(
-    [
-      ["COPY", "hidden-copy.Dockerfile"],
-      ["ADD", "hidden-add-backtick.Dockerfile"],
-    ],
-    "rejects a hidden %s instruction reconstructed from logical lines",
-    async (instruction, from) => {
-      await assertRejectsContaining(
+  for (const [instruction, from] of [
+    ["COPY", "hidden-copy.Dockerfile"],
+    ["ADD", "hidden-add-backtick.Dockerfile"],
+  ] as const) {
+    void it(`rejects a hidden ${instruction} instruction reconstructed from logical lines`, async () => {
+      await assert.rejects(
         planDevelopmentContainerToolLayers({
           baseLayer: layer({
             identity: "node-pnpm",
@@ -117,10 +109,14 @@ void describe("Development Container Tool Layer Contract", () => {
             }),
           ],
         }),
-        `must not use Dockerfile instruction ${instruction}; allowed instructions are ARG, ENV, and RUN.`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `must not use Dockerfile instruction ${instruction}; allowed instructions are ARG, ENV, and RUN.`,
+          ),
       );
-    },
-  );
+    });
+  }
 
   void it("validates current Dockerfile fragment operations before writing generated files", async () => {
     const targetRoot = await mkdtemp(
@@ -157,16 +153,18 @@ void describe("Development Container Tool Layer Contract", () => {
           ),
       );
       await assert.rejects(access(earlierGeneratedFile), (error) => {
-        assertPartialDeepStrictEqual(error, {
-          code: "ENOENT",
-        });
-        return true;
+        return (
+          error instanceof Error &&
+          Object.hasOwn(error, "code") &&
+          (error as Error & { readonly code?: unknown }).code === "ENOENT"
+        );
       });
       await assert.rejects(access(dockerfilePath), (error) => {
-        assertPartialDeepStrictEqual(error, {
-          code: "ENOENT",
-        });
-        return true;
+        return (
+          error instanceof Error &&
+          Object.hasOwn(error, "code") &&
+          (error as Error & { readonly code?: unknown }).code === "ENOENT"
+        );
       });
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
@@ -474,14 +472,12 @@ void describe("Development Container Tool Layer Contract", () => {
     );
   });
 
-  testEach(
-    [
-      ["FROM", "optional-from.Dockerfile"],
-      ["SHELL", "optional-shell.Dockerfile"],
-    ],
-    "reserves the %s instruction for the base layer",
-    async (instruction, from) => {
-      await assertRejectsContaining(
+  for (const [instruction, from] of [
+    ["FROM", "optional-from.Dockerfile"],
+    ["SHELL", "optional-shell.Dockerfile"],
+  ] as const) {
+    void it(`reserves the ${instruction} instruction for the base layer`, async () => {
+      await assert.rejects(
         planDevelopmentContainerToolLayers({
           baseLayer: layer({
             identity: "node-pnpm",
@@ -494,10 +490,14 @@ void describe("Development Container Tool Layer Contract", () => {
             }),
           ],
         }),
-        `must not use Dockerfile instruction ${instruction}`,
+        (error: unknown) =>
+          error instanceof Error &&
+          error.message.includes(
+            `must not use Dockerfile instruction ${instruction}`,
+          ),
       );
-    },
-  );
+    });
+  }
 
   void it("rejects legacy non-Dockerfile fragment paths", async () => {
     await assert.rejects(

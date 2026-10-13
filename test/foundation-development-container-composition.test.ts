@@ -26,15 +26,6 @@ import {
   renderNewProject,
 } from "@ykdz/template-core/renderer";
 
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertNotDeepStrictEqualWithMatchers,
-  assertPartialDeepStrictEqual,
-  objectContaining,
-  stringMatching,
-} from "./assertions.ts";
-
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),
 );
@@ -154,23 +145,25 @@ void describe("Foundation Development Container composition", () => {
         }),
       });
 
-      assertPartialDeepStrictEqual(
-        plan.developmentContainer.toolLayers.find(
-          (layer) => layer.identity === "github-cli",
-        ),
-        {
-          kind: "optional",
-          dockerfile: { from: "github-cli.Dockerfile" },
-          requires: ["node-pnpm"],
-          probes: [
-            {
-              identity: "github-cli",
-              command: "gh",
-              args: ["--version"],
-            },
-          ],
-        },
+      const githubCliLayer = plan.developmentContainer.toolLayers.find(
+        (layer) => layer.identity === "github-cli",
       );
+      assert.ok(githubCliLayer !== undefined);
+      assert.partialDeepStrictEqual(githubCliLayer, {
+        kind: "optional",
+        dockerfile: { from: "github-cli.Dockerfile" },
+        requires: ["node-pnpm"],
+        probes: [
+          {
+            identity: "github-cli",
+            command: "gh",
+            args: ["--version"],
+          },
+        ],
+      });
+      assert.strictEqual(githubCliLayer.requires?.length, 1);
+      assert.strictEqual(githubCliLayer.probes?.length, 1);
+      assert.strictEqual(githubCliLayer.probes?.[0]?.args?.length, 1);
     }
   });
 
@@ -218,15 +211,12 @@ void describe("Foundation Development Container composition", () => {
           `${dockerfile}\n${devcontainer}`,
           /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/u,
         );
-        assertNotDeepStrictEqualWithMatchers(
-          plan.nextStepInstructions,
-          arrayContaining([
-            objectContaining({
-              display: stringMatching(
-                /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/iu,
-              ),
-            }),
-          ]),
+        assert.ok(
+          !plan.nextStepInstructions.some((instruction) =>
+            /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/iu.test(
+              instruction.display,
+            ),
+          ),
         );
       }
     } finally {
@@ -286,8 +276,12 @@ void describe("Foundation Development Container composition", () => {
         await assert.rejects(
           access(path.join(targetDir, ".pnpm-store")),
           (error) => {
-            assertPartialDeepStrictEqual(error, { code: "ENOENT" });
-            return true;
+            return (
+              typeof error === "object" &&
+              error !== null &&
+              Object.hasOwn(error, "code") &&
+              (error as { readonly code?: unknown }).code === "ENOENT"
+            );
           },
         );
       }
@@ -324,7 +318,7 @@ void describe("Foundation Development Container composition", () => {
         }
         if (contribution.foundation.deploymentCheck !== undefined) {
           assert.ok(!layerIdentities.has("shellcheck"));
-          assertPartialDeepStrictEqual(
+          assert.partialDeepStrictEqual(
             contribution.foundation.deploymentCheck.sources,
             {
               shellCheckDockerfile: {
@@ -490,10 +484,11 @@ void describe("Foundation Development Container composition", () => {
           "utf8",
         ),
       ) as { build: { args: Record<string, string> } };
-      assertPartialDeepStrictEqual(devcontainer.build.args, {
-        RUST_TOOLCHAIN: "stable",
-        PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
-      });
+      assert.strictEqual(devcontainer.build.args.RUST_TOOLCHAIN, "stable");
+      assert.match(
+        devcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE ?? "",
+        /^@playwright\/test@/u,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -596,26 +591,23 @@ void describe("Foundation Development Container composition", () => {
         definition,
         context,
       });
-      assertPartialDeepStrictEqual(
-        plan.reconciliation.find(
-          (entry) =>
-            entry.path === ".devcontainer/devcontainer.json" &&
-            entry.driver === "structured",
-        ),
-        {
-          identitySets: [
-            {
-              location: "/mounts",
-              identity: {
-                kind: "projection",
-                members: [
-                  objectContaining({ identity: "pnpm-store" }),
-                  objectContaining({ identity: "fixture-cache" }),
-                ],
-              },
-            },
-          ],
-        },
+      const toolLayerReconciliation = plan.reconciliation.find(
+        (entry) =>
+          entry.path === ".devcontainer/devcontainer.json" &&
+          entry.driver === "structured",
+      );
+      assert.ok(
+        toolLayerReconciliation !== undefined &&
+          toolLayerReconciliation.driver === "structured",
+      );
+      assert.strictEqual(toolLayerReconciliation.identitySets?.length, 1);
+      const mountIdentitySet = toolLayerReconciliation.identitySets?.[0];
+      assert.ok(mountIdentitySet !== undefined);
+      assert.strictEqual(mountIdentitySet.location, "/mounts");
+      assert.strictEqual(mountIdentitySet.identity.kind, "projection");
+      assert.deepStrictEqual(
+        mountIdentitySet.identity.members.map(({ identity }) => identity),
+        ["pnpm-store", "fixture-cache"],
       );
       await renderNewProject({
         targetRoot: targetDir,
@@ -627,31 +619,32 @@ void describe("Foundation Development Container composition", () => {
         "utf8",
       );
       assert.match(dockerfile, /ARG RUST_TOOLCHAIN/iu);
-      assertPartialDeepStrictEqual(
+      const renderedDevcontainer = JSON.parse(
         await readFile(
           path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
-        ).then((source) => JSON.parse(source)),
-        {
-          build: {
-            args: {
-              RUST_TOOLCHAIN: "fixture-value",
-            },
-          },
-          mounts: [
-            {
-              type: "volume",
-              source: "${devcontainerId}-pnpm-store",
-              target: "/pnpm/store",
-            },
-            {
-              type: "volume",
-              source: "${devcontainerId}-fixture",
-              target: "/var/cache/fixture",
-            },
-          ],
-        },
+        ),
       );
+      assert.partialDeepStrictEqual(renderedDevcontainer, {
+        build: {
+          args: {
+            RUST_TOOLCHAIN: "fixture-value",
+          },
+        },
+        mounts: [
+          {
+            type: "volume",
+            source: "${devcontainerId}-pnpm-store",
+            target: "/pnpm/store",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-fixture",
+            target: "/var/cache/fixture",
+          },
+        ],
+      });
+      assert.strictEqual(renderedDevcontainer.mounts.length, 2);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -812,21 +805,25 @@ void describe("Foundation Development Container composition", () => {
         ...addition.projectProjections,
       });
 
-      assertPartialDeepStrictEqual(conflictingResult, {
-        ok: false,
-        conflicts: [
-          {
-            path: ".devcontainer/devcontainer.json",
-            driver: "structured",
-            location: stringMatching(/^\/mounts\/0\//u),
-          },
-        ],
+      assert.strictEqual(conflictingResult.ok, false);
+      assert.strictEqual(conflictingResult.conflicts.length, 1);
+      const conflict = conflictingResult.conflicts[0];
+      assert.ok(conflict !== undefined);
+      assert.partialDeepStrictEqual(conflict, {
+        path: ".devcontainer/devcontainer.json",
+        driver: "structured",
       });
+      assert.ok(typeof conflict.location === "string");
+      assert.match(conflict.location, /^\/mounts\/0\//u);
       await assert.rejects(
         access(path.join(targetDir, "packages/native/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
-          return true;
+          return (
+            typeof error === "object" &&
+            error !== null &&
+            Object.hasOwn(error, "code") &&
+            (error as { readonly code?: unknown }).code === "ENOENT"
+          );
         },
       );
       assert.strictEqual(
@@ -861,18 +858,16 @@ void describe("Foundation Development Container composition", () => {
         build: { args: Record<string, string> };
         mounts: { target: string }[];
       };
-      assertPartialDeepStrictEqual(updated.build.args, {
+      assert.partialDeepStrictEqual(updated.build.args, {
         USER_BUILD_ARGUMENT: "retained",
         RUST_TOOLCHAIN: "stable",
       });
-      assertDeepStrictEqualWithMatchers(
-        updated.mounts.map((mount) => mount.target),
-        arrayContaining([
-          "/var/cache/user-fixture",
-          "/usr/local/cargo/registry",
-          "/usr/local/cargo/git",
-          "${containerWorkspaceFolder}/target",
-        ]),
+      const updatedMountTargets = updated.mounts.map((mount) => mount.target);
+      assert.ok(updatedMountTargets.includes("/var/cache/user-fixture"));
+      assert.ok(updatedMountTargets.includes("/usr/local/cargo/registry"));
+      assert.ok(updatedMountTargets.includes("/usr/local/cargo/git"));
+      assert.ok(
+        updatedMountTargets.includes("${containerWorkspaceFolder}/target"),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });

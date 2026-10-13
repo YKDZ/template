@@ -19,8 +19,6 @@ import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { parse } from "yaml";
 
-import { assertThrowsMatching } from "./assertions.ts";
-
 function rootOnlyPlan(): GeneratedRepositoryPlan {
   const definition = builtInPresetRegistry.all().find((candidate) => {
     const plan = planGeneratedRepositoryInitialization({
@@ -260,14 +258,15 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       },
     ];
     for (const mutation of mutations) {
-      assertThrowsMatching(
+      assert.throws(
         () =>
           assertDependabotContract(
             plan,
             baseline.sourcePath,
             parse(mutation.source),
           ),
-        mutation.diagnostic,
+        (error: unknown) =>
+          error instanceof Error && mutation.diagnostic.test(error.message),
       );
     }
   });

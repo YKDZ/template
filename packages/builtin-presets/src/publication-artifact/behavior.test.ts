@@ -8,8 +8,6 @@ import { pathToFileURL } from "node:url";
 import { create } from "tar";
 
 import type { NpmPublicationReadiness } from "../../templates/ts-cli/publication/readiness.ts";
-import { assertMatchesPartial } from "../../test-support/assertions.ts";
-
 type ArtifactModule =
   typeof import("../../templates/ts-cli/publication/artifact.ts");
 
@@ -99,9 +97,12 @@ void describe("verified publication artifact contracts", () => {
         },
         [...item.paths],
       );
-      assertMatchesPartial(await inspectPublicationArchive(archivePath), {
-        code: "artifact-archive-unsafe",
-      });
+      assert.partialDeepStrictEqual(
+        await inspectPublicationArchive(archivePath),
+        {
+          code: "artifact-archive-unsafe",
+        },
+      );
     }
   });
 
@@ -161,7 +162,7 @@ void describe("verified publication artifact contracts", () => {
       },
     };
 
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       inspectPackedManifestContract({
         manifest: packedManifest,
         sourceManifest,
@@ -170,7 +171,7 @@ void describe("verified publication artifact contracts", () => {
       { code: "artifact-manifest-contract" },
     );
     const { scripts: _scripts, ...withoutScripts } = packedManifest;
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       inspectPackedManifestContract({
         manifest: { ...withoutScripts, author: "Ada Lovelace" },
         sourceManifest,
