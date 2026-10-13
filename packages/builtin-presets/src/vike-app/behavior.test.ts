@@ -507,7 +507,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     };
     assert.strictEqual(
       dbManifest.scripts.test,
-      "DATABASE_PROFILE=test node --conditions=source --test test/todos.test.ts",
+      "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     );
     assert.strictEqual(
       dbManifest.scripts["db:reset"],
@@ -834,15 +834,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const workflow = parseYaml(checkWorkflow) as {
       readonly jobs: {
         readonly check: {
-          readonly strategy: {
-            readonly matrix: {
-              readonly include: readonly {
-                readonly capability: string;
-                readonly job_name: string;
-                readonly timeout_minutes: number;
-              }[];
-            };
-          };
+          readonly name: string;
+          readonly "timeout-minutes": number;
           readonly steps: readonly {
             readonly name?: string;
             readonly uses?: string;
@@ -854,22 +847,30 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         };
       };
     };
-    const deploymentJob = workflow.jobs.check.strategy.matrix.include.find(
-      (job) => job.capability === "deployment",
-    );
-    assert.strictEqual(deploymentJob?.job_name, "Deployment Check");
-    assert.strictEqual(deploymentJob?.timeout_minutes, 45);
+    assert.strictEqual(workflow.jobs.check.name, "Full Check");
+    assert.strictEqual(workflow.jobs.check["timeout-minutes"], 45);
     const steps = workflow.jobs.check.steps;
-    const buildxSetup = steps.find(({ uses }) =>
+    const lightCheckIndex = steps.findIndex(
+      ({ name }) => name === "Run Light Check",
+    );
+    const buildxSetupIndex = steps.findIndex(({ uses }) =>
       uses?.startsWith("docker/setup-buildx-action@"),
     );
+    const heavyCheckIndex = steps.findIndex(
+      ({ name }) => name === "Run Heavy Check",
+    );
+    const buildxSetup = steps[buildxSetupIndex];
+    assert.ok(lightCheckIndex >= 0);
+    assert.ok(buildxSetupIndex > lightCheckIndex);
+    assert.ok(heavyCheckIndex > buildxSetupIndex);
+    assert.strictEqual(steps[lightCheckIndex]?.run, "pnpm run check");
+    assert.strictEqual(steps[heavyCheckIndex]?.run, "pnpm run check:heavy");
     assert.match(
       buildxSetup?.uses ?? "",
       /^docker\/setup-buildx-action@[a-f0-9]{40}$/u,
     );
-    assert.strictEqual(buildxSetup?.if, "matrix.requires_docker");
     const diagnosticStaging = steps.find(
-      ({ name }) => name === "Stage Root Check diagnostics",
+      ({ name }) => name === "Stage Check diagnostics",
     );
     assert.strictEqual(
       diagnosticStaging?.env?.PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS,
@@ -885,7 +886,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
     );
     const diagnosticUpload = steps.find(
-      ({ name }) => name === "Upload Root Check diagnostics",
+      ({ name }) => name === "Upload Check diagnostics",
     );
     assert.strictEqual(
       diagnosticUpload?.with?.path,

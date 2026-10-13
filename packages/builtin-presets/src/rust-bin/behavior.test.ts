@@ -675,6 +675,9 @@ if [ ! -e "${"$"}prepared" ]; then
   exit 90
 fi
 printf '%s\\n' "${"$"}*" >> "${"$"}state"
+if [ "${"$"}1" = "test" ]; then
+  printf '%s\\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'
+fi
 `,
         { mode: 0o755 },
       );
