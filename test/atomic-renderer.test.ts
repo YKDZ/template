@@ -6,8 +6,6 @@ import { describe, it } from "node:test";
 
 import { createAtomicProjectRenderer } from "@ykdz/template-core/renderer";
 
-import { assertRejectsMatching } from "./assertions.ts";
-
 void describe("atomic renderer", () => {
   void it("commits only planned paths and rolls them all back after a commit failure", async () => {
     const targetRoot = await mkdtemp(
@@ -31,7 +29,7 @@ void describe("atomic renderer", () => {
         },
       });
 
-      await assertRejectsMatching(
+      await assert.rejects(
         renderAtomically({
           targetRoot,
           operations: [
@@ -49,7 +47,9 @@ void describe("atomic renderer", () => {
             },
           ],
         }),
-        /injected commit failure/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /injected commit failure/u.test(error.message),
       );
 
       assert.equal(

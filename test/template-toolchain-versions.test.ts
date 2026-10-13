@@ -11,11 +11,6 @@ import {
   checkTemplateToolchainVersions,
   readTemplateToolchainVersionFacts,
 } from "../scripts/check-template-toolchain-versions.ts";
-import {
-  assertDeepStrictEqualWithMatchers,
-  stringContaining,
-} from "./assertions.ts";
-
 const verifiedBaseline = {
   rootNodeEngine: "24.16.0",
   packageManagerDeclaration: "pnpm@12.8.1",
@@ -89,12 +84,15 @@ void describe("Template toolchain version authority", () => {
   });
 
   void it("rejects the superseded Node major-only declaration as the root source", () => {
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        rootNodeEngine: ">=24.0.0",
-      }),
-      [stringContaining("根 engines.node 必须声明精确的已测 Node patch 版本")],
+    const diagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      rootNodeEngine: ">=24.0.0",
+    });
+    assert.strictEqual(diagnostics.length, 1);
+    assert.ok(
+      diagnostics[0]?.includes(
+        "根 engines.node 必须声明精确的已测 Node patch 版本",
+      ),
     );
   });
 
@@ -104,12 +102,15 @@ void describe("Template toolchain version authority", () => {
       "pnpm@11.21.0+sha512abc",
       "npm@10.0.0",
     ]) {
-      assertDeepStrictEqualWithMatchers(
-        checkTemplateToolchainVersions({
-          ...verifiedBaseline,
-          packageManagerDeclaration,
-        }),
-        [stringContaining("根 packageManager 必须是唯一精确 pnpm 固定值")],
+      const diagnostics = checkTemplateToolchainVersions({
+        ...verifiedBaseline,
+        packageManagerDeclaration,
+      });
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(
+        diagnostics[0]?.includes(
+          "根 packageManager 必须是唯一精确 pnpm 固定值",
+        ),
       );
     }
   });
@@ -122,35 +123,32 @@ void describe("Template toolchain version authority", () => {
       "^25.0.0",
       "24.17.0",
     ]) {
-      assertDeepStrictEqualWithMatchers(
-        checkTemplateToolchainVersions({
-          ...verifiedBaseline,
-          cliNodeEngine,
-        }),
-        [
-          stringContaining(
-            "公开 CLI engines.node 必须是根精确 Node 24.16.0 派生的同 LTS caret 范围 ^24.16.0",
-          ),
-        ],
+      const diagnostics = checkTemplateToolchainVersions({
+        ...verifiedBaseline,
+        cliNodeEngine,
+      });
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(
+        diagnostics[0]?.includes(
+          "公开 CLI engines.node 必须是根精确 Node 24.16.0 派生的同 LTS caret 范围 ^24.16.0",
+        ),
       );
     }
   });
 
   void it("rejects a running toolchain that mismatches the declared baseline", () => {
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        runningNodeVersion: "24.15.0",
-      }),
-      [stringContaining("实际运行 Node 24.15.0")],
-    );
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        runningPnpmVersion: "11.20.0",
-      }),
-      [stringContaining("实际 pnpm 11.20.0")],
-    );
+    const nodeDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      runningNodeVersion: "24.15.0",
+    });
+    assert.strictEqual(nodeDiagnostics.length, 1);
+    assert.ok(nodeDiagnostics[0]?.includes("实际运行 Node 24.15.0"));
+    const pnpmDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      runningPnpmVersion: "11.20.0",
+    });
+    assert.strictEqual(pnpmDiagnostics.length, 1);
+    assert.ok(pnpmDiagnostics[0]?.includes("实际 pnpm 11.20.0"));
   });
 
   void it("rejects floating or imprecise root Rust toolchain declarations", () => {
@@ -161,34 +159,35 @@ void describe("Template toolchain version authority", () => {
       "1.97",
       ">=1.97.0",
     ]) {
-      assertDeepStrictEqualWithMatchers(
-        checkTemplateToolchainVersions({
-          ...verifiedBaseline,
-          rustToolchainChannel,
-        }),
-        [
-          stringContaining(
-            "根 rust-toolchain.toml 必须声明精确的已测 Rust 版本",
-          ),
-        ],
+      const diagnostics = checkTemplateToolchainVersions({
+        ...verifiedBaseline,
+        rustToolchainChannel,
+      });
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(
+        diagnostics[0]?.includes(
+          "根 rust-toolchain.toml 必须声明精确的已测 Rust 版本",
+        ),
       );
     }
   });
 
   void it("rejects a running Rust toolchain that mismatches the declared channel", () => {
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        runningRustVersion: "1.96.0",
-      }),
-      [stringContaining("实际 Rust 1.96.0")],
-    );
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        rustToolchainChannel: "(缺失 rust-toolchain.toml 的 channel)",
-      }),
-      [stringContaining("根 rust-toolchain.toml 必须声明精确的已测 Rust 版本")],
+    const rustDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      runningRustVersion: "1.96.0",
+    });
+    assert.strictEqual(rustDiagnostics.length, 1);
+    assert.ok(rustDiagnostics[0]?.includes("实际 Rust 1.96.0"));
+    const missingRustDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      rustToolchainChannel: "(缺失 rust-toolchain.toml 的 channel)",
+    });
+    assert.strictEqual(missingRustDiagnostics.length, 1);
+    assert.ok(
+      missingRustDiagnostics[0]?.includes(
+        "根 rust-toolchain.toml 必须声明精确的已测 Rust 版本",
+      ),
     );
   });
 
@@ -271,16 +270,15 @@ void describe("Template toolchain version authority", () => {
 
   void it("rejects a dev container Node base image that is not the projected exact copy", () => {
     for (const devcontainerNodeVersion of ["24", "24.15.0", "24.17.0"]) {
-      assertDeepStrictEqualWithMatchers(
-        checkTemplateToolchainVersions({
-          ...verifiedBaseline,
-          devcontainerNodeVersion,
-        }),
-        [
-          stringContaining(
-            "开发容器 .devcontainer/Dockerfile 的 Node 基础镜像必须是根精确 Node 24.16.0 投影的静态副本",
-          ),
-        ],
+      const diagnostics = checkTemplateToolchainVersions({
+        ...verifiedBaseline,
+        devcontainerNodeVersion,
+      });
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(
+        diagnostics[0]?.includes(
+          "开发容器 .devcontainer/Dockerfile 的 Node 基础镜像必须是根精确 Node 24.16.0 投影的静态副本",
+        ),
       );
     }
   });
@@ -303,9 +301,9 @@ void describe("Template toolchain version authority", () => {
         readRunningPnpmVersion: async () => liveFixtureBaseline.pnpmVersion,
       });
       assert.strictEqual(facts.devcontainerNodeVersion, "24");
-      assertDeepStrictEqualWithMatchers(checkTemplateToolchainVersions(facts), [
-        stringContaining("当前为 24"),
-      ]);
+      const diagnostics = checkTemplateToolchainVersions(facts);
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(diagnostics[0]?.includes("当前为 24"));
 
       const entry = await execa(
         process.execPath,
@@ -382,9 +380,9 @@ void describe("Template toolchain version authority", () => {
         repositoryRoot,
         readRunningPnpmVersion: async () => liveFixtureBaseline.pnpmVersion,
       });
-      assertDeepStrictEqualWithMatchers(checkTemplateToolchainVersions(facts), [
-        stringContaining("当前为 >=24.0.0"),
-      ]);
+      const diagnostics = checkTemplateToolchainVersions(facts);
+      assert.strictEqual(diagnostics.length, 1);
+      assert.ok(diagnostics[0]?.includes("当前为 >=24.0.0"));
 
       const entry = await execa(
         process.execPath,
@@ -409,38 +407,35 @@ void describe("Template toolchain version authority", () => {
   });
 
   void it("rejects a release snapshot whose copied values drift from the root sources", () => {
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        releaseSnapshotNodeVersion: "24.15.0",
-      }),
-      [
-        stringContaining(
-          "Core 发版快照的 Node 副本 24.15.0 与根真源 24.16.0 漂移",
-        ),
-      ],
+    const nodeDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      releaseSnapshotNodeVersion: "24.15.0",
+    });
+    assert.strictEqual(nodeDiagnostics.length, 1);
+    assert.ok(
+      nodeDiagnostics[0]?.includes(
+        "Core 发版快照的 Node 副本 24.15.0 与根真源 24.16.0 漂移",
+      ),
     );
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        releaseSnapshotPackageManagerPin: "pnpm@11.20.0",
-      }),
-      [
-        stringContaining(
-          "Core 发版快照的 pnpm 副本 pnpm@11.20.0 与根真源 pnpm@12.8.1 漂移",
-        ),
-      ],
+    const pnpmDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      releaseSnapshotPackageManagerPin: "pnpm@11.20.0",
+    });
+    assert.strictEqual(pnpmDiagnostics.length, 1);
+    assert.ok(
+      pnpmDiagnostics[0]?.includes(
+        "Core 发版快照的 pnpm 副本 pnpm@11.20.0 与根真源 pnpm@12.8.1 漂移",
+      ),
     );
-    assertDeepStrictEqualWithMatchers(
-      checkTemplateToolchainVersions({
-        ...verifiedBaseline,
-        releaseSnapshotRustVersion: "1.96.0",
-      }),
-      [
-        stringContaining(
-          "Core 发版快照的 Rust 副本 1.96.0 与根真源 1.97.1 漂移",
-        ),
-      ],
+    const rustDiagnostics = checkTemplateToolchainVersions({
+      ...verifiedBaseline,
+      releaseSnapshotRustVersion: "1.96.0",
+    });
+    assert.strictEqual(rustDiagnostics.length, 1);
+    assert.ok(
+      rustDiagnostics[0]?.includes(
+        "Core 发版快照的 Rust 副本 1.96.0 与根真源 1.97.1 漂移",
+      ),
     );
   });
 

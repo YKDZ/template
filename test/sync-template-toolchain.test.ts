@@ -7,7 +7,6 @@ import { it } from "node:test";
 import { execa } from "execa";
 
 import { syncTemplateToolchain } from "../scripts/sync-template-toolchain.ts";
-import { testEach } from "./assertions.ts";
 
 void it("直接 Node 入口离线同步三个目标并保留无关内容，重复执行不再修改", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sync-toolchain-"));
@@ -92,10 +91,16 @@ void it("直接 Node 入口离线同步三个目标并保留无关内容，重�
   }
 });
 
-testEach(
-  ["node", "pnpm", "rust", "invalid-toml", "missing", "shape", "syntax"],
-  "预检失败 %s 时已经需要更新的其他目标也零写入",
-  async (failure) => {
+for (const failure of [
+  "node",
+  "pnpm",
+  "rust",
+  "invalid-toml",
+  "missing",
+  "shape",
+  "syntax",
+]) {
+  void it(`预检失败 ${failure} 时已经需要更新的其他目标也零写入`, async () => {
     const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
     try {
       await mkdir(path.join(root, "packages/cli"), { recursive: true });
@@ -151,5 +156,5 @@ testEach(
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  },
-);
+  });
+}

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -14,17 +15,6 @@ import {
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-
-import {
-  any,
-  assertContainsEqual,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotLength,
-  hasProperty,
-  objectContaining,
-  stringMatching,
-} from "./assertions.ts";
 
 // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
 const toolchain = {
@@ -74,23 +64,20 @@ void describe("Generated Repository Node manifest publication policy", () => {
         (manifest) => manifest.name === repositoryName,
       );
 
-      assertDeepStrictEqualWithMatchers(
-        rootManifest,
-        objectContaining({ name: repositoryName, private: true }),
-      );
+      assert.ok(rootManifest !== undefined);
+      assert.strictEqual(rootManifest.name, repositoryName);
+      assert.strictEqual(rootManifest.private, true);
       for (const manifest of plan.manifests) {
         if (manifest.private === true) {
-          assert.ok(!hasProperty(manifest, "version"));
+          assert.ok(!("version" in manifest));
           continue;
         }
-        assertDeepStrictEqualWithMatchers(
-          manifest,
-          objectContaining({
-            name: any(String),
-            version: stringMatching(/^\d+\.\d+\.\d+(?:[-+].+)?$/u),
-          }),
-        );
-        publicManifestNames.add(manifest.name as string);
+        const publicName = manifest.name;
+        const publicVersion = manifest.version;
+        assert.ok(typeof publicName === "string");
+        assert.ok(typeof publicVersion === "string");
+        assert.match(publicVersion, /^\d+\.\d+\.\d+(?:[-+].+)?$/u);
+        publicManifestNames.add(publicName);
       }
       const foundationRecord = plan.generationRecord.packages.find(
         (record) => record.planningContribution === "foundationPlan",
@@ -168,31 +155,38 @@ void describe("Generated Repository Node manifest publication policy", () => {
         (operation) =>
           operation.kind === "copyFile" && operation.to === ".pnpmfile.mjs",
       );
-      assertLength(packingHookOperations, requiresPackingHook ? 1 : 0);
-      assertDeepStrictEqualWithMatchers(
-        plan.operations.find(
-          (operation) =>
-            operation.kind === "copyFile" && operation.to === "tsconfig.json",
-        ),
-        objectContaining({ from: "tsconfig.json" }),
+      assert.strictEqual(
+        packingHookOperations.length,
+        requiresPackingHook ? 1 : 0,
       );
-      assertLength(
+      const tsconfigCopy = plan.operations.find(
+        (operation) =>
+          operation.kind === "copyFile" && operation.to === "tsconfig.json",
+      );
+      assert.ok(tsconfigCopy !== undefined && tsconfigCopy.kind === "copyFile");
+      assert.ok(Object.hasOwn(tsconfigCopy, "from"));
+      assert.strictEqual(tsconfigCopy.from, "tsconfig.json");
+      assert.strictEqual(
         plan.operations.filter(
           (operation) =>
             operation.kind === "mergeJsonTemplate" &&
             operation.to === "tsconfig.json" &&
             operation.from === "tsconfig.packing-hook.json",
-        ),
+        ).length,
         requiresPackingHookTsconfig ? 1 : 0,
       );
-      assertContainsEqual(plan.reconciliation, {
-        path: "tsconfig.json",
-        driver: "structured",
-      });
-      assertLength(
+      assert.ok(
+        plan.reconciliation.some((entry) =>
+          isDeepStrictEqual(entry, {
+            path: "tsconfig.json",
+            driver: "structured",
+          }),
+        ),
+      );
+      assert.strictEqual(
         plan.operations.filter(
           (operation) => "to" in operation && operation.to === "tsconfig.json",
-        ),
+        ).length,
         (requiresPackingHook ? 2 : 1) +
           (plan.vueHonoJointE2e === undefined ? 0 : 1),
       );
@@ -208,8 +202,8 @@ void describe("Generated Repository Node manifest publication policy", () => {
       (definition) => definition.planPackageAddition !== undefined,
     );
 
-    assertNotLength(definitions, 0);
-    assertNotLength(addableDefinitions, 0);
+    assert.notStrictEqual(definitions.length, 0);
+    assert.notStrictEqual(addableDefinitions.length, 0);
 
     for (const baseDefinition of definitions) {
       const workspace = await mkdtemp(

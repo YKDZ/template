@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -20,17 +21,6 @@ import {
 import { execa } from "execa";
 import semver from "semver";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertContainsEqual,
-  assertDoesNotContain,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  objectContaining,
-  stringMatching,
-} from "../../test-support/assertions.ts";
 import { vueAppDefinition } from "./definition.ts";
 
 void describe("vue-app Built-in Preset Definition behavior", () => {
@@ -84,13 +74,15 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
       pinia: "catalog:",
       vue: "catalog:",
     });
-    assertLacksProperty(contribution, "checks");
-    assertMatchesPartial(contribution.environmentNeeds, [
-      { kind: "playwright-browser-assets", browser: "chromium" },
-    ]);
-    assertMatchesPartial(contribution.foundation, {
-      workspacePackageGlobs: ["apps/*"],
+    assert.ok(!("checks" in contribution));
+    assert.strictEqual(contribution.environmentNeeds.length, 1);
+    assert.partialDeepStrictEqual(contribution.environmentNeeds[0], {
+      kind: "playwright-browser-assets",
+      browser: "chromium",
     });
+    assert.deepStrictEqual(contribution.foundation.workspacePackageGlobs, [
+      "apps/*",
+    ]);
   });
 
   void it("declares the shared source-backed browser-test Tool Layer", () => {
@@ -115,29 +107,30 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
     );
 
     assert.strictEqual(semver.valid(playwrightVersion), playwrightVersion);
-    assertMatchesPartial(layer, {
-      identity: "browser-test",
-      requires: ["node-pnpm"],
-      buildArguments: [
-        {
-          name: "PLAYWRIGHT_CLI_PACKAGE",
-          value: stringMatching(/^@playwright\/test@/u),
-        },
-      ],
-      probes: [
-        {
-          identity: "playwright",
-          command: "npx",
-          args: [
-            "--yes",
-            "--package",
-            playwrightCliPackage,
-            "playwright",
-            "--version",
-          ],
-        },
-      ],
+    assert.ok(layer !== undefined);
+    assert.strictEqual(layer.identity, "browser-test");
+    assert.deepStrictEqual(layer.requires, ["node-pnpm"]);
+    assert.strictEqual(layer.buildArguments?.length, 1);
+    assert.strictEqual(
+      layer.buildArguments?.[0]?.name,
+      "PLAYWRIGHT_CLI_PACKAGE",
+    );
+    assert.match(
+      layer.buildArguments?.[0]?.value ?? "",
+      /^@playwright\/test@/u,
+    );
+    assert.strictEqual(layer.probes?.length, 1);
+    assert.partialDeepStrictEqual(layer.probes?.[0], {
+      identity: "playwright",
+      command: "npx",
     });
+    assert.deepStrictEqual(layer.probes?.[0]?.args, [
+      "--yes",
+      "--package",
+      playwrightCliPackage,
+      "playwright",
+      "--version",
+    ]);
     assert.strictEqual(
       resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
       path.resolve(
@@ -169,15 +162,13 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         initialization.nextStepInstructions.map((step) => step.display),
         ["pnpm install", "pnpm run fix", "pnpm run check"],
       );
-      assertMatches(
-        initialization.operations,
-        arrayContaining([
-          objectContaining({
-            kind: "copyFile",
-            from: "src/App.vue",
-            to: "apps/web/src/App.vue",
-          }),
-        ]),
+      assert.ok(
+        initialization.operations.some(
+          (operation) =>
+            operation.kind === "copyFile" &&
+            operation.from === "src/App.vue" &&
+            operation.to === "apps/web/src/App.vue",
+        ),
       );
 
       await renderNewProject({
@@ -196,37 +187,35 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         path.join(targetDir, "apps/web/vite.config.ts"),
         "utf8",
       );
-      assertContains(
-        await readFile(
-          path.join(targetDir, ".devcontainer/Dockerfile"),
-          "utf8",
-        ),
-        "playwright install --with-deps chromium",
-      );
-      assertMatchesPartial(
-        JSON.parse(
+      assert.ok(
+        (
           await readFile(
-            path.join(targetDir, ".devcontainer/devcontainer.json"),
+            path.join(targetDir, ".devcontainer/Dockerfile"),
             "utf8",
-          ),
-        ),
-        {
-          build: {
-            args: {
-              PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
-            },
-          },
-        },
+          )
+        ).includes("playwright install --with-deps chromium"),
       );
-      assertContains(viteConfig, "@tailwindcss/vite");
-      assertDoesNotContain(viteConfig, "alias:");
-      assertDoesNotContain(
+      const devcontainer = JSON.parse(
         await readFile(
-          path.join(targetDir, "apps/web/vitest.config.ts"),
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
         ),
-        "alias:",
+      ) as {
+        readonly build?: {
+          readonly args?: Readonly<Record<string, unknown>>;
+        };
+      };
+      const playwrightPackage =
+        devcontainer.build?.args?.PLAYWRIGHT_CLI_PACKAGE;
+      assert.ok(typeof playwrightPackage === "string");
+      assert.match(playwrightPackage, /^@playwright\/test@/u);
+      assert.ok(viteConfig.includes("@tailwindcss/vite"));
+      assert.ok(!viteConfig.includes("alias:"));
+      const vitestConfig = await readFile(
+        path.join(targetDir, "apps/web/vitest.config.ts"),
+        "utf8",
       );
+      assert.ok(!vitestConfig.includes("alias:"));
       for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
         const config = JSON.parse(
           await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
@@ -234,32 +223,32 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
           readonly compilerOptions?: Readonly<Record<string, unknown>>;
           readonly extends?: string;
         };
-        assertMatchesPartial(config.compilerOptions, {
-          customConditions: ["source"],
-        });
-        assertLacksProperty(config.compilerOptions, "erasableSyntaxOnly");
+        assert.deepStrictEqual(config.compilerOptions?.customConditions, [
+          "source",
+        ]);
+        assert.ok(
+          config.compilerOptions === undefined ||
+            !("erasableSyntaxOnly" in config.compilerOptions),
+        );
         if (configPath === "tsconfig.app.json") {
-          assertMatchesPartial(config.compilerOptions, {
-            exactOptionalPropertyTypes: false,
-          });
+          assert.strictEqual(
+            config.compilerOptions?.exactOptionalPropertyTypes,
+            false,
+          );
         } else {
           assert.strictEqual(config.extends, "./tsconfig.app.json");
         }
       }
-      assertMatchesPartial(
-        JSON.parse(
-          await readFile(
-            path.join(targetDir, "apps/web/tsconfig.node.json"),
-            "utf8",
-          ),
+      const nodeConfig = JSON.parse(
+        await readFile(
+          path.join(targetDir, "apps/web/tsconfig.node.json"),
+          "utf8",
         ),
-        {
-          compilerOptions: {
-            customConditions: ["source"],
-            erasableSyntaxOnly: true,
-          },
-        },
       );
+      assert.strictEqual(nodeConfig.compilerOptions.erasableSyntaxOnly, true);
+      assert.deepStrictEqual(nodeConfig.compilerOptions.customConditions, [
+        "source",
+      ]);
 
       const defaultAddition = planGeneratedRepositoryPackageAddition({
         definition: vueAppDefinition,
@@ -281,29 +270,30 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         ...explicitAddition.projectProjections,
       });
 
-      assertMatches(
-        explicitAddition.blueprint.packages,
-        arrayContaining([
-          objectContaining({
-            name: "@demo/admin",
-            path: "apps/admin",
-            role: "runtime-service",
-          }),
-          objectContaining({
-            name: "@demo/portal",
-            path: "products/portal",
-            role: "runtime-service",
-          }),
-        ]),
+      assert.ok(
+        explicitAddition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === "@demo/admin" &&
+            packageDefinition.path === "apps/admin" &&
+            packageDefinition.role === "runtime-service",
+        ),
       );
-      assertMatchesPartial(
+      assert.ok(
+        explicitAddition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === "@demo/portal" &&
+            packageDefinition.path === "products/portal" &&
+            packageDefinition.role === "runtime-service",
+        ),
+      );
+      assert.strictEqual(
         JSON.parse(
           await readFile(
             path.join(targetDir, "apps/admin/package.json"),
             "utf8",
           ),
-        ),
-        { name: "@demo/admin" },
+        ).name,
+        "@demo/admin",
       );
 
       await execa("pnpm", ["install"], { cwd: targetDir });
@@ -358,39 +348,51 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         linkFrom: ["apps/web"],
       });
 
-      assertContainsEqual(
-        addition.blueprint.packages,
-        objectContaining({
-          name: "@demo/admin",
-          path: "apps/admin",
-          role: "runtime-service",
-        }),
+      assert.ok(
+        addition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === "@demo/admin" &&
+            packageDefinition.path === "apps/admin" &&
+            packageDefinition.role === "runtime-service",
+        ),
       );
-      assertContainsEqual(addition.blueprint.packageLinkIntents, {
-        consumerPackagePath: "apps/web",
-        providerPackagePath: "apps/admin",
-      });
-      assertContainsEqual(
-        addition.operations,
-        objectContaining({
-          kind: "mergeJson",
-          to: "apps/web/package.json",
-          value: {
-            dependencies: { "@demo/admin": "workspace:*" },
-            dependenciesMeta: { "@demo/admin": { injected: true } },
-          },
-          provenance: objectContaining({
-            definitionName: "vue-app",
-            planningContribution: "foundationPlan",
+      assert.ok(
+        addition.blueprint.packageLinkIntents?.some((intent) =>
+          isDeepStrictEqual(intent, {
+            consumerPackagePath: "apps/web",
+            providerPackagePath: "apps/admin",
           }),
-        }),
+        ),
+      );
+      const webPackageMerge = addition.operations.find(
+        (operation) =>
+          operation.kind === "mergeJson" &&
+          operation.to === "apps/web/package.json",
+      );
+      assert.ok(
+        webPackageMerge !== undefined && webPackageMerge.kind === "mergeJson",
+      );
+      assert.deepStrictEqual(webPackageMerge.value, {
+        dependencies: { "@demo/admin": "workspace:*" },
+        dependenciesMeta: { "@demo/admin": { injected: true } },
+      });
+      assert.deepStrictEqual(
+        {
+          definitionName: webPackageMerge.provenance?.definitionName,
+          planningContribution:
+            webPackageMerge.provenance?.planningContribution,
+        },
+        {
+          definitionName: "vue-app",
+          planningContribution: "foundationPlan",
+        },
       );
 
       await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...addition.projectProjections,
       });
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         JSON.parse(
           await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
         ),
@@ -445,16 +447,20 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
       });
       assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      assertMatchesPartial(
-        await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
-        {
-          boundaries: {
-            tags: {
-              app: { dependencies: { allow: ["app", "library"] } },
-            },
+      const updatedTurbo = await readFile(turboPath, "utf8").then((source) =>
+        JSON.parse(source),
+      );
+      assert.partialDeepStrictEqual(updatedTurbo, {
+        boundaries: {
+          tags: {
+            app: { dependencies: { allow: ["app", "library"] } },
           },
-          tasks: { "user:report": { cache: false } },
         },
+        tasks: { "user:report": { cache: false } },
+      });
+      assert.deepStrictEqual(
+        updatedTurbo.boundaries.tags.app.dependencies.allow,
+        ["app", "library"],
       );
 
       const repeated = planGeneratedRepositoryPackageAddition({
@@ -514,21 +520,22 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         ...addition.projectProjections,
       });
 
-      assertMatches(result, {
-        ok: false,
-        conflicts: [
-          objectContaining({
-            path: "turbo.json",
-            driver: "structured",
-            location: "/boundaries/tags/app/dependencies/allow",
-          }),
-        ],
+      assert.strictEqual(result.ok, false);
+      assert.strictEqual(result.conflicts.length, 1);
+      assert.partialDeepStrictEqual(result.conflicts[0], {
+        path: "turbo.json",
+        driver: "structured",
+        location: "/boundaries/tags/app/dependencies/allow",
       });
       await assert.rejects(
         readFile(path.join(targetDir, "apps/dashboard/package.json")),
         (error) => {
-          assertMatchesPartial(error, { code: "ENOENT" });
-          return true;
+          return (
+            typeof error === "object" &&
+            error !== null &&
+            Object.hasOwn(error, "code") &&
+            (error as { readonly code?: unknown }).code === "ENOENT"
+          );
         },
       );
     } finally {

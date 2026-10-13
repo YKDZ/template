@@ -904,7 +904,7 @@ void describe("Legacy Architecture Removal Check", () => {
 
       await writeFile(
         path.join(root, "packages/builtin-presets/src/behavior.test.ts"),
-        'import { assertLacksProperty } from "../../test-support/assertions.ts";\nassertLacksProperty({}, "tsc-alias");\n',
+        'import assert from "node:assert/strict";\nassert.ok(!Object.hasOwn({}, "tsc-alias"));\n',
       );
 
       const findings = await findLegacyArchitectureFindings(root);
