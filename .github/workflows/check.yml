@@ -149,6 +149,25 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Upload Fixture Failure Diagnostics
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fixture-failure-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .fixture-workspace/**
+            !.fixture-workspace/**/node_modules/**
+            !.fixture-workspace/**/.pnpm-store/**
+            !.fixture-workspace/**/.npm/**
+            !.fixture-workspace/**/.cargo/registry/**
+            !.fixture-workspace/**/.cargo/git/**
+            !.fixture-workspace/**/target/**
+            !.fixture-workspace/**/.cache/**
+            !.fixture-workspace/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 清理测试容器
         if: always() && steps.fixture-prerequisites.outcome == 'success'
         run: |

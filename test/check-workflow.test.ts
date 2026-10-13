@@ -395,6 +395,43 @@ void describe("Fixture Verification Evidence check workflow", () => {
     });
   });
 
+  void it("uploads retained Fixture failures without dependency and download caches", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const upload = steps.find(
+      (step) => step.name === "Upload Fixture Failure Diagnostics",
+    );
+    assert.ok(upload);
+    assert.equal(
+      upload.if,
+      "always() && steps.fixture-prerequisites.outcome == 'success'",
+    );
+    assert.equal(upload.uses, "actions/upload-artifact@v7");
+    assert.equal(
+      upload.with?.name,
+      "fixture-failure-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}",
+    );
+    const artifactPath = upload.with?.path;
+    if (typeof artifactPath !== "string") {
+      throw new TypeError(
+        "Fixture failure diagnostics artifact path is missing",
+      );
+    }
+    assert.deepEqual(artifactPath.split("\n").filter(Boolean), [
+      ".fixture-workspace/**",
+      "!.fixture-workspace/**/node_modules/**",
+      "!.fixture-workspace/**/.pnpm-store/**",
+      "!.fixture-workspace/**/.npm/**",
+      "!.fixture-workspace/**/.cargo/registry/**",
+      "!.fixture-workspace/**/.cargo/git/**",
+      "!.fixture-workspace/**/target/**",
+      "!.fixture-workspace/**/.cache/**",
+      "!.fixture-workspace/**/.turbo/cache/**",
+    ]);
+    assert.equal(upload.with?.["include-hidden-files"], true);
+    assert.equal(upload.with?.["if-no-files-found"], "ignore");
+    assert.equal(upload.with?.["retention-days"], 7);
+  });
+
   void it("uses a new Actions transport namespace and publishes only after healthy trusted work", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const restore = steps.find(
