@@ -4,8 +4,6 @@ import { describe, it } from "node:test";
 
 import { parse } from "yaml";
 
-import { assertLength, assertPartialDeepStrictEqual } from "./assertions.ts";
-
 type WorkflowStep = {
   readonly id?: string;
   readonly if?: string;
@@ -214,7 +212,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       checksManifest.devDependencies["@devcontainers/cli"],
       "catalog:",
     );
-    assertPartialDeepStrictEqual(prerequisites, {
+    assert.partialDeepStrictEqual(prerequisites, {
       name: "Validate Fixture Gate Prerequisites",
       run: [
         "docker version --format '{{.Server.Version}}'",
@@ -269,7 +267,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const scenarioSteps = job.steps.filter(
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
     );
-    assertLength(scenarioSteps, 4);
+    assert.strictEqual(scenarioSteps.length, 4);
     assert.strictEqual(
       scenarioSteps.every((step) =>
         Object.keys(step.env ?? {}).every(
@@ -363,7 +361,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       );
     }
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       steps.find((step) => step.id === "fixture-evidence-health"),
       {
         name: "Check Fixture Evidence Health",
@@ -411,7 +409,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       key: "fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
       "restore-keys": "fixture-verification-evidence-${{ runner.os }}-\n",
     });
-    assertPartialDeepStrictEqual(save, {
+    assert.partialDeepStrictEqual(save, {
       name: "Save Fixture Verification Evidence",
       if: "always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'",
       with: {
@@ -455,7 +453,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         (step) => step.name === `Save ${cache.name} cache`,
       );
 
-      assertPartialDeepStrictEqual(restore, {
+      assert.partialDeepStrictEqual(restore, {
         if: pullRequestOrTrustedRead,
         uses: "actions/cache/restore@v6",
         with: { path: cache.path },
@@ -467,7 +465,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       assert.ok(restoreKey.includes(cache.keyInput));
       assert.ok(restoreKey.includes("${{ github.run_id }}"));
       assert.ok(restoreKeys.includes(cache.keyInput));
-      assertPartialDeepStrictEqual(save, {
+      assert.partialDeepStrictEqual(save, {
         if: trustedHealthyWrite,
         uses: "actions/cache/save@v6",
         with: {

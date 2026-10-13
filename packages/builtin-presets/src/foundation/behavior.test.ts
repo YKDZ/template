@@ -4,6 +4,7 @@ import { readFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   materializeProjectProjection,
@@ -19,20 +20,6 @@ import {
   type WriteTextTemplateOperation,
 } from "@ykdz/template-core/renderer";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertContainsEqual,
-  assertDoesNotContain,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  assertThrows,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-  testEach,
-} from "../../test-support/assertions.ts";
 import {
   builtInPresetRegistry,
   createGenerationContext,
@@ -97,20 +84,21 @@ void describe("Generated Repository initialization preparation", () => {
       toolchain,
     });
 
-    assertThrows(
+    assert.throws(
       () =>
         planGeneratedRepositoryInitialization({
           definition: tsLibDefinition,
           context,
         }),
-      /^Generation Record defaultPackageScope must be a valid npm scope$/u,
+      (error: unknown) =>
+        /^Generation Record defaultPackageScope must be a valid npm scope$/u.test(
+          error instanceof Error ? error.message : String(error),
+        ),
     );
   });
 
-  testEach(
-    configurableDefinitions,
-    "resolves the $metadata.name Preset-owned Primary Package Identity",
-    (definition) => {
+  for (const definition of configurableDefinitions) {
+    void it(`resolves the ${definition.metadata.name} Preset-owned Primary Package Identity`, () => {
       const capability = definition.initialPrimaryPackage;
       const preparation = requireReadyInitialization({
         definition,
@@ -127,22 +115,25 @@ void describe("Generated Repository initialization preparation", () => {
           role: capability.role,
         },
       });
-      assert.notStrictEqual(preparation.resolvedPackageIdentity, undefined);
-      assertMatches(
-        preparation.plan.blueprint.packages,
-        arrayContaining([
-          objectContaining(preparation.resolvedPackageIdentity!.definition),
-        ]),
+      const resolvedIdentity = preparation.resolvedPackageIdentity!;
+      assert.ok(
+        preparation.plan.blueprint.packages.some(
+          (candidate) =>
+            Object.hasOwn(candidate, "name") &&
+            candidate.name === resolvedIdentity.definition.name &&
+            Object.hasOwn(candidate, "path") &&
+            candidate.path === resolvedIdentity.definition.path &&
+            Object.hasOwn(candidate, "role") &&
+            candidate.role === resolvedIdentity.definition.role,
+        ),
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    builtInPresetRegistry
-      .all()
-      .filter((definition) => definition.initialPrimaryPackage === undefined),
-    "preserves fixed-topology $metadata.name while applying only scope",
-    (definition) => {
+  for (const definition of builtInPresetRegistry
+    .all()
+    .filter((definition) => definition.initialPrimaryPackage === undefined)) {
+    void it(`preserves fixed-topology ${definition.metadata.name} while applying only scope`, () => {
       const preparation = requireReadyInitialization({
         definition,
         targetDir: "/tmp/customer-repository",
@@ -159,16 +150,24 @@ void describe("Generated Repository initialization preparation", () => {
           .packages.map(({ name, path }) => ({ name, path })),
         scope: "acme",
       });
-      assertMatches(
-        preparation.plan.blueprint.packages,
-        arrayContaining(
-          definition
-            .blueprint(preparation.context)
-            .packages.map((candidate) => objectContaining(candidate)),
-        ),
-      );
-    },
-  );
+      const expectedPackages = definition.blueprint(
+        preparation.context,
+      ).packages;
+      for (const expectedPackage of expectedPackages) {
+        assert.ok(
+          preparation.plan.blueprint.packages.some(
+            (candidate) =>
+              Object.hasOwn(candidate, "name") &&
+              candidate.name === expectedPackage.name &&
+              Object.hasOwn(candidate, "path") &&
+              candidate.path === expectedPackage.path &&
+              Object.hasOwn(candidate, "role") &&
+              candidate.role === expectedPackage.role,
+          ),
+        );
+      }
+    });
+  }
 
   void it("uses the optional capability as the only configurable support fact", () => {
     for (const definition of builtInPresetRegistry.all()) {
@@ -179,70 +178,71 @@ void describe("Generated Repository initialization preparation", () => {
           true,
         );
       } else {
-        assertLacksProperty(definition, "blueprint");
-        assertLacksProperty(definition, "planInitialization");
-        assertLacksProperty(definition, "planInitializationContributions");
+        assert.strictEqual("blueprint" in definition, false);
+        assert.strictEqual("planInitialization" in definition, false);
+        assert.strictEqual(
+          "planInitializationContributions" in definition,
+          false,
+        );
       }
     }
   });
 
-  testEach(
-    [
-      {
-        overrides: { name: "runner" },
-        expected: {
-          leafName: "runner",
-          name: "@customer-repository/runner",
-          path: "packages/runner",
-          scope: "customer-repository",
-        },
+  for (const { overrides, expected } of [
+    {
+      overrides: { name: "runner" },
+      expected: {
+        leafName: "runner",
+        name: "@customer-repository/runner",
+        path: "packages/runner",
+        scope: "customer-repository",
       },
-      {
-        overrides: { path: "tools/release" },
-        expected: {
-          leafName: defaultLeafName,
-          name: `@customer-repository/${defaultLeafName}`,
-          path: "tools/release",
-          scope: "customer-repository",
-        },
+    },
+    {
+      overrides: { path: "tools/release" },
+      expected: {
+        leafName: defaultLeafName,
+        name: `@customer-repository/${defaultLeafName}`,
+        path: "tools/release",
+        scope: "customer-repository",
       },
-      {
-        overrides: { scope: "@acme" },
-        expected: {
-          leafName: defaultLeafName,
-          name: `@acme/${defaultLeafName}`,
-          path: defaultPackagePath,
-          scope: "acme",
-        },
+    },
+    {
+      overrides: { scope: "@acme" },
+      expected: {
+        leafName: defaultLeafName,
+        name: `@acme/${defaultLeafName}`,
+        path: defaultPackagePath,
+        scope: "acme",
       },
-      {
-        overrides: { name: "runner", path: "tools/release", scope: "acme" },
-        expected: {
-          leafName: "runner",
-          name: "@acme/runner",
-          path: "tools/release",
-          scope: "acme",
-        },
+    },
+    {
+      overrides: { name: "runner", path: "tools/release", scope: "acme" },
+      expected: {
+        leafName: "runner",
+        name: "@acme/runner",
+        path: "tools/release",
+        scope: "acme",
       },
-    ],
-    "keeps name, path, and scope overrides independent: $expected.path",
-    ({ overrides, expected }) => {
+    },
+  ]) {
+    void it(`keeps name, path, and scope overrides independent: ${expected.path}`, () => {
       const preparation = requireReadyInitialization({
         definition: configurableDefinition,
         targetDir: "/tmp/customer-repository",
         overrides,
       });
 
-      assertMatchesPartial(preparation.context, {
+      assert.partialDeepStrictEqual(preparation.context, {
         repositoryName: "customer-repository",
         defaultPackageScope: expected.scope,
       });
-      assertMatchesPartial(preparation.resolvedPackageIdentity, {
+      assert.partialDeepStrictEqual(preparation.resolvedPackageIdentity, {
         leafName: expected.leafName,
         definition: { name: expected.name, path: expected.path },
       });
-    },
-  );
+    });
+  }
 
   void it("returns one stable resolved display model for configurable topology", () => {
     const preparation = requireReadyInitialization({
@@ -413,29 +413,27 @@ void describe("Generated Repository initialization preparation", () => {
     assert.strictEqual(defaultPathCalls, 1);
   });
 
-  testEach(
-    [
-      {
-        label: "throws",
-        defaultPackagePath() {
-          throw new Error("default path failure");
-        },
+  for (const candidate of [
+    {
+      label: "throws",
+      defaultPackagePath() {
+        throw new Error("default path failure");
       },
-      {
-        label: "is invalid",
-        defaultPackagePath() {
-          return ".git/invalid/path";
-        },
+    },
+    {
+      label: "is invalid",
+      defaultPackagePath() {
+        return ".git/invalid/path";
       },
-      {
-        label: "conflicts with Foundation",
-        defaultPackagePath() {
-          return "packages/typescript-config";
-        },
+    },
+    {
+      label: "conflicts with Foundation",
+      defaultPackagePath() {
+        return "packages/typescript-config";
       },
-    ],
-    "returns a Preset invariant when the default path $label",
-    (candidate) => {
+    },
+  ]) {
+    void it(`returns a Preset invariant when the default path ${candidate.label}`, () => {
       const definition = {
         ...tsLibDefinition,
         initialPrimaryPackage: {
@@ -451,13 +449,11 @@ void describe("Generated Repository initialization preparation", () => {
         }),
         { status: "operation-failure", phase: "preset" },
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    [".bad", "-bad", "_bad"],
-    "rejects default package scope %s before planning",
-    (scope) => {
+  for (const scope of [".bad", "-bad", "_bad"]) {
+    void it(`rejects default package scope ${scope} before planning`, () => {
       const preparation = prepareGeneratedRepositoryInitialization({
         definition: tsLibDefinition,
         targetDir: "/tmp/customer-repository",
@@ -467,15 +463,13 @@ void describe("Generated Repository initialization preparation", () => {
         status: "input-invalid",
         issues: [{ code: "INVALID_PACKAGE_SCOPE" }],
       });
-    },
-  );
+    });
+  }
 
-  testEach(
-    builtInPresetRegistry
-      .all()
-      .filter((definition) => definition.initialPrimaryPackage === undefined),
-    "rejects Primary Package Identity overrides for fixed-topology $metadata.name",
-    (definition) => {
+  for (const definition of builtInPresetRegistry
+    .all()
+    .filter((definition) => definition.initialPrimaryPackage === undefined)) {
+    void it(`rejects Primary Package Identity overrides for fixed-topology ${definition.metadata.name}`, () => {
       const preparation = prepareGeneratedRepositoryInitialization({
         definition,
         targetDir: "/tmp/customer-repository",
@@ -485,8 +479,8 @@ void describe("Generated Repository initialization preparation", () => {
         status: "input-invalid",
         issues: [{ code: "FIXED_TOPOLOGY_OVERRIDE" }],
       });
-    },
-  );
+    });
+  }
 
   void it("aggregates invalid name, path, and scope overrides", () => {
     const preparation = prepareGeneratedRepositoryInitialization({
@@ -611,10 +605,8 @@ void describe("Generated Repository initialization preparation", () => {
     });
   });
 
-  testEach(
-    configurableDefinitions,
-    "projects one resolved $metadata.name identity through durable and generated facts",
-    async (definition) => {
+  for (const definition of configurableDefinitions) {
+    void it(`projects one resolved ${definition.metadata.name} identity through durable and generated facts`, async () => {
       const capability = definition.initialPrimaryPackage;
       const preparation = requireReadyInitialization({
         definition,
@@ -646,7 +638,7 @@ void describe("Generated Repository initialization preparation", () => {
       });
       assert.deepStrictEqual(contribution.definition, resolved.definition);
       assert.strictEqual(contribution.manifest.name, resolved.definition.name);
-      assertMatchesPartial(provenance, {
+      assert.partialDeepStrictEqual(provenance, {
         definitionName: definition.metadata.name,
         planningContribution: "planInitialization",
         path: resolved.definition.path,
@@ -685,29 +677,34 @@ void describe("Generated Repository initialization preparation", () => {
       if (
         contribution.foundation.npmPublication?.kind === "public-cli-candidate"
       ) {
-        assertMatchesPartial(readJson("tsconfig.json"), {
-          compilerOptions: {
-            allowJs: true,
-            allowImportingTsExtensions: true,
-            checkJs: true,
-            noEmit: true,
-          },
-          files: [".pnpmfile.mjs"],
-          include: ["*.config.ts", "scripts/**/*.ts"],
+        const tsconfig = readJson("tsconfig.json");
+        assert.partialDeepStrictEqual(tsconfig.compilerOptions, {
+          allowJs: true,
+          allowImportingTsExtensions: true,
+          checkJs: true,
+          noEmit: true,
         });
-        assertMatches(
-          preparation.plan.operations,
-          arrayContaining([
-            objectContaining({
-              kind: "writeTextTemplate",
-              to: "scripts/npm-publication/check-readiness.ts",
-              replacements: { PUBLIC_CLI_PACKAGE_PATH: "tools/release" },
-            }),
-          ]),
+        assert.deepStrictEqual(tsconfig.files, [".pnpmfile.mjs"]);
+        assert.deepStrictEqual(tsconfig.include, [
+          "*.config.ts",
+          "scripts/**/*.ts",
+        ]);
+        assert.ok(
+          preparation.plan.operations.some(
+            (operation) =>
+              operation.kind === "writeTextTemplate" &&
+              Object.hasOwn(operation, "kind") &&
+              Object.hasOwn(operation, "to") &&
+              operation.to === "scripts/npm-publication/check-readiness.ts" &&
+              Object.hasOwn(operation, "replacements") &&
+              isDeepStrictEqual(operation.replacements, {
+                PUBLIC_CLI_PACKAGE_PATH: "tools/release",
+              }),
+          ),
         );
       }
-    },
-  );
+    });
+  }
 
   void it("exposes the enriched ts-lib contribution consumed by manifests and projection", async () => {
     const preparation = requireReadyInitialization({
@@ -727,7 +724,7 @@ void describe("Generated Repository initialization preparation", () => {
       (entry) => entry.path === "packages/lib/package.json",
     )!;
 
-    assertMatchesPartial(contribution.manifest, {
+    assert.partialDeepStrictEqual(contribution.manifest, {
       devDependencies: {
         "@acme/typescript-config": "workspace:*",
       },
@@ -735,8 +732,22 @@ void describe("Generated Repository initialization preparation", () => {
     const rootManifest = preparation.plan.manifests.find(
       (manifest) => manifest.name === "customer-repository",
     );
-    assertLacksProperty(rootManifest, "scripts.publication:readiness");
-    assertLacksProperty(rootManifest, "devDependencies.semver");
+    const rootScripts = rootManifest?.scripts;
+    assert.strictEqual(
+      rootScripts !== null &&
+        (typeof rootScripts === "object" ||
+          typeof rootScripts === "function") &&
+        "publication:readiness" in rootScripts,
+      false,
+    );
+    const rootDevDependencies = rootManifest?.devDependencies;
+    assert.strictEqual(
+      rootDevDependencies !== null &&
+        (typeof rootDevDependencies === "object" ||
+          typeof rootDevDependencies === "function") &&
+        "semver" in rootDevDependencies,
+      false,
+    );
     assert.strictEqual(
       preparation.plan.operations.some((operation) =>
         "to" in operation
@@ -787,7 +798,7 @@ void describe("Generated Repository initialization preparation", () => {
       },
     };
 
-    assertThrows(
+    assert.throws(
       () =>
         planGeneratedRepositoryInitialization({
           definition,
@@ -796,7 +807,10 @@ void describe("Generated Repository initialization preparation", () => {
             toolchain,
           }),
         }),
-      "Generated Repository Plan supports at most one public CLI candidate",
+      (error: unknown) =>
+        (error instanceof Error ? error.message : String(error)).includes(
+          "Generated Repository Plan supports at most one public CLI candidate",
+        ),
     );
   });
 
@@ -855,10 +869,8 @@ void describe("Generated Repository initialization preparation", () => {
     });
   });
 
-  testEach(
-    ["Customer Repository", ".bad"],
-    "rejects Repository Identity %s as an invalid default scope actionably",
-    (repositoryName) => {
+  for (const repositoryName of ["Customer Repository", ".bad"]) {
+    void it(`rejects Repository Identity ${repositoryName} as an invalid default scope actionably`, () => {
       const preparation = prepareGeneratedRepositoryInitialization({
         definition: builtInPresetRegistry.require("ts-lib"),
         targetDir: `/tmp/${repositoryName}`,
@@ -867,8 +879,8 @@ void describe("Generated Repository initialization preparation", () => {
         status: "input-invalid",
         issues: [{ code: "INVALID_REPOSITORY_SCOPE" }],
       });
-    },
-  );
+    });
+  }
 });
 
 void describe("Generated Repository Package Addition preparation", () => {
@@ -1016,10 +1028,8 @@ function rootManifestDeclarations(
 }
 
 void describe("Generated Repository initialization consumes the release toolchain snapshot", () => {
-  testEach(
-    builtInPresetRegistry.all(),
-    "projects the exact snapshot Node and pnpm into the $metadata.name private root",
-    (definition) => {
+  for (const definition of builtInPresetRegistry.all()) {
+    void it(`projects the exact snapshot Node and pnpm into the ${definition.metadata.name} private root`, () => {
       const preparation = requireReadyInitialization({
         definition,
         targetDir: "/tmp/customer-repository",
@@ -1046,13 +1056,11 @@ void describe("Generated Repository initialization consumes the release toolchai
         recordToolchainKeys(preparation.plan.generationRecord.toolchain),
         ["nodeLtsMajor", "packageManagerPin"],
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    builtInPresetRegistry.all(),
-    "projects rust-toolchain.toml for $metadata.name only from Rust Environment Needs",
-    (definition) => {
+  for (const definition of builtInPresetRegistry.all()) {
+    void it(`projects rust-toolchain.toml for ${definition.metadata.name} only from Rust Environment Needs`, () => {
       const preparation = requireReadyInitialization({
         definition,
         targetDir: "/tmp/customer-repository",
@@ -1075,8 +1083,8 @@ void describe("Generated Repository initialization consumes the release toolchai
           ? releaseToolchainSnapshot.rustVersion
           : undefined,
       );
-    },
-  );
+    });
+  }
 
   void it("不选 Rust 的真实初始化不产生 Rust 根文件、rust-analyzer 与 Cargo 任务", async () => {
     const workspace = await mkdtemp(
@@ -1100,9 +1108,11 @@ void describe("Generated Repository initialization consumes the release toolchai
       const extensions = JSON.parse(
         await readFile(path.join(targetDir, ".vscode/extensions.json"), "utf8"),
       ) as { readonly recommendations: readonly string[] };
-      assertDoesNotContain(
-        extensions.recommendations,
-        "rust-lang.rust-analyzer",
+      assert.strictEqual(
+        extensions.recommendations.some((recommendation) =>
+          Object.is(recommendation, "rust-lang.rust-analyzer"),
+        ),
+        false,
       );
       const devcontainer = JSON.parse(
         await readFile(
@@ -1110,7 +1120,10 @@ void describe("Generated Repository initialization consumes the release toolchai
           "utf8",
         ),
       ) as { readonly build?: { readonly args?: Record<string, string> } };
-      assertLacksProperty(devcontainer.build?.args ?? {}, "RUST_TOOLCHAIN");
+      assert.strictEqual(
+        "RUST_TOOLCHAIN" in (devcontainer.build?.args ?? {}),
+        false,
+      );
 
       const cargoTasks: string[] = [];
       for (const relativePath of [
@@ -1206,10 +1219,8 @@ const directPlanningCases = [
 ] as const;
 
 void describe("Direct initialization planning with an optional exact Node fact", () => {
-  testEach(
-    directPlanningCases,
-    "projects private root engines.node $expectedRootNode from toolchain.nodeVersion $nodeVersion",
-    ({ nodeVersion, expectedRootNode }) => {
+  for (const { nodeVersion, expectedRootNode } of directPlanningCases) {
+    void it(`projects private root engines.node ${expectedRootNode} from toolchain.nodeVersion ${nodeVersion}`, () => {
       const plan = planGeneratedRepositoryInitialization({
         definition: tsLibDefinition,
         context: createGenerationContext({
@@ -1233,23 +1244,21 @@ void describe("Direct initialization planning with an optional exact Node fact",
         recordToolchainKeys(plan.generationRecord.toolchain),
         ["nodeLtsMajor", "packageManagerPin"],
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      {
-        nodeVersion: "22.16.0",
-        message: /nodeVersion 22\.16\.0 与 nodeLtsMajor 24 大版本不一致/u,
-      },
-      {
-        nodeVersion: "24.16",
-        message: /必须是精确三段 Node 版本/u,
-      },
-    ],
-    "rejects the inconsistent exact Node fact $nodeVersion instead of planning a divergent root",
-    ({ nodeVersion, message }) => {
-      assertThrows(
+  for (const { nodeVersion, message } of [
+    {
+      nodeVersion: "22.16.0",
+      message: /nodeVersion 22\.16\.0 与 nodeLtsMajor 24 大版本不一致/u,
+    },
+    {
+      nodeVersion: "24.16",
+      message: /必须是精确三段 Node 版本/u,
+    },
+  ]) {
+    void it(`rejects the inconsistent exact Node fact ${nodeVersion} instead of planning a divergent root`, () => {
+      assert.throws(
         () =>
           planGeneratedRepositoryInitialization({
             definition: tsLibDefinition,
@@ -1262,10 +1271,11 @@ void describe("Direct initialization planning with an optional exact Node fact",
               },
             }),
           }),
-        message,
+        (error: unknown) =>
+          message.test(error instanceof Error ? error.message : String(error)),
       );
-    },
-  );
+    });
+  }
 });
 
 const currentRootToolchainCases = [
@@ -1382,10 +1392,12 @@ function requireReadyAddition(
 }
 
 void describe("Package Addition toolchain context from the target root declaration", () => {
-  testEach(
-    currentRootToolchainCases,
-    "follows root engines.node $declaration instead of the stale Generation Record",
-    async ({ declaration, nodeLtsMajor, nodeVersion }) => {
+  for (const {
+    declaration,
+    nodeLtsMajor,
+    nodeVersion,
+  } of currentRootToolchainCases) {
+    void it(`follows root engines.node ${declaration} instead of the stale Generation Record`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-add-toolchain-"),
       );
@@ -1426,15 +1438,26 @@ void describe("Package Addition toolchain context from the target root declarati
         );
         const addedPackagePath =
           preparation.plan.blueprint.packages.at(-1)!.path;
-        assertContainsEqual(
-          preparation.plan.operations,
-          objectContaining({
-            kind: "writeJson",
-            to: `${addedPackagePath}/package.json`,
-            value: objectContaining({
-              engines: { node: nodeLtsMajor },
-            }),
-          }),
+        const packageManifestOperation = preparation.plan.operations.find(
+          (operation) =>
+            operation.kind === "writeJson" &&
+            Object.hasOwn(operation, "kind") &&
+            Object.hasOwn(operation, "to") &&
+            operation.to === `${addedPackagePath}/package.json`,
+        );
+        assert.ok(packageManifestOperation);
+        if (packageManifestOperation.kind !== "writeJson") {
+          throw new Error("Expected package manifest write operation");
+        }
+        assert.ok(Object.hasOwn(packageManifestOperation, "value"));
+        const manifestValue = packageManifestOperation.value;
+        assert.ok(typeof manifestValue === "object" && manifestValue !== null);
+        assert.ok(Object.hasOwn(manifestValue, "engines"));
+        assert.deepStrictEqual(
+          (manifestValue as Record<string, unknown>).engines,
+          {
+            node: nodeLtsMajor,
+          },
         );
 
         const persistedRecord = JSON.parse(
@@ -1456,13 +1479,17 @@ void describe("Package Addition toolchain context from the target root declarati
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
-  testEach(
-    invalidRootToolchainCases,
-    "rejects $label without replaying the Generation Record",
-    async ({ field, actual, patch, message }) => {
+  for (const {
+    field,
+    actual,
+    patch,
+    message,
+    label,
+  } of invalidRootToolchainCases) {
+    void it(`rejects ${label} without replaying the Generation Record`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-add-toolchain-invalid-"),
       );
@@ -1481,32 +1508,35 @@ void describe("Package Addition toolchain context from the target root declarati
           patch(manifest);
         });
 
-        assertThrows(() => loadLocalTemplateMetadata(targetDir), message);
+        assert.throws(
+          () => loadLocalTemplateMetadata(targetDir),
+          (error: unknown) =>
+            message.test(
+              error instanceof Error ? error.message : String(error),
+            ),
+        );
         const preparation = prepareGeneratedRepositoryPackageAddition({
           repositoryRoot: targetDir,
           preset: tsLibDefinition.metadata.name,
           packageLeafName: "utility",
         });
-        assertMatchesPartial(preparation, {
-          status: "operation-failure",
-          phase: "metadata",
-          diagnostic: {
-            message: stringMatching(message),
-            suggestion: stringContaining(field),
-          },
-        });
+        assert.strictEqual(preparation.status, "operation-failure");
+        if (preparation.status !== "operation-failure") {
+          throw new Error("Expected invalid root toolchain metadata");
+        }
+        assert.strictEqual(preparation.phase, "metadata");
+        assert.ok(preparation.diagnostic);
+        const diagnostic = preparation.diagnostic;
+        assert.match(diagnostic.message, message);
+        assert.ok(diagnostic.suggestion.includes(field));
         // 诊断必须点名实际值，并给出修正现行声明的动作。
-        const diagnostic =
-          preparation.status === "operation-failure"
-            ? preparation.diagnostic
-            : undefined;
-        assertContains(diagnostic?.message, actual);
-        assertContains(diagnostic?.suggestion, "根 package.json");
+        assert.ok(diagnostic.message.includes(actual));
+        assert.ok(diagnostic.suggestion.includes("根 package.json"));
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("fails actionably when the target has no root manifest at all", async () => {
     const workspace = await mkdtemp(
@@ -1525,9 +1555,12 @@ void describe("Package Addition toolchain context from the target root declarati
       });
       await rm(path.join(targetDir, "package.json"));
 
-      assertThrows(
+      assert.throws(
         () => loadLocalTemplateMetadata(targetDir),
-        /Package Addition requires.*package\.json/u,
+        (error: unknown) =>
+          /Package Addition requires.*package\.json/u.test(
+            error instanceof Error ? error.message : String(error),
+          ),
       );
       assert.deepStrictEqual(
         prepareGeneratedRepositoryPackageAddition({
@@ -1642,17 +1675,28 @@ void describe("Package Addition follows the target root Rust declaration", () =>
         metadata.context.toolchain.rustVersion,
         initialization.context.toolchain.rustVersion,
       );
-      assertContainsEqual(
-        preparation.plan.operations,
-        objectContaining({
-          kind: "writeTextTemplate",
-          to: rootRustDeclarationPath,
-          replacements: { RUST_TOOLCHAIN: "stable" },
-        }),
+      assert.strictEqual(
+        preparation.plan.operations.some(
+          (operation) =>
+            operation.kind === "writeTextTemplate" &&
+            Object.hasOwn(operation, "kind") &&
+            Object.hasOwn(operation, "to") &&
+            operation.to === rootRustDeclarationPath &&
+            Object.hasOwn(operation, "replacements") &&
+            isDeepStrictEqual(operation.replacements, {
+              RUST_TOOLCHAIN: "stable",
+            }),
+        ),
+        true,
       );
-      assertContainsEqual(
-        preparation.plan.developmentContainer.buildArguments,
-        { name: "RUST_TOOLCHAIN", value: "stable" },
+      assert.strictEqual(
+        preparation.plan.developmentContainer.buildArguments.some((argument) =>
+          isDeepStrictEqual(argument, {
+            name: "RUST_TOOLCHAIN",
+            value: "stable",
+          }),
+        ),
+        true,
       );
       assert.strictEqual(
         projectedRootRustDeclaration(before),
@@ -1662,24 +1706,28 @@ void describe("Package Addition follows the target root Rust declaration", () =>
         projectedRootRustDeclaration(after),
         projectedRootRustDeclaration(before),
       );
-      assertMatches(
-        preparation.plan.environmentNeeds,
-        arrayContaining([
-          objectContaining({
-            kind: "rust-toolchain",
-            toolchain: "stable",
-          }),
-        ]),
+      assert.strictEqual(
+        preparation.plan.environmentNeeds.some(
+          (need) =>
+            Object.hasOwn(need, "kind") &&
+            need.kind === "rust-toolchain" &&
+            Object.hasOwn(need, "toolchain") &&
+            need.toolchain === "stable",
+        ),
+        true,
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  testEach(
-    invalidRootRustDeclarationCases,
-    "rejects $label with a path and field diagnostic before any replay",
-    async ({ declaration, message, actual }) => {
+  for (const {
+    declaration,
+    message,
+    actual,
+    label,
+  } of invalidRootRustDeclarationCases) {
+    void it(`rejects ${label} with a path and field diagnostic before any replay`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-add-rust-invalid-"),
       );
@@ -1695,32 +1743,35 @@ void describe("Package Addition follows the target root Rust declaration", () =>
           );
         }
 
-        assertThrows(() => loadLocalTemplateMetadata(targetDir), message);
+        assert.throws(
+          () => loadLocalTemplateMetadata(targetDir),
+          (error: unknown) =>
+            message.test(
+              error instanceof Error ? error.message : String(error),
+            ),
+        );
         const preparation = prepareGeneratedRepositoryPackageAddition({
           repositoryRoot: targetDir,
           preset: "rust-bin",
           packageLeafName: "worker",
         });
-        assertMatchesPartial(preparation, {
-          status: "operation-failure",
-          phase: "metadata",
-          diagnostic: {
-            message: stringMatching(message),
-            suggestion: stringContaining(rootRustDeclarationPath),
-          },
-        });
+        assert.strictEqual(preparation.status, "operation-failure");
+        if (preparation.status !== "operation-failure") {
+          throw new Error("Expected invalid root Rust metadata");
+        }
+        assert.strictEqual(preparation.phase, "metadata");
+        assert.ok(preparation.diagnostic);
+        const diagnostic = preparation.diagnostic;
+        assert.match(diagnostic.message, message);
+        assert.ok(diagnostic.suggestion.includes(rootRustDeclarationPath));
         // 诊断必须点名实际声明形状，修正动作指向目标根而非 CLI 快照。
-        const diagnostic =
-          preparation.status === "operation-failure"
-            ? preparation.diagnostic
-            : undefined;
-        assertContains(diagnostic?.message, actual);
-        assertContains(diagnostic?.suggestion, "[toolchain]");
+        assert.ok(diagnostic.message.includes(actual));
+        assert.ok(diagnostic.suggestion.includes("[toolchain]"));
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 });
 
 const devcontainerPath = ".devcontainer/devcontainer.json";
@@ -1907,18 +1958,25 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         pointerValue(config, ["build", "args", "NODE_VERSION"]),
         releaseToolchainSnapshot.nodeVersion,
       );
-      assertLacksProperty(
-        pointerValue(config, ["build", "args"]),
-        "PACKAGE_MANAGER_PIN",
+      assert.strictEqual(
+        "PACKAGE_MANAGER_PIN" in
+          (pointerValue(config, ["build", "args"]) as Record<string, unknown>),
+        false,
       );
       const containerDockerfile = await readFile(
         path.join(targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      assertContains(containerDockerfile, "corepack enable");
-      assertDoesNotContain(containerDockerfile, "corepack prepare");
-      assertDoesNotContain(containerDockerfile, "PACKAGE_MANAGER_PIN");
-      assertContains(containerDockerfile, "ARG NODE_VERSION");
+      assert.ok(containerDockerfile.includes("corepack enable"));
+      assert.strictEqual(
+        containerDockerfile.includes("corepack prepare"),
+        false,
+      );
+      assert.strictEqual(
+        containerDockerfile.includes("PACKAGE_MANAGER_PIN"),
+        false,
+      );
+      assert.ok(containerDockerfile.includes("ARG NODE_VERSION"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -2031,7 +2089,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         actionsFor(replayed.actions, devcontainerPath),
         [],
       );
-      assertDoesNotContain(replayed.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        replayed.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.strictEqual(
         Buffer.from(await readFile(configPath)).equals(rootBytes),
         false,
@@ -2171,7 +2234,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         actionsFor(replayed.actions, devcontainerPath),
         [],
       );
-      assertDoesNotContain(replayed.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        replayed.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.deepStrictEqual(await readJsonObject(configPath), reconciled);
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2209,9 +2277,14 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       );
       // 首次 Rust 形状：声明只给位置，两侧清单相同，因此合法加包不因 M5 扩展变成策略不兼容。
       assert.deepStrictEqual(beforeSlots, afterSlots);
-      assertContains(
-        beforeSlots,
-        "rust-toolchain-build-arg|json-pointer|/build/args/RUST_TOOLCHAIN",
+      assert.strictEqual(
+        beforeSlots.some((slot) =>
+          Object.is(
+            slot,
+            "rust-toolchain-build-arg|json-pointer|/build/args/RUST_TOOLCHAIN",
+          ),
+        ),
+        true,
       );
 
       const treeBefore = await treeFingerprint(workspace);
@@ -2231,7 +2304,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       });
       if (!applied.ok) throw new Error(JSON.stringify(applied));
       assert.deepStrictEqual(actionsFor(applied.actions, devcontainerPath), []);
-      assertDoesNotContain(applied.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.strictEqual(
         Buffer.from(await readFile(configPath)).equals(bytesBefore),
         true,
@@ -2306,8 +2384,18 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       const devcontainerAction = actionsFor(applied.actions, devcontainerPath);
       assert.strictEqual(devcontainerAction.length, 1);
       assert.strictEqual(devcontainerAction[0]?.driver, "structured");
-      assertContains(applied.changedPaths, devcontainerPath);
-      assertDoesNotContain(applied.changedPaths, rootRustDeclarationPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        true,
+      );
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, rootRustDeclarationPath),
+        ),
+        false,
+      );
       const written = await readJsonObject(configPath);
       assert.strictEqual(
         pointerValue(written, ["build", "args", "NODE_VERSION"]),
@@ -2378,7 +2466,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         actionsFor(reconciled.actions, devcontainerPath),
         [],
       );
-      assertDoesNotContain(reconciled.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        reconciled.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.strictEqual(
         Buffer.from(await readFile(configPath)).equals(configAfterFirstRust),
         true,
@@ -2411,10 +2504,15 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         }),
       );
       // 旧 Blueprint 尚无 Rust 包不能把已有合法根声明当成不存在或盲覆盖。
-      assertContainsEqual(addition.plan.developmentContainer.buildArguments, {
-        name: "RUST_TOOLCHAIN",
-        value: "stable",
-      });
+      assert.strictEqual(
+        addition.plan.developmentContainer.buildArguments.some((argument) =>
+          isDeepStrictEqual(argument, {
+            name: "RUST_TOOLCHAIN",
+            value: "stable",
+          }),
+        ),
+        true,
+      );
       const treeBefore = await treeFingerprint(workspace);
       const dryRun = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
@@ -2433,8 +2531,18 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         ...addition.plan.projectProjections,
       });
       if (!applied.ok) throw new Error(JSON.stringify(applied));
-      assertContains(applied.changedPaths, devcontainerPath);
-      assertDoesNotContain(applied.changedPaths, rootRustDeclarationPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        true,
+      );
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, rootRustDeclarationPath),
+        ),
+        false,
+      );
       assert.deepStrictEqual(
         actionsFor(applied.actions, rootRustDeclarationPath),
         [],
@@ -2468,7 +2576,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         ...second.plan.projectProjections,
       });
       if (!reconciled.ok) throw new Error(JSON.stringify(reconciled));
-      assertDoesNotContain(reconciled.changedPaths, rootRustDeclarationPath);
+      assert.strictEqual(
+        reconciled.changedPaths.some((changedPath) =>
+          Object.is(changedPath, rootRustDeclarationPath),
+        ),
+        false,
+      );
       assert.strictEqual(await readFile(rootRustPath, "utf8"), customRootRust);
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2508,7 +2621,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       if (!applied.ok) throw new Error(JSON.stringify(applied));
       assert.strictEqual(applied.ok, true);
       assert.deepStrictEqual(actionsFor(applied.actions, devcontainerPath), []);
-      assertDoesNotContain(applied.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.strictEqual(
         Buffer.from(await readFile(configPath)).equals(before),
         true,
@@ -2542,10 +2660,8 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
     },
   ];
 
-  testEach(
-    unexplainableSlotCases,
-    "M1 槽位$label时整次加包在写入前原子失败且零半成品",
-    async ({ reason, corrupt, mutate }) => {
+  for (const { label, reason, corrupt, mutate } of unexplainableSlotCases) {
+    void it(`M1 槽位${label}时整次加包在写入前原子失败且零半成品`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-mirror-atomic-"),
       );
@@ -2589,8 +2705,8 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("纯协调路径删除整个 devcontainer.json 后加包成功且不重建文件", async () => {
     const workspace = await mkdtemp(
@@ -2609,7 +2725,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       if (!applied.ok) throw new Error(JSON.stringify(applied));
       assert.strictEqual(applied.ok, true);
       assert.deepStrictEqual(actionsFor(applied.actions, devcontainerPath), []);
-      assertDoesNotContain(applied.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       await assert.rejects(readFile(configPath));
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2704,7 +2825,7 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
       }
       assert.strictEqual(conflict.driver, "structured");
       assert.match(conflict.reason, /non-string Current value/u);
-      assertContains(conflict.reason, "rust-toolchain-build-arg");
+      assert.ok(conflict.reason.includes("rust-toolchain-build-arg"));
       assert.strictEqual(await treeFingerprint(workspace), treeBefore);
       assert.strictEqual(await readFile(configPath, "utf8"), corrupted);
     } finally {
@@ -2805,7 +2926,12 @@ void describe("Package Addition 协调开发容器根工具链静态镜像槽位
         actionsFor(replayed.actions, devcontainerPath),
         [],
       );
-      assertDoesNotContain(replayed.changedPaths, devcontainerPath);
+      assert.strictEqual(
+        replayed.changedPaths.some((changedPath) =>
+          Object.is(changedPath, devcontainerPath),
+        ),
+        false,
+      );
       assert.deepStrictEqual(await readJsonObject(configPath), reconciled);
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2846,10 +2972,15 @@ void describe("Package Addition builds the first Rust root from the current CLI 
           packageLeafName: "worker",
         }),
       );
-      assertContainsEqual(addition.plan.developmentContainer.buildArguments, {
-        name: "RUST_TOOLCHAIN",
-        value: snapshotRust,
-      });
+      assert.strictEqual(
+        addition.plan.developmentContainer.buildArguments.some((argument) =>
+          isDeepStrictEqual(argument, {
+            name: "RUST_TOOLCHAIN",
+            value: snapshotRust,
+          }),
+        ),
+        true,
+      );
 
       const treeBefore = await treeFingerprint(workspace);
       const dryRun = await reconcileAndApplyProjectProjections({
@@ -2869,9 +3000,14 @@ void describe("Package Addition builds the first Rust root from the current CLI 
         ...addition.plan.projectProjections,
       });
       if (!applied.ok) throw new Error(JSON.stringify(applied));
-      assertContains(applied.changedPaths, rootRustDeclarationPath);
+      assert.strictEqual(
+        applied.changedPaths.some((changedPath) =>
+          Object.is(changedPath, rootRustDeclarationPath),
+        ),
+        true,
+      );
       const declared = await readFile(rootRustPath, "utf8");
-      assertContains(declared, `channel = "${snapshotRust}"`);
+      assert.ok(declared.includes(`channel = "${snapshotRust}"`));
       const written = await readJsonObject(configPath);
       assert.strictEqual(
         pointerValue(written, ["build", "args", "RUST_TOOLCHAIN"]),
@@ -2912,7 +3048,12 @@ void describe("Package Addition builds the first Rust root from the current CLI 
         actionsFor(reconciled.actions, rootRustDeclarationPath),
         [],
       );
-      assertDoesNotContain(reconciled.changedPaths, rootRustDeclarationPath);
+      assert.strictEqual(
+        reconciled.changedPaths.some((changedPath) =>
+          Object.is(changedPath, rootRustDeclarationPath),
+        ),
+        false,
+      );
       assert.strictEqual(await readFile(rootRustPath, "utf8"), declared);
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2940,10 +3081,13 @@ void describe("Package Addition builds the first Rust root from the current CLI 
     },
   ] as const;
 
-  testEach(
-    unexplainedFirstRustRootCases,
-    "首次加 Rust 遇到目标根声明为$label时可行动失败且零写入，不用快照掩盖",
-    async ({ declaration, message, actual }) => {
+  for (const {
+    label,
+    declaration,
+    message,
+    actual,
+  } of unexplainedFirstRustRootCases) {
+    void it(`首次加 Rust 遇到目标根声明为${label}时可行动失败且零写入，不用快照掩盖`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-first-rust-unexplained-root-"),
       );
@@ -2959,24 +3103,21 @@ void describe("Package Addition builds the first Rust root from the current CLI 
           preset: "rust-bin",
           packageLeafName: "worker",
         });
-        assertMatchesPartial(preparation, {
-          status: "operation-failure",
-          phase: "metadata",
-          diagnostic: {
-            message: stringMatching(message),
-            suggestion: stringContaining(rootRustDeclarationPath),
-          },
-        });
-        const diagnostic =
-          preparation.status === "operation-failure"
-            ? preparation.diagnostic
-            : undefined;
-        assertContains(diagnostic?.message, actual);
+        assert.strictEqual(preparation.status, "operation-failure");
+        if (preparation.status !== "operation-failure") {
+          throw new Error("Expected invalid root Rust metadata");
+        }
+        assert.strictEqual(preparation.phase, "metadata");
+        assert.ok(preparation.diagnostic);
+        const diagnostic = preparation.diagnostic;
+        assert.match(diagnostic.message, message);
+        assert.ok(diagnostic.suggestion.includes(rootRustDeclarationPath));
+        assert.ok(diagnostic.message.includes(actual));
         assert.strictEqual(await treeFingerprint(workspace), treeBefore);
         assert.strictEqual(await readFile(rootRustPath, "utf8"), declaration);
-        assertDoesNotContain(
-          await readFile(configPath, "utf8"),
-          "RUST_TOOLCHAIN",
+        assert.strictEqual(
+          (await readFile(configPath, "utf8")).includes("RUST_TOOLCHAIN"),
+          false,
         );
 
         // 恢复合法根声明后同一加包按修正后的根 channel 成功。
@@ -2988,15 +3129,17 @@ void describe("Package Addition builds the first Rust root from the current CLI 
             packageLeafName: "worker",
           }),
         );
-        assertContainsEqual(recovery.plan.developmentContainer.buildArguments, {
-          name: "RUST_TOOLCHAIN",
-          value: "stable",
-        });
+        assert.ok(
+          recovery.plan.developmentContainer.buildArguments.some(
+            (argument) =>
+              argument.name === "RUST_TOOLCHAIN" && argument.value === "stable",
+          ),
+        );
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 });
 
 void describe("Generated Repository toolchain checker projection", () => {
@@ -3102,6 +3245,6 @@ void describe("Generated Repository toolchain checker projection", () => {
       "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
     );
     assert.strictEqual(checkScript.startsWith("pnpm run boundaries &&"), true);
-    assertLacksProperty(scripts, "toolchain:prepare");
+    assert.strictEqual("toolchain:prepare" in scripts, false);
   });
 });

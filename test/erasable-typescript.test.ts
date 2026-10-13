@@ -30,14 +30,6 @@ import type {
 import { execa } from "execa";
 import ts from "typescript";
 
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotLength,
-  hasProperty,
-} from "./assertions.ts";
-
 type Manifest = {
   readonly name?: string;
   readonly dependencies?: Readonly<Record<string, unknown>>;
@@ -300,7 +292,7 @@ void describe("Erasable TypeScript enforcement", () => {
         { reject: false, all: true },
       );
       assert.notStrictEqual(result.exitCode, 0);
-      assertLength(result.all?.match(/error TS1294:/gu), 3);
+      assert.strictEqual(result.all?.match(/error TS1294:/gu)?.length, 3);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
@@ -420,24 +412,24 @@ void describe("Erasable TypeScript enforcement", () => {
       );
       if (scripts.some((command) => /\btsc(?:\s|$)/u.test(command))) {
         assert.ok(
-          hasProperty(
+          "typescript-7" in
             {
               ...manifest.dependencies,
               ...manifest.devDependencies,
             },
-            "typescript-7",
-          ),
           `${manifest.name ?? "(unnamed)"} owns its TypeScript 7 CLI`,
         );
       }
       if (ownsVueCompatibility) {
         assert.ok(
-          hasProperty(manifest.devDependencies, "typescript"),
+          manifest.devDependencies !== undefined &&
+            "typescript" in manifest.devDependencies,
           `${manifest.name ?? "(unnamed)"} owns Vue's TypeScript 6 compatibility package`,
         );
       } else if (runsTypeScript6Api) {
         assert.ok(
-          hasProperty(manifest.devDependencies, "typescript"),
+          manifest.devDependencies !== undefined &&
+            "typescript" in manifest.devDependencies,
           `${manifest.name ?? "(unnamed)"} owns the TypeScript 6 API its own scripts run`,
         );
       } else if (
@@ -450,12 +442,12 @@ void describe("Erasable TypeScript enforcement", () => {
         ]).has(manifest.name ?? "")
       ) {
         assert.ok(
-          !hasProperty(
+          !(
+            "typescript" in
             {
               ...manifest.dependencies,
               ...manifest.devDependencies,
-            },
-            "typescript",
+            }
           ),
           `${manifest.name ?? "(unnamed)"} does not own TypeScript 6 compatibility`,
         );
@@ -464,11 +456,11 @@ void describe("Erasable TypeScript enforcement", () => {
 
     for (const manifest of generatedManifests) {
       assert.ok(
-        !hasProperty({ ...manifest.dependencies }, "typescript"),
+        !("typescript" in { ...manifest.dependencies }),
         `${manifest.name ?? "(unnamed)"} keeps compilers out of Generated deployment production dependencies`,
       );
       assert.ok(
-        !hasProperty({ ...manifest.dependencies }, "typescript-7"),
+        !("typescript-7" in { ...manifest.dependencies }),
         `${manifest.name ?? "(unnamed)"} keeps compiler CLIs out of Generated deployment production dependencies`,
       );
     }
@@ -486,33 +478,45 @@ void describe("Erasable TypeScript enforcement", () => {
           manifest.bundleDependencies.includes("@ykdz/template-core"),
           "@ykdz/template owns the flattened runtime closure of its bundled private packages",
         );
-        assertLength(await compilerApiImports(packageRoot), 0);
+        assert.strictEqual((await compilerApiImports(packageRoot)).length, 0);
         continue;
       }
-      assertNotLength(await compilerApiImports(packageRoot), 0);
+      assert.notStrictEqual((await compilerApiImports(packageRoot)).length, 0);
     }
 
     const core = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template-core",
     );
-    assert.ok(hasProperty(core?.manifest.peerDependencies, "typescript"));
-    assert.ok(hasProperty(core?.manifest.devDependencies, "typescript"));
-    assertDeepStrictEqualWithMatchers(
-      await compilerApiImports(core!.packageRoot),
-      arrayContaining([
-        "packages/core/src/renderer.ts",
+    assert.ok(
+      core?.manifest.peerDependencies !== undefined &&
+        "typescript" in core.manifest.peerDependencies,
+    );
+    assert.ok(
+      core?.manifest.devDependencies !== undefined &&
+        "typescript" in core.manifest.devDependencies,
+    );
+    const coreCompilerApiImports = await compilerApiImports(core!.packageRoot);
+    assert.ok(coreCompilerApiImports.includes("packages/core/src/renderer.ts"));
+    assert.ok(
+      coreCompilerApiImports.includes(
         "packages/core/src/template-boundary-check.ts",
-      ]),
+      ),
     );
 
     const cliManifest = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template",
     )?.manifest;
-    assert.ok(hasProperty(cliManifest?.dependencies, "typescript"));
-    assert.ok(!hasProperty(cliManifest?.dependencies, "@typescript/old"));
-    assertDeepStrictEqualWithMatchers(
-      cliManifest?.bundleDependencies,
-      arrayContaining(["@ykdz/template-core", "typescript"]),
+    assert.ok(
+      cliManifest?.dependencies !== undefined &&
+        "typescript" in cliManifest.dependencies,
     );
+    assert.ok(
+      !(
+        cliManifest?.dependencies !== undefined &&
+        "@typescript/old" in cliManifest.dependencies
+      ),
+    );
+    assert.ok(cliManifest?.bundleDependencies?.includes("@ykdz/template-core"));
+    assert.ok(cliManifest?.bundleDependencies?.includes("typescript"));
   });
 });

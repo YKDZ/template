@@ -20,18 +20,6 @@ import {
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertContainsEqual,
-  assertDoesNotContain,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  assertThrows,
-  objectContaining,
-  stringContaining,
-} from "../../test-support/assertions.ts";
 import { tsLibDefinition } from "./definition.ts";
 
 void describe("ts-lib Built-in Preset Definition behavior", () => {
@@ -71,7 +59,7 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       path: "packages/lib",
       role: "shared-library",
     });
-    assertMatchesPartial(contribution.manifest, {
+    assert.partialDeepStrictEqual(contribution.manifest, {
       dependencies: { valibot: "catalog:" },
       exports: {
         ".": {
@@ -96,21 +84,30 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
-    assertLacksProperty(contribution, "checks");
-    assertLacksProperty(contribution, "fixes");
-    assertMatchesPartial(contribution.manifest, {
+    assert.ok(!("checks" in (contribution ?? {})));
+    assert.ok(!("fixes" in (contribution ?? {})));
+    assert.partialDeepStrictEqual(contribution.manifest, {
       scripts: {
         "format:write": "oxfmt --write .",
         "lint:fix": "oxlint --format=unix . --fix",
       },
     });
-    assertContainsEqual(contribution.operations, {
+    const turboCopy = contribution.operations.find(
+      (operation) =>
+        operation.kind === "copyFile" && operation.from === "turbo.json",
+    );
+    assert.deepStrictEqual(turboCopy, {
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "turbo.json",
       to: "packages/lib/turbo.json",
     });
-    assertContainsEqual(contribution.operations, {
+    const buildConfigCopy = contribution.operations.find(
+      (operation) =>
+        operation.kind === "copyFile" &&
+        operation.from === "tsconfig.build.json",
+    );
+    assert.deepStrictEqual(buildConfigCopy, {
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "tsconfig.build.json",
@@ -125,7 +122,7 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       (operation) =>
         operation.kind === "writeJson" && operation.to === "package.json",
     );
-    assertMatchesPartial(rootManifest, {
+    assert.partialDeepStrictEqual(rootManifest, {
       value: {
         scripts: {
           check:
@@ -134,17 +131,16 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         },
       },
     });
-    assertLacksProperty(plan, "checks");
-    assertLacksProperty(plan, "fixes");
-    assertContainsEqual(
-      plan.operations,
-      objectContaining({
-        kind: "writeTextTemplate",
-        to: "pnpm-workspace.yaml",
-        replacements: objectContaining({
-          WORKSPACE_PACKAGE_GLOBS: "  - apps/*\n  - packages/*",
-        }),
-      }),
+    assert.ok(!("checks" in (plan ?? {})));
+    assert.ok(!("fixes" in (plan ?? {})));
+    assert.ok(
+      plan.operations.some(
+        (operation) =>
+          operation.kind === "writeTextTemplate" &&
+          operation.to === "pnpm-workspace.yaml" &&
+          operation.replacements.WORKSPACE_PACKAGE_GLOBS ===
+            "  - apps/*\n  - packages/*",
+      ),
     );
   });
 
@@ -164,9 +160,11 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       IsEqual<SourceHandle, string> extends false ? true : false;
     const isOpaqueSourceHandle: IsOpaqueSourceHandle = true;
     assert.strictEqual(isOpaqueSourceHandle, true);
-    assertThrows(
+    assert.throws(
       () => resolveBuiltInTemplateSource("vue" as never, "src/main.ts"),
-      "unknown Template Source handle",
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("unknown Template Source handle"),
     );
 
     const targetDir = path.join(
@@ -182,45 +180,50 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       definition: tsLibDefinition,
       context,
     });
-    assertMatches(
-      initialization.operations,
-      arrayContaining([
-        objectContaining({
-          kind: "copyFile",
-          source: templateSources.tsLib,
-          from: "src/index.ts",
-        }),
-      ]),
+    assert.ok(
+      initialization.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.source === templateSources.tsLib &&
+          operation.from === "src/index.ts",
+      ),
     );
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...initialization.operations],
     });
-    assertContains(
-      await readFile(path.join(targetDir, "packages/lib/src/index.ts"), "utf8"),
-      "export",
+    assert.ok(
+      (
+        await readFile(
+          path.join(targetDir, "packages/lib/src/index.ts"),
+          "utf8",
+        )
+      ).includes("export"),
     );
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
-    assertContains(
-      devcontainerDockerfile,
-      'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
+    assert.ok(
+      devcontainerDockerfile.includes(
+        'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
+      ),
     );
-    assertContains(
-      devcontainerDockerfile,
-      'corepack enable --install-directory "$PNPM_HOME"',
+    assert.ok(
+      devcontainerDockerfile.includes(
+        'corepack enable --install-directory "$PNPM_HOME"',
+      ),
     );
-    assertDoesNotContain(devcontainerDockerfile, "corepack prepare");
-    assertDoesNotContain(devcontainerDockerfile, "PACKAGE_MANAGER_PIN");
-    assertDoesNotContain(devcontainerDockerfile, "COREPACK_HOME");
-    assertContains(
-      devcontainerDockerfile,
-      "git config --system init.defaultBranch main",
+    assert.ok(!devcontainerDockerfile.includes("corepack prepare"));
+    assert.ok(!devcontainerDockerfile.includes("PACKAGE_MANAGER_PIN"));
+    assert.ok(!devcontainerDockerfile.includes("COREPACK_HOME"));
+    assert.ok(
+      devcontainerDockerfile.includes(
+        "git config --system init.defaultBranch main",
+      ),
     );
     const gitignorePath = path.join(targetDir, ".gitignore");
-    assertContains(await readFile(gitignorePath, "utf8"), ".pnpm-store/");
+    assert.ok((await readFile(gitignorePath, "utf8")).includes(".pnpm-store/"));
     await writeFile(gitignorePath, "private-artifacts/\n", { flag: "a" });
     const turboPath = path.join(targetDir, "turbo.json");
     const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
@@ -234,15 +237,13 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "utilities",
     });
-    assertContainsEqual(
-      addition.operations,
-      objectContaining({
-        kind: "copyFile",
-        to: ".gitignore",
-        provenance: objectContaining({
-          planningContribution: "foundationPlan",
-        }),
-      }),
+    assert.ok(
+      addition.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.to === ".gitignore" &&
+          operation.provenance?.planningContribution === "foundationPlan",
+      ),
     );
     assert.deepStrictEqual(
       addition.operations.filter(
@@ -250,21 +251,19 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       ),
       [],
     );
-    assertContainsEqual(
-      addition.operations,
-      objectContaining({
-        kind: "mergeJsonTemplate",
-        to: "turbo.json",
-        provenance: objectContaining({
-          planningContribution: "foundationPlan",
-        }),
-      }),
+    assert.ok(
+      addition.operations.some(
+        (operation) =>
+          operation.kind === "mergeJsonTemplate" &&
+          operation.to === "turbo.json" &&
+          operation.provenance?.planningContribution === "foundationPlan",
+      ),
     );
     await reconcileAndApplyProjectProjections({
       targetRoot: targetDir,
       ...addition.projectProjections,
     });
-    assertMatchesPartial(
+    assert.partialDeepStrictEqual(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/utilities/package.json"),
@@ -273,8 +272,10 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       ),
       { name: "@demo/utilities" },
     );
-    assertContains(await readFile(gitignorePath, "utf8"), "private-artifacts/");
-    assertMatchesPartial(
+    assert.ok(
+      (await readFile(gitignorePath, "utf8")).includes("private-artifacts/"),
+    );
+    assert.partialDeepStrictEqual(
       await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
       {
         tasks: { custom: { cache: false } },
@@ -355,10 +356,10 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
             "utf8",
           ),
         ) as Readonly<Record<string, unknown>>;
-        assertMatchesPartial(consumerManifest, {
+        assert.partialDeepStrictEqual(consumerManifest, {
           dependencies: { "@demo/provider": "workspace:*" },
         });
-        assertLacksProperty(consumerManifest, "dependenciesMeta");
+        assert.ok(!("dependenciesMeta" in (consumerManifest ?? {})));
 
         const consumerRoot = path.join(targetDir, consumerPackagePath);
         await writeFile(
@@ -510,15 +511,17 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           ["--filter", `./${packagePath}`],
           "tsconfig.build.json",
         );
-        assertContains(rootConfig.files, "./scripts/automation-probe.ts");
-        assertDoesNotContain(
-          rootConfig.files,
-          `./${packagePath}/scripts/automation-probe.ts`,
+        assert.ok(rootConfig.files.includes("./scripts/automation-probe.ts"));
+        assert.ok(
+          !rootConfig.files.includes(
+            `./${packagePath}/scripts/automation-probe.ts`,
+          ),
         );
-        assertContains(packageConfig.files, "./scripts/automation-probe.ts");
-        assertDoesNotContain(
-          packageBuildConfig.files,
-          "./scripts/automation-probe.ts",
+        assert.ok(
+          packageConfig.files.includes("./scripts/automation-probe.ts"),
+        );
+        assert.ok(
+          !packageBuildConfig.files.includes("./scripts/automation-probe.ts"),
         );
         await execa("pnpm", ["--filter", `./${packagePath}`, "run", "build"], {
           cwd: targetDir,
@@ -542,9 +545,10 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           { cwd: targetDir, reject: false },
         );
         assert.notStrictEqual(rejected.exitCode, 0);
-        assertContains(
-          `${rejected.stdout}\n${rejected.stderr}`,
-          "erasableSyntaxOnly",
+        assert.ok(
+          `${rejected.stdout}\n${rejected.stderr}`.includes(
+            "erasableSyntaxOnly",
+          ),
         );
 
         await rm(nonErasableSource);
@@ -668,14 +672,14 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         const consumerTypecheck = tasks.find(
           ({ taskId }) => taskId === "@demo/lib#typecheck",
         );
-        assertContains(consumerBuild?.dependencies, "@demo/provider#build");
-        assertContains(
-          consumerTypecheck?.dependencies,
-          "@demo/provider#typecheck",
+        assert.ok(consumerBuild !== undefined);
+        assert.ok(consumerTypecheck !== undefined);
+        assert.ok(consumerBuild.dependencies.includes("@demo/provider#build"));
+        assert.ok(
+          consumerTypecheck.dependencies.includes("@demo/provider#typecheck"),
         );
-        assertDoesNotContain(
-          consumerTypecheck?.dependencies,
-          "@demo/provider#build",
+        assert.ok(
+          !consumerTypecheck.dependencies.includes("@demo/provider#build"),
         );
         assert.strictEqual(
           consumerBuild?.command,
@@ -696,12 +700,13 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           { cwd: consumerRoot },
         ).then(({ stdout }) => stdout);
         assert.strictEqual(distributionOutput, sourceOutput);
-        assertContains(
-          await readFile(
-            path.join(targetDir, "packages/provider/dist/index.d.ts"),
-            "utf8",
-          ),
-          "declare function greet",
+        assert.ok(
+          (
+            await readFile(
+              path.join(targetDir, "packages/provider/dist/index.d.ts"),
+              "utf8",
+            )
+          ).includes("declare function greet"),
         );
       } finally {
         await rm(workspace, { recursive: true, force: true });
@@ -766,23 +771,25 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           }[];
         }
       ).tasks;
-      assertMatches(
-        tasks,
-        arrayContaining([
-          objectContaining({ taskId: "//#lint:fix" }),
-          objectContaining({ taskId: "//#format:write" }),
-          objectContaining({ taskId: "@demo/repair#lint:fix" }),
-          objectContaining({ taskId: "@demo/repair#format:write" }),
-        ]),
-      );
-      assertContains(
-        tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
+      for (const taskId of [
         "//#lint:fix",
-      );
-      assertContains(
-        tasks.find((task) => task.taskId === "@demo/repair#format:write")
-          ?.dependencies,
+        "//#format:write",
         "@demo/repair#lint:fix",
+        "@demo/repair#format:write",
+      ]) {
+        assert.ok(tasks.some((task) => task.taskId === taskId));
+      }
+      const rootFormatWrite = tasks.find(
+        (task) => task.taskId === "//#format:write",
+      );
+      assert.ok(rootFormatWrite !== undefined);
+      assert.ok(rootFormatWrite.dependencies.includes("//#lint:fix"));
+      const packageFormatWrite = tasks.find(
+        (task) => task.taskId === "@demo/repair#format:write",
+      );
+      assert.ok(packageFormatWrite !== undefined);
+      assert.ok(
+        packageFormatWrite.dependencies.includes("@demo/repair#lint:fix"),
       );
       assert.strictEqual(
         tasks.find((task) => task.taskId === "@demo/repair#lint:fix")
@@ -796,10 +803,11 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       );
 
       const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
-      assertContains(`${fix.stdout}\n${fix.stderr}`, "@demo/repair:lint:fix");
-      assertContains(
-        `${fix.stdout}\n${fix.stderr}`,
-        "@demo/repair:format:write",
+      assert.ok(
+        `${fix.stdout}\n${fix.stderr}`.includes("@demo/repair:lint:fix"),
+      );
+      assert.ok(
+        `${fix.stdout}\n${fix.stderr}`.includes("@demo/repair:format:write"),
       );
       assert.strictEqual(
         await readFile(path.join(targetDir, "apps/repair/repair.txt"), "utf8"),
@@ -858,29 +866,29 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           tasks: readonly { command: string; taskId: string }[];
         }
       ).tasks;
-      assertContainsEqual(
-        tasks,
-        objectContaining({
-          command: stringContaining("writeFileSync"),
-          taskId: "@demo/lint-only#lint:fix",
-        }),
+      assert.ok(
+        tasks.some(
+          (task) =>
+            task.command.includes("writeFileSync") &&
+            task.taskId === "@demo/lint-only#lint:fix",
+        ),
       );
-      assertContainsEqual(
-        tasks,
-        objectContaining({
-          command: "<NONEXISTENT>",
-          taskId: "@demo/lint-only#format:write",
-        }),
+      assert.ok(
+        tasks.some(
+          (task) =>
+            task.command === "<NONEXISTENT>" &&
+            task.taskId === "@demo/lint-only#format:write",
+        ),
       );
 
       const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
-      assertContains(
-        `${fix.stdout}\n${fix.stderr}`,
-        "@demo/lint-only:lint:fix",
+      assert.ok(
+        `${fix.stdout}\n${fix.stderr}`.includes("@demo/lint-only:lint:fix"),
       );
-      assertDoesNotContain(
-        `${fix.stdout}\n${fix.stderr}`,
-        "@demo/lint-only:format:write",
+      assert.ok(
+        !`${fix.stdout}\n${fix.stderr}`.includes(
+          "@demo/lint-only:format:write",
+        ),
       );
       assert.strictEqual(
         await readFile(

@@ -14,8 +14,6 @@ import { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract"
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { parse } from "yaml";
 
-import { hasProperty } from "./assertions.ts";
-
 async function renderRootCheckWorkflow(): Promise<{
   readonly source: string;
   readonly plan: GeneratedRepositoryPlan;
@@ -78,7 +76,7 @@ void describe("Generated Root Check workflow", () => {
       }),
     });
 
-    assert.ok(!hasProperty(plan, "ciDiagnosticArtifactDeclarations"));
+    assert.ok(!Object.hasOwn(plan, "ciDiagnosticArtifactDeclarations"));
   });
 
   void it("runs the Root Check contract through real generated files", async () => {

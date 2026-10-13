@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -27,19 +28,6 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-
-import {
-  any,
-  arrayContaining,
-  assertContainsEqual,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertNotLength,
-  assertPartialDeepStrictEqual,
-  hasProperty,
-  objectContaining,
-  stringContaining,
-} from "./assertions.ts";
 
 void describe("Built-in Preset Package Addition universality", () => {
   type FixedTopologyDefinition = Exclude<
@@ -129,13 +117,14 @@ void describe("Built-in Preset Package Addition universality", () => {
           operation.to === "pnpm-workspace.yaml",
       );
 
-      assertPartialDeepStrictEqual(workspace, {
-        replacements: objectContaining({
-          WORKSPACE_PACKAGE_GLOBS: stringContaining(
-            "  - apps/*\n  - packages/*",
-          ),
-        }),
-      });
+      assert.ok(workspace?.kind === "writeTextTemplate");
+      assert.ok(Object.hasOwn(workspace, "replacements"));
+      assert.ok(
+        Object.hasOwn(workspace.replacements, "WORKSPACE_PACKAGE_GLOBS"),
+      );
+      const packageGlobs = workspace.replacements.WORKSPACE_PACKAGE_GLOBS;
+      assert.ok(typeof packageGlobs === "string");
+      assert.ok(packageGlobs.includes("  - apps/*\n  - packages/*"));
     }
   });
 
@@ -248,52 +237,75 @@ void describe("Built-in Preset Package Addition universality", () => {
               materializeProjectProjection(addition.projectProjections.before),
             ]);
 
-          assert.ok(!hasProperty(addition, "checks"));
-          assert.ok(!hasProperty(initialization, "checks"));
-          assert.ok(!hasProperty(addition, "fixes"));
-          assert.ok(!hasProperty(initialization, "fixes"));
-          assertDeepStrictEqualWithMatchers(
-            addition.environmentNeeds,
-            arrayContaining([...initialization.environmentNeeds]),
-          );
-          assert.ok(!hasProperty(addition, "deploymentChecks"));
-          assert.ok(!hasProperty(initialization, "deploymentChecks"));
+          assert.ok(!Object.hasOwn(addition, "checks"));
+          assert.ok(!Object.hasOwn(initialization, "checks"));
+          assert.ok(!Object.hasOwn(addition, "fixes"));
+          assert.ok(!Object.hasOwn(initialization, "fixes"));
+          for (const expectedNeed of initialization.environmentNeeds) {
+            assert.ok(
+              addition.environmentNeeds.some((need) =>
+                isDeepStrictEqual(need, expectedNeed),
+              ),
+            );
+          }
+          assert.ok(!Object.hasOwn(addition, "deploymentChecks"));
+          assert.ok(!Object.hasOwn(initialization, "deploymentChecks"));
           assert.deepStrictEqual(
             preAdditionProjection,
             initializationProjection,
           );
-          assertDeepStrictEqualWithMatchers(
-            addition.dependencyMaintenancePolicy.ecosystems,
-            arrayContaining(
-              initialization.dependencyMaintenancePolicy.ecosystems,
-            ),
+          for (const ecosystem of initialization.dependencyMaintenancePolicy
+            .ecosystems) {
+            assert.ok(
+              addition.dependencyMaintenancePolicy.ecosystems.includes(
+                ecosystem,
+              ),
+            );
+          }
+          const expectedDirectories =
+            initialization.dependencyMaintenancePolicy.directories;
+          if (
+            expectedDirectories !== undefined &&
+            Object.keys(expectedDirectories).length > 0
+          ) {
+            assert.partialDeepStrictEqual(
+              addition.dependencyMaintenancePolicy.directories,
+              expectedDirectories,
+            );
+          }
+          const rootManifestOperation = addition.operations.find(
+            (operation) =>
+              operation.kind === "writeJson" && operation.to === "package.json",
           );
-          assertPartialDeepStrictEqual(
-            addition.dependencyMaintenancePolicy.directories,
-            initialization.dependencyMaintenancePolicy.directories ?? {},
+          assert.ok(rootManifestOperation);
+          assert.ok(rootManifestOperation.kind === "writeJson");
+          assert.ok(Object.hasOwn(rootManifestOperation, "value"));
+          const value = rootManifestOperation.value;
+          assert.ok(typeof value === "object" && value !== null);
+          assert.ok(Object.hasOwn(value, "scripts"));
+          const scripts = (value as Record<string, unknown>).scripts as Record<
+            string,
+            unknown
+          >;
+          assert.ok(Object.hasOwn(scripts, "check"));
+          assert.ok(
+            typeof scripts.check === "string" ||
+              scripts.check instanceof String,
           );
-          assertPartialDeepStrictEqual(
-            addition.operations.find(
-              (operation) =>
-                operation.kind === "writeJson" &&
-                operation.to === "package.json",
-            ),
-            {
-              value: {
-                scripts: objectContaining({
-                  check: any(String),
-                  ...(initialization.manifests.some(
-                    (manifest) =>
-                      (
-                        manifest.scripts as Record<string, unknown> | undefined
-                      )?.["check:deployment"] !== undefined,
-                  )
-                    ? { "check:deployment": any(String) }
-                    : {}),
-                }),
-              },
-            },
-          );
+          if (
+            initialization.manifests.some(
+              (manifest) =>
+                (manifest.scripts as Record<string, unknown> | undefined)?.[
+                  "check:deployment"
+                ] !== undefined,
+            )
+          ) {
+            assert.ok(Object.hasOwn(scripts, "check:deployment"));
+            assert.ok(
+              typeof scripts["check:deployment"] === "string" ||
+                scripts["check:deployment"] instanceof String,
+            );
+          }
         } finally {
           await rm(workspace, { recursive: true, force: true });
         }
@@ -307,7 +319,7 @@ void describe("Built-in Preset Package Addition universality", () => {
       (definition) => definition.planPackageAddition !== undefined,
     );
 
-    assertNotLength(addableDefinitions, 0);
+    assert.notStrictEqual(addableDefinitions.length, 0);
 
     for (const baseDefinition of definitions) {
       const targetDir = path.join(
@@ -340,21 +352,23 @@ void describe("Built-in Preset Package Addition universality", () => {
             (definition) => definition.name === `@demo/${packageLeafName}`,
           );
 
-          assert.notStrictEqual(addedDefinition, undefined);
-          assertContainsEqual(
-            addition.operations,
-            objectContaining({
-              kind: "writeJson",
-              to: `${addedDefinition?.path}/package.json`,
-              value: objectContaining({
-                name: `@demo/${packageLeafName}`,
-              }),
-              provenance: objectContaining({
-                definitionName: additionDefinition.metadata.name,
-                planningContribution: "planPackageAddition",
-              }),
-            }),
+          assert.ok(addedDefinition);
+          const packageManifestOperation = addition.operations.find(
+            (operation) =>
+              operation.kind === "writeJson" &&
+              operation.to === `${addedDefinition.path}/package.json`,
           );
+          assert.ok(packageManifestOperation);
+          assert.ok(packageManifestOperation.kind === "writeJson");
+          assert.ok(Object.hasOwn(packageManifestOperation, "value"));
+          assert.ok(Object.hasOwn(packageManifestOperation, "provenance"));
+          assert.partialDeepStrictEqual(packageManifestOperation.value, {
+            name: `@demo/${packageLeafName}`,
+          });
+          assert.partialDeepStrictEqual(packageManifestOperation.provenance, {
+            definitionName: additionDefinition.metadata.name,
+            planningContribution: "planPackageAddition",
+          });
           await reconcileAndApplyProjectProjections({
             targetRoot: targetDir,
             ...addition.projectProjections,
@@ -442,7 +456,9 @@ void describe("Built-in Preset Package Addition universality", () => {
           "utf8",
         ),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual((error as { code?: unknown }).code, "ENOENT");
           return true;
         },
       );
@@ -493,13 +509,15 @@ void describe("Built-in Preset Package Addition universality", () => {
         path.join(context.targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      assertLength(dockerfile.match(/^ARG RUST_TOOLCHAIN$/gmu), 1);
-      assertLength(
-        dockerfile.match(
-          /"\$\{CARGO_HOME\}\/bin\/rustup" toolchain install \$\{RUST_TOOLCHAIN\}/gu,
-        ),
-        1,
+      const rustToolchainArguments =
+        dockerfile.match(/^ARG RUST_TOOLCHAIN$/gmu);
+      assert.ok(rustToolchainArguments);
+      assert.strictEqual(rustToolchainArguments.length, 1);
+      const rustupInstalls = dockerfile.match(
+        /"\$\{CARGO_HOME\}\/bin\/rustup" toolchain install \$\{RUST_TOOLCHAIN\}/gu,
       );
+      assert.ok(rustupInstalls);
+      assert.strictEqual(rustupInstalls.length, 1);
       assert.ok(
         dockerfile.includes(
           '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
@@ -511,10 +529,10 @@ void describe("Built-in Preset Package Addition universality", () => {
           "utf8",
         ),
       ) as { readonly mounts: readonly { readonly target: string }[] };
-      assertLength(
+      assert.strictEqual(
         devcontainer.mounts.filter(
           (mount) => mount.target === "/usr/local/cargo/registry",
-        ),
+        ).length,
         1,
       );
       const dependabot = await readFile(
@@ -567,10 +585,14 @@ void describe("Built-in Preset Package Addition universality", () => {
         localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
         packageLeafName: "worker",
       });
-      assertContainsEqual(addition.developmentContainer.buildArguments, {
-        name: "RUST_TOOLCHAIN",
-        value: "1.98.0",
-      });
+      assert.ok(
+        addition.developmentContainer.buildArguments.some((argument) =>
+          isDeepStrictEqual(argument, {
+            name: "RUST_TOOLCHAIN",
+            value: "1.98.0",
+          }),
+        ),
+      );
 
       const reconciliation = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
@@ -648,7 +670,7 @@ void describe("Built-in Preset Package Addition universality", () => {
           "to" in operation && operation.to === "rust-toolchain.toml",
       );
 
-      assertPartialDeepStrictEqual(rootDeclarationOperation, {
+      assert.partialDeepStrictEqual(rootDeclarationOperation, {
         kind: "writeTextTemplate",
         replacements: { RUST_TOOLCHAIN: "stable" },
       });
@@ -840,13 +862,13 @@ void describe("Built-in Preset Package Addition universality", () => {
       assert.ok(
         devcontainer.includes("playwright install --with-deps chromium"),
       );
-      assertDeepStrictEqualWithMatchers(
-        addition.environmentNeeds,
-        arrayContaining([
-          objectContaining({ kind: "rust-toolchain" }),
-          objectContaining({ kind: "playwright-browser-assets" }),
-        ]),
-      );
+      for (const kind of ["rust-toolchain", "playwright-browser-assets"]) {
+        assert.ok(
+          addition.environmentNeeds.some(
+            (need) => Object.hasOwn(need, "kind") && need.kind === kind,
+          ),
+        );
+      }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -904,7 +926,7 @@ void describe("Built-in Preset Package Addition universality", () => {
             path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
           ),
         ]);
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await reconcileAndApplyProjectProjections({
             targetRoot: targetDir,
             ...addition.projectProjections,
@@ -1027,16 +1049,22 @@ void describe("Built-in Preset Package Addition universality", () => {
 
       assert.deepStrictEqual(addition.environmentNeeds, []);
       assert.deepStrictEqual(addition.deploymentEnvironmentNeeds, []);
-      assertPartialDeepStrictEqual(
-        addition.operations.find(
-          (operation) =>
-            operation.kind === "writeJson" &&
-            operation.to === ".template/environment-needs.json",
-        ),
-        {
-          value: { schemaVersion: 1, check: [], deployment: [] },
-        },
+      const environmentNeedsOperation = addition.operations.find(
+        (operation) =>
+          operation.kind === "writeJson" &&
+          operation.to === ".template/environment-needs.json",
       );
+      assert.ok(environmentNeedsOperation);
+      assert.ok(environmentNeedsOperation.kind === "writeJson");
+      assert.ok(Object.hasOwn(environmentNeedsOperation, "value"));
+      const environmentNeeds = environmentNeedsOperation.value as {
+        schemaVersion: number;
+        check: readonly unknown[];
+        deployment: readonly unknown[];
+      };
+      assert.strictEqual(environmentNeeds.schemaVersion, 1);
+      assert.deepStrictEqual(environmentNeeds.check, []);
+      assert.deepStrictEqual(environmentNeeds.deployment, []);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -1073,26 +1101,36 @@ void describe("Built-in Preset Package Addition universality", () => {
           operation.to === "pnpm-workspace.yaml",
       );
 
-      assertPartialDeepStrictEqual(workspaceRefresh, {
-        replacements: objectContaining({
-          WORKSPACE_PACKAGE_GLOBS: stringContaining("  - services/*"),
+      assert.ok(workspaceRefresh?.kind === "writeTextTemplate");
+      assert.ok(Object.hasOwn(workspaceRefresh, "replacements"));
+      assert.ok(
+        Object.hasOwn(workspaceRefresh.replacements, "WORKSPACE_PACKAGE_GLOBS"),
+      );
+      const packageGlobs =
+        workspaceRefresh.replacements.WORKSPACE_PACKAGE_GLOBS;
+      assert.ok(typeof packageGlobs === "string");
+      assert.ok(packageGlobs.includes("  - services/*"));
+      assert.ok(
+        addition.operations.some((operation) => {
+          if (
+            operation.kind !== "writeJson" ||
+            operation.to !== "package.json" ||
+            !Object.hasOwn(operation, "value") ||
+            typeof operation.value !== "object" ||
+            operation.value === null ||
+            !Object.hasOwn(operation.value, "scripts")
+          ) {
+            return false;
+          }
+          const scripts = (operation.value as Record<string, unknown>)
+            .scripts as Record<string, unknown>;
+          return (
+            Object.hasOwn(scripts, "check") &&
+            scripts.check === rootScripts(initialization) &&
+            Object.hasOwn(scripts, "fix") &&
+            scripts.fix === rootFix(initialization)
+          );
         }),
-      });
-      assertDeepStrictEqualWithMatchers(
-        addition.operations.filter(
-          (operation) =>
-            operation.kind === "writeJson" && operation.to === "package.json",
-        ),
-        arrayContaining([
-          objectContaining({
-            value: objectContaining({
-              scripts: objectContaining({
-                check: rootScripts(initialization),
-                fix: rootFix(initialization),
-              }),
-            }),
-          }),
-        ]),
       );
       await reconcileAndApplyProjectProjections({
         targetRoot: context.targetDir,
@@ -1109,10 +1147,9 @@ void describe("Built-in Preset Package Addition universality", () => {
           tasks: readonly { taskId: string }[];
         }
       ).tasks.map((task) => task.taskId);
-      assertDeepStrictEqualWithMatchers(
-        taskIds,
-        arrayContaining(["@demo/custom#build", "@demo/custom#test"]),
-      );
+      for (const taskId of ["@demo/custom#build", "@demo/custom#test"]) {
+        assert.ok(taskIds.includes(taskId));
+      }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
