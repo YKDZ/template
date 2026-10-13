@@ -304,6 +304,11 @@ void describe("Development Container Fixture Executor", () => {
         cwd: projectDir,
       },
       {
+        command: "docker",
+        args: ["ps", "-aq", "--filter", `label=${idLabel}`],
+        cwd: projectDir,
+      },
+      {
         command: "devcontainer",
         args: [
           "exec",
@@ -316,11 +321,6 @@ void describe("Development Container Fixture Executor", () => {
           `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
           ".",
         ],
-        cwd: projectDir,
-      },
-      {
-        command: "docker",
-        args: ["ps", "-aq", "--filter", `label=${idLabel}`],
         cwd: projectDir,
       },
       {
@@ -1948,12 +1948,17 @@ void describe("Development Container Fixture Executor", () => {
         (failure as AggregateError).message,
         /^Dependency preparation failed during pnpm fetch.*fixture registry unavailable/u,
       );
-      assert.ok(
-        (failure as AggregateError).message.includes(
-          "fixture cleanup daemon stopped",
-        ),
+      assert.strictEqual(
+        (failure as AggregateError).cause,
+        (failure as AggregateError).errors[0],
       );
-      assert.strictEqual((failure as AggregateError).errors.length, 2);
+      assert.strictEqual((failure as AggregateError).errors.length, 3);
+      const cleanupFailure = (failure as AggregateError).errors[1];
+      assert.ok(cleanupFailure instanceof AggregateError);
+      assert.equal(
+        (cleanupFailure.errors[0] as Error).message,
+        "fixture cleanup daemon stopped",
+      );
       assert.ok(
         reports.some((report) =>
           /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u.test(
@@ -2117,10 +2122,17 @@ void describe("Development Container Fixture Executor", () => {
       (failure as AggregateError).message,
       /^Development Container capability docker-client.*permission denied/u,
     );
-    assert.ok(
-      (failure as AggregateError).message.includes("cleanup daemon stopped"),
+    assert.strictEqual(
+      (failure as AggregateError).cause,
+      (failure as AggregateError).errors[0],
     );
-    assert.strictEqual((failure as AggregateError).errors.length, 2);
+    assert.strictEqual((failure as AggregateError).errors.length, 3);
+    const cleanupFailure = (failure as AggregateError).errors[1];
+    assert.ok(cleanupFailure instanceof AggregateError);
+    assert.equal(
+      (cleanupFailure.errors[0] as Error).message,
+      "cleanup daemon stopped",
+    );
   });
 
   void it("fails a successful scenario when cleanup fails", async () => {
@@ -2143,17 +2155,19 @@ void describe("Development Container Fixture Executor", () => {
       .catch((error: unknown) => error);
 
     assert.ok(failure instanceof AggregateError);
-    assert.strictEqual(
+    assert.match(
       (failure as AggregateError).message,
-      "Development Container Fixture cleanup failed",
+      /^Development Container Fixture cleanup retry failed/u,
     );
-    const cleanupErrors = (failure as AggregateError).errors;
-    assert.strictEqual(cleanupErrors.length, 1);
-    const cleanupError = cleanupErrors[0]!;
-    assert.ok(typeof cleanupError === "object" && cleanupError !== null);
-    assert.ok(Object.hasOwn(cleanupError, "message"));
     assert.strictEqual(
-      Reflect.get(cleanupError, "message"),
+      (failure as AggregateError).cause,
+      (failure as AggregateError).errors[0],
+    );
+    assert.strictEqual((failure as AggregateError).errors.length, 2);
+    const firstCleanupFailure = (failure as AggregateError).errors[0];
+    assert.ok(firstCleanupFailure instanceof AggregateError);
+    assert.equal(
+      (firstCleanupFailure.errors[0] as Error).message,
       "cleanup daemon stopped",
     );
   });
