@@ -18,15 +18,6 @@ import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-
 import { parseDocument } from "yaml";
 
 import {
-  any,
-  arrayContaining,
-  assertMatches,
-  assertMatchesPartial,
-  assertThrows,
-  objectContaining,
-  testEach,
-} from "../../test-support/assertions.ts";
-import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "../foundation.ts";
@@ -342,7 +333,7 @@ async function executeFakePublication(
           "oidc-test-token",
         );
         assert.strictEqual(options.env.NPM_CONFIG_REGISTRY, undefined);
-        assertMatchesPartial(options.env, {
+        assert.partialDeepStrictEqual(options.env, {
           GITHUB_WORKFLOW_REF:
             "publisher/tool/.github/workflows/release.yml@refs/heads/main",
           GITHUB_SERVER_URL: "https://github.com",
@@ -354,14 +345,13 @@ async function executeFakePublication(
         if (arguments_[0] === "pnpm" && arguments_[1] === "install") {
           initialInstalls += 1;
           assert.strictEqual(options.cwd, workspace);
-          assertMatches(
-            arguments_,
-            arrayContaining([
-              "--frozen-lockfile",
-              "--ignore-scripts",
-              "--registry=https://registry.npmjs.org/",
-            ]),
-          );
+          for (const expectedArgument of [
+            "--frozen-lockfile",
+            "--ignore-scripts",
+            "--registry=https://registry.npmjs.org/",
+          ]) {
+            assert.ok(arguments_.includes(expectedArgument));
+          }
           assert.strictEqual(
             arguments_.some((argument) => argument.startsWith("--store-dir=")),
             true,
@@ -448,18 +438,17 @@ async function executeFakePublication(
           const consumer = prefix.slice("--prefix=".length);
           assert.notStrictEqual(consumer, sessionRoot);
           assert.strictEqual(options.cwd, workspace);
-          assertMatches(
-            arguments_,
-            arrayContaining([
-              `--prefix=${consumer}`,
-              "--registry=https://registry.npmjs.org/",
-              `--userconfig=${path.join(sessionRoot!, "user-npmrc")}`,
-              `--globalconfig=${path.join(sessionRoot!, "global-npmrc")}`,
-              `--cache=${path.join(sessionRoot!, "npm-cache")}`,
-              "install",
-              "--ignore-scripts",
-            ]),
-          );
+          for (const expectedArgument of [
+            `--prefix=${consumer}`,
+            "--registry=https://registry.npmjs.org/",
+            `--userconfig=${path.join(sessionRoot!, "user-npmrc")}`,
+            `--globalconfig=${path.join(sessionRoot!, "global-npmrc")}`,
+            `--cache=${path.join(sessionRoot!, "npm-cache")}`,
+            "install",
+            "--ignore-scripts",
+          ]) {
+            assert.ok(arguments_.includes(expectedArgument));
+          }
           assert.strictEqual(
             await readFile(path.join(consumer, ".npmrc"), "utf8"),
             "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
@@ -508,33 +497,56 @@ void describe("manual npm publication capability", () => {
       }),
     });
 
-    assertMatches(
-      plan.operations,
-      arrayContaining([
-        objectContaining({
-          kind: "copyFile",
-          from: "publication/release.yml",
-          to: ".github/workflows/release.yml",
-        }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication/publish.ts",
-          to: "scripts/npm-publication/publish.ts",
-          replacements: { PUBLIC_CLI_PACKAGE_PATH: "packages/cli" },
-        }),
-        objectContaining({
-          kind: "writeTextTemplate",
-          from: "publication/release.ts",
-          to: "scripts/npm-publication/release.ts",
-          replacements: { PUBLIC_CLI_PACKAGE_PATH: "packages/cli" },
-        }),
-        objectContaining({
-          kind: "copyFile",
-          from: "publication/handoff.ts",
-          to: "scripts/npm-publication/handoff.ts",
-        }),
-      ]),
+    const releaseWorkflow = plan.operations.find(
+      (operation) =>
+        Object.hasOwn(operation, "kind") &&
+        operation.kind === "copyFile" &&
+        Object.hasOwn(operation, "from") &&
+        operation.from === "publication/release.yml" &&
+        Object.hasOwn(operation, "to") &&
+        operation.to === ".github/workflows/release.yml",
     );
+    assert.ok(releaseWorkflow);
+    const publishScript = plan.operations.find(
+      (operation) =>
+        Object.hasOwn(operation, "kind") &&
+        operation.kind === "writeTextTemplate" &&
+        Object.hasOwn(operation, "from") &&
+        operation.from === "publication/publish.ts" &&
+        Object.hasOwn(operation, "to") &&
+        operation.to === "scripts/npm-publication/publish.ts",
+    );
+    assert.ok(publishScript);
+    assert.ok(publishScript.kind === "writeTextTemplate");
+    assert.ok(Object.hasOwn(publishScript, "replacements"));
+    assert.deepStrictEqual(publishScript.replacements, {
+      PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+    });
+    const releaseScript = plan.operations.find(
+      (operation) =>
+        Object.hasOwn(operation, "kind") &&
+        operation.kind === "writeTextTemplate" &&
+        Object.hasOwn(operation, "from") &&
+        operation.from === "publication/release.ts" &&
+        Object.hasOwn(operation, "to") &&
+        operation.to === "scripts/npm-publication/release.ts",
+    );
+    assert.ok(releaseScript);
+    assert.ok(releaseScript.kind === "writeTextTemplate");
+    assert.ok(Object.hasOwn(releaseScript, "replacements"));
+    assert.deepStrictEqual(releaseScript.replacements, {
+      PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+    });
+    const handoffScript = plan.operations.find(
+      (operation) =>
+        Object.hasOwn(operation, "kind") &&
+        operation.kind === "copyFile" &&
+        Object.hasOwn(operation, "from") &&
+        operation.from === "publication/handoff.ts" &&
+        Object.hasOwn(operation, "to") &&
+        operation.to === "scripts/npm-publication/handoff.ts",
+    );
+    assert.ok(handoffScript);
   });
 
   void it("creates and proves one immutable release from the accepted artifact", async () => {
@@ -671,18 +683,18 @@ void describe("manual npm publication capability", () => {
         ].some((prefix) => command.join(" ").startsWith(`gh ${prefix}`)),
       );
       assert.strictEqual(writes.length, 4);
-      assertMatches(
-        writes[2],
-        arrayContaining([
-          "release",
-          "create",
-          tag,
-          "--draft",
-          "--verify-tag",
-          "--title",
-          tag,
-        ]),
-      );
+      assert.ok(writes[2]);
+      for (const expectedArgument of [
+        "release",
+        "create",
+        tag,
+        "--draft",
+        "--verify-tag",
+        "--title",
+        tag,
+      ]) {
+        assert.ok(writes[2].includes(expectedArgument));
+      }
       assert.deepStrictEqual(writes[3], [
         "gh",
         "release",
@@ -690,131 +702,142 @@ void describe("manual npm publication capability", () => {
         tag,
         "--draft=false",
       ]);
-      assertMatches(commands.slice(-3), [
-        ["gh", "release", "verify", tag],
-        ["gh", "release", "verify-asset", tag, any(String)],
-        ["gh", "release", "verify-asset", tag, any(String)],
+      const verificationCommands = commands.slice(-3);
+      assert.strictEqual(verificationCommands.length, 3);
+      assert.deepStrictEqual(verificationCommands[0], [
+        "gh",
+        "release",
+        "verify",
+        tag,
       ]);
+      for (const command of verificationCommands.slice(1)) {
+        assert.strictEqual(command.length, 5);
+        assert.deepStrictEqual(command.slice(0, 4), [
+          "gh",
+          "release",
+          "verify-asset",
+          tag,
+        ]);
+        assert.strictEqual(typeof command[4], "string");
+      }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  testEach(
-    [
-      {
-        name: "rejects a fresh dispatch that finds existing state",
-        attempt: "1",
-        initialState: "draft",
-        initialTag: true,
-        expectedCode: "fresh-release-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "rejects a rerun with no tag or release",
-        attempt: "2",
-        initialState: "absent",
-        initialTag: false,
-        expectedCode: "release-incomplete-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "rejects a rerun with only an annotated tag",
-        attempt: "2",
-        initialState: "absent",
-        initialTag: true,
-        expectedCode: "release-incomplete-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "rejects a rerun with a partial draft without repairing it",
-        attempt: "2",
-        initialState: "draft",
-        initialTag: true,
-        partialDraft: true,
-        expectedCode: "release-incomplete-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "resumes the exact draft without recreating it",
-        attempt: "2",
-        initialState: "draft",
-        initialTag: true,
-        expectedWrites: 1,
-      },
-      {
-        name: "only proves an exact immutable public release on rerun",
-        attempt: "2",
-        initialState: "public",
-        initialTag: true,
-        expectedWrites: 0,
-      },
-      {
-        name: "stops before publication when a draft asset differs",
-        attempt: "2",
-        initialState: "draft",
-        initialTag: true,
-        corruptAsset: true,
-        expectedCode: "release-asset-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "stops before a draft when the existing tag annotation differs",
-        attempt: "2",
-        initialState: "draft",
-        initialTag: true,
-        mismatchedTag: true,
-        expectedCode: "release-tag-conflict",
-        expectedWrites: 0,
-      },
-      {
-        name: "does not claim a failed public conversion completed",
-        attempt: "1",
-        initialState: "absent",
-        initialTag: false,
-        publicConversionFails: true,
-        expectedCode: "release-write-failed",
-        expectedWrites: 4,
-      },
-      {
-        name: "stops after an unproven immutable public transition",
-        attempt: "1",
-        initialState: "absent",
-        initialTag: false,
-        immutableFalse: true,
-        expectedCode: "release-immutability-unproven",
-        expectedWrites: 4,
-      },
-      {
-        name: "fails closed when GitHub's documented attestation command fails",
-        attempt: "1",
-        initialState: "absent",
-        initialTag: false,
-        attestationFails: true,
-        expectedCode: "release-attestation-invalid",
-        expectedWrites: 4,
-      },
-      {
-        name: "rejects an invalid dispatch context before starting gh",
-        attempt: "1",
-        initialState: "absent",
-        initialTag: false,
-        invalidContext: true,
-        expectedCode: "release-context-invalid",
-        expectedWrites: 0,
-      },
-      {
-        name: "rejects a checkout whose checked-out HEAD is not the dispatch SHA",
-        attempt: "1",
-        initialState: "absent",
-        initialTag: false,
-        checkoutMismatch: true,
-        expectedCode: "release-context-invalid",
-        expectedWrites: 0,
-      },
-    ],
-    "%s",
-    async (scenario) => {
+  for (const scenario of [
+    {
+      name: "rejects a fresh dispatch that finds existing state",
+      attempt: "1",
+      initialState: "draft",
+      initialTag: true,
+      expectedCode: "fresh-release-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with no tag or release",
+      attempt: "2",
+      initialState: "absent",
+      initialTag: false,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with only an annotated tag",
+      attempt: "2",
+      initialState: "absent",
+      initialTag: true,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a rerun with a partial draft without repairing it",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      partialDraft: true,
+      expectedCode: "release-incomplete-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "resumes the exact draft without recreating it",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      expectedWrites: 1,
+    },
+    {
+      name: "only proves an exact immutable public release on rerun",
+      attempt: "2",
+      initialState: "public",
+      initialTag: true,
+      expectedWrites: 0,
+    },
+    {
+      name: "stops before publication when a draft asset differs",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      corruptAsset: true,
+      expectedCode: "release-asset-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "stops before a draft when the existing tag annotation differs",
+      attempt: "2",
+      initialState: "draft",
+      initialTag: true,
+      mismatchedTag: true,
+      expectedCode: "release-tag-conflict",
+      expectedWrites: 0,
+    },
+    {
+      name: "does not claim a failed public conversion completed",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      publicConversionFails: true,
+      expectedCode: "release-write-failed",
+      expectedWrites: 4,
+    },
+    {
+      name: "stops after an unproven immutable public transition",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      immutableFalse: true,
+      expectedCode: "release-immutability-unproven",
+      expectedWrites: 4,
+    },
+    {
+      name: "fails closed when GitHub's documented attestation command fails",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      attestationFails: true,
+      expectedCode: "release-attestation-invalid",
+      expectedWrites: 4,
+    },
+    {
+      name: "rejects an invalid dispatch context before starting gh",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      invalidContext: true,
+      expectedCode: "release-context-invalid",
+      expectedWrites: 0,
+    },
+    {
+      name: "rejects a checkout whose checked-out HEAD is not the dispatch SHA",
+      attempt: "1",
+      initialState: "absent",
+      initialTag: false,
+      checkoutMismatch: true,
+      expectedCode: "release-context-invalid",
+      expectedWrites: 0,
+    },
+  ]) {
+    void it(scenario.name, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-publication-release-state-"),
       );
@@ -961,9 +984,12 @@ void describe("manual npm publication capability", () => {
           assert.strictEqual(await execution, undefined);
         else
           await assert.rejects(execution, (error) => {
-            assertMatchesPartial(error, {
-              code: scenario.expectedCode,
-            });
+            assert.ok(typeof error === "object" && error !== null);
+            assert.ok(Object.hasOwn(error, "code"));
+            assert.strictEqual(
+              (error as { code?: unknown }).code,
+              scenario.expectedCode,
+            );
             return true;
           });
         const writes = commands.filter((command) =>
@@ -978,8 +1004,8 @@ void describe("manual npm publication capability", () => {
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("rejects semantic release mutations at their parsed YAML location", async () => {
     const plan = planGeneratedRepositoryInitialization({
@@ -1135,9 +1161,13 @@ void describe("manual npm publication capability", () => {
     ]) {
       const workflow = parseDocument(source).toJS() as Record<string, unknown>;
       mutate(workflow);
-      assertThrows(
+      assert.throws(
         () => assertPublicationWorkflowContract(plan, source, workflow),
-        "publication workflow",
+        (error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return message.includes("publication workflow");
+        },
       );
     }
   });
@@ -1164,7 +1194,12 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "credential-fallback" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "credential-fallback",
+          );
           return true;
         },
       );
@@ -1199,7 +1234,12 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "checkout-npmrc-conflict" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "checkout-npmrc-conflict",
+          );
           return true;
         },
       );
@@ -1233,7 +1273,12 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "checkout-npmrc-conflict" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "checkout-npmrc-conflict",
+          );
           return true;
         },
       );
@@ -1267,7 +1312,12 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "oidc-unavailable" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "oidc-unavailable",
+          );
           return true;
         },
       );
@@ -1312,7 +1362,12 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "artifact-receipt-invalid" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "artifact-receipt-invalid",
+          );
           return true;
         },
       );
@@ -1322,70 +1377,64 @@ void describe("manual npm publication capability", () => {
     }
   });
 
-  testEach(
+  for (const [name, code, mutateReceipt] of [
     [
-      [
-        "release notes",
-        "artifact-receipt-invalid",
-        (receipt: Record<string, unknown>) => {
-          delete (receipt.publication as Record<string, unknown>).releaseNotes;
-        },
-      ],
-      [
-        "release date",
-        "artifact-receipt-invalid",
-        (receipt: Record<string, unknown>) => {
-          delete (receipt.publication as Record<string, unknown>).releaseDate;
-        },
-      ],
-      [
-        "non-empty files",
-        "artifact-receipt-invalid",
-        (receipt: Record<string, unknown>) => {
-          receipt.files = [];
-        },
-      ],
-      [
-        "bin evidence",
-        "artifact-receipt-invalid",
-        (receipt: Record<string, unknown>) => {
-          delete receipt.bin;
-        },
-      ],
-      [
-        "smoke evidence",
-        "artifact-receipt-invalid",
-        (receipt: Record<string, unknown>) => {
-          delete receipt.smokes;
-        },
-      ],
-      [
-        "packed repository type",
-        "identity-invalid",
-        (receipt: Record<string, unknown>) => {
-          (
-            (receipt.packedManifest as Record<string, unknown>)
-              .repository as Record<string, unknown>
-          ).type = "npm";
-        },
-      ],
-      [
-        "packed package directory",
-        "identity-invalid",
-        (receipt: Record<string, unknown>) => {
-          (
-            (receipt.packedManifest as Record<string, unknown>)
-              .repository as Record<string, unknown>
-          ).directory = "packages/other";
-        },
-      ],
-    ] as const,
-    "rejects a Ticket 09 receipt without %s before spawning",
-    async (
-      _name: string,
-      code: string,
-      mutateReceipt: (receipt: Record<string, unknown>) => void,
-    ) => {
+      "release notes",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete (receipt.publication as Record<string, unknown>).releaseNotes;
+      },
+    ],
+    [
+      "release date",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete (receipt.publication as Record<string, unknown>).releaseDate;
+      },
+    ],
+    [
+      "non-empty files",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        receipt.files = [];
+      },
+    ],
+    [
+      "bin evidence",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete receipt.bin;
+      },
+    ],
+    [
+      "smoke evidence",
+      "artifact-receipt-invalid",
+      (receipt: Record<string, unknown>) => {
+        delete receipt.smokes;
+      },
+    ],
+    [
+      "packed repository type",
+      "identity-invalid",
+      (receipt: Record<string, unknown>) => {
+        (
+          (receipt.packedManifest as Record<string, unknown>)
+            .repository as Record<string, unknown>
+        ).type = "npm";
+      },
+    ],
+    [
+      "packed package directory",
+      "identity-invalid",
+      (receipt: Record<string, unknown>) => {
+        (
+          (receipt.packedManifest as Record<string, unknown>)
+            .repository as Record<string, unknown>
+        ).directory = "packages/other";
+      },
+    ],
+  ] as const) {
+    void it(`rejects a Ticket 09 receipt without ${name} before spawning`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-publication-caller-"),
       );
@@ -1393,15 +1442,21 @@ void describe("manual npm publication capability", () => {
         await assert.rejects(
           executeFakePublication(workspace, { mutateReceipt }),
           (error) => {
-            assertMatchesPartial(error, { code, writes: 0, spawns: 0 });
+            assert.ok(typeof error === "object" && error !== null);
+            assert.ok(Object.hasOwn(error, "code"));
+            assert.strictEqual((error as { code?: unknown }).code, code);
+            assert.ok(Object.hasOwn(error, "writes"));
+            assert.strictEqual((error as { writes?: unknown }).writes, 0);
+            assert.ok(Object.hasOwn(error, "spawns"));
+            assert.strictEqual((error as { spawns?: unknown }).spawns, 0);
             return true;
           },
         );
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("rejects a source package directory mismatch before spawning", async () => {
     const workspace = await mkdtemp(
@@ -1416,11 +1471,16 @@ void describe("manual npm publication capability", () => {
           },
         }),
         (error) => {
-          assertMatchesPartial(error, {
-            code: "identity-invalid",
-            writes: 0,
-            spawns: 0,
-          });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "identity-invalid",
+          );
+          assert.ok(Object.hasOwn(error, "writes"));
+          assert.strictEqual((error as { writes?: unknown }).writes, 0);
+          assert.ok(Object.hasOwn(error, "spawns"));
+          assert.strictEqual((error as { spawns?: unknown }).spawns, 0);
           return true;
         },
       );
@@ -1429,49 +1489,43 @@ void describe("manual npm publication capability", () => {
     }
   });
 
-  testEach(
+  for (const [name, mutateReceipt] of [
     [
-      [
-        "the fixed help arguments",
-        (receipt: Record<string, unknown>) => {
-          (receipt.smokes as Record<string, unknown>[])[1]!.args = [];
-        },
-      ],
-      [
-        "a canonical package file path",
-        (receipt: Record<string, unknown>) => {
-          (receipt.files as Record<string, unknown>[])[0]!.path =
-            "CHANGELOG.md";
-        },
-      ],
-      [
-        "one fixed packed file",
-        (receipt: Record<string, unknown>) => {
-          (receipt.files as Record<string, unknown>[]).splice(2, 1);
-        },
-      ],
-      [
-        "an otherwise sorted extra packed file",
-        (receipt: Record<string, unknown>) => {
-          (receipt.files as Record<string, unknown>[]).splice(5, 0, {
-            path: "package/dist/extra.js",
-            mode: 420,
-            size: 1,
-          });
-        },
-      ],
-      [
-        "the packed executable mode",
-        (receipt: Record<string, unknown>) => {
-          (receipt.bin as Record<string, unknown>).mode = 420;
-        },
-      ],
-    ] as const,
-    "rejects a Ticket 09 receipt that changes %s before spawning",
-    async (
-      _name: string,
-      mutateReceipt: (receipt: Record<string, unknown>) => void,
-    ) => {
+      "the fixed help arguments",
+      (receipt: Record<string, unknown>) => {
+        (receipt.smokes as Record<string, unknown>[])[1]!.args = [];
+      },
+    ],
+    [
+      "a canonical package file path",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[])[0]!.path = "CHANGELOG.md";
+      },
+    ],
+    [
+      "one fixed packed file",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[]).splice(2, 1);
+      },
+    ],
+    [
+      "an otherwise sorted extra packed file",
+      (receipt: Record<string, unknown>) => {
+        (receipt.files as Record<string, unknown>[]).splice(5, 0, {
+          path: "package/dist/extra.js",
+          mode: 420,
+          size: 1,
+        });
+      },
+    ],
+    [
+      "the packed executable mode",
+      (receipt: Record<string, unknown>) => {
+        (receipt.bin as Record<string, unknown>).mode = 420;
+      },
+    ],
+  ] as const) {
+    void it(`rejects a Ticket 09 receipt that changes ${name} before spawning`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-publication-caller-"),
       );
@@ -1479,81 +1533,77 @@ void describe("manual npm publication capability", () => {
         await assert.rejects(
           executeFakePublication(workspace, { mutateReceipt }),
           (error) => {
-            assertMatchesPartial(error, {
-              code: "identity-invalid",
-              spawns: 0,
-              writes: 0,
-            });
+            assert.ok(typeof error === "object" && error !== null);
+            assert.ok(Object.hasOwn(error, "code"));
+            assert.strictEqual(
+              (error as { code?: unknown }).code,
+              "identity-invalid",
+            );
+            assert.ok(Object.hasOwn(error, "spawns"));
+            assert.strictEqual((error as { spawns?: unknown }).spawns, 0);
+            assert.ok(Object.hasOwn(error, "writes"));
+            assert.strictEqual((error as { writes?: unknown }).writes, 0);
             return true;
           },
         );
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
-  testEach(
+  for (const [name, code, mutate] of [
     [
-      [
-        "an extra artifact member",
-        "artifact-set-invalid",
-        async (workspace: string, artifact: string) => {
-          await writeFile(path.join(artifact, "unexpected"), "not allowed");
-        },
-      ],
-      [
-        "a source manifest identity mismatch",
-        "identity-invalid",
-        async (workspace: string) => {
-          const manifestPath = path.join(
-            workspace,
-            "packages/cli/package.json",
-          );
-          const manifest = JSON.parse(
-            await readFile(manifestPath, "utf8"),
-          ) as Record<string, unknown>;
-          manifest.name = "@publisher/other";
-          await writeFile(manifestPath, JSON.stringify(manifest));
-        },
-      ],
-      [
-        "a packed bin target mismatch",
-        "identity-invalid",
-        async (_workspace: string, artifact: string) => {
-          const receiptPath = path.join(
-            artifact,
-            "verified-publication-artifact.json",
-          );
-          const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
-            packedManifest: { bin: Record<string, string> };
-          };
-          receipt.packedManifest.bin.ship = "./dist/other.js";
-          await writeFile(receiptPath, JSON.stringify(receipt));
-        },
-      ],
-      [
-        "a receipt artifact basename mismatch",
-        "artifact-receipt-invalid",
-        async (_workspace: string, artifact: string) => {
-          const receiptPath = path.join(
-            artifact,
-            "verified-publication-artifact.json",
-          );
-          const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
-            artifact: { file: string };
-          };
-          receipt.artifact.file = "different.tgz";
-          await writeFile(receiptPath, JSON.stringify(receipt));
-        },
-      ],
-    ] as const,
-    "rejects %s before spawning",
-    async (
-      _name: string,
-      code: string,
-      mutate: (workspace: string, artifact: string) => Promise<void>,
-    ) => {
+      "an extra artifact member",
+      "artifact-set-invalid",
+      async (workspace: string, artifact: string) => {
+        await writeFile(path.join(artifact, "unexpected"), "not allowed");
+      },
+    ],
+    [
+      "a source manifest identity mismatch",
+      "identity-invalid",
+      async (workspace: string) => {
+        const manifestPath = path.join(workspace, "packages/cli/package.json");
+        const manifest = JSON.parse(
+          await readFile(manifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        manifest.name = "@publisher/other";
+        await writeFile(manifestPath, JSON.stringify(manifest));
+      },
+    ],
+    [
+      "a packed bin target mismatch",
+      "identity-invalid",
+      async (_workspace: string, artifact: string) => {
+        const receiptPath = path.join(
+          artifact,
+          "verified-publication-artifact.json",
+        );
+        const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+          packedManifest: { bin: Record<string, string> };
+        };
+        receipt.packedManifest.bin.ship = "./dist/other.js";
+        await writeFile(receiptPath, JSON.stringify(receipt));
+      },
+    ],
+    [
+      "a receipt artifact basename mismatch",
+      "artifact-receipt-invalid",
+      async (_workspace: string, artifact: string) => {
+        const receiptPath = path.join(
+          artifact,
+          "verified-publication-artifact.json",
+        );
+        const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+          artifact: { file: string };
+        };
+        receipt.artifact.file = "different.tgz";
+        await writeFile(receiptPath, JSON.stringify(receipt));
+      },
+    ],
+  ] as const) {
+    void it(`rejects ${name} before spawning`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-publication-caller-"),
       );
@@ -1578,7 +1628,9 @@ void describe("manual npm publication capability", () => {
             },
           }),
           (error) => {
-            assertMatchesPartial(error, { code });
+            assert.ok(typeof error === "object" && error !== null);
+            assert.ok(Object.hasOwn(error, "code"));
+            assert.strictEqual((error as { code?: unknown }).code, code);
             return true;
           },
         );
@@ -1586,8 +1638,8 @@ void describe("manual npm publication capability", () => {
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("publishes once, then requires matching integrity, latest, and audit evidence", async () => {
     const workspace = await mkdtemp(
@@ -1673,157 +1725,150 @@ void describe("manual npm publication capability", () => {
     }
   });
 
-  testEach(
+  for (const [name, scenario, code, writes] of [
+    ["latest is absent", { latest: undefined }, "latest-invalid", 0],
     [
-      ["latest is absent", { latest: undefined }, "latest-invalid", 0],
-      [
-        "candidate is not newer than latest",
-        { latest: "1.0.1" },
-        "latest-stale",
-        0,
-      ],
-      [
-        "exact lookup is not an explicit E404",
-        { exact: "ambiguous" },
-        "registry-preflight-failed",
-        0,
-      ],
-      [
-        "fresh exact version exists",
-        { exact: "same" },
-        "fresh-version-exists",
-        0,
-      ],
-      [
-        "rerun integrity conflicts",
-        { attempt: 2, exact: "different" },
-        "rerun-integrity-conflict",
-        0,
-      ],
-      [
-        "rerun latest conflicts",
-        { attempt: 2, exact: "same", latest: "1.0.0" },
-        "rerun-latest-conflict",
-        0,
-      ],
-      [
-        "post-write integrity conflicts",
-        { postIntegrity: "different" },
-        "postwrite-integrity-conflict",
-        1,
-      ],
-      [
-        "audit invalid is non-empty",
-        { audit: { invalid: [{}], missing: [], verified: [] } },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit missing is non-empty",
-        { audit: { invalid: [], missing: [{}], verified: [] } },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit target is missing",
-        { audit: { invalid: [], missing: [], verified: [] } },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit target is duplicated",
-        {
-          audit: {
-            invalid: [],
-            missing: [],
-            verified: [
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [{}],
-              },
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [{}],
-              },
-            ],
-          },
+      "candidate is not newer than latest",
+      { latest: "1.0.1" },
+      "latest-stale",
+      0,
+    ],
+    [
+      "exact lookup is not an explicit E404",
+      { exact: "ambiguous" },
+      "registry-preflight-failed",
+      0,
+    ],
+    [
+      "fresh exact version exists",
+      { exact: "same" },
+      "fresh-version-exists",
+      0,
+    ],
+    [
+      "rerun integrity conflicts",
+      { attempt: 2, exact: "different" },
+      "rerun-integrity-conflict",
+      0,
+    ],
+    [
+      "rerun latest conflicts",
+      { attempt: 2, exact: "same", latest: "1.0.0" },
+      "rerun-latest-conflict",
+      0,
+    ],
+    [
+      "post-write integrity conflicts",
+      { postIntegrity: "different" },
+      "postwrite-integrity-conflict",
+      1,
+    ],
+    [
+      "audit invalid is non-empty",
+      { audit: { invalid: [{}], missing: [], verified: [] } },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit missing is non-empty",
+      { audit: { invalid: [], missing: [{}], verified: [] } },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit target is missing",
+      { audit: { invalid: [], missing: [], verified: [] } },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit target is duplicated",
+      {
+        audit: {
+          invalid: [],
+          missing: [],
+          verified: [
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [{}],
+            },
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [{}],
+            },
+          ],
         },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit target has mixed empty and non-empty duplicate bundles",
-        {
-          audit: {
-            invalid: [],
-            missing: [],
-            verified: [
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [],
-              },
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [{}],
-              },
-            ],
-          },
+      },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit target has mixed empty and non-empty duplicate bundles",
+      {
+        audit: {
+          invalid: [],
+          missing: [],
+          verified: [
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [],
+            },
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [{}],
+            },
+          ],
         },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit target bundle is empty",
-        {
-          audit: {
-            invalid: [],
-            missing: [],
-            verified: [
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [],
-              },
-            ],
-          },
+      },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit target bundle is empty",
+      {
+        audit: {
+          invalid: [],
+          missing: [],
+          verified: [
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [],
+            },
+          ],
         },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "audit omits invalid and missing arrays",
-        {
-          audit: {
-            verified: [
-              {
-                name: "@publisher/tool",
-                version: "1.0.1",
-                attestationBundles: [{}],
-              },
-            ],
-          },
+      },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "audit omits invalid and missing arrays",
+      {
+        audit: {
+          verified: [
+            {
+              name: "@publisher/tool",
+              version: "1.0.1",
+              attestationBundles: [{}],
+            },
+          ],
         },
-        "signature-audit-invalid",
-        1,
-      ],
-      [
-        "post-write latest conflicts",
-        { postLatest: "1.0.0" },
-        "postwrite-integrity-conflict",
-        1,
-      ],
-    ] as const,
-    "fails closed when %s",
-    async (
-      _name: string,
-      scenario: FakePublicationScenario,
-      code: string,
-      writes: number,
-    ) => {
+      },
+      "signature-audit-invalid",
+      1,
+    ],
+    [
+      "post-write latest conflicts",
+      { postLatest: "1.0.0" },
+      "postwrite-integrity-conflict",
+      1,
+    ],
+  ] as const) {
+    void it(`fails closed when ${name}`, async () => {
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-publication-caller-"),
       );
@@ -1834,12 +1879,16 @@ void describe("manual npm publication capability", () => {
         } catch (error) {
           failure = error;
         }
-        assertMatchesPartial(failure, { code, writes });
+        assert.ok(typeof failure === "object" && failure !== null);
+        assert.ok(Object.hasOwn(failure, "code"));
+        assert.strictEqual((failure as { code?: unknown }).code, code);
+        assert.ok(Object.hasOwn(failure, "writes"));
+        assert.strictEqual((failure as { writes?: unknown }).writes, writes);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("allows rerun absence once and resumes an identical rerun without rewriting", async () => {
     const absentWorkspace = await mkdtemp(
@@ -1849,14 +1898,14 @@ void describe("manual npm publication capability", () => {
       path.join(tmpdir(), "template-publication-caller-"),
     );
     try {
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         await executeFakePublication(absentWorkspace, {
           attempt: 2,
           exact: "absent",
         }),
         { writes: 1, initialInstalls: 1 },
       );
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         await executeFakePublication(identicalWorkspace, {
           attempt: 2,
           exact: "same",
@@ -1877,7 +1926,7 @@ void describe("manual npm publication capability", () => {
       path.join(tmpdir(), "template-publication-caller-"),
     );
     try {
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         await executeFakePublication(workspace, {
           audit: {
             invalid: [],
@@ -1905,7 +1954,7 @@ void describe("manual npm publication capability", () => {
       path.join(tmpdir(), "template-publication-caller-"),
     );
     try {
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         await executeFakePublication(workspace, { version: "1.0.1+build.7" }),
         { writes: 1 },
       );
@@ -1927,11 +1976,18 @@ void describe("manual npm publication capability", () => {
           version: "1.0.1-beta.1",
         }),
         (error) => {
-          assertMatchesPartial(error, { code: "identity-invalid", writes: 0 });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { code?: unknown }).code,
+            "identity-invalid",
+          );
+          assert.ok(Object.hasOwn(error, "writes"));
+          assert.strictEqual((error as { writes?: unknown }).writes, 0);
           return true;
         },
       );
-      assertMatchesPartial(
+      assert.partialDeepStrictEqual(
         await executeFakePublication(largeWorkspace, {
           version: "4294967297.0.0",
           latest: "4294967296.0.0",
