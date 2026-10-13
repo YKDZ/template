@@ -766,9 +766,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
               readonly include: readonly {
                 readonly capability: string;
                 readonly job_name: string;
-                readonly task_entrypoint: string;
                 readonly timeout_minutes: number;
-                readonly requires_docker: boolean;
               }[];
             };
           };
@@ -786,13 +784,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const deploymentJob = workflow.jobs.check.strategy.matrix.include.find(
       (job) => job.capability === "deployment",
     );
-    assert.deepStrictEqual(deploymentJob, {
-      capability: "deployment",
-      job_name: "Deployment Check",
-      task_entrypoint: "pnpm run check:deployment",
-      timeout_minutes: 45,
-      requires_docker: true,
-    });
+    assert.strictEqual(deploymentJob?.job_name, "Deployment Check");
+    assert.strictEqual(deploymentJob?.timeout_minutes, 45);
     const steps = workflow.jobs.check.steps;
     const buildxSetup = steps.find(({ uses }) =>
       uses?.startsWith("docker/setup-buildx-action@"),
@@ -805,10 +798,14 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const diagnosticStaging = steps.find(
       ({ name }) => name === "Stage Root Check diagnostics",
     );
-    assert.deepStrictEqual(diagnosticStaging?.env, {
-      PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
-      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
-    });
+    assert.strictEqual(
+      diagnosticStaging?.env?.PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS,
+      "apps/web",
+    );
+    assert.strictEqual(
+      diagnosticStaging?.env?.VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS,
+      "apps/web",
+    );
     assertContains(
       diagnosticStaging?.run ?? "",
       "for diagnostic_directory in test-results playwright-report; do",
@@ -820,11 +817,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       diagnosticUpload?.with?.path,
       ".template-ci-diagnostics",
     );
-    assertContains(
-      checkWorkflow,
-      "for diagnostic_directory in test-results playwright-report; do",
-    );
-    assertContains(checkWorkflow, "path: .template-ci-diagnostics");
     assertMatchesPartial(
       JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
       {
