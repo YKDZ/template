@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, glob, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -235,8 +235,8 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
   });
 }
 
-/** Convention-owned location for a Definition's observable behavior contract. */
-export function presetLocalBehaviorTestPath(
+/** 返回 Definition 对应的源码目录，行为层由原生测试后缀自动发现。 */
+function presetLocalBehaviorTestRoot(
   definition: BuiltInPresetDefinition,
 ): string {
   // Template Source is owned at templates/<definition>; its sibling source
@@ -249,7 +249,6 @@ export function presetLocalBehaviorTestPath(
     "..",
     "src",
     path.basename(templateRoot),
-    "behavior.test.ts",
   );
 }
 
@@ -258,27 +257,35 @@ export type PresetLocalBehaviorTest = {
   readonly filePath: string;
 };
 
-/** Discovers the behavior contract colocated with every registry Definition. */
+/** Discovers every layer-owned behavior file colocated with each Definition. */
 export async function discoverPresetLocalBehaviorTests(): Promise<
   readonly PresetLocalBehaviorTest[]
 > {
-  return await Promise.all(
-    builtInPresetRegistry.all().map(async (definition) => {
-      const filePath = presetLocalBehaviorTestPath(definition);
-      try {
-        const details = await stat(filePath);
-        if (!details.isFile()) {
-          throw new Error("path is not a file");
-        }
-      } catch (error) {
-        throw new Error(
-          `${definition.metadata.name}: missing Preset-Local Behavior Test at ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
+  const discovered: PresetLocalBehaviorTest[] = [];
+  for (const definition of builtInPresetRegistry.all()) {
+    const root = presetLocalBehaviorTestRoot(definition);
+    const filePaths: string[] = [];
+    for await (const entry of glob("behavior.*.test.ts", { cwd: root })) {
+      if (
+        !entry.endsWith(".light.test.ts") &&
+        !entry.endsWith(".integration.test.ts")
+      ) {
+        continue;
       }
-      return { definition, filePath };
-    }),
-  );
+      const filePath = path.join(root, entry);
+      const details = await stat(filePath);
+      if (details.isFile()) filePaths.push(filePath);
+    }
+    if (filePaths.length === 0) {
+      throw new Error(
+        `${definition.metadata.name}: missing Preset-Local Behavior Test under ${root}`,
+      );
+    }
+    discovered.push(
+      ...filePaths.sort().map((filePath) => ({ definition, filePath })),
+    );
+  }
+  return discovered;
 }
 
 type SourceBackedOperation = Extract<

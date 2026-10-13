@@ -26,9 +26,11 @@ import {
   createFixtureEvidenceScheduler,
   runFixtureEvidenceGate,
   type FixtureEvidenceLifecycleEvent,
+  type FixtureEvidenceSchedulerFactory,
   type FixtureCommandRunner,
   type FixtureEvidenceStorage,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
+import { generatedTaskIds } from "./fixture-evidence.test-support.ts";
 
 function hasCause(error: unknown, expected: unknown): boolean {
   if (error === expected) return true;
@@ -385,6 +387,163 @@ void it(
 );
 
 void it(
+  "keeps active command output when an earlier generated scenario is queued at cancellation",
+  { timeout: 45_000 },
+  async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "fixture-cli-queued-cancellation-"),
+    );
+    const controller = new AbortController();
+    const cancellation = new Error(
+      "Fixture CLI cancelled while scenarios were queued",
+    );
+    const scenarios = await generatedScenariosFor("init");
+    const [firstScenario, secondScenario] = scenarios;
+    assert.ok(firstScenario);
+    assert.ok(secondScenario);
+
+    let firstSessionQueued!: () => void;
+    let secondSessionQueued!: () => void;
+    const firstSessionQueuedPromise = new Promise<void>((resolve) => {
+      firstSessionQueued = resolve;
+    });
+    const secondSessionQueuedPromise = new Promise<void>((resolve) => {
+      secondSessionQueued = resolve;
+    });
+    let acquisitionCount = 0;
+    const waitForCancellation = (
+      signal: AbortSignal | undefined,
+    ): Promise<never> =>
+      new Promise((_resolve, reject) => {
+        if (signal === undefined) {
+          reject(new Error("Fixture scheduler did not receive cancellation"));
+        } else if (signal.aborted) {
+          reject(signal.reason);
+        } else {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }
+      });
+    const schedulerFactory: FixtureEvidenceSchedulerFactory = () => ({
+      acquire: async (_resources, options) => {
+        acquisitionCount += 1;
+        if (acquisitionCount === 1) {
+          firstSessionQueued();
+          return await waitForCancellation(options?.cancelSignal);
+        }
+        if (acquisitionCount === 2) {
+          secondSessionQueued();
+          return () => undefined;
+        }
+        return await waitForCancellation(options?.cancelSignal);
+      },
+      run: async (_resources, execute) => await execute(),
+    });
+    let activeCommandOutputSeen = false;
+    const run: GeneratedCommandRunner = (command, args, options) => {
+      const scenarioIndex = scenarios.findIndex(
+        (scenario) => scenario.id === path.basename(options.cwd ?? ""),
+      );
+      if (command === "git") {
+        const result =
+          args[0] === "write-tree" ? { stdout: "a".repeat(40) } : {};
+        if (scenarioIndex === 0) return Promise.resolve(result);
+        const release =
+          scenarioIndex === 1
+            ? firstSessionQueuedPromise
+            : secondSessionQueuedPromise;
+        return release.then(() => result);
+      }
+      if (args.includes("--dry-run=json")) {
+        assert.ok(options.cwd);
+        return generatedTaskIds(options.cwd).then((taskIds) => ({
+          stdout: JSON.stringify({
+            tasks: taskIds.map((taskId) => ({ taskId })),
+          }),
+        }));
+      }
+      const pnpmIndex = args.indexOf("pnpm");
+      if (
+        command === "devcontainer" &&
+        args[0] === "exec" &&
+        pnpmIndex >= 0 &&
+        args[pnpmIndex + 1] === "run" &&
+        args[pnpmIndex + 2] === "check" &&
+        scenarioIndex === 1
+      ) {
+        const activeCommand = execa(
+          process.execPath,
+          [
+            "-e",
+            'process.stdout.write("fixture-active-command-output\\n"); setInterval(() => {}, 1_000)',
+          ],
+          {
+            cwd: options.cwd,
+            stdio: ["ignore", "pipe", "pipe"],
+            cancelSignal: options.cancelSignal ?? controller.signal,
+          },
+        );
+        activeCommand.stdout?.once("data", () => {
+          activeCommandOutputSeen = true;
+          controller.abort(cancellation);
+        });
+        return activeCommand;
+      }
+      return Promise.resolve({});
+    };
+
+    try {
+      let cliFailure: unknown;
+      await assert.rejects(
+        runGeneratedRegistryCli({
+          scenarioSet: "init",
+          environment: {
+            TEMPLATE_FIXTURE_WORKSPACE_DIR: workspaceRoot,
+          },
+          reporter: { info: () => undefined },
+          schedulerFactory,
+          cancelSignal: controller.signal,
+          run,
+        }),
+        (error: unknown) => {
+          cliFailure = error;
+          return true;
+        },
+      );
+      assert.equal(activeCommandOutputSeen, true);
+
+      const [workspaceName] = await readdir(workspaceRoot);
+      assert.ok(workspaceName);
+      const reportText = await readFile(
+        path.join(workspaceRoot, workspaceName, "fixture-failure.json"),
+        "utf8",
+      );
+      const report = JSON.parse(reportText) as {
+        readonly failure: {
+          readonly name: string;
+          readonly cause: { readonly message: string };
+          readonly errors: readonly unknown[];
+        };
+      };
+      const failureDescription = JSON.stringify(report.failure);
+      assert.equal(
+        report.failure.name,
+        "AggregateError",
+        `Failure report lost queued cancellation details: ${failureDescription}`,
+      );
+      assert.equal(report.failure.cause.message, cancellation.message);
+      assert.ok(report.failure.errors.length > 0);
+      assert.match(failureDescription, /fixture-active-command-output/u);
+      assert.ok(cliFailure instanceof AggregateError);
+      assert.equal(cliFailure.cause, cancellation);
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+void it(
   "preserves a readable generated workspace and failure report after CLI cancellation",
   { timeout: 180_000 },
   async () => {
@@ -431,7 +590,7 @@ void it(
           run,
         }),
         (error: unknown) => {
-          assert.equal(error, cancellation);
+          assert.equal(hasCause(error, cancellation), true);
           return true;
         },
       );
@@ -458,8 +617,10 @@ void it(
         "pnpm --filter @ykdz/template-checks check:generated",
       );
       assert.equal(report.generatedWorkspace, workspace);
-      assert.equal(report.failure.name, "Error");
       assert.match(report.failure.message, /\[REDACTED\]/u);
+      if (report.failure.name === "AggregateError") {
+        assert.match(reportText, /"errors": \[/u);
+      }
       assert.match(reportText, /native stdout contains \[REDACTED\]/u);
       assert.match(reportText, /native stderr contains \[REDACTED\]/u);
       assert.equal(reportText.includes(secret), false);

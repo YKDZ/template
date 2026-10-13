@@ -14,6 +14,7 @@ type TurboTask = {
   readonly cache?: boolean;
   readonly dependsOn?: readonly string[];
   readonly passThroughEnv?: readonly string[];
+  readonly tags?: readonly string[];
 };
 
 type TurboConfig = {
@@ -52,13 +53,21 @@ void describe("Template Repository native task model", () => {
     assert.strictEqual(turbo.tasks.build?.cache, false);
   });
 
-  void it("uses conventional root leaf tasks and one native check/fix invocation", async () => {
+  void it("exposes one public quality-gate runner and recursive light/heavy test scripts", async () => {
     const manifest = await readJson<Manifest>("package.json");
     const scripts = manifest.scripts;
 
     assert.strictEqual(
       scripts.check,
-      "pnpm run build && pnpm run boundaries && pnpm run check:toolchain:versions && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
+      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check",
+    );
+    assert.strictEqual(
+      scripts["check:heavy"],
+      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check:heavy",
+    );
+    assert.strictEqual(
+      scripts["check:full"],
+      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check:full",
     );
     assert.strictEqual(
       scripts.fix,
@@ -68,12 +77,35 @@ void describe("Template Repository native task model", () => {
       scripts.build,
       "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     );
+    for (const alias of [
+      "check:fixtures",
+      "check:focused",
+      "check:generated",
+      "check:deployment",
+      "check:templates",
+      "check:templates:boundary",
+      "check:templates:github-yaml",
+    ]) {
+      assert.strictEqual(scripts[alias], undefined, `root ${alias} alias`);
+    }
     assert.strictEqual(
-      scripts["check:focused"],
-      "turbo run check:focused --output-logs=errors-only --log-order=grouped",
+      scripts.boundaries,
+      "node --conditions=source --experimental-strip-types scripts/run-turbo-boundaries.ts",
     );
-    assert.ok(!scripts.check.includes("check:focused"));
-    assert.strictEqual(scripts.boundaries, "turbo boundaries --no-color");
+    assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
+    assert.strictEqual(
+      scripts["test:integration"],
+      "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/*.integration.test.ts'",
+    );
+    assert.strictEqual(
+      scripts["test:packed-publication"],
+      "node --conditions=source --experimental-strip-types scripts/run-packed-publication-test.ts",
+    );
+    assert.ok(
+      scripts.test?.includes(
+        "@ykdz/template-builtin-presets/node-test-count-reporter",
+      ),
+    );
 
     for (const task of [
       "format:check",
@@ -132,7 +164,8 @@ void describe("Template Repository native task model", () => {
         `root ${task} configuration`,
       );
     }
-    assert.strictEqual(tasks["//#build"], undefined);
+    assert.deepStrictEqual(tasks.build?.tags, ["quality:light"]);
+    assert.deepStrictEqual(tasks["//#build"]?.tags, ["work:preparation"]);
     assert.strictEqual(tasks.transit, undefined);
     assert.strictEqual(tasks["check:templates:shared-oxc"], undefined);
     assert.strictEqual(tasks["check:templates:static-source"], undefined);
@@ -144,10 +177,34 @@ void describe("Template Repository native task model", () => {
     assert.ok(!(tasks.test?.dependsOn ?? []).includes("build"));
     assert.ok(!(tasks["//#test"]?.dependsOn ?? []).includes("^build"));
     assert.ok(tasks["//#test"]?.dependsOn?.includes("@ykdz/template#build"));
-    assert.ok(tasks["check:templates"]?.dependsOn?.includes("//#test"));
+    assert.ok(!(tasks["check:templates"]?.dependsOn ?? []).includes("//#test"));
     assert.strictEqual(tasks["//#test:e2e"], undefined);
-    assert.ok(!(tasks["test:e2e"]?.dependsOn ?? []).includes("build"));
+    assert.ok(tasks["test:e2e"]?.dependsOn?.includes("build"));
     assert.strictEqual(tasks["test:e2e"]?.cache, false);
+    assert.deepStrictEqual(tasks.test?.tags, ["quality:light"]);
+    assert.deepStrictEqual(tasks["test:integration"]?.tags, ["quality:heavy"]);
+    assert.deepStrictEqual(tasks["test:packed-publication"]?.tags, [
+      "quality:heavy",
+    ]);
+    assert.deepStrictEqual(tasks["//#test"]?.tags, ["quality:light"]);
+    assert.deepStrictEqual(tasks["//#test:integration"]?.tags, [
+      "quality:heavy",
+    ]);
+    assert.deepStrictEqual(tasks["//#test:packed-publication"]?.tags, [
+      "quality:heavy",
+    ]);
+    assert.deepStrictEqual(tasks["check:evidence-health"]?.tags, [
+      "quality:conditional",
+    ]);
+    assert.strictEqual(tasks["check:evidence-health"]?.cache, false);
+    assert.ok(
+      tasks["//#test:integration"]?.dependsOn?.includes("@ykdz/template#build"),
+    );
+    assert.ok(
+      tasks["//#test:packed-publication"]?.dependsOn?.includes(
+        "@ykdz/template#build",
+      ),
+    );
     for (const task of [
       "check:fixtures",
       "check:generated",
@@ -277,9 +334,10 @@ void describe("Template Repository native task model", () => {
         "@ykdz/template-builtin-presets#check:templates:boundary",
       ),
     );
-    assert.ok(taskIds.includes("@ykdz/template-core#build"));
-    assert.ok(taskIds.includes("@ykdz/template-builtin-presets#build"));
-    assert.ok(taskIds.includes("@ykdz/template#build"));
+    assert.ok(!taskIds.includes("//#test"));
+    assert.ok(!taskIds.includes("@ykdz/template-core#build"));
+    assert.ok(!taskIds.includes("@ykdz/template-builtin-presets#build"));
+    assert.ok(!taskIds.includes("@ykdz/template#build"));
   });
 
   void it("builds every package without scheduling the recursive root build script", async () => {

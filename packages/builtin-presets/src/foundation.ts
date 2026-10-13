@@ -3279,7 +3279,7 @@ function foundationPlan(options: {
         ? {}
         : { "toolchain:prepare": "cargo --version" }),
       boundaries:
-        "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
+        "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
       ...(databasePreparation === undefined
         ? {}
         : databasePreparationCommands(databasePreparation)),
@@ -3593,6 +3593,12 @@ function foundationPlan(options: {
       replacements: {
         TOOLCHAIN_MIRROR_SLOT_MANIFEST: toolchainMirrorSlotManifest,
       },
+    },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/run-turbo-boundaries.ts",
+      to: "scripts/run-turbo-boundaries.ts",
     },
     {
       kind: "copyFile",

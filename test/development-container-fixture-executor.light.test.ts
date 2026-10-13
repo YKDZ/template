@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -17,13 +10,9 @@ import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { execa } from "execa";
 
-import {
-  generatedScenariosFor,
-  runGeneratedScenarioSet,
-} from "../packages/checks/src/check-generated-registry.ts";
+import { runGeneratedScenarioSet } from "../packages/checks/src/check-generated-registry.ts";
 import { executeGeneratedRootQuality } from "../packages/checks/src/fixture-evidence/gates/root-quality/index.ts";
 import {
   checkFixtureEvidenceHealth,
@@ -35,6 +24,10 @@ import {
   runFixtureEvidenceGate,
   type FixtureCommandRunner,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
+import {
+  registryCapabilityProbes,
+  requiredCapabilityProbeIdentities,
+} from "./development-container-fixture-executor.test-support.ts";
 type Command = {
   readonly command: string;
   readonly args: readonly string[];
@@ -64,59 +57,6 @@ function nestedDevcontainerCommand(args: readonly string[]): {
     command: args[commandIndex],
     args: args.slice(commandIndex + 1),
   };
-}
-
-async function generatedTaskIds(root: string): Promise<readonly string[]> {
-  const taskIds: string[] = [];
-  async function visit(directory: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(entryPath);
-      } else if (entry.name === "package.json") {
-        const manifest = JSON.parse(await readFile(entryPath, "utf8")) as {
-          readonly name: string;
-          readonly scripts?: Readonly<Record<string, string>>;
-        };
-        for (const taskName of Object.keys(manifest.scripts ?? {})) {
-          taskIds.push(
-            `${manifest.name.startsWith("@") ? manifest.name : "//"}#${taskName}`,
-          );
-        }
-      }
-    }
-  }
-  await visit(root);
-  return taskIds;
-}
-
-const requiredCapabilityProbeIdentities = new Set([
-  "cargo",
-  "github-cli",
-  "playwright",
-  "shellcheck",
-]);
-
-function registryCapabilityProbes(root: string) {
-  return builtInPresetRegistry
-    .all()
-    .flatMap(
-      (definition) =>
-        planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir: path.join(root, `probe-${definition.metadata.name}`),
-            defaultPackageScope: "fixture",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        }).developmentContainer.probes,
-    )
-    .filter((probe) => requiredCapabilityProbeIdentities.has(probe.identity));
 }
 
 void describe("Development Container Fixture Executor", () => {
@@ -825,69 +765,6 @@ void describe("Development Container Fixture Executor", () => {
     });
   });
 
-  for (const [caseName, diagnostic] of [
-    [
-      "unknown registry host",
-      "GET https://registry.example.com/v2/library/node: read ECONNRESET",
-    ],
-    [
-      "deterministic Dockerfile failure",
-      "registry-1.docker.io returned Dockerfile parse error on line 4",
-    ],
-    [
-      "lookalike Docker registry host",
-      "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
-    ],
-    [
-      "unrelated transport marker on another line",
-      "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
-    ],
-  ] as const) {
-    void it(`does not retry a ${caseName}`, async () => {
-      const projectDir = path.resolve(
-        `/fixture/non-retryable-${caseName.replaceAll(" ", "-")}`,
-      );
-      let upAttempts = 0;
-      const activity: Array<Record<string, unknown>> = [];
-      const session = createDevelopmentContainerFixtureSession({
-        projectDir,
-        probes: [],
-        recordActivity: (event) => {
-          activity.push(event);
-        },
-        run: async (command, args) => {
-          if (command === "devcontainer" && args[0] === "up") {
-            upAttempts += 1;
-            throw new Error(diagnostic);
-          }
-          return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
-        },
-      });
-
-      await assert.rejects(
-        session.execute(
-          async (run) =>
-            await run("pnpm", ["run", "check"], { cwd: projectDir }),
-        ),
-        (error) => error instanceof Error && error.message.includes(diagnostic),
-      );
-
-      assert.strictEqual(upAttempts, 1);
-      const preparationPhases = activity.filter(
-        (event) =>
-          event.type === "phase" && event.phase === "container-preparation",
-      );
-      assert.strictEqual(preparationPhases.length, 2);
-      assert.partialDeepStrictEqual(preparationPhases[0], {
-        outcome: "started",
-      });
-      assert.partialDeepStrictEqual(preparationPhases[1], {
-        outcome: "failed",
-        classification: "not-retryable",
-      });
-    });
-  }
-
   void it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
     const projectDir = path.resolve("/fixture/semantic-no-retry");
     let semanticAttempts = 0;
@@ -1552,364 +1429,6 @@ void describe("Development Container Fixture Executor", () => {
     assert.deepStrictEqual({ leases, releases }, { leases: 1, releases: 1 });
   });
 
-  void it("routes cold registry quality through one container lifecycle per scenario", async () => {
-    const workspace = path.resolve(
-      "/tmp/template-development-container-registry-test",
-    );
-    const calls: Command[] = [];
-    const containerGeneratedLockfiles = new Set<string>();
-    await rm(workspace, { recursive: true, force: true });
-    const evidenceRoot = path.join(workspace, ".test-evidence");
-    const ledger = new FileFixtureEvidenceActivityLedger({
-      root: path.join(workspace, ".test-activity"),
-      evidenceRoot,
-    });
-
-    try {
-      await runGeneratedScenarioSet("init", {
-        workspace,
-        evidence: {
-          storage: new FileFixtureEvidenceStorage(evidenceRoot),
-          readEnabled: false,
-          writeEnabled: false,
-          activity: {
-            ledger,
-            runId: "cold-registry-phases",
-            runAttempt: "1",
-          },
-        },
-        run: async (command, args, options) => {
-          calls.push({ command, args, cwd: options.cwd });
-          if (command === "git") {
-            if (
-              args[0] === "add" &&
-              containerGeneratedLockfiles.has(options.cwd)
-            ) {
-              throw new Error(
-                'error: open("pnpm-lock.yaml"): Permission denied',
-              );
-            }
-            return await execa(command, [...args], options);
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
-          if (command === "docker" && args[0] === "ps") {
-            return {
-              stdout: `${createHash("sha256").update(options.cwd).digest("hex").slice(0, 12)}\n`,
-            };
-          }
-          if (command !== "devcontainer" || args[0] !== "exec") return {};
-
-          const { command: nestedCommand, args: nestedArgs } =
-            nestedDevcontainerCommand(args);
-          if (
-            nestedCommand === "pnpm" &&
-            nestedArgs.includes("--lockfile-only")
-          ) {
-            await writeFile(
-              path.join(options.cwd, "pnpm-lock.yaml"),
-              "lockfileVersion: '9.0'\n",
-            );
-            containerGeneratedLockfiles.add(options.cwd);
-          }
-          if (nestedCommand === "git") {
-            if (
-              nestedArgs[0] !== "-c" ||
-              nestedArgs[1] !==
-                `safe.directory=/workspaces/${path.basename(options.cwd)}`
-            ) {
-              throw new Error(
-                `fatal: detected dubious ownership in repository at '/workspaces/${path.basename(options.cwd)}'`,
-              );
-            }
-            return await execa(nestedCommand, [...nestedArgs], options);
-          }
-          return {};
-        },
-      });
-
-      const scenarioCount = (await generatedScenariosFor("init")).length;
-      const records = await ledger.read();
-      const phases = records.flatMap((record) =>
-        record.event.type === "phase" ? [record.event] : [],
-      );
-      assert.strictEqual(
-        phases.filter((event) => event.outcome === "started").length,
-        scenarioCount * 5,
-      );
-      assert.strictEqual(
-        phases.filter((event) => event.outcome === "succeeded").length,
-        scenarioCount * 5,
-      );
-      assert.deepStrictEqual(
-        records.filter((record) => record.event.type === "retry"),
-        [],
-      );
-      const health = await checkFixtureEvidenceHealth({
-        ledger,
-        runId: "cold-registry-phases",
-        runAttempt: "1",
-        enabledScenarioSets: ["init"],
-      });
-      assert.strictEqual(health.healthy, true);
-      assert.strictEqual(health.stages.length, 1);
-      assert.partialDeepStrictEqual(health.stages[0], {
-        retries: 0,
-        recoveries: 0,
-      });
-      assert.strictEqual(
-        calls.filter(
-          ({ command, args }) => command === "devcontainer" && args[0] === "up",
-        ).length,
-        scenarioCount,
-      );
-      assert.strictEqual(
-        calls.filter(({ command, args }) => {
-          if (command !== "devcontainer" || args[0] !== "exec") return false;
-          const nested = nestedDevcontainerCommand(args);
-          const nestedGitArgs =
-            nested.args[0] === "-c" &&
-            nested.args[1]?.startsWith("safe.directory=")
-              ? nested.args.slice(2)
-              : nested.args;
-          return (
-            nested.command === "git" &&
-            (nestedGitArgs[0] === "add" || nestedGitArgs[0] === "write-tree")
-          );
-        }).length,
-        scenarioCount * 4,
-      );
-      const buildCacheSources = calls
-        .filter(
-          ({ command, args }) => command === "devcontainer" && args[0] === "up",
-        )
-        .map(({ args }) => {
-          const cacheFrom = args.indexOf("--cache-from");
-          assert.ok(cacheFrom > 0);
-          assert.ok(args.includes("--cache-to"));
-          return args[cacheFrom + 1];
-        });
-      assert.ok(new Set(buildCacheSources).size < buildCacheSources.length);
-      assert.strictEqual(
-        calls.filter(
-          ({ command, args }) => command === "docker" && args[0] === "ps",
-        ).length,
-        scenarioCount,
-      );
-      assert.strictEqual(
-        calls.filter(
-          ({ command, args }) => command === "docker" && args[0] === "rm",
-        ).length,
-        scenarioCount,
-      );
-      assert.strictEqual(
-        calls.some(
-          ({ command, args }) =>
-            command === "devcontainer" && args[0] === "down",
-        ),
-        false,
-      );
-      assert.deepStrictEqual(
-        calls.filter(({ command }) => command === "pnpm" || command === "node"),
-        [],
-      );
-      const capabilityProbes = registryCapabilityProbes(workspace);
-      assert.deepStrictEqual(
-        new Set(capabilityProbes.map((probe) => probe.identity)),
-        requiredCapabilityProbeIdentities,
-      );
-      assert.deepStrictEqual(
-        calls.filter(({ command }) =>
-          capabilityProbes.some((probe) => probe.command === command),
-        ),
-        [],
-      );
-      for (const probe of capabilityProbes) {
-        assert.strictEqual(
-          calls.some(({ command, args }) => {
-            if (command !== "devcontainer" || args[0] !== "exec") return false;
-            const nested = nestedDevcontainerCommand(args);
-            return (
-              nested.command === probe.command &&
-              JSON.stringify(nested.args) === JSON.stringify(probe.args ?? [])
-            );
-          }),
-          true,
-        );
-      }
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  for (const identity of requiredCapabilityProbeIdentities) {
-    void it(`does not let a host-prepared ${identity} capability mask its missing container probe`, async () => {
-      const projectDir = path.resolve(`/fixture/container-${identity}-missing`);
-      const probe = registryCapabilityProbes(projectDir).find(
-        (candidate) => candidate.identity === identity,
-      );
-      if (probe === undefined) {
-        throw new Error(`Expected registry-derived ${identity} probe`);
-      }
-      const calls: Command[] = [];
-      const session = createDevelopmentContainerFixtureSession({
-        projectDir,
-        probes: [probe],
-        run: async (command, args, options) => {
-          calls.push({ command, args, cwd: options.cwd });
-          if (command === probe.command) {
-            return { stdout: "host-prepared capability is available" };
-          }
-          if (command === "devcontainer" && args[0] === "exec") {
-            const nested = nestedDevcontainerCommand(args);
-            if (nested.command === probe.command) {
-              throw new Error("container capability is missing");
-            }
-          }
-          return {};
-        },
-      });
-
-      try {
-        await assert.rejects(
-          session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-          (error) =>
-            error instanceof Error &&
-            new RegExp(
-              `Development Container capability ${identity}.*container capability is missing`,
-              "u",
-            ).test(error.message),
-        );
-      } finally {
-        await session.close();
-      }
-
-      assert.strictEqual(
-        calls.some(({ command }) => command === probe.command),
-        false,
-      );
-      assert.strictEqual(
-        calls.some(
-          ({ command, args }) =>
-            command === "devcontainer" &&
-            args[0] === "exec" &&
-            nestedDevcontainerCommand(args).command === probe.command,
-        ),
-        true,
-      );
-      assert.strictEqual(
-        calls.some(({ args }) => args.includes("--lockfile-only")),
-        false,
-      );
-    });
-  }
-
-  void it("shares one cold container session across independent Root and Deployment gates", async () => {
-    const workspace = path.resolve(
-      "/tmp/template-development-container-shared-deployment-test",
-    );
-    const calls: Command[] = [];
-    const lifecycle: Array<{
-      readonly type: string;
-      readonly gate?: string;
-      readonly identity?: string;
-      readonly outcome?: string;
-      readonly scenario?: { readonly id: string };
-    }> = [];
-    await rm(workspace, { recursive: true, force: true });
-
-    try {
-      await runGeneratedScenarioSet("deployment", {
-        workspace,
-        containerEnvironment: {},
-        evidence: {
-          writeEnabled: false,
-          recordLifecycle: (event) => {
-            lifecycle.push(event);
-          },
-        },
-        run: async (command, args, options) => {
-          calls.push({ command, args, cwd: options.cwd });
-          if (command === "git") {
-            return await execa(command, [...args], options);
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
-          if (command === "docker" && args[0] === "ps") {
-            return {
-              stdout: `${createHash("sha256").update(options.cwd).digest("hex").slice(0, 12)}\n`,
-            };
-          }
-          if (command !== "devcontainer" || args[0] !== "exec") return {};
-          const { command: nestedCommand, args: nestedArgs } =
-            nestedDevcontainerCommand(args);
-          if (nestedCommand === "pnpm" && args.includes("--lockfile-only")) {
-            await writeFile(
-              path.join(options.cwd, "pnpm-lock.yaml"),
-              "lockfileVersion: '9.0'\n",
-            );
-          }
-          if (nestedCommand === "git") {
-            return await execa("git", [...nestedArgs], {
-              cwd: options.cwd,
-            });
-          }
-          return {};
-        },
-      });
-
-      const started = lifecycle.filter(
-        (event) => event.type === "execution" && event.outcome === "started",
-      );
-      const deploymentStarts = started.filter(
-        (event) => event.gate === "deployment-quality",
-      );
-      assert.ok(deploymentStarts.length > 0);
-      for (const deployment of deploymentStarts) {
-        const root = started.find(
-          (event) =>
-            event.gate === "generated-root-quality" &&
-            event.scenario?.id === deployment.scenario?.id,
-        );
-        assert.notStrictEqual(root, undefined);
-        assert.notStrictEqual(root?.identity, deployment.identity);
-        const projectDir = path.join(workspace, deployment.scenario!.id);
-        assert.strictEqual(
-          calls.filter(
-            ({ command, args, cwd }) =>
-              cwd === projectDir &&
-              command === "devcontainer" &&
-              args[0] === "up",
-          ).length,
-          1,
-        );
-        assert.strictEqual(
-          calls.filter(
-            ({ command, args, cwd }) =>
-              cwd === projectDir && command === "docker" && args[0] === "ps",
-          ).length,
-          1,
-        );
-      }
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
   void it("keeps dependency diagnostics primary when registry scenario cleanup fails", async () => {
     const workspace = path.resolve(
       "/tmp/template-development-container-registry-cleanup-failure-test",
@@ -1945,15 +1464,12 @@ void describe("Development Container Fixture Executor", () => {
 
       assert.ok(failure instanceof AggregateError);
       assert.match(
-        (failure as AggregateError).message,
+        failure.message,
         /^Dependency preparation failed during pnpm fetch.*fixture registry unavailable/u,
       );
-      assert.strictEqual(
-        (failure as AggregateError).cause,
-        (failure as AggregateError).errors[0],
-      );
-      assert.strictEqual((failure as AggregateError).errors.length, 3);
-      const cleanupFailure = (failure as AggregateError).errors[1];
+      assert.strictEqual(failure.cause, failure.errors[0]);
+      assert.strictEqual(failure.errors.length, 3);
+      const cleanupFailure = failure.errors[1];
       assert.ok(cleanupFailure instanceof AggregateError);
       assert.equal(
         (cleanupFailure.errors[0] as Error).message,
@@ -2119,15 +1635,12 @@ void describe("Development Container Fixture Executor", () => {
 
     assert.ok(failure instanceof AggregateError);
     assert.match(
-      (failure as AggregateError).message,
+      failure.message,
       /^Development Container capability docker-client.*permission denied/u,
     );
-    assert.strictEqual(
-      (failure as AggregateError).cause,
-      (failure as AggregateError).errors[0],
-    );
-    assert.strictEqual((failure as AggregateError).errors.length, 3);
-    const cleanupFailure = (failure as AggregateError).errors[1];
+    assert.strictEqual(failure.cause, failure.errors[0]);
+    assert.strictEqual(failure.errors.length, 3);
+    const cleanupFailure = failure.errors[1];
     assert.ok(cleanupFailure instanceof AggregateError);
     assert.equal(
       (cleanupFailure.errors[0] as Error).message,
@@ -2156,15 +1669,12 @@ void describe("Development Container Fixture Executor", () => {
 
     assert.ok(failure instanceof AggregateError);
     assert.match(
-      (failure as AggregateError).message,
+      failure.message,
       /^Development Container Fixture cleanup retry failed/u,
     );
-    assert.strictEqual(
-      (failure as AggregateError).cause,
-      (failure as AggregateError).errors[0],
-    );
-    assert.strictEqual((failure as AggregateError).errors.length, 2);
-    const firstCleanupFailure = (failure as AggregateError).errors[0];
+    assert.strictEqual(failure.cause, failure.errors[0]);
+    assert.strictEqual(failure.errors.length, 2);
+    const firstCleanupFailure = failure.errors[0];
     assert.ok(firstCleanupFailure instanceof AggregateError);
     assert.equal(
       (firstCleanupFailure.errors[0] as Error).message,
@@ -2225,64 +1735,6 @@ void describe("Development Container Fixture Executor", () => {
       [["docker", "ps", "-aq", "--filter", `label=${idLabel}`]],
     );
   });
-
-  for (const scenario of [
-    {
-      unavailable: "docker",
-      expected: /Docker is required for Generated Repository Fixture quality/u,
-      expectedCalls: [["docker", "version", "--format", "{{.Server.Version}}"]],
-    },
-    {
-      unavailable: "devcontainer",
-      expected:
-        /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
-      expectedCalls: [
-        ["docker", "version", "--format", "{{.Server.Version}}"],
-        ["devcontainer", "--version"],
-      ],
-    },
-  ] as const) {
-    void it(`reports a clear ${scenario.unavailable} prerequisite error without host fallback`, async () => {
-      const { unavailable, expected, expectedCalls } = scenario;
-      const projectDir = path.resolve(`/fixture/missing-${unavailable}`);
-      const calls: Command[] = [];
-      const session = createDevelopmentContainerFixtureSession({
-        projectDir,
-        probes: [],
-        run: async (command, args, options) => {
-          calls.push({ command, args, cwd: options.cwd });
-          if (command === unavailable) {
-            throw new Error(`${unavailable} executable not found`);
-          }
-          return {};
-        },
-      });
-
-      try {
-        await assert.rejects(
-          session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-          expected,
-        );
-      } finally {
-        await session.close();
-      }
-
-      assert.deepStrictEqual(
-        calls.map(({ command, args }) => [command, ...args]),
-        expectedCalls,
-      );
-      assert.strictEqual(
-        calls.some(({ command }) => command === "pnpm"),
-        false,
-      );
-      assert.strictEqual(
-        calls.some(
-          ({ command, args }) => command === "devcontainer" && args[0] === "up",
-        ),
-        false,
-      );
-    });
-  }
 
   void it("removes the labeled container and exactly the declared scenario volumes after a command failure", async () => {
     const projectDir = path.resolve("/fixture/command-failure");
@@ -2545,4 +1997,187 @@ void describe("Development Container Fixture Executor", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  for (const [caseName, diagnostic] of [
+    [
+      "unknown registry host",
+      "GET https://registry.example.com/v2/library/node: read ECONNRESET",
+    ],
+    [
+      "deterministic Dockerfile failure",
+      "registry-1.docker.io returned Dockerfile parse error on line 4",
+    ],
+    [
+      "lookalike Docker registry host",
+      "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
+    ],
+    [
+      "unrelated transport marker on another line",
+      "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
+    ],
+  ] as const) {
+    void it(`does not retry a ${caseName}`, async () => {
+      const projectDir = path.resolve(
+        `/fixture/non-retryable-${caseName.replaceAll(" ", "-")}`,
+      );
+      let upAttempts = 0;
+      const activity: Array<Record<string, unknown>> = [];
+      const session = createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        recordActivity: (event) => {
+          activity.push(event);
+        },
+        run: async (command, args) => {
+          if (command === "devcontainer" && args[0] === "up") {
+            upAttempts += 1;
+            throw new Error(diagnostic);
+          }
+          return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+        },
+      });
+
+      await assert.rejects(
+        session.execute(
+          async (run) =>
+            await run("pnpm", ["run", "check"], { cwd: projectDir }),
+        ),
+        (error) => error instanceof Error && error.message.includes(diagnostic),
+      );
+
+      assert.strictEqual(upAttempts, 1);
+      const preparationPhases = activity.filter(
+        (event) =>
+          event.type === "phase" && event.phase === "container-preparation",
+      );
+      assert.strictEqual(preparationPhases.length, 2);
+      assert.partialDeepStrictEqual(preparationPhases[0], {
+        outcome: "started",
+      });
+      assert.partialDeepStrictEqual(preparationPhases[1], {
+        outcome: "failed",
+        classification: "not-retryable",
+      });
+    });
+  }
+
+  for (const identity of requiredCapabilityProbeIdentities) {
+    void it(`does not let a host-prepared ${identity} capability mask its missing container probe`, async () => {
+      const projectDir = path.resolve(`/fixture/container-${identity}-missing`);
+      const probe = registryCapabilityProbes(projectDir).find(
+        (candidate) => candidate.identity === identity,
+      );
+      if (probe === undefined) {
+        throw new Error(`Expected registry-derived ${identity} probe`);
+      }
+      const calls: Command[] = [];
+      const session = createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [probe],
+        run: async (command, args, options) => {
+          calls.push({ command, args, cwd: options.cwd });
+          if (command === probe.command) {
+            return { stdout: "host-prepared capability is available" };
+          }
+          if (command === "devcontainer" && args[0] === "exec") {
+            const nested = nestedDevcontainerCommand(args);
+            if (nested.command === probe.command) {
+              throw new Error("container capability is missing");
+            }
+          }
+          return {};
+        },
+      });
+
+      try {
+        await assert.rejects(
+          session.run("pnpm", ["run", "check"], { cwd: projectDir }),
+          (error) =>
+            error instanceof Error &&
+            new RegExp(
+              `Development Container capability ${identity}.*container capability is missing`,
+              "u",
+            ).test(error.message),
+        );
+      } finally {
+        await session.close();
+      }
+
+      assert.strictEqual(
+        calls.some(({ command }) => command === probe.command),
+        false,
+      );
+      assert.strictEqual(
+        calls.some(
+          ({ command, args }) =>
+            command === "devcontainer" &&
+            args[0] === "exec" &&
+            nestedDevcontainerCommand(args).command === probe.command,
+        ),
+        true,
+      );
+      assert.strictEqual(
+        calls.some(({ args }) => args.includes("--lockfile-only")),
+        false,
+      );
+    });
+  }
+
+  for (const scenario of [
+    {
+      unavailable: "docker",
+      expected: /Docker is required for Generated Repository Fixture quality/u,
+      expectedCalls: [["docker", "version", "--format", "{{.Server.Version}}"]],
+    },
+    {
+      unavailable: "devcontainer",
+      expected:
+        /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
+      expectedCalls: [
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        ["devcontainer", "--version"],
+      ],
+    },
+  ] as const) {
+    void it(`reports a clear ${scenario.unavailable} prerequisite error without host fallback`, async () => {
+      const { unavailable, expected, expectedCalls } = scenario;
+      const projectDir = path.resolve(`/fixture/missing-${unavailable}`);
+      const calls: Command[] = [];
+      const session = createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        run: async (command, args, options) => {
+          calls.push({ command, args, cwd: options.cwd });
+          if (command === unavailable) {
+            throw new Error(`${unavailable} executable not found`);
+          }
+          return {};
+        },
+      });
+
+      try {
+        await assert.rejects(
+          session.run("pnpm", ["run", "check"], { cwd: projectDir }),
+          expected,
+        );
+      } finally {
+        await session.close();
+      }
+
+      assert.deepStrictEqual(
+        calls.map(({ command, args }) => [command, ...args]),
+        expectedCalls,
+      );
+      assert.strictEqual(
+        calls.some(({ command }) => command === "pnpm"),
+        false,
+      );
+      assert.strictEqual(
+        calls.some(
+          ({ command, args }) => command === "devcontainer" && args[0] === "up",
+        ),
+        false,
+      );
+    });
+  }
 });

@@ -21,9 +21,7 @@ import {
   prepareGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { execa } from "execa";
 
 import { vueHonoAppDefinition } from "./definition.ts";
 
@@ -52,20 +50,6 @@ async function treeBytes(
 
 void describe("vue-hono-app Built-in Preset Definition behavior", () => {
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
-
-  /**
-   * 运行夹具：真正渲染并执行生成仓库自身检查的现场必须携带发版快照的精确 Node 事实，
-   * 因为该检查要求根 engines.node 是精确三段版本。发版快照是固定副本里的既有真源，
-   * 这里不另立版本常量。
-   */
-  const runtimeToolchain = {
-    nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-      0,
-      releaseToolchainSnapshot.nodeVersion.indexOf("."),
-    ),
-    packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-    nodeVersion: releaseToolchainSnapshot.nodeVersion,
-  };
 
   void it("owns API and web contributions and derives their workspace link", async () => {
     assert.deepStrictEqual(
@@ -352,36 +336,6 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
       readFile(path.join(targetDir, "apps/web/playwright.config.ts"), "utf8"),
     );
   });
-
-  void it(
-    "generates a checked browser-backed multi-package workspace",
-    { timeout: 300_000 },
-    async () => {
-      const targetDir = path.join(
-        await mkdtemp(path.join(tmpdir(), "template-vue-hono-check-")),
-        "demo-stack",
-      );
-      const context = createGenerationContext({
-        targetDir,
-        defaultPackageScope: "demo",
-        toolchain: runtimeToolchain,
-      });
-      const plan = planGeneratedRepositoryInitialization({
-        definition: vueHonoAppDefinition,
-        context,
-      });
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...plan.operations],
-      });
-
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
-        cwd: targetDir,
-      });
-      await execa("pnpm", ["run", "check"], { cwd: targetDir });
-    },
-  );
 
   void it("replays the linked API identity through additions without guessing names or collections", async () => {
     const workspace = await mkdtemp(
