@@ -32,6 +32,7 @@ import {
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import { parse as parseYaml } from "yaml";
 
 import {
   arrayContaining,
@@ -222,8 +223,15 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       "pnpm --config.inject-workspace-packages=true --filter @demo/db-migrations deploy --prod /migration-deploy",
     );
     assertDoesNotContain(dockerfile, "--legacy");
-    assertContains(workspace, "injectWorkspacePackages: false");
-    assertContains(workspace, "syncInjectedDepsAfterScripts:\n  - build");
+    const workspaceConfiguration = parseYaml(workspace) as {
+      readonly injectWorkspacePackages: boolean;
+      readonly syncInjectedDepsAfterScripts: readonly string[];
+    };
+    assert.strictEqual(workspaceConfiguration.injectWorkspacePackages, false);
+    assert.deepStrictEqual(
+      workspaceConfiguration.syncInjectedDepsAfterScripts,
+      ["build"],
+    );
   });
 
   void it("derives cross-package contracts from Package identities instead of sibling paths", async () => {
@@ -711,9 +719,25 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       path.join(targetDir, ".github/dependabot.yml"),
       "utf8",
     );
-    assertContains(dependabot, "package-ecosystem: npm\n    directory: /");
-    assertContains(dependabot, "directory: /.devcontainer");
-    assertContains(dependabot, "package-ecosystem: docker\n    directory: /");
+    const dependabotConfiguration = parseYaml(dependabot) as {
+      readonly updates: readonly {
+        readonly "package-ecosystem": string;
+        readonly directory: string;
+      }[];
+    };
+    for (const [ecosystem, directory] of [
+      ["npm", "/"],
+      ["docker", "/"],
+      ["docker", "/.devcontainer"],
+    ] as const) {
+      assert.ok(
+        dependabotConfiguration.updates.some(
+          (update) =>
+            update["package-ecosystem"] === ecosystem &&
+            update.directory === directory,
+        ),
+      );
+    }
     assertContains(
       await readFile(path.join(targetDir, ".gitignore"), "utf8"),
       ".pnpm-store/",
@@ -734,21 +758,67 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       path.join(targetDir, ".github/workflows/check.yml"),
       "utf8",
     );
-    assertContains(checkWorkflow, "capability: deployment");
-    assertContains(checkWorkflow, "job_name: Deployment Check");
-    assertContains(checkWorkflow, "timeout_minutes: 45");
+    const workflow = parseYaml(checkWorkflow) as {
+      readonly jobs: {
+        readonly check: {
+          readonly strategy: {
+            readonly matrix: {
+              readonly include: readonly {
+                readonly capability: string;
+                readonly job_name: string;
+                readonly task_entrypoint: string;
+                readonly timeout_minutes: number;
+                readonly requires_docker: boolean;
+              }[];
+            };
+          };
+          readonly steps: readonly {
+            readonly name?: string;
+            readonly uses?: string;
+            readonly if?: string;
+            readonly env?: Readonly<Record<string, string>>;
+            readonly with?: Readonly<Record<string, string>>;
+            readonly run?: string;
+          }[];
+        };
+      };
+    };
+    const deploymentJob = workflow.jobs.check.strategy.matrix.include.find(
+      (job) => job.capability === "deployment",
+    );
+    assert.deepStrictEqual(deploymentJob, {
+      capability: "deployment",
+      job_name: "Deployment Check",
+      task_entrypoint: "pnpm run check:deployment",
+      timeout_minutes: 45,
+      requires_docker: true,
+    });
+    const steps = workflow.jobs.check.steps;
+    const buildxSetup = steps.find(({ uses }) =>
+      uses?.startsWith("docker/setup-buildx-action@"),
+    );
     assert.match(
-      checkWorkflow,
-      /uses: docker\/setup-buildx-action@[a-f0-9]{40} # v\d[^\n]*/u,
+      buildxSetup?.uses ?? "",
+      /^docker\/setup-buildx-action@[a-f0-9]{40}$/u,
     );
-    assertContains(checkWorkflow, "if: matrix.requires_docker");
-    assertContains(
-      checkWorkflow,
-      "PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+    assert.strictEqual(buildxSetup?.if, "matrix.requires_docker");
+    const diagnosticStaging = steps.find(
+      ({ name }) => name === "Stage Root Check diagnostics",
     );
+    assert.deepStrictEqual(diagnosticStaging?.env, {
+      PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+    });
     assertContains(
-      checkWorkflow,
-      "VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+      diagnosticStaging?.run ?? "",
+      "for diagnostic_directory in test-results playwright-report; do",
+    );
+    const diagnosticUpload = steps.find(
+      ({ name }) => name === "Upload Root Check diagnostics",
+    );
+    assert.strictEqual(
+      diagnosticUpload?.with?.path,
+      ".template-ci-diagnostics",
     );
     assertContains(
       checkWorkflow,
