@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -11,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -23,8 +25,15 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it, onTestFinished } from "vitest";
 
+import {
+  any,
+  arrayContaining,
+  assertContains,
+  assertMatchesPartial,
+  objectContaining,
+  stringContaining,
+} from "../../test-support/assertions.ts";
 import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
 
@@ -151,18 +160,21 @@ async function requireReady(repositoryRoot: string): Promise<void> {
     ["run", "publication:readiness", "--require-ready"],
     { cwd: repositoryRoot, reject: false },
   );
-  expect({
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-  }).toMatchObject({
-    exitCode: 0,
-    stdout: expect.stringContaining("npm publication readiness: ready"),
-  });
+  assertMatchesPartial(
+    {
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    },
+    {
+      exitCode: 0,
+      stdout: stringContaining("npm publication readiness: ready"),
+    },
+  );
 }
 
-describe("ts-cli publication owner-fact integration", () => {
-  it("starts with a fix-stable publication projection", async () => {
+void describe("ts-cli publication owner-fact integration", () => {
+  void it("starts with a fix-stable publication projection", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-fix-stability-"),
     );
@@ -205,547 +217,578 @@ describe("ts-cli publication owner-fact integration", () => {
         cwd: repositoryRoot,
       });
 
-      expect(
+      assert.strictEqual(
         (
           await execa("git", ["diff", beforeFix.stdout, afterFix.stdout], {
             cwd: repositoryRoot,
           })
         ).stdout,
-      ).toBe("");
+        "",
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("verifies the one packed artifact and records its installed CLI evidence", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-publication-artifact-"),
-    );
-    const repositoryRoot = path.join(workspace, "recorded-repository");
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: createGenerationContext({
-        targetDir: repositoryRoot,
-        defaultPackageScope: "seed",
-        toolchain: {
-          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-            0,
-            releaseToolchainSnapshot.nodeVersion.indexOf("."),
-          ),
-          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: repositoryRoot,
-        operations: [...plan.operations],
-      });
-      await execa("pnpm", ["install"], { cwd: repositoryRoot });
-      const rootManifest = JSON.parse(
-        await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
-      ) as { readonly engines?: { readonly node?: unknown } };
-      const publicManifest = JSON.parse(
-        await readFile(
-          path.join(repositoryRoot, "packages/cli/package.json"),
-          "utf8",
-        ),
-      ) as { readonly engines?: { readonly node?: unknown } };
-      expect(rootManifest.engines?.node).toBe(
-        releaseToolchainSnapshot.nodeVersion,
+  void it(
+    "verifies the one packed artifact and records its installed CLI evidence",
+    { timeout: 240_000 },
+    async (t) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-publication-artifact-"),
       );
-      expect(publicManifest.engines?.node).toBe(
-        `^${releaseToolchainSnapshot.nodeVersion}`,
-      );
-      await expect(
-        execa("pnpm", ["exec", "npm", "--version"], {
-          cwd: repositoryRoot,
+      const repositoryRoot = path.join(workspace, "recorded-repository");
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir: repositoryRoot,
+          defaultPackageScope: "seed",
+          toolchain: {
+            nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+              0,
+              releaseToolchainSnapshot.nodeVersion.indexOf("."),
+            ),
+            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
+          },
         }),
-      ).resolves.toMatchObject({ stdout: "12.2.0" });
-      const npmSession = path.join(workspace, "isolated-npm-session");
-      await mkdir(npmSession);
-      const userConfig = path.join(npmSession, "user-npmrc");
-      const globalConfig = path.join(npmSession, "global-npmrc");
-      const npmCache = path.join(npmSession, "npm-cache");
-      await Promise.all([
-        writeFile(
-          path.join(npmSession, ".npmrc"),
-          "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
-        ),
-        writeFile(userConfig, ""),
-        writeFile(globalConfig, ""),
-        mkdir(npmCache),
-      ]);
-      const sessionConfigArguments = [
-        `--prefix=${npmSession}`,
-        `--userconfig=${userConfig}`,
-        `--globalconfig=${globalConfig}`,
-        `--cache=${npmCache}`,
-      ];
-      await expect(
-        execa(
-          "pnpm",
-          [
-            "exec",
-            "npm",
-            ...sessionConfigArguments,
-            "config",
-            "get",
-            "fetch-retries",
-          ],
-          { cwd: repositoryRoot },
-        ),
-      ).resolves.toMatchObject({ stdout: "1" });
-      await expect(
-        execa(
-          "pnpm",
-          [
-            "exec",
-            "npm",
-            ...sessionConfigArguments,
-            "config",
-            "get",
-            "registry",
-          ],
-          { cwd: repositoryRoot },
-        ),
-      ).resolves.toMatchObject({ stdout: "https://registry.npmjs.org/" });
-      const consumer = path.join(npmSession, "consumer");
-      await mkdir(consumer);
-      await writeFile(
-        path.join(consumer, ".npmrc"),
-        "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
-      );
-      await expect(
-        execa(
-          "pnpm",
-          [
-            "exec",
-            "npm",
-            `--prefix=${consumer}`,
-            `--userconfig=${userConfig}`,
-            `--globalconfig=${globalConfig}`,
-            `--cache=${npmCache}`,
-            "config",
-            "get",
-            "fetch-retries",
-          ],
-          { cwd: repositoryRoot },
-        ),
-      ).resolves.toMatchObject({ stdout: "1" });
-      const artifactModule = (await import(
-        `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
-      )) as ArtifactModule;
-
-      const safeOutput = path.join(workspace, "safe-output");
-      await mkdir(safeOutput);
-      const safe = await artifactModule.verifyNpmPublicationArtifact({
-        repositoryRoot,
-        packagePath: "packages/cli",
-        outputDirectory: safeOutput,
-      });
-      expect(safe).toMatchObject({
-        kind: "blocked",
-        readiness: { mode: "safe-unconfigured" },
-      });
-      expect(await readdir(safeOutput)).toEqual([]);
-
-      const overlappingTarget = path.join(repositoryRoot, ".artifact-output");
-      await mkdir(overlappingTarget);
-      const overlappingOutput = path.join(workspace, "overlapping-output");
-      await symlink(overlappingTarget, overlappingOutput, "dir");
-      await expect(
-        artifactModule.verifyNpmPublicationArtifact({
-          repositoryRoot,
-          packagePath: "packages/cli",
-          outputDirectory: overlappingOutput,
-        }),
-      ).resolves.toMatchObject({
-        kind: "failed",
-        failure: { code: "artifact-output-invalid" },
       });
 
-      const candidateManifestPath = path.join(
-        repositoryRoot,
-        "packages/cli/package.json",
-      );
-      const publicIntentManifest = JSON.parse(
-        await readFile(candidateManifestPath, "utf8"),
-      ) as Record<string, unknown>;
-      publicIntentManifest.version = "1.0.0";
-      await writeJson(candidateManifestPath, publicIntentManifest);
-      const publicIntentOutput = path.join(workspace, "public-intent-output");
-      await mkdir(publicIntentOutput);
-      const publicIntent = await artifactModule.verifyNpmPublicationArtifact({
-        repositoryRoot,
-        packagePath: "packages/cli",
-        outputDirectory: publicIntentOutput,
-      });
-      expect(publicIntent).toMatchObject({
-        kind: "blocked",
-        readiness: { mode: "public-intent" },
-      });
-      expect(await readdir(publicIntentOutput)).toEqual([]);
-
-      await configurePublicOwnerFacts({
-        repositoryRoot,
-        packageName: "@publisher/tool",
-      });
-      const sourceManifestPath = path.join(
-        repositoryRoot,
-        "packages/cli/package.json",
-      );
-      const sourceManifest = JSON.parse(
-        await readFile(sourceManifestPath, "utf8"),
-      ) as Record<string, unknown>;
-      const scripts = sourceManifest.scripts as Record<string, string>;
-      const canonicalPrepack = scripts.prepack!;
-      scripts.prepack = "true";
-      await writeJson(sourceManifestPath, sourceManifest);
-
-      const invalidPrepackOutput = path.join(
-        workspace,
-        "invalid-prepack-output",
-      );
-      await mkdir(invalidPrepackOutput);
-      await expect(
-        artifactModule.verifyNpmPublicationArtifact({
-          repositoryRoot,
-          packagePath: "packages/cli",
-          outputDirectory: invalidPrepackOutput,
-        }),
-      ).resolves.toMatchObject({
-        kind: "blocked",
-        readiness: {
-          mode: "public-intent",
-          blockers: expect.arrayContaining([
-            expect.objectContaining({ code: "manifest-contract" }),
-          ]),
-        },
-      });
-      expect(await readdir(invalidPrepackOutput)).toEqual([]);
-
-      scripts.prepack = canonicalPrepack;
-      scripts.postbuild = `${scripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
-      scripts.postpack =
-        "node -e \"const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('package.json','utf8'));value.description='Changed after pack';fs.writeFileSync('package.json',JSON.stringify(value,null,2)+'\\n')\"";
-      await writeJson(sourceManifestPath, sourceManifest);
-
-      const mainSourcePath = path.join(
-        repositoryRoot,
-        "packages/cli/src/main.ts",
-      );
-      const mainSource = await readFile(mainSourcePath, "utf8");
-      await writeFile(
-        mainSourcePath,
-        mainSource.replace("/^[a-z]+$/", "/^[a-z ]+$/"),
-      );
-      const invalidBehaviorOutput = path.join(
-        workspace,
-        "invalid-behavior-output",
-      );
-      await mkdir(invalidBehaviorOutput);
-      await expect(
-        artifactModule.verifyNpmPublicationArtifact({
-          repositoryRoot,
-          packagePath: "packages/cli",
-          outputDirectory: invalidBehaviorOutput,
-        }),
-      ).resolves.toMatchObject({
-        kind: "failed",
-        failure: { code: "consumer-smoke-failed" },
-      });
-      expect(await readdir(invalidBehaviorOutput)).toEqual([]);
-      await writeFile(mainSourcePath, mainSource);
-      await rm(path.join(repositoryRoot, "packages/cli/.build-witness"), {
-        force: true,
-      });
-
-      const refreshedManifest = JSON.parse(
-        await readFile(sourceManifestPath, "utf8"),
-      ) as Record<string, unknown>;
-      refreshedManifest.description = "A focused command-line release tool.";
-      await writeJson(sourceManifestPath, refreshedManifest);
-
-      const outputDirectory = path.join(workspace, "verified-output");
-      await mkdir(outputDirectory);
-      const ambient = {
-        NPM_CONFIG_BIN_LINKS: process.env.NPM_CONFIG_BIN_LINKS,
-        npm_config_package_lock_only: process.env.npm_config_package_lock_only,
-        NPM_CONFIG_REGISTRY: process.env.NPM_CONFIG_REGISTRY,
-        NODE_OPTIONS: process.env.NODE_OPTIONS,
-      };
-      const restoreAmbient = () => {
-        for (const [key, value] of Object.entries(ambient)) {
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
-      };
-      onTestFinished(restoreAmbient);
-      process.env.NPM_CONFIG_BIN_LINKS = "false";
-      process.env.npm_config_package_lock_only = "true";
-      process.env.NPM_CONFIG_REGISTRY = "https://invalid.example/";
-      process.env.NODE_OPTIONS =
-        "--require=/definitely/missing-node-options.cjs";
-      let verified;
       try {
-        verified = await artifactModule.verifyNpmPublicationArtifact({
-          repositoryRoot,
-          packagePath: "packages/cli",
-          outputDirectory,
+        await renderNewProject({
+          targetRoot: repositoryRoot,
+          operations: [...plan.operations],
         });
-      } finally {
-        restoreAmbient();
-      }
-
-      expect(verified).toMatchObject({
-        kind: "verified",
-        receipt: {
-          schemaVersion: 1,
-          publication: {
-            packageName: "@publisher/tool",
-            version: "1.0.0",
-            commandName: "ship",
-          },
-          files: [
-            { path: "package/CHANGELOG.md" },
-            { path: "package/LICENSE" },
-            { path: "package/README.md" },
-            { path: "package/dist/cli-command-identity.js" },
-            { path: "package/dist/cli.js" },
-            { path: "package/dist/main.js" },
-            { path: "package/dist/standard-schema.js" },
-            { path: "package/package.json" },
-          ],
-          bin: {
-            path: "package/dist/cli.js",
-            shebang: "#!/usr/bin/env node",
-          },
-          smokes: [
-            { name: "runtime-import", stdout: "" },
-            { name: "help", stdout: expect.stringContaining("lookup") },
-            { name: "version", stdout: "ship 1.0.0\n" },
-            { name: "lookup", stdout: expect.stringContaining("Ada Lovelace") },
-            { name: "schema", stdout: expect.stringContaining("notFound") },
-          ],
-        },
-      });
-      if (verified?.kind !== "verified")
-        throw new Error("Expected verified artifact");
-      const artifactBytes = await readFile(verified.artifactPath);
-      const digest = createHash("sha512").update(artifactBytes).digest();
-      expect(verified.receipt.artifact).toMatchObject({
-        size: artifactBytes.byteLength,
-        integrity: `sha512-${digest.toString("base64")}`,
-      });
-      expect(await readFile(verified.checksumPath, "utf8")).toBe(
-        `${digest.toString("hex")}  ${path.basename(verified.artifactPath)}\n`,
-      );
-      expect(JSON.parse(await readFile(verified.receiptPath, "utf8"))).toEqual(
-        verified.receipt,
-      );
-      expect(await readdir(outputDirectory)).toEqual(
-        [
-          "SHA512SUMS",
-          path.basename(verified.artifactPath),
-          "verified-publication-artifact.json",
-        ].toSorted(),
-      );
-      expect(
-        await readFile(
-          path.join(repositoryRoot, "packages/cli/.build-witness"),
-          "utf8",
-        ),
-      ).toBe("build\n");
-      expect(
-        JSON.parse(await readFile(sourceManifestPath, "utf8")),
-      ).toMatchObject({ description: "Changed after pack" });
-      expect(verified.receipt.packedManifest).toMatchObject({
-        description: "A focused command-line release tool.",
-      });
-
-      const callerOutput = path.join(workspace, "caller-output");
-      await mkdir(callerOutput);
-      const caller = await execa(
-        "pnpm",
-        [
-          "run",
-          "publication:artifact",
-          "--",
-          "--output-directory",
-          callerOutput,
-        ],
-        { cwd: repositoryRoot, reject: false },
-      );
-      expect(caller.exitCode).toBe(0);
-      expect(caller.stdout).toContain("npm publication artifact: verified");
-      expect(await readdir(callerOutput)).toHaveLength(3);
-
-      const workflowOutput = path.join(workspace, "workflow-output");
-      await mkdir(workflowOutput);
-      const workflowCaller = await execa(
-        "pnpm",
-        ["run", "publication:artifact"],
-        {
-          cwd: repositoryRoot,
-          env: {
-            ...process.env,
-            PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: workflowOutput,
-          },
-          reject: false,
-        },
-      );
-      expect(workflowCaller.exitCode).toBe(0);
-      expect(await readdir(workflowOutput)).toHaveLength(3);
-
-      const invalidCaller = await execa(
-        "pnpm",
-        ["run", "publication:artifact", "--", "--output-directory"],
-        { cwd: repositoryRoot, reject: false },
-      );
-      expect(invalidCaller).toMatchObject({
-        exitCode: 2,
-        stderr: expect.stringContaining("ERROR publication-artifact-usage"),
-      });
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 240_000);
-
-  it("keeps scoped and unscoped public identity ready across a later addition", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-publication-owner-facts-"),
-    );
-    const repositoryRoot = path.join(workspace, "recorded-repository");
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: createGenerationContext({
-        targetDir: repositoryRoot,
-        defaultPackageScope: "seed",
-        toolchain: {
-          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-            0,
-            releaseToolchainSnapshot.nodeVersion.indexOf("."),
-          ),
-          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
-    const initialCandidate = plan.blueprint.packages.find(
-      (item) => item.path === "packages/cli",
-    )!;
-    const initialGenerationRecord = plan.generationRecord.packages.find(
-      (item) => item.path === "packages/cli",
-    )!;
-
-    try {
-      await renderNewProject({
-        targetRoot: repositoryRoot,
-        operations: [...plan.operations],
-      });
-      await execa("pnpm", ["install"], { cwd: repositoryRoot });
-
-      await configurePublicOwnerFacts({
-        repositoryRoot,
-        packageName: "@publisher/tool",
-      });
-      await requireReady(repositoryRoot);
-
-      await configurePublicOwnerFacts({
-        repositoryRoot,
-        packageName: "tool",
-      });
-      await requireReady(repositoryRoot);
-
-      const publicManifestPath = path.join(
-        repositoryRoot,
-        "packages/cli/package.json",
-      );
-      const publicManifestBytes = await readFile(publicManifestPath, "utf8");
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsLibDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(repositoryRoot),
-        packageLeafName: "lib",
-      });
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot: repositoryRoot,
-        ...addition.projectProjections,
-      });
-      if (!applied.ok) throw new Error(JSON.stringify(applied, null, 2));
-
-      expect(await readFile(publicManifestPath, "utf8")).toBe(
-        publicManifestBytes,
-      );
-      expect(
-        JSON.parse(
+        await execa("pnpm", ["install"], { cwd: repositoryRoot });
+        const rootManifest = JSON.parse(
+          await readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+        ) as { readonly engines?: { readonly node?: unknown } };
+        const publicManifest = JSON.parse(
           await readFile(
-            path.join(repositoryRoot, "packages/lib/package.json"),
+            path.join(repositoryRoot, "packages/cli/package.json"),
             "utf8",
           ),
-        ),
-      ).toMatchObject({ name: "@seed/lib", private: true });
-      const blueprint = JSON.parse(
-        await readFile(
-          path.join(repositoryRoot, ".template/blueprint.json"),
-          "utf8",
-        ),
-      ) as { readonly packages: readonly Record<string, unknown>[] };
-      expect(
-        blueprint.packages.find((item) => item.path === "packages/cli"),
-      ).toEqual({ ...initialCandidate, name: "tool" });
-      const generation = JSON.parse(
-        await readFile(
-          path.join(repositoryRoot, ".template/generation.json"),
-          "utf8",
-        ),
-      ) as {
-        readonly repositoryName: string;
-        readonly defaultPackageScope: string;
-        readonly packages: readonly Record<string, unknown>[];
-      };
-      expect(generation).toMatchObject({
-        repositoryName: "recorded-repository",
-        defaultPackageScope: "seed",
-      });
-      expect(
-        generation.packages.find((item) => item.path === "packages/cli"),
-      ).toEqual(initialGenerationRecord);
+        ) as { readonly engines?: { readonly node?: unknown } };
+        assert.strictEqual(
+          rootManifest.engines?.node,
+          releaseToolchainSnapshot.nodeVersion,
+        );
+        assert.strictEqual(
+          publicManifest.engines?.node,
+          `^${releaseToolchainSnapshot.nodeVersion}`,
+        );
+        assertMatchesPartial(
+          await execa("pnpm", ["exec", "npm", "--version"], {
+            cwd: repositoryRoot,
+          }),
+          { stdout: "12.2.0" },
+        );
+        const npmSession = path.join(workspace, "isolated-npm-session");
+        await mkdir(npmSession);
+        const userConfig = path.join(npmSession, "user-npmrc");
+        const globalConfig = path.join(npmSession, "global-npmrc");
+        const npmCache = path.join(npmSession, "npm-cache");
+        await Promise.all([
+          writeFile(
+            path.join(npmSession, ".npmrc"),
+            "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
+          ),
+          writeFile(userConfig, ""),
+          writeFile(globalConfig, ""),
+          mkdir(npmCache),
+        ]);
+        const sessionConfigArguments = [
+          `--prefix=${npmSession}`,
+          `--userconfig=${userConfig}`,
+          `--globalconfig=${globalConfig}`,
+          `--cache=${npmCache}`,
+        ];
+        assertMatchesPartial(
+          await execa(
+            "pnpm",
+            [
+              "exec",
+              "npm",
+              ...sessionConfigArguments,
+              "config",
+              "get",
+              "fetch-retries",
+            ],
+            { cwd: repositoryRoot },
+          ),
+          { stdout: "1" },
+        );
+        assertMatchesPartial(
+          await execa(
+            "pnpm",
+            [
+              "exec",
+              "npm",
+              ...sessionConfigArguments,
+              "config",
+              "get",
+              "registry",
+            ],
+            { cwd: repositoryRoot },
+          ),
+          { stdout: "https://registry.npmjs.org/" },
+        );
+        const consumer = path.join(npmSession, "consumer");
+        await mkdir(consumer);
+        await writeFile(
+          path.join(consumer, ".npmrc"),
+          "registry=https://registry.npmjs.org/\nfetch-retries=1\n",
+        );
+        assertMatchesPartial(
+          await execa(
+            "pnpm",
+            [
+              "exec",
+              "npm",
+              `--prefix=${consumer}`,
+              `--userconfig=${userConfig}`,
+              `--globalconfig=${globalConfig}`,
+              `--cache=${npmCache}`,
+              "config",
+              "get",
+              "fetch-retries",
+            ],
+            { cwd: repositoryRoot },
+          ),
+          { stdout: "1" },
+        );
+        const artifactModule = (await import(
+          `${pathToFileURL(path.join(repositoryRoot, "scripts/npm-publication/artifact.ts")).href}?test=${crypto.randomUUID()}`
+        )) as ArtifactModule;
 
-      await execa("pnpm", ["install", "--no-frozen-lockfile"], {
-        cwd: repositoryRoot,
+        const safeOutput = path.join(workspace, "safe-output");
+        await mkdir(safeOutput);
+        const safe = await artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory: safeOutput,
+        });
+        assertMatchesPartial(safe, {
+          kind: "blocked",
+          readiness: { mode: "safe-unconfigured" },
+        });
+        assert.deepStrictEqual(await readdir(safeOutput), []);
+
+        const overlappingTarget = path.join(repositoryRoot, ".artifact-output");
+        await mkdir(overlappingTarget);
+        const overlappingOutput = path.join(workspace, "overlapping-output");
+        await symlink(overlappingTarget, overlappingOutput, "dir");
+        assertMatchesPartial(
+          await artifactModule.verifyNpmPublicationArtifact({
+            repositoryRoot,
+            packagePath: "packages/cli",
+            outputDirectory: overlappingOutput,
+          }),
+          {
+            kind: "failed",
+            failure: { code: "artifact-output-invalid" },
+          },
+        );
+
+        const candidateManifestPath = path.join(
+          repositoryRoot,
+          "packages/cli/package.json",
+        );
+        const publicIntentManifest = JSON.parse(
+          await readFile(candidateManifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        publicIntentManifest.version = "1.0.0";
+        await writeJson(candidateManifestPath, publicIntentManifest);
+        const publicIntentOutput = path.join(workspace, "public-intent-output");
+        await mkdir(publicIntentOutput);
+        const publicIntent = await artifactModule.verifyNpmPublicationArtifact({
+          repositoryRoot,
+          packagePath: "packages/cli",
+          outputDirectory: publicIntentOutput,
+        });
+        assertMatchesPartial(publicIntent, {
+          kind: "blocked",
+          readiness: { mode: "public-intent" },
+        });
+        assert.deepStrictEqual(await readdir(publicIntentOutput), []);
+
+        await configurePublicOwnerFacts({
+          repositoryRoot,
+          packageName: "@publisher/tool",
+        });
+        const sourceManifestPath = path.join(
+          repositoryRoot,
+          "packages/cli/package.json",
+        );
+        const sourceManifest = JSON.parse(
+          await readFile(sourceManifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        const scripts = sourceManifest.scripts as Record<string, string>;
+        const canonicalPrepack = scripts.prepack!;
+        scripts.prepack = "true";
+        await writeJson(sourceManifestPath, sourceManifest);
+
+        const invalidPrepackOutput = path.join(
+          workspace,
+          "invalid-prepack-output",
+        );
+        await mkdir(invalidPrepackOutput);
+        assertMatchesPartial(
+          await artifactModule.verifyNpmPublicationArtifact({
+            repositoryRoot,
+            packagePath: "packages/cli",
+            outputDirectory: invalidPrepackOutput,
+          }),
+          {
+            kind: "blocked",
+            readiness: {
+              mode: "public-intent",
+              blockers: arrayContaining([
+                objectContaining({ code: "manifest-contract" }),
+              ]),
+            },
+          },
+        );
+        assert.deepStrictEqual(await readdir(invalidPrepackOutput), []);
+
+        scripts.prepack = canonicalPrepack;
+        scripts.postbuild = `${scripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
+        scripts.postpack =
+          "node -e \"const fs=require('node:fs');const value=JSON.parse(fs.readFileSync('package.json','utf8'));value.description='Changed after pack';fs.writeFileSync('package.json',JSON.stringify(value,null,2)+'\\n')\"";
+        await writeJson(sourceManifestPath, sourceManifest);
+
+        const mainSourcePath = path.join(
+          repositoryRoot,
+          "packages/cli/src/main.ts",
+        );
+        const mainSource = await readFile(mainSourcePath, "utf8");
+        await writeFile(
+          mainSourcePath,
+          mainSource.replace("/^[a-z]+$/", "/^[a-z ]+$/"),
+        );
+        const invalidBehaviorOutput = path.join(
+          workspace,
+          "invalid-behavior-output",
+        );
+        await mkdir(invalidBehaviorOutput);
+        assertMatchesPartial(
+          await artifactModule.verifyNpmPublicationArtifact({
+            repositoryRoot,
+            packagePath: "packages/cli",
+            outputDirectory: invalidBehaviorOutput,
+          }),
+          {
+            kind: "failed",
+            failure: { code: "consumer-smoke-failed" },
+          },
+        );
+        assert.deepStrictEqual(await readdir(invalidBehaviorOutput), []);
+        await writeFile(mainSourcePath, mainSource);
+        await rm(path.join(repositoryRoot, "packages/cli/.build-witness"), {
+          force: true,
+        });
+
+        const refreshedManifest = JSON.parse(
+          await readFile(sourceManifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        refreshedManifest.description = "A focused command-line release tool.";
+        await writeJson(sourceManifestPath, refreshedManifest);
+
+        const outputDirectory = path.join(workspace, "verified-output");
+        await mkdir(outputDirectory);
+        const ambient = {
+          NPM_CONFIG_BIN_LINKS: process.env.NPM_CONFIG_BIN_LINKS,
+          npm_config_package_lock_only:
+            process.env.npm_config_package_lock_only,
+          NPM_CONFIG_REGISTRY: process.env.NPM_CONFIG_REGISTRY,
+          NODE_OPTIONS: process.env.NODE_OPTIONS,
+        };
+        const restoreAmbient = () => {
+          for (const [key, value] of Object.entries(ambient)) {
+            if (value === undefined) delete process.env[key];
+            else process.env[key] = value;
+          }
+        };
+        t.after(restoreAmbient);
+        process.env.NPM_CONFIG_BIN_LINKS = "false";
+        process.env.npm_config_package_lock_only = "true";
+        process.env.NPM_CONFIG_REGISTRY = "https://invalid.example/";
+        process.env.NODE_OPTIONS =
+          "--require=/definitely/missing-node-options.cjs";
+        let verified;
+        try {
+          verified = await artifactModule.verifyNpmPublicationArtifact({
+            repositoryRoot,
+            packagePath: "packages/cli",
+            outputDirectory,
+          });
+        } finally {
+          restoreAmbient();
+        }
+
+        assertMatchesPartial(verified, {
+          kind: "verified",
+          receipt: {
+            schemaVersion: 1,
+            publication: {
+              packageName: "@publisher/tool",
+              version: "1.0.0",
+              commandName: "ship",
+            },
+            files: [
+              { path: "package/CHANGELOG.md" },
+              { path: "package/LICENSE" },
+              { path: "package/README.md" },
+              { path: "package/dist/cli-command-identity.js" },
+              { path: "package/dist/cli.js" },
+              { path: "package/dist/main.js" },
+              { path: "package/dist/standard-schema.js" },
+              { path: "package/package.json" },
+            ],
+            bin: {
+              path: "package/dist/cli.js",
+              shebang: "#!/usr/bin/env node",
+            },
+            smokes: [
+              { name: "runtime-import", stdout: "" },
+              { name: "help", stdout: stringContaining("lookup") },
+              { name: "version", stdout: "ship 1.0.0\n" },
+              { name: "lookup", stdout: stringContaining("Ada Lovelace") },
+              { name: "schema", stdout: stringContaining("notFound") },
+            ],
+          },
+        });
+        if (verified?.kind !== "verified")
+          throw new Error("Expected verified artifact");
+        const artifactBytes = await readFile(verified.artifactPath);
+        const digest = createHash("sha512").update(artifactBytes).digest();
+        assertMatchesPartial(verified.receipt.artifact, {
+          size: artifactBytes.byteLength,
+          integrity: `sha512-${digest.toString("base64")}`,
+        });
+        assert.strictEqual(
+          await readFile(verified.checksumPath, "utf8"),
+          `${digest.toString("hex")}  ${path.basename(verified.artifactPath)}\n`,
+        );
+        assert.deepStrictEqual(
+          JSON.parse(await readFile(verified.receiptPath, "utf8")),
+          verified.receipt,
+        );
+        assert.deepStrictEqual(
+          await readdir(outputDirectory),
+          [
+            "SHA512SUMS",
+            path.basename(verified.artifactPath),
+            "verified-publication-artifact.json",
+          ].toSorted(),
+        );
+        assert.strictEqual(
+          await readFile(
+            path.join(repositoryRoot, "packages/cli/.build-witness"),
+            "utf8",
+          ),
+          "build\n",
+        );
+        assertMatchesPartial(
+          JSON.parse(await readFile(sourceManifestPath, "utf8")),
+          { description: "Changed after pack" },
+        );
+        assertMatchesPartial(verified.receipt.packedManifest, {
+          description: "A focused command-line release tool.",
+        });
+
+        const callerOutput = path.join(workspace, "caller-output");
+        await mkdir(callerOutput);
+        const caller = await execa(
+          "pnpm",
+          [
+            "run",
+            "publication:artifact",
+            "--",
+            "--output-directory",
+            callerOutput,
+          ],
+          { cwd: repositoryRoot, reject: false },
+        );
+        assert.strictEqual(caller.exitCode, 0);
+        assertContains(caller.stdout, "npm publication artifact: verified");
+        assert.strictEqual((await readdir(callerOutput)).length, 3);
+
+        const workflowOutput = path.join(workspace, "workflow-output");
+        await mkdir(workflowOutput);
+        const workflowCaller = await execa(
+          "pnpm",
+          ["run", "publication:artifact"],
+          {
+            cwd: repositoryRoot,
+            env: {
+              ...process.env,
+              PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: workflowOutput,
+            },
+            reject: false,
+          },
+        );
+        assert.strictEqual(workflowCaller.exitCode, 0);
+        assert.strictEqual((await readdir(workflowOutput)).length, 3);
+
+        const invalidCaller = await execa(
+          "pnpm",
+          ["run", "publication:artifact", "--", "--output-directory"],
+          { cwd: repositoryRoot, reject: false },
+        );
+        assertMatchesPartial(invalidCaller, {
+          exitCode: 2,
+          stderr: stringContaining("ERROR publication-artifact-usage"),
+        });
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it(
+    "keeps scoped and unscoped public identity ready across a later addition",
+    { timeout: 240_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-publication-owner-facts-"),
+      );
+      const repositoryRoot = path.join(workspace, "recorded-repository");
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsCliDefinition,
+        context: createGenerationContext({
+          targetDir: repositoryRoot,
+          defaultPackageScope: "seed",
+          toolchain: {
+            nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+              0,
+              releaseToolchainSnapshot.nodeVersion.indexOf("."),
+            ),
+            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+            nodeVersion: releaseToolchainSnapshot.nodeVersion,
+          },
+        }),
       });
-      await requireReady(repositoryRoot);
-      const rootCandidateManifest = JSON.parse(
-        await readFile(publicManifestPath, "utf8"),
-      ) as Record<string, unknown>;
-      const rootCandidateScripts = rootCandidateManifest.scripts as Record<
-        string,
-        string
-      >;
-      rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
-      await writeJson(publicManifestPath, rootCandidateManifest);
-      const rootCheck = await execa("pnpm", ["run", "check"], {
-        cwd: repositoryRoot,
-        reject: false,
-      });
-      expect(
-        rootCheck.exitCode,
-        `${rootCheck.stdout}\n${rootCheck.stderr}`,
-      ).toBe(0);
-      await expect(
-        stat(path.join(repositoryRoot, "packages/lib/dist/index.js")),
-      ).resolves.toMatchObject({ mode: expect.any(Number) });
-      await expect(
-        readFile(
-          path.join(repositoryRoot, "packages/cli/.build-witness"),
-          "utf8",
-        ),
-      ).resolves.toBe("build\n");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 240_000);
+      const initialCandidate = plan.blueprint.packages.find(
+        (item) => item.path === "packages/cli",
+      )!;
+      const initialGenerationRecord = plan.generationRecord.packages.find(
+        (item) => item.path === "packages/cli",
+      )!;
+
+      try {
+        await renderNewProject({
+          targetRoot: repositoryRoot,
+          operations: [...plan.operations],
+        });
+        await execa("pnpm", ["install"], { cwd: repositoryRoot });
+
+        await configurePublicOwnerFacts({
+          repositoryRoot,
+          packageName: "@publisher/tool",
+        });
+        await requireReady(repositoryRoot);
+
+        await configurePublicOwnerFacts({
+          repositoryRoot,
+          packageName: "tool",
+        });
+        await requireReady(repositoryRoot);
+
+        const publicManifestPath = path.join(
+          repositoryRoot,
+          "packages/cli/package.json",
+        );
+        const publicManifestBytes = await readFile(publicManifestPath, "utf8");
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: tsLibDefinition,
+          localTemplateMetadata: loadLocalTemplateMetadata(repositoryRoot),
+          packageLeafName: "lib",
+        });
+        const applied = await reconcileAndApplyProjectProjections({
+          targetRoot: repositoryRoot,
+          ...addition.projectProjections,
+        });
+        if (!applied.ok) throw new Error(JSON.stringify(applied, null, 2));
+
+        assert.strictEqual(
+          await readFile(publicManifestPath, "utf8"),
+          publicManifestBytes,
+        );
+        assertMatchesPartial(
+          JSON.parse(
+            await readFile(
+              path.join(repositoryRoot, "packages/lib/package.json"),
+              "utf8",
+            ),
+          ),
+          { name: "@seed/lib", private: true },
+        );
+        const blueprint = JSON.parse(
+          await readFile(
+            path.join(repositoryRoot, ".template/blueprint.json"),
+            "utf8",
+          ),
+        ) as { readonly packages: readonly Record<string, unknown>[] };
+        assert.deepStrictEqual(
+          blueprint.packages.find((item) => item.path === "packages/cli"),
+          { ...initialCandidate, name: "tool" },
+        );
+        const generation = JSON.parse(
+          await readFile(
+            path.join(repositoryRoot, ".template/generation.json"),
+            "utf8",
+          ),
+        ) as {
+          readonly repositoryName: string;
+          readonly defaultPackageScope: string;
+          readonly packages: readonly Record<string, unknown>[];
+        };
+        assertMatchesPartial(generation, {
+          repositoryName: "recorded-repository",
+          defaultPackageScope: "seed",
+        });
+        assert.deepStrictEqual(
+          generation.packages.find((item) => item.path === "packages/cli"),
+          initialGenerationRecord,
+        );
+
+        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+          cwd: repositoryRoot,
+        });
+        await requireReady(repositoryRoot);
+        const rootCandidateManifest = JSON.parse(
+          await readFile(publicManifestPath, "utf8"),
+        ) as Record<string, unknown>;
+        const rootCandidateScripts = rootCandidateManifest.scripts as Record<
+          string,
+          string
+        >;
+        rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
+        await writeJson(publicManifestPath, rootCandidateManifest);
+        const rootCheck = await execa("pnpm", ["run", "check"], {
+          cwd: repositoryRoot,
+          reject: false,
+        });
+        assert.strictEqual(
+          rootCheck.exitCode,
+          0,
+          `${rootCheck.stdout}\n${rootCheck.stderr}`,
+        );
+        assertMatchesPartial(
+          await stat(path.join(repositoryRoot, "packages/lib/dist/index.js")),
+          { mode: any(Number) },
+        );
+        assert.strictEqual(
+          await readFile(
+            path.join(repositoryRoot, "packages/cli/.build-witness"),
+            "utf8",
+          ),
+          "build\n",
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 });

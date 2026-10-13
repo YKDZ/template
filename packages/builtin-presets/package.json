@@ -23,7 +23,7 @@
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
     "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . && oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts",
     "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix && oxlint --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts --fix",
-    "test": "vitest run --config vitest.config.ts --reporter=agent --silent=passed-only --maxWorkers=1",
+    "test": "node --conditions=source --import=./test-support/setup.ts --test --test-concurrency=1 --test-timeout=60000 src/*/behavior.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
@@ -70,7 +70,6 @@
     "vike": "catalog:",
     "vike-vue": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:",
     "vue": "catalog:",
     "vue-tsc": "catalog:"
   },

@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, describe, it } from "node:test";
 
 import {
   createGenerationContext,
@@ -13,8 +15,18 @@ import {
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { afterEach, describe, expect, it } from "vitest";
 
+import {
+  arrayContaining,
+  assertContains,
+  assertDoesNotMatch,
+  assertDoesNotContain,
+  assertLacksProperty,
+  assertMatches,
+  assertMatchesPartial,
+  objectContaining,
+  stringContaining,
+} from "../../test-support/assertions.ts";
 import { rustBinDefinition } from "./definition.ts";
 
 /** Preset 必须投影上下文提供的 Rust 事实，而不是自带版本常量。 */
@@ -55,9 +67,12 @@ function requireReadyInitialization(
   return preparation;
 }
 
-describe("rust-bin Built-in Preset Definition behavior", () => {
-  it("adds worker as @scope/worker with matching Cargo name and default path", () => {
-    expect(rustBinDefinition.initialPrimaryPackage.defaultLeafName).toBe("app");
+void describe("rust-bin Built-in Preset Definition behavior", () => {
+  void it("adds worker as @scope/worker with matching Cargo name and default path", () => {
+    assert.strictEqual(
+      rustBinDefinition.initialPrimaryPackage.defaultLeafName,
+      "app",
+    );
     const context = {
       targetDir: "/tmp/demo",
       repositoryName: "demo",
@@ -77,25 +92,26 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       packagePath: packagePath,
     });
 
-    expect(packagePath).toBe("packages/worker");
-    expect(contribution?.definition).toEqual({
+    assert.strictEqual(packagePath, "packages/worker");
+    assert.deepStrictEqual(contribution?.definition, {
       name: "@scope/worker",
       path: "packages/worker",
       role: "native-package",
     });
-    expect(
+    assertMatchesPartial(
       contribution?.operations.find(
         (operation) =>
           operation.kind === "writeTextTemplate" &&
           operation.from === "Cargo.toml",
       ),
-    ).toMatchObject({
-      to: "packages/worker/Cargo.toml",
-      replacements: { CARGO_PACKAGE_NAME: "worker" },
-    });
+      {
+        to: "packages/worker/Cargo.toml",
+        replacements: { CARGO_PACKAGE_NAME: "worker" },
+      },
+    );
   });
 
-  it("keeps initialization and Package Addition Rust contributions aligned", () => {
+  void it("keeps initialization and Package Addition Rust contributions aligned", () => {
     const context = {
       targetDir: "/tmp/worker",
       repositoryName: "worker",
@@ -123,10 +139,10 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       packagePath: "packages/app",
     });
 
-    expect(addition).toEqual(initialization);
+    assert.deepStrictEqual(addition, initialization);
   });
 
-  it("owns a native package contribution with conventional scripts, fixes, and toolchain maintenance", () => {
+  void it("owns a native package contribution with conventional scripts, fixes, and toolchain maintenance", () => {
     const context = {
       targetDir: "/tmp/Demo Rust!",
       repositoryName: "Demo Rust!",
@@ -150,18 +166,18 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         },
       });
 
-    expect(rustBinDefinition.metadata).toEqual({
+    assert.deepStrictEqual(rustBinDefinition.metadata, {
       name: "rust-bin",
       title: "Rust 二进制程序",
       description:
         "包含 rustfmt、clippy 和 cargo 测试的 Rust 原生二进制工作区。",
     });
-    expect(contribution.definition).toEqual({
+    assert.deepStrictEqual(contribution.definition, {
       name: "@demo/app",
       path: "packages/app",
       role: "native-package",
     });
-    expect(contribution.manifest).toMatchObject({
+    assertMatchesPartial(contribution.manifest, {
       name: "@demo/app",
       scripts: {
         "format:check": "cargo fmt --all -- --check",
@@ -169,24 +185,25 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         test: "cargo test --workspace",
       },
     });
-    expect(contribution.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+    assertMatches(
+      contribution.operations,
+      arrayContaining([
+        objectContaining({
           kind: "copyFile",
           from: "src/main.rs",
           to: "packages/app/src/main.rs",
         }),
-        expect.objectContaining({
+        objectContaining({
           kind: "copyFile",
           from: "rustfmt.toml",
           to: "packages/app/rustfmt.toml",
         }),
       ]),
     );
-    expect(contribution).not.toHaveProperty("checks");
-    expect(contribution).not.toHaveProperty("fixes");
-    expect(contribution).not.toHaveProperty("foundationOperations");
-    expect(contribution.foundation).toMatchObject({
+    assertLacksProperty(contribution, "checks");
+    assertLacksProperty(contribution, "fixes");
+    assertLacksProperty(contribution, "foundationOperations");
+    assertMatchesPartial(contribution.foundation, {
       toolchains: {
         rust: {
           toolchain: contextToolchain.rustVersion,
@@ -206,7 +223,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     });
   });
 
-  it("declares its source-backed Rust Development Container Tool Layer", () => {
+  void it("declares its source-backed Rust Development Container Tool Layer", () => {
     const context = {
       targetDir: "/tmp/demo-rust",
       repositoryName: "demo-rust",
@@ -232,8 +249,8 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
       contribution.foundation.developmentContainerToolLayers ?? [];
     const rustChannel = contribution.foundation.toolchains.rust!.toolchain;
 
-    expect(rustChannel).toBe(contextToolchain.rustVersion);
-    expect(layer).toMatchObject({
+    assert.strictEqual(rustChannel, contextToolchain.rustVersion);
+    assertMatchesPartial(layer, {
       identity: "rust",
       requires: ["node-pnpm"],
       buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustChannel }],
@@ -256,9 +273,8 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         { identity: "rustc", command: "rustc", args: ["--version"] },
       ],
     });
-    expect(
+    assert.strictEqual(
       resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
-    ).toBe(
       path.resolve(
         import.meta.dirname,
         "../../templates/rust-bin/devcontainer/rust.Dockerfile",
@@ -266,7 +282,7 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     );
   });
 
-  it("ignores package-local Cargo target output in generated repositories", async () => {
+  void it("ignores package-local Cargo target output in generated repositories", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-rust-ignore-")),
       "demo-rust",
@@ -291,14 +307,15 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
     await writeFile(path.join(targetDir, artifactPath), "generated");
     await execa("git", ["init", "--quiet"], { cwd: targetDir });
 
-    await expect(
-      execa("git", ["check-ignore", "--no-index", artifactPath], {
+    assertMatchesPartial(
+      await execa("git", ["check-ignore", "--no-index", artifactPath], {
         cwd: targetDir,
       }),
-    ).resolves.toMatchObject({ stdout: artifactPath });
+      { stdout: artifactPath },
+    );
   });
 
-  it("建立仓库根 Rust 声明时逐字使用发版快照版本而非浮动 stable", async () => {
+  void it("建立仓库根 Rust 声明时逐字使用发版快照版本而非浮动 stable", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-rust-snapshot-"),
     );
@@ -316,10 +333,11 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
           "to" in operation && operation.to === "rust-toolchain.toml",
       );
 
-      expect(preparation.context.toolchain.rustVersion).toBe(
+      assert.strictEqual(
+        preparation.context.toolchain.rustVersion,
         snapshotRustVersion,
       );
-      expect(rootToolchainOperation).toMatchObject({
+      assertMatchesPartial(rootToolchainOperation, {
         kind: "writeTextTemplate",
         source: rustBinDefinition.source,
         from: "rust-toolchain.toml",
@@ -331,250 +349,278 @@ describe("rust-bin Built-in Preset Definition behavior", () => {
         operations: [...preparation.plan.operations],
       });
 
-      expect(
+      assert.strictEqual(
         await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-      ).toBe(
         `[toolchain]\nchannel = "${snapshotRustVersion}"\ncomponents = ["rustfmt", "clippy"]\n`,
       );
-      expect(
+      assert.strictEqual(
         JSON.parse(
           await readFile(
             path.join(targetDir, ".devcontainer/devcontainer.json"),
             "utf8",
           ),
         ).build.args.RUST_TOOLCHAIN,
-      ).toBe(snapshotRustVersion);
-      expect(
+        snapshotRustVersion,
+      );
+      assert.deepStrictEqual(
         JSON.parse(
           await readFile(
             path.join(targetDir, ".template/environment-needs.json"),
             "utf8",
           ),
         ).check,
-      ).toEqual([
-        {
-          kind: "rust-toolchain",
-          owner: { kind: "package-boundary", path: "packages/app" },
-          toolchain: "stable",
-        },
-      ]);
+        [
+          {
+            kind: "rust-toolchain",
+            owner: { kind: "package-boundary", path: "packages/app" },
+            toolchain: "stable",
+          },
+        ],
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("orders one Rustup preparation before generated Cargo tasks", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-rust-check-"),
-    );
-    cleanupDirectories.push(workspace);
-    const targetDir = path.join(workspace, "demo-rust");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: renderToolchain,
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: rustBinDefinition,
-      context,
-    });
+  void it(
+    "orders one Rustup preparation before generated Cargo tasks",
+    { timeout: 180_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-rust-check-"),
+      );
+      cleanupDirectories.push(workspace);
+      const targetDir = path.join(workspace, "demo-rust");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: renderToolchain,
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: rustBinDefinition,
+        context,
+      });
 
-    expect(plan).not.toHaveProperty("checks");
-    expect(plan).not.toHaveProperty("fixes");
+      assertLacksProperty(plan, "checks");
+      assertLacksProperty(plan, "fixes");
 
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
 
-    expect(
-      await readFile(path.join(targetDir, "packages/app/Cargo.toml"), "utf8"),
-    ).toContain('name = "app"');
-    expect(
-      await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-    ).toContain(`channel = "${renderToolchain.rustVersion}"`);
-    const devcontainerDockerfile = await readFile(
-      path.join(targetDir, ".devcontainer/Dockerfile"),
-      "utf8",
-    );
-    expect(devcontainerDockerfile).toContain(
-      '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
-    );
-    expect(devcontainerDockerfile).toContain(
-      'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
-    );
-    expect(devcontainerDockerfile).toContain(
-      'corepack enable --install-directory "$PNPM_HOME"',
-    );
-    expect(devcontainerDockerfile).not.toContain("corepack prepare");
-    expect(devcontainerDockerfile).not.toContain("PACKAGE_MANAGER_PIN");
-    expect(devcontainerDockerfile).not.toContain("COREPACK_HOME");
-    expect(devcontainerDockerfile).toContain(
-      "git config --system init.defaultBranch main",
-    );
-    expect(
-      JSON.parse(
-        await readFile(
-          path.join(targetDir, ".devcontainer/devcontainer.json"),
-          "utf8",
+      assertContains(
+        await readFile(path.join(targetDir, "packages/app/Cargo.toml"), "utf8"),
+        'name = "app"',
+      );
+      assertContains(
+        await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
+        `channel = "${renderToolchain.rustVersion}"`,
+      );
+      const devcontainerDockerfile = await readFile(
+        path.join(targetDir, ".devcontainer/Dockerfile"),
+        "utf8",
+      );
+      assertContains(
+        devcontainerDockerfile,
+        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+      );
+      assertContains(
+        devcontainerDockerfile,
+        'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
+      );
+      assertContains(
+        devcontainerDockerfile,
+        'corepack enable --install-directory "$PNPM_HOME"',
+      );
+      assertDoesNotContain(devcontainerDockerfile, "corepack prepare");
+      assertDoesNotContain(devcontainerDockerfile, "PACKAGE_MANAGER_PIN");
+      assertDoesNotContain(devcontainerDockerfile, "COREPACK_HOME");
+      assertContains(
+        devcontainerDockerfile,
+        "git config --system init.defaultBranch main",
+      );
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, ".devcontainer/devcontainer.json"),
+            "utf8",
+          ),
         ),
-      ),
-    ).toMatchObject({
-      build: { args: { RUST_TOOLCHAIN: renderToolchain.rustVersion } },
-      mounts: [
         {
-          type: "volume",
-          source: "${devcontainerId}-pnpm-store",
-          target: "/pnpm/store",
+          build: { args: { RUST_TOOLCHAIN: renderToolchain.rustVersion } },
+          mounts: [
+            {
+              type: "volume",
+              source: "${devcontainerId}-pnpm-store",
+              target: "/pnpm/store",
+            },
+            {
+              type: "volume",
+              source: "${devcontainerId}-cargo-git",
+              target: "/usr/local/cargo/git",
+            },
+            {
+              type: "volume",
+              source: "${devcontainerId}-cargo-registry",
+              target: "/usr/local/cargo/registry",
+            },
+          ],
         },
-        {
-          type: "volume",
-          source: "${devcontainerId}-cargo-git",
-          target: "/usr/local/cargo/git",
-        },
-        {
-          type: "volume",
-          source: "${devcontainerId}-cargo-registry",
-          target: "/usr/local/cargo/registry",
-        },
-      ],
-    });
-    expect(
-      JSON.parse(
-        await readFile(
-          path.join(targetDir, ".devcontainer/devcontainer.json"),
-          "utf8",
+      );
+      assertDoesNotMatch(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, ".devcontainer/devcontainer.json"),
+            "utf8",
+          ),
+        ).mounts,
+        arrayContaining([
+          objectContaining({
+            target: stringContaining("${containerWorkspaceFolder}"),
+          }),
+        ]),
+      );
+      assertContains(
+        await readFile(path.join(targetDir, ".gitignore"), "utf8"),
+        ".pnpm-store/",
+      );
+      assertContains(
+        await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8"),
+        'directory: "/packages/app"',
+      );
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(path.join(targetDir, "package.json"), "utf8"),
         ),
-      ).mounts,
-    ).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          target: expect.stringContaining("${containerWorkspaceFolder}"),
+        {
+          scripts: {
+            check: stringContaining("test"),
+            fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+            "toolchain:prepare": "cargo --version",
+          },
+        },
+      );
+      assertMatchesPartial(
+        JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
+        {
+          globalPassThroughEnv: [
+            "CARGO_HOME",
+            "RUSTUP_HOME",
+            "RUSTUP_TOOLCHAIN",
+          ],
+          tasks: { "//#toolchain:prepare": { cache: false } },
+        },
+      );
+
+      await mkdir(path.join(targetDir, "apps/discovered"), { recursive: true });
+      await writeFile(
+        path.join(targetDir, "apps/discovered/package.json"),
+        JSON.stringify({
+          name: "@demo/discovered",
+          private: true,
+          scripts: {
+            lint: 'node --eval "process.exit(0)"',
+            build: 'node --eval "process.exit(0)"',
+            test: 'node --eval "process.exit(0)"',
+            "test:e2e": 'node --eval "process.exit(0)"',
+          },
         }),
-      ]),
-    );
-    expect(
-      await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-    ).toContain(".pnpm-store/");
-    expect(
-      await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8"),
-    ).toContain('directory: "/packages/app"');
-    expect(
-      JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
-    ).toMatchObject({
-      scripts: {
-        check: expect.stringContaining("test"),
-        fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
-        "toolchain:prepare": "cargo --version",
-      },
-    });
-    expect(
-      JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-    ).toMatchObject({
-      globalPassThroughEnv: ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
-      tasks: { "//#toolchain:prepare": { cache: false } },
-    });
+      );
 
-    await mkdir(path.join(targetDir, "apps/discovered"), { recursive: true });
-    await writeFile(
-      path.join(targetDir, "apps/discovered/package.json"),
-      JSON.stringify({
-        name: "@demo/discovered",
-        private: true,
-        scripts: {
-          lint: 'node --eval "process.exit(0)"',
-          build: 'node --eval "process.exit(0)"',
-          test: 'node --eval "process.exit(0)"',
-          "test:e2e": 'node --eval "process.exit(0)"',
-        },
-      }),
-    );
-
-    await execa("pnpm", ["install"], { cwd: targetDir });
-    const dryRun = await execa(
-      "pnpm",
-      [
-        "exec",
-        "turbo",
-        "run",
-        "format:check",
-        "lint",
-        "typecheck",
-        "build",
-        "test",
-        "test:e2e",
-        "format:write",
-        "--dry-run=json",
-      ],
-      { cwd: targetDir },
-    );
-    const tasks = (
-      JSON.parse(dryRun.stdout) as {
-        tasks: readonly {
-          taskId: string;
-          dependencies: readonly string[];
-          resolvedTaskDefinition: { cache: boolean };
-        }[];
-      }
-    ).tasks;
-    const taskIds = tasks.map((task) => task.taskId);
-    expect(taskIds).toEqual(
-      expect.arrayContaining([
-        "//#format:check",
-        "//#lint",
-        "//#typecheck",
-        "//#toolchain:prepare",
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      const dryRun = await execa(
+        "pnpm",
+        [
+          "exec",
+          "turbo",
+          "run",
+          "format:check",
+          "lint",
+          "typecheck",
+          "build",
+          "test",
+          "test:e2e",
+          "format:write",
+          "--dry-run=json",
+        ],
+        { cwd: targetDir },
+      );
+      const tasks = (
+        JSON.parse(dryRun.stdout) as {
+          tasks: readonly {
+            taskId: string;
+            dependencies: readonly string[];
+            resolvedTaskDefinition: { cache: boolean };
+          }[];
+        }
+      ).tasks;
+      const taskIds = tasks.map((task) => task.taskId);
+      assertMatches(
+        taskIds,
+        arrayContaining([
+          "//#format:check",
+          "//#lint",
+          "//#typecheck",
+          "//#toolchain:prepare",
+          "@demo/app#format:check",
+          "@demo/app#format:write",
+          "@demo/app#lint",
+          "@demo/app#test",
+          "@demo/discovered#lint",
+          "@demo/discovered#build",
+          "@demo/discovered#test",
+          "@demo/discovered#test:e2e",
+        ]),
+      );
+      assertDoesNotContain(
+        tasks.find((task) => task.taskId === "@demo/discovered#test")
+          ?.dependencies,
+        "@demo/discovered#build",
+      );
+      assert.strictEqual(
+        tasks.find((task) => task.taskId === "@demo/discovered#lint")
+          ?.resolvedTaskDefinition.cache,
+        true,
+      );
+      assert.strictEqual(
+        tasks.find((task) => task.taskId === "@demo/discovered#test:e2e")
+          ?.resolvedTaskDefinition.cache,
+        false,
+      );
+      assert.strictEqual(
+        tasks.filter((task) => task.taskId === "//#toolchain:prepare").length,
+        1,
+      );
+      assert.strictEqual(
+        tasks.find((task) => task.taskId === "//#toolchain:prepare")
+          ?.resolvedTaskDefinition.cache,
+        false,
+      );
+      for (const taskId of [
         "@demo/app#format:check",
-        "@demo/app#format:write",
         "@demo/app#lint",
         "@demo/app#test",
-        "@demo/discovered#lint",
-        "@demo/discovered#build",
-        "@demo/discovered#test",
-        "@demo/discovered#test:e2e",
-      ]),
-    );
-    expect(
-      tasks.find((task) => task.taskId === "@demo/discovered#test")
-        ?.dependencies,
-    ).not.toContain("@demo/discovered#build");
-    expect(
-      tasks.find((task) => task.taskId === "@demo/discovered#lint")
-        ?.resolvedTaskDefinition.cache,
-    ).toBe(true);
-    expect(
-      tasks.find((task) => task.taskId === "@demo/discovered#test:e2e")
-        ?.resolvedTaskDefinition.cache,
-    ).toBe(false);
-    expect(
-      tasks.filter((task) => task.taskId === "//#toolchain:prepare"),
-    ).toHaveLength(1);
-    expect(
-      tasks.find((task) => task.taskId === "//#toolchain:prepare")
-        ?.resolvedTaskDefinition.cache,
-    ).toBe(false);
-    for (const taskId of [
-      "@demo/app#format:check",
-      "@demo/app#lint",
-      "@demo/app#test",
-      "@demo/app#format:write",
-    ]) {
-      expect(
-        tasks.find((task) => task.taskId === taskId)?.dependencies,
-      ).toContain("//#toolchain:prepare");
-    }
-    expect(
-      tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
-    ).toContain("//#lint:fix");
-    expect(taskIds).not.toContain("@demo/app#lint:fix");
-    const cargoHome = path.join(workspace, "cargo-home");
-    const rustupHome = path.join(workspace, "rustup-home");
-    const fakeBin = path.join(workspace, "fake-bin");
-    await mkdir(fakeBin, { recursive: true });
-    // 用临时 Cargo 记录器跳过工具链下载，只验证生成 Root Check 的真实任务顺序。
-    await writeFile(
-      path.join(fakeBin, "cargo"),
-      `#!/bin/sh
+        "@demo/app#format:write",
+      ]) {
+        assertContains(
+          tasks.find((task) => task.taskId === taskId)?.dependencies,
+          "//#toolchain:prepare",
+        );
+      }
+      assertContains(
+        tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
+        "//#lint:fix",
+      );
+      assertDoesNotContain(taskIds, "@demo/app#lint:fix");
+      const cargoHome = path.join(workspace, "cargo-home");
+      const rustupHome = path.join(workspace, "rustup-home");
+      const fakeBin = path.join(workspace, "fake-bin");
+      await mkdir(fakeBin, { recursive: true });
+      // 用临时 Cargo 记录器跳过工具链下载，只验证生成 Root Check 的真实任务顺序。
+      await writeFile(
+        path.join(fakeBin, "cargo"),
+        `#!/bin/sh
 set -eu
 state="${"$"}{CARGO_HOME:?}/template-cargo-calls"
 prepared="${"$"}{CARGO_HOME:?}/template-toolchain-prepared"
@@ -594,135 +640,160 @@ if [ ! -e "${"$"}prepared" ]; then
 fi
 printf '%s\\n' "${"$"}*" >> "${"$"}state"
 `,
-      { mode: 0o755 },
-    );
-    await execa("pnpm", ["run", "check"], {
-      cwd: targetDir,
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
-        CARGO_HOME: cargoHome,
-        RUSTUP_HOME: rustupHome,
-      },
-    });
-    const cargoCalls = (
-      await readFile(path.join(cargoHome, "template-cargo-calls"), "utf8")
-    )
-      .trim()
-      .split("\n");
-    expect(cargoCalls.filter((call) => call === "--version")).toHaveLength(1);
-    expect(cargoCalls).toEqual(
-      expect.arrayContaining([
-        "fmt --all -- --check",
-        "clippy --workspace --all-targets -- -D warnings",
-        "test --workspace",
-      ]),
-    );
-  }, 180_000);
-
-  it("discovers a manual package and runs source tests independently of failed builds", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-rust-discovery-")),
-      "demo-rust",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: renderToolchain,
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: rustBinDefinition,
-      context,
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
-    await mkdir(path.join(targetDir, "apps/controlled"), { recursive: true });
-    await writeFile(
-      path.join(targetDir, "apps/controlled/package.json"),
-      JSON.stringify({
-        name: "@demo/controlled",
-        private: true,
-        scripts: {
-          build: "node --eval \"console.error('BUILD_FAIL'); process.exit(1)\"",
-          lint: "node --eval \"console.error('LINT_FAIL'); process.exit(1)\"",
-          test: "node --eval \"require('node:fs').writeFileSync('TEST_EXECUTED', 'yes')\"",
+        { mode: 0o755 },
+      );
+      await execa("pnpm", ["run", "check"], {
+        cwd: targetDir,
+        env: {
+          ...process.env,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+          CARGO_HOME: cargoHome,
+          RUSTUP_HOME: rustupHome,
         },
-      }),
-    );
-    await execa("pnpm", ["install"], { cwd: targetDir });
+      });
+      const cargoCalls = (
+        await readFile(path.join(cargoHome, "template-cargo-calls"), "utf8")
+      )
+        .trim()
+        .split("\n");
+      assert.strictEqual(
+        cargoCalls.filter((call) => call === "--version").length,
+        1,
+      );
+      assertMatches(
+        cargoCalls,
+        arrayContaining([
+          "fmt --all -- --check",
+          "clippy --workspace --all-targets -- -D warnings",
+          "test --workspace",
+        ]),
+      );
+    },
+  );
 
-    const failure = await execa("pnpm", ["run", "check"], {
-      cwd: targetDir,
-      reject: false,
-    });
+  void it(
+    "discovers a manual package and runs source tests independently of failed builds",
+    { timeout: 180_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-rust-discovery-")),
+        "demo-rust",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: renderToolchain,
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: rustBinDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await mkdir(path.join(targetDir, "apps/controlled"), { recursive: true });
+      await writeFile(
+        path.join(targetDir, "apps/controlled/package.json"),
+        JSON.stringify({
+          name: "@demo/controlled",
+          private: true,
+          scripts: {
+            build:
+              "node --eval \"console.error('BUILD_FAIL'); process.exit(1)\"",
+            lint: "node --eval \"console.error('LINT_FAIL'); process.exit(1)\"",
+            test: "node --eval \"require('node:fs').writeFileSync('TEST_EXECUTED', 'yes')\"",
+          },
+        }),
+      );
+      await execa("pnpm", ["install"], { cwd: targetDir });
 
-    expect(failure.exitCode).not.toBe(0);
-    expect(`${failure.stdout}\n${failure.stderr}`).toContain(
-      "@demo/controlled#build",
-    );
-    expect(`${failure.stdout}\n${failure.stderr}`).toContain(
-      "@demo/controlled#lint",
-    );
-    expect(`${failure.stdout}\n${failure.stderr}`).toContain("BUILD_FAIL");
-    expect(`${failure.stdout}\n${failure.stderr}`).toContain("LINT_FAIL");
-    await expect(
-      readFile(path.join(targetDir, "apps/controlled/TEST_EXECUTED"), "utf8"),
-    ).resolves.toBe("yes");
-  }, 180_000);
+      const failure = await execa("pnpm", ["run", "check"], {
+        cwd: targetDir,
+        reject: false,
+      });
 
-  it("keeps root-owned formatting inputs separate from package pollution", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-rust-root-scope-")),
-      "demo-rust",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: renderToolchain,
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: rustBinDefinition,
-      context,
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
-    await writeFile(path.join(targetDir, "TODO.md"), "# root\n\n-   text\n");
-    await writeFile(
-      path.join(targetDir, ".devcontainer/devcontainer.json"),
-      '{"name":"root-owned","image":"node:24"}\n',
-    );
-    await writeFile(
-      path.join(targetDir, "packages/app/package.json"),
-      '{"name":"@demo/package-pollution"}\n',
-    );
-    await execa("pnpm", ["install"], { cwd: targetDir });
+      assert.notStrictEqual(failure.exitCode, 0);
+      assertContains(
+        `${failure.stdout}\n${failure.stderr}`,
+        "@demo/controlled#build",
+      );
+      assertContains(
+        `${failure.stdout}\n${failure.stderr}`,
+        "@demo/controlled#lint",
+      );
+      assertContains(`${failure.stdout}\n${failure.stderr}`, "BUILD_FAIL");
+      assertContains(`${failure.stdout}\n${failure.stderr}`, "LINT_FAIL");
+      assert.strictEqual(
+        await readFile(
+          path.join(targetDir, "apps/controlled/TEST_EXECUTED"),
+          "utf8",
+        ),
+        "yes",
+      );
+    },
+  );
 
-    const rootFormat = await execa(
-      "pnpm",
-      ["exec", "turbo", "run", "format:check", "--filter=//"],
-      { cwd: targetDir, reject: false },
-    );
-    const output = `${rootFormat.stdout}\n${rootFormat.stderr}`;
+  void it(
+    "keeps root-owned formatting inputs separate from package pollution",
+    { timeout: 180_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-rust-root-scope-")),
+        "demo-rust",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: renderToolchain,
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: rustBinDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await writeFile(path.join(targetDir, "TODO.md"), "# root\n\n-   text\n");
+      await writeFile(
+        path.join(targetDir, ".devcontainer/devcontainer.json"),
+        '{"name":"root-owned","image":"node:24"}\n',
+      );
+      await writeFile(
+        path.join(targetDir, "packages/app/package.json"),
+        '{"name":"@demo/package-pollution"}\n',
+      );
+      await execa("pnpm", ["install"], { cwd: targetDir });
 
-    expect(rootFormat.exitCode).not.toBe(0);
-    expect(output).toContain("TODO.md");
-    expect(output).toContain(".devcontainer/devcontainer.json");
-    expect(output).not.toContain("packages/app/package.json");
+      const rootFormat = await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "format:check", "--filter=//"],
+        { cwd: targetDir, reject: false },
+      );
+      const output = `${rootFormat.stdout}\n${rootFormat.stderr}`;
 
-    await execa(
-      "pnpm",
-      ["exec", "turbo", "run", "format:write", "--filter=//"],
-      { cwd: targetDir },
-    );
-    expect(
-      await readFile(path.join(targetDir, "TODO.md"), "utf8"),
-    ).not.toContain("-   text");
-    await expect(
-      readFile(path.join(targetDir, "packages/app/package.json"), "utf8"),
-    ).resolves.toBe('{"name":"@demo/package-pollution"}\n');
-  }, 180_000);
+      assert.notStrictEqual(rootFormat.exitCode, 0);
+      assertContains(output, "TODO.md");
+      assertContains(output, ".devcontainer/devcontainer.json");
+      assertDoesNotContain(output, "packages/app/package.json");
+
+      await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "format:write", "--filter=//"],
+        { cwd: targetDir },
+      );
+      assertDoesNotContain(
+        await readFile(path.join(targetDir, "TODO.md"), "utf8"),
+        "-   text",
+      );
+      assert.strictEqual(
+        await readFile(
+          path.join(targetDir, "packages/app/package.json"),
+          "utf8",
+        ),
+        '{"name":"@demo/package-pollution"}\n',
+      );
+    },
+  );
 });

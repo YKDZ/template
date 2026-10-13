@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   createGenerationContext,
@@ -17,13 +19,27 @@ import {
   type CopyFileOperation,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, expectTypeOf, it } from "vitest";
 
+import {
+  arrayContaining,
+  assertContains,
+  assertContainsEqual,
+  assertDoesNotContain,
+  assertLacksProperty,
+  assertMatches,
+  assertMatchesPartial,
+  assertThrows,
+  objectContaining,
+  stringContaining,
+} from "../../test-support/assertions.ts";
 import { tsLibDefinition } from "./definition.ts";
 
-describe("ts-lib Built-in Preset Definition behavior", () => {
-  it("owns conventional task scripts without a package check registration", () => {
-    expect(tsLibDefinition.initialPrimaryPackage.defaultLeafName).toBe("lib");
+void describe("ts-lib Built-in Preset Definition behavior", () => {
+  void it("owns conventional task scripts without a package check registration", () => {
+    assert.strictEqual(
+      tsLibDefinition.initialPrimaryPackage.defaultLeafName,
+      "lib",
+    );
     const context = {
       targetDir: "/tmp/demo-library",
       repositoryName: "demo-library",
@@ -46,15 +62,16 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
         },
       });
 
-    expect(resolveBuiltInTemplateSource(tsLibDefinition.source, ".")).toMatch(
+    assert.match(
+      resolveBuiltInTemplateSource(tsLibDefinition.source, "."),
       /templates[\\/]ts-lib$/,
     );
-    expect(contribution.definition).toEqual({
+    assert.deepStrictEqual(contribution.definition, {
       name: "@demo/lib",
       path: "packages/lib",
       role: "shared-library",
     });
-    expect(contribution.manifest).toMatchObject({
+    assertMatchesPartial(contribution.manifest, {
       dependencies: { valibot: "catalog:" },
       exports: {
         ".": {
@@ -79,21 +96,21 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
-    expect(contribution).not.toHaveProperty("checks");
-    expect(contribution).not.toHaveProperty("fixes");
-    expect(contribution.manifest).toMatchObject({
+    assertLacksProperty(contribution, "checks");
+    assertLacksProperty(contribution, "fixes");
+    assertMatchesPartial(contribution.manifest, {
       scripts: {
         "format:write": "oxfmt --write .",
         "lint:fix": "oxlint --format=unix . --fix",
       },
     });
-    expect(contribution.operations).toContainEqual({
+    assertContainsEqual(contribution.operations, {
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "turbo.json",
       to: "packages/lib/turbo.json",
     });
-    expect(contribution.operations).toContainEqual({
+    assertContainsEqual(contribution.operations, {
       kind: "copyFile",
       source: templateSources.tsLib,
       from: "tsconfig.build.json",
@@ -108,7 +125,7 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       (operation) =>
         operation.kind === "writeJson" && operation.to === "package.json",
     );
-    expect(rootManifest).toMatchObject({
+    assertMatchesPartial(rootManifest, {
       value: {
         scripts: {
           check:
@@ -117,26 +134,40 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
         },
       },
     });
-    expect(plan).not.toHaveProperty("checks");
-    expect(plan).not.toHaveProperty("fixes");
-    expect(plan.operations).toContainEqual(
-      expect.objectContaining({
+    assertLacksProperty(plan, "checks");
+    assertLacksProperty(plan, "fixes");
+    assertContainsEqual(
+      plan.operations,
+      objectContaining({
         kind: "writeTextTemplate",
         to: "pnpm-workspace.yaml",
-        replacements: expect.objectContaining({
+        replacements: objectContaining({
           WORKSPACE_PACKAGE_GLOBS: "  - apps/*\n  - packages/*",
         }),
       }),
     );
   });
 
-  it("renders its owned source through opaque handles and persists durable addition facts", async () => {
-    expectTypeOf<
-      NonNullable<CopyFileOperation["source"]>
-    >().not.toEqualTypeOf<string>();
-    expect(() =>
-      resolveBuiltInTemplateSource("vue" as never, "src/main.ts"),
-    ).toThrow("unknown Template Source handle");
+  void it("renders its owned source through opaque handles and persists durable addition facts", async () => {
+    type SourceHandle = NonNullable<CopyFileOperation["source"]>;
+    type IsEqual<Left, Right> =
+      (<Value>() => Value extends Left ? 1 : 2) extends <
+        Value,
+      >() => Value extends Right ? 1 : 2
+        ? (<Value>() => Value extends Right ? 1 : 2) extends <
+            Value,
+          >() => Value extends Left ? 1 : 2
+          ? true
+          : false
+        : false;
+    type IsOpaqueSourceHandle =
+      IsEqual<SourceHandle, string> extends false ? true : false;
+    const isOpaqueSourceHandle: IsOpaqueSourceHandle = true;
+    assert.strictEqual(isOpaqueSourceHandle, true);
+    assertThrows(
+      () => resolveBuiltInTemplateSource("vue" as never, "src/main.ts"),
+      "unknown Template Source handle",
+    );
 
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-ts-lib-definition-")),
@@ -151,9 +182,10 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       definition: tsLibDefinition,
       context,
     });
-    expect(initialization.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+    assertMatches(
+      initialization.operations,
+      arrayContaining([
+        objectContaining({
           kind: "copyFile",
           source: templateSources.tsLib,
           from: "src/index.ts",
@@ -164,29 +196,31 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       targetRoot: targetDir,
       operations: [...initialization.operations],
     });
-    expect(
+    assertContains(
       await readFile(path.join(targetDir, "packages/lib/src/index.ts"), "utf8"),
-    ).toContain("export");
+      "export",
+    );
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
     );
-    expect(devcontainerDockerfile).toContain(
+    assertContains(
+      devcontainerDockerfile,
       'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
     );
-    expect(devcontainerDockerfile).toContain(
+    assertContains(
+      devcontainerDockerfile,
       'corepack enable --install-directory "$PNPM_HOME"',
     );
-    expect(devcontainerDockerfile).not.toContain("corepack prepare");
-    expect(devcontainerDockerfile).not.toContain("PACKAGE_MANAGER_PIN");
-    expect(devcontainerDockerfile).not.toContain("COREPACK_HOME");
-    expect(devcontainerDockerfile).toContain(
+    assertDoesNotContain(devcontainerDockerfile, "corepack prepare");
+    assertDoesNotContain(devcontainerDockerfile, "PACKAGE_MANAGER_PIN");
+    assertDoesNotContain(devcontainerDockerfile, "COREPACK_HOME");
+    assertContains(
+      devcontainerDockerfile,
       "git config --system init.defaultBranch main",
     );
     const gitignorePath = path.join(targetDir, ".gitignore");
-    await expect(readFile(gitignorePath, "utf8")).resolves.toContain(
-      ".pnpm-store/",
-    );
+    assertContains(await readFile(gitignorePath, "utf8"), ".pnpm-store/");
     await writeFile(gitignorePath, "private-artifacts/\n", { flag: "a" });
     const turboPath = path.join(targetDir, "turbo.json");
     const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
@@ -200,25 +234,28 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "utilities",
     });
-    expect(addition.operations).toContainEqual(
-      expect.objectContaining({
+    assertContainsEqual(
+      addition.operations,
+      objectContaining({
         kind: "copyFile",
         to: ".gitignore",
-        provenance: expect.objectContaining({
+        provenance: objectContaining({
           planningContribution: "foundationPlan",
         }),
       }),
     );
-    expect(
+    assert.deepStrictEqual(
       addition.operations.filter(
         (operation) => "overwrite" in operation && operation.overwrite,
       ),
-    ).toEqual([]);
-    expect(addition.operations).toContainEqual(
-      expect.objectContaining({
+      [],
+    );
+    assertContainsEqual(
+      addition.operations,
+      objectContaining({
         kind: "mergeJsonTemplate",
         to: "turbo.json",
-        provenance: expect.objectContaining({
+        provenance: objectContaining({
           planningContribution: "foundationPlan",
         }),
       }),
@@ -227,22 +264,22 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       targetRoot: targetDir,
       ...addition.projectProjections,
     });
-    expect(
+    assertMatchesPartial(
       JSON.parse(
         await readFile(
           path.join(targetDir, "packages/utilities/package.json"),
           "utf8",
         ),
       ),
-    ).toMatchObject({ name: "@demo/utilities" });
-    await expect(readFile(gitignorePath, "utf8")).resolves.toContain(
-      "private-artifacts/",
+      { name: "@demo/utilities" },
     );
-    await expect(
-      readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
-    ).resolves.toMatchObject({
-      tasks: { custom: { cache: false } },
-    });
+    assertContains(await readFile(gitignorePath, "utf8"), "private-artifacts/");
+    assertMatchesPartial(
+      await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
+      {
+        tasks: { custom: { cache: false } },
+      },
+    );
 
     const secondAddition = planGeneratedRepositoryPackageAddition({
       definition: tsLibDefinition,
@@ -254,482 +291,21 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
       ...secondAddition.projectProjections,
     });
     const updatedGitignore = await readFile(gitignorePath, "utf8");
-    expect(updatedGitignore.match(/^private-artifacts\/$/gmu)).toHaveLength(1);
+    assert.strictEqual(
+      updatedGitignore.match(/^private-artifacts\/$/gmu)?.length,
+      1,
+    );
   });
 
-  it("observes linked provider source changes without a provider build", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-lib-source-link-"),
-    );
-    const targetDir = path.join(workspace, "consumer");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-          0,
-          releaseToolchainSnapshot.nodeVersion.indexOf("."),
-        ),
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      },
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const consumerPackagePath = initialization.blueprint.packages[0]!.path;
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsLibDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "provider",
-        linkFrom: [consumerPackagePath],
-      });
-      await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.projectProjections,
-      });
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      const providerManifest = JSON.parse(
-        await readFile(
-          path.join(targetDir, "packages/provider/package.json"),
-          "utf8",
-        ),
-      ) as { exports: { ".": Record<string, string> } };
-      expect(Object.keys(providerManifest.exports["."])).toEqual([
-        "source",
-        "types",
-        "default",
-      ]);
-      const consumerManifest = JSON.parse(
-        await readFile(
-          path.join(targetDir, consumerPackagePath, "package.json"),
-          "utf8",
-        ),
-      ) as Readonly<Record<string, unknown>>;
-      expect(consumerManifest).toMatchObject({
-        dependencies: { "@demo/provider": "workspace:*" },
-      });
-      expect(consumerManifest).not.toHaveProperty("dependenciesMeta");
-
-      const consumerRoot = path.join(targetDir, consumerPackagePath);
-      await writeFile(
-        path.join(consumerRoot, "src/observe-provider.ts"),
-        [
-          'import { greet } from "@demo/provider";',
-          "",
-          'console.log(greet("Ada").message);',
-          "",
-        ].join("\n"),
+  void it(
+    "observes linked provider source changes without a provider build",
+    { timeout: 180_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-ts-lib-source-link-"),
       );
-      const sourceCommand = () =>
-        execa("node", ["--conditions=source", "src/observe-provider.ts"], {
-          cwd: consumerRoot,
-        });
-
-      await expect(sourceCommand().then(({ stdout }) => stdout)).resolves.toBe(
-        "Hello, Ada",
-      );
-      const providerEntry = path.join(
-        targetDir,
-        "packages/provider/src/index.ts",
-      );
-      await writeFile(
-        providerEntry,
-        (await readFile(providerEntry, "utf8")).replace(
-          "Hello,",
-          "Source changed:",
-        ),
-      );
-      await expect(sourceCommand().then(({ stdout }) => stdout)).resolves.toBe(
-        "Source changed: Ada",
-      );
-      await execa(
-        "pnpm",
-        ["--filter", `./${consumerPackagePath}`, "run", "typecheck"],
-        { cwd: targetDir },
-      );
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
-
-  it("uses native TypeScript 7 to enforce erasable source syntax", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-lib-erasability-"),
-    );
-    const targetDir = path.join(workspace, "library");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-          0,
-          releaseToolchainSnapshot.nodeVersion.indexOf("."),
-        ),
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      },
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...plan.operations],
-      });
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      const packagePath = plan.blueprint.packages[0]!.path;
-      await mkdir(path.join(targetDir, "scripts"), { recursive: true });
-      await mkdir(path.join(targetDir, packagePath, "scripts"), {
-        recursive: true,
-      });
-      await writeFile(
-        path.join(targetDir, "scripts/automation-helper.ts"),
-        'export const rootAutomationProbe = "root";\n',
-      );
-      await writeFile(
-        path.join(targetDir, packagePath, "scripts/automation-probe.ts"),
-        'import { packageAutomationProbe } from "./automation-helper.ts";\n\nconsole.log(packageAutomationProbe);\n',
-      );
-      await writeFile(
-        path.join(targetDir, "scripts/automation-probe.ts"),
-        'import { rootAutomationProbe } from "./automation-helper.ts";\n\nconsole.log(rootAutomationProbe);\n',
-      );
-      await writeFile(
-        path.join(targetDir, packagePath, "scripts/automation-helper.ts"),
-        'export const packageAutomationProbe = "package";\n',
-      );
-      await execa("pnpm", ["run", "format:check"], { cwd: targetDir });
-      await execa("pnpm", ["run", "lint"], { cwd: targetDir });
-      await execa("pnpm", ["run", "typecheck"], { cwd: targetDir });
-      for (const command of ["format:check", "lint", "typecheck"] as const) {
-        await execa("pnpm", ["--filter", `./${packagePath}`, "run", command], {
-          cwd: targetDir,
-        });
-      }
-      await expect(
-        execa("node", ["--conditions=source", "scripts/automation-probe.ts"], {
-          cwd: targetDir,
-        }).then(({ stdout }) => stdout),
-      ).resolves.toBe("root");
-      await expect(
-        execa("node", ["--conditions=source", "scripts/automation-probe.ts"], {
-          cwd: path.join(targetDir, packagePath),
-        }).then(({ stdout }) => stdout),
-      ).resolves.toBe("package");
-      const showConfig = async (
-        args: readonly string[],
-        configName: string,
-      ): Promise<{ readonly files: readonly string[] }> => {
-        const shown = await execa(
-          "pnpm",
-          [...args, "exec", "tsc", "-p", configName, "--showConfig"],
-          { cwd: targetDir },
-        );
-        return JSON.parse(shown.stdout) as {
-          readonly files: readonly string[];
-        };
-      };
-      const rootConfig = await showConfig([], "tsconfig.json");
-      const packageConfig = await showConfig(
-        ["--filter", `./${packagePath}`],
-        "tsconfig.json",
-      );
-      const packageBuildConfig = await showConfig(
-        ["--filter", `./${packagePath}`],
-        "tsconfig.build.json",
-      );
-      expect(rootConfig.files).toContain("./scripts/automation-probe.ts");
-      expect(rootConfig.files).not.toContain(
-        `./${packagePath}/scripts/automation-probe.ts`,
-      );
-      expect(packageConfig.files).toContain("./scripts/automation-probe.ts");
-      expect(packageBuildConfig.files).not.toContain(
-        "./scripts/automation-probe.ts",
-      );
-      await execa("pnpm", ["--filter", `./${packagePath}`, "run", "build"], {
-        cwd: targetDir,
-      });
-      const compilerVersion = await execa(
-        "pnpm",
-        ["--filter", `./${packagePath}`, "exec", "tsc", "--version"],
-        { cwd: targetDir },
-      ).then(({ stdout }) => stdout);
-      expect(compilerVersion).toMatch(/^Version 7\./u);
-
-      const nonErasableSource = path.join(
-        targetDir,
-        packagePath,
-        "src/non-erasable.ts",
-      );
-      await writeFile(nonErasableSource, "enum Direction { Left, Right }\n");
-      const rejected = await execa(
-        "pnpm",
-        ["--filter", `./${packagePath}`, "run", "typecheck"],
-        { cwd: targetDir, reject: false },
-      );
-      expect(rejected.exitCode).not.toBe(0);
-      expect(`${rejected.stdout}\n${rejected.stderr}`).toContain(
-        "erasableSyntaxOnly",
-      );
-
-      await rm(nonErasableSource);
-      await execa(
-        "pnpm",
-        ["--filter", `./${packagePath}`, "run", "typecheck"],
-        { cwd: targetDir },
-      );
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
-
-  it("builds linked distributions in Turbo order and runs without source", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-ts-lib-dist-link-"),
-    );
-    const targetDir = path.join(workspace, "consumer");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-          0,
-          releaseToolchainSnapshot.nodeVersion.indexOf("."),
-        ),
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      },
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const consumerPackagePath = initialization.blueprint.packages[0]!.path;
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: tsLibDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "provider",
-        linkFrom: [consumerPackagePath],
-      });
-      await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.projectProjections,
-      });
-      await execa("pnpm", ["install"], { cwd: targetDir });
-
-      const consumerRoot = path.join(targetDir, consumerPackagePath);
-      await writeFile(
-        path.join(consumerRoot, "src/decorate.ts"),
-        [
-          "export function decorate(message: string): string {",
-          "  return `[${message}]`;",
-          "}",
-          "",
-        ].join("\n"),
-      );
-      await writeFile(
-        path.join(consumerRoot, "src/observe-provider.ts"),
-        [
-          'import { greet } from "@demo/provider";',
-          "",
-          'import { decorate } from "#/decorate";',
-          "",
-          'console.log(decorate(greet("Ada").message));',
-          "",
-        ].join("\n"),
-      );
-      const providerEntry = path.join(
-        targetDir,
-        "packages/provider/src/index.ts",
-      );
-      await writeFile(
-        providerEntry,
-        (await readFile(providerEntry, "utf8")).replace(
-          "Hello,",
-          "Linked source:",
-        ),
-      );
-      const sourceOutput = await execa(
-        "node",
-        ["--conditions=source", "src/observe-provider.ts"],
-        { cwd: consumerRoot },
-      ).then(({ stdout }) => stdout);
-      expect(sourceOutput).toBe("[Linked source: Ada]");
-
-      await expect(
-        execa(
-          "pnpm",
-          ["--filter", `./${consumerPackagePath}`, "run", "build"],
-          { cwd: targetDir },
-        ),
-      ).rejects.toThrow();
-
-      const dryRun = await execa(
-        "pnpm",
-        ["exec", "turbo", "run", "typecheck", "build", "--dry-run=json"],
-        { cwd: targetDir },
-      );
-      const tasks = (
-        JSON.parse(dryRun.stdout) as {
-          tasks: readonly {
-            taskId: string;
-            command: string;
-            dependencies: readonly string[];
-          }[];
-        }
-      ).tasks;
-      const consumerBuild = tasks.find(
-        ({ taskId }) => taskId === "@demo/lib#build",
-      );
-      const consumerTypecheck = tasks.find(
-        ({ taskId }) => taskId === "@demo/lib#typecheck",
-      );
-      expect(consumerBuild?.dependencies).toContain("@demo/provider#build");
-      expect(consumerTypecheck?.dependencies).toContain(
-        "@demo/provider#typecheck",
-      );
-      expect(consumerTypecheck?.dependencies).not.toContain(
-        "@demo/provider#build",
-      );
-      expect(consumerBuild?.command).toBe(
-        "tsc -p tsconfig.build.json --pretty false",
-      );
-      expect(consumerBuild?.command).not.toMatch(/pnpm|turbo/u);
-
-      await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
-        cwd: targetDir,
-      });
-      await rm(path.join(targetDir, "packages/provider/src"), {
-        recursive: true,
-        force: true,
-      });
-      const distributionOutput = await execa(
-        "node",
-        ["dist/observe-provider.js"],
-        { cwd: consumerRoot },
-      ).then(({ stdout }) => stdout);
-      expect(distributionOutput).toBe(sourceOutput);
-      await expect(
-        readFile(
-          path.join(targetDir, "packages/provider/dist/index.d.ts"),
-          "utf8",
-        ),
-      ).resolves.toContain("declare function greet");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
-
-  it("discovers unregistered repair tasks, orders formatting after lint fixes, and keeps successful logs", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-fix-")),
-      "demo-lib",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-          0,
-          releaseToolchainSnapshot.nodeVersion.indexOf("."),
-        ),
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      },
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context,
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
-    await mkdir(path.join(targetDir, "apps/repair"), { recursive: true });
-    await writeFile(
-      path.join(targetDir, "apps/repair/package.json"),
-      JSON.stringify({
-        name: "@demo/repair",
-        private: true,
-        scripts: {
-          "lint:fix":
-            "node --input-type=module --eval \"import { writeFileSync } from 'node:fs'; writeFileSync('repair.txt', 'lint-fixed')\"",
-          "format:write":
-            "node --input-type=module --eval \"import { readFileSync, writeFileSync } from 'node:fs'; if (readFileSync('repair.txt', 'utf8') !== 'lint-fixed') process.exit(1); writeFileSync('repair.txt', 'formatted')\"",
-        },
-      }),
-    );
-    await execa("pnpm", ["install"], { cwd: targetDir });
-
-    const dryRun = await execa(
-      "pnpm",
-      ["exec", "turbo", "run", "lint:fix", "format:write", "--dry-run=json"],
-      { cwd: targetDir },
-    );
-    const tasks = (
-      JSON.parse(dryRun.stdout) as {
-        tasks: readonly {
-          taskId: string;
-          dependencies: readonly string[];
-          resolvedTaskDefinition: { cache: boolean };
-        }[];
-      }
-    ).tasks;
-    expect(tasks).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ taskId: "//#lint:fix" }),
-        expect.objectContaining({ taskId: "//#format:write" }),
-        expect.objectContaining({ taskId: "@demo/repair#lint:fix" }),
-        expect.objectContaining({ taskId: "@demo/repair#format:write" }),
-      ]),
-    );
-    expect(
-      tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
-    ).toContain("//#lint:fix");
-    expect(
-      tasks.find((task) => task.taskId === "@demo/repair#format:write")
-        ?.dependencies,
-    ).toContain("@demo/repair#lint:fix");
-    expect(
-      tasks.find((task) => task.taskId === "@demo/repair#lint:fix")
-        ?.resolvedTaskDefinition.cache,
-    ).toBe(false);
-    expect(
-      tasks.find((task) => task.taskId === "@demo/repair#format:write")
-        ?.resolvedTaskDefinition.cache,
-    ).toBe(false);
-
-    const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
-    expect(`${fix.stdout}\n${fix.stderr}`).toContain("@demo/repair:lint:fix");
-    expect(`${fix.stdout}\n${fix.stderr}`).toContain(
-      "@demo/repair:format:write",
-    );
-    await expect(
-      readFile(path.join(targetDir, "apps/repair/repair.txt"), "utf8"),
-    ).resolves.toBe("formatted");
-  }, 180_000);
-
-  it("discovers a package that implements only one repair task", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-ts-lib-single-fix-")),
-      "demo-lib",
-    );
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context: createGenerationContext({
+      const targetDir = path.join(workspace, "consumer");
+      const context = createGenerationContext({
         targetDir,
         defaultPackageScope: "demo",
         toolchain: {
@@ -739,58 +315,580 @@ describe("ts-lib Built-in Preset Definition behavior", () => {
           ),
           packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
         },
-      }),
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
-    await mkdir(path.join(targetDir, "apps/lint-only"), { recursive: true });
-    await writeFile(
-      path.join(targetDir, "apps/lint-only/package.json"),
-      JSON.stringify({
-        name: "@demo/lint-only",
-        private: true,
-        scripts: {
-          "lint:fix":
-            "node --input-type=module --eval \"import { writeFileSync } from 'node:fs'; writeFileSync('repair.txt', 'lint-fixed')\"",
-        },
-      }),
-    );
-    await execa("pnpm", ["install"], { cwd: targetDir });
+      });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: tsLibDefinition,
+        context,
+      });
 
-    const dryRun = await execa(
-      "pnpm",
-      ["exec", "turbo", "run", "lint:fix", "format:write", "--dry-run=json"],
-      { cwd: targetDir },
-    );
-    const tasks = (
-      JSON.parse(dryRun.stdout) as {
-        tasks: readonly { command: string; taskId: string }[];
+      try {
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...initialization.operations],
+        });
+        const consumerPackagePath = initialization.blueprint.packages[0]!.path;
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: tsLibDefinition,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName: "provider",
+          linkFrom: [consumerPackagePath],
+        });
+        await reconcileAndApplyProjectProjections({
+          targetRoot: targetDir,
+          ...addition.projectProjections,
+        });
+        await execa("pnpm", ["install"], { cwd: targetDir });
+        const providerManifest = JSON.parse(
+          await readFile(
+            path.join(targetDir, "packages/provider/package.json"),
+            "utf8",
+          ),
+        ) as { exports: { ".": Record<string, string> } };
+        assert.deepStrictEqual(Object.keys(providerManifest.exports["."]), [
+          "source",
+          "types",
+          "default",
+        ]);
+        const consumerManifest = JSON.parse(
+          await readFile(
+            path.join(targetDir, consumerPackagePath, "package.json"),
+            "utf8",
+          ),
+        ) as Readonly<Record<string, unknown>>;
+        assertMatchesPartial(consumerManifest, {
+          dependencies: { "@demo/provider": "workspace:*" },
+        });
+        assertLacksProperty(consumerManifest, "dependenciesMeta");
+
+        const consumerRoot = path.join(targetDir, consumerPackagePath);
+        await writeFile(
+          path.join(consumerRoot, "src/observe-provider.ts"),
+          [
+            'import { greet } from "@demo/provider";',
+            "",
+            'console.log(greet("Ada").message);',
+            "",
+          ].join("\n"),
+        );
+        const sourceCommand = () =>
+          execa("node", ["--conditions=source", "src/observe-provider.ts"], {
+            cwd: consumerRoot,
+          });
+
+        assert.strictEqual(
+          await sourceCommand().then(({ stdout }) => stdout),
+          "Hello, Ada",
+        );
+        const providerEntry = path.join(
+          targetDir,
+          "packages/provider/src/index.ts",
+        );
+        await writeFile(
+          providerEntry,
+          (await readFile(providerEntry, "utf8")).replace(
+            "Hello,",
+            "Source changed:",
+          ),
+        );
+        assert.strictEqual(
+          await sourceCommand().then(({ stdout }) => stdout),
+          "Source changed: Ada",
+        );
+        await execa(
+          "pnpm",
+          ["--filter", `./${consumerPackagePath}`, "run", "typecheck"],
+          { cwd: targetDir },
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
       }
-    ).tasks;
-    expect(tasks).toContainEqual(
-      expect.objectContaining({
-        command: expect.stringContaining("writeFileSync"),
-        taskId: "@demo/lint-only#lint:fix",
-      }),
-    );
-    expect(tasks).toContainEqual(
-      expect.objectContaining({
-        command: "<NONEXISTENT>",
-        taskId: "@demo/lint-only#format:write",
-      }),
-    );
+    },
+  );
 
-    const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
-    expect(`${fix.stdout}\n${fix.stderr}`).toContain(
-      "@demo/lint-only:lint:fix",
-    );
-    expect(`${fix.stdout}\n${fix.stderr}`).not.toContain(
-      "@demo/lint-only:format:write",
-    );
-    await expect(
-      readFile(path.join(targetDir, "apps/lint-only/repair.txt"), "utf8"),
-    ).resolves.toBe("lint-fixed");
-  }, 180_000);
+  void it(
+    "uses native TypeScript 7 to enforce erasable source syntax",
+    { timeout: 180_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-ts-lib-erasability-"),
+      );
+      const targetDir = path.join(workspace, "library");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+        },
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsLibDefinition,
+        context,
+      });
+
+      try {
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...plan.operations],
+        });
+        await execa("pnpm", ["install"], { cwd: targetDir });
+        const packagePath = plan.blueprint.packages[0]!.path;
+        await mkdir(path.join(targetDir, "scripts"), { recursive: true });
+        await mkdir(path.join(targetDir, packagePath, "scripts"), {
+          recursive: true,
+        });
+        await writeFile(
+          path.join(targetDir, "scripts/automation-helper.ts"),
+          'export const rootAutomationProbe = "root";\n',
+        );
+        await writeFile(
+          path.join(targetDir, packagePath, "scripts/automation-probe.ts"),
+          'import { packageAutomationProbe } from "./automation-helper.ts";\n\nconsole.log(packageAutomationProbe);\n',
+        );
+        await writeFile(
+          path.join(targetDir, "scripts/automation-probe.ts"),
+          'import { rootAutomationProbe } from "./automation-helper.ts";\n\nconsole.log(rootAutomationProbe);\n',
+        );
+        await writeFile(
+          path.join(targetDir, packagePath, "scripts/automation-helper.ts"),
+          'export const packageAutomationProbe = "package";\n',
+        );
+        await execa("pnpm", ["run", "format:check"], { cwd: targetDir });
+        await execa("pnpm", ["run", "lint"], { cwd: targetDir });
+        await execa("pnpm", ["run", "typecheck"], { cwd: targetDir });
+        for (const command of ["format:check", "lint", "typecheck"] as const) {
+          await execa(
+            "pnpm",
+            ["--filter", `./${packagePath}`, "run", command],
+            {
+              cwd: targetDir,
+            },
+          );
+        }
+        assert.strictEqual(
+          await execa(
+            "node",
+            ["--conditions=source", "scripts/automation-probe.ts"],
+            {
+              cwd: targetDir,
+            },
+          ).then(({ stdout }) => stdout),
+          "root",
+        );
+        assert.strictEqual(
+          await execa(
+            "node",
+            ["--conditions=source", "scripts/automation-probe.ts"],
+            {
+              cwd: path.join(targetDir, packagePath),
+            },
+          ).then(({ stdout }) => stdout),
+          "package",
+        );
+        const showConfig = async (
+          args: readonly string[],
+          configName: string,
+        ): Promise<{ readonly files: readonly string[] }> => {
+          const shown = await execa(
+            "pnpm",
+            [...args, "exec", "tsc", "-p", configName, "--showConfig"],
+            { cwd: targetDir },
+          );
+          return JSON.parse(shown.stdout) as {
+            readonly files: readonly string[];
+          };
+        };
+        const rootConfig = await showConfig([], "tsconfig.json");
+        const packageConfig = await showConfig(
+          ["--filter", `./${packagePath}`],
+          "tsconfig.json",
+        );
+        const packageBuildConfig = await showConfig(
+          ["--filter", `./${packagePath}`],
+          "tsconfig.build.json",
+        );
+        assertContains(rootConfig.files, "./scripts/automation-probe.ts");
+        assertDoesNotContain(
+          rootConfig.files,
+          `./${packagePath}/scripts/automation-probe.ts`,
+        );
+        assertContains(packageConfig.files, "./scripts/automation-probe.ts");
+        assertDoesNotContain(
+          packageBuildConfig.files,
+          "./scripts/automation-probe.ts",
+        );
+        await execa("pnpm", ["--filter", `./${packagePath}`, "run", "build"], {
+          cwd: targetDir,
+        });
+        const compilerVersion = await execa(
+          "pnpm",
+          ["--filter", `./${packagePath}`, "exec", "tsc", "--version"],
+          { cwd: targetDir },
+        ).then(({ stdout }) => stdout);
+        assert.match(compilerVersion, /^Version 7\./u);
+
+        const nonErasableSource = path.join(
+          targetDir,
+          packagePath,
+          "src/non-erasable.ts",
+        );
+        await writeFile(nonErasableSource, "enum Direction { Left, Right }\n");
+        const rejected = await execa(
+          "pnpm",
+          ["--filter", `./${packagePath}`, "run", "typecheck"],
+          { cwd: targetDir, reject: false },
+        );
+        assert.notStrictEqual(rejected.exitCode, 0);
+        assertContains(
+          `${rejected.stdout}\n${rejected.stderr}`,
+          "erasableSyntaxOnly",
+        );
+
+        await rm(nonErasableSource);
+        await execa(
+          "pnpm",
+          ["--filter", `./${packagePath}`, "run", "typecheck"],
+          { cwd: targetDir },
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it(
+    "builds linked distributions in Turbo order and runs without source",
+    { timeout: 180_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-ts-lib-dist-link-"),
+      );
+      const targetDir = path.join(workspace, "consumer");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+        },
+      });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: tsLibDefinition,
+        context,
+      });
+
+      try {
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...initialization.operations],
+        });
+        const consumerPackagePath = initialization.blueprint.packages[0]!.path;
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: tsLibDefinition,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName: "provider",
+          linkFrom: [consumerPackagePath],
+        });
+        await reconcileAndApplyProjectProjections({
+          targetRoot: targetDir,
+          ...addition.projectProjections,
+        });
+        await execa("pnpm", ["install"], { cwd: targetDir });
+
+        const consumerRoot = path.join(targetDir, consumerPackagePath);
+        await writeFile(
+          path.join(consumerRoot, "src/decorate.ts"),
+          [
+            "export function decorate(message: string): string {",
+            "  return `[${message}]`;",
+            "}",
+            "",
+          ].join("\n"),
+        );
+        await writeFile(
+          path.join(consumerRoot, "src/observe-provider.ts"),
+          [
+            'import { greet } from "@demo/provider";',
+            "",
+            'import { decorate } from "#/decorate";',
+            "",
+            'console.log(decorate(greet("Ada").message));',
+            "",
+          ].join("\n"),
+        );
+        const providerEntry = path.join(
+          targetDir,
+          "packages/provider/src/index.ts",
+        );
+        await writeFile(
+          providerEntry,
+          (await readFile(providerEntry, "utf8")).replace(
+            "Hello,",
+            "Linked source:",
+          ),
+        );
+        const sourceOutput = await execa(
+          "node",
+          ["--conditions=source", "src/observe-provider.ts"],
+          { cwd: consumerRoot },
+        ).then(({ stdout }) => stdout);
+        assert.strictEqual(sourceOutput, "[Linked source: Ada]");
+
+        await assert.rejects(
+          execa(
+            "pnpm",
+            ["--filter", `./${consumerPackagePath}`, "run", "build"],
+            { cwd: targetDir },
+          ),
+        );
+
+        const dryRun = await execa(
+          "pnpm",
+          ["exec", "turbo", "run", "typecheck", "build", "--dry-run=json"],
+          { cwd: targetDir },
+        );
+        const tasks = (
+          JSON.parse(dryRun.stdout) as {
+            tasks: readonly {
+              taskId: string;
+              command: string;
+              dependencies: readonly string[];
+            }[];
+          }
+        ).tasks;
+        const consumerBuild = tasks.find(
+          ({ taskId }) => taskId === "@demo/lib#build",
+        );
+        const consumerTypecheck = tasks.find(
+          ({ taskId }) => taskId === "@demo/lib#typecheck",
+        );
+        assertContains(consumerBuild?.dependencies, "@demo/provider#build");
+        assertContains(
+          consumerTypecheck?.dependencies,
+          "@demo/provider#typecheck",
+        );
+        assertDoesNotContain(
+          consumerTypecheck?.dependencies,
+          "@demo/provider#build",
+        );
+        assert.strictEqual(
+          consumerBuild?.command,
+          "tsc -p tsconfig.build.json --pretty false",
+        );
+        assert.doesNotMatch(consumerBuild?.command, /pnpm|turbo/u);
+
+        await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
+          cwd: targetDir,
+        });
+        await rm(path.join(targetDir, "packages/provider/src"), {
+          recursive: true,
+          force: true,
+        });
+        const distributionOutput = await execa(
+          "node",
+          ["dist/observe-provider.js"],
+          { cwd: consumerRoot },
+        ).then(({ stdout }) => stdout);
+        assert.strictEqual(distributionOutput, sourceOutput);
+        assertContains(
+          await readFile(
+            path.join(targetDir, "packages/provider/dist/index.d.ts"),
+            "utf8",
+          ),
+          "declare function greet",
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it(
+    "discovers unregistered repair tasks, orders formatting after lint fixes, and keeps successful logs",
+    { timeout: 180_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-ts-lib-fix-")),
+        "demo-lib",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+            0,
+            releaseToolchainSnapshot.nodeVersion.indexOf("."),
+          ),
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+        },
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsLibDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await mkdir(path.join(targetDir, "apps/repair"), { recursive: true });
+      await writeFile(
+        path.join(targetDir, "apps/repair/package.json"),
+        JSON.stringify({
+          name: "@demo/repair",
+          private: true,
+          scripts: {
+            "lint:fix":
+              "node --input-type=module --eval \"import { writeFileSync } from 'node:fs'; writeFileSync('repair.txt', 'lint-fixed')\"",
+            "format:write":
+              "node --input-type=module --eval \"import { readFileSync, writeFileSync } from 'node:fs'; if (readFileSync('repair.txt', 'utf8') !== 'lint-fixed') process.exit(1); writeFileSync('repair.txt', 'formatted')\"",
+          },
+        }),
+      );
+      await execa("pnpm", ["install"], { cwd: targetDir });
+
+      const dryRun = await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "lint:fix", "format:write", "--dry-run=json"],
+        { cwd: targetDir },
+      );
+      const tasks = (
+        JSON.parse(dryRun.stdout) as {
+          tasks: readonly {
+            taskId: string;
+            dependencies: readonly string[];
+            resolvedTaskDefinition: { cache: boolean };
+          }[];
+        }
+      ).tasks;
+      assertMatches(
+        tasks,
+        arrayContaining([
+          objectContaining({ taskId: "//#lint:fix" }),
+          objectContaining({ taskId: "//#format:write" }),
+          objectContaining({ taskId: "@demo/repair#lint:fix" }),
+          objectContaining({ taskId: "@demo/repair#format:write" }),
+        ]),
+      );
+      assertContains(
+        tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
+        "//#lint:fix",
+      );
+      assertContains(
+        tasks.find((task) => task.taskId === "@demo/repair#format:write")
+          ?.dependencies,
+        "@demo/repair#lint:fix",
+      );
+      assert.strictEqual(
+        tasks.find((task) => task.taskId === "@demo/repair#lint:fix")
+          ?.resolvedTaskDefinition.cache,
+        false,
+      );
+      assert.strictEqual(
+        tasks.find((task) => task.taskId === "@demo/repair#format:write")
+          ?.resolvedTaskDefinition.cache,
+        false,
+      );
+
+      const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
+      assertContains(`${fix.stdout}\n${fix.stderr}`, "@demo/repair:lint:fix");
+      assertContains(
+        `${fix.stdout}\n${fix.stderr}`,
+        "@demo/repair:format:write",
+      );
+      assert.strictEqual(
+        await readFile(path.join(targetDir, "apps/repair/repair.txt"), "utf8"),
+        "formatted",
+      );
+    },
+  );
+
+  void it(
+    "discovers a package that implements only one repair task",
+    { timeout: 180_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-ts-lib-single-fix-")),
+        "demo-lib",
+      );
+      const plan = planGeneratedRepositoryInitialization({
+        definition: tsLibDefinition,
+        context: createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain: {
+            nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
+              0,
+              releaseToolchainSnapshot.nodeVersion.indexOf("."),
+            ),
+            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+          },
+        }),
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+      await mkdir(path.join(targetDir, "apps/lint-only"), { recursive: true });
+      await writeFile(
+        path.join(targetDir, "apps/lint-only/package.json"),
+        JSON.stringify({
+          name: "@demo/lint-only",
+          private: true,
+          scripts: {
+            "lint:fix":
+              "node --input-type=module --eval \"import { writeFileSync } from 'node:fs'; writeFileSync('repair.txt', 'lint-fixed')\"",
+          },
+        }),
+      );
+      await execa("pnpm", ["install"], { cwd: targetDir });
+
+      const dryRun = await execa(
+        "pnpm",
+        ["exec", "turbo", "run", "lint:fix", "format:write", "--dry-run=json"],
+        { cwd: targetDir },
+      );
+      const tasks = (
+        JSON.parse(dryRun.stdout) as {
+          tasks: readonly { command: string; taskId: string }[];
+        }
+      ).tasks;
+      assertContainsEqual(
+        tasks,
+        objectContaining({
+          command: stringContaining("writeFileSync"),
+          taskId: "@demo/lint-only#lint:fix",
+        }),
+      );
+      assertContainsEqual(
+        tasks,
+        objectContaining({
+          command: "<NONEXISTENT>",
+          taskId: "@demo/lint-only#format:write",
+        }),
+      );
+
+      const fix = await execa("pnpm", ["run", "fix"], { cwd: targetDir });
+      assertContains(
+        `${fix.stdout}\n${fix.stderr}`,
+        "@demo/lint-only:lint:fix",
+      );
+      assertDoesNotContain(
+        `${fix.stdout}\n${fix.stderr}`,
+        "@demo/lint-only:format:write",
+      );
+      assert.strictEqual(
+        await readFile(
+          path.join(targetDir, "apps/lint-only/repair.txt"),
+          "utf8",
+        ),
+        "lint-fixed",
+      );
+    },
+  );
 });

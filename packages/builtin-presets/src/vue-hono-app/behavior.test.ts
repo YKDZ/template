@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
@@ -10,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -21,8 +23,21 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 
+import {
+  arrayContaining,
+  assertContains,
+  assertContainsEqual,
+  assertDoesNotMatchPartial,
+  assertDoesNotContain,
+  assertHasProperty,
+  assertLacksProperty,
+  assertMatches,
+  assertMatchesPartial,
+  objectContaining,
+  stringMatching,
+  testEach,
+} from "../../test-support/assertions.ts";
 import { vueHonoAppDefinition } from "./definition.ts";
 
 async function treeBytes(
@@ -48,7 +63,7 @@ async function treeBytes(
   return Object.assign({}, ...snapshots);
 }
 
-describe("vue-hono-app Built-in Preset Definition behavior", () => {
+void describe("vue-hono-app Built-in Preset Definition behavior", () => {
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
 
   /**
@@ -65,8 +80,9 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
     nodeVersion: releaseToolchainSnapshot.nodeVersion,
   };
 
-  it("owns API and web contributions and derives their workspace link", async () => {
-    expect(builtInPresetRegistry.require("vue-hono-app").metadata).toEqual(
+  void it("owns API and web contributions and derives their workspace link", async () => {
+    assert.deepStrictEqual(
+      builtInPresetRegistry.require("vue-hono-app").metadata,
       vueHonoAppDefinition.metadata,
     );
     const targetDir = path.join(
@@ -90,7 +106,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       )
       .find((layer) => layer.identity === "browser-test");
 
-    expect(plan.blueprint).toMatchObject({
+    assertMatchesPartial(plan.blueprint, {
       schemaVersion: 3,
       packages: [
         { name: "@demo/api", path: "apps/api", role: "runtime-service" },
@@ -108,30 +124,29 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
-    expect(plan.nextStepInstructions.map((step) => step.display)).toEqual([
-      "pnpm install",
-      "pnpm run fix",
-      "pnpm run check",
-    ]);
-    expect(plan.environmentNeeds).toContainEqual({
+    assert.deepStrictEqual(
+      plan.nextStepInstructions.map((step) => step.display),
+      ["pnpm install", "pnpm run fix", "pnpm run check"],
+    );
+    assertContainsEqual(plan.environmentNeeds, {
       kind: "playwright-browser-assets",
       browser: "chromium",
       owner: { kind: "workspace-orchestration", path: "." },
     });
-    expect(browserLayer).toMatchObject({
+    assertMatchesPartial(browserLayer, {
       identity: "browser-test",
       requires: ["node-pnpm"],
       buildArguments: [
         {
           name: "PLAYWRIGHT_CLI_PACKAGE",
-          value: expect.stringMatching(/^@playwright\/test@/u),
+          value: stringMatching(/^@playwright\/test@/u),
         },
       ],
       probes: [
         {
           identity: "playwright",
           command: "npx",
-          args: expect.arrayContaining(["playwright", "--version"]),
+          args: arrayContaining(["playwright", "--version"]),
         },
       ],
     });
@@ -147,7 +162,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       readonly devDependencies?: Readonly<Record<string, string>>;
       readonly scripts: Readonly<Record<string, string>>;
     };
-    expect(apiManifest).toMatchObject({
+    assertMatchesPartial(apiManifest, {
       name: "@demo/api",
       exports: {
         ".": { default: "./dist/index.js", types: "./dist/index.d.ts" },
@@ -161,26 +176,28 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       },
       scripts: { build: "tsc -p tsconfig.build.json" },
     });
-    expect(apiManifest.devDependencies).not.toHaveProperty("tsc-alias");
-    expect(apiManifest.devDependencies).toHaveProperty("typescript-7");
-    expect(
+    assertLacksProperty(apiManifest.devDependencies, "tsc-alias");
+    assertHasProperty(apiManifest.devDependencies, "typescript-7");
+    assertMatchesPartial(
       JSON.parse(
         await readFile(path.join(targetDir, "apps/api/tsconfig.json"), "utf8"),
       ),
-    ).toMatchObject({
-      compilerOptions: {
-        customConditions: ["source"],
-        erasableSyntaxOnly: true,
+      {
+        compilerOptions: {
+          customConditions: ["source"],
+          erasableSyntaxOnly: true,
+        },
       },
-    });
-    expect(
+    );
+    assertMatchesPartial(
       JSON.parse(
         await readFile(
           path.join(targetDir, "apps/api/tsconfig.build.json"),
           "utf8",
         ),
       ),
-    ).toMatchObject({ compilerOptions: { customConditions: [] } });
+      { compilerOptions: { customConditions: [] } },
+    );
     for (const configPath of [
       "apps/web/tsconfig.app.json",
       "apps/web/tsconfig.test.json",
@@ -191,31 +208,32 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         readonly compilerOptions?: Readonly<Record<string, unknown>>;
         readonly extends?: string;
       };
-      expect(config.compilerOptions).toMatchObject({
+      assertMatchesPartial(config.compilerOptions, {
         customConditions: ["source"],
       });
-      expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
+      assertLacksProperty(config.compilerOptions, "erasableSyntaxOnly");
       if (configPath.endsWith("tsconfig.app.json")) {
-        expect(config.compilerOptions).toMatchObject({
+        assertMatchesPartial(config.compilerOptions, {
           exactOptionalPropertyTypes: false,
         });
       } else {
-        expect(config.extends).toBe("./tsconfig.app.json");
+        assert.strictEqual(config.extends, "./tsconfig.app.json");
       }
     }
-    expect(
+    assertMatchesPartial(
       JSON.parse(
         await readFile(
           path.join(targetDir, "apps/web/tsconfig.node.json"),
           "utf8",
         ),
       ),
-    ).toMatchObject({
-      compilerOptions: {
-        customConditions: ["source"],
-        erasableSyntaxOnly: true,
+      {
+        compilerOptions: {
+          customConditions: ["source"],
+          erasableSyntaxOnly: true,
+        },
       },
-    });
+    );
     const webManifest = JSON.parse(
       await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
     ) as {
@@ -223,7 +241,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       readonly devDependencies: Readonly<Record<string, string>>;
       readonly scripts: Readonly<Record<string, string>>;
     };
-    expect(webManifest).toMatchObject({
+    assertMatchesPartial(webManifest, {
       dependencies: {
         "@demo/api": "workspace:*",
         "@vue/devtools-api": "catalog:",
@@ -231,115 +249,129 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         vue: "catalog:",
       },
     });
-    expect(webManifest.devDependencies).not.toHaveProperty("@playwright/test");
-    expect(webManifest.scripts).not.toHaveProperty("test:e2e");
-    expect(
+    assertLacksProperty(webManifest.devDependencies, "@playwright/test");
+    assertLacksProperty(webManifest.scripts, "test:e2e");
+    assertMatchesPartial(
       JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-    ).toMatchObject({
-      boundaries: {
-        tags: {
-          app: { dependencies: { allow: ["app", "library"] } },
+      {
+        boundaries: {
+          tags: {
+            app: { dependencies: { allow: ["app", "library"] } },
+          },
+        },
+        tasks: {
+          build: { dependsOn: ["^build"] },
+          typecheck: { dependsOn: ["^typecheck"] },
         },
       },
-      tasks: {
-        build: { dependsOn: ["^build"] },
-        typecheck: { dependsOn: ["^typecheck"] },
-      },
-    });
-    expect(
+    );
+    assertContains(
       await readFile(path.join(targetDir, "apps/api/src/runtime.ts"), "utf8"),
-    ).toContain("new Hono()");
-    expect(
+      "new Hono()",
+    );
+    assertContains(
       await readFile(path.join(targetDir, "apps/web/src/api.ts"), "utf8"),
-    ).toContain("/api/health");
-    expect(
+      "/api/health",
+    );
+    assertContains(
       await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
-    ).toContain("playwright install --with-deps chromium");
-    expect(
+      "playwright install --with-deps chromium",
+    );
+    assertMatchesPartial(
       JSON.parse(
         await readFile(
           path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
         ),
       ),
-    ).toMatchObject({
-      build: {
-        args: {
-          PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
+      {
+        build: {
+          args: {
+            PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
+          },
         },
       },
-    });
-    expect(
+    );
+    assertDoesNotContain(
       await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8"),
-    ).not.toContain("alias:");
+      "alias:",
+    );
     for (const configPath of [
       "apps/api/vitest.config.ts",
       "apps/web/vitest.config.ts",
     ]) {
-      expect(
+      assertDoesNotContain(
         await readFile(path.join(targetDir, configPath), "utf8"),
-      ).not.toContain("alias:");
+        "alias:",
+      );
     }
     for (const sourcePath of [
       "apps/api/src/index.ts",
       "apps/api/src/server.ts",
       "apps/api/test/app.test.ts",
     ]) {
-      expect(
+      assertContains(
         await readFile(path.join(targetDir, sourcePath), "utf8"),
-      ).toContain('from "#/runtime"');
+        'from "#/runtime"',
+      );
     }
     const rootManifest = JSON.parse(
       await readFile(path.join(targetDir, "package.json"), "utf8"),
     ) as { readonly scripts: Readonly<Record<string, string>> };
-    expect(rootManifest.scripts).toMatchObject({
+    assertMatchesPartial(rootManifest.scripts, {
       "test:e2e": "playwright test",
     });
-    expect(
+    assertMatchesPartial(
       JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-    ).toMatchObject({
-      tasks: {
-        "//#test:e2e": {
-          dependsOn: ["@demo/api#build", "@demo/web#build"],
-          cache: false,
+      {
+        tasks: {
+          "//#test:e2e": {
+            dependsOn: ["@demo/api#build", "@demo/web#build"],
+            cache: false,
+          },
         },
       },
-    });
-    expect(
+    );
+    assertContains(
       await readFile(path.join(targetDir, "playwright.config.ts"), "utf8"),
-    ).toContain("pnpm --filter @demo/api --fail-if-no-match run start");
-    await expect(
+      "pnpm --filter @demo/api --fail-if-no-match run start",
+    );
+    await assert.rejects(
       readFile(path.join(targetDir, "apps/web/playwright.config.ts"), "utf8"),
-    ).rejects.toThrow();
+    );
   });
 
-  it("generates a checked browser-backed multi-package workspace", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-vue-hono-check-")),
-      "demo-stack",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: runtimeToolchain,
-    });
-    const plan = planGeneratedRepositoryInitialization({
-      definition: vueHonoAppDefinition,
-      context,
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...plan.operations],
-    });
+  void it(
+    "generates a checked browser-backed multi-package workspace",
+    { timeout: 300_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-vue-hono-check-")),
+        "demo-stack",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: runtimeToolchain,
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: vueHonoAppDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
 
-    await execa("pnpm", ["install"], { cwd: targetDir });
-    await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
-      cwd: targetDir,
-    });
-    await execa("pnpm", ["run", "check"], { cwd: targetDir });
-  }, 300_000);
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
+        cwd: targetDir,
+      });
+      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+    },
+  );
 
-  it("replays the linked API identity through additions without guessing names or collections", async () => {
+  void it("replays the linked API identity through additions without guessing names or collections", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-vue-hono-replay-"),
     );
@@ -480,22 +512,24 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         preset: "ts-lib",
         packageLeafName: "shared",
       });
-      expect(preparation).toMatchObject({ status: "ready" });
+      assertMatchesPartial(preparation, { status: "ready" });
       if (preparation.status !== "ready")
         throw new Error("expected quoted API env key addition to prepare");
       const addition = preparation.plan;
-      expect(addition.blueprint.packages).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining(api),
-          expect.objectContaining(web),
-          expect.objectContaining({
+      assertMatches(
+        addition.blueprint.packages,
+        arrayContaining([
+          objectContaining(api),
+          objectContaining(web),
+          objectContaining({
             name: "@demo/shared",
             path: "packages/shared",
           }),
         ]),
       );
-      expect(addition.operations).toContainEqual(
-        expect.objectContaining({
+      assertContainsEqual(
+        addition.operations,
+        objectContaining({
           kind: "writeTextTemplate",
           to: "playwright.config.ts",
           replacements: {
@@ -504,23 +538,27 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
           },
         }),
       );
-      expect(addition.blueprint.packageLinkIntents).toContainEqual({
+      assertContainsEqual(addition.blueprint.packageLinkIntents, {
         consumerPackagePath: "products/client",
         providerPackagePath: "services/backend",
       });
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assertMatchesPartial(
+        await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...addition.projectProjections,
         }),
-      ).resolves.toMatchObject({ ok: true });
-      await expect(readFile(playwrightConfigPath, "utf8")).resolves.toContain(
+        { ok: true },
+      );
+      assertContains(
+        await readFile(playwrightConfigPath, "utf8"),
         `pnpm --filter ${api.name} --fail-if-no-match run start`,
       );
-      await expect(readFile(playwrightConfigPath, "utf8")).resolves.toContain(
+      assertContains(
+        await readFile(playwrightConfigPath, "utf8"),
         `pnpm --filter ${web.name} --fail-if-no-match run preview --host 127.0.0.1 --strictPort`,
       );
-      await expect(readFile(playwrightConfigPath, "utf8")).resolves.toContain(
+      assertContains(
+        await readFile(playwrightConfigPath, "utf8"),
         'env: { "PORT": apiPort }',
       );
       const workspaceGlobs = (await readFile(workspacePath, "utf8"))
@@ -528,7 +566,7 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
         .split("\n")
         .filter((line) => line.startsWith("  - "))
         .map((line) => line.slice("  - ".length));
-      expect(workspaceGlobs).toEqual([
+      assert.deepStrictEqual(workspaceGlobs, [
         "apps/*",
         "packages/*",
         "services/*",
@@ -536,33 +574,35 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
       ]);
 
       const beforeConflict = await treeBytes(targetDir);
-      expect(
+      assertMatchesPartial(
         prepareGeneratedRepositoryPackageAddition({
           repositoryRoot: targetDir,
           preset: "ts-lib",
           packageLeafName: "shared",
           packagePath: "libraries/shared",
         }),
-      ).toMatchObject({ status: "conflict", conflict: { kind: "identity" } });
-      await expect(treeBytes(targetDir)).resolves.toEqual(beforeConflict);
+        { status: "conflict", conflict: { kind: "identity" } },
+      );
+      assert.deepStrictEqual(await treeBytes(targetDir), beforeConflict);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it.each([
-    "missing",
-    "stale",
-    "syntax",
-    "dynamic",
-    "api-port",
-    "web-port",
-    "api-capture",
-    "web-capture",
-    "web-endpoint-override",
-    "api-port-reassigned",
-    "web-port-duplicate",
-  ] as const)(
+  testEach(
+    [
+      "missing",
+      "stale",
+      "syntax",
+      "dynamic",
+      "api-port",
+      "web-port",
+      "api-capture",
+      "web-capture",
+      "web-endpoint-override",
+      "api-port-reassigned",
+      "web-port-duplicate",
+    ] as const,
     "rejects %s root Playwright truth before a Package Addition writes",
     async (kind) => {
       const workspace = await mkdtemp(
@@ -648,14 +688,15 @@ describe("vue-hono-app Built-in Preset Definition behavior", () => {
           );
 
         const beforeAddition = await treeBytes(targetDir);
-        expect(
+        assertDoesNotMatchPartial(
           prepareGeneratedRepositoryPackageAddition({
             repositoryRoot: targetDir,
             preset: "ts-lib",
             packageLeafName: kind,
           }),
-        ).not.toMatchObject({ status: "ready" });
-        await expect(treeBytes(targetDir)).resolves.toEqual(beforeAddition);
+          { status: "ready" },
+        );
+        assert.deepStrictEqual(await treeBytes(targetDir), beforeAddition);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }

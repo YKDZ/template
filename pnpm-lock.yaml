@@ -469,9 +469,6 @@ importers:
       vite:
         specifier: 'catalog:'
         version: 8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)
-      vitest:
-        specifier: 'catalog:'
-        version: 5.0.3(@types/node@24.19.1)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
       vue:
         specifier: 'catalog:'
         version: 3.5.43

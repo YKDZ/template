@@ -1,12 +1,14 @@
+import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { create } from "tar";
-import { afterEach, describe, expect, it } from "vitest";
 
 import type { NpmPublicationReadiness } from "../../templates/ts-cli/publication/readiness.ts";
+import { assertMatchesPartial } from "../../test-support/assertions.ts";
 
 type ArtifactModule =
   typeof import("../../templates/ts-cli/publication/artifact.ts");
@@ -65,8 +67,8 @@ async function loadArtifactModule(workspace: string): Promise<ArtifactModule> {
   )) as ArtifactModule;
 }
 
-describe("verified publication artifact contracts", () => {
-  it("rejects traversal, symbolic-link, and duplicate tar entries", async () => {
+void describe("verified publication artifact contracts", () => {
+  void it("rejects traversal, symbolic-link, and duplicate tar entries", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-archive-contract-"),
     );
@@ -97,13 +99,13 @@ describe("verified publication artifact contracts", () => {
         },
         [...item.paths],
       );
-      await expect(
-        inspectPublicationArchive(archivePath),
-      ).resolves.toMatchObject({ code: "artifact-archive-unsafe" });
+      assertMatchesPartial(await inspectPublicationArchive(archivePath), {
+        code: "artifact-archive-unsafe",
+      });
     }
   });
 
-  it("rejects scripts and unreviewed top-level packed manifest fields", async () => {
+  void it("rejects scripts and unreviewed top-level packed manifest fields", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-manifest-contract-"),
     );
@@ -159,24 +161,26 @@ describe("verified publication artifact contracts", () => {
       },
     };
 
-    expect(
+    assertMatchesPartial(
       inspectPackedManifestContract({
         manifest: packedManifest,
         sourceManifest,
         readiness,
       }),
-    ).toMatchObject({ code: "artifact-manifest-contract" });
+      { code: "artifact-manifest-contract" },
+    );
     const { scripts: _scripts, ...withoutScripts } = packedManifest;
-    expect(
+    assertMatchesPartial(
       inspectPackedManifestContract({
         manifest: { ...withoutScripts, author: "Ada Lovelace" },
         sourceManifest,
         readiness,
       }),
-    ).toMatchObject({ code: "artifact-manifest-contract" });
+      { code: "artifact-manifest-contract" },
+    );
   });
 
-  it("uses explicit platform command plans for cmd bins and pnpm pack", async () => {
+  void it("uses explicit platform command plans for cmd bins and pnpm pack", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-consumer-command-"),
     );
@@ -186,74 +190,78 @@ describe("verified publication artifact contracts", () => {
     const environment = { ComSpec: String.raw`C:\Windows\System32\cmd.exe` };
     const binPath = String.raw`C:\consumer\node_modules\.bin\ship.cmd`;
 
-    expect(
+    assert.deepStrictEqual(
       planInstalledBinCommand({
         platform: "win32",
         binPath,
         args: ["--help"],
         environment,
       }),
-    ).toEqual({
-      executable: environment.ComSpec,
-      args: [
-        "/d",
-        "/v:off",
-        "/s",
-        "/c",
-        '""%TEMPLATE_VERIFIED_PUBLICATION_BIN%" "--help""',
-      ],
-      environment: {
-        ...environment,
-        TEMPLATE_VERIFIED_PUBLICATION_BIN: binPath,
+      {
+        executable: environment.ComSpec,
+        args: [
+          "/d",
+          "/v:off",
+          "/s",
+          "/c",
+          '""%TEMPLATE_VERIFIED_PUBLICATION_BIN%" "--help""',
+        ],
+        environment: {
+          ...environment,
+          TEMPLATE_VERIFIED_PUBLICATION_BIN: binPath,
+        },
       },
-    });
-    expect(
+    );
+    assert.deepStrictEqual(
       planInstalledBinCommand({
         platform: "linux",
         binPath: "/consumer/node_modules/.bin/ship",
         args: ["--help"],
         environment: {},
       }),
-    ).toEqual({
-      executable: "/consumer/node_modules/.bin/ship",
-      args: ["--help"],
-      environment: {},
-    });
+      {
+        executable: "/consumer/node_modules/.bin/ship",
+        args: ["--help"],
+        environment: {},
+      },
+    );
 
-    expect(
+    assert.deepStrictEqual(
       planPnpmPackCommand({
         platform: "win32",
         packDirectory: String.raw`C:\temp\%SystemRoot%\publication !output`,
         environment,
       }),
-    ).toEqual({
-      executable: environment.ComSpec,
-      args: [
-        "/d",
-        "/v:off",
-        "/s",
-        "/c",
-        '""pnpm.cmd" "pack" "--pack-destination" "%TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY%""',
-      ],
-      environment: {
-        ...environment,
-        TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY: String.raw`C:\temp\%SystemRoot%\publication !output`,
+      {
+        executable: environment.ComSpec,
+        args: [
+          "/d",
+          "/v:off",
+          "/s",
+          "/c",
+          '""pnpm.cmd" "pack" "--pack-destination" "%TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY%""',
+        ],
+        environment: {
+          ...environment,
+          TEMPLATE_VERIFIED_PUBLICATION_PACK_DIRECTORY: String.raw`C:\temp\%SystemRoot%\publication !output`,
+        },
       },
-    });
-    expect(
+    );
+    assert.deepStrictEqual(
       planPnpmPackCommand({
         platform: "linux",
         packDirectory: "/tmp/publication-%SystemRoot%-! output",
         environment: { PATH: "/usr/bin" },
       }),
-    ).toEqual({
-      executable: "pnpm",
-      args: [
-        "pack",
-        "--pack-destination",
-        "/tmp/publication-%SystemRoot%-! output",
-      ],
-      environment: { PATH: "/usr/bin" },
-    });
+      {
+        executable: "pnpm",
+        args: [
+          "pack",
+          "--pack-destination",
+          "/tmp/publication-%SystemRoot%-! output",
+        ],
+        environment: { PATH: "/usr/bin" },
+      },
+    );
   });
 });

@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -17,11 +19,21 @@ import {
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import semver from "semver";
-import { describe, expect, it } from "vitest";
 
+import {
+  arrayContaining,
+  assertContains,
+  assertContainsEqual,
+  assertDoesNotContain,
+  assertLacksProperty,
+  assertMatches,
+  assertMatchesPartial,
+  objectContaining,
+  stringMatching,
+} from "../../test-support/assertions.ts";
 import { vueAppDefinition } from "./definition.ts";
 
-describe("vue-app Built-in Preset Definition behavior", () => {
+void describe("vue-app Built-in Preset Definition behavior", () => {
   const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
 
   /**
@@ -38,8 +50,9 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     nodeVersion: releaseToolchainSnapshot.nodeVersion,
   };
 
-  it("owns a browser application contribution with explicit exposure and preparation", () => {
-    expect(builtInPresetRegistry.require("vue-app").metadata).toEqual(
+  void it("owns a browser application contribution with explicit exposure and preparation", () => {
+    assert.deepStrictEqual(
+      builtInPresetRegistry.require("vue-app").metadata,
       vueAppDefinition.metadata,
     );
     const contribution = vueAppDefinition.planInitialization({
@@ -52,35 +65,35 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       toolchain,
     });
 
-    expect(vueAppDefinition.metadata).toEqual({
+    assert.deepStrictEqual(vueAppDefinition.metadata, {
       name: "vue-app",
       title: "Vue 应用",
       description: "使用 Vite、Tailwind、Pinia 和测试工具的 Vue 应用工作区。",
     });
-    expect(contribution.definition).toEqual({
+    assert.deepStrictEqual(contribution.definition, {
       name: "@demo/web",
       path: "apps/web",
       role: "runtime-service",
     });
-    expect(contribution.exposure).toEqual({
+    assert.deepStrictEqual(contribution.exposure, {
       exports: { ".": { default: "./src/main.ts", types: "./src/main.ts" } },
       imports: { "#/*": { default: "./src/*.ts", types: "./src/*.ts" } },
     });
-    expect(contribution.manifest.dependencies).toEqual({
+    assert.deepStrictEqual(contribution.manifest.dependencies, {
       "@vue/devtools-api": "catalog:",
       pinia: "catalog:",
       vue: "catalog:",
     });
-    expect(contribution).not.toHaveProperty("checks");
-    expect(contribution.environmentNeeds).toMatchObject([
+    assertLacksProperty(contribution, "checks");
+    assertMatchesPartial(contribution.environmentNeeds, [
       { kind: "playwright-browser-assets", browser: "chromium" },
     ]);
-    expect(contribution.foundation).toMatchObject({
+    assertMatchesPartial(contribution.foundation, {
       workspacePackageGlobs: ["apps/*"],
     });
   });
 
-  it("declares the shared source-backed browser-test Tool Layer", () => {
+  void it("declares the shared source-backed browser-test Tool Layer", () => {
     const contribution = vueAppDefinition.planInitialization({
       targetDir: "/tmp/demo-vue",
       repositoryName: "demo-vue",
@@ -101,14 +114,14 @@ describe("vue-app Built-in Preset Definition behavior", () => {
       "",
     );
 
-    expect(semver.valid(playwrightVersion)).toBe(playwrightVersion);
-    expect(layer).toMatchObject({
+    assert.strictEqual(semver.valid(playwrightVersion), playwrightVersion);
+    assertMatchesPartial(layer, {
       identity: "browser-test",
       requires: ["node-pnpm"],
       buildArguments: [
         {
           name: "PLAYWRIGHT_CLI_PACKAGE",
-          value: expect.stringMatching(/^@playwright\/test@/u),
+          value: stringMatching(/^@playwright\/test@/u),
         },
       ],
       probes: [
@@ -125,9 +138,8 @@ describe("vue-app Built-in Preset Definition behavior", () => {
         },
       ],
     });
-    expect(
+    assert.strictEqual(
       resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
-    ).toBe(
       path.resolve(
         import.meta.dirname,
         "../../templates/shared/devcontainer/browser-test.Dockerfile",
@@ -135,233 +147,266 @@ describe("vue-app Built-in Preset Definition behavior", () => {
     );
   });
 
-  it("initializes and adds Vue applications at default and explicit Package Paths", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-vue-")),
-      "demo-vue",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: runtimeToolchain,
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: vueAppDefinition,
-      context,
-    });
-
-    expect(
-      initialization.nextStepInstructions.map((step) => step.display),
-    ).toEqual(["pnpm install", "pnpm run fix", "pnpm run check"]);
-    expect(initialization.operations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "copyFile",
-          from: "src/App.vue",
-          to: "apps/web/src/App.vue",
-        }),
-      ]),
-    );
-
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...initialization.operations],
-    });
-    await writeFile(
-      path.join(targetDir, "apps/web/scripts/automation-helper.ts"),
-      'export const automationOwner = "vue";\n',
-    );
-    await writeFile(
-      path.join(targetDir, "apps/web/scripts/automation-probe.ts"),
-      'import { automationOwner } from "./automation-helper.ts";\n\nconsole.log(automationOwner);\n',
-    );
-    const viteConfig = await readFile(
-      path.join(targetDir, "apps/web/vite.config.ts"),
-      "utf8",
-    );
-    expect(
-      await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8"),
-    ).toContain("playwright install --with-deps chromium");
-    expect(
-      JSON.parse(
-        await readFile(
-          path.join(targetDir, ".devcontainer/devcontainer.json"),
-          "utf8",
-        ),
-      ),
-    ).toMatchObject({
-      build: {
-        args: {
-          PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
-        },
-      },
-    });
-    expect(viteConfig).toContain("@tailwindcss/vite");
-    expect(viteConfig).not.toContain("alias:");
-    expect(
-      await readFile(path.join(targetDir, "apps/web/vitest.config.ts"), "utf8"),
-    ).not.toContain("alias:");
-    for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
-      const config = JSON.parse(
-        await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
-      ) as {
-        readonly compilerOptions?: Readonly<Record<string, unknown>>;
-        readonly extends?: string;
-      };
-      expect(config.compilerOptions).toMatchObject({
-        customConditions: ["source"],
+  void it(
+    "initializes and adds Vue applications at default and explicit Package Paths",
+    { timeout: 300_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-vue-")),
+        "demo-vue",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: runtimeToolchain,
       });
-      expect(config.compilerOptions).not.toHaveProperty("erasableSyntaxOnly");
-      if (configPath === "tsconfig.app.json") {
-        expect(config.compilerOptions).toMatchObject({
-          exactOptionalPropertyTypes: false,
-        });
-      } else {
-        expect(config.extends).toBe("./tsconfig.app.json");
-      }
-    }
-    expect(
-      JSON.parse(
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: vueAppDefinition,
+        context,
+      });
+
+      assert.deepStrictEqual(
+        initialization.nextStepInstructions.map((step) => step.display),
+        ["pnpm install", "pnpm run fix", "pnpm run check"],
+      );
+      assertMatches(
+        initialization.operations,
+        arrayContaining([
+          objectContaining({
+            kind: "copyFile",
+            from: "src/App.vue",
+            to: "apps/web/src/App.vue",
+          }),
+        ]),
+      );
+
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      await writeFile(
+        path.join(targetDir, "apps/web/scripts/automation-helper.ts"),
+        'export const automationOwner = "vue";\n',
+      );
+      await writeFile(
+        path.join(targetDir, "apps/web/scripts/automation-probe.ts"),
+        'import { automationOwner } from "./automation-helper.ts";\n\nconsole.log(automationOwner);\n',
+      );
+      const viteConfig = await readFile(
+        path.join(targetDir, "apps/web/vite.config.ts"),
+        "utf8",
+      );
+      assertContains(
         await readFile(
-          path.join(targetDir, "apps/web/tsconfig.node.json"),
+          path.join(targetDir, ".devcontainer/Dockerfile"),
           "utf8",
         ),
-      ),
-    ).toMatchObject({
-      compilerOptions: {
-        customConditions: ["source"],
-        erasableSyntaxOnly: true,
-      },
-    });
+        "playwright install --with-deps chromium",
+      );
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, ".devcontainer/devcontainer.json"),
+            "utf8",
+          ),
+        ),
+        {
+          build: {
+            args: {
+              PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
+            },
+          },
+        },
+      );
+      assertContains(viteConfig, "@tailwindcss/vite");
+      assertDoesNotContain(viteConfig, "alias:");
+      assertDoesNotContain(
+        await readFile(
+          path.join(targetDir, "apps/web/vitest.config.ts"),
+          "utf8",
+        ),
+        "alias:",
+      );
+      for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
+        const config = JSON.parse(
+          await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
+        ) as {
+          readonly compilerOptions?: Readonly<Record<string, unknown>>;
+          readonly extends?: string;
+        };
+        assertMatchesPartial(config.compilerOptions, {
+          customConditions: ["source"],
+        });
+        assertLacksProperty(config.compilerOptions, "erasableSyntaxOnly");
+        if (configPath === "tsconfig.app.json") {
+          assertMatchesPartial(config.compilerOptions, {
+            exactOptionalPropertyTypes: false,
+          });
+        } else {
+          assert.strictEqual(config.extends, "./tsconfig.app.json");
+        }
+      }
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, "apps/web/tsconfig.node.json"),
+            "utf8",
+          ),
+        ),
+        {
+          compilerOptions: {
+            customConditions: ["source"],
+            erasableSyntaxOnly: true,
+          },
+        },
+      );
 
-    const defaultAddition = planGeneratedRepositoryPackageAddition({
-      definition: vueAppDefinition,
-      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-      packageLeafName: "admin",
-    });
-    await reconcileAndApplyProjectProjections({
-      targetRoot: targetDir,
-      ...defaultAddition.projectProjections,
-    });
-    const explicitAddition = planGeneratedRepositoryPackageAddition({
-      definition: vueAppDefinition,
-      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-      packageLeafName: "portal",
-      packagePath: "products/portal",
-    });
-    await reconcileAndApplyProjectProjections({
-      targetRoot: targetDir,
-      ...explicitAddition.projectProjections,
-    });
+      const defaultAddition = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+        packageLeafName: "admin",
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...defaultAddition.projectProjections,
+      });
+      const explicitAddition = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+        packageLeafName: "portal",
+        packagePath: "products/portal",
+      });
+      await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...explicitAddition.projectProjections,
+      });
 
-    expect(explicitAddition.blueprint.packages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+      assertMatches(
+        explicitAddition.blueprint.packages,
+        arrayContaining([
+          objectContaining({
+            name: "@demo/admin",
+            path: "apps/admin",
+            role: "runtime-service",
+          }),
+          objectContaining({
+            name: "@demo/portal",
+            path: "products/portal",
+            role: "runtime-service",
+          }),
+        ]),
+      );
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(
+            path.join(targetDir, "apps/admin/package.json"),
+            "utf8",
+          ),
+        ),
+        { name: "@demo/admin" },
+      );
+
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      assert.strictEqual(
+        await execa(
+          "node",
+          ["--conditions=source", "scripts/automation-probe.ts"],
+          {
+            cwd: path.join(targetDir, "apps/web"),
+          },
+        ).then(({ stdout }) => stdout),
+        "vue",
+      );
+      await execa("pnpm", ["--filter", "./apps/web", "run", "typecheck"], {
+        cwd: targetDir,
+      });
+      await execa(
+        "pnpm",
+        ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+        { cwd: targetDir },
+      );
+      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+    },
+  );
+
+  void it(
+    "owns its default Package Path and updates an explicit Link Intent atomically",
+    { timeout: 300_000 },
+    async () => {
+      const targetDir = path.join(
+        await mkdtemp(path.join(tmpdir(), "template-vue-link-")),
+        "demo-vue",
+      );
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: runtimeToolchain,
+      });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: vueAppDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+
+      const addition = planGeneratedRepositoryPackageAddition({
+        definition: vueAppDefinition,
+        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+        packageLeafName: "admin",
+        linkFrom: ["apps/web"],
+      });
+
+      assertContainsEqual(
+        addition.blueprint.packages,
+        objectContaining({
           name: "@demo/admin",
           path: "apps/admin",
           role: "runtime-service",
         }),
-        expect.objectContaining({
-          name: "@demo/portal",
-          path: "products/portal",
-          role: "runtime-service",
+      );
+      assertContainsEqual(addition.blueprint.packageLinkIntents, {
+        consumerPackagePath: "apps/web",
+        providerPackagePath: "apps/admin",
+      });
+      assertContainsEqual(
+        addition.operations,
+        objectContaining({
+          kind: "mergeJson",
+          to: "apps/web/package.json",
+          value: {
+            dependencies: { "@demo/admin": "workspace:*" },
+            dependenciesMeta: { "@demo/admin": { injected: true } },
+          },
+          provenance: objectContaining({
+            definitionName: "vue-app",
+            planningContribution: "foundationPlan",
+          }),
         }),
-      ]),
-    );
-    expect(
-      JSON.parse(
-        await readFile(path.join(targetDir, "apps/admin/package.json"), "utf8"),
-      ),
-    ).toMatchObject({ name: "@demo/admin" });
+      );
 
-    await execa("pnpm", ["install"], { cwd: targetDir });
-    await expect(
-      execa("node", ["--conditions=source", "scripts/automation-probe.ts"], {
-        cwd: path.join(targetDir, "apps/web"),
-      }).then(({ stdout }) => stdout),
-    ).resolves.toBe("vue");
-    await execa("pnpm", ["--filter", "./apps/web", "run", "typecheck"], {
-      cwd: targetDir,
-    });
-    await execa(
-      "pnpm",
-      ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-      { cwd: targetDir },
-    );
-    await execa("pnpm", ["run", "check"], { cwd: targetDir });
-  }, 300_000);
+      await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+      assertMatchesPartial(
+        JSON.parse(
+          await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
+        ),
+        { dependencies: { "@demo/admin": "workspace:*" } },
+      );
+      await execa("pnpm", ["install"], { cwd: targetDir });
+      await execa(
+        "pnpm",
+        ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
+        { cwd: targetDir },
+      );
+      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+    },
+  );
 
-  it("owns its default Package Path and updates an explicit Link Intent atomically", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-vue-link-")),
-      "demo-vue",
-    );
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: runtimeToolchain,
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: vueAppDefinition,
-      context,
-    });
-    await renderNewProject({
-      targetRoot: targetDir,
-      operations: [...initialization.operations],
-    });
-
-    const addition = planGeneratedRepositoryPackageAddition({
-      definition: vueAppDefinition,
-      localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-      packageLeafName: "admin",
-      linkFrom: ["apps/web"],
-    });
-
-    expect(addition.blueprint.packages).toContainEqual(
-      expect.objectContaining({
-        name: "@demo/admin",
-        path: "apps/admin",
-        role: "runtime-service",
-      }),
-    );
-    expect(addition.blueprint.packageLinkIntents).toContainEqual({
-      consumerPackagePath: "apps/web",
-      providerPackagePath: "apps/admin",
-    });
-    expect(addition.operations).toContainEqual(
-      expect.objectContaining({
-        kind: "mergeJson",
-        to: "apps/web/package.json",
-        value: {
-          dependencies: { "@demo/admin": "workspace:*" },
-          dependenciesMeta: { "@demo/admin": { injected: true } },
-        },
-        provenance: expect.objectContaining({
-          definitionName: "vue-app",
-          planningContribution: "foundationPlan",
-        }),
-      }),
-    );
-
-    await reconcileAndApplyProjectProjections({
-      targetRoot: targetDir,
-      ...addition.projectProjections,
-    });
-    expect(
-      JSON.parse(
-        await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
-      ),
-    ).toMatchObject({ dependencies: { "@demo/admin": "workspace:*" } });
-    await execa("pnpm", ["install"], { cwd: targetDir });
-    await execa(
-      "pnpm",
-      ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-      { cwd: targetDir },
-    );
-    await execa("pnpm", ["run", "check"], { cwd: targetDir });
-  }, 300_000);
-
-  it("reconciles Foundation structured customization and reruns idempotently", async () => {
+  void it("reconciles Foundation structured customization and reruns idempotently", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-vue-structured-addition-"),
     );
@@ -398,36 +443,38 @@ describe("vue-app Built-in Preset Definition behavior", () => {
         targetRoot: targetDir,
         ...addition.projectProjections,
       });
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      await expect(
-        readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        boundaries: {
-          tags: {
-            app: { dependencies: { allow: ["app", "library"] } },
+      assertMatchesPartial(
+        await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
+        {
+          boundaries: {
+            tags: {
+              app: { dependencies: { allow: ["app", "library"] } },
+            },
           },
+          tasks: { "user:report": { cache: false } },
         },
-        tasks: { "user:report": { cache: false } },
-      });
+      );
 
       const repeated = planGeneratedRepositoryPackageAddition({
         definition: vueAppDefinition,
         localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...repeated.projectProjections,
         }),
-      ).resolves.toEqual({ ok: true, changedPaths: [], actions: [] });
+        { ok: true, changedPaths: [], actions: [] },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("returns a structured conflict before mutating an incompatible Turbo customization", async () => {
+  void it("returns a structured conflict before mutating an incompatible Turbo customization", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-vue-structured-conflict-"),
     );
@@ -467,19 +514,23 @@ describe("vue-app Built-in Preset Definition behavior", () => {
         ...addition.projectProjections,
       });
 
-      expect(result).toEqual({
+      assertMatches(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             path: "turbo.json",
             driver: "structured",
             location: "/boundaries/tags/app/dependencies/allow",
           }),
         ],
       });
-      await expect(
+      await assert.rejects(
         readFile(path.join(targetDir, "apps/dashboard/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertMatchesPartial(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
