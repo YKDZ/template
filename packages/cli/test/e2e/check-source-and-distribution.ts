@@ -72,9 +72,13 @@ try {
 
   await execa(
     "node",
-    ["--conditions=source", "test/e2e/run-journeys.ts", "source"],
+    ["--conditions=source", "--test", "test/e2e/run-journeys.ts"],
     {
       cwd: packageRoot,
+      env: {
+        ...process.env,
+        TEMPLATE_CLI_JOURNEY_MODE: "source",
+      },
       stdio: "inherit",
     },
   );
@@ -96,8 +100,12 @@ try {
     },
   );
 
-  await execa("node", ["test/e2e/run-journeys.ts", "distribution"], {
+  await execa("node", ["--test", "test/e2e/run-journeys.ts"], {
     cwd: packageRoot,
+    env: {
+      ...process.env,
+      TEMPLATE_CLI_JOURNEY_MODE: "distribution",
+    },
     stdio: "inherit",
   });
 } finally {

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type {
@@ -19,35 +20,19 @@ type JourneyRunTarget = {
   readonly packedBin?: string;
 };
 
-function invalidArguments(message: string): never {
-  throw new Error(
-    `${message}\nUsage: run-journeys.ts <source|distribution> [...modes] | packed <bin-path>`,
-  );
-}
-
-function parseTargets(args: readonly string[]): readonly JourneyRunTarget[] {
-  const first = args[0];
-  if (first === undefined) invalidArguments("missing journey mode");
-  if (first === "packed") {
-    if (args.length !== 2) {
-      invalidArguments("packed journey mode requires exactly one bin path");
-    }
-    return [{ mode: "packed", packedBin: args[1]! }];
+function getRunTarget(): JourneyRunTarget {
+  const mode = process.env.TEMPLATE_CLI_JOURNEY_MODE;
+  if (mode !== "source" && mode !== "distribution" && mode !== "packed") {
+    throw new Error(
+      "TEMPLATE_CLI_JOURNEY_MODE must be source, distribution, or packed",
+    );
   }
 
-  const targets: JourneyRunTarget[] = [];
-  const seen = new Set<CliJourneyMode>();
-  for (const argument of args) {
-    if (argument !== "source" && argument !== "distribution") {
-      invalidArguments(`unknown journey mode ${JSON.stringify(argument)}`);
-    }
-    if (seen.has(argument)) {
-      invalidArguments(`duplicate journey mode ${JSON.stringify(argument)}`);
-    }
-    seen.add(argument);
-    targets.push({ mode: argument });
+  const packedBin = process.env.TEMPLATE_CLI_PACKED_BIN;
+  if (mode === "packed" && packedBin === undefined) {
+    throw new Error("TEMPLATE_CLI_PACKED_BIN is required for packed journeys");
   }
-  return targets;
+  return { mode, ...(packedBin === undefined ? {} : { packedBin }) };
 }
 
 async function discoverJourneys(): Promise<readonly CliJourney[]> {
@@ -72,11 +57,11 @@ async function discoverJourneys(): Promise<readonly CliJourney[]> {
   );
 }
 
-function invocation(
-  mode: CliJourneyMode,
-  packedBin: string | undefined,
-): { readonly executable: string; readonly prefix: readonly string[] } {
-  switch (mode) {
+function invocation(target: JourneyRunTarget): {
+  readonly executable: string;
+  readonly prefix: readonly string[];
+} {
+  switch (target.mode) {
     case "source":
       return {
         executable: process.execPath,
@@ -88,20 +73,24 @@ function invocation(
         prefix: [path.join(packageRoot, "dist/cli.js")],
       };
     case "packed":
-      if (packedBin === undefined) {
-        throw new Error("packed journey mode requires a bin path");
+      if (target.packedBin === undefined) {
+        throw new Error(
+          "TEMPLATE_CLI_PACKED_BIN is required for packed journeys",
+        );
       }
-      return { executable: packedBin, prefix: [] };
+      return { executable: target.packedBin, prefix: [] };
   }
 }
 
 async function runCommand(options: {
-  readonly mode: CliJourneyMode;
-  readonly packedBin: string | undefined;
+  readonly target: JourneyRunTarget;
   readonly command: CliJourneyCommand;
   readonly cwd: string;
 }): Promise<CliJourneyResult> {
-  const target = invocation(options.mode, options.packedBin);
+  const target = invocation(options.target);
+  const env = { ...process.env, ...options.command.env };
+  delete env.TEMPLATE_CLI_JOURNEY_MODE;
+  delete env.TEMPLATE_CLI_PACKED_BIN;
   return await new Promise((resolve, reject) => {
     const child = spawn(
       options.command.executable ?? target.executable,
@@ -110,7 +99,7 @@ async function runCommand(options: {
         : options.command.args,
       {
         cwd: options.command.cwd ?? options.cwd,
-        env: { ...process.env, ...options.command.env },
+        env,
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -136,62 +125,44 @@ async function runCommand(options: {
   });
 }
 
-async function runJourneys(
+async function runJourney(
   target: JourneyRunTarget,
-): Promise<readonly string[]> {
-  const passed: string[] = [];
-  for (const journey of await discoverJourneys()) {
-    if (!journey.modes.includes(target.mode)) continue;
-    const workDir = await mkdtemp(
-      path.join(tmpdir(), `template-${journey.name}-${target.mode}-`),
-    );
-    const context = { mode: target.mode, packageRoot, workDir };
-    try {
-      await journey.setup(context);
-      const results: CliJourneyResult[] = [];
-      for (const command of journey.commands(context)) {
-        await command.prepare?.(context);
-        results.push(
-          await runCommand({
-            mode: target.mode,
-            packedBin: target.packedBin,
-            command,
-            cwd: workDir,
-          }),
-        );
-      }
-      try {
-        await journey.assertions({ context, results });
-      } catch (error) {
-        const commandSummary = results
-          .map(
-            (result) =>
-              `${result.commandName}: exit=${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
-          )
-          .join("\n\n");
-        throw new Error(`旅程 ${journey.name} 验证失败。\n${commandSummary}`, {
-          cause: error,
-        });
-      }
-      passed.push(`${target.mode}:${journey.name}:passed`);
-    } finally {
-      await rm(workDir, { recursive: true, force: true });
+  journey: CliJourney,
+): Promise<void> {
+  const workDir = await mkdtemp(
+    path.join(tmpdir(), `template-${journey.name}-${target.mode}-`),
+  );
+  const context = { mode: target.mode, packageRoot, workDir };
+  try {
+    await journey.setup(context);
+    const results: CliJourneyResult[] = [];
+    for (const command of journey.commands(context)) {
+      await command.prepare?.(context);
+      results.push(await runCommand({ target, command, cwd: workDir }));
     }
+    try {
+      await journey.assertions({ context, results });
+    } catch (error) {
+      const commandSummary = results
+        .map(
+          (result) =>
+            `${result.commandName}: exit=${result.exitCode}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+        )
+        .join("\n\n");
+      throw new Error(`旅程 ${journey.name} 验证失败。\n${commandSummary}`, {
+        cause: error,
+      });
+    }
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
   }
-  return passed;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  try {
-    const passed: string[] = [];
-    for (const target of parseTargets(process.argv.slice(2))) {
-      passed.push(...(await runJourneys(target)));
-    }
-    process.stdout.write(`${passed.join("\n")}\n`);
-  } catch (error) {
-    process.stderr.write(
-      `error: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    process.exitCode = 1;
-  }
+const target = getRunTarget();
+const journeys = await discoverJourneys();
+for (const journey of journeys) {
+  if (!journey.modes.includes(target.mode)) continue;
+  void test(`${target.mode}: ${journey.name}`, async () => {
+    await runJourney(target, journey);
+  });
 }

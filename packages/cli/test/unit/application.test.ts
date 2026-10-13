@@ -1,13 +1,14 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
   prepareGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import { describe, expect, it } from "vitest";
 
 import { runInit, type ApplicationRuntime } from "../../src/application.ts";
 
@@ -23,8 +24,8 @@ function createRuntime(workspace: string): ApplicationRuntime {
   };
 }
 
-describe("init publication setup handoff", () => {
-  it("renders the one-time setup command only in the init terminal result", async () => {
+void describe("init publication setup handoff", () => {
+  void it("renders the one-time setup command only in the init terminal result", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-cli-init-"));
     try {
       const publicationSetupPreset = builtInPresetRegistry
@@ -52,9 +53,9 @@ describe("init publication setup handoff", () => {
         runtime,
       );
 
-      expect(output.status).toBe("success");
+      assert.equal(output.status, "success");
       if (output.status !== "success") throw new Error("Expected init success");
-      expect(output.publicationSetup).toEqual({
+      assert.deepEqual(output.publicationSetup, {
         command: "./scripts/npm-publication-setup/setup.sh",
       });
       const preview = await runInit(
@@ -66,10 +67,10 @@ describe("init publication setup handoff", () => {
         },
         runtime,
       );
-      expect(preview.status).toBe("success");
+      assert.equal(preview.status, "success");
       if (preview.status !== "success")
         throw new Error("Expected preview success");
-      expect(preview.publicationSetup).toEqual({
+      assert.deepEqual(preview.publicationSetup, {
         command: "./scripts/npm-publication-setup/setup.sh",
       });
     } finally {
@@ -78,8 +79,8 @@ describe("init publication setup handoff", () => {
   });
 });
 
-describe("init toolchain snapshot consumption", () => {
-  it("writes the exact snapshot Node and pnpm to the private root", async () => {
+void describe("init toolchain snapshot consumption", () => {
+  void it("writes the exact snapshot Node and pnpm to the private root", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-cli-snapshot-init-"),
     );
@@ -106,9 +107,9 @@ describe("init toolchain snapshot consumption", () => {
         createRuntime(workspace),
       );
 
-      expect(output.status).toBe("success");
+      assert.equal(output.status, "success");
       if (output.status !== "success") throw new Error("Expected init success");
-      expect(output.toolchain).toEqual({
+      assert.deepEqual(output.toolchain, {
         nodeVersion: releaseToolchainSnapshot.nodeVersion,
         packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
       });
@@ -119,10 +120,12 @@ describe("init toolchain snapshot consumption", () => {
         readonly engines: { readonly node: string };
         readonly packageManager: string;
       };
-      expect(rootManifest.engines.node).toBe(
+      assert.equal(
+        rootManifest.engines.node,
         releaseToolchainSnapshot.nodeVersion,
       );
-      expect(rootManifest.packageManager).toBe(
+      assert.equal(
+        rootManifest.packageManager,
         releaseToolchainSnapshot.packageManagerPin,
       );
 
@@ -132,7 +135,7 @@ describe("init toolchain snapshot consumption", () => {
           "utf8",
         ),
       ) as { readonly toolchain: Record<string, unknown> };
-      expect(generationRecord.toolchain).toEqual({
+      assert.deepEqual(generationRecord.toolchain, {
         nodeLtsMajor: snapshotNodeMajor,
         packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
       });
