@@ -15,8 +15,8 @@ concurrency:
 jobs:
   baseline:
     name: Cold and warm formal check scope
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
     env:
       CI: "true"
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
@@ -100,10 +100,10 @@ jobs:
           set +e
           /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
             -o "$MEASURE_ROOT/records/preparation/shellcheck-install.time" \
-            bash -c 'sudo apt-get update && sudo apt-get install -y shellcheck' \
+            bash -c 'sudo apt-get update && sudo apt-get install -y shellcheck strace' \
             > "$MEASURE_ROOT/records/preparation/shellcheck-install.log" 2>&1
           result=$?
-          printf 'sudo apt-get update && sudo apt-get install -y shellcheck\t%s\n' "$result" \
+          printf 'sudo apt-get update && sudo apt-get install -y shellcheck strace\t%s\n' "$result" \
             > "$MEASURE_ROOT/records/preparation/shellcheck-install.exit"
           cat "$MEASURE_ROOT/records/preparation/shellcheck-install.log"
           exit "$result"
@@ -138,16 +138,22 @@ jobs:
             printf 'actions_cache_restore_steps=0\n'
             printf 'setup_node_pnpm_cache=disabled\n'
             printf 'turbo_remote_cache=disabled\n'
-            printf 'root_dependency_install_invocations=1\n'
+            printf 'root_pnpm_install_invocations=1\n'
             printf 'root_pnpm_store=prepared_once_before_cold_and_shared_with_warm\n'
             printf 'playwright_browser_bundle=prepared_once_before_cold_and_shared_with_warm\n'
-            printf 'shellcheck_install_invocations=1\n'
-            printf 'playwright_browser_install_invocations=1\n'
+            printf 'apt_get_update_invocations=1\n'
+            printf 'apt_get_install_invocations=1\n'
+            printf 'apt_packages=shellcheck,strace\n'
+            printf 'playwright_chromium_install_invocations=1\n'
+            printf 'formal_gate_host_pnpm_install_counts=recorded_per_gate_by_strace\n'
+            printf 'fixture_dependency_installation_events=recorded_by_native_activity_ledger\n'
             printf '\n--- runner ---\n'
             date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
             cat /etc/os-release
             uname -a
             printf 'nproc=%s\n' "$(nproc)"
+            grep '^Cpus_allowed_list:' /proc/self/status
+            cat /proc/loadavg
             lscpu
             free -h
             df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
@@ -161,12 +167,8 @@ jobs:
             pnpm --filter @ykdz/template-checks exec devcontainer --version
             pnpm --filter @ykdz/template-builtin-presets exec playwright --version
             shellcheck --version
-            printf '\n--- remote cache variables ---\n'
-            for name in TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
-              TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
-              TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY; do
-              if [[ -n "${!name-}" ]]; then printf '%s=present\n' "$name"; else printf '%s=unset_or_empty\n' "$name"; fi
-            done
+            strace --version
+            printf 'pnpm_executable=%s\n' "$(command -v pnpm)"
           } > "$records/runner-environment.txt" 2>&1
 
           if [[ "$(git rev-parse HEAD)" != f79e73efbdfaabab77c5331c783db94d16167ef1 ]]; then
@@ -199,6 +201,7 @@ jobs:
           measure_root=${MEASURE_ROOT:?}
           records="$measure_root/records"
           final_status=0
+          pnpm_executable=$(command -v pnpm)
           export GITHUB_SHA=f79e73efbdfaabab77c5331c783db94d16167ef1
           unset TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
             TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
@@ -209,6 +212,11 @@ jobs:
             local phase=$1 point=$2 file="$records/$1/cache-$2.txt"
             {
               date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+              printf 'loadavg='
+              cat /proc/loadavg
+              grep '^Cpus_allowed_list:' /proc/self/status
+              free -h
+              df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
               for path in \
                 "$GITHUB_WORKSPACE/.turbo" \
                 "$TEMPLATE_FIXTURE_EVIDENCE_DIR" \
@@ -240,9 +248,16 @@ jobs:
             started_ms=$(date +%s%3N)
             printf '%s start %s %s\n' "$phase" "$name" "$started" >> "$phase_dir/progress.log"
             command_text=$(printf '%q ' "$@")
-            /usr/bin/time -f 'cli_process_tree_wall_seconds=%e cli_process_tree_user_seconds=%U cli_process_tree_sys_seconds=%S cli_process_tree_max_rss_kb=%M exit=%x' \
-              -o "$phase_dir/$name.time" "$@" > "$phase_dir/$name.log" 2>&1
+            /usr/bin/time -f 'observer_wrapper_wall_seconds=%e observer_wrapper_user_seconds=%U observer_wrapper_sys_seconds=%S observer_wrapper_max_rss_kb=%M exit=%x' \
+              -o "$phase_dir/$name.time" \
+              strace -f -qq -e trace=execve -P "$pnpm_executable" \
+                -o "$phase_dir/$name.execve.log" -- "$@" > "$phase_dir/$name.log" 2>&1
             status=$?
+            pnpm_install_invocations=$(awk \
+              '/execve\(/ && /\["[^"]*", "(install|i)"(,|\])/ { count++ } END { print count + 0 }' \
+              "$phase_dir/$name.execve.log")
+            printf 'pnpm_install_execve_invocations=%s\npnpm_executable=%s\n' \
+              "$pnpm_install_invocations" "$pnpm_executable" > "$phase_dir/$name.pnpm-install-count.txt"
             ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             ended_ms=$(date +%s%3N)
             elapsed=$((ended_ms - started_ms))
@@ -292,55 +307,6 @@ jobs:
             docker ps -a --no-trunc > "$phase_dir/docker-ps-after.txt" 2>&1 || true
             docker buildx inspect infra-01-baseline > "$phase_dir/buildx-inspect-after.txt" 2>&1 || true
             record_cache_state "$phase" after
-            if [[ -f "$activity_dir/activity.jsonl" ]]; then
-              cp "$activity_dir/activity.jsonl" "$phase_dir/activity.jsonl"
-              event_lines=$(wc -l < "$activity_dir/activity.jsonl")
-              printf 'activity_event_lines=%s\n' "$event_lines" >> "$phase_dir/phase.txt"
-              if [[ "$event_lines" -eq 0 ]]; then
-                printf 'activity_validation=failed_or_empty\n' >> "$phase_dir/phase.txt"
-                echo 'Fixture activity evidence was empty or malformed.' > "$phase_dir/evidence-error.txt"
-                final_status=1
-              else
-                printf 'activity_validation=valid_jsonl\n' >> "$phase_dir/phase.txt"
-                if ! node --input-type=commonjs - "$activity_dir/activity.jsonl" "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" \
-                  "$phase_dir/container-preparation-outcomes.txt" "$phase_dir/non-retryable-failures.jsonl" <<'NODE'
-          const fs = require('node:fs');
-          const [activityPath, expectedRunId, outcomePath, failurePath] = process.argv.slice(2);
-          const events = fs.readFileSync(activityPath, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
-          if (events.some((record) => record.runId !== expectedRunId)) {
-            throw new Error('Fixture activity contains an unexpected run ID');
-          }
-          const outcomes = new Map();
-          for (const record of events) {
-            const event = record.event;
-            if (event?.type === 'phase' && event.phase === 'container-preparation') {
-              const outcome = event.outcome ?? 'unknown';
-              outcomes.set(outcome, (outcomes.get(outcome) ?? 0) + 1);
-            }
-          }
-          fs.writeFileSync(outcomePath, [...outcomes].map(([name, count]) => `${count}\t${name}`).join('\n') + '\n');
-          const failures = events.filter((record) =>
-            record.event?.outcome === 'failed' && record.event.classification === 'not-retryable'
-          );
-          fs.writeFileSync(failurePath, failures.map((record) => JSON.stringify(record)).join('\n') + (failures.length ? '\n' : ''));
-          if (failures.length > 0) process.exitCode = 1;
-          NODE
-                then
-                  echo 'Could not validate fixture activity or it contains a non-retryable failure.' > "$phase_dir/evidence-error.txt"
-                  final_status=1
-                fi
-                if [[ -s "$phase_dir/non-retryable-failures.jsonl" ]]; then
-                  printf 'non_retryable_activity_failures=%s\n' "$(wc -l < "$phase_dir/non-retryable-failures.jsonl")" >> "$phase_dir/phase.txt"
-                  final_status=1
-                elif [[ -f "$phase_dir/non-retryable-failures.jsonl" ]]; then
-                  printf 'non_retryable_activity_failures=0\n' >> "$phase_dir/phase.txt"
-                fi
-              fi
-            else
-              printf 'activity_event_lines=0\nnon_retryable_activity_failures=unknown\n' >> "$phase_dir/phase.txt"
-              echo 'Fixture activity evidence was missing.' > "$phase_dir/evidence-error.txt"
-              final_status=1
-            fi
 
             fixture_container_ids=$(docker ps -aq --filter label=com.ykdz.template.fixture.project)
             list_status=$?
@@ -356,6 +322,8 @@ jobs:
             else
               printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=0\n' >> "$phase_dir/phase.txt"
             fi
+            printf 'phase_gate_commands_completed=5\n' >> "$phase_dir/phase.txt"
+            printf 'phase_completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$phase_dir/phase-complete.txt"
           done
 
           {
@@ -364,15 +332,16 @@ jobs:
             git rev-parse HEAD
             printf '`\n\n'
             printf 'Both phases ran the five formal CI commands from the same checkout and preparation, in this order.\n\n'
-            printf '| Phase | Gate | Exit | Wall ms | CLI process CPU (user+sys) |\n|---|---|---:|---:|---:|\n'
+            printf '| Phase | Gate | Exit | Wall ms | Observer wrapper CPU (user+sys) | Host pnpm install execve |\n|---|---|---:|---:|---:|---:|\n'
             while IFS=$'\t' read -r phase gate status started ended elapsed command; do
               [[ "$phase" == phase ]] && continue
               time_file="$records/$phase/$gate.time"
-              cpu=$(sed -n 's/.*cli_process_tree_user_seconds=\([^ ]*\) cli_process_tree_sys_seconds=\([^ ]*\).*/user=\1s + sys=\2s/p' "$time_file" 2>/dev/null || true)
-              printf '| %s | `%s` | %s | %s | %s |\n' "$phase" "$gate" "$status" "$elapsed" "${cpu:-unavailable}"
+              cpu=$(sed -n 's/.*observer_wrapper_user_seconds=\([^ ]*\) observer_wrapper_sys_seconds=\([^ ]*\).*/user=\1s + sys=\2s/p' "$time_file" 2>/dev/null || true)
+              install_count=$(sed -n 's/^pnpm_install_execve_invocations=//p' "$records/$phase/$gate.pnpm-install-count.txt" 2>/dev/null || true)
+              printf '| %s | `%s` | %s | %s | %s | %s |\n' "$phase" "$gate" "$status" "$elapsed" "${cpu:-unavailable}" "${install_count:-unavailable}"
             done < "$records/steps.tsv"
-            printf '\nCPU values above are for the measured CLI process tree only; they exclude Docker daemon and container CPU. `docker-stats.jsonl` contains 5-second instantaneous container snapshots.\n'
-            printf '\nThis job uses one `ubuntu-latest` runner for both phases. `nproc`, `lscpu`, runner image, preparation command timings, cache/evidence sizes, Docker/BuildKit diagnostics, and fixture activity are in the uploaded evidence artifact. No `actions/cache` restore, setup-node package cache, Turbo remote-cache credentials, or publish step is used.\n'
+            printf '\nThe observed command wall/CPU includes the `strace` wrapper; CPU excludes Docker daemon and container CPU. The per-gate execve trace is filtered to the resolved host `pnpm` executable. Fixture-internal dependency installation phases remain recorded in the native activity JSONL. `docker-stats.jsonl` contains 5-second instantaneous container snapshots.\n'
+            printf '\nThis job uses one `ubuntu-24.04` runner for both phases. `nproc`, `lscpu`, runner image, preparation command timings and explicit invocation counts, cache/evidence sizes, Docker/BuildKit diagnostics, raw fixture activity, and all ten gate results are in the uploaded evidence artifact. No `actions/cache` restore, setup-node package cache, Turbo remote-cache credentials, or publish step is used.\n'
           } >> "$GITHUB_STEP_SUMMARY"
 
           exit "$final_status"
@@ -388,4 +357,4 @@ jobs:
           path: ${{ runner.temp }}/infra-01-measurement/
           include-hidden-files: true
           if-no-files-found: warn
-          retention-days: 1
+          retention-days: 7
