@@ -323,7 +323,11 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
       {
         tasks: {
           "//#test:e2e": {
-            dependsOn: ["@demo/api#build", "@demo/web#build"],
+            dependsOn: [
+              "@demo/api#build",
+              "@demo/web#build",
+              "@demo/web#browser:prepare",
+            ],
             cache: false,
           },
         },
@@ -361,10 +365,7 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
       });
 
       await execa("pnpm", ["install"], { cwd: targetDir });
-      await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
-        cwd: targetDir,
-      });
-      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+      await execa("pnpm", ["run", "check:full"], { cwd: targetDir });
     },
   );
 
@@ -474,11 +475,19 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
 
       const turboPath = path.join(targetDir, "turbo.json");
       const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
-        tasks: Record<string, { dependsOn?: string[]; cache?: boolean }>;
+        tasks: Record<
+          string,
+          { dependsOn?: string[]; cache?: boolean; tags?: string[] }
+        >;
       };
       turbo.tasks["//#test:e2e"] = {
-        dependsOn: [`${api.name}#build`, `${web.name}#build`],
+        dependsOn: [
+          `${api.name}#build`,
+          `${web.name}#build`,
+          `${web.name}#browser:prepare`,
+        ],
         cache: false,
+        tags: ["quality:heavy"],
       };
       await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
       const playwrightConfigPath = path.join(targetDir, "playwright.config.ts");

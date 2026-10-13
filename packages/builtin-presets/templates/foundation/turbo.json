@@ -2,20 +2,73 @@
   "boundaries": { "tags": {} },
   "globalPassThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
   "tasks": {
-    "//#format:check": { "outputs": [] },
-    "//#lint": { "outputs": [] },
-    "//#format:write": { "dependsOn": ["//#lint:fix"], "cache": false },
-    "//#lint:fix": { "cache": false },
-    "//#toolchain:prepare": { "cache": false },
-    "//#typecheck": { "outputs": [] },
-    "format:check": { "outputs": [] },
-    "lint": { "outputs": [] },
-    "typecheck": { "dependsOn": ["^typecheck"], "outputs": [] },
-    "build": { "dependsOn": ["^build"] },
-    "test": { "outputs": [] },
-    "test:e2e": { "dependsOn": ["build"], "cache": false },
-    "deployment": { "cache": false },
-    "format:write": { "dependsOn": ["lint:fix"], "cache": false },
-    "lint:fix": { "cache": false }
+    "//#check": { "tags": ["quality:entry"] },
+    "//#check:heavy": { "tags": ["quality:entry"] },
+    "//#check:full": { "tags": ["quality:entry"] },
+    "//#deployment": { "tags": ["quality:heavy"] },
+    "//#boundaries": { "tags": ["quality:light"] },
+    "//#fix": { "tags": ["work:repair"] },
+    "//#test:e2e": { "tags": ["quality:heavy"] },
+    "//#dev": { "tags": ["work:development"] },
+    "//#database:prepare:dev": { "cache": false, "tags": ["work:preparation"] },
+    "//#database:prepare:test": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#database:prepare:e2e": { "cache": false, "tags": ["work:preparation"] },
+    "//#format:check": { "outputs": [], "tags": ["quality:light"] },
+    "//#lint": { "outputs": [], "tags": ["quality:light"] },
+    "//#format:write": {
+      "dependsOn": ["//#lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "//#lint:fix": { "cache": false, "tags": ["work:repair"] },
+    "//#toolchain:prepare": { "cache": false, "tags": ["work:preparation"] },
+    "//#typecheck": { "outputs": [], "tags": ["quality:light"] },
+    "format:check": { "outputs": [], "tags": ["quality:light"] },
+    "lint": { "outputs": [], "tags": ["quality:light"] },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build": { "dependsOn": ["^build"], "tags": ["quality:light"] },
+    "test": { "outputs": [], "tags": ["quality:light"] },
+    "browser:prepare": { "cache": false, "tags": ["work:preparation"] },
+    "test:browser": {
+      "dependsOn": ["browser:prepare"],
+      "tags": ["quality:heavy"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "tags": ["quality:heavy"]
+    },
+    "deployment": { "cache": false, "tags": ["quality:heavy"] },
+    "database:prepare:dev": { "cache": false, "tags": ["work:preparation"] },
+    "database:prepare:test": { "cache": false, "tags": ["work:preparation"] },
+    "database:prepare:e2e": { "cache": false, "tags": ["work:preparation"] },
+    "dev": { "cache": false, "tags": ["work:development"] },
+    "preview": { "cache": false, "tags": ["work:development"] },
+    "start": { "cache": false, "tags": ["work:development"] },
+    "db:seed:example": { "cache": false, "tags": ["work:preparation"] },
+    "db:reset": { "cache": false, "tags": ["work:preparation"] },
+    "db:generate": { "cache": false, "tags": ["work:development"] },
+    "db:migrate": { "cache": false, "tags": ["work:lifecycle"] },
+    "db:prepare:deploy": { "cache": false, "tags": ["work:lifecycle"] },
+    "db:push": { "cache": false, "tags": ["work:preparation"] },
+    "db:studio": { "cache": false, "tags": ["work:development"] },
+    "publication:readiness": { "tags": ["work:release"] },
+    "publication:artifact": { "tags": ["quality:heavy"] },
+    "fix": { "tags": ["work:repair"] },
+    "postbuild": { "tags": ["work:lifecycle"] },
+    "prepack": { "tags": ["work:release"] },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint:fix": { "cache": false, "tags": ["work:repair"] }
   }
 }

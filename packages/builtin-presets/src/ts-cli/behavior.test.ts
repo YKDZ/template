@@ -357,7 +357,7 @@ void describe("ts-cli Preset Definition behavior", () => {
     );
     assert.strictEqual(
       sourceManifest.scripts.typecheck,
-      "tsc -p tsconfig.json --noEmit --pretty false",
+      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false",
     );
     const publicationSpecifiers = [
       ...bridge.matchAll(/from "([^"]*(?:npm-)?publication[^"]*)"/gu),
@@ -663,7 +663,11 @@ esac
         "#npm-publication/*": "./scripts/npm-publication/*.ts",
       },
       scripts: {
-        check: stringContaining("publication:artifact"),
+        check: "node --conditions=source scripts/quality-gates.ts check",
+        "check:heavy":
+          "node --conditions=source scripts/quality-gates.ts check:heavy",
+        "check:full":
+          "node --conditions=source scripts/quality-gates.ts check:full",
         "publication:artifact":
           "node --conditions=source scripts/npm-publication/check-artifact.ts",
         "publication:readiness":
@@ -679,11 +683,7 @@ esac
       },
     });
     const rootScripts = rootManifest?.scripts as Record<string, string>;
-    assertContains(
-      rootScripts.check,
-      "build test:e2e --filter=!./packages/cli",
-    );
-    assertDoesNotContain(rootScripts.check, "publication:readiness --continue");
+    assertDoesNotContain(rootScripts.check, "publication:readiness");
     assertMatches(
       plan.operations,
       arrayContaining([
@@ -3671,7 +3671,7 @@ syncBuiltinESMExports();
       );
 
       try {
-        const rootCheck = await execa("pnpm", ["run", "check"], {
+        const rootCheck = await execa("pnpm", ["run", "check:full"], {
           cwd: project.targetDir,
           reject: false,
         });

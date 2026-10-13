@@ -320,12 +320,7 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
       await execa("pnpm", ["--filter", "./apps/web", "run", "typecheck"], {
         cwd: targetDir,
       });
-      await execa(
-        "pnpm",
-        ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-        { cwd: targetDir },
-      );
-      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+      await execa("pnpm", ["run", "check:full"], { cwd: targetDir });
     },
   );
 
@@ -397,12 +392,7 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
         { dependencies: { "@demo/admin": "workspace:*" } },
       );
       await execa("pnpm", ["install"], { cwd: targetDir });
-      await execa(
-        "pnpm",
-        ["--filter", "./apps/web", "exec", "playwright", "install", "chromium"],
-        { cwd: targetDir },
-      );
-      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+      await execa("pnpm", ["run", "check:full"], { cwd: targetDir });
     },
   );
 

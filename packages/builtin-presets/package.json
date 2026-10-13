@@ -31,10 +31,10 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
     "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . && oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts && oxlint --quiet --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts/quality-gates.ts",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix && oxlint --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts --fix && oxlint --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts/quality-gates.ts --fix",
+    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . && oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts && oxlint --quiet --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts",
+    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix && oxlint --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts --fix && oxlint --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts --fix",
     "test": "node --conditions=source --import=./test-support/setup.ts --test --test-concurrency=1 --test-timeout=60000 src/*/behavior.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.quality-gates.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",

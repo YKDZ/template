@@ -766,7 +766,7 @@ void describe("ts-cli publication owner-fact integration", () => {
         >;
         rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
         await writeJson(publicManifestPath, rootCandidateManifest);
-        const rootCheck = await execa("pnpm", ["run", "check"], {
+        const rootCheck = await execa("pnpm", ["run", "check:full"], {
           cwd: repositoryRoot,
           reject: false,
         });

@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "//#publication:artifact": { "cache": false },
-    "//#publication:readiness": { "cache": false }
+    "//#publication:artifact": { "cache": false, "tags": ["quality:heavy"] },
+    "//#publication:readiness": { "cache": false, "tags": ["work:release"] }
   }
 }

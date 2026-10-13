@@ -3076,7 +3076,7 @@ void describe("Generated Repository toolchain checker projection", () => {
     assert.ok(largestCarried >= 2);
   });
 
-  void it("composes the checker into the root boundary task that Root Check runs", () => {
+  void it("composes the native boundary check into the light quality task", () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: tsLibDefinition,
       context,
@@ -3099,9 +3099,12 @@ void describe("Generated Repository toolchain checker projection", () => {
 
     assert.strictEqual(
       boundariesScript,
-      "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
+      "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
     );
-    assert.strictEqual(checkScript.startsWith("pnpm run boundaries &&"), true);
+    assert.strictEqual(
+      checkScript,
+      "node --conditions=source scripts/quality-gates.ts check",
+    );
     assertLacksProperty(scripts, "toolchain:prepare");
   });
 });

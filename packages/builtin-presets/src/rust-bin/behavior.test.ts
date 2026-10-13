@@ -180,9 +180,11 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     assertMatchesPartial(contribution.manifest, {
       name: "@demo/app",
       scripts: {
-        "format:check": "cargo fmt --all -- --check",
-        lint: "cargo clippy --workspace --all-targets -- -D warnings",
-        test: "cargo test --workspace",
+        "format:check":
+          "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+        lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+        test: "node --conditions=source scripts/run-rust-tests.ts",
+        typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
       },
     });
     assertMatches(
@@ -197,6 +199,11 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
           kind: "copyFile",
           from: "rustfmt.toml",
           to: "packages/app/rustfmt.toml",
+        }),
+        objectContaining({
+          kind: "copyFile",
+          from: "scripts/run-rust-tests.ts",
+          to: "packages/app/scripts/run-rust-tests.ts",
         }),
       ]),
     );
@@ -495,7 +502,7 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         ),
         {
           scripts: {
-            check: stringContaining("test"),
+            check: stringContaining("quality-gates.ts check"),
             fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
             "toolchain:prepare": "cargo --version",
           },
@@ -617,7 +624,7 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       const rustupHome = path.join(workspace, "rustup-home");
       const fakeBin = path.join(workspace, "fake-bin");
       await mkdir(fakeBin, { recursive: true });
-      // 用临时 Cargo 记录器跳过工具链下载，只验证生成 Root Check 的真实任务顺序。
+      // 用临时 Cargo 记录器跳过工具链下载，只验证生成完整门禁的真实任务顺序。
       await writeFile(
         path.join(fakeBin, "cargo"),
         `#!/bin/sh
@@ -639,14 +646,17 @@ if [ ! -e "${"$"}prepared" ]; then
   exit 90
 fi
 printf '%s\\n' "${"$"}*" >> "${"$"}state"
+if [ "${"$"}1" = "test" ]; then
+  printf '%s\\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'
+fi
 `,
         { mode: 0o755 },
       );
-      await execa("pnpm", ["run", "check"], {
+      await execa("pnpm", ["run", "check:full"], {
         cwd: targetDir,
         env: {
           ...process.env,
-          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+          PATH: `${path.dirname(process.execPath)}${path.delimiter}${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
           CARGO_HOME: cargoHome,
           RUSTUP_HOME: rustupHome,
         },
@@ -668,6 +678,116 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
           "test --workspace",
         ]),
       );
+    },
+  );
+
+  void it(
+    "uses the generated Cargo entrypoint and rejects empty or fully ignored suites",
+    { timeout: 300_000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-rust-zero-tests-"),
+      );
+      cleanupDirectories.push(workspace);
+      const targetDir = path.join(workspace, "demo-rust");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: renderToolchain,
+      });
+      const plan = planGeneratedRepositoryInitialization({
+        definition: rustBinDefinition,
+        context,
+      });
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...plan.operations],
+      });
+
+      const packageDir = path.join(targetDir, "packages/app");
+      const run = () =>
+        execa("pnpm", ["run", "test"], {
+          cwd: packageDir,
+          env: {
+            ...process.env,
+            PATH: [path.dirname(process.execPath), process.env.PATH]
+              .filter((entry) => entry !== undefined)
+              .join(path.delimiter),
+          },
+          reject: false,
+        });
+
+      const passing = await run();
+      assert.strictEqual(
+        passing.exitCode,
+        0,
+        `${passing.stdout}\n${passing.stderr}`,
+      );
+
+      const sourcePath = path.join(packageDir, "src/main.rs");
+      await writeFile(sourcePath, "fn main() {}\n");
+      const empty = await run();
+      assert.strictEqual(empty.exitCode, 1, `${empty.stdout}\n${empty.stderr}`);
+      assertContains(
+        `${empty.stdout}\n${empty.stderr}`,
+        "Cargo 未执行任何业务测试用例",
+      );
+
+      await writeFile(
+        sourcePath,
+        [
+          "fn main() {}",
+          "#[cfg(test)]",
+          "mod tests {",
+          '    #[test] #[ignore = "external dependency"] fn ignored() {}',
+          "}",
+          "",
+        ].join("\n"),
+      );
+      const ignored = await run();
+      assert.strictEqual(
+        ignored.exitCode,
+        1,
+        `${ignored.stdout}\n${ignored.stderr}`,
+      );
+      assertContains(
+        `${ignored.stdout}\n${ignored.stderr}`,
+        "Cargo 未执行任何业务测试用例",
+      );
+
+      await writeFile(
+        sourcePath,
+        [
+          "fn main() {}",
+          "#[cfg(test)]",
+          "mod tests {",
+          "    #[test] fn executed() {}",
+          '    #[test] #[ignore = "external dependency"] fn ignored() {}',
+          "}",
+          "",
+        ].join("\n"),
+      );
+      const mixed = await run();
+      assert.strictEqual(mixed.exitCode, 0, `${mixed.stdout}\n${mixed.stderr}`);
+
+      await writeFile(
+        sourcePath,
+        [
+          "fn main() {}",
+          "#[cfg(test)]",
+          "mod tests {",
+          '    #[test] fn failing() { assert!(false, "native failure"); }',
+          "}",
+          "",
+        ].join("\n"),
+      );
+      const failing = await run();
+      assert.strictEqual(
+        failing.exitCode,
+        101,
+        `${failing.stdout}\n${failing.stderr}`,
+      );
+      assertContains(`${failing.stdout}\n${failing.stderr}`, "native failure");
     },
   );
 
@@ -708,7 +828,7 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
       );
       await execa("pnpm", ["install"], { cwd: targetDir });
 
-      const failure = await execa("pnpm", ["run", "check"], {
+      const failure = await execa("pnpm", ["run", "check:full"], {
         cwd: targetDir,
         reject: false,
       });

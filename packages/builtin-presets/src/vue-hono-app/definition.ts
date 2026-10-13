@@ -26,7 +26,7 @@ function apiScripts(): Record<string, string> {
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     start: "node dist/server.js",
-    test: "node --conditions=source --test test/app.test.ts",
+    test: "node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -108,6 +108,12 @@ function apiContribution(
             to: `${definition.path}/${from}`,
           },
     ),
+    ...["node-test-count-reporter.ts"].map((name) => ({
+      kind: "copyFile" as const,
+      source: templateSources.foundation,
+      from: `scripts/${name}`,
+      to: `${definition.path}/scripts/${name}`,
+    })),
   ];
   return {
     definition,
