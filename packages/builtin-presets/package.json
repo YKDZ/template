@@ -25,6 +25,11 @@
       "source": "./templates/foundation/scripts/node-test-count-reporter.ts",
       "types": "./templates/foundation/scripts/node-test-count-reporter.ts",
       "default": "./templates/foundation/scripts/node-test-count-reporter.ts"
+    },
+    "./turbo-boundaries": {
+      "source": "./templates/foundation/scripts/run-turbo-boundaries.ts",
+      "types": "./templates/foundation/scripts/run-turbo-boundaries.ts",
+      "default": "./templates/foundation/scripts/run-turbo-boundaries.ts"
     }
   },
   "scripts": {
