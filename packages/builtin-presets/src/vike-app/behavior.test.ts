@@ -772,7 +772,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/web",
           lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
           check:
-            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --concurrency=2 --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
+            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
           fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
         },
       },

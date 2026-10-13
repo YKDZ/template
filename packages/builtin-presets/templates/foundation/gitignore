@@ -10,9 +10,3 @@ coverage/
 data/
 playwright-report/
 test-results/
-
-/docs
-/.agents
-/.scratch
-/skills-lock.json
-GLOSSARY*.md
