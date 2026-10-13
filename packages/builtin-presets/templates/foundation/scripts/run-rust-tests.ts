@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 
 const testSummary =
-  /test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; \d+ ignored;/u;
+  /^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed; \d+ ignored;/u;
 const ansiEscape = new RegExp(
   `${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
   "gu",
