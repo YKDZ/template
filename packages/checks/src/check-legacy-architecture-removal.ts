@@ -211,7 +211,7 @@ function isTypeScript(relativePath: string): boolean {
 function isRemovalRule(relativePath: string): boolean {
   return (
     relativePath.endsWith("check-legacy-architecture-removal.ts") ||
-    relativePath.endsWith("legacy-architecture-removal.test.ts")
+    relativePath.endsWith("legacy-architecture-removal.light.test.ts")
   );
 }
 
@@ -1254,7 +1254,8 @@ function collectTextFindings(
   if (
     relativePath !==
       "packages/checks/src/check-legacy-architecture-removal.ts" &&
-    (relativePath === "test/packed-publication.test.ts" ||
+    ((relativePath.startsWith("test/packed-publication.") &&
+      relativePath.endsWith(".test.ts")) ||
       relativePath.startsWith("packages/checks/src/") ||
       /^packages\/builtin-presets\/src\/check-.*\.ts$/u.test(relativePath)) &&
     /(?:--(?:config\.)?ignore-scripts(?:=true)?|(?:npm|pnpm)_config_ignore_scripts)/iu.test(

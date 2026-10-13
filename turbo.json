@@ -63,13 +63,16 @@
     "PNPM_CONFIG_STORE_DIR",
     "PNPM_CONFIG_CACHE_DIR"
   ],
+  "concurrency": "1",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "tags": ["quality:light"],
       "cache": false,
       "outputs": ["dist/**"]
     },
     "check:fixtures": {
+      "tags": ["quality:heavy"],
       "cache": false,
       "outputs": [],
       "passThroughEnv": [
@@ -92,6 +95,7 @@
       ]
     },
     "check:generated": {
+      "tags": ["quality:heavy"],
       "cache": false,
       "outputs": [],
       "passThroughEnv": [
@@ -114,6 +118,7 @@
       ]
     },
     "check:focused": {
+      "tags": ["quality:heavy"],
       "cache": false,
       "outputs": [],
       "passThroughEnv": [
@@ -136,6 +141,7 @@
       ]
     },
     "check:deployment": {
+      "tags": ["quality:heavy"],
       "cache": false,
       "outputs": [],
       "passThroughEnv": [
@@ -158,61 +164,149 @@
       ]
     },
     "check:templates": {
-      "dependsOn": ["//#test"],
+      "tags": ["quality:heavy"],
       "outputs": [],
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     },
     "check:templates:boundary": {
+      "tags": ["quality:light"],
       "outputs": []
     },
     "check:templates:github-yaml": {
+      "tags": ["quality:light"],
+      "outputs": []
+    },
+    "check:evidence-health": {
+      "tags": ["quality:conditional"],
+      "cache": false,
       "outputs": []
     },
     "format:check": {
+      "tags": ["quality:light"],
       "outputs": []
     },
     "format:write": {
       "dependsOn": ["lint:fix"],
+      "tags": ["work:repair"],
       "cache": false
     },
     "lint": {
+      "tags": ["quality:light"],
       "outputs": []
     },
     "lint:fix": {
+      "tags": ["work:repair"],
       "cache": false
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
+      "tags": ["quality:light"],
       "outputs": []
     },
     "test": {
+      "tags": ["quality:light"],
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "test:integration": {
+      "tags": ["quality:heavy"],
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "test:packed-publication": {
+      "tags": ["quality:heavy"],
       "outputs": [],
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     },
     "test:e2e": {
+      "dependsOn": ["build"],
+      "tags": ["quality:heavy"],
+      "cache": false
+    },
+    "prepack": {
+      "tags": ["work:lifecycle"],
+      "cache": false
+    },
+    "pack:bundled": {
+      "tags": ["work:release"],
+      "cache": false
+    },
+    "publish:bundled": {
+      "tags": ["work:release"],
       "cache": false
     },
     "//#format:check": {
+      "tags": ["quality:light"],
       "outputs": []
     },
     "//#format:write": {
       "dependsOn": ["lint:fix"],
+      "tags": ["work:repair"],
       "cache": false
     },
     "//#lint": {
+      "tags": ["quality:light"],
       "outputs": []
     },
     "//#lint:fix": {
+      "tags": ["work:repair"],
       "cache": false
     },
     "//#typecheck": {
       "dependsOn": ["^typecheck"],
+      "tags": ["quality:light"],
       "outputs": []
     },
     "//#test": {
       "dependsOn": ["@ykdz/template#build"],
+      "tags": ["quality:light"],
       "outputs": [],
       "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "//#test:integration": {
+      "dependsOn": ["@ykdz/template#build"],
+      "tags": ["quality:heavy"],
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "//#test:packed-publication": {
+      "dependsOn": ["@ykdz/template#build"],
+      "tags": ["quality:heavy"],
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "//#check": {
+      "tags": ["quality:entry"],
+      "cache": false
+    },
+    "//#check:heavy": {
+      "tags": ["quality:entry"],
+      "cache": false
+    },
+    "//#check:full": {
+      "tags": ["quality:entry"],
+      "cache": false
+    },
+    "//#check:toolchain:versions": {
+      "tags": ["quality:light"],
+      "outputs": []
+    },
+    "//#sync:toolchain": {
+      "tags": ["work:preparation"],
+      "cache": false
+    },
+    "//#boundaries": {
+      "tags": ["quality:light"],
+      "cache": false,
+      "outputs": []
+    },
+    "//#fix": {
+      "tags": ["work:repair"],
+      "cache": false
+    },
+    "//#build": {
+      "tags": ["work:preparation"],
+      "cache": false
     }
   }
 }

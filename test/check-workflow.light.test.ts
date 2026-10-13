@@ -189,6 +189,34 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.strictEqual(job["timeout-minutes"], 120);
   });
 
+  void it("runs the heavy gate only after the light gate and its prerequisites", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const lightGateIndex = steps.findIndex(
+      (step) => step.run === "pnpm run check",
+    );
+    const heavyGateIndex = steps.findIndex(
+      (step) => step.run === "pnpm run check:heavy",
+    );
+    const dockerSetupIndex = steps.findIndex(
+      (step) => step.uses === "docker/setup-buildx-action@v4",
+    );
+
+    assert.ok(lightGateIndex >= 0);
+    assert.ok(heavyGateIndex > lightGateIndex);
+    assert.ok(dockerSetupIndex > lightGateIndex);
+    assert.strictEqual(steps[lightGateIndex]?.id, "package-check");
+    assert.strictEqual(
+      steps.some((step) =>
+        [
+          "pnpm run check:fixtures",
+          "pnpm run check:focused",
+          "pnpm run check:deployment",
+        ].includes(step.run ?? ""),
+      ),
+      false,
+    );
+  });
+
   void it("validates fixture prerequisites before running container-backed gates", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const prerequisites = steps.find(
@@ -221,19 +249,18 @@ void describe("Fixture Verification Evidence check workflow", () => {
       ].join("\n"),
     });
 
-    for (const command of [
-      "pnpm run check:fixtures",
-      "pnpm run check:focused",
-      "pnpm run check:deployment",
-    ]) {
-      assert.strictEqual(
-        steps.find((step) => step.run === command)?.if,
-        "always() && steps.fixture-prerequisites.outcome == 'success'",
-      );
-    }
+    const heavyGate = steps.find((step) => step.run === "pnpm run check:heavy");
+    assert.strictEqual(
+      heavyGate?.if,
+      "always() && steps.package-check.outcome == 'success'",
+    );
+    assert.ok(
+      steps.findIndex((step) => step.run === "pnpm run check:heavy") >
+        steps.findIndex((step) => step.id === "fixture-prerequisites"),
+    );
     assert.strictEqual(
       steps.find((step) => step.id === "fixture-evidence-health")?.if,
-      "always()",
+      "always() && steps.package-check.outcome == 'success'",
     );
   });
 
@@ -256,18 +283,18 @@ void describe("Fixture Verification Evidence check workflow", () => {
         "${{ github.workspace }}/.fixture-native-cache/pnpm",
       TEMPLATE_FIXTURE_CARGO_CACHE_DIR:
         "${{ github.workspace }}/.fixture-native-cache/cargo",
+      TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR:
+        "${{ github.workspace }}/.cli-journey-diagnostics",
     });
 
     const scenarioCommands = new Set([
       "pnpm run check",
-      "pnpm run check:fixtures",
-      "pnpm run check:focused",
-      "pnpm run check:deployment",
+      "pnpm run check:heavy",
     ]);
     const scenarioSteps = job.steps.filter(
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
     );
-    assert.strictEqual(scenarioSteps.length, 4);
+    assert.strictEqual(scenarioSteps.length, 2);
     assert.strictEqual(
       scenarioSteps.every((step) =>
         Object.keys(step.env ?? {}).every(
@@ -311,11 +338,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
       ),
       true,
     );
-    for (const command of [
-      "pnpm run check:fixtures",
-      "pnpm run check:focused",
-      "pnpm run check:deployment",
-    ]) {
+    for (const command of ["pnpm run check:heavy"]) {
       assert.deepStrictEqual(
         check.steps.find((step) => step.run === command)?.env,
         {
@@ -351,11 +374,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
 
   void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
-    for (const command of [
-      "pnpm run check:fixtures",
-      "pnpm run check:focused",
-      "pnpm run check:deployment",
-    ]) {
+    for (const command of ["pnpm run check:heavy"]) {
       assert.ok(
         steps.find((step) => step.run === command)?.if?.includes("always()"),
       );
@@ -365,9 +384,14 @@ void describe("Fixture Verification Evidence check workflow", () => {
       steps.find((step) => step.id === "fixture-evidence-health"),
       {
         name: "Check Fixture Evidence Health",
-        if: "always()",
+        if: "always() && steps.package-check.outcome == 'success'",
         run: "pnpm --filter @ykdz/template-checks run check:evidence-health",
       },
+    );
+
+    assert.strictEqual(
+      steps.find((step) => step.run === "pnpm run check:heavy")?.if,
+      steps.find((step) => step.id === "fixture-evidence-health")?.if,
     );
   });
 
@@ -430,6 +454,37 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.equal(upload.with?.["include-hidden-files"], true);
     assert.equal(upload.with?.["if-no-files-found"], "ignore");
     assert.equal(upload.with?.["retention-days"], 7);
+  });
+
+  void it("always uploads CLI journey diagnostics from the durable workspace directory", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const upload = steps.find(
+      (step) => step.name === "Upload CLI Journey Diagnostics",
+    );
+
+    assert.partialDeepStrictEqual(upload, {
+      if: "always()",
+      uses: "actions/upload-artifact@v7",
+      with: {
+        name: "cli-journey-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}",
+        "include-hidden-files": true,
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+      },
+    });
+    const artifactPath = upload?.with?.path;
+    assert.ok(typeof artifactPath === "string");
+    assert.deepStrictEqual(artifactPath.trimEnd().split("\n"), [
+      ".cli-journey-diagnostics/**",
+      "!.cli-journey-diagnostics/**/node_modules/**",
+      "!.cli-journey-diagnostics/**/.pnpm-store/**",
+      "!.cli-journey-diagnostics/**/.npm/**",
+      "!.cli-journey-diagnostics/**/.cargo/registry/**",
+      "!.cli-journey-diagnostics/**/.cargo/git/**",
+      "!.cli-journey-diagnostics/**/target/**",
+      "!.cli-journey-diagnostics/**/.cache/**",
+      "!.cli-journey-diagnostics/**/.turbo/cache/**",
+    ]);
   });
 
   void it("uses a new Actions transport namespace and publishes only after healthy trusted work", async () => {
@@ -550,19 +605,15 @@ void describe("Fixture Verification Evidence check workflow", () => {
       check.find((step) => step.run === "pnpm run check"),
       undefined,
     );
-    for (const command of [
-      "pnpm run check:fixtures",
-      "pnpm run check:focused",
-      "pnpm run check:deployment",
-    ]) {
+    for (const command of ["pnpm run check:heavy"]) {
       assert.strictEqual(
         check.find((step) => step.run === command)?.if,
-        "always() && steps.fixture-prerequisites.outcome == 'success'",
+        "always() && steps.package-check.outcome == 'success'",
       );
     }
   });
 
-  void it("keeps only the new evidence store and current-run activity local", async () => {
+  void it("keeps local evidence and journey diagnostics out of version control", async () => {
     const ignored = new Set(
       (await readFile(".gitignore", "utf8"))
         .split("\n")
@@ -572,5 +623,6 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.ok(ignored.has(".fixture-evidence/"));
     assert.ok(ignored.has(".fixture-evidence-activity/"));
     assert.ok(ignored.has(".fixture-native-cache/"));
+    assert.ok(ignored.has(".cli-journey-diagnostics/"));
   });
 });

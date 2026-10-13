@@ -7,6 +7,7 @@ export type CliJourneyCommand = {
   readonly executable?: string | undefined;
   readonly cwd?: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs?: number;
   prepare?(context: CliJourneyContext): Promise<void>;
 };
 
@@ -21,11 +22,13 @@ export type CliJourneyContext = {
   readonly mode: CliJourneyMode;
   readonly packageRoot: string;
   readonly workDir: string;
+  readonly signal: AbortSignal;
 };
 
 export type CliJourney = {
   readonly name: string;
   readonly modes: readonly CliJourneyMode[];
+  readonly timeoutMs?: number;
   setup(context: CliJourneyContext): Promise<void>;
   commands(context: CliJourneyContext): readonly CliJourneyCommand[];
   assertions(options: {

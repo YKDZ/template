@@ -90,64 +90,6 @@ async function dockerIsAvailable(): Promise<boolean> {
 const hasDocker = await dockerIsAvailable();
 
 void describe("pnpm Workspace Policy", () => {
-  void it("renders only explicitly requested dependency overrides", () => {
-    const workspace = renderGeneratedPnpmWorkspaceYaml({
-      dependencies: [],
-      overrides: { "example>peer": "-" },
-    });
-
-    assert.ok(workspace.includes('"example>peer": "-"'));
-    assert.ok(
-      workspace.includes('minimumReleaseAgeExclude:\n  - "@ykdz/template"'),
-    );
-    assert.ok(workspace.includes("injectWorkspacePackages: false"));
-    assert.ok(!workspace.includes("valibot>typescript"));
-    assert.ok(!workspace.includes("pnpmfile"));
-  });
-
-  void it("keeps the template CLI out of generated repository maturity delays", async () => {
-    const projectDir = await generateNodeOnlyProject("pnpm-template-cli-age-");
-    const workspace = await readFile(
-      path.join(projectDir, "pnpm-workspace.yaml"),
-      "utf8",
-    );
-
-    assert.ok(
-      workspace.includes('minimumReleaseAgeExclude:\n  - "@ykdz/template"'),
-    );
-    assert.ok(workspace.includes("preferSymlinkedExecutables: true"));
-  });
-
-  void it("selects a Node-only Definition by contribution semantics", () => {
-    const context = {
-      targetDir: "/tmp/pnpm-policy-definition",
-      repositoryName: "pnpm-policy-definition",
-      defaultPackageScope: "pnpm-policy-definition",
-      foundationPackages: {
-        typescriptConfiguration: {
-          name: "@pnpm-policy-definition/typescript-config",
-        },
-      },
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin,
-        nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      },
-    } satisfies GenerationContext;
-    const definition = definitionForPnpmPolicy(context);
-    const contributions = planGeneratedRepositoryInitialization({
-      definition,
-      context,
-    }).packageContributions;
-
-    assert.strictEqual(
-      contributions.every(
-        (contribution) => contribution.foundation.toolchains.rust === undefined,
-      ),
-      true,
-    );
-  });
-
   void it(
     "installs an injected workspace dependency from a frozen lockfile and synchronizes its build output",
     { timeout: 30000 },

@@ -479,9 +479,15 @@ void describe("Preset Registry generated scenarios", () => {
 
   void it("discovers every owned behavior test and derives source and catalog checks from real plans", async () => {
     const definitions = builtInPresetRegistry.all();
-    assert.strictEqual(
-      (await discoverPresetLocalBehaviorTests()).length,
-      definitions.length,
+    const behaviorTests = await discoverPresetLocalBehaviorTests();
+    assert.deepStrictEqual(
+      new Set(behaviorTests.map(({ definition }) => definition.metadata.name)),
+      new Set(definitions.map((definition) => definition.metadata.name)),
+    );
+    assert.ok(
+      behaviorTests.every(({ filePath }) =>
+        /behavior\.(?:light|integration)\.test\.ts$/u.test(filePath),
+      ),
     );
 
     for (const definition of definitions) {

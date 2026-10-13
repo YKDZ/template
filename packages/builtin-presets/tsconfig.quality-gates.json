@@ -1,4 +1,8 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["templates/foundation/scripts/quality-gates.ts"]
+  "include": [
+    "templates/foundation/scripts/quality-gates.ts",
+    "templates/foundation/scripts/node-test-count-reporter.ts",
+    "templates/foundation/scripts/run-turbo-boundaries.ts"
+  ]
 }
