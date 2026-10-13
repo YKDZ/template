@@ -660,7 +660,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     }
   });
 
-  void it("keeps local evidence and journey diagnostics out of version control", async () => {
+  void it("忽略本地证据、旅程诊断与发布候选目录", async () => {
     const ignored = new Set(
       (await readFile(".gitignore", "utf8"))
         .split("\n")
@@ -671,5 +671,6 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.ok(ignored.has(".fixture-evidence-activity/"));
     assert.ok(ignored.has(".fixture-native-cache/"));
     assert.ok(ignored.has(".cli-journey-diagnostics/"));
+    assert.ok(ignored.has(".verified-packed-publication/"));
   });
 });
