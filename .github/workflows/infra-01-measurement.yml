@@ -1,0 +1,391 @@
+name: Temporary infra-01 baseline measurement
+
+on:
+  push:
+    branches:
+      - codex/infra-01-measurement-harness
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-01-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Cold and warm formal check scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CI: "true"
+      TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
+      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
+    steps:
+      - name: Check out frozen baseline candidate
+        uses: actions/checkout@v7
+        with:
+          ref: f79e73efbdfaabab77c5331c783db94d16167ef1
+          persist-credentials: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+
+      - name: Set up isolated Docker Buildx builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          name: infra-01-baseline
+          driver: docker-container
+          use: true
+
+      - name: Allocate private measurement paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure_root="$RUNNER_TEMP/infra-01-measurement"
+          fixture_state="$RUNNER_TEMP/infra-01-fixture-state"
+          pnpm_store="$RUNNER_TEMP/infra-01-pnpm-store"
+          playwright_browsers="$RUNNER_TEMP/infra-01-playwright-browsers"
+          mkdir -p "$measure_root/records/preparation" "$measure_root/activity"
+          {
+            printf 'MEASURE_ROOT=%s\n' "$measure_root"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_DIR=%s/evidence\n' "$fixture_state"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR=%s/activity\n' "$measure_root"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_RUN_ID=infra-01-%s\n' "$GITHUB_RUN_ID"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR=%s/cache/buildkit\n' "$fixture_state"
+            printf 'TEMPLATE_FIXTURE_PNPM_CACHE_DIR=%s/cache/pnpm\n' "$fixture_state"
+            printf 'TEMPLATE_FIXTURE_CARGO_CACHE_DIR=%s/cache/cargo\n' "$fixture_state"
+            printf 'TEMPLATE_FIXTURE_WORKSPACE_DIR=%s/workspaces\n' "$fixture_state"
+            printf 'pnpm_config_store_dir=%s\n' "$pnpm_store"
+            printf 'PLAYWRIGHT_BROWSERS_PATH=%s\n' "$playwright_browsers"
+          } >> "$GITHUB_ENV"
+          printf 'private measurement root: %s\n' "$measure_root"
+          printf 'fixture caches/evidence/workspaces: %s\n' "$fixture_state"
+          printf 'root pnpm store: %s\n' "$pnpm_store"
+          printf 'Playwright browsers: %s\n' "$playwright_browsers"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/pnpm-install.time" \
+            pnpm install --frozen-lockfile \
+            > "$MEASURE_ROOT/records/preparation/pnpm-install.log" 2>&1
+          result=$?
+          printf 'pnpm install --frozen-lockfile\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/pnpm-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/pnpm-install.log"
+          exit "$result"
+
+      - name: Validate fixture gate prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            docker version --format '{{.Server.Version}}'
+            pnpm --filter @ykdz/template-checks exec devcontainer --version
+          } > "$MEASURE_ROOT/records/preparation/fixture-prerequisites.log" 2>&1
+          cat "$MEASURE_ROOT/records/preparation/fixture-prerequisites.log"
+
+      - name: Prepare shell checks
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/shellcheck-install.time" \
+            bash -c 'sudo apt-get update && sudo apt-get install -y shellcheck' \
+            > "$MEASURE_ROOT/records/preparation/shellcheck-install.log" 2>&1
+          result=$?
+          printf 'sudo apt-get update && sudo apt-get install -y shellcheck\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/shellcheck-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/shellcheck-install.log"
+          exit "$result"
+
+      - name: Prepare browser checks
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/playwright-install.time" \
+            pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.log" 2>&1
+          result=$?
+          printf 'playwright install --with-deps chromium\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/playwright-install.log"
+          exit "$result"
+
+      - name: Record runner, source, and cold-cache boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          records="$MEASURE_ROOT/records"
+          {
+            printf 'measured_source_commit=%s\n' "$(git rev-parse HEAD)"
+            printf 'expected_source_commit=f79e73efbdfaabab77c5331c783db94d16167ef1\n'
+            printf 'measurement_GITHUB_SHA=f79e73efbdfaabab77c5331c783db94d16167ef1\n'
+            printf 'workflow_event_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_event_sha=%s\n' "$GITHUB_SHA"
+            printf 'workflow_file_in_checked_out_source='
+            if [[ -e .github/workflows/infra-01-measurement.yml ]]; then printf 'present\n'; else printf 'absent\n'; fi
+            printf 'actions_cache_restore_steps=0\n'
+            printf 'setup_node_pnpm_cache=disabled\n'
+            printf 'turbo_remote_cache=disabled\n'
+            printf 'root_dependency_install_invocations=1\n'
+            printf 'root_pnpm_store=prepared_once_before_cold_and_shared_with_warm\n'
+            printf 'playwright_browser_bundle=prepared_once_before_cold_and_shared_with_warm\n'
+            printf 'shellcheck_install_invocations=1\n'
+            printf 'playwright_browser_install_invocations=1\n'
+            printf '\n--- runner ---\n'
+            date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+            cat /etc/os-release
+            uname -a
+            printf 'nproc=%s\n' "$(nproc)"
+            lscpu
+            free -h
+            df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+            printf '\n--- tools ---\n'
+            node --version
+            pnpm --version
+            pnpm store path
+            docker version
+            docker buildx version
+            docker buildx inspect infra-01-baseline
+            pnpm --filter @ykdz/template-checks exec devcontainer --version
+            pnpm --filter @ykdz/template-builtin-presets exec playwright --version
+            shellcheck --version
+            printf '\n--- remote cache variables ---\n'
+            for name in TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
+              TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
+              TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY; do
+              if [[ -n "${!name-}" ]]; then printf '%s=present\n' "$name"; else printf '%s=unset_or_empty\n' "$name"; fi
+            done
+          } > "$records/runner-environment.txt" 2>&1
+
+          if [[ "$(git rev-parse HEAD)" != f79e73efbdfaabab77c5331c783db94d16167ef1 ]]; then
+            echo 'The measured checkout is not the frozen f79e73e candidate.' >&2
+            exit 1
+          fi
+          if [[ -e .github/workflows/infra-01-measurement.yml ]]; then
+            echo 'The temporary measurement workflow leaked into the measured source checkout.' >&2
+            exit 1
+          fi
+          if [[ -e .turbo || -e "$TEMPLATE_FIXTURE_EVIDENCE_DIR" || -e "$TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR" || -e "$TEMPLATE_FIXTURE_PNPM_CACHE_DIR" || -e "$TEMPLATE_FIXTURE_CARGO_CACHE_DIR" ]]; then
+            echo 'A cold test-scope cache was unexpectedly present before cold.' >&2
+            exit 1
+          fi
+          docker buildx du --builder infra-01-baseline > "$records/buildx-du-before-cold.txt"
+          cat "$records/buildx-du-before-cold.txt"
+          if ! grep -Eq '^Total:[[:space:]]+0B$' "$records/buildx-du-before-cold.txt"; then
+            echo 'The fresh Buildx builder has a non-empty cache before cold.' >&2
+            exit 1
+          fi
+          cat "$records/runner-environment.txt"
+
+      - name: Run five formal CI gates cold then warm
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/run-infra-01-scope.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -uo pipefail
+
+          measure_root=${MEASURE_ROOT:?}
+          records="$measure_root/records"
+          final_status=0
+          export GITHUB_SHA=f79e73efbdfaabab77c5331c783db94d16167ef1
+          unset TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
+            TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
+            TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY
+          printf 'phase\tstep\texit_code\tstarted_utc\tended_utc\telapsed_ms\tcommand\n' > "$records/steps.tsv"
+
+          record_cache_state() {
+            local phase=$1 point=$2 file="$records/$1/cache-$2.txt"
+            {
+              date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+              for path in \
+                "$GITHUB_WORKSPACE/.turbo" \
+                "$TEMPLATE_FIXTURE_EVIDENCE_DIR" \
+                "$TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR" \
+                "$TEMPLATE_FIXTURE_PNPM_CACHE_DIR" \
+                "$TEMPLATE_FIXTURE_CARGO_CACHE_DIR" \
+                "$pnpm_config_store_dir" \
+                "$PLAYWRIGHT_BROWSERS_PATH"; do
+                if [[ -e "$path" ]]; then
+                  printf '\npath=%s\n' "$path"
+                  du -sh "$path" 2>&1 || true
+                  file_count=$(find "$path" -type f -printf . 2>/dev/null | wc -c)
+                  printf 'files=%s\n' "$file_count"
+                else
+                  printf 'path=%s\tstate=absent\n' "$path"
+                fi
+              done
+            } > "$file"
+            timeout --signal=TERM --kill-after=3s 30s docker buildx du --builder infra-01-baseline \
+              > "$records/$phase/buildx-du-$point.txt" 2>&1 || true
+          }
+
+          run_gate() {
+            local phase=$1 name=$2
+            shift 2
+            local phase_dir="$records/$phase"
+            local started ended started_ms ended_ms elapsed status command_text
+            started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            started_ms=$(date +%s%3N)
+            printf '%s start %s %s\n' "$phase" "$name" "$started" >> "$phase_dir/progress.log"
+            command_text=$(printf '%q ' "$@")
+            /usr/bin/time -f 'cli_process_tree_wall_seconds=%e cli_process_tree_user_seconds=%U cli_process_tree_sys_seconds=%S cli_process_tree_max_rss_kb=%M exit=%x' \
+              -o "$phase_dir/$name.time" "$@" > "$phase_dir/$name.log" 2>&1
+            status=$?
+            ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            ended_ms=$(date +%s%3N)
+            elapsed=$((ended_ms - started_ms))
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$phase" "$name" "$status" "$started" "$ended" "$elapsed" "$command_text" >> "$records/steps.tsv"
+            printf '%s end exit=%s elapsed_ms=%s %s\n' "$phase" "$status" "$elapsed" "$ended" >> "$phase_dir/progress.log"
+            if [[ "$status" -ne 0 ]]; then final_status=1; fi
+          }
+
+          for phase in cold warm; do
+            phase_dir="$records/$phase"
+            activity_dir="$measure_root/activity/$phase"
+            mkdir -p "$phase_dir" "$activity_dir"
+            export TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR="$activity_dir"
+            export TEMPLATE_FIXTURE_EVIDENCE_RUN_ID="infra-01-${GITHUB_RUN_ID}-${phase}"
+            export TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT}"
+            printf 'phase=%s\nsource_commit=%s\nrun_id=%s\nrun_attempt=%s\n' \
+              "$phase" "$GITHUB_SHA" "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT" > "$phase_dir/phase.txt"
+            record_cache_state "$phase" before
+            docker ps -a --no-trunc > "$phase_dir/docker-ps-before.txt" 2>&1 || true
+
+            (
+              while [[ ! -e "$phase_dir/stop-docker-stats" ]]; do
+                captured=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                snapshot=$(timeout --signal=TERM --kill-after=2s 10s docker stats --no-stream --format '{{json .}}' 2>> "$phase_dir/docker-stats-errors.log")
+                result=$?
+                if [[ "$result" -eq 0 ]]; then
+                  while IFS= read -r row; do
+                    [[ -n "$row" ]] && printf '%s\t%s\n' "$captured" "$row" >> "$phase_dir/docker-stats.jsonl"
+                  done <<< "$snapshot"
+                else
+                  printf '%s\texit=%s\n' "$captured" "$result" >> "$phase_dir/docker-stats-errors.log"
+                fi
+                sleep 5
+              done
+            ) &
+            stats_pid=$!
+
+            run_gate "$phase" check pnpm run check
+            run_gate "$phase" fixtures pnpm run check:fixtures
+            run_gate "$phase" focused pnpm run check:focused
+            run_gate "$phase" deployment pnpm run check:deployment
+            run_gate "$phase" evidence-health pnpm --filter @ykdz/template-checks run check:evidence-health
+
+            : > "$phase_dir/stop-docker-stats"
+            wait "$stats_pid" 2>/dev/null || true
+            docker ps -a --no-trunc > "$phase_dir/docker-ps-after.txt" 2>&1 || true
+            docker buildx inspect infra-01-baseline > "$phase_dir/buildx-inspect-after.txt" 2>&1 || true
+            record_cache_state "$phase" after
+            if [[ -f "$activity_dir/activity.jsonl" ]]; then
+              cp "$activity_dir/activity.jsonl" "$phase_dir/activity.jsonl"
+              event_lines=$(wc -l < "$activity_dir/activity.jsonl")
+              printf 'activity_event_lines=%s\n' "$event_lines" >> "$phase_dir/phase.txt"
+              if [[ "$event_lines" -eq 0 ]]; then
+                printf 'activity_validation=failed_or_empty\n' >> "$phase_dir/phase.txt"
+                echo 'Fixture activity evidence was empty or malformed.' > "$phase_dir/evidence-error.txt"
+                final_status=1
+              else
+                printf 'activity_validation=valid_jsonl\n' >> "$phase_dir/phase.txt"
+                if ! node --input-type=commonjs - "$activity_dir/activity.jsonl" "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" \
+                  "$phase_dir/container-preparation-outcomes.txt" "$phase_dir/non-retryable-failures.jsonl" <<'NODE'
+          const fs = require('node:fs');
+          const [activityPath, expectedRunId, outcomePath, failurePath] = process.argv.slice(2);
+          const events = fs.readFileSync(activityPath, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
+          if (events.some((record) => record.runId !== expectedRunId)) {
+            throw new Error('Fixture activity contains an unexpected run ID');
+          }
+          const outcomes = new Map();
+          for (const record of events) {
+            const event = record.event;
+            if (event?.type === 'phase' && event.phase === 'container-preparation') {
+              const outcome = event.outcome ?? 'unknown';
+              outcomes.set(outcome, (outcomes.get(outcome) ?? 0) + 1);
+            }
+          }
+          fs.writeFileSync(outcomePath, [...outcomes].map(([name, count]) => `${count}\t${name}`).join('\n') + '\n');
+          const failures = events.filter((record) =>
+            record.event?.outcome === 'failed' && record.event.classification === 'not-retryable'
+          );
+          fs.writeFileSync(failurePath, failures.map((record) => JSON.stringify(record)).join('\n') + (failures.length ? '\n' : ''));
+          if (failures.length > 0) process.exitCode = 1;
+          NODE
+                then
+                  echo 'Could not validate fixture activity or it contains a non-retryable failure.' > "$phase_dir/evidence-error.txt"
+                  final_status=1
+                fi
+                if [[ -s "$phase_dir/non-retryable-failures.jsonl" ]]; then
+                  printf 'non_retryable_activity_failures=%s\n' "$(wc -l < "$phase_dir/non-retryable-failures.jsonl")" >> "$phase_dir/phase.txt"
+                  final_status=1
+                elif [[ -f "$phase_dir/non-retryable-failures.jsonl" ]]; then
+                  printf 'non_retryable_activity_failures=0\n' >> "$phase_dir/phase.txt"
+                fi
+              fi
+            else
+              printf 'activity_event_lines=0\nnon_retryable_activity_failures=unknown\n' >> "$phase_dir/phase.txt"
+              echo 'Fixture activity evidence was missing.' > "$phase_dir/evidence-error.txt"
+              final_status=1
+            fi
+
+            fixture_container_ids=$(docker ps -aq --filter label=com.ykdz.template.fixture.project)
+            list_status=$?
+            if [[ "$list_status" -ne 0 ]]; then
+              printf 'fixture_container_cleanup_exit=%s\n' "$list_status" >> "$phase_dir/phase.txt"
+              final_status=1
+            elif [[ -n "$fixture_container_ids" ]]; then
+              mapfile -t fixture_containers <<< "$fixture_container_ids"
+              docker rm -f "${fixture_containers[@]}" > "$phase_dir/fixture-container-cleanup.log" 2>&1
+              cleanup_status=$?
+              printf 'fixture_container_cleanup_exit=%s\n' "$cleanup_status" >> "$phase_dir/phase.txt"
+              if [[ "$cleanup_status" -ne 0 ]]; then final_status=1; fi
+            else
+              printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=0\n' >> "$phase_dir/phase.txt"
+            fi
+          done
+
+          {
+            printf '\n## Frozen candidate and scope\n\n'
+            printf 'Source commit: `'
+            git rev-parse HEAD
+            printf '`\n\n'
+            printf 'Both phases ran the five formal CI commands from the same checkout and preparation, in this order.\n\n'
+            printf '| Phase | Gate | Exit | Wall ms | CLI process CPU (user+sys) |\n|---|---|---:|---:|---:|\n'
+            while IFS=$'\t' read -r phase gate status started ended elapsed command; do
+              [[ "$phase" == phase ]] && continue
+              time_file="$records/$phase/$gate.time"
+              cpu=$(sed -n 's/.*cli_process_tree_user_seconds=\([^ ]*\) cli_process_tree_sys_seconds=\([^ ]*\).*/user=\1s + sys=\2s/p' "$time_file" 2>/dev/null || true)
+              printf '| %s | `%s` | %s | %s | %s |\n' "$phase" "$gate" "$status" "$elapsed" "${cpu:-unavailable}"
+            done < "$records/steps.tsv"
+            printf '\nCPU values above are for the measured CLI process tree only; they exclude Docker daemon and container CPU. `docker-stats.jsonl` contains 5-second instantaneous container snapshots.\n'
+            printf '\nThis job uses one `ubuntu-latest` runner for both phases. `nproc`, `lscpu`, runner image, preparation command timings, cache/evidence sizes, Docker/BuildKit diagnostics, and fixture activity are in the uploaded evidence artifact. No `actions/cache` restore, setup-node package cache, Turbo remote-cache credentials, or publish step is used.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$final_status"
+          BASH
+          chmod +x "$RUNNER_TEMP/run-infra-01-scope.sh"
+          "$RUNNER_TEMP/run-infra-01-scope.sh"
+
+      - name: Upload isolated measurement records
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-01-baseline-measurement-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/infra-01-measurement/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 1
