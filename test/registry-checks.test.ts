@@ -64,9 +64,16 @@ void describe("Preset Registry generated scenarios", () => {
       }).packageContributions;
       for (const contribution of contributions) {
         const writesTypeScriptConfig = contribution.operations.some(
-          (operation) =>
-            "to" in operation &&
-            operation.to === `${contribution.definition.path}/tsconfig.json`,
+          (operation) => {
+            if (!("to" in operation)) return false;
+            const outputPath = path.posix.parse(operation.to);
+            return (
+              outputPath.dir === contribution.definition.path &&
+              (outputPath.base === "tsconfig.json" ||
+                (outputPath.base.startsWith("tsconfig.") &&
+                  outputPath.base.endsWith(".json")))
+            );
+          },
         );
         assert.deepStrictEqual(
           contribution.foundation.typescriptConfigurationPackage,
