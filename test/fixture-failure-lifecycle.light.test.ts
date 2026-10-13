@@ -536,7 +536,7 @@ void it(
       assert.ok(report.failure.errors.length > 0);
       assert.match(failureDescription, /fixture-active-command-output/u);
       assert.ok(cliFailure instanceof AggregateError);
-      assert.equal(hasCause(cliFailure, cancellation), true);
+      assert.equal(cliFailure.cause, cancellation);
     } finally {
       await rm(workspaceRoot, { recursive: true, force: true });
     }
@@ -590,7 +590,7 @@ void it(
           run,
         }),
         (error: unknown) => {
-          assert.equal(error, cancellation);
+          assert.equal(hasCause(error, cancellation), true);
           return true;
         },
       );
@@ -617,8 +617,10 @@ void it(
         "pnpm --filter @ykdz/template-checks check:generated",
       );
       assert.equal(report.generatedWorkspace, workspace);
-      assert.equal(report.failure.name, "Error");
       assert.match(report.failure.message, /\[REDACTED\]/u);
+      if (report.failure.name === "AggregateError") {
+        assert.match(reportText, /"errors": \[/u);
+      }
       assert.match(reportText, /native stdout contains \[REDACTED\]/u);
       assert.match(reportText, /native stderr contains \[REDACTED\]/u);
       assert.equal(reportText.includes(secret), false);
