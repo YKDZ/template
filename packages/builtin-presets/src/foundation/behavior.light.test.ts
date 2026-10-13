@@ -3242,7 +3242,7 @@ void describe("Generated Repository toolchain checker projection", () => {
 
     assert.strictEqual(
       boundariesScript,
-      "turbo boundaries --no-color && node --conditions=source scripts/check-toolchain-versions.ts",
+      "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
     );
     assert.strictEqual(checkScript.startsWith("pnpm run boundaries &&"), true);
     assert.strictEqual("toolchain:prepare" in scripts, false);

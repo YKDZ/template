@@ -35,6 +35,7 @@ jobs:
       TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/buildkit
       TEMPLATE_FIXTURE_PNPM_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/pnpm
       TEMPLATE_FIXTURE_CARGO_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/cargo
+      TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -47,6 +48,13 @@ jobs:
         with:
           node-version-file: package.json
           cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check package
+        id: package-check
+        run: pnpm run check
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -89,9 +97,6 @@ jobs:
           restore-keys: |
             fixture-verification-evidence-${{ runner.os }}-
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
       - name: Validate Fixture Gate Prerequisites
         id: fixture-prerequisites
         run: |
@@ -104,30 +109,9 @@ jobs:
       - name: Prepare browser checks
         run: pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium
 
-      - name: Check package
-        run: pnpm run check
-
-      - name: Check fixture matrix
-        if: always() && steps.fixture-prerequisites.outcome == 'success'
-        run: pnpm run check:fixtures
-        env:
-          TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
-          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
-          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
-
-      - name: Check focused project links
-        if: always() && steps.fixture-prerequisites.outcome == 'success'
-        run: pnpm run check:focused
-        env:
-          TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
-          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}
-          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}
-
-      - name: Check deployment artifacts
-        if: always() && steps.fixture-prerequisites.outcome == 'success'
-        run: pnpm run check:deployment
+      - name: Check heavy gate
+        if: always() && steps.package-check.outcome == 'success'
+        run: pnpm run check:heavy
         env:
           TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}
@@ -136,7 +120,7 @@ jobs:
 
       - name: Check Fixture Evidence Health
         id: fixture-evidence-health
-        if: always()
+        if: always() && steps.package-check.outcome == 'success'
         run: pnpm --filter @ykdz/template-checks run check:evidence-health
 
       - name: Upload Fixture Evidence Activity
@@ -164,6 +148,25 @@ jobs:
             !.fixture-workspace/**/target/**
             !.fixture-workspace/**/.cache/**
             !.fixture-workspace/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload CLI Journey Diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cli-journey-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .cli-journey-diagnostics/**
+            !.cli-journey-diagnostics/**/node_modules/**
+            !.cli-journey-diagnostics/**/.pnpm-store/**
+            !.cli-journey-diagnostics/**/.npm/**
+            !.cli-journey-diagnostics/**/.cargo/registry/**
+            !.cli-journey-diagnostics/**/.cargo/git/**
+            !.cli-journey-diagnostics/**/target/**
+            !.cli-journey-diagnostics/**/.cache/**
+            !.cli-journey-diagnostics/**/.turbo/cache/**
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

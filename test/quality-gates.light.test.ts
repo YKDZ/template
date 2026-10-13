@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -19,13 +12,28 @@ import { execa } from "execa";
 const qualityGatesPath = fileURLToPath(
   import.meta.resolve("@ykdz/template-builtin-presets/quality-gates"),
 );
-const repositoryRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-);
 
 function taskScript(gate: string): string {
   return `node record.cjs ${gate}`;
+}
+
+async function readRuns(root: string): Promise<string[]> {
+  try {
+    return (await readFile(path.join(root, "runs.log"), "utf8"))
+      .trim()
+      .split("\n")
+      .filter((run) => run.length > 0);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 async function createWorkspace(
@@ -41,15 +49,6 @@ async function createWorkspace(
 ): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "template-quality-gates-"));
   await mkdir(path.join(root, "packages", "app"), { recursive: true });
-  await mkdir(path.join(root, "node_modules", ".bin"), { recursive: true });
-  await symlink(
-    path.join(repositoryRoot, "node_modules", "turbo"),
-    path.join(root, "node_modules", "turbo"),
-  );
-  await symlink(
-    path.join(repositoryRoot, "node_modules", ".bin", "turbo"),
-    path.join(root, "node_modules", ".bin", "turbo"),
-  );
   await writeFile(
     path.join(root, "package.json"),
     JSON.stringify(
@@ -83,6 +82,7 @@ async function createWorkspace(
             ? { "check:custom": taskScript("root-check-custom") }
             : {}),
         },
+        devDependencies: { turbo: "2.11.7" },
       },
       null,
       2,
@@ -189,6 +189,27 @@ async function createWorkspace(
     ].join("\n"),
   );
 
+  try {
+    const lockfile = await execa(
+      "pnpm",
+      ["install", "--offline", "--lockfile-only"],
+      { cwd: root, reject: false },
+    );
+    assert.equal(lockfile.exitCode, 0, lockfile.stderr);
+
+    const install = await execa(
+      "pnpm",
+      ["install", "--offline", "--frozen-lockfile"],
+      { cwd: root, reject: false },
+    );
+    assert.equal(install.exitCode, 0, install.stderr);
+
+    await writeFile(path.join(root, "runs.log"), "");
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+
   return root;
 }
 
@@ -223,9 +244,7 @@ void it("check runs light tasks and their native preparation dependencies", asyn
     });
     assert.equal(result.exitCode, 0, result.stderr);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.deepEqual(
       new Set(runs),
       new Set([
@@ -235,7 +254,6 @@ void it("check runs light tasks and their native preparation dependencies", asyn
         "root-custom-light",
         "package-light",
         "package-custom-light",
-        "package-lifecycle",
       ]),
       `${result.stdout}\n${result.stderr}`,
     );
@@ -274,12 +292,10 @@ void it("check:heavy runs heavy verification tasks without light tasks", async (
     });
     assert.equal(result.exitCode, 0, result.stderr);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.deepEqual(
       new Set(runs),
-      new Set(["root-heavy", "package-heavy", "package-lifecycle"]),
+      new Set(["root-heavy", "package-heavy"]),
       `${result.stdout}\n${result.stderr}`,
     );
   } finally {
@@ -296,9 +312,7 @@ void it("check:full runs the light layer before the heavy layer", async () => {
     });
     assert.equal(result.exitCode, 0, result.stderr);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     const lightTasks = [
       "root-light",
       "root-typecheck",
@@ -334,9 +348,7 @@ void it("does not start the heavy layer after a light task fails", async () => {
     });
     assert.notEqual(result.exitCode, 0);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.ok(runs.includes("root-light-failure"), runs.join("\n"));
     assert.ok(!runs.includes("root-heavy"), runs.join("\n"));
     assert.ok(!runs.includes("package-heavy"), runs.join("\n"));
@@ -414,9 +426,7 @@ async function verifyFullGateCancellation(
     assert.equal(result.code, expectedExitCode);
     assert.equal(result.signal, null);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.ok(
       runs.includes(
         `root-light-signal-${signal === "SIGTERM" ? "SIGINT" : signal}`,
@@ -454,9 +464,7 @@ void it("continues independent heavy tasks after one task fails", async () => {
     });
     assert.notEqual(result.exitCode, 0);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.ok(runs.includes("root-heavy-failure"), runs.join("\n"));
     assert.ok(runs.includes("package-heavy"), runs.join("\n"));
   } finally {
@@ -481,10 +489,8 @@ void it("rejects a light task whose native dependency closure includes heavy ver
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /轻检查不能间接启动重验收/);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -500,10 +506,8 @@ void it("preflights with closures and does not run light work when heavy include
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /常规验收不能间接启动条件验收/);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -522,9 +526,7 @@ void it("reports conditional tasks as unexecuted when ordinary checks exclude th
       /条件验收未执行：@quality-gates\/app#verify:conditional/,
     );
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.ok(!runs.includes("package-conditional"), runs.join("\n"));
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -540,9 +542,7 @@ void it("runs quality-tagged native command tasks without package scripts", asyn
     });
     assert.equal(result.exitCode, 0, result.stderr);
 
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
+    const runs = await readRuns(root);
     assert.ok(
       runs.includes("package-command-only"),
       `${result.stdout}\n${result.stderr}`,
@@ -562,10 +562,8 @@ void it("rejects custom check-family tasks assigned to a work role before execut
 
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /保留验收任务.*非验收职责 work:repair/);
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -582,10 +580,8 @@ void it("rejects custom test-family tasks assigned to a work role before executi
 
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /\/\/#test:custom 是保留验收任务.*work:repair/);
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -603,10 +599,8 @@ for (const name of ["lint", "typecheck", "format:check"]) {
 
       assert.notEqual(result.exitCode, 0);
       assert.match(result.stderr, new RegExp(`${name}.*保留验收任务`));
-      const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-        .trim()
-        .split("\n");
-      assert.deepEqual(runs, ["package-lifecycle"]);
+      const runs = await readRuns(root);
+      assert.deepEqual(runs, []);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -624,10 +618,8 @@ void it("rejects an executable root task with no quality or work role", async ()
 
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /\/\/#verify:unclassified 缺少唯一职责标签/);
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -647,10 +639,8 @@ void it("rejects an executable root task with an unknown role", async () => {
       result.stderr,
       /\/\/#verify:unknown 使用未知职责标签 quality:unknown/,
     );
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -670,10 +660,8 @@ void it("rejects an executable root task with conflicting roles", async () => {
 
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /\/\/#verify:conflicting 有多个职责标签/);
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -703,10 +691,8 @@ void it("rejects package tasks that explicitly clear an inherited role", async (
       result.stderr,
       /@quality-gates\/app#verify:generated 缺少唯一职责标签/,
     );
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -723,10 +709,8 @@ void it("limits quality:entry to the three public root gate tasks", async () => 
 
     assert.notEqual(result.exitCode, 0);
     assert.match(result.stderr, /\/\/#verify:entry 不能使用 quality:entry/);
-    const runs = (await readFile(path.join(root, "runs.log"), "utf8"))
-      .trim()
-      .split("\n");
-    assert.deepEqual(runs, ["package-lifecycle"]);
+    const runs = await readRuns(root);
+    assert.deepEqual(runs, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

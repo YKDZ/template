@@ -335,16 +335,19 @@ void describe("Erasable TypeScript enforcement", () => {
       for (const [scriptName, command] of Object.entries(
         manifest.scripts ?? {},
       )) {
-        if (
-          typeof command !== "string" ||
-          !/\bnode\b[^\n;&|]*\.ts(?:\s|$)/u.test(command)
-        ) {
-          continue;
+        if (typeof command !== "string") continue;
+        const directTypeScriptCommands = command
+          .split(/(?:&&|\|\||;)/u)
+          .map((part) => part.trim())
+          .filter(
+            (part) => /^node\s/u.test(part) && /\.ts(?:\s|$)/u.test(part),
+          );
+        for (const directCommand of directTypeScriptCommands) {
+          assert.ok(
+            directCommand.includes("--conditions=source"),
+            `${manifest.name ?? "(unnamed)"}#${scriptName}`,
+          );
         }
-        assert.ok(
-          command.includes("--conditions=source"),
-          `${manifest.name ?? "(unnamed)"}#${scriptName}`,
-        );
       }
     }
   });

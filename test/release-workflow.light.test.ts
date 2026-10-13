@@ -83,13 +83,13 @@ void describe("npm release workflow", () => {
     assert.ok(!workflow.includes("run: pnpm run check:fixtures"));
   });
 
-  void it("keeps focused generated links as a durable CI gate", async () => {
+  void it("keeps the public heavy quality gate in reusable CI", async () => {
     const workflow = await readFile(
       path.join(repoRoot, ".github/workflows/check.yml"),
       "utf8",
     );
 
-    assert.ok(workflow.includes("run: pnpm run check:focused"));
+    assert.ok(workflow.includes("run: pnpm run check:heavy"));
     assert.ok(workflow.includes("run: pnpm install --frozen-lockfile"));
   });
 });

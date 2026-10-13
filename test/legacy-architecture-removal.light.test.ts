@@ -709,7 +709,7 @@ void describe("Legacy Architecture Removal Check", () => {
           }),
         ),
         writeFile(
-          path.join(root, "test/packed-publication.test.ts"),
+          path.join(root, "test/packed-publication.integration.test.ts"),
           'const packArgs = ["--config.ignore-scripts=true"];\n',
         ),
       ]);
@@ -941,14 +941,16 @@ void describe("Legacy Architecture Removal Check", () => {
       ]);
 
       await writeFile(
-        path.join(root, "packages/builtin-presets/src/behavior.test.ts"),
+        path.join(root, "packages/builtin-presets/src/behavior.light.test.ts"),
         'import assert from "node:assert/strict";\nassert.ok(!Object.hasOwn({}, "tsc-alias"));\n',
       );
 
       const findings = await findLegacyArchitectureFindings(root);
       assert.deepStrictEqual(
         findings.filter((entry) =>
-          entry.file.endsWith("packages/builtin-presets/src/behavior.test.ts"),
+          entry.file.endsWith(
+            "packages/builtin-presets/src/behavior.light.test.ts",
+          ),
         ),
         [],
       );
