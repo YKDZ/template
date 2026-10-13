@@ -1,4 +1,12 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import {
   cp,
   lstat,
@@ -8,12 +16,14 @@ import {
   readdir,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -30,21 +40,666 @@ import {
 } from "@ykdz/template-checks/workflow-contract";
 import type { PackageRole } from "@ykdz/template-core/project-blueprint";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import { execa } from "execa";
+import { execa as runExeca } from "execa";
 import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
+const journeyDiagnosticsRoot =
+  process.env.TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR ?? tmpdir();
+const packedDiagnosticExclusions = new Set([
+  ".git",
+  ".fixture-evidence",
+  ".fixture-evidence-activity",
+  ".fixture-native-cache",
+  ".fixture-workspace",
+  ".npm",
+  ".pnpm-store",
+  ".scratch",
+  ".turbo",
+  ".cache",
+  ".cli-journey-diagnostics",
+  "node_modules",
+  "target",
+]);
+
+type ActivePackedRun = {
+  archivePath?: string;
+  readonly archiveWorkspace: string;
+  workspace?: string;
+  consumer?: string;
+  readonly diagnostics: string;
+  stage: string;
+  workerPidFile?: string;
+  stdoutPath?: string;
+  stderrPath?: string;
+  packedBin?: string;
+  nativeParentPid?: number;
+  signalRelay?: Promise<void>;
+  forceKillTimer?: ReturnType<typeof setTimeout>;
+};
+
+let preservePackedWorkspaceAfterSignal = false;
+let activePackedRun: ActivePackedRun | undefined;
+let receivedPackedSignal: NodeJS.Signals | undefined;
+const packedJourneyKillGracePeriodMs = 10_000;
+const packedJourneyTimeoutMs = 900_000;
+const packedCancellationController = new AbortController();
+const execa = runExeca({
+  cancelSignal: packedCancellationController.signal,
+  killDescendants: true,
+  forceKillAfterDelay: packedJourneyKillGracePeriodMs,
+});
+
+function errorDetails(error: unknown, seen = new Set<unknown>()): unknown {
+  if (error instanceof Error) {
+    if (seen.has(error)) return { name: error.name, message: "[循环 cause]" };
+    seen.add(error);
+    const cause = "cause" in error ? error.cause : undefined;
+    return {
+      name: error.name,
+      message: error.message,
+      ...(error.stack === undefined ? {} : { stack: error.stack }),
+      ...("exitCode" in error ? { exitCode: error.exitCode } : {}),
+      ...("signal" in error ? { signal: error.signal } : {}),
+      ...("timedOut" in error ? { timedOut: error.timedOut } : {}),
+      ...("isCanceled" in error ? { isCanceled: error.isCanceled } : {}),
+      ...(cause === undefined ? {} : { cause: errorDetails(cause, seen) }),
+    };
+  }
+  if (typeof error === "string")
+    return { name: "ThrownString", message: error };
+  try {
+    return { name: "ThrownValue", value: JSON.stringify(error) };
+  } catch {
+    return { name: "ThrownValue", value: String(error) };
+  }
+}
+
+function copyDiagnosticPath(source: string, root: string): boolean {
+  const relativePath = path.relative(root, source);
+  if (
+    relativePath
+      .split(path.sep)
+      .some((segment) => packedDiagnosticExclusions.has(segment))
+  ) {
+    return false;
+  }
+  return !/^packages\/[^/]+\/dist(?:\/|$)/u.test(
+    relativePath.split(path.sep).join("/"),
+  );
+}
+
+function packedReproduction(options: {
+  readonly artifactRoot: string;
+  readonly archivePath: string;
+  readonly sourcePath: string;
+  readonly consumerPath: string;
+}): readonly string[] {
+  return [
+    `cd ${JSON.stringify(options.sourcePath)}`,
+    "pnpm install --frozen-lockfile",
+    `cd ${JSON.stringify(options.consumerPath)}`,
+    `pnpm add ${JSON.stringify(options.archivePath)}`,
+    `TEMPLATE_CLI_JOURNEY_MODE=packed TEMPLATE_CLI_PACKED_BIN="$(pwd)/node_modules/.bin/template" TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR=${JSON.stringify(options.artifactRoot)} node --conditions=source --test --test-reporter=tap ${JSON.stringify(path.join(options.sourcePath, "packages/cli/test/e2e/run-journeys.ts"))}`,
+  ];
+}
+
+function readPackedRunnerWorkerPid(
+  active: ActivePackedRun,
+): number | undefined {
+  if (active.workerPidFile === undefined) return undefined;
+  try {
+    const pid = Number(readFileSync(active.workerPidFile, "utf8").trim());
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function relaySignalToPackedJourneyWorker(
+  active: ActivePackedRun,
+  signal: NodeJS.Signals,
+): Promise<void> {
+  active.signalRelay ??= (async () => {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const pid = readPackedRunnerWorkerPid(active);
+      if (pid !== undefined) {
+        try {
+          process.kill(pid, signal);
+        } catch (error) {
+          if (
+            !(
+              error instanceof Error &&
+              "code" in error &&
+              error.code === "ESRCH"
+            )
+          ) {
+            process.stderr.write(
+              `无法向打包旅程 worker 转发 ${signal}：${String(error)}\n`,
+            );
+          }
+        }
+        active.forceKillTimer = setTimeout(() => {
+          if (active.nativeParentPid === undefined) return;
+          try {
+            if (process.platform !== "win32") {
+              process.kill(-active.nativeParentPid, "SIGKILL");
+            } else {
+              process.kill(active.nativeParentPid, "SIGKILL");
+            }
+          } catch (error) {
+            if (
+              !(
+                error instanceof Error &&
+                "code" in error &&
+                error.code === "ESRCH"
+              )
+            ) {
+              process.stderr.write(
+                `无法在清理期限后结束打包旅程进程：${String(error)}\n`,
+              );
+            }
+          }
+        }, packedJourneyKillGracePeriodMs);
+        return;
+      }
+      await delay(25);
+    }
+    if (active.nativeParentPid !== undefined) {
+      try {
+        if (process.platform !== "win32") {
+          process.kill(-active.nativeParentPid, "SIGKILL");
+        } else {
+          process.kill(active.nativeParentPid, "SIGKILL");
+        }
+      } catch (error) {
+        if (
+          !(error instanceof Error && "code" in error && error.code === "ESRCH")
+        ) {
+          process.stderr.write(
+            `无法结束未启动 worker 的打包旅程进程：${String(error)}\n`,
+          );
+        }
+      }
+    }
+  })();
+  return await active.signalRelay;
+}
+
+async function runPackedJourneyTests(options: {
+  readonly active: ActivePackedRun;
+  readonly consumer: string;
+  readonly installedBin: string;
+  readonly runnerPath?: string;
+  readonly stageName?: string;
+  readonly diagnosticsRoot?: string;
+}): Promise<{
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+}> {
+  const active = options.active;
+  const runner =
+    options.runnerPath ??
+    path.join(process.cwd(), "packages/cli/test/e2e/run-journeys.ts");
+  const stageName = options.stageName ?? "packed-journeys";
+  const outputDirectory = path.join(active.workspace!, stageName);
+  await mkdir(outputDirectory, { recursive: true });
+  const stdoutPath = path.join(outputDirectory, `${stageName}.stdout.tap`);
+  const stderrPath = path.join(outputDirectory, `${stageName}.stderr.log`);
+  const workerPidFile = path.join(outputDirectory, "journey-worker.pid");
+  const stdoutDescriptor = openSync(stdoutPath, "w");
+  const stderrDescriptor = openSync(stderrPath, "w");
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    TEMPLATE_CLI_JOURNEY_MODE: "packed",
+    TEMPLATE_CLI_PACKED_BIN: options.installedBin,
+    TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR:
+      options.diagnosticsRoot ?? journeyDiagnosticsRoot,
+    TEMPLATE_CLI_JOURNEY_WORKER_PID_FILE: workerPidFile,
+  };
+  delete environment.NODE_TEST_CONTEXT;
+  active.stage = stageName;
+  active.consumer = options.consumer;
+  active.workerPidFile = workerPidFile;
+  active.stdoutPath = stdoutPath;
+  active.stderrPath = stderrPath;
+  active.packedBin = options.installedBin;
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(
+      process.execPath,
+      ["--conditions=source", "--test", "--test-reporter=tap", runner],
+      {
+        cwd: process.cwd(),
+        env: environment,
+        stdio: ["ignore", stdoutDescriptor, stderrDescriptor],
+        detached: process.platform !== "win32",
+      },
+    );
+  } finally {
+    closeSync(stdoutDescriptor);
+    closeSync(stderrDescriptor);
+  }
+  if (child.pid !== undefined) active.nativeParentPid = child.pid;
+
+  if (receivedPackedSignal !== undefined) {
+    void relaySignalToPackedJourneyWorker(active, receivedPackedSignal);
+  }
+
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    void relaySignalToPackedJourneyWorker(active, "SIGTERM");
+  }, packedJourneyTimeoutMs);
+  try {
+    const result = await new Promise<{
+      readonly exitCode: number | null;
+      readonly signal: NodeJS.Signals | null;
+    }>((resolve, reject) => {
+      child.once("error", reject);
+      child.once("exit", (exitCode, signal) => resolve({ exitCode, signal }));
+    });
+    if (active.signalRelay !== undefined) await active.signalRelay;
+    if (active.forceKillTimer !== undefined) {
+      clearTimeout(active.forceKillTimer);
+      delete active.forceKillTimer;
+    }
+    if (timedOut) {
+      throw new Error("打包 CLI 旅程超过 15 分钟时限。", {
+        cause: { ...result, timedOut: true },
+      });
+    }
+    return result;
+  } finally {
+    clearTimeout(timeout);
+    if (timedOut && active.forceKillTimer !== undefined) {
+      clearTimeout(active.forceKillTimer);
+      delete active.forceKillTimer;
+    }
+    if (active.workerPidFile !== undefined) {
+      await rm(active.workerPidFile, { force: true });
+      delete active.workerPidFile;
+    }
+    delete active.nativeParentPid;
+  }
+}
+
+async function preservePackedFailure(options: {
+  readonly archivePath?: string;
+  readonly archiveWorkspace: string;
+  readonly workspace: string;
+  readonly error: unknown;
+  readonly journeyOutput?: string;
+  readonly journeyStderr?: string;
+}): Promise<string> {
+  await mkdir(journeyDiagnosticsRoot, { recursive: true });
+  const diagnostics = await mkdtemp(
+    path.join(journeyDiagnosticsRoot, "template-packed-failure-"),
+  );
+  const sourceRoot = path.join(options.archiveWorkspace, "repository");
+  const consumerRoot = path.join(options.workspace, "consumer");
+  const archiveCopy = path.join(diagnostics, "template-package.tgz");
+  const sourceCopy = path.join(diagnostics, "source");
+  const workspaceCopy = path.join(diagnostics, "workspace");
+  const consumerCopy = path.join(workspaceCopy, "consumer");
+  const reports: string[] = [];
+  const preservationErrors: unknown[] = [];
+  if (options.archivePath !== undefined) {
+    try {
+      await cp(options.archivePath, archiveCopy);
+      reports.push("template-package.tgz");
+    } catch (error) {
+      preservationErrors.push(error);
+    }
+  }
+  try {
+    await cp(sourceRoot, sourceCopy, {
+      recursive: true,
+      filter: (source) => copyDiagnosticPath(source, sourceRoot),
+    });
+    reports.push("source");
+  } catch (error) {
+    preservationErrors.push(error);
+  }
+  try {
+    await cp(options.workspace, workspaceCopy, {
+      recursive: true,
+      filter: (source) => copyDiagnosticPath(source, options.workspace),
+    });
+    reports.push("workspace");
+  } catch (error) {
+    preservationErrors.push(error);
+  }
+  for (const [name, content] of [
+    ["packed-journeys.stdout.tap", options.journeyOutput],
+    ["packed-journeys.stderr.log", options.journeyStderr],
+  ] as const) {
+    if (content === undefined) continue;
+    try {
+      await writeFile(path.join(diagnostics, name), content);
+      reports.push(name);
+    } catch (error) {
+      preservationErrors.push(error);
+    }
+  }
+  const nestedPath =
+    `${options.journeyOutput ?? ""}\n${options.journeyStderr ?? ""}`.match(
+      /CLI_JOURNEY_DIAGNOSTICS=(.+)/u,
+    )?.[1];
+  let nestedJourneyDiagnostics: string | undefined;
+  if (nestedPath !== undefined) {
+    try {
+      nestedJourneyDiagnostics = path.join(
+        diagnostics,
+        "nested-journey-diagnostics",
+      );
+      await cp(nestedPath, nestedJourneyDiagnostics, {
+        recursive: true,
+        filter: (source) => copyDiagnosticPath(source, nestedPath),
+      });
+      reports.push("nested-journey-diagnostics");
+    } catch (error) {
+      preservationErrors.push(error);
+      nestedJourneyDiagnostics = undefined;
+    }
+  }
+  const report = {
+    node: process.version,
+    platform: process.platform,
+    architecture: process.arch,
+    ...(options.archivePath === undefined
+      ? {}
+      : {
+          archive: reports.includes("template-package.tgz")
+            ? archiveCopy
+            : options.archivePath,
+        }),
+    source: reports.includes("source") ? sourceCopy : sourceRoot,
+    workspace: reports.includes("workspace")
+      ? workspaceCopy
+      : options.workspace,
+    consumer: reports.includes("workspace") ? consumerCopy : consumerRoot,
+    reports,
+    nestedJourneyDiagnostics,
+    error: errorDetails(options.error),
+    preservationErrors: preservationErrors.map((error) => errorDetails(error)),
+    ...(options.archivePath === undefined
+      ? {
+          reproduction: [
+            "完成归档生成后，使用同一归档重新运行 packed CLI 旅程。",
+          ],
+        }
+      : {
+          reproduction: packedReproduction({
+            artifactRoot: diagnostics,
+            archivePath: archiveCopy,
+            sourcePath: sourceCopy,
+            consumerPath: consumerCopy,
+          }),
+        }),
+    cleanup: {
+      originalWorkspace: options.workspace,
+      retryCommand: `rm -rf ${JSON.stringify(options.workspace)}`,
+    },
+  };
+  await writeFile(
+    path.join(diagnostics, "failure.json"),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
+  return diagnostics;
+}
+
+async function verifyPackedJourneyFailure(options: {
+  readonly active: ActivePackedRun;
+  readonly installedBin: string;
+}): Promise<void> {
+  const fixtureRoot = path.join(options.active.workspace!, "failure-probe");
+  const cliRoot = path.join(fixtureRoot, "packages", "cli");
+  const e2eRoot = path.join(cliRoot, "test", "e2e");
+  const journeyRoot = path.join(e2eRoot, "journeys");
+  await mkdir(journeyRoot, { recursive: true });
+  await symlink(
+    path.join(process.cwd(), "packages/cli/node_modules"),
+    path.join(cliRoot, "node_modules"),
+    "dir",
+  );
+  await Promise.all(
+    ["run-journeys.ts", "journey.ts"].map((fileName) =>
+      cp(
+        path.join(process.cwd(), "packages/cli/test/e2e", fileName),
+        path.join(e2eRoot, fileName),
+      ),
+    ),
+  );
+  await cp(
+    path.join(process.cwd(), "packages/cli/package.json"),
+    path.join(cliRoot, "package.json"),
+  );
+
+  const shimPath = path.join(fixtureRoot, "packed-cli-failure-shim.mjs");
+  await writeFile(
+    shimPath,
+    [
+      'import { spawn } from "node:child_process";',
+      "const [executable, ...args] = process.argv.slice(2);",
+      'if (executable === undefined) throw new Error("missing CLI executable");',
+      'const child = spawn(executable, args, { shell: process.platform === "win32", stdio: "inherit" });',
+      'child.once("error", (error) => { console.error(error); process.exitCode = 1; });',
+      'child.once("exit", (code) => { process.exitCode = code === 0 ? 79 : (code ?? 1); });',
+      "",
+    ].join("\n"),
+  );
+  const journeySource = [
+    'import path from "node:path";',
+    'import assert from "node:assert/strict";',
+    'import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";',
+    'import type { CliJourney } from "../journey.ts";',
+    "const preset = builtInPresetRegistry.all().find((candidate) => candidate.planPackageAddition !== undefined && candidate.initialPrimaryPackage !== undefined);",
+    'if (preset === undefined) throw new Error("没有可初始化的可扩展预设");',
+    "const journey: CliJourney = {",
+    '  name: "packed-failure-probe",',
+    '  modes: ["packed"],',
+    "  async setup() {},",
+    "  commands(context) {",
+    "    const shim = process.env.TEMPLATE_CLI_PACKED_FAILURE_SHIM;",
+    "    const packedBin = process.env.TEMPLATE_CLI_PACKED_BIN;",
+    '    if (shim === undefined || packedBin === undefined) throw new Error("缺少 packed 失败探针命令");',
+    "    return [{",
+    '      name: "生成项目后注入退出错误",',
+    "      executable: process.execPath,",
+    '      args: [shim, packedBin, "init", "project", "--preset", preset.metadata.name, "--scope", "acme", "--no-todo"],',
+    "    }];",
+    "  },",
+    "  async assertions({ results }) {",
+    "    assert.strictEqual(results[0]?.exitCode, 79);",
+    '    assert.match(results[0]?.stdout ?? "", /"variant":"initialized"/u);',
+    '    throw new Error("注入的 packed 旅程断言失败", { cause: new Error("原始 packed 旅程错误") });',
+    "  },",
+    "};",
+    "export default journey;",
+    "",
+  ].join("\n");
+  await writeFile(
+    path.join(journeyRoot, "packed-failure.journey.ts"),
+    journeySource,
+  );
+
+  const diagnosticsRoot = path.join(fixtureRoot, "diagnostics");
+  const originalShim = process.env.TEMPLATE_CLI_PACKED_FAILURE_SHIM;
+  process.env.TEMPLATE_CLI_PACKED_FAILURE_SHIM = shimPath;
+  try {
+    const result = await runPackedJourneyTests({
+      active: options.active,
+      consumer: options.active.consumer!,
+      installedBin: options.installedBin,
+      runnerPath: path.join(e2eRoot, "run-journeys.ts"),
+      stageName: "packed-failure-probe",
+      diagnosticsRoot,
+    });
+    const output = await readFile(options.active.stdoutPath!, "utf8");
+    const stderr = await readFile(options.active.stderrPath!, "utf8");
+    assert.notStrictEqual(result.exitCode, 0, `${output}\n${stderr}`);
+    assert.match(output, /# fail 1/u);
+    const diagnosticsPath = `${output}\n${stderr}`.match(
+      /CLI_JOURNEY_DIAGNOSTICS=(.+)/u,
+    )?.[1];
+    assert.ok(diagnosticsPath, `${output}\n${stderr}`);
+    const report = JSON.parse(
+      await readFile(
+        path.join(diagnosticsPath!, "journey-report.json"),
+        "utf8",
+      ),
+    ) as {
+      readonly journey: string;
+      readonly workspace: string;
+      readonly error: {
+        readonly message: string;
+        readonly cause?: {
+          readonly message: string;
+          readonly cause?: { readonly message: string };
+        };
+      };
+      readonly results: readonly {
+        readonly exitCode: number;
+        readonly stdout: string;
+      }[];
+    };
+    assert.strictEqual(report.journey, "packed-failure-probe");
+    assert.strictEqual(report.results[0]?.exitCode, 79);
+    assert.strictEqual(
+      report.error.cause?.cause?.message,
+      "原始 packed 旅程错误",
+    );
+    assert.match(report.error.message, /"variant":"initialized"/u);
+    assert.match(report.results[0]?.stdout ?? "", /"variant":"initialized"/u);
+    const generatedManifest = await readFile(
+      path.join(report.workspace, "project", "package.json"),
+      "utf8",
+    );
+    assert.ok(JSON.parse(generatedManifest));
+  } finally {
+    if (originalShim === undefined) {
+      delete process.env.TEMPLATE_CLI_PACKED_FAILURE_SHIM;
+    } else {
+      process.env.TEMPLATE_CLI_PACKED_FAILURE_SHIM = originalShim;
+    }
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    receivedPackedSignal ??= signal;
+    preservePackedWorkspaceAfterSignal = true;
+    packedCancellationController.abort(new Error(`收到 ${signal} 信号`));
+    const active = activePackedRun;
+    const diagnostics = active?.diagnostics ?? journeyDiagnosticsRoot;
+    mkdirSync(diagnostics, { recursive: true });
+    const source =
+      active === undefined
+        ? undefined
+        : path.join(active.archiveWorkspace, "repository");
+    const journeyWorkerPid =
+      active === undefined ? undefined : readPackedRunnerWorkerPid(active);
+    const reproduction =
+      active?.archivePath !== undefined &&
+      source !== undefined &&
+      active.consumer !== undefined
+        ? packedReproduction({
+            artifactRoot: diagnostics,
+            archivePath: active.archivePath,
+            sourcePath: source,
+            consumerPath: active.consumer,
+          })
+        : [];
+    writeFileSync(
+      path.join(diagnostics, "packed-publication-interrupted.json"),
+      `${JSON.stringify(
+        {
+          node: process.version,
+          platform: process.platform,
+          architecture: process.arch,
+          signal,
+          stage: active?.stage ?? "packed 测试初始化",
+          processIds: {
+            rootTestWorker: process.pid,
+            ...(active?.nativeParentPid === undefined
+              ? {}
+              : { nativeTestParent: active.nativeParentPid }),
+            ...(journeyWorkerPid === undefined
+              ? {}
+              : { journeyWorker: journeyWorkerPid }),
+          },
+          ...(active?.archivePath === undefined
+            ? {}
+            : { archive: active.archivePath }),
+          ...(source === undefined ? {} : { source }),
+          ...(active?.consumer === undefined
+            ? {}
+            : { consumer: active.consumer }),
+          ...(active?.workspace === undefined
+            ? {}
+            : { workspace: active.workspace }),
+          ...(active?.packedBin === undefined
+            ? {}
+            : { packedBin: active.packedBin }),
+          ...(active === undefined
+            ? {}
+            : {
+                nativeReport: {
+                  stdout: active.stdoutPath,
+                  stderr: active.stderrPath,
+                },
+              }),
+          cause: {
+            name: "Error",
+            message: `收到 ${signal} 信号，正在保留 packed 旅程现场。`,
+          },
+          reproduction,
+          cleanup: {
+            retained: true,
+            retryPath: active?.workspace,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    if (active?.workerPidFile !== undefined)
+      void relaySignalToPackedJourneyWorker(active, signal);
+    process.exitCode = signal === "SIGINT" ? 130 : 143;
+  });
+}
+
+const rootTestWorkerPidFile = process.env.TEMPLATE_ROOT_TEST_WORKER_PID_FILE;
+if (rootTestWorkerPidFile !== undefined) {
+  mkdirSync(path.dirname(rootTestWorkerPidFile), { recursive: true });
+  writeFileSync(rootTestWorkerPidFile, `${process.pid}\n`);
+}
 
 async function packTemplateArchive(workspace: string): Promise<string> {
   const repositoryRoot = path.join(workspace, "repository");
   const archiveDirectory = path.join(workspace, "archives");
+  const diagnosticsRelativePath = path.relative(
+    process.cwd(),
+    journeyDiagnosticsRoot,
+  );
+  const diagnosticsPathIsInsideRepository =
+    diagnosticsRelativePath !== "" &&
+    diagnosticsRelativePath !== ".." &&
+    !diagnosticsRelativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(diagnosticsRelativePath);
+  const normalizedDiagnosticsRelativePath = diagnosticsRelativePath
+    .split(path.sep)
+    .join("/");
   const ignoredDirectoryNames = new Set([
     ".git",
     ".fixture-evidence",
     ".fixture-evidence-activity",
     ".fixture-native-cache",
     ".fixture-workspace",
+    ".cli-journey-diagnostics",
     ".pnpm-store",
     ".scratch",
     ".turbo",
@@ -61,6 +716,13 @@ async function packTemplateArchive(workspace: string): Promise<string> {
         relativePath
           .split("/")
           .some((segment) => ignoredDirectoryNames.has(segment))
+      ) {
+        return false;
+      }
+      if (
+        diagnosticsPathIsInsideRepository &&
+        (relativePath === normalizedDiagnosticsRelativePath ||
+          relativePath.startsWith(`${normalizedDiagnosticsRelativePath}/`))
       ) {
         return false;
       }
@@ -513,31 +1175,81 @@ void describe("packed public CLI consumer", () => {
 
   before(
     async () => {
+      await mkdir(journeyDiagnosticsRoot, { recursive: true });
       archiveWorkspace = await mkdtemp(
         path.join(tmpdir(), "template-packed-artifact-"),
       );
-      packedArchivePath = await packTemplateArchive(archiveWorkspace);
+      activePackedRun = {
+        archiveWorkspace,
+        diagnostics: journeyDiagnosticsRoot,
+        stage: "创建 packed 归档",
+      };
+      try {
+        packedArchivePath = await packTemplateArchive(archiveWorkspace);
+        activePackedRun.archivePath = packedArchivePath;
+        if (receivedPackedSignal !== undefined) {
+          const error = new Error(
+            `创建 packed 归档期间收到 ${receivedPackedSignal} 信号。`,
+          );
+          const diagnostics = await preservePackedFailure({
+            archivePath: packedArchivePath,
+            archiveWorkspace,
+            workspace: archiveWorkspace,
+            error,
+          });
+          throw new Error(`packed 归档已保留：${diagnostics}`, {
+            cause: error,
+          });
+        }
+      } catch (error) {
+        if (receivedPackedSignal === undefined) {
+          const diagnostics = await preservePackedFailure({
+            ...(packedArchivePath === undefined
+              ? {}
+              : { archivePath: packedArchivePath }),
+            archiveWorkspace,
+            workspace: archiveWorkspace,
+            error,
+          });
+          throw new Error(`packed 归档创建失败，诊断目录：${diagnostics}`, {
+            cause: error,
+          });
+        }
+        throw error;
+      }
     },
-    { timeout: 300000 },
+    { timeout: 900_000 },
   );
 
   after(async () => {
-    if (archiveWorkspace !== undefined) {
+    if (!preservePackedWorkspaceAfterSignal && archiveWorkspace !== undefined) {
       await rm(archiveWorkspace, { recursive: true, force: true });
     }
+    activePackedRun = undefined;
   });
 
   void it(
     "runs the archive alone: import, help, every initialization, and package addition",
-    { timeout: 300000 },
+    { timeout: 1_200_000 },
     async () => {
       const workspace = await mkdtemp(
-        path.join(tmpdir(), "template-packed-consumer-"),
+        path.join(journeyDiagnosticsRoot, "template-packed-consumer-"),
       );
+      let journeyOutput: string | undefined;
+      let journeyStderr: string | undefined;
       try {
         assert.ok(packedArchivePath);
         const archivePath = packedArchivePath;
         const consumer = path.join(workspace, "consumer");
+        const activeRun: ActivePackedRun = {
+          archivePath,
+          archiveWorkspace: archiveWorkspace!,
+          workspace,
+          consumer,
+          diagnostics: journeyDiagnosticsRoot,
+          stage: "检查 packed 归档",
+        };
+        activePackedRun = activeRun;
         const packedPaths = (await execa("tar", ["-tf", archivePath])).stdout
           .split("\n")
           .filter(Boolean);
@@ -661,6 +1373,7 @@ void describe("packed public CLI consumer", () => {
           ),
         );
         await mkdir(consumer, { recursive: true });
+        activeRun.stage = "安装 packed 消费者";
         await execa("npm", ["init", "--yes"], { cwd: consumer });
         await execa("pnpm", ["add", archivePath], { cwd: consumer });
         const bundledCoreRenderer = path.join(
@@ -686,29 +1399,39 @@ void describe("packed public CLI consumer", () => {
           ".bin",
           "template",
         );
-        const journeyEnvironment: NodeJS.ProcessEnv = {
-          ...process.env,
-          TEMPLATE_CLI_JOURNEY_MODE: "packed",
-          TEMPLATE_CLI_PACKED_BIN: installedBin,
-        };
-        delete journeyEnvironment.NODE_TEST_CONTEXT;
-        const packedJourneys = await execa(
-          "node",
-          [
-            "--conditions=source",
-            "--test",
-            "--test-reporter=tap",
-            path.join(process.cwd(), "packages/cli/test/e2e/run-journeys.ts"),
-          ],
-          {
-            cwd: process.cwd(),
-            env: journeyEnvironment,
-            extendEnv: false,
-          },
+        const packedResult = await runPackedJourneyTests({
+          active: activeRun,
+          consumer,
+          installedBin,
+        });
+        journeyOutput = await readFile(activeRun.stdoutPath!, "utf8");
+        journeyStderr = await readFile(activeRun.stderrPath!, "utf8");
+        if (receivedPackedSignal !== undefined) {
+          throw new Error(
+            `packed CLI 旅程收到 ${receivedPackedSignal} 信号并已完成清理。`,
+            {
+              cause: {
+                exitCode: packedResult.exitCode,
+                signal: packedResult.signal,
+                requestSignal: receivedPackedSignal,
+                stdout: journeyOutput,
+                stderr: journeyStderr,
+              },
+            },
+          );
+        }
+        activeRun.stage = "检查 packed 旅程报告";
+        assert.strictEqual(
+          packedResult.exitCode,
+          0,
+          `${journeyOutput}\n${journeyStderr}`,
         );
-        const journeyOutput = `${packedJourneys.stdout}\n${packedJourneys.stderr}`;
         assert.match(journeyOutput, /^# tests 5$/mu);
         assert.match(journeyOutput, /^# pass 5$/mu);
+        await verifyPackedJourneyFailure({
+          active: activeRun,
+          installedBin,
+        });
         const bundledDefinitions = path.join(
           consumer,
           "node_modules",
@@ -1443,8 +2166,35 @@ void describe("packed public CLI consumer", () => {
           await workspaceByteSnapshot(previewTarget),
           textBefore,
         );
+      } catch (error) {
+        if (activePackedRun !== undefined) {
+          try {
+            const diagnostics = await preservePackedFailure({
+              ...(activePackedRun.archivePath === undefined
+                ? {}
+                : { archivePath: activePackedRun.archivePath }),
+              archiveWorkspace: activePackedRun.archiveWorkspace,
+              workspace,
+              error,
+              ...(journeyOutput === undefined ? {} : { journeyOutput }),
+              ...(journeyStderr === undefined ? {} : { journeyStderr }),
+            });
+            process.stderr.write(`\nPACKED_CLI_DIAGNOSTICS=${diagnostics}\n`);
+          } catch (preservationError) {
+            preservePackedWorkspaceAfterSignal = true;
+            throw new AggregateError(
+              [error, preservationError],
+              "packed CLI 失败，保存诊断材料时又发生错误。",
+              { cause: error },
+            );
+          }
+        }
+        throw error;
       } finally {
-        await rm(workspace, { recursive: true, force: true });
+        if (!preservePackedWorkspaceAfterSignal) {
+          await rm(workspace, { recursive: true, force: true });
+        }
+        activePackedRun = undefined;
       }
     },
   );
