@@ -91,6 +91,16 @@ const execa = runExeca({
   forceKillAfterDelay: packedJourneyKillGracePeriodMs,
 });
 
+function throwIfPackedCommandWasCancelled(
+  result: { readonly isCanceled: boolean },
+  commandDescription: string,
+): void {
+  if (!result.isCanceled && receivedPackedSignal === undefined) return;
+  throw new Error(`packed 验收命令已取消：${commandDescription}`, {
+    cause: packedCancellationController.signal.reason,
+  });
+}
+
 function errorDetails(error: unknown, seen = new Set<unknown>()): unknown {
   if (error instanceof Error) {
     if (seen.has(error)) return { name: error.name, message: "[循环 cause]" };
@@ -1032,6 +1042,7 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
     cwd: projectDir,
     reject: false,
   });
+  throwIfPackedCommandWasCancelled(retiredBuild, "检查已移除的构建命令");
   assert.notStrictEqual(retiredBuild.exitCode, 0);
 }
 
@@ -1564,6 +1575,10 @@ void describe("packed public CLI consumer", () => {
               reject: false,
             },
           );
+          throwIfPackedCommandWasCancelled(
+            result,
+            `向 ${candidate.name} 预设添加包`,
+          );
           if (result.exitCode === 0) {
             completedAdditions.push(candidate.name);
             await expectNativeTaskModel(
@@ -1984,6 +1999,10 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(
+          reservedPackagePath,
+          "检查保留目录拒绝行为",
+        );
         assert.strictEqual(reservedPackagePath.exitCode, 2);
         assert.strictEqual(reservedPackagePath.stdout, "");
         assert.partialDeepStrictEqual(JSON.parse(reservedPackagePath.stderr), {
@@ -2019,6 +2038,10 @@ void describe("packed public CLI consumer", () => {
             cwd: previewTarget,
             reject: false,
           },
+        );
+        throwIfPackedCommandWasCancelled(
+          existingPackagePath,
+          "检查已存在目录冲突",
         );
         assert.notStrictEqual(existingPackagePath.exitCode, 0);
         const existingPackageFailure = JSON.parse(
@@ -2099,6 +2122,10 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(
+          structuredConflict,
+          "检查结构化配置冲突",
+        );
         assert.notStrictEqual(structuredConflict.exitCode, 0);
         const structuredFailure = JSON.parse(structuredConflict.stderr).data;
         assert.strictEqual(structuredFailure.actions.length, 0);
@@ -2156,6 +2183,7 @@ void describe("packed public CLI consumer", () => {
             reject: false,
           },
         );
+        throwIfPackedCommandWasCancelled(textConflict, "检查文本文件冲突");
         assert.notStrictEqual(textConflict.exitCode, 0);
         assert.ok(
           textConflict.stderr.includes(".devcontainer/Dockerfile (text)"),
