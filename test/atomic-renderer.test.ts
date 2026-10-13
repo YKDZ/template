@@ -98,7 +98,10 @@ void describe("atomic renderer", () => {
         ),
         writeFile(
           path.join(sourceRoot, "static-tasks.json"),
-          `${JSON.stringify({ tasks: { plain: { cache: false } } })}\n`,
+          `${JSON.stringify({
+            literal: "{{UNCHANGED_LITERAL}}",
+            tasks: { plain: { cache: false } },
+          })}\n`,
         ),
         writeFile(
           path.join(targetRoot, "turbo.json"),
@@ -174,7 +177,10 @@ void describe("atomic renderer", () => {
         JSON.parse(
           await readFile(path.join(targetRoot, "static-turbo.json"), "utf8"),
         ),
-        { tasks: { plain: { cache: false } } },
+        {
+          literal: "{{UNCHANGED_LITERAL}}",
+          tasks: { plain: { cache: false } },
+        },
       );
     } finally {
       await Promise.all([

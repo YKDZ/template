@@ -388,7 +388,9 @@ async function renderMergeJsonTemplate(
       { cause: error },
     );
   }
-  patch = replaceJsonTemplateVariables(patch, operation.replacements ?? {});
+  if (operation.replacements !== undefined) {
+    patch = replaceJsonTemplateVariables(patch, operation.replacements);
+  }
   await mergeJsonIntoFile({
     options,
     patch,
