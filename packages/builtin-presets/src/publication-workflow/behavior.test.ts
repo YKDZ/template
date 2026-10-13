@@ -483,7 +483,7 @@ async function executeFakePublication(
 }
 
 void describe("manual npm publication capability", () => {
-  void it("projects a source-backed release workflow and caller only for the public CLI candidate", () => {
+  void it("projects a source-backed release workflow and caller only for the public CLI candidate", async () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: tsCliDefinition,
       context: createGenerationContext({
@@ -547,6 +547,35 @@ void describe("manual npm publication capability", () => {
         operation.to === "scripts/npm-publication/handoff.ts",
     );
     assert.ok(handoffScript);
+
+    const releaseSource = await readFile(
+      path.resolve(
+        import.meta.dirname,
+        "../../templates/ts-cli/publication/release.yml",
+      ),
+      "utf8",
+    );
+    const workflow = parseDocument(releaseSource).toJS() as {
+      readonly jobs: {
+        readonly verify: { readonly steps: readonly Record<string, unknown>[] };
+      };
+    };
+    const verifySteps = workflow.jobs.verify.steps;
+    assert.strictEqual(verifySteps.length, 9);
+    assert.deepStrictEqual(verifySteps[6], {
+      name: "Run Full Check once",
+      run: "pnpm run check:full",
+    });
+    assert.deepStrictEqual(verifySteps[7], {
+      name: "Verify publication artifact",
+      run: "pnpm run publication:artifact",
+      env: {
+        PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY:
+          "${{ runner.temp }}/npm-publication-artifact",
+        PUBLICATION_ARTIFACT_REQUIRED: "true",
+      },
+    });
+    assert.strictEqual(verifySteps[8]?.name, "Upload verified npm artifact");
   });
 
   void it("creates and proves one immutable release from the accepted artifact", async () => {
@@ -1054,7 +1083,7 @@ void describe("manual npm publication capability", () => {
           (workflow.jobs as Record<string, unknown>).verify as {
             steps: Record<string, unknown>[];
           }
-        ).steps[7]!;
+        ).steps[8]!;
         upload.with = {
           ...(upload.with as Record<string, unknown>),
           path: "wrong.tgz",
@@ -1099,6 +1128,17 @@ void describe("manual npm publication capability", () => {
           }
         ).steps[6]!;
         fullCheck.run = "pnpm run check";
+      },
+      (workflow: Record<string, unknown>) => {
+        const artifact = (
+          (workflow.jobs as Record<string, unknown>).verify as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[7]!;
+        artifact.env = {
+          ...(artifact.env as Record<string, unknown>),
+          PUBLICATION_ARTIFACT_REQUIRED: "false",
+        };
       },
       (workflow: Record<string, unknown>) => {
         (workflow.jobs as Record<string, unknown>).release = {

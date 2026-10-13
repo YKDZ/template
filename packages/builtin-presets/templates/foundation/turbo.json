@@ -60,7 +60,7 @@
     "db:push": { "cache": false, "tags": ["work:preparation"] },
     "db:studio": { "cache": false, "tags": ["work:development"] },
     "publication:readiness": { "tags": ["work:release"] },
-    "publication:artifact": { "tags": ["quality:heavy"] },
+    "publication:artifact": { "tags": ["quality:conditional"] },
     "fix": { "tags": ["work:repair"] },
     "postbuild": { "tags": ["work:lifecycle"] },
     "prepack": { "tags": ["work:release"] },

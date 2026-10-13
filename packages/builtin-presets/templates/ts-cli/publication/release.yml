@@ -47,8 +47,11 @@ jobs:
           test -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"
       - name: Run Full Check once
         run: pnpm run check:full
+      - name: Verify publication artifact
+        run: pnpm run publication:artifact
         env:
           PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: ${{ runner.temp }}/npm-publication-artifact
+          PUBLICATION_ARTIFACT_REQUIRED: "true"
       - name: Upload verified npm artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

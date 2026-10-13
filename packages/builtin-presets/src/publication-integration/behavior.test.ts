@@ -619,6 +619,7 @@ void describe("ts-cli publication owner-fact integration", () => {
             env: {
               ...process.env,
               PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: workflowOutput,
+              PUBLICATION_ARTIFACT_REQUIRED: "true",
             },
             reject: false,
           },

@@ -3800,6 +3800,50 @@ syncBuiltinESMExports();
   );
 
   void it(
+    "未配置发布条件时报告制品验收未执行，发布必需模式失败",
+    { timeout: 180_000 },
+    async () => {
+      const project = await renderInstalledGeneratedRepository(
+        "template-ts-cli-publication-artifact-required-",
+      );
+
+      try {
+        const optional = await execa("pnpm", ["run", "publication:artifact"], {
+          cwd: project.targetDir,
+          reject: false,
+        });
+        assert.strictEqual(
+          optional.exitCode,
+          0,
+          `${optional.stdout}\n${optional.stderr}`,
+        );
+        assert.ok(
+          `${optional.stdout}\n${optional.stderr}`.includes(
+            "发布制品验收未执行",
+          ),
+        );
+
+        const required = await execa("pnpm", ["run", "publication:artifact"], {
+          cwd: project.targetDir,
+          env: {
+            ...process.env,
+            PUBLICATION_ARTIFACT_REQUIRED: "true",
+          },
+          reject: false,
+        });
+        assert.strictEqual(required.exitCode, 1);
+        assert.ok(
+          `${required.stdout}\n${required.stderr}`.includes(
+            "ERROR publication-artifact-required",
+          ),
+        );
+      } finally {
+        await rm(project.workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it(
     "keeps the private candidate Root Check green while require-ready fails closed",
     { timeout: 180_000 },
     async () => {
@@ -3816,6 +3860,11 @@ syncBuiltinESMExports();
           rootCheck.exitCode,
           0,
           `${rootCheck.stdout}\n${rootCheck.stderr}`,
+        );
+        assert.ok(rootCheck.stderr.includes("条件验收未执行"));
+        assert.ok(rootCheck.stderr.includes("publication:artifact"));
+        assert.ok(
+          !rootCheck.stdout.includes("npm publication artifact: blocked"),
         );
 
         const baseline = await execa("pnpm", ["run", "publication:readiness"], {

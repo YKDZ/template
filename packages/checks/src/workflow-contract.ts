@@ -281,10 +281,10 @@ function assertPublicationVerifySteps(
   plan: GeneratedRepositoryPlan,
   steps: unknown,
 ): void {
-  if (!Array.isArray(steps) || steps.length !== 8) {
+  if (!Array.isArray(steps) || steps.length !== 9) {
     failPublicationWorkflow(
       plan,
-      "verify must have the closed eight-step sequence",
+      "verify must have the closed nine-step sequence",
     );
   }
   const gate = step(plan, steps[0], "Require the default branch dispatch");
@@ -309,7 +309,8 @@ function assertPublicationVerifySteps(
   const install = step(plan, steps[4], "Install dependencies");
   const staging = step(plan, steps[5], "Create publication staging directory");
   const check = step(plan, steps[6], "Run Full Check once");
-  const upload = step(plan, steps[7], "Upload verified npm artifact");
+  const artifact = step(plan, steps[7], "Verify publication artifact");
+  const upload = step(plan, steps[8], "Upload verified npm artifact");
   if (
     !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
     !matchesAction(pnpm.uses, "pnpm/action-setup") ||
@@ -321,13 +322,20 @@ function assertPublicationVerifySteps(
     !hasExactKeys(staging, ["name", "run"]) ||
     staging.run !==
       'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
-    !hasExactKeys(check, ["name", "run", "env"]) ||
+    !hasExactKeys(check, ["name", "run"]) ||
     check.name !== "Run Full Check once" ||
     check.run !== "pnpm run check:full" ||
-    !isParsedObject(check.env) ||
-    !hasExactKeys(check.env, ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]) ||
-    check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
+    !hasExactKeys(artifact, ["name", "run", "env"]) ||
+    artifact.name !== "Verify publication artifact" ||
+    artifact.run !== "pnpm run publication:artifact" ||
+    !isParsedObject(artifact.env) ||
+    !hasExactKeys(artifact.env, [
+      "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+      "PUBLICATION_ARTIFACT_REQUIRED",
+    ]) ||
+    artifact.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
       "${{ runner.temp }}/npm-publication-artifact" ||
+    artifact.env.PUBLICATION_ARTIFACT_REQUIRED !== "true" ||
     !hasExactKeys(upload, ["name", "uses", "with"]) ||
     !matchesAction(upload.uses, "actions/upload-artifact") ||
     !isParsedObject(upload.with) ||
