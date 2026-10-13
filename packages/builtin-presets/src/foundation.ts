@@ -3530,9 +3530,14 @@ function foundationPlan(options: {
       ? []
       : [
           {
-            kind: "mergeJson" as const,
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.foundation,
+            from: "turbo-projections/vue-hono-joint-e2e.json",
             to: "turbo.json",
-            value: { tasks: vueHonoJointE2eTurboTasks(vueHonoJointE2e) },
+            replacements: {
+              API_PACKAGE: vueHonoJointE2e.apiPackageName,
+              WEB_PACKAGE: vueHonoJointE2e.webPackageName,
+            },
             multilineArrays: ["tasks.//#test:e2e.dependsOn"],
           },
         ]),
@@ -3540,10 +3545,14 @@ function foundationPlan(options: {
       ? []
       : [
           {
-            kind: "mergeJson" as const,
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.foundation,
+            from: "turbo-projections/deployment.json",
             to: "turbo.json",
-            value: {
-              tasks: deploymentTurboTasks(deploymentCheck),
+            replacements: {
+              APPLICATION_PACKAGE: deploymentCheck.applicationPackageName,
+              DATABASE_PACKAGE: deploymentCheck.databasePackageName,
+              MIGRATION_PACKAGE: deploymentCheck.migrationPackageName,
             },
             multilineArrays: ["tasks.//#deployment.dependsOn"],
           },
@@ -3552,10 +3561,17 @@ function foundationPlan(options: {
       ? []
       : [
           {
-            kind: "mergeJson" as const,
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.foundation,
+            from: "turbo-projections/database-preparation.json",
             to: "turbo.json",
-            value: {
-              tasks: databasePreparationTurboTasks(databasePreparation),
+            replacements: {
+              DATABASE_PACKAGE: databasePreparation.databasePackageName,
+              MIGRATION_PACKAGE: databasePreparation.migrationPackageName,
+              APPLICATION_DEV_PACKAGE:
+                databasePreparation.consumers["application-dev"],
+              APPLICATION_E2E_PACKAGE:
+                databasePreparation.consumers["application-e2e"],
             },
             multilineArrays: [
               `tasks.${databasePreparation.migrationPackageName}#typecheck.dependsOn`,
