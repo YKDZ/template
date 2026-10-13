@@ -16,17 +16,6 @@ import {
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertDoesNotMatch,
-  assertDoesNotContain,
-  assertLacksProperty,
-  assertMatches,
-  assertMatchesPartial,
-  objectContaining,
-  stringContaining,
-} from "../../test-support/assertions.ts";
 import { rustBinDefinition } from "./definition.ts";
 
 /** Preset 必须投影上下文提供的 Rust 事实，而不是自带版本常量。 */
@@ -98,17 +87,19 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       path: "packages/worker",
       role: "native-package",
     });
-    assertMatchesPartial(
-      contribution?.operations.find(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          operation.from === "Cargo.toml",
-      ),
-      {
-        to: "packages/worker/Cargo.toml",
-        replacements: { CARGO_PACKAGE_NAME: "worker" },
-      },
+    const cargoManifestOperation = contribution?.operations.find(
+      (operation) =>
+        operation.kind === "writeTextTemplate" &&
+        operation.from === "Cargo.toml",
     );
+    assert.ok(
+      cargoManifestOperation !== undefined &&
+        cargoManifestOperation.kind === "writeTextTemplate",
+    );
+    assert.strictEqual(cargoManifestOperation.to, "packages/worker/Cargo.toml");
+    assert.deepStrictEqual(cargoManifestOperation.replacements, {
+      CARGO_PACKAGE_NAME: "worker",
+    });
   });
 
   void it("keeps initialization and Package Addition Rust contributions aligned", () => {
@@ -177,7 +168,7 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       path: "packages/app",
       role: "native-package",
     });
-    assertMatchesPartial(contribution.manifest, {
+    assert.partialDeepStrictEqual(contribution.manifest, {
       name: "@demo/app",
       scripts: {
         "format:check": "cargo fmt --all -- --check",
@@ -185,25 +176,26 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         test: "cargo test --workspace",
       },
     });
-    assertMatches(
-      contribution.operations,
-      arrayContaining([
-        objectContaining({
-          kind: "copyFile",
-          from: "src/main.rs",
-          to: "packages/app/src/main.rs",
-        }),
-        objectContaining({
-          kind: "copyFile",
-          from: "rustfmt.toml",
-          to: "packages/app/rustfmt.toml",
-        }),
-      ]),
+    assert.ok(
+      contribution.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.from === "src/main.rs" &&
+          operation.to === "packages/app/src/main.rs",
+      ),
     );
-    assertLacksProperty(contribution, "checks");
-    assertLacksProperty(contribution, "fixes");
-    assertLacksProperty(contribution, "foundationOperations");
-    assertMatchesPartial(contribution.foundation, {
+    assert.ok(
+      contribution.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.from === "rustfmt.toml" &&
+          operation.to === "packages/app/rustfmt.toml",
+      ),
+    );
+    assert.ok(!("checks" in contribution));
+    assert.ok(!("fixes" in contribution));
+    assert.ok(!("foundationOperations" in contribution));
+    assert.partialDeepStrictEqual(contribution.foundation, {
       toolchains: {
         rust: {
           toolchain: contextToolchain.rustVersion,
@@ -221,6 +213,17 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         ],
       },
     });
+    assert.deepStrictEqual(
+      contribution.foundation.toolchains.rust?.components,
+      ["rustfmt", "clippy"],
+    );
+    assert.deepStrictEqual(contribution.foundation.editorCapabilities, [
+      "rust-tooling",
+    ]);
+    assert.deepStrictEqual(
+      contribution.foundation.dependencyMaintenance.ecosystems,
+      ["npm", "cargo", "github-actions", "docker", "rust-toolchain"],
+    );
   });
 
   void it("declares its source-backed Rust Development Container Tool Layer", () => {
@@ -250,7 +253,7 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     const rustChannel = contribution.foundation.toolchains.rust!.toolchain;
 
     assert.strictEqual(rustChannel, contextToolchain.rustVersion);
-    assertMatchesPartial(layer, {
+    assert.partialDeepStrictEqual(layer, {
       identity: "rust",
       requires: ["node-pnpm"],
       buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustChannel }],
@@ -273,6 +276,12 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         { identity: "rustc", command: "rustc", args: ["--version"] },
       ],
     });
+    assert.strictEqual(layer?.requires?.length, 1);
+    assert.strictEqual(layer?.buildArguments?.length, 1);
+    assert.strictEqual(layer?.mounts?.length, 2);
+    assert.strictEqual(layer?.probes?.length, 2);
+    assert.strictEqual(layer?.probes?.[0]?.args?.length, 1);
+    assert.strictEqual(layer?.probes?.[1]?.args?.length, 1);
     assert.strictEqual(
       resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
       path.resolve(
@@ -307,11 +316,13 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     await writeFile(path.join(targetDir, artifactPath), "generated");
     await execa("git", ["init", "--quiet"], { cwd: targetDir });
 
-    assertMatchesPartial(
-      await execa("git", ["check-ignore", "--no-index", artifactPath], {
-        cwd: targetDir,
-      }),
-      { stdout: artifactPath },
+    assert.strictEqual(
+      (
+        await execa("git", ["check-ignore", "--no-index", artifactPath], {
+          cwd: targetDir,
+        })
+      ).stdout,
+      artifactPath,
     );
   });
 
@@ -337,7 +348,7 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         preparation.context.toolchain.rustVersion,
         snapshotRustVersion,
       );
-      assertMatchesPartial(rootToolchainOperation, {
+      assert.partialDeepStrictEqual(rootToolchainOperation, {
         kind: "writeTextTemplate",
         source: rustBinDefinition.source,
         from: "rust-toolchain.toml",
@@ -401,117 +412,120 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         context,
       });
 
-      assertLacksProperty(plan, "checks");
-      assertLacksProperty(plan, "fixes");
+      assert.ok(!("checks" in plan));
+      assert.ok(!("fixes" in plan));
 
       await renderNewProject({
         targetRoot: targetDir,
         operations: [...plan.operations],
       });
 
-      assertContains(
-        await readFile(path.join(targetDir, "packages/app/Cargo.toml"), "utf8"),
-        'name = "app"',
+      assert.ok(
+        (
+          await readFile(
+            path.join(targetDir, "packages/app/Cargo.toml"),
+            "utf8",
+          )
+        ).includes('name = "app"'),
       );
-      assertContains(
-        await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-        `channel = "${renderToolchain.rustVersion}"`,
+      assert.ok(
+        (
+          await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8")
+        ).includes(`channel = "${renderToolchain.rustVersion}"`),
       );
       const devcontainerDockerfile = await readFile(
         path.join(targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      assertContains(
-        devcontainerDockerfile,
-        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
-      );
-      assertContains(
-        devcontainerDockerfile,
-        'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
-      );
-      assertContains(
-        devcontainerDockerfile,
-        'corepack enable --install-directory "$PNPM_HOME"',
-      );
-      assertDoesNotContain(devcontainerDockerfile, "corepack prepare");
-      assertDoesNotContain(devcontainerDockerfile, "PACKAGE_MANAGER_PIN");
-      assertDoesNotContain(devcontainerDockerfile, "COREPACK_HOME");
-      assertContains(
-        devcontainerDockerfile,
-        "git config --system init.defaultBranch main",
-      );
-      assertMatchesPartial(
-        JSON.parse(
-          await readFile(
-            path.join(targetDir, ".devcontainer/devcontainer.json"),
-            "utf8",
-          ),
+      assert.ok(
+        devcontainerDockerfile.includes(
+          '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
         ),
-        {
-          build: { args: { RUST_TOOLCHAIN: renderToolchain.rustVersion } },
-          mounts: [
-            {
-              type: "volume",
-              source: "${devcontainerId}-pnpm-store",
-              target: "/pnpm/store",
-            },
-            {
-              type: "volume",
-              source: "${devcontainerId}-cargo-git",
-              target: "/usr/local/cargo/git",
-            },
-            {
-              type: "volume",
-              source: "${devcontainerId}-cargo-registry",
-              target: "/usr/local/cargo/registry",
-            },
-          ],
-        },
       );
-      assertDoesNotMatch(
-        JSON.parse(
-          await readFile(
-            path.join(targetDir, ".devcontainer/devcontainer.json"),
-            "utf8",
-          ),
-        ).mounts,
-        arrayContaining([
-          objectContaining({
-            target: stringContaining("${containerWorkspaceFolder}"),
-          }),
-        ]),
-      );
-      assertContains(
-        await readFile(path.join(targetDir, ".gitignore"), "utf8"),
-        ".pnpm-store/",
-      );
-      assertContains(
-        await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8"),
-        'directory: "/packages/app"',
-      );
-      assertMatchesPartial(
-        JSON.parse(
-          await readFile(path.join(targetDir, "package.json"), "utf8"),
+      assert.ok(
+        devcontainerDockerfile.includes(
+          'ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"',
         ),
-        {
-          scripts: {
-            check: stringContaining("test"),
-            fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
-            "toolchain:prepare": "cargo --version",
+      );
+      assert.ok(
+        devcontainerDockerfile.includes(
+          'corepack enable --install-directory "$PNPM_HOME"',
+        ),
+      );
+      assert.ok(!devcontainerDockerfile.includes("corepack prepare"));
+      assert.ok(!devcontainerDockerfile.includes("PACKAGE_MANAGER_PIN"));
+      assert.ok(!devcontainerDockerfile.includes("COREPACK_HOME"));
+      assert.ok(
+        devcontainerDockerfile.includes(
+          "git config --system init.defaultBranch main",
+        ),
+      );
+      const devcontainer = JSON.parse(
+        await readFile(
+          path.join(targetDir, ".devcontainer/devcontainer.json"),
+          "utf8",
+        ),
+      );
+      assert.partialDeepStrictEqual(devcontainer, {
+        build: { args: { RUST_TOOLCHAIN: renderToolchain.rustVersion } },
+        mounts: [
+          {
+            type: "volume",
+            source: "${devcontainerId}-pnpm-store",
+            target: "/pnpm/store",
           },
-        },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-git",
+            target: "/usr/local/cargo/git",
+          },
+          {
+            type: "volume",
+            source: "${devcontainerId}-cargo-registry",
+            target: "/usr/local/cargo/registry",
+          },
+        ],
+      });
+      assert.strictEqual(devcontainer.mounts.length, 3);
+      assert.ok(
+        !devcontainer.mounts.some((mount: { readonly target: string }) =>
+          mount.target.includes("${containerWorkspaceFolder}"),
+        ),
       );
-      assertMatchesPartial(
-        JSON.parse(await readFile(path.join(targetDir, "turbo.json"), "utf8")),
-        {
-          globalPassThroughEnv: [
-            "CARGO_HOME",
-            "RUSTUP_HOME",
-            "RUSTUP_TOOLCHAIN",
-          ],
-          tasks: { "//#toolchain:prepare": { cache: false } },
-        },
+      assert.ok(
+        (await readFile(path.join(targetDir, ".gitignore"), "utf8")).includes(
+          ".pnpm-store/",
+        ),
       );
+      assert.ok(
+        (
+          await readFile(path.join(targetDir, ".github/dependabot.yml"), "utf8")
+        ).includes('directory: "/packages/app"'),
+      );
+      const rootManifest = JSON.parse(
+        await readFile(path.join(targetDir, "package.json"), "utf8"),
+      );
+      assert.ok(rootManifest.scripts.check.includes("test"));
+      assert.strictEqual(
+        rootManifest.scripts.fix,
+        "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+      );
+      assert.strictEqual(
+        rootManifest.scripts["toolchain:prepare"],
+        "cargo --version",
+      );
+      const turboConfig = JSON.parse(
+        await readFile(path.join(targetDir, "turbo.json"), "utf8"),
+      );
+      assert.partialDeepStrictEqual(turboConfig, {
+        globalPassThroughEnv: ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
+        tasks: { "//#toolchain:prepare": { cache: false } },
+      });
+      assert.deepStrictEqual(turboConfig.globalPassThroughEnv, [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+      ]);
 
       await mkdir(path.join(targetDir, "apps/discovered"), { recursive: true });
       await writeFile(
@@ -556,27 +570,28 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         }
       ).tasks;
       const taskIds = tasks.map((task) => task.taskId);
-      assertMatches(
-        taskIds,
-        arrayContaining([
-          "//#format:check",
-          "//#lint",
-          "//#typecheck",
-          "//#toolchain:prepare",
-          "@demo/app#format:check",
-          "@demo/app#format:write",
-          "@demo/app#lint",
-          "@demo/app#test",
-          "@demo/discovered#lint",
-          "@demo/discovered#build",
-          "@demo/discovered#test",
-          "@demo/discovered#test:e2e",
-        ]),
-      );
-      assertDoesNotContain(
-        tasks.find((task) => task.taskId === "@demo/discovered#test")
-          ?.dependencies,
+      for (const taskId of [
+        "//#format:check",
+        "//#lint",
+        "//#typecheck",
+        "//#toolchain:prepare",
+        "@demo/app#format:check",
+        "@demo/app#format:write",
+        "@demo/app#lint",
+        "@demo/app#test",
+        "@demo/discovered#lint",
         "@demo/discovered#build",
+        "@demo/discovered#test",
+        "@demo/discovered#test:e2e",
+      ]) {
+        assert.ok(taskIds.includes(taskId));
+      }
+      const discoveredTest = tasks.find(
+        (task) => task.taskId === "@demo/discovered#test",
+      );
+      assert.ok(discoveredTest !== undefined);
+      assert.ok(
+        !discoveredTest.dependencies.includes("@demo/discovered#build"),
       );
       assert.strictEqual(
         tasks.find((task) => task.taskId === "@demo/discovered#lint")
@@ -603,16 +618,16 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         "@demo/app#test",
         "@demo/app#format:write",
       ]) {
-        assertContains(
-          tasks.find((task) => task.taskId === taskId)?.dependencies,
-          "//#toolchain:prepare",
-        );
+        const task = tasks.find((candidate) => candidate.taskId === taskId);
+        assert.ok(task !== undefined);
+        assert.ok(task.dependencies.includes("//#toolchain:prepare"));
       }
-      assertContains(
-        tasks.find((task) => task.taskId === "//#format:write")?.dependencies,
-        "//#lint:fix",
+      const formatWrite = tasks.find(
+        (task) => task.taskId === "//#format:write",
       );
-      assertDoesNotContain(taskIds, "@demo/app#lint:fix");
+      assert.ok(formatWrite !== undefined);
+      assert.ok(formatWrite.dependencies.includes("//#lint:fix"));
+      assert.ok(!taskIds.includes("@demo/app#lint:fix"));
       const cargoHome = path.join(workspace, "cargo-home");
       const rustupHome = path.join(workspace, "rustup-home");
       const fakeBin = path.join(workspace, "fake-bin");
@@ -660,14 +675,11 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
         cargoCalls.filter((call) => call === "--version").length,
         1,
       );
-      assertMatches(
-        cargoCalls,
-        arrayContaining([
-          "fmt --all -- --check",
-          "clippy --workspace --all-targets -- -D warnings",
-          "test --workspace",
-        ]),
+      assert.ok(cargoCalls.includes("fmt --all -- --check"));
+      assert.ok(
+        cargoCalls.includes("clippy --workspace --all-targets -- -D warnings"),
       );
+      assert.ok(cargoCalls.includes("test --workspace"));
     },
   );
 
@@ -714,16 +726,11 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
       });
 
       assert.notStrictEqual(failure.exitCode, 0);
-      assertContains(
-        `${failure.stdout}\n${failure.stderr}`,
-        "@demo/controlled#build",
-      );
-      assertContains(
-        `${failure.stdout}\n${failure.stderr}`,
-        "@demo/controlled#lint",
-      );
-      assertContains(`${failure.stdout}\n${failure.stderr}`, "BUILD_FAIL");
-      assertContains(`${failure.stdout}\n${failure.stderr}`, "LINT_FAIL");
+      const failureOutput = `${failure.stdout}\n${failure.stderr}`;
+      assert.ok(failureOutput.includes("@demo/controlled#build"));
+      assert.ok(failureOutput.includes("@demo/controlled#lint"));
+      assert.ok(failureOutput.includes("BUILD_FAIL"));
+      assert.ok(failureOutput.includes("LINT_FAIL"));
       assert.strictEqual(
         await readFile(
           path.join(targetDir, "apps/controlled/TEST_EXECUTED"),
@@ -774,18 +781,19 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
       const output = `${rootFormat.stdout}\n${rootFormat.stderr}`;
 
       assert.notStrictEqual(rootFormat.exitCode, 0);
-      assertContains(output, "TODO.md");
-      assertContains(output, ".devcontainer/devcontainer.json");
-      assertDoesNotContain(output, "packages/app/package.json");
+      assert.ok(output.includes("TODO.md"));
+      assert.ok(output.includes(".devcontainer/devcontainer.json"));
+      assert.ok(!output.includes("packages/app/package.json"));
 
       await execa(
         "pnpm",
         ["exec", "turbo", "run", "format:write", "--filter=//"],
         { cwd: targetDir },
       );
-      assertDoesNotContain(
-        await readFile(path.join(targetDir, "TODO.md"), "utf8"),
-        "-   text",
+      assert.ok(
+        !(await readFile(path.join(targetDir, "TODO.md"), "utf8")).includes(
+          "-   text",
+        ),
       );
       assert.strictEqual(
         await readFile(
