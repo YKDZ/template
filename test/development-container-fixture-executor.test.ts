@@ -607,9 +607,10 @@ void describe("Development Container Fixture Executor", () => {
         },
       });
 
-      await session.execute(
-        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
-      );
+      await session.execute(async (run) => {
+        await run("pnpm", ["run", "check"], { cwd: projectDir });
+        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+      });
 
       for (const expected of [
         { cache: "buildkit", outcome: "configured" },

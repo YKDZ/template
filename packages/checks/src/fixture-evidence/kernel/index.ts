@@ -788,6 +788,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       command === "pnpm" &&
       ((args[0] === "run" &&
         (args[1] === "check" ||
+          args[1] === "check:full" ||
           args[1] === "fix" ||
           args[1] === "check:deployment")) ||
         (args[0] === "exec" && args[1] === "turbo"))

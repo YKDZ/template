@@ -1085,12 +1085,20 @@ void describe("manual npm publication capability", () => {
         staging.run = "true";
       },
       (workflow: Record<string, unknown>) => {
-        const rootCheck = (
+        const fullCheck = (
           (workflow.jobs as Record<string, unknown>).verify as {
             steps: Record<string, unknown>[];
           }
         ).steps[6]!;
-        rootCheck.env = { PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: "wrong" };
+        fullCheck.env = { PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: "wrong" };
+      },
+      (workflow: Record<string, unknown>) => {
+        const fullCheck = (
+          (workflow.jobs as Record<string, unknown>).verify as {
+            steps: Record<string, unknown>[];
+          }
+        ).steps[6]!;
+        fullCheck.run = "pnpm run check";
       },
       (workflow: Record<string, unknown>) => {
         (workflow.jobs as Record<string, unknown>).release = {
