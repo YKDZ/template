@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   mkdir,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -17,7 +19,6 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { execa } from "execa";
-import { describe, expect, it, vi } from "vitest";
 
 import {
   generatedScenariosFor,
@@ -34,6 +35,22 @@ import {
   runFixtureEvidenceGate,
   type FixtureCommandRunner,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
+import {
+  any,
+  arrayContaining,
+  assertContainsEqual,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertNotDeepStrictEqualWithMatchers,
+  assertPartialDeepStrictEqual,
+  assertRejectsContaining,
+  assertRejectsMatching,
+  objectContaining,
+  stringContaining,
+  stringMatching,
+  testEach,
+  waitFor,
+} from "./assertions.ts";
 
 type Command = {
   readonly command: string;
@@ -119,8 +136,8 @@ function registryCapabilityProbes(root: string) {
     .filter((probe) => requiredCapabilityProbeIdentities.has(probe.identity));
 }
 
-describe("Development Container Fixture Executor", () => {
-  it("normalizes equivalent final Development Container build inputs", async () => {
+void describe("Development Container Fixture Executor", () => {
+  void it("normalizes equivalent final Development Container build inputs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-build-identity-"));
     const first = path.join(root, "first");
     const second = path.join(root, "second");
@@ -162,9 +179,10 @@ describe("Development Container Fixture Executor", () => {
       const firstIdentity = await deriveDevelopmentContainerBuildIdentity({
         projectDir: first,
       });
-      expect(
+      assert.strictEqual(
         await deriveDevelopmentContainerBuildIdentity({ projectDir: second }),
-      ).toBe(firstIdentity);
+        firstIdentity,
+      );
 
       await writeBuild(second, {
         build: {
@@ -172,15 +190,16 @@ describe("Development Container Fixture Executor", () => {
           args: { NODE_VERSION: "24", TOOL_VERSION: "2" },
         },
       });
-      expect(
+      assert.notStrictEqual(
         await deriveDevelopmentContainerBuildIdentity({ projectDir: second }),
-      ).not.toBe(firstIdentity);
+        firstIdentity,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("starts, prepares, executes, and cleans up through supported CLI commands", async () => {
+  void it("starts, prepares, executes, and cleans up through supported CLI commands", async () => {
     const projectDir = path.resolve("/fixture/generated");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
@@ -206,7 +225,7 @@ describe("Development Container Fixture Executor", () => {
       await session.close();
     }
 
-    expect(calls).toEqual([
+    assert.deepStrictEqual(calls, [
       {
         command: "docker",
         args: ["version", "--format", "{{.Server.Version}}"],
@@ -329,7 +348,7 @@ describe("Development Container Fixture Executor", () => {
     ]);
   });
 
-  it("passes identity-scoped BuildKit cache transport through Dev Container CLI", async () => {
+  void it("passes identity-scoped BuildKit cache transport through Dev Container CLI", async () => {
     const projectDir = path.resolve("/fixture/buildkit-cache");
     const cacheDirectory = path.resolve("/cache/template-buildkit");
     const buildIdentity = "a".repeat(64);
@@ -352,24 +371,26 @@ describe("Development Container Fixture Executor", () => {
       ({ command, args }) => command === "devcontainer" && args[0] === "up",
     );
     const identityCache = path.join(cacheDirectory, buildIdentity);
-    expect(up?.args).toEqual(
-      expect.arrayContaining([
+    assertDeepStrictEqualWithMatchers(
+      up?.args,
+      arrayContaining([
         "--cache-from",
         `type=local,src=${identityCache}`,
         "--cache-to",
         `type=local,dest=${identityCache},mode=max`,
       ]),
     );
-    expect(
+    assert.strictEqual(
       calls.some(
         ({ command, args }) =>
           command === "docker" &&
           (args.includes("prune") || args.includes(identityCache)),
       ),
-    ).toBe(false);
+      false,
+    );
   });
 
-  it("isolates Dev Container CLI temporary directories per fixture session", async () => {
+  void it("isolates Dev Container CLI temporary directories per fixture session", async () => {
     const projectDirs = [
       path.resolve("/fixture/devcontainer-temp-a"),
       path.resolve("/fixture/devcontainer-temp-b"),
@@ -412,21 +433,22 @@ describe("Development Container Fixture Executor", () => {
       )
       .map(({ env }) => env?.TMPDIR);
 
-    expect(upTempDirectories).toHaveLength(2);
-    expect(new Set(upTempDirectories)).toHaveLength(2);
-    expect(upTempDirectories).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining(
+    assertLength(upTempDirectories, 2);
+    assertLength(new Set(upTempDirectories), 2);
+    assertDeepStrictEqualWithMatchers(
+      upTempDirectories,
+      arrayContaining([
+        stringContaining(
           `template-devcontainer-${fixtureProjectIdentity(projectDirs[0]!)}-`,
         ),
-        expect.stringContaining(
+        stringContaining(
           `template-devcontainer-${fixtureProjectIdentity(projectDirs[1]!)}-`,
         ),
       ]),
     );
   });
 
-  it("binds only dependency-download caches into the Development Container", async () => {
+  void it("binds only dependency-download caches into the Development Container", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-native-caches-"));
     const projectDir = path.join(root, "project");
     const configPath = path.join(
@@ -496,7 +518,7 @@ describe("Development Container Fixture Executor", () => {
       });
 
       await session.run("pnpm", ["run", "check"], { cwd: projectDir });
-      expect(overrideConfig).toEqual({
+      assert.deepStrictEqual(overrideConfig, {
         name: "fixture development container",
         build: {
           dockerfile: "Dockerfile",
@@ -524,23 +546,28 @@ describe("Development Container Fixture Executor", () => {
           },
         ],
       });
-      expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual(
+      assert.deepStrictEqual(
+        JSON.parse(await readFile(configPath, "utf8")),
         generatedConfig,
       );
-      expect(JSON.stringify(overrideConfig)).not.toMatch(
+      assert.doesNotMatch(
+        JSON.stringify(overrideConfig),
         /node_modules|pnpm-lock|workspace|\/target/u,
       );
       await session.close();
 
-      await expect(readFile(overridePath!, "utf8")).rejects.toMatchObject({
-        code: "ENOENT",
+      await assert.rejects(readFile(overridePath!, "utf8"), (error) => {
+        assertPartialDeepStrictEqual(error, {
+          code: "ENOENT",
+        });
+        return true;
       });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("records deterministic cache activity only when the executor uses native caches", async () => {
+  void it("records deterministic cache activity only when the executor uses native caches", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-cache-activity-"));
     const projectDir = path.join(root, "project");
     const configPath = path.join(
@@ -606,31 +633,32 @@ describe("Development Container Fixture Executor", () => {
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       );
 
-      expect(cacheActivity).toEqual(
-        expect.arrayContaining([
+      assertDeepStrictEqualWithMatchers(
+        cacheActivity,
+        arrayContaining([
           {
             type: "cache",
             cache: "buildkit",
             outcome: "configured",
-            at: expect.any(String),
+            at: any(String),
           },
           {
             type: "cache",
             cache: "pnpm-downloads",
             outcome: "mounted",
-            at: expect.any(String),
+            at: any(String),
           },
           {
             type: "cache",
             cache: "cargo-downloads",
             outcome: "mounted",
-            at: expect.any(String),
+            at: any(String),
           },
           {
             type: "cache",
             cache: "turbo",
             outcome: "configured",
-            at: expect.any(String),
+            at: any(String),
           },
         ]),
       );
@@ -639,7 +667,7 @@ describe("Development Container Fixture Executor", () => {
     }
   });
 
-  it("records paired container preparation and dependency installation phases", async () => {
+  void it("records paired container preparation and dependency installation phases", async () => {
     const projectDir = path.resolve("/fixture/phase-lifecycle");
     const activity: Array<Record<string, unknown>> = [];
     let milliseconds = 0;
@@ -658,37 +686,40 @@ describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    expect(activity.filter((event) => event.type === "phase")).toEqual([
-      {
-        type: "phase",
-        phase: "container-preparation",
-        at: "1970-01-01T00:00:00.000Z",
-        outcome: "started",
-      },
-      {
-        type: "phase",
-        phase: "container-preparation",
-        at: "1970-01-01T00:00:00.010Z",
-        outcome: "succeeded",
-        durationMilliseconds: 10,
-      },
-      {
-        type: "phase",
-        phase: "dependency-installation",
-        at: "1970-01-01T00:00:00.020Z",
-        outcome: "started",
-      },
-      {
-        type: "phase",
-        phase: "dependency-installation",
-        at: "1970-01-01T00:00:00.030Z",
-        outcome: "succeeded",
-        durationMilliseconds: 10,
-      },
-    ]);
+    assert.deepStrictEqual(
+      activity.filter((event) => event.type === "phase"),
+      [
+        {
+          type: "phase",
+          phase: "container-preparation",
+          at: "1970-01-01T00:00:00.000Z",
+          outcome: "started",
+        },
+        {
+          type: "phase",
+          phase: "container-preparation",
+          at: "1970-01-01T00:00:00.010Z",
+          outcome: "succeeded",
+          durationMilliseconds: 10,
+        },
+        {
+          type: "phase",
+          phase: "dependency-installation",
+          at: "1970-01-01T00:00:00.020Z",
+          outcome: "started",
+        },
+        {
+          type: "phase",
+          phase: "dependency-installation",
+          at: "1970-01-01T00:00:00.030Z",
+          outcome: "succeeded",
+          durationMilliseconds: 10,
+        },
+      ],
+    );
   });
 
-  it("retries one classified Docker registry transport failure with identical inputs", async () => {
+  void it("retries one classified Docker registry transport failure with identical inputs", async () => {
     const projectDir = path.resolve("/fixture/docker-registry-recovery");
     const upCalls: Command[] = [];
     const activity: Array<Record<string, unknown>> = [];
@@ -722,37 +753,39 @@ describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    expect(upCalls).toHaveLength(2);
-    expect(upCalls[1]).toEqual(upCalls[0]);
-    expect(
+    assertLength(upCalls, 2);
+    assert.deepStrictEqual(upCalls[1], upCalls[0]);
+    assertDeepStrictEqualWithMatchers(
       activity.filter(
         (event) =>
           event.type === "phase" && event.phase === "container-preparation",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        outcome: "started",
-      }),
-      expect.objectContaining({
-        outcome: "succeeded",
-      }),
-    ]);
-    expect(
+      [
+        objectContaining({
+          outcome: "started",
+        }),
+        objectContaining({
+          outcome: "succeeded",
+        }),
+      ],
+    );
+    assertDeepStrictEqualWithMatchers(
       activity.filter(
         (event) =>
           event.type === "retry" && event.phase === "container-preparation",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        outcome: "started",
-        classification: "docker-registry-transport-transient",
-        firstError: expect.stringContaining("registry-1.docker.io"),
-      }),
-      expect.objectContaining({ outcome: "recovered" }),
-    ]);
+      [
+        objectContaining({
+          outcome: "started",
+          classification: "docker-registry-transport-transient",
+          firstError: stringContaining("registry-1.docker.io"),
+        }),
+        objectContaining({ outcome: "recovered" }),
+      ],
+    );
   });
 
-  it("retries one npm registry transport failure found in command stderr", async () => {
+  void it("retries one npm registry transport failure found in command stderr", async () => {
     const projectDir = path.resolve("/fixture/npm-registry-recovery");
     const installCalls: Command[] = [];
     const activity: Array<Record<string, unknown>> = [];
@@ -794,92 +827,101 @@ describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    expect(installCalls).toHaveLength(2);
-    expect(installCalls[1]).toEqual(installCalls[0]);
-    expect(
+    assertLength(installCalls, 2);
+    assert.deepStrictEqual(installCalls[1], installCalls[0]);
+    assertDeepStrictEqualWithMatchers(
       activity.filter(
         (event) =>
           event.type === "phase" && event.phase === "dependency-installation",
       ),
-    ).toEqual([
-      expect.objectContaining({ outcome: "started" }),
-      expect.objectContaining({ outcome: "succeeded" }),
-    ]);
-    expect(
+      [
+        objectContaining({ outcome: "started" }),
+        objectContaining({ outcome: "succeeded" }),
+      ],
+    );
+    assertDeepStrictEqualWithMatchers(
       activity.filter(
         (event) =>
           event.type === "retry" && event.phase === "dependency-installation",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        outcome: "started",
-        classification: "npm-registry-transport-transient",
-        firstError: expect.stringContaining("registry.npmjs.org"),
-      }),
-      expect.objectContaining({ outcome: "recovered" }),
-    ]);
-  });
-
-  it.each([
-    [
-      "unknown registry host",
-      "GET https://registry.example.com/v2/library/node: read ECONNRESET",
-    ],
-    [
-      "deterministic Dockerfile failure",
-      "registry-1.docker.io returned Dockerfile parse error on line 4",
-    ],
-    [
-      "lookalike Docker registry host",
-      "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
-    ],
-    [
-      "unrelated transport marker on another line",
-      "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
-    ],
-  ])("does not retry a %s", async (_case, diagnostic) => {
-    const projectDir = path.resolve(
-      `/fixture/non-retryable-${_case.replaceAll(" ", "-")}`,
+      [
+        objectContaining({
+          outcome: "started",
+          classification: "npm-registry-transport-transient",
+          firstError: stringContaining("registry.npmjs.org"),
+        }),
+        objectContaining({ outcome: "recovered" }),
+      ],
     );
-    let upAttempts = 0;
-    const activity: Array<Record<string, unknown>> = [];
-    const session = createDevelopmentContainerFixtureSession({
-      projectDir,
-      probes: [],
-      recordActivity: (event) => {
-        activity.push(event);
-      },
-      run: async (command, args) => {
-        if (command === "devcontainer" && args[0] === "up") {
-          upAttempts += 1;
-          throw new Error(diagnostic);
-        }
-        return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
-      },
-    });
-
-    await expect(
-      session.execute(
-        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
-      ),
-    ).rejects.toThrow(diagnostic);
-
-    expect(upAttempts).toBe(1);
-    expect(
-      activity.filter(
-        (event) =>
-          event.type === "phase" && event.phase === "container-preparation",
-      ),
-    ).toEqual([
-      expect.objectContaining({ outcome: "started" }),
-      expect.objectContaining({
-        outcome: "failed",
-        classification: "not-retryable",
-      }),
-    ]);
   });
 
-  it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
+  testEach(
+    [
+      [
+        "unknown registry host",
+        "GET https://registry.example.com/v2/library/node: read ECONNRESET",
+      ],
+      [
+        "deterministic Dockerfile failure",
+        "registry-1.docker.io returned Dockerfile parse error on line 4",
+      ],
+      [
+        "lookalike Docker registry host",
+        "https://evilregistry-1.docker.io/v2/library/node: i/o timeout",
+      ],
+      [
+        "unrelated transport marker on another line",
+        "FROM registry-1.docker.io/library/node\nlocal socket: connection refused",
+      ],
+    ],
+    "does not retry a %s",
+    async (_case, diagnostic) => {
+      const projectDir = path.resolve(
+        `/fixture/non-retryable-${_case.replaceAll(" ", "-")}`,
+      );
+      let upAttempts = 0;
+      const activity: Array<Record<string, unknown>> = [];
+      const session = createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        recordActivity: (event) => {
+          activity.push(event);
+        },
+        run: async (command, args) => {
+          if (command === "devcontainer" && args[0] === "up") {
+            upAttempts += 1;
+            throw new Error(diagnostic);
+          }
+          return command === "docker" && args[0] === "ps" ? { stdout: "" } : {};
+        },
+      });
+
+      await assertRejectsContaining(
+        session.execute(
+          async (run) =>
+            await run("pnpm", ["run", "check"], { cwd: projectDir }),
+        ),
+        diagnostic,
+      );
+
+      assert.strictEqual(upAttempts, 1);
+      assertDeepStrictEqualWithMatchers(
+        activity.filter(
+          (event) =>
+            event.type === "phase" && event.phase === "container-preparation",
+        ),
+        [
+          objectContaining({ outcome: "started" }),
+          objectContaining({
+            outcome: "failed",
+            classification: "not-retryable",
+          }),
+        ],
+      );
+    },
+  );
+
+  void it("does not retry a semantic gate failure even when its text resembles a registry transient", async () => {
     const projectDir = path.resolve("/fixture/semantic-no-retry");
     let semanticAttempts = 0;
     const session = createDevelopmentContainerFixtureSession({
@@ -903,15 +945,18 @@ describe("Development Container Fixture Executor", () => {
       },
     });
 
-    await expect(
+    await assert.rejects(
       session.execute(
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       ),
-    ).rejects.toThrow("test assertion mentions");
-    expect(semanticAttempts).toBe(1);
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("test assertion mentions"),
+    );
+    assert.strictEqual(semanticAttempts, 1);
   });
 
-  it("shares one retry budget across container and dependency preparation", async () => {
+  void it("shares one retry budget across container and dependency preparation", async () => {
     const projectDir = path.resolve("/fixture/single-retry-budget");
     let upAttempts = 0;
     let installAttempts = 0;
@@ -944,18 +989,23 @@ describe("Development Container Fixture Executor", () => {
       },
     });
 
-    await expect(
+    await assert.rejects(
       session.execute(
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       ),
-    ).rejects.toThrow("registry.npmjs.org");
-    expect({ upAttempts, installAttempts }).toEqual({
-      upAttempts: 2,
-      installAttempts: 1,
-    });
+      (error) =>
+        error instanceof Error && error.message.includes("registry.npmjs.org"),
+    );
+    assert.deepStrictEqual(
+      { upAttempts, installAttempts },
+      {
+        upAttempts: 2,
+        installAttempts: 1,
+      },
+    );
   });
 
-  it("stops after one retry and preserves the first and final registry failures", async () => {
+  void it("stops after one retry and preserves the first and final registry failures", async () => {
     const projectDir = path.resolve("/fixture/docker-registry-final-failure");
     let upAttempts = 0;
     const activity: Array<Record<string, unknown>> = [];
@@ -976,32 +1026,33 @@ describe("Development Container Fixture Executor", () => {
       },
     });
 
-    await expect(
+    await assertRejectsMatching(
       session.execute(
         async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
       ),
-    ).rejects.toThrow(
       /container-preparation failed after docker-registry-transport-transient retry.*First failure:.*attempt 1.*Retry failure:.*attempt 2/u,
     );
 
-    expect(upAttempts).toBe(2);
-    expect(
+    assert.strictEqual(upAttempts, 2);
+    assertDeepStrictEqualWithMatchers(
       activity.filter(
         (event) =>
           event.type === "retry" && event.phase === "container-preparation",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        outcome: "started",
-        firstError: expect.stringContaining("attempt 1"),
-      }),
-      expect.objectContaining({
-        outcome: "failed",
-        error: expect.stringContaining("attempt 2"),
-      }),
-    ]);
-    expect(activity).toContainEqual(
-      expect.objectContaining({
+      [
+        objectContaining({
+          outcome: "started",
+          firstError: stringContaining("attempt 1"),
+        }),
+        objectContaining({
+          outcome: "failed",
+          error: stringContaining("attempt 2"),
+        }),
+      ],
+    );
+    assertContainsEqual(
+      activity,
+      objectContaining({
         type: "phase",
         phase: "container-preparation",
         outcome: "failed",
@@ -1010,7 +1061,7 @@ describe("Development Container Fixture Executor", () => {
     );
   });
 
-  it("keeps final retry failure unhealthy and issues no evidence", async () => {
+  void it("keeps final retry failure unhealthy and issues no evidence", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-retry-health-"));
     const projectDir = path.join(root, "project");
     const evidenceRoot = path.join(root, "evidence");
@@ -1080,7 +1131,7 @@ describe("Development Container Fixture Executor", () => {
       } catch (error) {
         failure = error;
       }
-      expect(failure).toBeInstanceOf(Error);
+      assert.ok(failure instanceof Error);
       await invocation.record({
         type: "scenario",
         scenario,
@@ -1094,34 +1145,43 @@ describe("Development Container Fixture Executor", () => {
       });
 
       const records = await ledger.read();
-      expect(
+      assert.deepStrictEqual(
         records.filter((record) => record.event.type === "issuance"),
-      ).toEqual([]);
+        [],
+      );
       const report = await checkFixtureEvidenceHealth({
         ledger,
         runId: "retry-final-failure",
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      expect(report.healthy).toBe(false);
-      expect(report.failures).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ code: "failed-retry" }),
-          expect.objectContaining({ code: "failed-phase" }),
-          expect.objectContaining({ code: "failed-execution" }),
+      assert.strictEqual(report.healthy, false);
+      assertDeepStrictEqualWithMatchers(
+        report.failures,
+        arrayContaining([
+          objectContaining({ code: "failed-retry" }),
+          objectContaining({ code: "failed-phase" }),
+          objectContaining({ code: "failed-execution" }),
         ]),
       );
-      expect(report.failures).not.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ code: "invalid-retry-lifecycle" }),
+      assertNotDeepStrictEqualWithMatchers(
+        report.failures,
+        arrayContaining([
+          objectContaining({ code: "invalid-retry-lifecycle" }),
         ]),
       );
-      expect(
-        report.failures.find((entry) => entry.code === "failed-retry")?.detail,
-      ).toMatch(/First failure:.*registry-1\.docker\.io.*Retry failure:/u);
-      expect(formatFixtureEvidenceHealthReport(report)).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(
+      const retryFailure = report.failures.find(
+        (entry) => entry.code === "failed-retry",
+      );
+      assert.ok(retryFailure !== undefined);
+      assert.match(
+        retryFailure.detail,
+        /First failure:.*registry-1\.docker\.io.*Retry failure:/u,
+      );
+      assertDeepStrictEqualWithMatchers(
+        formatFixtureEvidenceHealthReport(report),
+        arrayContaining([
+          stringMatching(
             /failure code=failed-retry .*scenario=retry-final-failure .*Fixture retry for container-preparation failed after docker-registry-transport-transient.*Retry failure:/u,
           ),
         ]),
@@ -1131,7 +1191,7 @@ describe("Development Container Fixture Executor", () => {
     }
   });
 
-  it("does not single-flight Development Container startup across projects with equivalent builds", async () => {
+  void it("does not single-flight Development Container startup across projects with equivalent builds", async () => {
     const cacheDirectory = path.resolve("/cache/template-buildkit");
     const buildIdentity = "b".repeat(64);
     const calls: Command[] = [];
@@ -1172,21 +1232,22 @@ describe("Development Container Fixture Executor", () => {
             }),
         ),
     );
-    await vi.waitFor(() => {
-      expect(releaseBuild).toBeDefined();
+    await waitFor(() => {
+      assert.notStrictEqual(releaseBuild, undefined);
     });
     releaseBuild!();
     await Promise.all(executions);
 
-    expect(
+    assertLength(
       calls.filter(
         ({ command, args }) => command === "devcontainer" && args[0] === "up",
       ),
-    ).toHaveLength(2);
+      2,
+    );
     for (const projectDir of projectDirs) {
-      expect(calls).toContainEqual({
+      assertContainsEqual(calls, {
         command: "devcontainer",
-        args: expect.arrayContaining([
+        args: arrayContaining([
           "up",
           "--workspace-folder",
           projectDir,
@@ -1198,9 +1259,9 @@ describe("Development Container Fixture Executor", () => {
     }
     for (const projectDir of projectDirs) {
       const idLabel = fixtureIdLabel(projectDir);
-      expect(calls).toContainEqual({
+      assertContainsEqual(calls, {
         command: "devcontainer",
-        args: expect.arrayContaining([
+        args: arrayContaining([
           "exec",
           "--workspace-folder",
           projectDir,
@@ -1212,12 +1273,12 @@ describe("Development Container Fixture Executor", () => {
         ]),
         cwd: projectDir,
       });
-      expect(calls).toContainEqual({
+      assertContainsEqual(calls, {
         command: "docker",
         args: ["ps", "-aq", "--filter", `label=${idLabel}`],
         cwd: projectDir,
       });
-      expect(calls).toContainEqual({
+      assertContainsEqual(calls, {
         command: "docker",
         args: ["rm", "-f", `container-${path.basename(projectDir)}`],
         cwd: projectDir,
@@ -1225,7 +1286,7 @@ describe("Development Container Fixture Executor", () => {
     }
   });
 
-  it("shares a failed build flight retry across the same project and cleans by exact label", async () => {
+  void it("shares a failed build flight retry across the same project and cleans by exact label", async () => {
     const projectDir = path.resolve("/fixture/shared-build-retry");
     const build = {
       identity: "d".repeat(64),
@@ -1288,14 +1349,15 @@ describe("Development Container Fixture Executor", () => {
       ),
     );
 
-    expect(upAttempts).toBe(2);
-    expect(activities.flat().filter((event) => event.type === "retry")).toEqual(
+    assert.strictEqual(upAttempts, 2);
+    assertDeepStrictEqualWithMatchers(
+      activities.flat().filter((event) => event.type === "retry"),
       [
-        expect.objectContaining({ outcome: "started" }),
-        expect.objectContaining({ outcome: "recovered" }),
+        objectContaining({ outcome: "started" }),
+        objectContaining({ outcome: "recovered" }),
       ],
     );
-    expect(
+    assertDeepStrictEqualWithMatchers(
       activities.map((activity) =>
         activity.filter(
           (event) =>
@@ -1304,28 +1366,31 @@ describe("Development Container Fixture Executor", () => {
             event.outcome === "succeeded",
         ),
       ),
-    ).toEqual([[expect.any(Object)], [expect.any(Object)]]);
+      [[any(Object)], [any(Object)]],
+    );
     const label = fixtureIdLabel(projectDir);
-    expect(
+    assertDeepStrictEqualWithMatchers(
       calls.filter(
         ({ command, args }) => command === "docker" && args[0] === "ps",
       ),
-    ).toEqual([
-      expect.objectContaining({
-        args: ["ps", "-aq", "--filter", `label=${label}`],
-      }),
-      expect.objectContaining({
-        args: ["ps", "-aq", "--filter", `label=${label}`],
-      }),
-    ]);
-    expect(
+      [
+        objectContaining({
+          args: ["ps", "-aq", "--filter", `label=${label}`],
+        }),
+        objectContaining({
+          args: ["ps", "-aq", "--filter", `label=${label}`],
+        }),
+      ],
+    );
+    assertLength(
       calls.filter(
         ({ command, args }) => command === "docker" && args[0] === "rm",
       ),
-    ).toHaveLength(2);
+      2,
+    );
   });
 
-  it("checks before Fix, compares tree identities, and checks again", async () => {
+  void it("checks before Fix, compares tree identities, and checks again", async () => {
     const projectDir = path.resolve("/fixture/root-order");
     const plan = planGeneratedRepositoryInitialization({
       definition: builtInPresetRegistry.all()[0]!,
@@ -1367,7 +1432,7 @@ describe("Development Container Fixture Executor", () => {
       },
     });
 
-    expect(
+    assert.deepStrictEqual(
       calls
         .filter(
           ({ command, args }) =>
@@ -1377,16 +1442,17 @@ describe("Development Container Fixture Executor", () => {
             (command === "git" && args[0] === "write-tree"),
         )
         .map(({ command, args }) => [command, ...args]),
-    ).toEqual([
-      ["pnpm", "run", "check"],
-      ["git", "write-tree"],
-      ["pnpm", "run", "fix"],
-      ["git", "write-tree"],
-      ["pnpm", "run", "check"],
-    ]);
+      [
+        ["pnpm", "run", "check"],
+        ["git", "write-tree"],
+        ["pnpm", "run", "fix"],
+        ["git", "write-tree"],
+        ["pnpm", "run", "check"],
+      ],
+    );
   });
 
-  it("rejects a Fix delta before the repeated Root Check", async () => {
+  void it("rejects a Fix delta before the repeated Root Check", async () => {
     const projectDir = path.resolve("/fixture/fix-delta");
     const plan = planGeneratedRepositoryInitialization({
       definition: builtInPresetRegistry.all()[0]!,
@@ -1412,7 +1478,7 @@ describe("Development Container Fixture Executor", () => {
     let treeWrites = 0;
     let rootChecks = 0;
 
-    await expect(
+    await assertRejectsMatching(
       executeGeneratedRootQuality({
         plan,
         projectDir,
@@ -1430,13 +1496,12 @@ describe("Development Container Fixture Executor", () => {
           return {};
         },
       }),
-    ).rejects.toThrow(
       /Fix Command changed the working-tree identity from 1111.* to 2222/u,
     );
-    expect(rootChecks).toBe(1);
+    assert.strictEqual(rootChecks, 1);
   });
 
-  it("does not touch Docker or the CLI when evidence selection has no cold gate", async () => {
+  void it("does not touch Docker or the CLI when evidence selection has no cold gate", async () => {
     const calls: Command[] = [];
     let leases = 0;
     let releases = 0;
@@ -1457,11 +1522,11 @@ describe("Development Container Fixture Executor", () => {
 
     await session.close();
 
-    expect(calls).toEqual([]);
-    expect({ leases, releases }).toEqual({ leases: 0, releases: 0 });
+    assert.deepStrictEqual(calls, []);
+    assert.deepStrictEqual({ leases, releases }, { leases: 0, releases: 0 });
   });
 
-  it("holds one scheduling lease for a cold container lifecycle", async () => {
+  void it("holds one scheduling lease for a cold container lifecycle", async () => {
     const projectDir = path.resolve("/fixture/cold-session-lease");
     let leases = 0;
     let releases = 0;
@@ -1481,10 +1546,10 @@ describe("Development Container Fixture Executor", () => {
       async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
     );
 
-    expect({ leases, releases }).toEqual({ leases: 1, releases: 1 });
+    assert.deepStrictEqual({ leases, releases }, { leases: 1, releases: 1 });
   });
 
-  it("routes cold registry quality through one container lifecycle per scenario", async () => {
+  void it("routes cold registry quality through one container lifecycle per scenario", async () => {
     const workspace = path.resolve(
       "/tmp/template-development-container-registry-test",
     );
@@ -1572,37 +1637,42 @@ describe("Development Container Fixture Executor", () => {
       const phases = records.flatMap((record) =>
         record.event.type === "phase" ? [record.event] : [],
       );
-      expect(
+      assertLength(
         phases.filter((event) => event.outcome === "started"),
-      ).toHaveLength(scenarioCount * 5);
-      expect(
+        scenarioCount * 5,
+      );
+      assertLength(
         phases.filter((event) => event.outcome === "succeeded"),
-      ).toHaveLength(scenarioCount * 5);
-      expect(records.filter((record) => record.event.type === "retry")).toEqual(
+        scenarioCount * 5,
+      );
+      assert.deepStrictEqual(
+        records.filter((record) => record.event.type === "retry"),
         [],
       );
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "cold-registry-phases",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: true,
-        stages: [
-          expect.objectContaining({
-            retries: 0,
-            recoveries: 0,
-          }),
-        ],
-      });
-      expect(
+        {
+          healthy: true,
+          stages: [
+            objectContaining({
+              retries: 0,
+              recoveries: 0,
+            }),
+          ],
+        },
+      );
+      assertLength(
         calls.filter(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         calls.filter(({ command, args }) => {
           if (command !== "devcontainer" || args[0] !== "exec") return false;
           const nested = nestedDevcontainerCommand(args);
@@ -1616,50 +1686,55 @@ describe("Development Container Fixture Executor", () => {
             (nestedGitArgs[0] === "add" || nestedGitArgs[0] === "write-tree")
           );
         }),
-      ).toHaveLength(scenarioCount * 4);
+        scenarioCount * 4,
+      );
       const buildCacheSources = calls
         .filter(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",
         )
         .map(({ args }) => {
           const cacheFrom = args.indexOf("--cache-from");
-          expect(cacheFrom).toBeGreaterThan(0);
-          expect(args).toContain("--cache-to");
+          assert.ok(cacheFrom > 0);
+          assert.ok(args.includes("--cache-to"));
           return args[cacheFrom + 1];
         });
-      expect(new Set(buildCacheSources).size).toBeLessThan(
-        buildCacheSources.length,
-      );
-      expect(
+      assert.ok(new Set(buildCacheSources).size < buildCacheSources.length);
+      assertLength(
         calls.filter(
           ({ command, args }) => command === "docker" && args[0] === "ps",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         calls.filter(
           ({ command, args }) => command === "docker" && args[0] === "rm",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assert.strictEqual(
         calls.some(
           ({ command, args }) =>
             command === "devcontainer" && args[0] === "down",
         ),
-      ).toBe(false);
-      expect(
+        false,
+      );
+      assert.deepStrictEqual(
         calls.filter(({ command }) => command === "pnpm" || command === "node"),
-      ).toEqual([]);
+        [],
+      );
       const capabilityProbes = registryCapabilityProbes(workspace);
-      expect(new Set(capabilityProbes.map((probe) => probe.identity))).toEqual(
+      assert.deepStrictEqual(
+        new Set(capabilityProbes.map((probe) => probe.identity)),
         requiredCapabilityProbeIdentities,
       );
-      expect(
+      assert.deepStrictEqual(
         calls.filter(({ command }) =>
           capabilityProbes.some((probe) => probe.command === command),
         ),
-      ).toEqual([]);
+        [],
+      );
       for (const probe of capabilityProbes) {
-        expect(
+        assert.strictEqual(
           calls.some(({ command, args }) => {
             if (command !== "devcontainer" || args[0] !== "exec") return false;
             const nested = nestedDevcontainerCommand(args);
@@ -1668,14 +1743,16 @@ describe("Development Container Fixture Executor", () => {
               JSON.stringify(nested.args) === JSON.stringify(probe.args ?? [])
             );
           }),
-        ).toBe(true);
+          true,
+        );
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it.each([...requiredCapabilityProbeIdentities])(
+  testEach(
+    [...requiredCapabilityProbeIdentities],
     "does not let a host-prepared %s capability mask its missing container probe",
     async (identity) => {
       const projectDir = path.resolve(`/fixture/container-${identity}-missing`);
@@ -1705,9 +1782,8 @@ describe("Development Container Fixture Executor", () => {
       });
 
       try {
-        await expect(
+        await assertRejectsMatching(
           session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-        ).rejects.toThrow(
           new RegExp(
             `Development Container capability ${identity}.*container capability is missing`,
             "u",
@@ -1717,24 +1793,27 @@ describe("Development Container Fixture Executor", () => {
         await session.close();
       }
 
-      expect(calls.some(({ command }) => command === probe.command)).toBe(
+      assert.strictEqual(
+        calls.some(({ command }) => command === probe.command),
         false,
       );
-      expect(
+      assert.strictEqual(
         calls.some(
           ({ command, args }) =>
             command === "devcontainer" &&
             args[0] === "exec" &&
             nestedDevcontainerCommand(args).command === probe.command,
         ),
-      ).toBe(true);
-      expect(calls.some(({ args }) => args.includes("--lockfile-only"))).toBe(
+        true,
+      );
+      assert.strictEqual(
+        calls.some(({ args }) => args.includes("--lockfile-only")),
         false,
       );
     },
   );
 
-  it("shares one cold container session across independent Root and Deployment gates", async () => {
+  void it("shares one cold container session across independent Root and Deployment gates", async () => {
     const workspace = path.resolve(
       "/tmp/template-development-container-shared-deployment-test",
     );
@@ -1801,37 +1880,39 @@ describe("Development Container Fixture Executor", () => {
       const deploymentStarts = started.filter(
         (event) => event.gate === "deployment-quality",
       );
-      expect(deploymentStarts.length).toBeGreaterThan(0);
+      assert.ok(deploymentStarts.length > 0);
       for (const deployment of deploymentStarts) {
         const root = started.find(
           (event) =>
             event.gate === "generated-root-quality" &&
             event.scenario?.id === deployment.scenario?.id,
         );
-        expect(root).toBeDefined();
-        expect(root?.identity).not.toBe(deployment.identity);
+        assert.notStrictEqual(root, undefined);
+        assert.notStrictEqual(root?.identity, deployment.identity);
         const projectDir = path.join(workspace, deployment.scenario!.id);
-        expect(
+        assertLength(
           calls.filter(
             ({ command, args, cwd }) =>
               cwd === projectDir &&
               command === "devcontainer" &&
               args[0] === "up",
           ),
-        ).toHaveLength(1);
-        expect(
+          1,
+        );
+        assertLength(
           calls.filter(
             ({ command, args, cwd }) =>
               cwd === projectDir && command === "docker" && args[0] === "ps",
           ),
-        ).toHaveLength(1);
+          1,
+        );
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("keeps dependency diagnostics primary when registry scenario cleanup fails", async () => {
+  void it("keeps dependency diagnostics primary when registry scenario cleanup fails", async () => {
     const workspace = path.resolve(
       "/tmp/template-development-container-registry-cleanup-failure-test",
     );
@@ -1864,17 +1945,21 @@ describe("Development Container Fixture Executor", () => {
         },
       }).catch((error: unknown) => error);
 
-      expect(failure).toBeInstanceOf(AggregateError);
-      expect((failure as AggregateError).message).toMatch(
+      assert.ok(failure instanceof AggregateError);
+      assert.match(
+        (failure as AggregateError).message,
         /^Dependency preparation failed during pnpm fetch.*fixture registry unavailable/u,
       );
-      expect((failure as AggregateError).message).toContain(
-        "fixture cleanup daemon stopped",
+      assert.ok(
+        (failure as AggregateError).message.includes(
+          "fixture cleanup daemon stopped",
+        ),
       );
-      expect((failure as AggregateError).errors).toHaveLength(2);
-      expect(reports).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(
+      assertLength((failure as AggregateError).errors, 2);
+      assertDeepStrictEqualWithMatchers(
+        reports,
+        arrayContaining([
+          stringMatching(
             /\[Fixture Evidence\] init .* \(init--.*\) failed: .*Reproduce the scenario set with pnpm --filter @ykdz\/template-checks check:generated; generated artifact:/u,
           ),
         ]),
@@ -1884,7 +1969,7 @@ describe("Development Container Fixture Executor", () => {
     }
   });
 
-  it("cleans up by exact label after startup fails", async () => {
+  void it("cleans up by exact label after startup fails", async () => {
     const projectDir = path.resolve("/fixture/startup-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
@@ -1901,14 +1986,17 @@ describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await expect(
+      await assert.rejects(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-      ).rejects.toThrow("image build failed");
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("image build failed"),
+      );
     } finally {
       await session.close();
     }
 
-    expect(
+    assert.deepStrictEqual(
       calls
         .filter(
           ({ command, args }) =>
@@ -1917,23 +2005,24 @@ describe("Development Container Fixture Executor", () => {
             (command === "docker" && args[0] === "ps"),
         )
         .map(({ command, args }) => [command, ...args]),
-    ).toEqual([
       [
-        "devcontainer",
-        "up",
-        "--workspace-folder",
-        projectDir,
-        "--config",
-        path.join(projectDir, ".devcontainer", "devcontainer.json"),
-        "--no-lockfile",
-        "--id-label",
-        idLabel,
+        [
+          "devcontainer",
+          "up",
+          "--workspace-folder",
+          projectDir,
+          "--config",
+          path.join(projectDir, ".devcontainer", "devcontainer.json"),
+          "--no-lockfile",
+          "--id-label",
+          idLabel,
+        ],
+        ["docker", "ps", "-aq", "--filter", `label=${idLabel}`],
       ],
-      ["docker", "ps", "-aq", "--filter", `label=${idLabel}`],
-    ]);
+    );
   });
 
-  it("attributes probe failures before dependency preparation or quality commands", async () => {
+  void it("attributes probe failures before dependency preparation or quality commands", async () => {
     const projectDir = path.resolve("/fixture/probe-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
@@ -1961,23 +2050,23 @@ describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await expect(
+      await assertRejectsMatching(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-      ).rejects.toThrow(
         /Development Container capability docker-client.*Docker daemon access is unavailable.*permission denied/u,
       );
     } finally {
       await session.close();
     }
 
-    expect(
+    assert.strictEqual(
       calls.some(
         ({ args }) =>
           args.includes("--lockfile-only") ||
           (args.includes("run") && args.includes("check")),
       ),
-    ).toBe(false);
-    expect(
+      false,
+    );
+    assert.deepStrictEqual(
       calls
         .filter(
           ({ command, args }) =>
@@ -1985,10 +2074,11 @@ describe("Development Container Fixture Executor", () => {
             (command === "devcontainer" && args[0] === "down"),
         )
         .map(({ command, args }) => [command, ...args]),
-    ).toEqual([["docker", "ps", "-aq", "--filter", `label=${idLabel}`]]);
+      [["docker", "ps", "-aq", "--filter", `label=${idLabel}`]],
+    );
   });
 
-  it("keeps a probe failure primary when cleanup also fails", async () => {
+  void it("keeps a probe failure primary when cleanup also fails", async () => {
     const projectDir = path.resolve("/fixture/probe-and-cleanup-failure");
     const session = createDevelopmentContainerFixtureSession({
       projectDir,
@@ -2021,17 +2111,18 @@ describe("Development Container Fixture Executor", () => {
       )
       .catch((error: unknown) => error);
 
-    expect(failure).toBeInstanceOf(AggregateError);
-    expect((failure as AggregateError).message).toMatch(
+    assert.ok(failure instanceof AggregateError);
+    assert.match(
+      (failure as AggregateError).message,
       /^Development Container capability docker-client.*permission denied/u,
     );
-    expect((failure as AggregateError).message).toContain(
-      "cleanup daemon stopped",
+    assert.ok(
+      (failure as AggregateError).message.includes("cleanup daemon stopped"),
     );
-    expect((failure as AggregateError).errors).toHaveLength(2);
+    assertLength((failure as AggregateError).errors, 2);
   });
 
-  it("fails a successful scenario when cleanup fails", async () => {
+  void it("fails a successful scenario when cleanup fails", async () => {
     const projectDir = path.resolve("/fixture/cleanup-only-failure");
     const session = createDevelopmentContainerFixtureSession({
       projectDir,
@@ -2050,16 +2141,17 @@ describe("Development Container Fixture Executor", () => {
       )
       .catch((error: unknown) => error);
 
-    expect(failure).toBeInstanceOf(AggregateError);
-    expect((failure as AggregateError).message).toBe(
+    assert.ok(failure instanceof AggregateError);
+    assert.strictEqual(
+      (failure as AggregateError).message,
       "Development Container Fixture cleanup failed",
     );
-    expect((failure as AggregateError).errors).toEqual([
-      expect.objectContaining({ message: "cleanup daemon stopped" }),
+    assertDeepStrictEqualWithMatchers((failure as AggregateError).errors, [
+      objectContaining({ message: "cleanup daemon stopped" }),
     ]);
   });
 
-  it("attributes dependency preparation failures and still cleans up", async () => {
+  void it("attributes dependency preparation failures and still cleans up", async () => {
     const projectDir = path.resolve("/fixture/fetch-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
@@ -2080,24 +2172,24 @@ describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await expect(
+      await assertRejectsMatching(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-      ).rejects.toThrow(
         /Dependency preparation failed during pnpm fetch.*registry unavailable/u,
       );
     } finally {
       await session.close();
     }
 
-    expect(
+    assert.strictEqual(
       calls.some(
         ({ command, args }) =>
           command === "devcontainer" &&
           args[0] === "exec" &&
           args.includes("check"),
       ),
-    ).toBe(false);
-    expect(
+      false,
+    );
+    assert.deepStrictEqual(
       calls
         .filter(
           ({ command, args }) =>
@@ -2105,25 +2197,30 @@ describe("Development Container Fixture Executor", () => {
             (command === "devcontainer" && args[0] === "down"),
         )
         .map(({ command, args }) => [command, ...args]),
-    ).toEqual([["docker", "ps", "-aq", "--filter", `label=${idLabel}`]]);
+      [["docker", "ps", "-aq", "--filter", `label=${idLabel}`]],
+    );
   });
 
-  it.each([
-    {
-      unavailable: "docker",
-      expected: /Docker is required for Generated Repository Fixture quality/u,
-      expectedCalls: [["docker", "version", "--format", "{{.Server.Version}}"]],
-    },
-    {
-      unavailable: "devcontainer",
-      expected:
-        /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
-      expectedCalls: [
-        ["docker", "version", "--format", "{{.Server.Version}}"],
-        ["devcontainer", "--version"],
-      ],
-    },
-  ])(
+  testEach(
+    [
+      {
+        unavailable: "docker",
+        expected:
+          /Docker is required for Generated Repository Fixture quality/u,
+        expectedCalls: [
+          ["docker", "version", "--format", "{{.Server.Version}}"],
+        ],
+      },
+      {
+        unavailable: "devcontainer",
+        expected:
+          /pinned Dev Container CLI is required for Generated Repository Fixture quality/u,
+        expectedCalls: [
+          ["docker", "version", "--format", "{{.Server.Version}}"],
+          ["devcontainer", "--version"],
+        ],
+      },
+    ],
     "reports a clear $unavailable prerequisite error without host fallback",
     async ({ unavailable, expected, expectedCalls }) => {
       const projectDir = path.resolve(`/fixture/missing-${unavailable}`);
@@ -2141,26 +2238,32 @@ describe("Development Container Fixture Executor", () => {
       });
 
       try {
-        await expect(
+        await assert.rejects(
           session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-        ).rejects.toThrow(expected);
+          expected,
+        );
       } finally {
         await session.close();
       }
 
-      expect(calls.map(({ command, args }) => [command, ...args])).toEqual(
+      assert.deepStrictEqual(
+        calls.map(({ command, args }) => [command, ...args]),
         expectedCalls,
       );
-      expect(calls.some(({ command }) => command === "pnpm")).toBe(false);
-      expect(
+      assert.strictEqual(
+        calls.some(({ command }) => command === "pnpm"),
+        false,
+      );
+      assert.strictEqual(
         calls.some(
           ({ command, args }) => command === "devcontainer" && args[0] === "up",
         ),
-      ).toBe(false);
+        false,
+      );
     },
   );
 
-  it("removes the labeled container and exactly the declared scenario volumes after a command failure", async () => {
+  void it("removes the labeled container and exactly the declared scenario volumes after a command failure", async () => {
     const projectDir = path.resolve("/fixture/command-failure");
     const idLabel = fixtureIdLabel(projectDir);
     const calls: Command[] = [];
@@ -2188,14 +2291,16 @@ describe("Development Container Fixture Executor", () => {
     });
 
     try {
-      await expect(
+      await assert.rejects(
         session.run("pnpm", ["run", "check"], { cwd: projectDir }),
-      ).rejects.toThrow("Root Check failed");
+        (error) =>
+          error instanceof Error && error.message.includes("Root Check failed"),
+      );
     } finally {
       await session.close();
     }
 
-    expect(
+    assert.deepStrictEqual(
       calls
         .filter(
           ({ command, args }) =>
@@ -2203,21 +2308,31 @@ describe("Development Container Fixture Executor", () => {
             (args[0] === "ps" || args[0] === "rm" || args[0] === "volume"),
         )
         .map(({ command, args }) => [command, ...args]),
-    ).toEqual([
-      ["docker", "ps", "-aq", "--filter", `label=${idLabel}`],
-      ["docker", "rm", "-f", "fixture-command-failure"],
-      ["docker", "volume", "rm", "template-fixture-command-failure-workspace"],
-      ["docker", "volume", "rm", "template-fixture-command-failure-state"],
-    ]);
-    expect(
+      [
+        ["docker", "ps", "-aq", "--filter", `label=${idLabel}`],
+        ["docker", "rm", "-f", "fixture-command-failure"],
+        [
+          "docker",
+          "volume",
+          "rm",
+          "template-fixture-command-failure-workspace",
+        ],
+        ["docker", "volume", "rm", "template-fixture-command-failure-state"],
+      ],
+    );
+    assert.strictEqual(
       calls.some(
         ({ command, args }) => command === "devcontainer" && args[0] === "down",
       ),
-    ).toBe(false);
-    expect(calls.some(({ args }) => args.includes("prune"))).toBe(false);
+      false,
+    );
+    assert.strictEqual(
+      calls.some(({ args }) => args.includes("prune")),
+      false,
+    );
   });
 
-  it("preserves an in-repository command working directory inside the container", async () => {
+  void it("preserves an in-repository command working directory inside the container", async () => {
     const projectDir = path.resolve("/fixture/focused");
     const idLabel = fixtureIdLabel(projectDir);
     const consumerDir = path.join(projectDir, "apps", "web");
@@ -2239,33 +2354,34 @@ describe("Development Container Fixture Executor", () => {
       await session.close();
     }
 
-    expect(
+    assert.deepStrictEqual(
       calls.find(
         ({ command, args }) =>
           command === "devcontainer" &&
           args[0] === "exec" &&
           args.includes("probe.mjs"),
       )?.args,
-    ).toEqual([
-      "exec",
-      "--workspace-folder",
-      projectDir,
-      "--id-label",
-      idLabel,
-      "--remote-env",
-      fixtureTurboCacheRemoteEnv(projectDir),
-      "sh",
-      "-c",
-      'cd "$1" && shift && exec "$@"',
-      "sh",
-      "apps/web",
-      "node",
-      "--conditions=source",
-      "probe.mjs",
-    ]);
+      [
+        "exec",
+        "--workspace-folder",
+        projectDir,
+        "--id-label",
+        idLabel,
+        "--remote-env",
+        fixtureTurboCacheRemoteEnv(projectDir),
+        "sh",
+        "-c",
+        'cd "$1" && shift && exec "$@"',
+        "sh",
+        "apps/web",
+        "node",
+        "--conditions=source",
+        "probe.mjs",
+      ],
+    );
   });
 
-  it("forwards only the Turbo cache environment whitelist to container commands", async () => {
+  void it("forwards only the Turbo cache environment whitelist to container commands", async () => {
     const projectDir = path.resolve("/fixture/turbo-cache");
     const calls: Command[] = [];
     const session = createDevelopmentContainerFixtureSession({
@@ -2294,10 +2410,11 @@ describe("Development Container Fixture Executor", () => {
         args[0] === "exec" &&
         args.includes("check"),
     );
-    expect(execCall?.args).toEqual(
-      expect.arrayContaining([
+    assertDeepStrictEqualWithMatchers(
+      execCall?.args,
+      arrayContaining([
         "--remote-env",
-        expect.stringMatching(/^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u),
+        stringMatching(/^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u),
         "--remote-env",
         "TURBO_TEAM=fixture-team",
         "TURBO_TOKEN=fixture-token",
@@ -2305,18 +2422,19 @@ describe("Development Container Fixture Executor", () => {
         "TURBO_REMOTE_CACHE_READ_ONLY=true",
       ]),
     );
-    expect(execCall?.args.join("\n")).not.toContain("UNRELATED_SECRET");
-    expect(
-      calls
+    assert.ok(!execCall?.args.join("\n").includes("UNRELATED_SECRET"));
+    assert.ok(
+      !calls
         .filter(
           ({ command, args }) =>
             command === "devcontainer" && args[0] !== "exec",
         )
-        .flatMap(({ args }) => args),
-    ).not.toContain("fixture-token");
+        .flatMap(({ args }) => args)
+        .includes("fixture-token"),
+    );
   });
 
-  it("redacts forwarded Turbo secrets from propagated failures and activity records", async () => {
+  void it("redacts forwarded Turbo secrets from propagated failures and activity records", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-turbo-redaction-"));
     const projectDir = path.join(root, "project");
     const activityRoot = path.join(root, "activity");
@@ -2387,7 +2505,7 @@ describe("Development Container Fixture Executor", () => {
         propagated = error;
       }
 
-      expect(propagated).toBeInstanceOf(Error);
+      assert.ok(propagated instanceof Error);
       const propagatedText =
         propagated instanceof Error
           ? `${propagated.message}\n${propagated.stack ?? ""}`
@@ -2396,9 +2514,9 @@ describe("Development Container Fixture Executor", () => {
         path.join(activityRoot, "activity.jsonl"),
         "utf8",
       );
-      expect(`${propagatedText}\n${activityText}`).toContain("[REDACTED]");
-      expect(`${propagatedText}\n${activityText}`).not.toContain(turboToken);
-      expect(`${propagatedText}\n${activityText}`).not.toContain(signatureKey);
+      assert.ok(`${propagatedText}\n${activityText}`.includes("[REDACTED]"));
+      assert.ok(!`${propagatedText}\n${activityText}`.includes(turboToken));
+      assert.ok(!`${propagatedText}\n${activityText}`.includes(signatureKey));
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -2,13 +2,12 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "types": ["node", "vitest/globals"]
+    "types": ["node"]
   },
   "include": [
     "oxfmt.config.ts",
     "oxlint.config.ts",
     "scripts/**/*.ts",
-    "test/**/*.ts",
-    "vitest.config.ts"
+    "test/**/*.ts"
   ]
 }

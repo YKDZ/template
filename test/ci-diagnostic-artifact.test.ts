@@ -1,3 +1,6 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import {
   composeCiDiagnosticArtifacts,
   type CiDiagnosticArtifactDeclaration,
@@ -10,7 +13,6 @@ import {
   projectCheckWorkflowTemplateSource,
   projectCheckWorkflowTemplateReplacements,
 } from "@ykdz/template-core/project-github";
-import { describe, expect, it } from "vitest";
 
 const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "playwright",
@@ -36,9 +38,9 @@ function packageContribution(
   };
 }
 
-describe("CI Diagnostic Artifact contract", () => {
-  it("returns only ordered, deduplicated closed declarations", () => {
-    expect(
+void describe("CI Diagnostic Artifact contract", () => {
+  void it("returns only ordered, deduplicated closed declarations", () => {
+    assert.deepStrictEqual(
       composeCiDiagnosticArtifacts({
         packagePaths: ["apps/web", "apps/admin"],
         declarations: [
@@ -47,19 +49,20 @@ describe("CI Diagnostic Artifact contract", () => {
           playwright("apps/web"),
         ],
       }),
-    ).toEqual([
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: "apps/admin" },
-      },
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: "apps/web" },
-      },
-    ]);
+      [
+        {
+          kind: "playwright",
+          owner: { kind: "package-boundary", path: "apps/admin" },
+        },
+        {
+          kind: "playwright",
+          owner: { kind: "package-boundary", path: "apps/web" },
+        },
+      ],
+    );
   });
 
-  it("rejects unrecognized kinds, unsafe paths, unknown owners, and extra upload fields", () => {
+  void it("rejects unrecognized kinds, unsafe paths, unknown owners, and extra upload fields", () => {
     const packagePaths = ["apps/web"];
     for (const declaration of [
       {
@@ -73,32 +76,34 @@ describe("CI Diagnostic Artifact contract", () => {
         path: "**/*",
       },
     ]) {
-      expect(() =>
+      assert.throws(() =>
         composeCiDiagnosticArtifacts({
           packagePaths,
           declarations: [declaration],
         }),
-      ).toThrow();
+      );
     }
   });
 
-  it("derives only ordered owner facts from actual Package Boundary paths", () => {
+  void it("derives only ordered owner facts from actual Package Boundary paths", () => {
     const packagePaths = ["apps/web"];
-    expect(
+    assert.strictEqual(
       projectCheckWorkflowTemplateSource({
         packagePaths,
         diagnosticArtifacts: [playwright("apps/web")],
       }),
-    ).toBe(".github/workflows/check-diagnostics.yml");
-    expect(
+      ".github/workflows/check-diagnostics.yml",
+    );
+    assert.deepStrictEqual(
       projectCheckWorkflowTemplateReplacements({
         packagePaths,
         diagnosticArtifacts: [playwright("apps/web")],
       }),
-    ).toEqual({ DIAGNOSTIC_OWNER_PATHS: "apps/web" });
+      { DIAGNOSTIC_OWNER_PATHS: "apps/web" },
+    );
   });
 
-  it("requires exact Package Boundary membership at every public workflow entrypoint", () => {
+  void it("requires exact Package Boundary membership at every public workflow entrypoint", () => {
     for (const entrypoint of [
       () =>
         projectCheckWorkflowTemplateSource({
@@ -111,13 +116,18 @@ describe("CI Diagnostic Artifact contract", () => {
           diagnosticArtifacts: [playwright("services/private")],
         }),
     ]) {
-      expect(entrypoint).toThrow(
-        "CI Diagnostic Artifact owner is not a declared Package Boundary",
+      assert.throws(
+        entrypoint,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "CI Diagnostic Artifact owner is not a declared Package Boundary",
+          ),
       );
     }
   });
 
-  it("rejects unsafe owners at every public workflow entrypoint", () => {
+  void it("rejects unsafe owners at every public workflow entrypoint", () => {
     const declarationWithPath = {
       ...playwright("apps/web"),
       paths: [".env", "**/*"],
@@ -150,17 +160,21 @@ describe("CI Diagnostic Artifact contract", () => {
           diagnosticArtifacts: [playwright("node_modules/private")],
         }),
     ]) {
-      expect(entrypoint).toThrow();
+      assert.throws(entrypoint);
     }
   });
 
-  it("requires every Package Contribution diagnostic owner to be its boundary", () => {
-    expect(() =>
-      assertPackageContribution(
-        packageContribution("apps/web", [playwright("apps/admin")]),
-      ),
-    ).toThrow(
-      "CI Diagnostic Artifact owner must match its Package Contribution",
+  void it("requires every Package Contribution diagnostic owner to be its boundary", () => {
+    assert.throws(
+      () =>
+        assertPackageContribution(
+          packageContribution("apps/web", [playwright("apps/admin")]),
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "CI Diagnostic Artifact owner must match its Package Contribution",
+        ),
     );
   });
 });

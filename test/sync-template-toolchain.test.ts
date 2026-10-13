@@ -1,13 +1,15 @@
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { it } from "node:test";
 
 import { execa } from "execa";
-import { expect, it } from "vitest";
 
 import { syncTemplateToolchain } from "../scripts/sync-template-toolchain.ts";
+import { testEach } from "./assertions.ts";
 
-it("直接 Node 入口离线同步三个目标并保留无关内容，重复执行不再修改", async () => {
+void it("直接 Node 入口离线同步三个目标并保留无关内容，重复执行不再修改", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sync-toolchain-"));
   try {
     await mkdir(path.join(root, "packages/cli"), { recursive: true });
@@ -46,42 +48,52 @@ it("直接 Node 入口离线同步三个目标并保留无关内容，重复执�
         ],
         { env: { PATH: "", RUSTUP_TOOLCHAIN: "uninstalled" }, reject: false },
       );
-    await expect(
+    await assert.rejects(
       syncTemplateToolchain(root, async (file, contents) => {
         if (file.endsWith("Dockerfile")) throw new Error("磁盘故障");
         await writeFile(file, contents);
       }),
-    ).rejects.toThrow("已更新文件：packages/cli/package.json");
-    expect(
-      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
-    ).toBe('{"engines":{"node":"^26.1.2"},"custom":true}\n');
-    expect(
-      await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
-    ).toBe("FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n");
-    const result = await run();
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
-    expect(
-      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
-    ).toBe('{"engines":{"node":"^26.1.2"},"custom":true}\n');
-    expect(
-      await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
-    ).toBe("FROM node:26.1.2-bookworm\nENV CUSTOM=yes\n");
-    expect(
-      await readFile(
-        path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
-        "utf8",
-      ),
-    ).toContain(
-      'nodeVersion: "26.1.2",\n packageManagerPin: "pnpm@13.2.1",\n rustVersion: "1.100.2",\n} as const);\n// keep',
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("已更新文件：packages/cli/package.json"),
     );
-    expect((await run()).stdout).toContain("无需修改");
+    assert.strictEqual(
+      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
+      '{"engines":{"node":"^26.1.2"},"custom":true}\n',
+    );
+    assert.strictEqual(
+      await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
+      "FROM node:24.0.0-bookworm\nENV CUSTOM=yes\n",
+    );
+    const result = await run();
+    assert.strictEqual(result.stderr, "");
+    assert.strictEqual(result.exitCode, 0);
+    assert.strictEqual(
+      await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
+      '{"engines":{"node":"^26.1.2"},"custom":true}\n',
+    );
+    assert.strictEqual(
+      await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
+      "FROM node:26.1.2-bookworm\nENV CUSTOM=yes\n",
+    );
+    assert.ok(
+      (
+        await readFile(
+          path.join(root, "packages/core/src/release-toolchain-snapshot.ts"),
+          "utf8",
+        )
+      ).includes(
+        'nodeVersion: "26.1.2",\n packageManagerPin: "pnpm@13.2.1",\n rustVersion: "1.100.2",\n} as const);\n// keep',
+      ),
+    );
+    assert.ok((await run()).stdout.includes("无需修改"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-it.each(["node", "pnpm", "rust", "invalid-toml", "missing", "shape", "syntax"])(
+testEach(
+  ["node", "pnpm", "rust", "invalid-toml", "missing", "shape", "syntax"],
   "预检失败 %s 时已经需要更新的其他目标也零写入",
   async (failure) => {
     const root = await mkdtemp(path.join(tmpdir(), "sync-preflight-"));
@@ -127,13 +139,15 @@ it.each(["node", "pnpm", "rust", "invalid-toml", "missing", "shape", "syntax"])(
         ],
         { reject: false },
       );
-      expect(result.exitCode).toBe(1);
-      expect(
+      assert.strictEqual(result.exitCode, 1);
+      assert.strictEqual(
         await readFile(path.join(root, "packages/cli/package.json"), "utf8"),
-      ).toBe(cli);
-      expect(
+        cli,
+      );
+      assert.strictEqual(
         await readFile(path.join(root, ".devcontainer/Dockerfile"), "utf8"),
-      ).toBe(docker);
+        docker,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

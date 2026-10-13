@@ -1,12 +1,15 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import { createAtomicProjectRenderer } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
 
-describe("atomic renderer", () => {
-  it("commits only planned paths and rolls them all back after a commit failure", async () => {
+import { assertRejectsMatching } from "./assertions.ts";
+
+void describe("atomic renderer", () => {
+  void it("commits only planned paths and rolls them all back after a commit failure", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-atomic-rollback-"),
     );
@@ -28,7 +31,7 @@ describe("atomic renderer", () => {
         },
       });
 
-      await expect(
+      await assertRejectsMatching(
         renderAtomically({
           targetRoot,
           operations: [
@@ -46,18 +49,22 @@ describe("atomic renderer", () => {
             },
           ],
         }),
-      ).rejects.toThrow("injected commit failure");
+        /injected commit failure/u,
+      );
 
-      await expect(
-        readFile(path.join(targetRoot, "first.json"), "utf8"),
-      ).resolves.toBe('{"state":"before"}\n');
-      await expect(
-        readFile(path.join(targetRoot, "second.json"), "utf8"),
-      ).resolves.toBe('{"state":"before"}\n');
-      await expect(
-        readFile(path.join(targetRoot, "unplanned.txt"), "utf8"),
-      ).resolves.toBe("untouched\n");
-      expect(committedPaths).toEqual(["first.json", "second.json"]);
+      assert.equal(
+        await readFile(path.join(targetRoot, "first.json"), "utf8"),
+        '{"state":"before"}\n',
+      );
+      assert.equal(
+        await readFile(path.join(targetRoot, "second.json"), "utf8"),
+        '{"state":"before"}\n',
+      );
+      assert.equal(
+        await readFile(path.join(targetRoot, "unplanned.txt"), "utf8"),
+        "untouched\n",
+      );
+      assert.deepEqual(committedPaths, ["first.json", "second.json"]);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }

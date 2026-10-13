@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   chmod,
   mkdir,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   createProjectProjectionReconciler,
@@ -16,7 +18,6 @@ import {
   reconcileAndApplyProjectProjections,
   reconcileProjectProjections,
   validateProjectProjectionPlan,
-  type CurrentProjectProjectionEntry,
   type ProjectProjection,
   type ProjectProjectionEntry,
   type ProjectProjectionMirrorSlot,
@@ -25,7 +26,19 @@ import {
   createTemplateSourceHandle,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+
+import {
+  any,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertPartialDeepStrictEqual,
+  assertRejectsContaining,
+  hasProperty,
+  objectContaining,
+  stringContaining,
+  stringMatching,
+  testEach,
+} from "./assertions.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -65,9 +78,9 @@ function structuredProjection(
   };
 }
 
-describe("Project Projection materialization", () => {
-  it("rejects merging JSON into known non-JSON text during plan preflight", () => {
-    expect(
+void describe("Project Projection materialization", () => {
+  void it("rejects merging JSON into known non-JSON text during plan preflight", () => {
+    assert.ok(
       validateProjectProjectionPlan({
         operations: [
           {
@@ -81,14 +94,14 @@ describe("Project Projection materialization", () => {
             value: { enabled: true },
           },
         ],
-      }),
-    ).toContain(
-      "Project Projection mergeJson requires JSON-compatible content: config.json follows writeText",
+      }).includes(
+        "Project Projection mergeJson requires JSON-compatible content: config.json follows writeText",
+      ),
     );
   });
 
-  it("rejects overwriting content after a transform during plan preflight", () => {
-    expect(
+  void it("rejects overwriting content after a transform during plan preflight", () => {
+    assert.ok(
       validateProjectProjectionPlan({
         operations: [
           {
@@ -109,14 +122,14 @@ describe("Project Projection materialization", () => {
             overwrite: true,
           },
         ],
-      }),
-    ).toContain(
-      "Project Projection writeJson may not overwrite content after replaceAnchors: src/main.ts",
+      }).includes(
+        "Project Projection writeJson may not overwrite content after replaceAnchors: src/main.ts",
+      ),
     );
   });
 
-  it("rejects applying a text transform to known JSON content", () => {
-    expect(
+  void it("rejects applying a text transform to known JSON content", () => {
+    assert.ok(
       validateProjectProjectionPlan({
         operations: [
           {
@@ -131,64 +144,68 @@ describe("Project Projection materialization", () => {
             replacements: { entry: "new" },
           },
         ],
-      }),
-    ).toContain(
-      "Project Projection replaceAnchors requires text-compatible content: src/main.ts follows writeJson",
+      }).includes(
+        "Project Projection replaceAnchors requires text-compatible content: src/main.ts follows writeJson",
+      ),
     );
   });
 
-  it.each([
-    {
-      sequence: "writeJson to mergeJson",
-      operations: [
-        { kind: "writeJson", to: "config.json", value: { first: true } },
-        { kind: "mergeJson", to: "config.json", value: { second: true } },
-      ],
+  testEach(
+    [
+      {
+        sequence: "writeJson to mergeJson",
+        operations: [
+          { kind: "writeJson", to: "config.json", value: { first: true } },
+          { kind: "mergeJson", to: "config.json", value: { second: true } },
+        ],
+      },
+      {
+        sequence: "copyFile to mergeJson",
+        operations: [
+          {
+            kind: "copyFile",
+            source: planTemplateSource,
+            from: "config.json",
+            to: "config.json",
+          },
+          { kind: "mergeJson", to: "config.json", value: { second: true } },
+        ],
+      },
+      {
+        sequence: "copyFile to replaceAnchors to setExecutable",
+        operations: [
+          {
+            kind: "copyFile",
+            source: planTemplateSource,
+            from: "main.ts",
+            to: "src/main.ts",
+          },
+          {
+            kind: "replaceAnchors",
+            path: "src/main.ts",
+            language: "typescript",
+            replacements: { entry: "new" },
+          },
+          {
+            kind: "setExecutable",
+            path: "src/main.ts",
+            executable: true,
+          },
+        ],
+      },
+    ] satisfies readonly {
+      readonly sequence: string;
+      readonly operations: readonly RenderOperation[];
+    }[],
+    "accepts the legal $sequence sequence",
+    ({ operations }) => {
+      assert.deepStrictEqual(validateProjectProjectionPlan({ operations }), []);
     },
-    {
-      sequence: "copyFile to mergeJson",
-      operations: [
-        {
-          kind: "copyFile",
-          source: planTemplateSource,
-          from: "config.json",
-          to: "config.json",
-        },
-        { kind: "mergeJson", to: "config.json", value: { second: true } },
-      ],
-    },
-    {
-      sequence: "copyFile to replaceAnchors to setExecutable",
-      operations: [
-        {
-          kind: "copyFile",
-          source: planTemplateSource,
-          from: "main.ts",
-          to: "src/main.ts",
-        },
-        {
-          kind: "replaceAnchors",
-          path: "src/main.ts",
-          language: "typescript",
-          replacements: { entry: "new" },
-        },
-        {
-          kind: "setExecutable",
-          path: "src/main.ts",
-          executable: true,
-        },
-      ],
-    },
-  ] satisfies readonly {
-    readonly sequence: string;
-    readonly operations: readonly RenderOperation[];
-  }[])("accepts the legal $sequence sequence", ({ operations }) => {
-    expect(validateProjectProjectionPlan({ operations })).toEqual([]);
-  });
+  );
 
-  it("materializes planner-owned text at any safe projection path", async () => {
-    await expect(
-      materializeProjectProjection({
+  void it("materializes planner-owned text at any safe projection path", async () => {
+    assert.deepStrictEqual(
+      await materializeProjectProjection({
         operations: [
           {
             kind: "writeText",
@@ -197,13 +214,14 @@ describe("Project Projection materialization", () => {
           },
         ],
       }),
-    ).resolves.toEqual({
-      entries: [textEntry("policies/custom.rules", "allow generated fact\n")],
-      reconciliation: [{ path: "policies/custom.rules", driver: "text" }],
-    });
+      {
+        entries: [textEntry("policies/custom.rules", "allow generated fact\n")],
+        reconciliation: [{ path: "policies/custom.rules", driver: "text" }],
+      },
+    );
   });
 
-  it("uses planner-declared JSON key order instead of recognizing filenames", async () => {
+  void it("uses planner-declared JSON key order instead of recognizing filenames", async () => {
     const value = {
       zeta: true,
       name: "demo",
@@ -227,16 +245,18 @@ describe("Project Projection materialization", () => {
       }),
     ]);
 
-    expect(decoder.decode(generic.entries[0]!.content)).toBe(
+    assert.strictEqual(
+      decoder.decode(generic.entries[0]!.content),
       '{\n  "alpha": true,\n  "entry": {\n    "default": "./dist.js",\n    "source": "./src.ts",\n    "types": "./dist.d.ts"\n  },\n  "name": "demo",\n  "zeta": true\n}\n',
     );
-    expect(decoder.decode(declared.entries[0]!.content)).toBe(
+    assert.strictEqual(
+      decoder.decode(declared.entries[0]!.content),
       '{\n  "name": "demo",\n  "zeta": true,\n  "alpha": true,\n  "entry": {\n    "source": "./src.ts",\n    "types": "./dist.d.ts",\n    "default": "./dist.js"\n  }\n}\n',
     );
   });
 
-  it("rejects isolated setExecutable as an incomplete Project Projection", async () => {
-    await expect(
+  void it("rejects isolated setExecutable as an incomplete Project Projection", async () => {
+    await assert.rejects(
       materializeProjectProjection({
         operations: [
           {
@@ -246,12 +266,15 @@ describe("Project Projection materialization", () => {
           },
         ],
       }),
-    ).rejects.toThrow(
-      "Project Projection setExecutable requires a preceding content-producing operation: scripts/run.sh",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection setExecutable requires a preceding content-producing operation: scripts/run.sh",
+        ),
     );
   });
 
-  it("normalizes equivalent final states independently of Renderer operation count and order", async () => {
+  void it("normalizes equivalent final states independently of Renderer operation count and order", async () => {
     const repeatedOperations = await materializeProjectProjection({
       operations: [
         {
@@ -286,8 +309,8 @@ describe("Project Projection materialization", () => {
       ],
     });
 
-    expect(repeatedOperations).toEqual(consolidatedOperations);
-    expect(repeatedOperations.entries).toEqual([
+    assert.deepStrictEqual(repeatedOperations, consolidatedOperations);
+    assert.deepStrictEqual(repeatedOperations.entries, [
       {
         path: "config.json",
         kind: "file",
@@ -297,12 +320,12 @@ describe("Project Projection materialization", () => {
         mode: 0o111,
       },
     ]);
-    expect(repeatedOperations.reconciliation).toEqual([
+    assert.deepStrictEqual(repeatedOperations.reconciliation, [
       { path: "config.json", driver: "structured" },
     ]);
   });
 
-  it("uses generic planner reconciliation metadata to select a structured driver", async () => {
+  void it("uses generic planner reconciliation metadata to select a structured driver", async () => {
     const projection = await materializeProjectProjection({
       operations: [
         {
@@ -314,12 +337,12 @@ describe("Project Projection materialization", () => {
       reconciliation: [{ path: "policy.md", driver: "structured" }],
     });
 
-    expect(projection.reconciliation).toEqual([
+    assert.deepStrictEqual(projection.reconciliation, [
       { path: "policy.md", driver: "structured" },
     ]);
   });
 
-  it("reconciles a mode-only final-state delta while preserving compatible Current content", async () => {
+  void it("reconciles a mode-only final-state delta while preserving compatible Current content", async () => {
     const contentOperation = {
       kind: "writeText" as const,
       to: "README.md",
@@ -339,9 +362,12 @@ describe("Project Projection materialization", () => {
       ],
     });
 
-    expect(before.entries[0]?.content).toEqual(after.entries[0]?.content);
-    expect(before.entries[0]?.mode).toBe(0);
-    expect(after.entries[0]?.mode).toBe(0o111);
+    assert.deepStrictEqual(
+      before.entries[0]?.content,
+      after.entries[0]?.content,
+    );
+    assert.strictEqual(before.entries[0]?.mode, 0);
+    assert.strictEqual(after.entries[0]?.mode, 0o111);
 
     const result = await reconcileProjectProjections({
       before,
@@ -351,9 +377,9 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(result.mutations).toEqual([
+    assert.deepStrictEqual(result.mutations, [
       {
         path: "README.md",
         kind: "file",
@@ -363,7 +389,7 @@ describe("Project Projection materialization", () => {
     ]);
   });
 
-  it("applies a mode-only delta without replacing Current content", async () => {
+  void it("applies a mode-only delta without replacing Current content", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-mode-only-"),
     );
@@ -378,8 +404,8 @@ describe("Project Projection materialization", () => {
       await writeFile(readmePath, "user content\n");
       await chmod(readmePath, 0o644);
 
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot,
           before: { operations: [contentOperation] },
           after: {
@@ -393,21 +419,20 @@ describe("Project Projection materialization", () => {
             ],
           },
         }),
-      ).resolves.toEqual({
-        ok: true,
-        changedPaths: ["README.md"],
-        actions: [{ path: "README.md", driver: "text", action: "update" }],
-      });
-      await expect(readFile(readmePath, "utf8")).resolves.toBe(
-        "user content\n",
+        {
+          ok: true,
+          changedPaths: ["README.md"],
+          actions: [{ path: "README.md", driver: "text", action: "update" }],
+        },
       );
-      expect((await stat(readmePath)).mode & 0o111).toBe(0o111);
+      assert.strictEqual(await readFile(readmePath, "utf8"), "user content\n");
+      assert.strictEqual((await stat(readmePath)).mode & 0o111, 0o111);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("reads only the Addition Delta so equal Before/After template output cannot upgrade Current", async () => {
+  void it("reads only the Addition Delta so equal Before/After template output cannot upgrade Current", async () => {
     const unchanged = textEntry("unchanged.txt", "projected\n");
     const before: ProjectProjection = {
       entries: [textEntry("policy.txt", "first\ncommon\nlast\n"), unchanged],
@@ -440,16 +465,17 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(reads).toEqual(["policy.txt"]);
-    expect(result.ok).toBe(true);
+    assert.deepStrictEqual(reads, ["policy.txt"]);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(result.mutations).toHaveLength(1);
-    expect(decoder.decode(result.mutations[0]!.content)).toBe(
+    assertLength(result.mutations, 1);
+    assert.strictEqual(
+      decoder.decode(result.mutations[0]!.content),
       "first\nprivate\ncommon\ngenerated\nlast\n",
     );
   });
 
-  it("recursively composes one-sided structured changes without erasing unrelated Current keys", async () => {
+  void it("recursively composes one-sided structured changes without erasing unrelated Current keys", async () => {
     const before = structuredProjection("config.json", {
       generated: { enabled: false },
       settings: { obsolete: true, timeout: 10 },
@@ -479,17 +505,20 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
-      generated: { enabled: true },
-      required: { source: "package-addition" },
-      settings: { timeout: 20 },
-      userOnly: { retained: true },
-    });
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      {
+        generated: { enabled: true },
+        required: { source: "package-addition" },
+        settings: { timeout: 20 },
+        userOnly: { retained: true },
+      },
+    );
   });
 
-  it("reports an incompatible concurrent scalar change at its structured location", async () => {
+  void it("reports an incompatible concurrent scalar change at its structured location", async () => {
     const result = await reconcileProjectProjections({
       before: structuredProjection("config.json", {
         settings: { timeout: 10 },
@@ -502,10 +531,10 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           path: "config.json",
           driver: "structured",
           location: "/settings/timeout",
@@ -516,24 +545,25 @@ describe("Project Projection materialization", () => {
         }),
       ],
     });
-    expect(result).not.toHaveProperty("mutations");
+    assert.ok(!hasProperty(result, "mutations"));
   });
 
-  it.each([
-    { beforeKind: "null", beforeValue: null, beforeDiagnostic: "null" },
-    {
-      beforeKind: "string",
-      beforeValue: "legacy",
-      beforeDiagnostic: '"legacy"',
-    },
-    { beforeKind: "number", beforeValue: 7, beforeDiagnostic: "7" },
-    { beforeKind: "boolean", beforeValue: false, beforeDiagnostic: "false" },
-    {
-      beforeKind: "array",
-      beforeValue: ["legacy"],
-      beforeDiagnostic: '["legacy"]',
-    },
-  ])(
+  testEach(
+    [
+      { beforeKind: "null", beforeValue: null, beforeDiagnostic: "null" },
+      {
+        beforeKind: "string",
+        beforeValue: "legacy",
+        beforeDiagnostic: '"legacy"',
+      },
+      { beforeKind: "number", beforeValue: 7, beforeDiagnostic: "7" },
+      { beforeKind: "boolean", beforeValue: false, beforeDiagnostic: "false" },
+      {
+        beforeKind: "array",
+        beforeValue: ["legacy"],
+        beforeDiagnostic: '["legacy"]',
+      },
+    ],
     "conflicts when explicit $beforeKind is concurrently replaced by different objects",
     async ({ beforeValue, beforeDiagnostic }) => {
       const result = await reconcileProjectProjections({
@@ -551,10 +581,10 @@ describe("Project Projection materialization", () => {
         },
       });
 
-      expect(result).toEqual({
+      assertDeepStrictEqualWithMatchers(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             path: "config.json",
             driver: "structured",
             location: "/setting",
@@ -565,11 +595,11 @@ describe("Project Projection materialization", () => {
           }),
         ],
       });
-      expect(result).not.toHaveProperty("mutations");
+      assert.ok(!hasProperty(result, "mutations"));
     },
   );
 
-  it("recursively combines concurrent object additions only at a missing location", async () => {
+  void it("recursively combines concurrent object additions only at a missing location", async () => {
     const result = await reconcileProjectProjections({
       before: structuredProjection("config.json", {}),
       after: structuredProjection("config.json", {
@@ -580,14 +610,17 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
-      setting: { userRetained: true, generated: true },
-    });
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      {
+        setting: { userRetained: true, generated: true },
+      },
+    );
   });
 
-  it("rejects undefined because it is not a JSON structured value", async () => {
+  void it("rejects undefined because it is not a JSON structured value", async () => {
     const result = await reconcileProjectProjections({
       before: {
         entries: [textEntry("config.json", '{"setting":undefined}\n')],
@@ -601,12 +634,12 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           location: "",
-          reason: expect.stringContaining(
+          reason: stringContaining(
             "Before structured content is not valid JSON",
           ),
           before: '{"setting":undefined}\n',
@@ -615,7 +648,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("returns a structured parse diagnostic for invalid Current JSON", async () => {
+  void it("returns a structured parse diagnostic for invalid Current JSON", async () => {
     const result = await reconcileProjectProjections({
       before: structuredProjection("config.json", { enabled: false }),
       after: structuredProjection("config.json", { enabled: true }),
@@ -624,14 +657,14 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           path: "config.json",
           driver: "structured",
           location: "",
-          reason: expect.stringContaining(
+          reason: stringContaining(
             "Current structured content is not valid JSON",
           ),
           current: '{"enabled":',
@@ -640,7 +673,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("uses the root pointer for a structured file-level conflict", async () => {
+  void it("uses the root pointer for a structured file-level conflict", async () => {
     const result = await reconcileProjectProjections({
       before: structuredProjection("config.json", { enabled: false }),
       after: structuredProjection("config.json", { enabled: true }),
@@ -649,10 +682,10 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           path: "config.json",
           driver: "structured",
           location: "",
@@ -662,7 +695,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("preserves Current scalar members and appends After members for an explicit identity set", async () => {
+  void it("preserves Current scalar members and appends After members for an explicit identity set", async () => {
     const identitySetReconciliation = [
       {
         path: "config.json",
@@ -684,17 +717,15 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual([
-      "user-first",
-      "base",
-      "user-last",
-      "generated",
-    ]);
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      ["user-first", "base", "user-last", "generated"],
+    );
   });
 
-  it("recursively reconciles matching object members by stable identity", async () => {
+  void it("recursively reconciles matching object members by stable identity", async () => {
     const identitySetReconciliation = [
       {
         path: "config.json",
@@ -739,21 +770,24 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
-      members: [
-        { id: "user", settings: { retained: true } },
-        {
-          id: "base",
-          settings: { timeout: 20, required: true },
-        },
-        { id: "generated", settings: {} },
-      ],
-    });
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      {
+        members: [
+          { id: "user", settings: { retained: true } },
+          {
+            id: "base",
+            settings: { timeout: 20, required: true },
+          },
+          { id: "generated", settings: {} },
+        ],
+      },
+    );
   });
 
-  it("reconciles generated members by projection identity when visible fields change", async () => {
+  void it("reconciles generated members by projection identity when visible fields change", async () => {
     const beforeReconciliation = [
       {
         path: "config.json",
@@ -842,25 +876,28 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
-      mounts: [
-        {
-          type: "bind",
-          source: "${localEnv:HOME}/.user-cache",
-          target: "/var/cache/user",
-        },
-        {
-          type: "volume",
-          source: "tool-cache",
-          target: "/var/cache/tool-v2",
-        },
-      ],
-    });
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      {
+        mounts: [
+          {
+            type: "bind",
+            source: "${localEnv:HOME}/.user-cache",
+            target: "/var/cache/user",
+          },
+          {
+            type: "volume",
+            source: "tool-cache",
+            target: "/var/cache/tool-v2",
+          },
+        ],
+      },
+    );
   });
 
-  it("distinguishes object members by multiple identity fields", async () => {
+  void it("distinguishes object members by multiple identity fields", async () => {
     const reconciliation = [
       {
         path: "config.json",
@@ -905,18 +942,21 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(JSON.parse(decoder.decode(result.mutations[0]!.content))).toEqual({
-      members: [
-        { owner: "user", name: "shared" },
-        { owner: "base", name: "shared" },
-        { owner: "generated", name: "shared" },
-      ],
-    });
+    assert.deepStrictEqual(
+      JSON.parse(decoder.decode(result.mutations[0]!.content)),
+      {
+        members: [
+          { owner: "user", name: "shared" },
+          { owner: "base", name: "shared" },
+          { owner: "generated", name: "shared" },
+        ],
+      },
+    );
   });
 
-  it("conflicts when matching object members change the same scalar incompatibly", async () => {
+  void it("conflicts when matching object members change the same scalar incompatibly", async () => {
     const reconciliation = [
       {
         path: "config.json",
@@ -950,10 +990,10 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           driver: "structured",
           location: "/members/1/value",
           reason: "Current and After contain incompatible scalar changes",
@@ -963,10 +1003,10 @@ describe("Project Projection materialization", () => {
         }),
       ],
     });
-    expect(result).not.toHaveProperty("mutations");
+    assert.ok(!hasProperty(result, "mutations"));
   });
 
-  it("decodes identity-set pointers and escapes structured conflict tokens", async () => {
+  void it("decodes identity-set pointers and escapes structured conflict tokens", async () => {
     const escapedKey = "groups/primary~set";
     const reconciliation = [
       {
@@ -1003,10 +1043,10 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           location: "/groups~1primary~0set/0/value",
           before: "1",
           current: "2",
@@ -1016,7 +1056,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("rejects an identity-set policy whose structured location is not an array", async () => {
+  void it("rejects an identity-set policy whose structured location is not an array", async () => {
     let reads = 0;
     const reconciliation = [
       {
@@ -1028,7 +1068,7 @@ describe("Project Projection materialization", () => {
       },
     ];
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: {
           ...structuredProjection("config.json", { members: {} }),
@@ -1046,13 +1086,17 @@ describe("Project Projection materialization", () => {
           return textEntry("config.json", '{"members":{}}\n');
         },
       }),
-    ).rejects.toThrow(
-      "Project Projection identity-set location must reference an array: config.json /members",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection identity-set location must reference an array: config.json /members",
+        ),
     );
-    expect(reads).toBe(0);
+    assert.strictEqual(reads, 0);
   });
 
-  it.each(["members", "/members/~", "/members/~2"])(
+  testEach(
+    ["members", "/members/~", "/members/~2"],
     "rejects invalid identity-set JSON Pointer %j before reading Current",
     async (location) => {
       let reads = 0;
@@ -1064,7 +1108,7 @@ describe("Project Projection materialization", () => {
         },
       ];
 
-      await expect(
+      await assert.rejects(
         reconcileProjectProjections({
           before: {
             ...structuredProjection("config.json", { members: ["base"] }),
@@ -1082,25 +1126,29 @@ describe("Project Projection materialization", () => {
             return textEntry("config.json", '{"members":["base"]}\n');
           },
         }),
-      ).rejects.toThrow(
-        "Project Projection identity-set location must be an RFC 6901 JSON Pointer",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Project Projection identity-set location must be an RFC 6901 JSON Pointer",
+          ),
       );
-      expect(reads).toBe(0);
+      assert.strictEqual(reads, 0);
     },
   );
 
-  it.each([
-    {
-      caseName: "missing",
-      currentMembers: [{ label: "missing-id" }],
-      diagnostic: "is missing its identity",
-    },
-    {
-      caseName: "duplicate",
-      currentMembers: [{ id: "same" }, { id: "same" }],
-      diagnostic: "identities must be unique",
-    },
-  ])(
+  testEach(
+    [
+      {
+        caseName: "missing",
+        currentMembers: [{ label: "missing-id" }],
+        diagnostic: "is missing its identity",
+      },
+      {
+        caseName: "duplicate",
+        currentMembers: [{ id: "same" }, { id: "same" }],
+        diagnostic: "identities must be unique",
+      },
+    ],
     "returns a policy conflict for $caseName Current member identities",
     async ({ currentMembers, diagnostic }) => {
       const reconciliation = [
@@ -1136,20 +1184,20 @@ describe("Project Projection materialization", () => {
         },
       });
 
-      expect(result).toEqual({
+      assertDeepStrictEqualWithMatchers(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             location: "/members",
-            reason: expect.stringContaining(`Current ${diagnostic}`),
+            reason: stringContaining(`Current ${diagnostic}`),
           }),
         ],
       });
-      expect(result).not.toHaveProperty("mutations");
+      assert.ok(!hasProperty(result, "mutations"));
     },
   );
 
-  it("keeps undeclared arrays atomic", async () => {
+  void it("keeps undeclared arrays atomic", async () => {
     const result = await reconcileProjectProjections({
       before: structuredProjection("config.json", {
         members: ["base"],
@@ -1162,10 +1210,10 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           location: "/members",
           reason: "Current and After contain incompatible atomic array changes",
         }),
@@ -1173,7 +1221,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("advances tool-owned state when Current exactly matches Before", async () => {
+  void it("advances tool-owned state when Current exactly matches Before", async () => {
     const canonicalReconciliation = [
       { path: "state.json", driver: "canonical" as const },
     ];
@@ -1199,43 +1247,41 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assert.deepStrictEqual(result, {
       ok: true,
       mutations: after.entries,
     });
   });
 
-  it.each<{
-    readonly staleDimension: string;
-    readonly current: CurrentProjectProjectionEntry;
-    readonly currentDescription: string;
-  }>([
-    {
-      staleDimension: "content",
-      current: textEntry(
-        "state.json",
-        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
-      ),
-      currentDescription:
-        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
-    },
-    {
-      staleDimension: "mode",
-      current: {
-        ...structuredProjection("state.json", {
-          schemaVersion: 1,
-          value: "before",
-        }).entries[0]!,
-        mode: 0o111,
+  testEach(
+    [
+      {
+        staleDimension: "content",
+        current: textEntry(
+          "state.json",
+          '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
+        ),
+        currentDescription:
+          '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
       },
-      currentDescription: '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
-    },
-    {
-      staleDimension: "kind",
-      current: { path: "state.json", kind: "directory" },
-      currentDescription: "directory",
-    },
-  ])(
+      {
+        staleDimension: "mode",
+        current: {
+          ...structuredProjection("state.json", {
+            schemaVersion: 1,
+            value: "before",
+          }).entries[0]!,
+          mode: 0o111,
+        },
+        currentDescription:
+          '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
+      },
+      {
+        staleDimension: "kind",
+        current: { path: "state.json", kind: "directory" },
+        currentDescription: "directory",
+      },
+    ],
     "rejects stale tool-owned $staleDimension unless Current exactly matches Before",
     async ({ current, currentDescription }) => {
       const canonicalReconciliation = [
@@ -1261,7 +1307,7 @@ describe("Project Projection materialization", () => {
         },
       });
 
-      expect(result).toEqual({
+      assert.deepStrictEqual(result, {
         ok: false,
         conflicts: [
           {
@@ -1274,11 +1320,11 @@ describe("Project Projection materialization", () => {
           },
         ],
       });
-      expect(result).not.toHaveProperty("mutations");
+      assert.ok(!hasProperty(result, "mutations"));
     },
   );
 
-  it("rejects duplicate projection paths before reading Current", async () => {
+  void it("rejects duplicate projection paths before reading Current", async () => {
     const duplicateBefore: ProjectProjection = {
       entries: [
         textEntry("same.txt", "first\n"),
@@ -1287,7 +1333,7 @@ describe("Project Projection materialization", () => {
       reconciliation: [{ path: "same.txt", driver: "text" }],
     };
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: duplicateBefore,
         after: {
@@ -1298,13 +1344,18 @@ describe("Project Projection materialization", () => {
           throw new Error(`unexpected read: ${projectionPath}`);
         },
       }),
-    ).rejects.toThrow("Project Projection paths must be unique: same.txt");
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection paths must be unique: same.txt",
+        ),
+    );
   });
 
-  it("rejects escaping raw Projection entry paths before reading Current", async () => {
+  void it("rejects escaping raw Projection entry paths before reading Current", async () => {
     let reads = 0;
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: textProjection("../escape.txt", "before\n"),
         after: textProjection("../escape.txt", "after\n"),
@@ -1313,16 +1364,19 @@ describe("Project Projection materialization", () => {
           return textEntry("../escape.txt", "before\n");
         },
       }),
-    ).rejects.toThrow(
-      "Project Projection entry path must be a normalized safe relative path: ../escape.txt",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection entry path must be a normalized safe relative path: ../escape.txt",
+        ),
     );
-    expect(reads).toBe(0);
+    assert.strictEqual(reads, 0);
   });
 
-  it("rejects non-normalized reconciliation paths before reading Current", async () => {
+  void it("rejects non-normalized reconciliation paths before reading Current", async () => {
     let reads = 0;
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: {
           entries: [textEntry("policy.txt", "before\n")],
@@ -1334,37 +1388,47 @@ describe("Project Projection materialization", () => {
           return textEntry("policy.txt", "before\n");
         },
       }),
-    ).rejects.toThrow(
-      "Project Projection reconciliation path must be a normalized safe relative path: ./policy.txt",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection reconciliation path must be a normalized safe relative path: ./policy.txt",
+        ),
     );
-    expect(reads).toBe(0);
+    assert.strictEqual(reads, 0);
   });
 
-  it.each([
-    "",
-    "/absolute.txt",
-    "./policy.txt",
-    "nested/../policy.txt",
-    "nested//policy.txt",
-    "nested/",
-    String.raw`C:\absolute.txt`,
-  ])("rejects unsafe raw Projection path %j", async (projectionPath) => {
-    let reads = 0;
+  testEach(
+    [
+      "",
+      "/absolute.txt",
+      "./policy.txt",
+      "nested/../policy.txt",
+      "nested//policy.txt",
+      "nested/",
+      String.raw`C:\absolute.txt`,
+    ],
+    "rejects unsafe raw Projection path %j",
+    async (projectionPath) => {
+      let reads = 0;
 
-    await expect(
-      reconcileProjectProjections({
-        before: textProjection(projectionPath, "before\n"),
-        after: textProjection(projectionPath, "after\n"),
-        async readCurrent() {
-          reads += 1;
-          return textEntry(projectionPath, "before\n");
-        },
-      }),
-    ).rejects.toThrow("must be a normalized safe relative path");
-    expect(reads).toBe(0);
-  });
+      await assert.rejects(
+        reconcileProjectProjections({
+          before: textProjection(projectionPath, "before\n"),
+          after: textProjection(projectionPath, "after\n"),
+          async readCurrent() {
+            reads += 1;
+            return textEntry(projectionPath, "before\n");
+          },
+        }),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("must be a normalized safe relative path"),
+      );
+      assert.strictEqual(reads, 0);
+    },
+  );
 
-  it("does not apply an escaping materialized path outside the target root", async () => {
+  void it("does not apply an escaping materialized path outside the target root", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-projection-containment-"),
     );
@@ -1374,7 +1438,7 @@ describe("Project Projection materialization", () => {
     try {
       await writeFile(outsidePath, '{"owner":"user"}\n');
 
-      await expect(
+      await assert.rejects(
         reconcileAndApplyProjectProjections({
           targetRoot,
           before: { operations: [] },
@@ -1388,10 +1452,14 @@ describe("Project Projection materialization", () => {
             ],
           },
         }),
-      ).rejects.toThrow(
-        "Project Projection path escapes its root: ../outside.json",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Project Projection path escapes its root: ../outside.json",
+          ),
       );
-      await expect(readFile(outsidePath, "utf8")).resolves.toBe(
+      assert.strictEqual(
+        await readFile(outsidePath, "utf8"),
         '{"owner":"user"}\n',
       );
     } finally {
@@ -1399,8 +1467,8 @@ describe("Project Projection materialization", () => {
     }
   });
 
-  it("requires one stable reconciliation driver per projected path before reading Current", async () => {
-    await expect(
+  void it("requires one stable reconciliation driver per projected path before reading Current", async () => {
+    await assert.rejects(
       reconcileProjectProjections({
         before: textProjection("same.txt", "before\n"),
         after: {
@@ -1411,16 +1479,19 @@ describe("Project Projection materialization", () => {
           throw new Error(`unexpected read: ${projectionPath}`);
         },
       }),
-    ).rejects.toThrow(
-      "Project Projection requires one reconciliation driver: same.txt",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection requires one reconciliation driver: same.txt",
+        ),
     );
   });
 
-  it("requires reconciliation policy metadata to remain stable before reading Current", async () => {
+  void it("requires reconciliation policy metadata to remain stable before reading Current", async () => {
     let reads = 0;
     const entry = textEntry("config.json", '{"members":["base"]}\n');
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: {
           entries: [entry],
@@ -1448,13 +1519,16 @@ describe("Project Projection materialization", () => {
           return entry;
         },
       }),
-    ).rejects.toThrow(
-      "Project Projection reconciliation policy changed for config.json",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Project Projection reconciliation policy changed for config.json",
+        ),
     );
-    expect(reads).toBe(0);
+    assert.strictEqual(reads, 0);
   });
 
-  it("obeys the basic three-way laws and repeated application is idempotent", async () => {
+  void it("obeys the basic three-way laws and repeated application is idempotent", async () => {
     const before = textProjection("alpha.txt", "before\n");
     const after = textProjection("alpha.txt", "after\n");
     const first = await reconcileProjectProjections({
@@ -1465,7 +1539,7 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(first).toEqual({
+    assert.deepStrictEqual(first, {
       ok: true,
       mutations: [textEntry("alpha.txt", "after\n")],
     });
@@ -1477,21 +1551,22 @@ describe("Project Projection materialization", () => {
         return first.mutations[0];
       },
     });
-    expect(repeated).toEqual({ ok: true, mutations: [] });
+    assert.deepStrictEqual(repeated, { ok: true, mutations: [] });
 
     const unchangedProjection = textProjection("stable.txt", "projected\n");
-    await expect(
-      reconcileProjectProjections({
+    assert.deepStrictEqual(
+      await reconcileProjectProjections({
         before: unchangedProjection,
         after: unchangedProjection,
         async readCurrent(projectionPath) {
           throw new Error(`unexpected read: ${projectionPath}`);
         },
       }),
-    ).resolves.toEqual({ ok: true, mutations: [] });
+      { ok: true, mutations: [] },
+    );
   });
 
-  it("returns conflicts without a partial mutation result", async () => {
+  void it("returns conflicts without a partial mutation result", async () => {
     const result = await reconcileProjectProjections({
       before: textProjection("alpha.txt", "shared\n"),
       after: textProjection("alpha.txt", "generated\n"),
@@ -1500,20 +1575,20 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result.ok).toBe(false);
+    assert.strictEqual(result.ok, false);
     if (result.ok) return;
-    expect(result).not.toHaveProperty("mutations");
-    expect(result.conflicts).toEqual([
-      expect.objectContaining({
+    assert.ok(!hasProperty(result, "mutations"));
+    assertDeepStrictEqualWithMatchers(result.conflicts, [
+      objectContaining({
         path: "alpha.txt",
         driver: "text",
         reason: "Current and After contain incompatible text changes",
-        region: expect.any(Object),
+        region: any(Object),
       }),
     ]);
   });
 
-  it("reports each text conflict as a concise line region", async () => {
+  void it("reports each text conflict as a concise line region", async () => {
     const result = await reconcileProjectProjections({
       before: textProjection(
         "policy.txt",
@@ -1531,7 +1606,7 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assert.deepStrictEqual(result, {
       ok: false,
       conflicts: [
         {
@@ -1551,7 +1626,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("reports incompatible binary content without throwing or serializing bytes", async () => {
+  void it("reports incompatible binary content without throwing or serializing bytes", async () => {
     const binaryProjection = (
       content: readonly number[],
     ): ProjectProjection => ({
@@ -1574,7 +1649,7 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
         {
@@ -1582,21 +1657,15 @@ describe("Project Projection materialization", () => {
           driver: "text",
           attribute: "binary-content",
           reason: "Current and After contain incompatible binary changes",
-          before: expect.stringMatching(
-            /^<2 binary bytes; sha256=[a-f0-9]{64}>$/u,
-          ),
-          current: expect.stringMatching(
-            /^<2 binary bytes; sha256=[a-f0-9]{64}>$/u,
-          ),
-          after: expect.stringMatching(
-            /^<2 binary bytes; sha256=[a-f0-9]{64}>$/u,
-          ),
+          before: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
+          current: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
+          after: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
         },
       ],
     });
   });
 
-  it("reports incompatible executable-mode changes as a file attribute conflict", async () => {
+  void it("reports incompatible executable-mode changes as a file attribute conflict", async () => {
     const before = textProjection("script.sh", "echo stable\n");
     const after = {
       ...before,
@@ -1611,7 +1680,7 @@ describe("Project Projection materialization", () => {
       },
     });
 
-    expect(result).toEqual({
+    assert.deepStrictEqual(result, {
       ok: false,
       conflicts: [
         {
@@ -1628,7 +1697,7 @@ describe("Project Projection materialization", () => {
     });
   });
 
-  it("reports a Current file-kind conflict before mutating the workspace", async () => {
+  void it("reports a Current file-kind conflict before mutating the workspace", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-kind-conflict-"),
     );
@@ -1638,8 +1707,8 @@ describe("Project Projection materialization", () => {
       await mkdir(readmePath);
       await writeFile(path.join(readmePath, "retained.txt"), "user data\n");
 
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot,
           before: {
             operations: [
@@ -1652,29 +1721,31 @@ describe("Project Projection materialization", () => {
             ],
           },
         }),
-      ).resolves.toEqual({
-        ok: false,
-        conflicts: [
-          {
-            path: "README.md",
-            driver: "text",
-            attribute: "file-kind",
-            reason: "Current file kind is incompatible with Package Addition",
-            before: "file",
-            current: "directory",
-            after: "file",
-          },
-        ],
-      });
-      await expect(
-        readFile(path.join(readmePath, "retained.txt"), "utf8"),
-      ).resolves.toBe("user data\n");
+        {
+          ok: false,
+          conflicts: [
+            {
+              path: "README.md",
+              driver: "text",
+              attribute: "file-kind",
+              reason: "Current file kind is incompatible with Package Addition",
+              before: "file",
+              current: "directory",
+              after: "file",
+            },
+          ],
+        },
+      );
+      assert.strictEqual(
+        await readFile(path.join(readmePath, "retained.txt"), "utf8"),
+        "user data\n",
+      );
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("rolls back repository files and canonical metadata after a commit failure", async () => {
+  void it("rolls back repository files and canonical metadata after a commit failure", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-rollback-"),
     );
@@ -1716,26 +1787,31 @@ describe("Project Projection materialization", () => {
         ),
       ]);
 
-      await expect(
+      await assert.rejects(
         reconcile({
           targetRoot,
           before: sourceOperation("before\n"),
           after: sourceOperation("after\n"),
         }),
-      ).rejects.toThrow("injected projection commit failure");
-      await expect(
-        readFile(path.join(targetRoot, "alpha.md"), "utf8"),
-      ).resolves.toBe("before\n");
-      await expect(
-        readFile(path.join(targetRoot, ".template/state.json"), "utf8"),
-      ).resolves.toBe('{\n  "state": "before"\n}\n');
-      expect(committedPaths).toHaveLength(2);
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("injected projection commit failure"),
+      );
+      assert.strictEqual(
+        await readFile(path.join(targetRoot, "alpha.md"), "utf8"),
+        "before\n",
+      );
+      assert.strictEqual(
+        await readFile(path.join(targetRoot, ".template/state.json"), "utf8"),
+        '{\n  "state": "before"\n}\n',
+      );
+      assertLength(committedPaths, 2);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("rejects a concurrently created reserved path at the atomic commit boundary with zero transaction writes", async () => {
+  void it("rejects a concurrently created reserved path at the atomic commit boundary with zero transaction writes", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-path-race-"),
     );
@@ -1775,36 +1851,42 @@ describe("Project Projection materialization", () => {
         ],
       });
 
-      expect(result).toMatchObject({
+      assertPartialDeepStrictEqual(result, {
         ok: false,
         conflicts: [
           {
             path: "services/race",
             driver: "precondition",
-            reason: expect.stringContaining(
+            reason: stringContaining(
               "Package Path services/race already exists",
             ),
           },
         ],
       });
-      await expect(
-        readFile(path.join(targetRoot, "root.txt"), "utf8"),
-      ).resolves.toBe("before\n");
-      await expect(
-        readFile(path.join(targetRoot, "services/race/OWNER"), "utf8"),
-      ).resolves.toBe("user\n");
-      await expect(
+      assert.strictEqual(
+        await readFile(path.join(targetRoot, "root.txt"), "utf8"),
+        "before\n",
+      );
+      assert.strictEqual(
+        await readFile(path.join(targetRoot, "services/race/OWNER"), "utf8"),
+        "user\n",
+      );
+      await assert.rejects(
         stat(path.join(targetRoot, "services/race/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("rejects projection deletions before reading Current", async () => {
+  void it("rejects projection deletions before reading Current", async () => {
     const reads: string[] = [];
 
-    await expect(
+    await assert.rejects(
       reconcileProjectProjections({
         before: {
           entries: [
@@ -1822,10 +1904,13 @@ describe("Project Projection materialization", () => {
           return textEntry(projectionPath, "before\n");
         },
       }),
-    ).rejects.toThrow(
-      "Package Addition projection may not delete path: removed.txt",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Package Addition projection may not delete path: removed.txt",
+        ),
     );
-    expect(reads).toEqual([]);
+    assert.deepStrictEqual(reads, []);
   });
 });
 
@@ -1911,8 +1996,8 @@ function anchoredLauncherPlan(text: string) {
   };
 }
 
-describe("Declared mirror-slot coordination", () => {
-  it("reads only declared slot paths when Before equals After and restores the root value", async () => {
+void describe("Declared mirror-slot coordination", () => {
+  void it("reads only declared slot paths when Before equals After and restores the root value", async () => {
     const declared = mirrorStructuredProjection({
       env: { TOOL_VERSION: rootValue },
       name: "demo",
@@ -1955,20 +2040,21 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(reads).toEqual([declaredConfigPath]);
-    expect(result.ok).toBe(true);
+    assert.deepStrictEqual(reads, [declaredConfigPath]);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(result.mutations).toHaveLength(1);
-    expect(
+    assertLength(result.mutations, 1);
+    assert.deepStrictEqual(
       JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
-    ).toEqual({
-      name: "demo",
-      env: { TOOL_VERSION: rootValue },
-      userOnly: { retained: true },
-    });
+      {
+        name: "demo",
+        env: { TOOL_VERSION: rootValue },
+        userOnly: { retained: true },
+      },
+    );
   });
 
-  it("carries one update action for a legal same-file delta and the coordinated slot", async () => {
+  void it("carries one update action for a legal same-file delta and the coordinated slot", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-slot-delta-"),
     );
@@ -2001,7 +2087,7 @@ describe("Declared mirror-slot coordination", () => {
         }),
       });
 
-      expect(applied).toEqual({
+      assert.deepStrictEqual(applied, {
         ok: true,
         changedPaths: [declaredConfigPath],
         actions: [
@@ -2009,7 +2095,7 @@ describe("Declared mirror-slot coordination", () => {
         ],
       });
       const written = await readFile(configPath, "utf8");
-      expect(JSON.parse(written) as unknown).toEqual({
+      assert.deepStrictEqual(JSON.parse(written) as unknown, {
         env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
         features: { beta: true },
         userOnly: { retained: true },
@@ -2026,14 +2112,18 @@ describe("Declared mirror-slot coordination", () => {
           features: { beta: true },
         }),
       });
-      expect(repeated).toEqual({ ok: true, changedPaths: [], actions: [] });
-      await expect(readFile(configPath, "utf8")).resolves.toBe(written);
+      assert.deepStrictEqual(repeated, {
+        ok: true,
+        changedPaths: [],
+        actions: [],
+      });
+      assert.strictEqual(await readFile(configPath, "utf8"), written);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("keeps a deleted slot absent while a legal new key lands in the same file", async () => {
+  void it("keeps a deleted slot absent while a legal new key lands in the same file", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-slot-deleted-"),
     );
@@ -2046,33 +2136,38 @@ describe("Declared mirror-slot coordination", () => {
         `${JSON.stringify({ env: {}, userOnly: true }, null, 2)}\n`,
       );
 
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot,
           before: structuredConfigPlan({ env: { TOOL_VERSION: rootValue } }),
           after: structuredConfigPlan({
             env: { ADDITIONAL_TOOL: "1.4.0", TOOL_VERSION: rootValue },
           }),
         }),
-      ).resolves.toEqual({
-        ok: true,
-        changedPaths: [declaredConfigPath],
-        actions: [
-          { path: declaredConfigPath, driver: "structured", action: "update" },
-        ],
-      });
+        {
+          ok: true,
+          changedPaths: [declaredConfigPath],
+          actions: [
+            {
+              path: declaredConfigPath,
+              driver: "structured",
+              action: "update",
+            },
+          ],
+        },
+      );
       const merged = JSON.parse(await readFile(configPath, "utf8")) as unknown;
-      expect(merged).toEqual({
+      assert.deepStrictEqual(merged, {
         env: { ADDITIONAL_TOOL: "1.4.0" },
         userOnly: true,
       });
-      expect(merged).not.toHaveProperty(["env", "TOOL_VERSION"]);
+      assert.ok(!hasProperty(merged, ["env", "TOOL_VERSION"]));
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("adds a slot value that only After declares", async () => {
+  void it("adds a slot value that only After declares", async () => {
     const result = await reconcileProjectProjections({
       before: mirrorStructuredProjection({ env: { OTHER: "keep" } }),
       after: mirrorStructuredProjection({
@@ -2086,39 +2181,42 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(
+    assert.deepStrictEqual(
       JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
-    ).toEqual({ env: { OTHER: "keep", TOOL_VERSION: rootValue } });
+      { env: { OTHER: "keep", TOOL_VERSION: rootValue } },
+    );
   });
 
-  it.each([
-    { absentShape: "missing file", current: undefined },
-    {
-      absentShape: "directory in place of the file",
-      current: { path: declaredConfigPath, kind: "directory" as const },
-    },
-  ])(
+  testEach(
+    [
+      { absentShape: "missing file", current: undefined },
+      {
+        absentShape: "directory in place of the file",
+        current: { path: declaredConfigPath, kind: "directory" as const },
+      },
+    ],
     "skips a pure coordination path whose Current is $absentShape",
     async ({ current }) => {
       const projection = mirrorStructuredProjection({
         env: { TOOL_VERSION: rootValue },
       });
 
-      await expect(
-        reconcileProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileProjectProjections({
           before: projection,
           after: projection,
           async readCurrent() {
             return current;
           },
         }),
-      ).resolves.toEqual({ ok: true, mutations: [] });
+        { ok: true, mutations: [] },
+      );
     },
   );
 
-  it("keeps the presence conflict when a declared path also carries a delta", async () => {
+  void it("keeps the presence conflict when a declared path also carries a delta", async () => {
     const result = await reconcileProjectProjections({
       before: mirrorStructuredProjection({ env: { TOOL_VERSION: rootValue } }),
       after: mirrorStructuredProjection({
@@ -2130,10 +2228,10 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(result).toEqual({
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           path: declaredConfigPath,
           driver: "structured",
           reason: "Path presence changed concurrently",
@@ -2142,7 +2240,7 @@ describe("Declared mirror-slot coordination", () => {
     });
   });
 
-  it("reports no change when a declared slot already equals the root value in another format", async () => {
+  void it("reports no change when a declared slot already equals the root value in another format", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-slot-format-"),
     );
@@ -2161,40 +2259,42 @@ describe("Declared mirror-slot coordination", () => {
         env: { TOOL_VERSION: rootValue },
         name: "demo",
       });
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot,
           before: plan,
           after: plan,
         }),
-      ).resolves.toEqual({ ok: true, changedPaths: [], actions: [] });
-      await expect(readFile(configPath, "utf8")).resolves.toBe(formatted);
+        { ok: true, changedPaths: [], actions: [] },
+      );
+      assert.strictEqual(await readFile(configPath, "utf8"), formatted);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it.each([
-    {
-      unusableShape: "JSON with comments",
-      currentBytes: new TextEncoder().encode(
-        `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
-      ),
-      diagnostic: "Current structured content is not valid JSON",
-    },
-    {
-      unusableShape: "non-string slot value",
-      currentBytes: new TextEncoder().encode(
-        '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
-      ),
-      diagnostic: "holds a non-string Current value",
-    },
-    {
-      unusableShape: "binary bytes",
-      currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
-      diagnostic: "Current structured content is not valid JSON",
-    },
-  ])(
+  testEach(
+    [
+      {
+        unusableShape: "JSON with comments",
+        currentBytes: new TextEncoder().encode(
+          `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
+        ),
+        diagnostic: "Current structured content is not valid JSON",
+      },
+      {
+        unusableShape: "non-string slot value",
+        currentBytes: new TextEncoder().encode(
+          '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
+        ),
+        diagnostic: "holds a non-string Current value",
+      },
+      {
+        unusableShape: "binary bytes",
+        currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
+        diagnostic: "Current structured content is not valid JSON",
+      },
+    ],
     "fails atomically with zero writes for an unusable $unusableShape declared slot",
     async ({ currentBytes, diagnostic }) => {
       const targetRoot = await mkdtemp(
@@ -2207,8 +2307,8 @@ describe("Declared mirror-slot coordination", () => {
         await mkdir(path.dirname(configPath), { recursive: true });
         await writeFile(configPath, currentBytes);
 
-        await expect(
-          reconcileAndApplyProjectProjections({
+        assertDeepStrictEqualWithMatchers(
+          await reconcileAndApplyProjectProjections({
             targetRoot,
             before: structuredConfigPlan({
               env: { TOOL_VERSION: rootValue },
@@ -2236,21 +2336,26 @@ describe("Declared mirror-slot coordination", () => {
               },
             ],
           }),
-        ).resolves.toEqual({
-          ok: false,
-          conflicts: [
-            expect.objectContaining({
-              path: declaredConfigPath,
-              driver: "structured",
-              reason: expect.stringContaining(diagnostic),
-            }),
-          ],
-        });
-        await expect(readFile(configPath)).resolves.toEqual(
+          {
+            ok: false,
+            conflicts: [
+              objectContaining({
+                path: declaredConfigPath,
+                driver: "structured",
+                reason: stringContaining(diagnostic),
+              }),
+            ],
+          },
+        );
+        assert.deepStrictEqual(
+          await readFile(configPath),
           Buffer.from(currentBytes),
         );
-        await expect(stat(reservedPath)).rejects.toMatchObject({
-          code: "ENOENT",
+        await assert.rejects(stat(reservedPath), (error) => {
+          assertPartialDeepStrictEqual(error, {
+            code: "ENOENT",
+          });
+          return true;
         });
       } finally {
         await rm(targetRoot, { recursive: true, force: true });
@@ -2258,7 +2363,7 @@ describe("Declared mirror-slot coordination", () => {
     },
   );
 
-  it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
+  void it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
     const result = await reconcileProjectProjections({
       before: projection,
@@ -2274,9 +2379,10 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(decoder.decode(result.mutations[0]!.content)).toBe(
+    assert.strictEqual(
+      decoder.decode(result.mutations[0]!.content),
       anchoredText(rootValue).replace(
         "RUN existing step\n",
         "RUN existing step\nRUN user step\n",
@@ -2284,7 +2390,7 @@ describe("Declared mirror-slot coordination", () => {
     );
   });
 
-  it("replaces the owned block when Before has no block and keeps bytes outside it", async () => {
+  void it("replaces the owned block when Before has no block and keeps bytes outside it", async () => {
     const result = await reconcileProjectProjections({
       before: mirrorTextProjection("FROM base:1\nRUN existing step\n"),
       after: mirrorTextProjection(anchoredText(rootValue)),
@@ -2299,10 +2405,11 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    expect(result.mutations).toHaveLength(1);
-    expect(decoder.decode(result.mutations[0]!.content)).toBe(
+    assertLength(result.mutations, 1);
+    assert.strictEqual(
+      decoder.decode(result.mutations[0]!.content),
       anchoredText(rootValue).replace(
         "RUN existing step\n",
         "RUN existing step\nRUN user step\n",
@@ -2310,7 +2417,7 @@ describe("Declared mirror-slot coordination", () => {
     );
   });
 
-  it("fails atomically when Before holds the anchor more than once", async () => {
+  void it("fails atomically when Before holds the anchor more than once", async () => {
     const result = await reconcileProjectProjections({
       before: mirrorTextProjection(
         anchoredText(rootValue) + anchoredText(rootValue),
@@ -2321,21 +2428,21 @@ describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    expect(result).not.toHaveProperty("mutations");
-    expect(result).toEqual({
+    assert.ok(!hasProperty(result, "mutations"));
+    assertDeepStrictEqualWithMatchers(result, {
       ok: false,
       conflicts: [
-        expect.objectContaining({
+        objectContaining({
           path: declaredLauncherPath,
           driver: "text",
           location: "TOOL_VERSION",
-          reason: expect.stringContaining("in Before could not be located"),
+          reason: stringContaining("in Before could not be located"),
         }),
       ],
     });
   });
 
-  it("lands a template text delta together with the coordinated anchor", async () => {
+  void it("lands a template text delta together with the coordinated anchor", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-slot-text-delta-"),
     );
@@ -2351,22 +2458,24 @@ describe("Declared mirror-slot coordination", () => {
         ),
       );
 
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot,
           before: anchoredLauncherPlan(anchoredText(rootValue)),
           after: anchoredLauncherPlan(
             `# generated header\n${anchoredText(rootValue)}`,
           ),
         }),
-      ).resolves.toEqual({
-        ok: true,
-        changedPaths: [declaredLauncherPath],
-        actions: [
-          { path: declaredLauncherPath, driver: "text", action: "update" },
-        ],
-      });
-      await expect(readFile(launcherPath, "utf8")).resolves.toBe(
+        {
+          ok: true,
+          changedPaths: [declaredLauncherPath],
+          actions: [
+            { path: declaredLauncherPath, driver: "text", action: "update" },
+          ],
+        },
+      );
+      assert.strictEqual(
+        await readFile(launcherPath, "utf8"),
         `# generated header\n${anchoredText(rootValue).replace(
           "RUN existing step\n",
           "RUN existing step\nRUN user step\n",
@@ -2377,27 +2486,28 @@ describe("Declared mirror-slot coordination", () => {
     }
   });
 
-  it.each([
-    {
-      brokenAnchor: "markers removed but the carrier assignment remains",
-      current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
-    },
-    {
-      brokenAnchor: "marker removed but the reference remains",
-      current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
-    },
-    {
-      brokenAnchor: "the anchored region is duplicated",
-      current: anchoredText(driftedValue) + anchoredText(driftedValue),
-    },
-    {
-      brokenAnchor: "the anchored region holds two lines",
-      current: anchoredText(driftedValue).replace(
-        `ARG TOOL_VERSION="${driftedValue}"\n`,
-        `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
-      ),
-    },
-  ])(
+  testEach(
+    [
+      {
+        brokenAnchor: "markers removed but the carrier assignment remains",
+        current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
+      },
+      {
+        brokenAnchor: "marker removed but the reference remains",
+        current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
+      },
+      {
+        brokenAnchor: "the anchored region is duplicated",
+        current: anchoredText(driftedValue) + anchoredText(driftedValue),
+      },
+      {
+        brokenAnchor: "the anchored region holds two lines",
+        current: anchoredText(driftedValue).replace(
+          `ARG TOOL_VERSION="${driftedValue}"\n`,
+          `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
+        ),
+      },
+    ],
     "fails when $brokenAnchor while the carrier or reference is still present",
     async ({ current }) => {
       const projection = mirrorTextProjection(anchoredText(rootValue));
@@ -2409,25 +2519,25 @@ describe("Declared mirror-slot coordination", () => {
         },
       });
 
-      expect(result).toEqual({
+      assertDeepStrictEqualWithMatchers(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             path: declaredLauncherPath,
             driver: "text",
             location: "TOOL_VERSION",
-            reason: expect.stringContaining("anchor could not be located"),
+            reason: stringContaining("anchor could not be located"),
           }),
         ],
       });
     },
   );
 
-  it("keeps a text slot absent when the carrier and every reference exited", async () => {
+  void it("keeps a text slot absent when the carrier and every reference exited", async () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
 
-    await expect(
-      reconcileProjectProjections({
+    assert.deepStrictEqual(
+      await reconcileProjectProjections({
         before: projection,
         after: projection,
         async readCurrent() {
@@ -2437,10 +2547,11 @@ describe("Declared mirror-slot coordination", () => {
           );
         },
       }),
-    ).resolves.toEqual({ ok: true, mutations: [] });
+      { ok: true, mutations: [] },
+    );
   });
 
-  it("rolls back the coordinated slot together with the other mutations", async () => {
+  void it("rolls back the coordinated slot together with the other mutations", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-projection-slot-rollback-"),
     );
@@ -2487,59 +2598,67 @@ describe("Declared mirror-slot coordination", () => {
       await writeFile(guidePath, "before\n");
       const driftedConfig = await readFile(configPath, "utf8");
 
-      await expect(reconcile({ targetRoot, before, after })).rejects.toThrow(
-        "injected mirror-slot commit failure",
+      await assert.rejects(
+        reconcile({ targetRoot, before, after }),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("injected mirror-slot commit failure"),
       );
-      await expect(readFile(configPath, "utf8")).resolves.toBe(driftedConfig);
-      await expect(readFile(guidePath, "utf8")).resolves.toBe("before\n");
+      assert.strictEqual(await readFile(configPath, "utf8"), driftedConfig);
+      assert.strictEqual(await readFile(guidePath, "utf8"), "before\n");
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it.each([
-    {
-      malformed: "a JSON Pointer location on the text driver",
-      driver: "text" as const,
-      slot: toolSlot,
-      diagnostic: "text mirror slots require a named text anchor",
-    },
-    {
-      malformed: "a named text anchor on the structured driver",
-      driver: "structured" as const,
-      slot: toolAnchorSlot,
-      diagnostic: "structured mirror slots require a JSON Pointer location",
-    },
-    {
-      malformed: "an invalid JSON Pointer",
-      driver: "structured" as const,
-      slot: {
-        id: "bad-pointer",
-        location: { kind: "json-pointer", pointer: "/env/~2" },
-      } satisfies ProjectProjectionMirrorSlot,
-      diagnostic: "must be an RFC 6901 JSON Pointer",
-    },
-    {
-      malformed: "a repeated slot id",
-      driver: "structured" as const,
-      slot: { id: "tool-version", location: { ...toolSlot.location } },
-      duplicateId: true,
-      diagnostic: "mirror slot ids must be unique and non-empty",
-    },
-    {
-      malformed: "a slot name made of separate words",
-      driver: "text" as const,
-      slot: {
-        id: "spaced",
-        location: { kind: "text-anchor", name: "TOOL VERSION" },
-      } satisfies ProjectProjectionMirrorSlot,
-      diagnostic: "text mirror slot names must be single non-empty tokens",
-    },
-  ])(
+  testEach(
+    [
+      {
+        malformed: "a JSON Pointer location on the text driver",
+        driver: "text" as const,
+        slot: toolSlot,
+        diagnostic: "text mirror slots require a named text anchor",
+      },
+      {
+        malformed: "a named text anchor on the structured driver",
+        driver: "structured" as const,
+        slot: toolAnchorSlot,
+        diagnostic: "structured mirror slots require a JSON Pointer location",
+      },
+      {
+        malformed: "an invalid JSON Pointer",
+        driver: "structured" as const,
+        slot: {
+          id: "bad-pointer",
+          location: { kind: "json-pointer", pointer: "/env/~2" },
+        } satisfies ProjectProjectionMirrorSlot,
+        diagnostic: "must be an RFC 6901 JSON Pointer",
+      },
+      {
+        malformed: "a repeated slot id",
+        driver: "structured" as const,
+        slot: { id: "tool-version", location: { ...toolSlot.location } },
+        duplicateId: true,
+        diagnostic: "mirror slot ids must be unique and non-empty",
+      },
+      {
+        malformed: "a slot name made of separate words",
+        driver: "text" as const,
+        slot: {
+          id: "spaced",
+          location: { kind: "text-anchor", name: "TOOL VERSION" },
+        } satisfies ProjectProjectionMirrorSlot,
+        diagnostic: "text mirror slot names must be single non-empty tokens",
+      },
+    ],
     "rejects malformed declarations such as $malformed before reading Current",
-    async ({ driver, slot, duplicateId, diagnostic }) => {
+    async (scenario) => {
+      const { driver, slot, diagnostic } = scenario;
       let reads = 0;
-      const slots = duplicateId ? [slot, toolSlot] : [slot];
+      const slots =
+        "duplicateId" in scenario && scenario.duplicateId
+          ? [slot, toolSlot]
+          : [slot];
       const projection: ProjectProjection = {
         entries: [
           textEntry(declaredConfigPath, '{"env":{"TOOL_VERSION":"x"}}\n'),
@@ -2549,7 +2668,7 @@ describe("Declared mirror-slot coordination", () => {
         ],
       };
 
-      await expect(
+      await assertRejectsContaining(
         reconcileProjectProjections({
           before: projection,
           after: projection,
@@ -2558,12 +2677,13 @@ describe("Declared mirror-slot coordination", () => {
             return projection.entries[0];
           },
         }),
-      ).rejects.toThrow(diagnostic);
-      expect(reads).toBe(0);
+        diagnostic,
+      );
+      assert.strictEqual(reads, 0);
     },
   );
 
-  it("carries the declaration through plan preflight and materialization", async () => {
+  void it("carries the declaration through plan preflight and materialization", async () => {
     const operations = [
       {
         kind: "writeText" as const,
@@ -2579,17 +2699,18 @@ describe("Declared mirror-slot coordination", () => {
       },
     ];
 
-    expect(
+    assert.deepStrictEqual(
       validateProjectProjectionPlan({ operations, reconciliation }),
-    ).toEqual([]);
+      [],
+    );
     const projection = await materializeProjectProjection({
       operations,
       reconciliation,
     });
-    expect(projection.reconciliation).toEqual(reconciliation);
+    assert.deepStrictEqual(projection.reconciliation, reconciliation);
 
     const undeclared = await materializeProjectProjection({ operations });
-    expect(undeclared.reconciliation).toEqual([
+    assert.deepStrictEqual(undeclared.reconciliation, [
       { path: declaredLauncherPath, driver: "text" },
     ]);
   });

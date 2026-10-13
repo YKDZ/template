@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -9,7 +11,12 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+
+import {
+  assertContainsEqual,
+  objectContaining,
+  testEach,
+} from "./assertions.ts";
 
 type Tsconfig = {
   readonly compilerOptions?: Readonly<Record<string, unknown>>;
@@ -80,10 +87,9 @@ async function localExtendsChain(
   return seen;
 }
 
-describe("Generated Repository TypeScript policy", () => {
-  it.each(
+void describe("Generated Repository TypeScript policy", () => {
+  testEach(
     builtInPresetRegistry.all().map((definition) => definition.metadata.name),
-  )(
     "%s inherits one strict policy with explicit ecosystem exceptions",
     async (presetName) => {
       const workspace = await mkdtemp(
@@ -115,11 +121,12 @@ describe("Generated Repository TypeScript policy", () => {
           targetDir,
           "packages/typescript-config/base.json",
         );
-        expect(await readTsconfig(baselinePath)).toEqual({
+        assert.deepStrictEqual(await readTsconfig(baselinePath), {
           compilerOptions: policyOptions,
         });
-        expect(plan.blueprint.packages).toContainEqual(
-          expect.objectContaining({
+        assertContainsEqual(
+          plan.blueprint.packages,
+          objectContaining({
             name: configPackageName,
             path: "packages/typescript-config",
             role: "shared-library",
@@ -135,12 +142,15 @@ describe("Generated Repository TypeScript policy", () => {
             config.references !== undefined;
           if (!isSolutionConfig) {
             const chain = await localExtendsChain(configPath);
-            expect({
-              inheritsPolicy:
-                chain.has(path.resolve(baselinePath)) ||
-                chain.has(configReference),
-              relativePath,
-            }).toEqual({ inheritsPolicy: true, relativePath });
+            assert.deepStrictEqual(
+              {
+                inheritsPolicy:
+                  chain.has(path.resolve(baselinePath)) ||
+                  chain.has(configReference),
+                relativePath,
+              },
+              { inheritsPolicy: true, relativePath },
+            );
           }
 
           const repeatedPolicyOptions = Object.keys(
@@ -161,10 +171,13 @@ describe("Generated Repository TypeScript policy", () => {
               ? ["skipLibCheck"]
               : []),
           ];
-          expect({ relativePath, repeatedPolicyOptions }).toEqual({
-            relativePath,
-            repeatedPolicyOptions: allowedOverrides,
-          });
+          assert.deepStrictEqual(
+            { relativePath, repeatedPolicyOptions },
+            {
+              relativePath,
+              repeatedPolicyOptions: allowedOverrides,
+            },
+          );
         }
       } finally {
         await rm(workspace, { recursive: true, force: true });

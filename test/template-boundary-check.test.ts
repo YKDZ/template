@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import type {
   PackageDefinition,
@@ -9,7 +11,12 @@ import type {
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { checkTemplateSourceBoundary } from "@ykdz/template-core/template-boundary-check";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+
+import {
+  assertDeepStrictEqualWithMatchers,
+  objectContaining,
+  testEach,
+} from "./assertions.ts";
 
 const workflowPath = ".github/workflows/check.yml";
 
@@ -35,15 +42,16 @@ function workflowOperation(
   };
 }
 
-describe("Template Source Boundary", () => {
-  it.each([
-    "packages/cli/README.md",
-    "scripts/npm-publication/readiness.ts",
-    "Dockerfile",
-    ".dockerignore",
-    "scripts/check-standalone-deployment.ts",
-    "scripts/container-entrypoint.sh",
-  ])(
+void describe("Template Source Boundary", () => {
+  testEach(
+    [
+      "packages/cli/README.md",
+      "scripts/npm-publication/readiness.ts",
+      "Dockerfile",
+      ".dockerignore",
+      "scripts/check-standalone-deployment.ts",
+      "scripts/container-entrypoint.sh",
+    ],
     "rejects an inline protected body for %s with its planner owner",
     async (generatedPath) => {
       const directory = await mkdtemp(
@@ -85,10 +93,10 @@ describe("Template Source Boundary", () => {
           ],
         });
 
-        expect(result).toEqual({
+        assertDeepStrictEqualWithMatchers(result, {
           ok: false,
           violations: [
-            expect.objectContaining({
+            objectContaining({
               generatedPath,
               owningFunction: "planPublicationBody",
               operationKind: "writeText",
@@ -102,38 +110,42 @@ describe("Template Source Boundary", () => {
     },
   );
 
-  it.each([
+  testEach(
     [
-      "an extra declaration key",
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: "apps/web" },
-        paths: ["test-results"],
-      },
+      [
+        "an extra declaration key",
+        {
+          kind: "playwright",
+          owner: { kind: "package-boundary", path: "apps/web" },
+          paths: ["test-results"],
+        },
+      ],
+      [
+        "a wrong diagnostic kind",
+        {
+          kind: "coverage",
+          owner: { kind: "package-boundary", path: "apps/web" },
+        },
+      ],
+      [
+        "a malformed owner",
+        { kind: "playwright", owner: { path: "apps/web" } },
+      ],
+      [
+        "an unsafe owner path",
+        {
+          kind: "playwright",
+          owner: { kind: "package-boundary", path: "../secrets" },
+        },
+      ],
+      [
+        "an owner absent from the Blueprint",
+        {
+          kind: "playwright",
+          owner: { kind: "package-boundary", path: "apps/admin" },
+        },
+      ],
     ],
-    [
-      "a wrong diagnostic kind",
-      {
-        kind: "coverage",
-        owner: { kind: "package-boundary", path: "apps/web" },
-      },
-    ],
-    ["a malformed owner", { kind: "playwright", owner: { path: "apps/web" } }],
-    [
-      "an unsafe owner path",
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: "../secrets" },
-      },
-    ],
-    [
-      "an owner absent from the Blueprint",
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: "apps/admin" },
-      },
-    ],
-  ])(
     "rejects %s in a protected workflow declaration",
     async (_label, declaration) => {
       const directory = await mkdtemp(
@@ -172,9 +184,9 @@ describe("Template Source Boundary", () => {
           ],
         });
 
-        expect(result.ok).toBe(false);
-        expect(result.violations).toEqual([
-          expect.objectContaining({
+        assert.strictEqual(result.ok, false);
+        assertDeepStrictEqualWithMatchers(result.violations, [
+          objectContaining({
             generatedPath: workflowPath,
             sourceFilePath,
           }),
@@ -185,7 +197,7 @@ describe("Template Source Boundary", () => {
     },
   );
 
-  it("derives diagnostic owner facts from raw Blueprint declarations without the production composer", async () => {
+  void it("derives diagnostic owner facts from raw Blueprint declarations without the production composer", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "template-boundary-workflow-contract-"),
     );
@@ -242,7 +254,7 @@ describe("Template Source Boundary", () => {
         ],
       });
 
-      expect(result).toEqual({ ok: true, violations: [] });
+      assert.deepStrictEqual(result, { ok: true, violations: [] });
 
       const checkerSourcePath = path.resolve(
         "packages/core/src/template-boundary-check.ts",
@@ -266,13 +278,13 @@ describe("Template Source Boundary", () => {
       };
       visit(checkerSource);
 
-      expect(composerReferences).toEqual([]);
+      assert.deepStrictEqual(composerReferences, []);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("does not scan unrelated planner strings when the workflow projection is source-backed", async () => {
+  void it("does not scan unrelated planner strings when the workflow projection is source-backed", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "template-boundary-workflow-contract-"),
     );
@@ -318,13 +330,13 @@ describe("Template Source Boundary", () => {
         ],
       });
 
-      expect(result).toEqual({ ok: true, violations: [] });
+      assert.deepStrictEqual(result, { ok: true, violations: [] });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("rejects a workflow replacement that is not independently derived owner facts", async () => {
+  void it("rejects a workflow replacement that is not independently derived owner facts", async () => {
     const directory = await mkdtemp(
       path.join(tmpdir(), "template-boundary-workflow-contract-"),
     );
@@ -380,10 +392,10 @@ describe("Template Source Boundary", () => {
         ],
       });
 
-      expect(result).toEqual({
+      assertDeepStrictEqualWithMatchers(result, {
         ok: false,
         violations: [
-          expect.objectContaining({
+          objectContaining({
             generatedPath: workflowPath,
             owningFunction: "planWorkflow",
             sourceFilePath,

@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   createGenerationContext,
@@ -23,7 +25,15 @@ import {
   createTemplateSourceHandle,
   renderNewProject,
 } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertNotDeepStrictEqualWithMatchers,
+  assertPartialDeepStrictEqual,
+  objectContaining,
+  stringMatching,
+} from "./assertions.ts";
 
 const fixtureSource = createTemplateSourceHandle(
   path.join(process.cwd(), "test/fixtures/development-container-tool-layers"),
@@ -128,8 +138,8 @@ function fixtureContribution(options: {
   };
 }
 
-describe("Foundation Development Container composition", () => {
-  it("plans GitHub CLI as a default source-backed Tool Layer", () => {
+void describe("Foundation Development Container composition", () => {
+  void it("plans GitHub CLI as a default source-backed Tool Layer", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
         definition,
@@ -144,26 +154,27 @@ describe("Foundation Development Container composition", () => {
         }),
       });
 
-      expect(
+      assertPartialDeepStrictEqual(
         plan.developmentContainer.toolLayers.find(
           (layer) => layer.identity === "github-cli",
         ),
-      ).toMatchObject({
-        kind: "optional",
-        dockerfile: { from: "github-cli.Dockerfile" },
-        requires: ["node-pnpm"],
-        probes: [
-          {
-            identity: "github-cli",
-            command: "gh",
-            args: ["--version"],
-          },
-        ],
-      });
+        {
+          kind: "optional",
+          dockerfile: { from: "github-cli.Dockerfile" },
+          requires: ["node-pnpm"],
+          probes: [
+            {
+              identity: "github-cli",
+              command: "gh",
+              args: ["--version"],
+            },
+          ],
+        },
+      );
     }
   });
 
-  it("renders the official stable GitHub CLI package without credential automation", async () => {
+  void it("renders the official stable GitHub CLI package without credential automation", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-github-cli-"),
     );
@@ -197,19 +208,21 @@ describe("Foundation Development Container composition", () => {
           "utf8",
         );
 
-        expect(dockerfile).toContain(
-          "https://cli.github.com/packages stable main",
+        assert.ok(
+          dockerfile.includes("https://cli.github.com/packages stable main"),
         );
-        expect(dockerfile).toContain(
-          "apt-get install -y --no-install-recommends gh",
+        assert.ok(
+          dockerfile.includes("apt-get install -y --no-install-recommends gh"),
         );
-        expect(`${dockerfile}\n${devcontainer}`).not.toMatch(
+        assert.doesNotMatch(
+          `${dockerfile}\n${devcontainer}`,
           /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/u,
         );
-        expect(plan.nextStepInstructions).not.toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              display: expect.stringMatching(
+        assertNotDeepStrictEqualWithMatchers(
+          plan.nextStepInstructions,
+          arrayContaining([
+            objectContaining({
+              display: stringMatching(
                 /\b(?:GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)\b|\.config\/gh|\bgh\s+auth\b|\bauth\s+setup-git\b/iu,
               ),
             }),
@@ -221,7 +234,7 @@ describe("Foundation Development Container composition", () => {
     }
   });
 
-  it("keeps every generated pnpm store in a persistent volume outside the workspace", async () => {
+  void it("keeps every generated pnpm store in a persistent volume outside the workspace", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-pnpm-store-"),
     );
@@ -262,24 +275,28 @@ describe("Foundation Development Container composition", () => {
         const pnpmStoreMount = devcontainer.mounts.find(
           (mount) => mount.source === "${devcontainerId}-pnpm-store",
         );
-        expect(pnpmStoreMount).toEqual({
+        assert.deepStrictEqual(pnpmStoreMount, {
           type: "volume",
           source: "${devcontainerId}-pnpm-store",
           target: "/pnpm/store",
         });
-        expect(pnpmStoreMount?.target).not.toContain(
-          "${containerWorkspaceFolder}",
+        assert.ok(
+          !pnpmStoreMount?.target.includes("${containerWorkspaceFolder}"),
         );
-        await expect(
+        await assert.rejects(
           access(path.join(targetDir, ".pnpm-store")),
-        ).rejects.toMatchObject({ code: "ENOENT" });
+          (error) => {
+            assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+            return true;
+          },
+        );
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("keeps built-in devcontainer capability facts on Package Contributions", () => {
+  void it("keeps built-in devcontainer capability facts on Package Contributions", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
@@ -303,11 +320,12 @@ describe("Foundation Development Container composition", () => {
             (need) => need.kind === "playwright-browser-assets",
           )
         ) {
-          expect(layerIdentities).toContain("browser-test");
+          assert.ok(layerIdentities.has("browser-test"));
         }
         if (contribution.foundation.deploymentCheck !== undefined) {
-          expect(layerIdentities).not.toContain("shellcheck");
-          expect(contribution.foundation.deploymentCheck.sources).toMatchObject(
+          assert.ok(!layerIdentities.has("shellcheck"));
+          assertPartialDeepStrictEqual(
+            contribution.foundation.deploymentCheck.sources,
             {
               shellCheckDockerfile: {
                 from: "devcontainer/shellcheck.Dockerfile",
@@ -319,7 +337,7 @@ describe("Foundation Development Container composition", () => {
     }
   });
 
-  it("does not prepare migrated Development Container tools in generated host workflows", async () => {
+  void it("does not prepare migrated Development Container tools in generated host workflows", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-workflow-tool-layers-"),
     );
@@ -361,7 +379,8 @@ describe("Foundation Development Container composition", () => {
           path.join(targetDir, ".github/workflows/check.yml"),
           "utf8",
         );
-        expect(workflow).not.toMatch(
+        assert.doesNotMatch(
+          workflow,
           /dtolnay\/rust-toolchain|Swatinem\/rust-cache|playwright install|apt-get install -y shellcheck/u,
         );
       }
@@ -370,7 +389,7 @@ describe("Foundation Development Container composition", () => {
     }
   });
 
-  it("does not present migrated Development Container tools as host install next steps", () => {
+  void it("does not present migrated Development Container tools as host install next steps", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
@@ -386,15 +405,14 @@ describe("Foundation Development Container composition", () => {
         context,
       });
 
-      expect(
+      assert.doesNotMatch(
         plan.nextStepInstructions.map((step) => step.display).join("\n"),
-      ).not.toMatch(
         /rustup toolchain install|playwright install|apt-get install -y shellcheck/u,
       );
     }
   });
 
-  it("composes Rust and browser build arguments from their Package Contributions", async () => {
+  void it("composes Rust and browser build arguments from their Package Contributions", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-rust-browser-"),
     );
@@ -472,16 +490,16 @@ describe("Foundation Development Container composition", () => {
           "utf8",
         ),
       ) as { build: { args: Record<string, string> } };
-      expect(devcontainer.build.args).toMatchObject({
+      assertPartialDeepStrictEqual(devcontainer.build.args, {
         RUST_TOOLCHAIN: "stable",
-        PLAYWRIGHT_CLI_PACKAGE: expect.stringMatching(/^@playwright\/test@/u),
+        PLAYWRIGHT_CLI_PACKAGE: stringMatching(/^@playwright\/test@/u),
       });
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("composes a source-backed Tool Layer contributed by a Package Contribution", async () => {
+  void it("composes a source-backed Tool Layer contributed by a Package Contribution", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-tool-layer-"),
     );
@@ -578,26 +596,27 @@ describe("Foundation Development Container composition", () => {
         definition,
         context,
       });
-      expect(
+      assertPartialDeepStrictEqual(
         plan.reconciliation.find(
           (entry) =>
             entry.path === ".devcontainer/devcontainer.json" &&
             entry.driver === "structured",
         ),
-      ).toMatchObject({
-        identitySets: [
-          {
-            location: "/mounts",
-            identity: {
-              kind: "projection",
-              members: [
-                expect.objectContaining({ identity: "pnpm-store" }),
-                expect.objectContaining({ identity: "fixture-cache" }),
-              ],
+        {
+          identitySets: [
+            {
+              location: "/mounts",
+              identity: {
+                kind: "projection",
+                members: [
+                  objectContaining({ identity: "pnpm-store" }),
+                  objectContaining({ identity: "fixture-cache" }),
+                ],
+              },
             },
-          },
-        ],
-      });
+          ],
+        },
+      );
       await renderNewProject({
         targetRoot: targetDir,
         operations: [...plan.operations],
@@ -607,37 +626,38 @@ describe("Foundation Development Container composition", () => {
         path.join(targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      expect(dockerfile).toMatch(/ARG RUST_TOOLCHAIN/iu);
-      await expect(
-        readFile(
+      assert.match(dockerfile, /ARG RUST_TOOLCHAIN/iu);
+      assertPartialDeepStrictEqual(
+        await readFile(
           path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
         ).then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        build: {
-          args: {
-            RUST_TOOLCHAIN: "fixture-value",
+        {
+          build: {
+            args: {
+              RUST_TOOLCHAIN: "fixture-value",
+            },
           },
+          mounts: [
+            {
+              type: "volume",
+              source: "${devcontainerId}-pnpm-store",
+              target: "/pnpm/store",
+            },
+            {
+              type: "volume",
+              source: "${devcontainerId}-fixture",
+              target: "/var/cache/fixture",
+            },
+          ],
         },
-        mounts: [
-          {
-            type: "volume",
-            source: "${devcontainerId}-pnpm-store",
-            target: "/pnpm/store",
-          },
-          {
-            type: "volume",
-            source: "${devcontainerId}-fixture",
-            target: "/var/cache/fixture",
-          },
-        ],
-      });
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("preserves unrelated Dockerfile, build argument, and mount customizations during Package Addition", async () => {
+  void it("preserves unrelated Dockerfile, build argument, and mount customizations during Package Addition", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-tool-layer-addition-"),
     );
@@ -792,20 +812,25 @@ describe("Foundation Development Container composition", () => {
         ...addition.projectProjections,
       });
 
-      expect(conflictingResult).toMatchObject({
+      assertPartialDeepStrictEqual(conflictingResult, {
         ok: false,
         conflicts: [
           {
             path: ".devcontainer/devcontainer.json",
             driver: "structured",
-            location: expect.stringMatching(/^\/mounts\/0\//u),
+            location: stringMatching(/^\/mounts\/0\//u),
           },
         ],
       });
-      await expect(
+      await assert.rejects(
         access(path.join(targetDir, "packages/native/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(readFile(dockerfilePath, "utf8")).resolves.toBe(
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
+      assert.strictEqual(
+        await readFile(dockerfilePath, "utf8"),
         customizedDockerfile,
       );
 
@@ -825,21 +850,24 @@ describe("Foundation Development Container composition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      await expect(readFile(dockerfilePath, "utf8")).resolves.toContain(
-        "# user container policy",
+      assert.ok(
+        (await readFile(dockerfilePath, "utf8")).includes(
+          "# user container policy",
+        ),
       );
       const updated = JSON.parse(await readFile(devcontainerPath, "utf8")) as {
         build: { args: Record<string, string> };
         mounts: { target: string }[];
       };
-      expect(updated.build.args).toMatchObject({
+      assertPartialDeepStrictEqual(updated.build.args, {
         USER_BUILD_ARGUMENT: "retained",
         RUST_TOOLCHAIN: "stable",
       });
-      expect(updated.mounts.map((mount) => mount.target)).toEqual(
-        expect.arrayContaining([
+      assertDeepStrictEqualWithMatchers(
+        updated.mounts.map((mount) => mount.target),
+        arrayContaining([
           "/var/cache/user-fixture",
           "/usr/local/cargo/registry",
           "/usr/local/cargo/git",
@@ -851,7 +879,7 @@ describe("Foundation Development Container composition", () => {
     }
   });
 
-  it("generates equivalent Development Container output independent of contribution order", async () => {
+  void it("generates equivalent Development Container output independent of contribution order", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-tool-layer-order-"),
     );
@@ -959,14 +987,17 @@ describe("Foundation Development Container composition", () => {
         });
       }
 
-      expect(outputs[1]!.dockerfile).toBe(outputs[0]!.dockerfile);
-      expect(outputs[1]!.devcontainer).toEqual(outputs[0]!.devcontainer);
+      assert.strictEqual(outputs[1]!.dockerfile, outputs[0]!.dockerfile);
+      assert.deepStrictEqual(
+        outputs[1]!.devcontainer,
+        outputs[0]!.devcontainer,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("generates equivalent Development Container output independent of initialization and addition order", async () => {
+  void it("generates equivalent Development Container output independent of initialization and addition order", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-foundation-tool-layer-addition-order-"),
     );
@@ -1058,7 +1089,7 @@ describe("Foundation Development Container composition", () => {
           targetRoot: targetDir,
           ...addition.projectProjections,
         });
-        expect(result.ok).toBe(true);
+        assert.strictEqual(result.ok, true);
 
         outputs.push({
           dockerfile: await readFile(
@@ -1074,8 +1105,11 @@ describe("Foundation Development Container composition", () => {
         });
       }
 
-      expect(outputs[1]!.dockerfile).toBe(outputs[0]!.dockerfile);
-      expect(outputs[1]!.devcontainer).toEqual(outputs[0]!.devcontainer);
+      assert.strictEqual(outputs[1]!.dockerfile, outputs[0]!.dockerfile);
+      assert.deepStrictEqual(
+        outputs[1]!.devcontainer,
+        outputs[0]!.devcontainer,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

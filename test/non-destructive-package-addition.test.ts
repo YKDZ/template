@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   mkdir,
   mkdtemp,
@@ -10,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -28,7 +30,20 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
+
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertNotDeepStrictEqualWithMatchers,
+  assertNotPartialDeepStrictEqual,
+  assertPartialDeepStrictEqual,
+  assertThrowsMatching,
+  hasProperty,
+  objectContaining,
+  stringContaining,
+  assertThrowsContaining,
+} from "./assertions.ts";
 
 function requireAddableDefinitionForRole(
   context: BuiltInGenerationContext,
@@ -86,156 +101,169 @@ async function workspaceByteSnapshot(
   return files.toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
-describe("Non-Destructive Package Addition", () => {
-  it("adds the checked packing hook when a pre-hook private repository gains a public package", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-packing-hook-"),
-    );
-    const targetDir = path.join(workspace, "project");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
-      },
-    });
-    const privateBaseDefinition = builtInPresetRegistry
-      .all()
-      .find((definition) => {
+void describe("Non-Destructive Package Addition", () => {
+  void it(
+    "adds the checked packing hook when a pre-hook private repository gains a public package",
+    { timeout: 180000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-add-packing-hook-"),
+      );
+      const targetDir = path.join(workspace, "project");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+        },
+      });
+      const privateBaseDefinition = builtInPresetRegistry
+        .all()
+        .find((definition) => {
+          const initialization = planGeneratedRepositoryInitialization({
+            definition,
+            context,
+          });
+          return initialization.manifests.every(
+            (manifest) => manifest.private === true,
+          );
+        });
+      if (privateBaseDefinition === undefined) {
+        throw new Error("Expected a private Built-in Preset base repository");
+      }
+      const privateLibraryDefinition = requireAddableDefinitionForRole(
+        context,
+        "shared-library",
+      );
+      const publicDefinition: BuiltInPresetDefinition = {
+        ...privateLibraryDefinition,
+        metadata: {
+          ...privateLibraryDefinition.metadata,
+          name: "synthetic-public-library",
+        },
+        planPackageAddition(options) {
+          const contribution =
+            privateLibraryDefinition.planPackageAddition!(options);
+          const { private: _private, ...privateManifest } =
+            contribution.manifest;
+          return {
+            ...contribution,
+            manifest: { ...privateManifest, version: "1.0.0" },
+          };
+        },
+      };
+
+      try {
         const initialization = planGeneratedRepositoryInitialization({
-          definition,
+          definition: privateBaseDefinition,
           context,
         });
-        return initialization.manifests.every(
-          (manifest) => manifest.private === true,
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...initialization.operations],
+        });
+        await assert.rejects(
+          stat(path.join(targetDir, ".pnpmfile.mjs")),
+          (error) => {
+            assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+            return true;
+          },
         );
-      });
-    if (privateBaseDefinition === undefined) {
-      throw new Error("Expected a private Built-in Preset base repository");
-    }
-    const privateLibraryDefinition = requireAddableDefinitionForRole(
-      context,
-      "shared-library",
-    );
-    const publicDefinition: BuiltInPresetDefinition = {
-      ...privateLibraryDefinition,
-      metadata: {
-        ...privateLibraryDefinition.metadata,
-        name: "synthetic-public-library",
-      },
-      planPackageAddition(options) {
-        const contribution =
-          privateLibraryDefinition.planPackageAddition!(options);
-        const { private: _private, ...privateManifest } = contribution.manifest;
-        return {
-          ...contribution,
-          manifest: { ...privateManifest, version: "1.0.0" },
-        };
-      },
-    };
-
-    try {
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: privateBaseDefinition,
-        context,
-      });
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      await expect(
-        stat(path.join(targetDir, ".pnpmfile.mjs")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(
-        readFile(path.join(targetDir, "tsconfig.json"), "utf8").then((source) =>
-          JSON.parse(source),
-        ),
-      ).resolves.not.toMatchObject({
-        compilerOptions: { allowJs: true, checkJs: true },
-        include: expect.arrayContaining([".pnpmfile.mjs"]),
-      });
-
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: publicDefinition,
-        localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
-        packageLeafName: "release",
-      });
-      const result = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.projectProjections,
-      });
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-      expect(result.actions).toEqual(
-        expect.arrayContaining([
-          { path: ".pnpmfile.mjs", driver: "text", action: "create" },
-          { path: "tsconfig.json", driver: "structured", action: "update" },
-        ]),
-      );
-      const addedPackage = addition.blueprint.packages.find(
-        (definition) => definition.path === "packages/release",
-      );
-      expect(addedPackage).toBeDefined();
-      const sourceManifest = JSON.parse(
-        await readFile(
-          path.join(targetDir, addedPackage!.path, "package.json"),
-          "utf8",
-        ),
-      ) as Record<string, unknown>;
-      const localDevelopmentDependency = Object.entries(
-        (sourceManifest.devDependencies ?? {}) as Record<string, unknown>,
-      ).find(([, specifier]) =>
-        typeof specifier === "string" ? specifier.startsWith("link:") : false,
-      );
-      expect(localDevelopmentDependency).toBeDefined();
-      const provider = addition.blueprint.packages.find(
-        (definition) => definition.name === localDevelopmentDependency![0],
-      );
-      expect(provider).toBeDefined();
-      expect(
-        path.posix.normalize(
-          path.posix.join(
-            addedPackage!.path,
-            (localDevelopmentDependency![1] as string).slice("link:".length),
+        assertNotPartialDeepStrictEqual(
+          await readFile(path.join(targetDir, "tsconfig.json"), "utf8").then(
+            (source) => JSON.parse(source),
           ),
-        ),
-      ).toBe(provider!.path);
-      await expect(
-        readFile(path.join(targetDir, "tsconfig.json"), "utf8").then((source) =>
-          JSON.parse(source),
-        ),
-      ).resolves.toMatchObject({
-        compilerOptions: { allowJs: true, checkJs: true },
-        files: [".pnpmfile.mjs"],
-        include: ["*.config.ts", "scripts/**/*.ts"],
-      });
+          {
+            compilerOptions: { allowJs: true, checkJs: true },
+            include: arrayContaining([".pnpmfile.mjs"]),
+          },
+        );
 
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      const packDestination = path.join(workspace, "packs");
-      await mkdir(packDestination);
-      await execa("pnpm", ["pack", "--pack-destination", packDestination], {
-        cwd: path.join(targetDir, addedPackage!.path),
-      });
-      const archives = (await readdir(packDestination)).filter((file) =>
-        file.endsWith(".tgz"),
-      );
-      expect(archives).toHaveLength(1);
-      const packedManifest = await execa("tar", [
-        "-xOf",
-        path.join(packDestination, archives[0]!),
-        "package/package.json",
-      ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
-      expect(packedManifest).not.toHaveProperty("devDependencies");
-      expect(JSON.stringify(packedManifest)).not.toContain("link:");
-      expect(JSON.stringify(packedManifest)).not.toContain("workspace:");
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 180_000);
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: publicDefinition,
+          localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+          packageLeafName: "release",
+        });
+        const result = await reconcileAndApplyProjectProjections({
+          targetRoot: targetDir,
+          ...addition.projectProjections,
+        });
 
-  it("reconciles the complete Foundation delta while preserving unrelated customization", async () => {
+        assert.strictEqual(result.ok, true);
+        if (!result.ok) return;
+        assertDeepStrictEqualWithMatchers(
+          result.actions,
+          arrayContaining([
+            { path: ".pnpmfile.mjs", driver: "text", action: "create" },
+            { path: "tsconfig.json", driver: "structured", action: "update" },
+          ]),
+        );
+        const addedPackage = addition.blueprint.packages.find(
+          (definition) => definition.path === "packages/release",
+        );
+        assert.notStrictEqual(addedPackage, undefined);
+        const sourceManifest = JSON.parse(
+          await readFile(
+            path.join(targetDir, addedPackage!.path, "package.json"),
+            "utf8",
+          ),
+        ) as Record<string, unknown>;
+        const localDevelopmentDependency = Object.entries(
+          (sourceManifest.devDependencies ?? {}) as Record<string, unknown>,
+        ).find(([, specifier]) =>
+          typeof specifier === "string" ? specifier.startsWith("link:") : false,
+        );
+        assert.notStrictEqual(localDevelopmentDependency, undefined);
+        const provider = addition.blueprint.packages.find(
+          (definition) => definition.name === localDevelopmentDependency![0],
+        );
+        assert.notStrictEqual(provider, undefined);
+        assert.strictEqual(
+          path.posix.normalize(
+            path.posix.join(
+              addedPackage!.path,
+              (localDevelopmentDependency![1] as string).slice("link:".length),
+            ),
+          ),
+          provider!.path,
+        );
+        assertPartialDeepStrictEqual(
+          await readFile(path.join(targetDir, "tsconfig.json"), "utf8").then(
+            (source) => JSON.parse(source),
+          ),
+          {
+            compilerOptions: { allowJs: true, checkJs: true },
+            files: [".pnpmfile.mjs"],
+            include: ["*.config.ts", "scripts/**/*.ts"],
+          },
+        );
+
+        await execa("pnpm", ["install"], { cwd: targetDir });
+        const packDestination = path.join(workspace, "packs");
+        await mkdir(packDestination);
+        await execa("pnpm", ["pack", "--pack-destination", packDestination], {
+          cwd: path.join(targetDir, addedPackage!.path),
+        });
+        const archives = (await readdir(packDestination)).filter((file) =>
+          file.endsWith(".tgz"),
+        );
+        assertLength(archives, 1);
+        const packedManifest = await execa("tar", [
+          "-xOf",
+          path.join(packDestination, archives[0]!),
+          "package/package.json",
+        ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
+        assert.ok(!hasProperty(packedManifest, "devDependencies"));
+        assert.ok(!JSON.stringify(packedManifest).includes("link:"));
+        assert.ok(!JSON.stringify(packedManifest).includes("workspace:"));
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it("reconciles the complete Foundation delta while preserving unrelated customization", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-complete-foundation-addition-"),
     );
@@ -330,10 +358,11 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      expect(result.actions).toEqual(
-        expect.arrayContaining([
+      assertDeepStrictEqualWithMatchers(
+        result.actions,
+        arrayContaining([
           {
             path: ".devcontainer/devcontainer.json",
             driver: "structured",
@@ -351,8 +380,9 @@ describe("Non-Destructive Package Addition", () => {
           },
         ]),
       );
-      expect(result.actions.map((action) => action.path)).not.toEqual(
-        expect.arrayContaining([
+      assertNotDeepStrictEqualWithMatchers(
+        result.actions.map((action) => action.path),
+        arrayContaining([
           ".gitignore",
           ".github/dependabot.yml",
           ".vscode/settings.json",
@@ -360,73 +390,88 @@ describe("Non-Destructive Package Addition", () => {
           "package.json",
         ]),
       );
-      await expect(
-        readFile(path.join(targetDir, "package.json"), "utf8").then((source) =>
-          JSON.parse(source),
+      assertPartialDeepStrictEqual(
+        await readFile(path.join(targetDir, "package.json"), "utf8").then(
+          (source) => JSON.parse(source),
         ),
-      ).resolves.toMatchObject({ userRoot: { retained: true } });
-      await expect(
-        readFile(
+        { userRoot: { retained: true } },
+      );
+      assertPartialDeepStrictEqual(
+        await readFile(
           path.join(targetDir, consumerPath, "package.json"),
           "utf8",
         ).then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        userConsumer: { retained: true },
-        dependencies: {
-          "user-only": "workspace:*",
-          "@demo/dashboard": "workspace:*",
+        {
+          userConsumer: { retained: true },
+          dependencies: {
+            "user-only": "workspace:*",
+            "@demo/dashboard": "workspace:*",
+          },
         },
-      });
-      await expect(
-        readFile(
+      );
+      assertPartialDeepStrictEqual(
+        await readFile(
           path.join(targetDir, ".devcontainer/devcontainer.json"),
           "utf8",
         ).then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        userCustomization: { retained: true },
-        build: {
-          args: {
-            PLAYWRIGHT_CLI_PACKAGE: expect.stringContaining("@playwright/test"),
+        {
+          userCustomization: { retained: true },
+          build: {
+            args: {
+              PLAYWRIGHT_CLI_PACKAGE: stringContaining("@playwright/test"),
+            },
           },
         },
-      });
+      );
       for (const [relativePath, prefix] of textCustomizations) {
-        await expect(
-          readFile(path.join(targetDir, relativePath), "utf8"),
-        ).resolves.toContain(prefix.trim());
+        assert.ok(
+          (await readFile(path.join(targetDir, relativePath), "utf8")).includes(
+            prefix.trim(),
+          ),
+        );
       }
-      await expect(
-        readFile(path.join(targetDir, "pnpm-workspace.yaml"), "utf8"),
-      ).resolves.toContain("  - services/*");
-      await expect(
-        readFile(path.join(targetDir, ".github/workflows/check.yml"), "utf8"),
-      ).resolves.not.toContain("playwright install");
-      await expect(
-        readFile(path.join(targetDir, ".vscode/extensions.json"), "utf8").then(
-          (source) => JSON.parse(source),
-        ),
-      ).resolves.toMatchObject({
-        recommendations: expect.arrayContaining(["user.first", "Vue.volar"]),
-      });
-      await expect(
-        readFile(
+      assert.ok(
+        (
+          await readFile(path.join(targetDir, "pnpm-workspace.yaml"), "utf8")
+        ).includes("  - services/*"),
+      );
+      assert.ok(
+        !(
+          await readFile(
+            path.join(targetDir, ".github/workflows/check.yml"),
+            "utf8",
+          )
+        ).includes("playwright install"),
+      );
+      assertPartialDeepStrictEqual(
+        await readFile(
+          path.join(targetDir, ".vscode/extensions.json"),
+          "utf8",
+        ).then((source) => JSON.parse(source)),
+        {
+          recommendations: arrayContaining(["user.first", "Vue.volar"]),
+        },
+      );
+      assertPartialDeepStrictEqual(
+        await readFile(
           path.join(targetDir, ".template/generation.json"),
           "utf8",
         ).then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        schemaVersion: 2,
-        packages: [
-          expect.objectContaining({ path: consumerPath }),
-          expect.objectContaining({ path: "packages/typescript-config" }),
-          expect.objectContaining({ path: "services/dashboard" }),
-        ],
-      });
+        {
+          schemaVersion: 2,
+          packages: [
+            objectContaining({ path: consumerPath }),
+            objectContaining({ path: "packages/typescript-config" }),
+            objectContaining({ path: "services/dashboard" }),
+          ],
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects a shared-library link to a runtime-service before workspace mutation", async () => {
+  void it("rejects a shared-library link to a runtime-service before workspace mutation", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-invalid-package-role-link-"),
     );
@@ -460,24 +505,24 @@ describe("Non-Destructive Package Addition", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       const before = await workspaceByteSnapshot(targetDir);
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition: additionDefinition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "dashboard",
-          packagePath: "services/dashboard",
-          linkFrom: [consumerPath],
-        }),
-      ).toThrow(
+      assertThrowsContaining(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition: additionDefinition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "dashboard",
+            packagePath: "services/dashboard",
+            linkFrom: [consumerPath],
+          }),
         `Package Link ${consumerPath} (shared-library) cannot depend on services/dashboard (runtime-service) under Package Role boundaries`,
       );
-      expect(await workspaceByteSnapshot(targetDir)).toEqual(before);
+      assert.deepStrictEqual(await workspaceByteSnapshot(targetDir), before);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("uses Current Manifest Truth for links without making it the Before baseline", async () => {
+  void it("uses Current Manifest Truth for links without making it the Before baseline", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-current-link-manifest-truth-"),
     );
@@ -556,34 +601,40 @@ describe("Non-Destructive Package Addition", () => {
           dependenciesMeta?: Record<string, { injected: true }>;
         };
 
-      expect(manifestFrom(before, consumerPath)).not.toHaveProperty(
-        "dependenciesMeta",
+      assert.ok(
+        !hasProperty(manifestFrom(before, consumerPath), "dependenciesMeta"),
       );
-      expect(
+      assert.deepStrictEqual(
         manifestFrom(after, consumerPath).dependenciesMeta?.["@demo/provider"],
-      ).toEqual({ injected: true });
-      expect(
-        manifestFrom(after, consumerPath).dependenciesMeta,
-      ).not.toHaveProperty("@demo/next-provider");
-      await expect(
-        reconcileAndApplyProjectProjections({
+        { injected: true },
+      );
+      assert.ok(
+        !hasProperty(
+          manifestFrom(after, consumerPath).dependenciesMeta,
+          "@demo/next-provider",
+        ),
+      );
+      assertPartialDeepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...secondAddition.projectProjections,
         }),
-      ).resolves.toMatchObject({ ok: true });
-      await expect(
-        readFile(providerManifestPath, "utf8").then((source) =>
+        { ok: true },
+      );
+      assertPartialDeepStrictEqual(
+        await readFile(providerManifestPath, "utf8").then((source) =>
           JSON.parse(source),
         ),
-      ).resolves.toMatchObject({
-        exports: { ".": { default: "./dist/stale-provider.js" } },
-      });
+        {
+          exports: { ".": { default: "./dist/stale-provider.js" } },
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("preserves a stale root export during an ordinary addition without links", async () => {
+  void it("preserves a stale root export during an ordinary addition without links", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-ordinary-add-stale-export-"),
     );
@@ -637,30 +688,35 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      expect(result.actions.map((action) => action.path)).not.toContain(
-        `${existingPath}/package.json`,
+      assert.ok(
+        !result.actions
+          .map((action) => action.path)
+          .includes(`${existingPath}/package.json`),
       );
-      await expect(
-        readFile(existingManifestPath, "utf8").then((source) =>
+      assertPartialDeepStrictEqual(
+        await readFile(existingManifestPath, "utf8").then((source) =>
           JSON.parse(source),
         ),
-      ).resolves.toMatchObject({
-        exports: { ".": { default: "./dist/user-maintained.js" } },
-      });
-      await expect(
-        readFile(
-          path.join(targetDir, "packages/ordinary/package.json"),
-          "utf8",
-        ),
-      ).resolves.toContain('"name": "@demo/ordinary"');
+        {
+          exports: { ".": { default: "./dist/user-maintained.js" } },
+        },
+      );
+      assert.ok(
+        (
+          await readFile(
+            path.join(targetDir, "packages/ordinary/package.json"),
+            "utf8",
+          )
+        ).includes('"name": "@demo/ordinary"'),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("does not inspect or restore a missing non-delta Package manifest", async () => {
+  void it("does not inspect or restore a missing non-delta Package manifest", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-missing-non-delta-manifest-"),
     );
@@ -705,26 +761,33 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      expect(result.actions.map((action) => action.path)).not.toContain(
-        `${existingPath}/package.json`,
+      assert.ok(
+        !result.actions
+          .map((action) => action.path)
+          .includes(`${existingPath}/package.json`),
       );
-      await expect(stat(existingManifestPath)).rejects.toMatchObject({
-        code: "ENOENT",
+      await assert.rejects(stat(existingManifestPath), (error) => {
+        assertPartialDeepStrictEqual(error, {
+          code: "ENOENT",
+        });
+        return true;
       });
-      await expect(
-        readFile(
-          path.join(targetDir, "packages/ordinary/package.json"),
-          "utf8",
-        ),
-      ).resolves.toContain('"name": "@demo/ordinary"');
+      assert.ok(
+        (
+          await readFile(
+            path.join(targetDir, "packages/ordinary/package.json"),
+            "utf8",
+          )
+        ).includes('"name": "@demo/ordinary"'),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when an explicitly linked consumer manifest is missing", async () => {
+  void it("fails closed when an explicitly linked consumer manifest is missing", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-missing-linked-manifest-"),
     );
@@ -754,25 +817,29 @@ describe("Non-Destructive Package Addition", () => {
       const consumerPath = initialization.blueprint.packages[0]!.path;
       await unlink(path.join(targetDir, consumerPath, "package.json"));
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
-          packageLeafName: "provider",
-          linkFrom: [consumerPath],
-        }),
-      ).toThrow(
+      assertThrowsContaining(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+            packageLeafName: "provider",
+            linkFrom: [consumerPath],
+          }),
         `Package Addition requires manifest truth for ${consumerPath}:`,
       );
-      await expect(
+      await assert.rejects(
         stat(path.join(targetDir, "packages/provider")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("preserves Editor members and order while appending a new capability", async () => {
+  void it("preserves Editor members and order while appending a new capability", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-identity-set-addition-"),
     );
@@ -828,17 +895,17 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
       const updated = JSON.parse(await readFile(extensionsPath, "utf8")) as {
         recommendations: string[];
       };
-      expect(updated.recommendations.slice(0, 3)).toEqual([
+      assert.deepStrictEqual(updated.recommendations.slice(0, 3), [
         "user.first",
         initialRecommendation,
         "user.last",
       ]);
-      expect(updated.recommendations.slice(3)).toEqual([
+      assert.deepStrictEqual(updated.recommendations.slice(3), [
         "Vue.volar",
         "bradlc.vscode-tailwindcss",
         "vitest.explorer",
@@ -848,7 +915,7 @@ describe("Non-Destructive Package Addition", () => {
     }
   });
 
-  it("preserves a custom Turbo task while adding a required structured fact", async () => {
+  void it("preserves a custom Turbo task while adding a required structured fact", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-structured-addition-"),
     );
@@ -896,39 +963,41 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result.ok).toBe(true);
+      assert.strictEqual(result.ok, true);
       if (!result.ok) return;
-      expect(result.changedPaths).toContain("turbo.json");
-      await expect(
-        readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
-      ).resolves.toMatchObject({
-        boundaries: {
-          tags: {
-            app: { dependencies: { allow: ["app", "library"] } },
+      assert.ok(result.changedPaths.includes("turbo.json"));
+      assertPartialDeepStrictEqual(
+        await readFile(turboPath, "utf8").then((source) => JSON.parse(source)),
+        {
+          boundaries: {
+            tags: {
+              app: { dependencies: { allow: ["app", "library"] } },
+            },
           },
+          tasks: { "user:report": { cache: false } },
         },
-        tasks: { "user:report": { cache: false } },
-      });
+      );
 
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition: additionDefinition,
         localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
         packageLeafName: "dashboard",
       });
-      await expect(
-        reconcileAndApplyProjectProjections({
+      assert.deepStrictEqual(
+        await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...repeatedAddition.projectProjections,
         }),
-      ).resolves.toEqual({ ok: true, changedPaths: [], actions: [] });
+        { ok: true, changedPaths: [], actions: [] },
+      );
       const repeatedTurbo = await readFile(turboPath, "utf8");
-      expect(repeatedTurbo.match(/"user:report"/gu)).toHaveLength(1);
+      assertLength(repeatedTurbo.match(/"user:report"/gu), 1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("preserves a user's text policy, creates the package, and repeats as a no-op", async () => {
+  void it("preserves a user's text policy, creates the package, and repeats as a no-op", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-non-destructive-addition-"),
     );
@@ -970,9 +1039,8 @@ describe("Non-Destructive Package Addition", () => {
         packageLeafName: "utilities",
         packagePath: "services/utilities",
       });
-      await expect(
-        materializeProjectProjection(addition.projectProjections.before),
-      ).resolves.toEqual(
+      assert.deepStrictEqual(
+        await materializeProjectProjection(addition.projectProjections.before),
         await materializeProjectProjection({
           operations: initialization.operations,
           reconciliation: initialization.reconciliation,
@@ -983,23 +1051,25 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(firstResult.ok).toBe(true);
+      assert.strictEqual(firstResult.ok, true);
       if (!firstResult.ok) return;
-      expect(firstResult.changedPaths).toContain(
-        "services/utilities/package.json",
+      assert.ok(
+        firstResult.changedPaths.includes("services/utilities/package.json"),
       );
-      await expect(readFile(gitignorePath, "utf8")).resolves.toContain(
-        "private-artifacts/",
+      assert.ok(
+        (await readFile(gitignorePath, "utf8")).includes("private-artifacts/"),
       );
-      await expect(
-        readFile(
-          path.join(targetDir, "services/utilities/package.json"),
-          "utf8",
-        ),
-      ).resolves.toContain('"name": "@demo/utilities"');
+      assert.ok(
+        (
+          await readFile(
+            path.join(targetDir, "services/utilities/package.json"),
+            "utf8",
+          )
+        ).includes('"name": "@demo/utilities"'),
+      );
       const workspaceManifest = await readFile(workspaceManifestPath, "utf8");
-      expect(workspaceManifest).toContain("  - services/*");
-      expect(workspaceManifest).toContain("# private workspace policy");
+      assert.ok(workspaceManifest.includes("  - services/*"));
+      assert.ok(workspaceManifest.includes("# private workspace policy"));
 
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
         definition,
@@ -1012,19 +1082,19 @@ describe("Non-Destructive Package Addition", () => {
         ...repeatedAddition.projectProjections,
       });
 
-      expect(repeatedResult).toEqual({
+      assert.deepStrictEqual(repeatedResult, {
         ok: true,
         changedPaths: [],
         actions: [],
       });
       const gitignore = await readFile(gitignorePath, "utf8");
-      expect(gitignore.match(/^private-artifacts\/$/gmu)).toHaveLength(1);
+      assertLength(gitignore.match(/^private-artifacts\/$/gmu), 1);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects tool-owned metadata that changes after planning with zero workspace writes", async () => {
+  void it("rejects tool-owned metadata that changes after planning with zero workspace writes", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-stale-foundation-metadata-"),
     );
@@ -1068,23 +1138,23 @@ describe("Non-Destructive Package Addition", () => {
         ...addition.projectProjections,
       });
 
-      expect(result).toEqual({
+      assertDeepStrictEqualWithMatchers(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             path: ".template/generation.json",
             driver: "canonical",
             reason: "Current tool-owned state is stale",
           }),
         ],
       });
-      expect(await workspaceByteSnapshot(targetDir)).toEqual(before);
+      assert.deepStrictEqual(await workspaceByteSnapshot(targetDir), before);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects unknown Generation Record fields instead of accepting historical snapshots", async () => {
+  void it("rejects unknown Generation Record fields instead of accepting historical snapshots", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-generation-record-validation-"),
     );
@@ -1120,13 +1190,13 @@ describe("Non-Destructive Package Addition", () => {
         JSON.stringify({ ...generation, historicalFiles: {} }),
       );
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "utilities",
-        }),
-      ).toThrow(
+      assertThrowsMatching(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "utilities",
+          }),
         /^Generation Record contains unknown field: historicalFiles; historicalFiles: contains unknown Generation Record field$/u,
       );
     } finally {
@@ -1134,7 +1204,7 @@ describe("Non-Destructive Package Addition", () => {
     }
   });
 
-  it("rejects unknown persisted Environment Need fields before projection", async () => {
+  void it("rejects unknown persisted Environment Need fields before projection", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-environment-metadata-validation-"),
     );
@@ -1173,24 +1243,32 @@ describe("Non-Destructive Package Addition", () => {
         JSON.stringify({ ...metadata, inferredFromWorkspace: true }),
       );
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "utilities",
-        }),
-      ).toThrow(
-        "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: $ contains unknown field: inferredFromWorkspace",
+      assert.throws(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "utilities",
+          }),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: $ contains unknown field: inferredFromWorkspace",
+          ),
       );
-      await expect(
+      await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects unknown fields nested in persisted Environment Need facts before projection", async () => {
+  void it("rejects unknown fields nested in persisted Environment Need facts before projection", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-nested-environment-metadata-validation-"),
     );
@@ -1224,28 +1302,36 @@ describe("Non-Destructive Package Addition", () => {
       const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as {
         check: Record<string, unknown>[];
       };
-      expect(metadata.check.length).toBeGreaterThan(0);
+      assert.ok(metadata.check.length > 0);
       metadata.check[0]!.inferredFromTaskGraph = true;
       await writeFile(metadataPath, JSON.stringify(metadata));
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "utilities",
-        }),
-      ).toThrow(
-        "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: check[0] contains unknown field: inferredFromTaskGraph",
+      assert.throws(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "utilities",
+          }),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Package Addition requires valid Environment Need metadata in .template/environment-needs.json: check[0] contains unknown field: inferredFromTaskGraph",
+          ),
       );
-      await expect(
+      await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects missing, invalid, and unsupported Local Template Metadata before projection", async () => {
+  void it("rejects missing, invalid, and unsupported Local Template Metadata before projection", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-required-metadata-validation-"),
     );
@@ -1287,9 +1373,19 @@ describe("Non-Destructive Package Addition", () => {
         });
 
       await rm(generationPath);
-      expect(plan).toThrow("requires valid Generation Record facts");
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("requires valid Generation Record facts"),
+      );
       await writeFile(generationPath, "{");
-      expect(plan).toThrow("requires valid Generation Record facts");
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("requires valid Generation Record facts"),
+      );
       await writeFile(
         generationPath,
         JSON.stringify({
@@ -1297,15 +1393,32 @@ describe("Non-Destructive Package Addition", () => {
           schemaVersion: 3,
         }),
       );
-      expect(plan).toThrow(
-        "Unsupported Generation Record schema version 3; expected 2",
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Unsupported Generation Record schema version 3; expected 2",
+          ),
       );
       await writeFile(generationPath, generation);
 
       await rm(environmentPath);
-      expect(plan).toThrow("requires explicit Check Environment Need facts");
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "requires explicit Check Environment Need facts",
+          ),
+      );
       await writeFile(environmentPath, "{");
-      expect(plan).toThrow("requires valid Check Environment Need facts");
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("requires valid Check Environment Need facts"),
+      );
       await writeFile(
         environmentPath,
         JSON.stringify({
@@ -1314,21 +1427,30 @@ describe("Non-Destructive Package Addition", () => {
           deployment: [],
         }),
       );
-      expect(plan).toThrow(
-        "requires valid Environment Need metadata in .template/environment-needs.json: check[0] has unsupported kind: inferred-task",
+      assert.throws(
+        plan,
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "requires valid Environment Need metadata in .template/environment-needs.json: check[0] has unsupported kind: inferred-task",
+          ),
       );
       await writeFile(environmentPath, environment);
 
-      expect(plan).not.toThrow();
-      await expect(
+      assert.doesNotThrow(plan);
+      await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("rejects a Generation Record preset that conflicts with initial provenance and Blueprint", async () => {
+  void it("rejects a Generation Record preset that conflicts with initial provenance and Blueprint", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-generation-preset-consistency-"),
     );
@@ -1379,13 +1501,13 @@ describe("Non-Destructive Package Addition", () => {
         }),
       );
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "utilities",
-        }),
-      ).toThrow(
+      assertThrowsContaining(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "utilities",
+          }),
         `Package Addition Generation Record preset ${conflictingDefinition.metadata.name} conflicts with initial Package provenance ${definition.metadata.name} for Blueprint package ${initialization.blueprint.packages[0]!.path}`,
       );
       await writeFile(
@@ -1403,18 +1525,22 @@ describe("Non-Destructive Package Addition", () => {
           })),
         }),
       );
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "utilities",
-        }),
-      ).toThrow(
+      assertThrowsContaining(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "utilities",
+          }),
         `Package Planning Provenance ${conflictingDefinition.metadata.name}:library (planInitialization) at ${initialization.blueprint.packages[0]!.path} failed: unknown Package Contribution replay adapter library; expected binary for ${conflictingDefinition.metadata.name}`,
       );
-      await expect(
+      await assert.rejects(
         readFile(path.join(targetDir, "packages/utilities/package.json")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

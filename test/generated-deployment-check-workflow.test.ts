@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -11,7 +13,6 @@ import {
 import { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 async function renderDeploymentWorkflow(): Promise<{
@@ -66,16 +67,16 @@ async function renderDeploymentWorkflow(): Promise<{
   }
 }
 
-describe("Generated Deployment Check workflow", () => {
-  it("runs the Deployment Check contract through real generated files", async () => {
+void describe("Generated Deployment Check workflow", () => {
+  void it("runs the Deployment Check contract through real generated files", async () => {
     const { source, plan } = await renderDeploymentWorkflow();
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertWorkflowContract(
         plan,
         ".github/workflows/check.yml",
         source,
         parse(source),
       ),
-    ).not.toThrow();
+    );
   });
 });

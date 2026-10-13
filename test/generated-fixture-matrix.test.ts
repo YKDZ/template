@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   mkdir,
   mkdtemp,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -17,7 +19,6 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 
 import {
   assertGeneratedTaskDiscovery,
@@ -25,8 +26,16 @@ import {
 } from "../packages/checks/src/check-generated-registry.ts";
 import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
 import { fixtureDependencyInstallationPlan } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertPartialDeepStrictEqual,
+  assertRejectsContaining,
+  not,
+  testEach,
+} from "./assertions.ts";
 
-describe("registry-derived Package Addition Fixture Matrix", () => {
+void describe("registry-derived Package Addition Fixture Matrix", () => {
   type GeneratedDevelopmentContainerConfig = {
     build: { args: Record<string, string> };
     mounts: Record<string, unknown>[];
@@ -42,30 +51,36 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     }),
   });
 
-  it("fails the matrix when Turbo dry-run omits a generated task despite a successful command", async () => {
-    await expect(
+  void it("fails the matrix when Turbo dry-run omits a generated task despite a successful command", async () => {
+    await assert.rejects(
       assertGeneratedTaskDiscovery({
         plan,
         projectDir: "/tmp/generated-fixture-matrix",
         taskNames: ["lint", "typecheck"],
         run: async () => ({ stdout: JSON.stringify({ tasks: [] }) }),
       }),
-    ).rejects.toThrow("Turbo dry-run omitted generated task(s)");
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("Turbo dry-run omitted generated task(s)"),
+    );
   });
 
-  it("fails the matrix when a successful command does not produce Turbo dry-run JSON", async () => {
-    await expect(
+  void it("fails the matrix when a successful command does not produce Turbo dry-run JSON", async () => {
+    await assert.rejects(
       assertGeneratedTaskDiscovery({
         plan,
         projectDir: "/tmp/generated-fixture-matrix",
         taskNames: ["lint", "typecheck"],
         run: async () => ({ stdout: "completed successfully" }),
       }),
-    ).rejects.toThrow("Turbo dry-run did not return a task graph");
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("Turbo dry-run did not return a task graph"),
+    );
   });
 
-  it("isolates generated installs from the repository pnpm store", () => {
-    expect(fixtureDependencyInstallationPlan("/pnpm/store")).toEqual({
+  void it("isolates generated installs from the repository pnpm store", () => {
+    assert.deepStrictEqual(fixtureDependencyInstallationPlan("/pnpm/store"), {
       storeDir: "/pnpm/store",
       commands: [
         {
@@ -90,29 +105,30 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     });
   });
 
-  it.each([
-    {
-      protectedField: "build argument",
-      mutate: (config: GeneratedDevelopmentContainerConfig) => {
-        config.build.args.NODE_VERSION = "999";
+  testEach(
+    [
+      {
+        protectedField: "build argument",
+        mutate: (config: GeneratedDevelopmentContainerConfig) => {
+          config.build.args.NODE_VERSION = "999";
+        },
+        expectedError: "build arguments do not match the final Tool Layer plan",
       },
-      expectedError: "build arguments do not match the final Tool Layer plan",
-    },
-    {
-      protectedField: "mount",
-      mutate: (config: GeneratedDevelopmentContainerConfig) => {
-        const mount = config.mounts.find(
-          (candidate) => candidate.target === "/pnpm/store",
-        );
-        if (mount === undefined) {
-          throw new Error("Expected projected pnpm store mount");
-        }
-        mount.source = "user-overlap";
+      {
+        protectedField: "mount",
+        mutate: (config: GeneratedDevelopmentContainerConfig) => {
+          const mount = config.mounts.find(
+            (candidate) => candidate.target === "/pnpm/store",
+          );
+          if (mount === undefined) {
+            throw new Error("Expected projected pnpm store mount");
+          }
+          mount.source = "user-overlap";
+        },
+        expectedError:
+          "mount pnpm-store does not match the final Tool Layer plan",
       },
-      expectedError:
-        "mount pnpm-store does not match the final Tool Layer plan",
-    },
-  ])(
+    ],
     "rejects a protected Development Container $protectedField mismatch before evidence lookup",
     async ({ mutate, expectedError }) => {
       const workspace = await mkdtemp(
@@ -121,7 +137,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
       const evidenceEvents: Array<{ readonly type: string }> = [];
 
       try {
-        await expect(
+        await assertRejectsContaining(
           runGeneratedScenarioSet("init", {
             workspace,
             evidence: {
@@ -154,15 +170,17 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
               return result;
             },
           }),
-        ).rejects.toThrow(expectedError);
-        expect(evidenceEvents).toEqual([]);
+          expectedError,
+        );
+        assert.deepStrictEqual(evidenceEvents, []);
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }
     },
   );
 
-  it.each(["root", "package"] as const)(
+  testEach(
+    ["root", "package"] as const,
     "rejects a private %s manifest version before container-backed fixture gates",
     async (manifestOwner) => {
       const workspace = await mkdtemp(
@@ -170,7 +188,11 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
       );
 
       try {
-        await expect(
+        const expectedError =
+          manifestOwner === "root"
+            ? "Generated Repository private Node manifest package.json must not declare version"
+            : /Generated Repository private Node manifest packages\/.+\/package\.json must not declare version/u;
+        await assert.rejects(
           runGeneratedScenarioSet("init", {
             workspace,
             run: async (command, args, options) => {
@@ -218,10 +240,11 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
               );
             },
           }),
-        ).rejects.toThrow(
-          manifestOwner === "root"
-            ? "Generated Repository private Node manifest package.json must not declare version"
-            : /Generated Repository private Node manifest packages\/.+\/package\.json must not declare version/u,
+          (error: unknown) =>
+            error instanceof Error &&
+            (typeof expectedError === "string"
+              ? error.message.includes(expectedError)
+              : expectedError.test(error.message)),
         );
       } finally {
         await rm(workspace, { recursive: true, force: true });
@@ -229,7 +252,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     },
   );
 
-  it("consumes manifest-derived provider source and distribution exports by package name", async () => {
+  void it("consumes manifest-derived provider source and distribution exports by package name", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "focused-provider-probe-"));
     const consumerPackagePath = "apps/unusual-consumer";
     const providerPackagePath = "tools/unusual-provider";
@@ -288,7 +311,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
           calls.push({ command, args });
           if (args[0] === "install") return {};
           if (command === "pnpm") {
-            expect(args).toEqual([
+            assert.deepStrictEqual(args, [
               "exec",
               "turbo",
               "run",
@@ -314,31 +337,39 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
         },
       });
 
-      await expect(
+      await assert.rejects(
         readFile(path.join(providerRoot, sourceTarget), "utf8"),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      await expect(
-        readFile(path.join(providerRoot, defaultTarget), "utf8"),
-      ).resolves.toContain("templateFocusedExport");
-      expect(
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
+      assert.ok(
+        (
+          await readFile(path.join(providerRoot, defaultTarget), "utf8")
+        ).includes("templateFocusedExport"),
+      );
+      assertDeepStrictEqualWithMatchers(
         calls
           .filter(({ command }) => command === "node")
           .map(({ args }) => args),
-      ).toEqual([
-        expect.arrayContaining(["--conditions=source"]),
-        expect.not.arrayContaining(["--conditions=source"]),
-      ]);
-      expect(
+        [
+          arrayContaining(["--conditions=source"]),
+          not(arrayContaining(["--conditions=source"])),
+        ],
+      );
+      assert.deepStrictEqual(
         (await readdir(consumerRoot)).filter((entry) =>
           entry.includes("focused-provider-probe"),
         ),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("derives the real run fixture toolchain from the release snapshot, not historical pins", async () => {
+  void it("derives the real run fixture toolchain from the release snapshot, not historical pins", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "fixture-runtime-snapshot-"),
     );
@@ -355,7 +386,7 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
     try {
       // 真实初始化先渲染再调用 Git，因此可在 Git 接缝观察各场景的根 manifest。
       // 在首个容器命令处停止；本测试证明运行夹具输入，不把它作为 Docker 成功结果。
-      await expect(
+      await assertRejectsContaining(
         runGeneratedScenarioSet("init", {
           workspace,
           run: async (command, args, options) => {
@@ -385,29 +416,33 @@ describe("registry-derived Package Addition Fixture Matrix", () => {
             return result;
           },
         }),
-      ).rejects.toThrow(stopSentinel);
+        stopSentinel,
+      );
 
-      expect(captured.size).toBeGreaterThan(0);
+      assert.ok(captured.size > 0);
       for (const [id, observed] of captured) {
-        expect(
+        assert.strictEqual(
           observed.packageManager,
+          releaseToolchainSnapshot.packageManagerPin,
           `root manifest for ${id} must consume the release snapshot pnpm pin`,
-        ).toBe(releaseToolchainSnapshot.packageManagerPin);
-        expect(
+        );
+        assert.strictEqual(
           observed.node,
+          releaseToolchainSnapshot.nodeVersion,
           `root manifest for ${id} must consume the release snapshot Node version`,
-        ).toBe(releaseToolchainSnapshot.nodeVersion);
+        );
       }
 
       const rustScenarios = [...captured.values()].filter(
         (observed) => observed.rustChannel !== undefined,
       );
-      expect(rustScenarios.length).toBeGreaterThan(0);
+      assert.ok(rustScenarios.length > 0);
       for (const observed of rustScenarios) {
-        expect(
+        assert.strictEqual(
           observed.rustChannel,
+          releaseToolchainSnapshot.rustVersion,
           "a Rust scenario must observe the exact release snapshot Rust version",
-        ).toBe(releaseToolchainSnapshot.rustVersion);
+        );
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });

@@ -1,8 +1,11 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { describe } from "node:test";
 
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+
+import { testEach } from "./assertions.ts";
 
 function property(
   object: ts.ObjectLiteralExpression,
@@ -48,38 +51,48 @@ async function loadMaintainedConfig(
   return config;
 }
 
-describe("maintained Playwright diagnostic configuration", () => {
-  it.each([
-    "packages/builtin-presets/templates/vue-app/playwright.config.ts",
-    "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
-    "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
-  ])("uses native failure diagnostics in %s", async (relativePath) => {
-    const config = await loadMaintainedConfig(relativePath);
-    const use = property(config, "use");
+void describe("maintained Playwright diagnostic configuration", () => {
+  testEach(
+    [
+      "packages/builtin-presets/templates/vue-app/playwright.config.ts",
+      "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
+      "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
+    ],
+    "uses native failure diagnostics in %s",
+    async (relativePath) => {
+      const config = await loadMaintainedConfig(relativePath);
+      const use = property(config, "use");
 
-    expect(use !== undefined && ts.isObjectLiteralExpression(use)).toBe(true);
-    if (use === undefined || !ts.isObjectLiteralExpression(use)) return;
-    const trace = property(use, "trace");
-    const reporter = property(config, "reporter");
+      assert.strictEqual(
+        use !== undefined && ts.isObjectLiteralExpression(use),
+        true,
+      );
+      if (use === undefined || !ts.isObjectLiteralExpression(use)) return;
+      const trace = property(use, "trace");
+      const reporter = property(config, "reporter");
 
-    expect(trace !== undefined && ts.isStringLiteral(trace) && trace.text).toBe(
-      "retain-on-failure",
-    );
-    expect(
-      reporter !== undefined && ts.isArrayLiteralExpression(reporter),
-    ).toBe(true);
-    if (reporter === undefined || !ts.isArrayLiteralExpression(reporter))
-      return;
-    expect(
-      reporter.elements.map((entry) =>
-        ts.isArrayLiteralExpression(entry) &&
-        entry.elements[0] !== undefined &&
-        ts.isStringLiteral(entry.elements[0])
-          ? entry.elements[0].text
-          : undefined,
-      ),
-    ).toEqual(["list", "html"]);
-    expect(property(config, "retries")).toBeUndefined();
-    expect(property(use, "video")).toBeUndefined();
-  });
+      assert.strictEqual(
+        trace !== undefined && ts.isStringLiteral(trace) && trace.text,
+        "retain-on-failure",
+      );
+      assert.strictEqual(
+        reporter !== undefined && ts.isArrayLiteralExpression(reporter),
+        true,
+      );
+      if (reporter === undefined || !ts.isArrayLiteralExpression(reporter))
+        return;
+      assert.deepStrictEqual(
+        reporter.elements.map((entry) =>
+          ts.isArrayLiteralExpression(entry) &&
+          entry.elements[0] !== undefined &&
+          ts.isStringLiteral(entry.elements[0])
+            ? entry.elements[0].text
+            : undefined,
+        ),
+        ["list", "html"],
+      );
+      assert.strictEqual(property(config, "retries"), undefined);
+      assert.strictEqual(property(use, "video"), undefined);
+    },
+  );
 });

@@ -1,7 +1,10 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { describe, it } from "node:test";
 
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+
+import { assertLength, assertPartialDeepStrictEqual } from "./assertions.ts";
 
 type WorkflowStep = {
   readonly id?: string;
@@ -56,19 +59,19 @@ type ReleaseWorkflow = {
   };
 };
 
-describe("Fixture Verification Evidence check workflow", () => {
-  it("checks every pull request while avoiding duplicate branch-push checks outside main", async () => {
+void describe("Fixture Verification Evidence check workflow", () => {
+  void it("checks every pull request while avoiding duplicate branch-push checks outside main", async () => {
     const workflow = await checkWorkflow();
 
-    expect(workflow.on.pull_request).toBeNull();
-    expect(workflow.on.push).toEqual({ branches: ["main"] });
-    expect(workflow.on.workflow_dispatch).toBeNull();
+    assert.strictEqual(workflow.on.pull_request, null);
+    assert.deepStrictEqual(workflow.on.push, { branches: ["main"] });
+    assert.strictEqual(workflow.on.workflow_dispatch, null);
   });
 
-  it("cancels only stale checks for the same pull request", async () => {
+  void it("cancels only stale checks for the same pull request", async () => {
     const workflow = await checkWorkflow();
 
-    expect(workflow.concurrency).toEqual({
+    assert.deepStrictEqual(workflow.concurrency, {
       group:
         "${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}",
       "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
@@ -125,7 +128,7 @@ describe("Fixture Verification Evidence check workflow", () => {
         workflow: "PR Check",
       },
     ] as const;
-    expect(
+    assert.deepStrictEqual(
       eventTable.map(({ caller, event, ref, runId, workflow }) => ({
         caller,
         event,
@@ -135,59 +138,60 @@ describe("Fixture Verification Evidence check workflow", () => {
             : `${workflow}-${runId}`,
         cancelInProgress: event === "pull_request",
       })),
-    ).toEqual([
-      {
-        caller: "direct Check",
-        event: "pull_request",
-        group: "Check-refs/pull/17/merge",
-        cancelInProgress: true,
-      },
-      {
-        caller: "direct Check",
-        event: "pull_request",
-        group: "Check-refs/pull/18/merge",
-        cancelInProgress: true,
-      },
-      {
-        caller: "direct Check",
-        event: "push",
-        group: "Check-103",
-        cancelInProgress: false,
-      },
-      {
-        caller: "direct Check",
-        event: "workflow_dispatch",
-        group: "Check-104",
-        cancelInProgress: false,
-      },
-      {
-        caller: "reusable Release",
-        event: "release",
-        group: "Release-105",
-        cancelInProgress: false,
-      },
-      {
-        caller: "reusable Release",
-        event: "workflow_dispatch",
-        group: "Release-106",
-        cancelInProgress: false,
-      },
-      {
-        caller: "reusable PR Check",
-        event: "pull_request",
-        group: "PR Check-refs/pull/19/merge",
-        cancelInProgress: true,
-      },
-    ]);
+      [
+        {
+          caller: "direct Check",
+          event: "pull_request",
+          group: "Check-refs/pull/17/merge",
+          cancelInProgress: true,
+        },
+        {
+          caller: "direct Check",
+          event: "pull_request",
+          group: "Check-refs/pull/18/merge",
+          cancelInProgress: true,
+        },
+        {
+          caller: "direct Check",
+          event: "push",
+          group: "Check-103",
+          cancelInProgress: false,
+        },
+        {
+          caller: "direct Check",
+          event: "workflow_dispatch",
+          group: "Check-104",
+          cancelInProgress: false,
+        },
+        {
+          caller: "reusable Release",
+          event: "release",
+          group: "Release-105",
+          cancelInProgress: false,
+        },
+        {
+          caller: "reusable Release",
+          event: "workflow_dispatch",
+          group: "Release-106",
+          cancelInProgress: false,
+        },
+        {
+          caller: "reusable PR Check",
+          event: "pull_request",
+          group: "PR Check-refs/pull/19/merge",
+          cancelInProgress: true,
+        },
+      ],
+    );
   });
 
-  it("bounds the observed cold Check runtime with a 120 minute timeout", async () => {
+  void it("bounds the observed cold Check runtime with a 120 minute timeout", async () => {
     const job = (await checkWorkflow()).jobs.check;
 
-    expect(job["timeout-minutes"]).toBe(120);
+    assert.strictEqual(job["timeout-minutes"], 120);
   });
 
-  it("validates fixture prerequisites before running container-backed gates", async () => {
+  void it("validates fixture prerequisites before running container-backed gates", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const prerequisites = steps.find(
       (step) => step.id === "fixture-prerequisites",
@@ -201,14 +205,16 @@ describe("Fixture Verification Evidence check workflow", () => {
       readonly devDependencies: Record<string, string>;
     };
 
-    expect(
+    assert.notStrictEqual(
       steps.find((step) => step.uses === "docker/setup-buildx-action@v4"),
-    ).toBeDefined();
-    expect(workspace.catalog["@devcontainers/cli"]).toBe("0.89.0");
-    expect(checksManifest.devDependencies["@devcontainers/cli"]).toBe(
+      undefined,
+    );
+    assert.strictEqual(workspace.catalog["@devcontainers/cli"], "0.89.0");
+    assert.strictEqual(
+      checksManifest.devDependencies["@devcontainers/cli"],
       "catalog:",
     );
-    expect(prerequisites).toMatchObject({
+    assertPartialDeepStrictEqual(prerequisites, {
       name: "Validate Fixture Gate Prerequisites",
       run: [
         "docker version --format '{{.Server.Version}}'",
@@ -222,20 +228,22 @@ describe("Fixture Verification Evidence check workflow", () => {
       "pnpm run check:focused",
       "pnpm run check:deployment",
     ]) {
-      expect(steps.find((step) => step.run === command)?.if).toBe(
+      assert.strictEqual(
+        steps.find((step) => step.run === command)?.if,
         "always() && steps.fixture-prerequisites.outcome == 'success'",
       );
     }
-    expect(
+    assert.strictEqual(
       steps.find((step) => step.id === "fixture-evidence-health")?.if,
-    ).toBe("always()");
+      "always()",
+    );
   });
 
-  it("enables job-local evidence while limiting publication to trusted main pushes", async () => {
+  void it("enables job-local evidence while limiting publication to trusted main pushes", async () => {
     const workflow = await checkWorkflow();
     const job = workflow.jobs.check;
 
-    expect(job.env).toEqual({
+    assert.deepStrictEqual(job.env, {
       TEMPLATE_FIXTURE_EVIDENCE_DIR:
         "${{ github.workspace }}/.fixture-evidence",
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1",
@@ -261,22 +269,24 @@ describe("Fixture Verification Evidence check workflow", () => {
     const scenarioSteps = job.steps.filter(
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
     );
-    expect(scenarioSteps).toHaveLength(4);
-    expect(
+    assertLength(scenarioSteps, 4);
+    assert.strictEqual(
       scenarioSteps.every((step) =>
         Object.keys(step.env ?? {}).every(
           (name) => !name.startsWith("TEMPLATE_FIXTURE_EVIDENCE_"),
         ),
       ),
-    ).toBe(true);
-    expect(
+      true,
+    );
+    assert.strictEqual(
       job.steps.find(
         (step) => step.name === "Enable trusted evidence publication",
       ),
-    ).toBeUndefined();
+      undefined,
+    );
   });
 
-  it("shares signed Turbo cache only with trusted producers and read-only Release consumers", async () => {
+  void it("shares signed Turbo cache only with trusted producers and read-only Release consumers", async () => {
     const trustedCacheCredential =
       "${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.";
     const checkWorkflowDocument = await checkWorkflow();
@@ -292,72 +302,78 @@ describe("Fixture Verification Evidence check workflow", () => {
       unknown
     >;
 
-    expect(checkWorkflowDocument.on.workflow_call.secrets).toEqual({
+    assert.deepStrictEqual(checkWorkflowDocument.on.workflow_call.secrets, {
       TURBO_TOKEN: { required: false },
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: { required: false },
     });
-    expect(packageCheck?.env).toBeUndefined();
-    expect(
+    assert.strictEqual(packageCheck?.env, undefined);
+    assert.strictEqual(
       check.steps.every((step) =>
         Object.keys(step.env ?? {}).every((name) => !name.startsWith("TURBO_")),
       ),
-    ).toBe(true);
+      true,
+    );
     for (const command of [
       "pnpm run check:fixtures",
       "pnpm run check:focused",
       "pnpm run check:deployment",
     ]) {
-      expect(check.steps.find((step) => step.run === command)?.env).toEqual({
-        TEMPLATE_FIXTURE_TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
-        TEMPLATE_FIXTURE_TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
-        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
-        TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY:
-          "${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}",
-      });
+      assert.deepStrictEqual(
+        check.steps.find((step) => step.run === command)?.env,
+        {
+          TEMPLATE_FIXTURE_TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
+          TEMPLATE_FIXTURE_TURBO_TOKEN: `${trustedCacheCredential}TURBO_TOKEN || '' }}`,
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY: `${trustedCacheCredential}TURBO_REMOTE_CACHE_SIGNATURE_KEY || '' }}`,
+          TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY:
+            "${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref) && 'false' || 'true' }}",
+        },
+      );
     }
-    expect(release.jobs.check.secrets).toEqual({
+    assert.deepStrictEqual(release.jobs.check.secrets, {
       TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
       TURBO_REMOTE_CACHE_SIGNATURE_KEY:
         "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
     });
-    expect(
+    assert.deepStrictEqual(
       release.jobs.publish.steps.find(
         (step) =>
           step.run ===
           "pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance",
       )?.env,
-    ).toEqual({
-      TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
-      TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
-      TURBO_REMOTE_CACHE_SIGNATURE_KEY:
-        "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
-      TURBO_REMOTE_CACHE_READ_ONLY: "true",
-    });
-    expect(turboConfig.remoteCache).toEqual({ signature: true });
+      {
+        TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
+        TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
+        TURBO_REMOTE_CACHE_SIGNATURE_KEY:
+          "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
+        TURBO_REMOTE_CACHE_READ_ONLY: "true",
+      },
+    );
+    assert.deepStrictEqual(turboConfig.remoteCache, { signature: true });
   });
 
-  it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
+  void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     for (const command of [
       "pnpm run check:fixtures",
       "pnpm run check:focused",
       "pnpm run check:deployment",
     ]) {
-      expect(steps.find((step) => step.run === command)?.if).toContain(
-        "always()",
+      assert.ok(
+        steps.find((step) => step.run === command)?.if?.includes("always()"),
       );
     }
 
-    expect(
+    assertPartialDeepStrictEqual(
       steps.find((step) => step.id === "fixture-evidence-health"),
-    ).toMatchObject({
-      name: "Check Fixture Evidence Health",
-      if: "always()",
-      run: "pnpm --filter @ykdz/template-checks run check:evidence-health",
-    });
+      {
+        name: "Check Fixture Evidence Health",
+        if: "always()",
+        run: "pnpm --filter @ykdz/template-checks run check:evidence-health",
+      },
+    );
   });
 
-  it("always preserves the current run activity after Evidence Health", async () => {
+  void it("always preserves the current run activity after Evidence Health", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const healthIndex = steps.findIndex(
       (step) => step.id === "fixture-evidence-health",
@@ -366,8 +382,8 @@ describe("Fixture Verification Evidence check workflow", () => {
       (step) => step.name === "Upload Fixture Evidence Activity",
     );
 
-    expect(uploadIndex).toBe(healthIndex + 1);
-    expect(steps[uploadIndex]).toEqual({
+    assert.strictEqual(uploadIndex, healthIndex + 1);
+    assert.deepStrictEqual(steps[uploadIndex], {
       name: "Upload Fixture Evidence Activity",
       if: "always()",
       uses: "actions/upload-artifact@v7",
@@ -381,7 +397,7 @@ describe("Fixture Verification Evidence check workflow", () => {
     });
   });
 
-  it("uses a new Actions transport namespace and publishes only after healthy trusted work", async () => {
+  void it("uses a new Actions transport namespace and publishes only after healthy trusted work", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const restore = steps.find(
       (step) => step.name === "Restore Fixture Verification Evidence",
@@ -390,12 +406,12 @@ describe("Fixture Verification Evidence check workflow", () => {
       (step) => step.name === "Save Fixture Verification Evidence",
     );
 
-    expect(restore?.with).toEqual({
+    assert.deepStrictEqual(restore?.with, {
       path: ".fixture-evidence",
       key: "fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}",
       "restore-keys": "fixture-verification-evidence-${{ runner.os }}-\n",
     });
-    expect(save).toMatchObject({
+    assertPartialDeepStrictEqual(save, {
       name: "Save Fixture Verification Evidence",
       if: "always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'",
       with: {
@@ -405,7 +421,7 @@ describe("Fixture Verification Evidence check workflow", () => {
     });
   });
 
-  it("restores native caches for pull requests and saves only trusted healthy fixture work", async () => {
+  void it("restores native caches for pull requests and saves only trusted healthy fixture work", async () => {
     const job = (await checkWorkflow()).jobs.check;
     const pullRequestOrTrustedRead =
       "github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && job.workflow_ref == github.workflow_ref)";
@@ -439,15 +455,19 @@ describe("Fixture Verification Evidence check workflow", () => {
         (step) => step.name === `Save ${cache.name} cache`,
       );
 
-      expect(restore).toMatchObject({
+      assertPartialDeepStrictEqual(restore, {
         if: pullRequestOrTrustedRead,
         uses: "actions/cache/restore@v6",
         with: { path: cache.path },
       });
-      expect(restore?.with?.key).toContain(cache.keyInput);
-      expect(restore?.with?.key).toContain("${{ github.run_id }}");
-      expect(restore?.with?.["restore-keys"]).toContain(cache.keyInput);
-      expect(save).toMatchObject({
+      const restoreKey = restore?.with?.key;
+      const restoreKeys = restore?.with?.["restore-keys"];
+      assert.ok(typeof restoreKey === "string");
+      assert.ok(typeof restoreKeys === "string");
+      assert.ok(restoreKey.includes(cache.keyInput));
+      assert.ok(restoreKey.includes("${{ github.run_id }}"));
+      assert.ok(restoreKeys.includes(cache.keyInput));
+      assertPartialDeepStrictEqual(save, {
         if: trustedHealthyWrite,
         uses: "actions/cache/save@v6",
         with: {
@@ -455,18 +475,20 @@ describe("Fixture Verification Evidence check workflow", () => {
           key: restore?.with?.key,
         },
       });
-      expect(cache.path).not.toMatch(
+      assert.doesNotMatch(
+        cache.path,
         /(?:node_modules|pnpm-lock|workspace|target)/u,
       );
     }
   });
 
-  it("keeps Release on the same read-only reusable check workflow", async () => {
+  void it("keeps Release on the same read-only reusable check workflow", async () => {
     const workflow = parse(
       await readFile(".github/workflows/release.yml", "utf8"),
     ) as ReleaseWorkflow;
 
-    expect(workflow.jobs.check).toEqual({
+    assert.strictEqual(workflow.jobs.check.with, undefined);
+    assert.deepStrictEqual(workflow.jobs.check, {
       name: "Check package",
       uses: "./.github/workflows/check.yml",
       secrets: {
@@ -475,11 +497,10 @@ describe("Fixture Verification Evidence check workflow", () => {
           "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
       },
     });
-    expect(workflow.jobs.check.with).toBeUndefined();
-    expect(workflow.jobs.publish.needs).toBe("check");
+    assert.strictEqual(workflow.jobs.publish.needs, "check");
   });
 
-  it("keeps Release readiness tied to packed Rust addition and container-backed generated quality", async () => {
+  void it("keeps Release readiness tied to packed Rust addition and container-backed generated quality", async () => {
     const check = (await checkWorkflow()).jobs.check.steps;
     const release = parse(
       await readFile(".github/workflows/release.yml", "utf8"),
@@ -489,38 +510,50 @@ describe("Fixture Verification Evidence check workflow", () => {
       "utf8",
     );
 
-    expect(release.jobs.check.uses).toBe("./.github/workflows/check.yml");
-    expect(release.jobs.publish.needs).toBe("check");
-    expect(check.find((step) => step.run === "pnpm run check")).toBeDefined();
-    expect(packedConsumerSource).toContain(
-      'addableDefinitionWithPackageRole("native-package")',
+    assert.strictEqual(
+      release.jobs.check.uses,
+      "./.github/workflows/check.yml",
     );
-    expect(packedConsumerSource).toContain(
-      '"--preset",\n          rustDefinition.metadata.name,',
+    assert.strictEqual(release.jobs.publish.needs, "check");
+    assert.notStrictEqual(
+      check.find((step) => step.run === "pnpm run check"),
+      undefined,
     );
-    expect(packedConsumerSource).toContain(
-      'await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });',
+    assert.ok(
+      packedConsumerSource.includes(
+        'addableDefinitionWithPackageRole("native-package")',
+      ),
+    );
+    assert.match(
+      packedConsumerSource,
+      /"--preset",\s*rustDefinition\.metadata\.name,/u,
+    );
+    assert.ok(
+      packedConsumerSource.includes(
+        'await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });',
+      ),
     );
     for (const command of [
       "pnpm run check:fixtures",
       "pnpm run check:focused",
       "pnpm run check:deployment",
     ]) {
-      expect(check.find((step) => step.run === command)?.if).toBe(
+      assert.strictEqual(
+        check.find((step) => step.run === command)?.if,
         "always() && steps.fixture-prerequisites.outcome == 'success'",
       );
     }
   });
 
-  it("keeps only the new evidence store and current-run activity local", async () => {
+  void it("keeps only the new evidence store and current-run activity local", async () => {
     const ignored = new Set(
       (await readFile(".gitignore", "utf8"))
         .split("\n")
         .filter((line) => line.length > 0),
     );
 
-    expect(ignored).toContain(".fixture-evidence/");
-    expect(ignored).toContain(".fixture-evidence-activity/");
-    expect(ignored).toContain(".fixture-native-cache/");
+    assert.ok(ignored.has(".fixture-evidence/"));
+    assert.ok(ignored.has(".fixture-evidence-activity/"));
+    assert.ok(ignored.has(".fixture-native-cache/"));
   });
 });

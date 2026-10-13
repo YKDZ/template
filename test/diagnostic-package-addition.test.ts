@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   mkdir,
@@ -8,6 +9,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -21,8 +23,15 @@ import {
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+
+import {
+  any,
+  arrayContaining,
+  assertLength,
+  assertPartialDeepStrictEqual,
+  objectContaining,
+} from "./assertions.ts";
 
 const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
 
@@ -144,8 +153,8 @@ async function initializedBase(targetDir: string) {
   return { generationContext };
 }
 
-describe("diagnostic Package Addition", () => {
-  it("adds and extends one aggregate native artifact without overwriting unrelated workflow edits", async () => {
+void describe("diagnostic Package Addition", () => {
+  void it("adds and extends one aggregate native artifact without overwriting unrelated workflow edits", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-diagnostic-addition-"),
     );
@@ -172,9 +181,9 @@ describe("diagnostic Package Addition", () => {
         ...first.projectProjections,
         dryRun: true,
       });
-      expect(preview).toMatchObject({
+      assertPartialDeepStrictEqual(preview, {
         ok: true,
-        actions: expect.arrayContaining([
+        actions: arrayContaining([
           {
             path: ".github/workflows/check.yml",
             driver: "text",
@@ -182,26 +191,29 @@ describe("diagnostic Package Addition", () => {
           },
         ]),
       });
-      expect(await snapshot(targetDir)).toEqual(beforeDryRun);
+      assert.deepStrictEqual(await snapshot(targetDir), beforeDryRun);
 
-      expect(
+      assertPartialDeepStrictEqual(
         await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...first.projectProjections,
         }),
-      ).toMatchObject({ ok: true });
+        { ok: true },
+      );
       const firstWorkflow = await readFile(workflowPath, "utf8");
-      expect(firstWorkflow).toMatch(/^# user workflow policy\n/u);
-      expect(firstWorkflow).toContain(
-        "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+      assert.match(firstWorkflow, /^# user workflow policy\n/u);
+      assert.ok(
+        firstWorkflow.includes(
+          "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/web",
+        ),
       );
-      expect(firstWorkflow).toContain(
-        "for diagnostic_directory in test-results playwright-report; do",
+      assert.ok(
+        firstWorkflow.includes(
+          "for diagnostic_directory in test-results playwright-report; do",
+        ),
       );
-      expect(firstWorkflow).toContain("path: .template-ci-diagnostics");
-      expect(
-        firstWorkflow.match(/Upload Root Check diagnostics/gu),
-      ).toHaveLength(1);
+      assert.ok(firstWorkflow.includes("path: .template-ci-diagnostics"));
+      assertLength(firstWorkflow.match(/Upload Root Check diagnostics/gu), 1);
 
       const second = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
@@ -211,23 +223,22 @@ describe("diagnostic Package Addition", () => {
         packageLeafName: "admin",
         packagePath: "apps/admin",
       });
-      expect(
+      assertPartialDeepStrictEqual(
         await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...second.projectProjections,
         }),
-      ).toMatchObject({ ok: true });
-      const secondWorkflow = await readFile(workflowPath, "utf8");
-      expect(
-        secondWorkflow.match(/DIAGNOSTIC_OWNER_PATHS: \|-/gu),
-      ).toHaveLength(1);
-      expect(secondWorkflow.match(/apps\/admin/gu)).toHaveLength(1);
-      expect(secondWorkflow).toContain(
-        "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+        { ok: true },
       );
-      expect(
-        secondWorkflow.match(/Upload Root Check diagnostics/gu),
-      ).toHaveLength(1);
+      const secondWorkflow = await readFile(workflowPath, "utf8");
+      assertLength(secondWorkflow.match(/DIAGNOSTIC_OWNER_PATHS: \|-/gu), 1);
+      assertLength(secondWorkflow.match(/apps\/admin/gu), 1);
+      assert.ok(
+        secondWorkflow.includes(
+          "DIAGNOSTIC_OWNER_PATHS: |-\n            apps/admin\n            apps/web",
+        ),
+      );
+      assertLength(secondWorkflow.match(/Upload Root Check diagnostics/gu), 1);
 
       const repeated = planGeneratedRepositoryPackageAddition({
         definition: diagnosticAddition(),
@@ -237,21 +248,22 @@ describe("diagnostic Package Addition", () => {
         packageLeafName: "admin",
         packagePath: "apps/admin",
       });
-      expect(
+      assert.deepStrictEqual(
         await reconcileAndApplyProjectProjections({
           targetRoot: targetDir,
           ...repeated.projectProjections,
         }),
-      ).toEqual({ ok: true, changedPaths: [], actions: [] });
+        { ok: true, changedPaths: [], actions: [] },
+      );
 
       const staleRepeat = await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...first.projectProjections,
       });
-      expect(staleRepeat).toMatchObject({
+      assertPartialDeepStrictEqual(staleRepeat, {
         ok: false,
         conflicts: [
-          expect.objectContaining({ path: "apps/web", driver: "precondition" }),
+          objectContaining({ path: "apps/web", driver: "precondition" }),
         ],
       });
     } finally {
@@ -259,7 +271,7 @@ describe("diagnostic Package Addition", () => {
     }
   });
 
-  it("is deterministic across diagnostic addition order and does not inspect an unchanged workflow", async () => {
+  void it("is deterministic across diagnostic addition order and does not inspect an unchanged workflow", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-diagnostic-order-"),
     );
@@ -280,12 +292,13 @@ describe("diagnostic Package Addition", () => {
             packageLeafName: name,
             packagePath: `apps/${name}`,
           });
-          expect(
+          assertPartialDeepStrictEqual(
             await reconcileAndApplyProjectProjections({
               targetRoot: targetDir,
               ...addition.projectProjections,
             }),
-          ).toMatchObject({ ok: true });
+            { ok: true },
+          );
         }
         rendered.push(
           await readFile(
@@ -294,7 +307,7 @@ describe("diagnostic Package Addition", () => {
           ),
         );
       }
-      expect(rendered[0]).toBe(rendered[1]);
+      assert.strictEqual(rendered[0], rendered[1]);
 
       const targetDir = path.join(workspace, "no-diagnostic");
       const { generationContext } = await initializedBase(targetDir);
@@ -313,17 +326,19 @@ describe("diagnostic Package Addition", () => {
         targetRoot: targetDir,
         ...addition.projectProjections,
       });
-      expect(result).toMatchObject({ ok: true });
+      assertPartialDeepStrictEqual(result, { ok: true });
       if (result.ok)
-        expect(result.actions.map((action) => action.path)).not.toContain(
-          ".github/workflows/check.yml",
+        assert.ok(
+          !result.actions
+            .map((action) => action.path)
+            .includes(".github/workflows/check.yml"),
         );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("reports overlapping workflow edits atomically and composes deployment with root-only diagnostics", async () => {
+  void it("reports overlapping workflow edits atomically and composes deployment with root-only diagnostics", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-diagnostic-conflict-"),
     );
@@ -351,17 +366,17 @@ describe("diagnostic Package Addition", () => {
         targetRoot: targetDir,
         ...conflict.projectProjections,
       });
-      expect(result).toMatchObject({
+      assertPartialDeepStrictEqual(result, {
         ok: false,
         conflicts: [
-          expect.objectContaining({
+          objectContaining({
             path: ".github/workflows/check.yml",
             driver: "text",
-            region: expect.any(Object),
+            region: any(Object),
           }),
         ],
       });
-      expect(await snapshot(targetDir)).toEqual(before);
+      assert.deepStrictEqual(await snapshot(targetDir), before);
 
       await writeFile(
         workflowPath,
@@ -389,12 +404,13 @@ describe("diagnostic Package Addition", () => {
         packageLeafName: "admin",
         packagePath: "apps/admin",
       });
-      expect(
+      assertPartialDeepStrictEqual(
         await reconcileAndApplyProjectProjections({
           targetRoot: deploymentTargetDir,
           ...combined.projectProjections,
         }),
-      ).toMatchObject({ ok: true });
+        { ok: true },
+      );
       const deploymentWorkflowSource = await readFile(
         path.join(deploymentTargetDir, ".github/workflows/check.yml"),
         "utf8",
@@ -415,19 +431,20 @@ describe("diagnostic Package Addition", () => {
           };
         };
       };
-      expect(
+      assert.deepStrictEqual(
         workflow.jobs.check.strategy.matrix.include.map(
           (entry) => entry.job_name,
         ),
-      ).toEqual(["Root Check", "Deployment Check"]);
+        ["Root Check", "Deployment Check"],
+      );
       const upload = workflow.jobs.check.steps.find(
         (step) => step.name === "Upload Root Check diagnostics",
       );
-      expect(upload).toMatchObject({
+      assertPartialDeepStrictEqual(upload, {
         if: "failure() && matrix.capability == 'root'",
       });
-      expect(upload?.with?.path).toBe(".template-ci-diagnostics");
-      expect(deploymentWorkflowSource).toContain("apps/admin");
+      assert.strictEqual(upload?.with?.path, ".template-ci-diagnostics");
+      assert.ok(deploymentWorkflowSource.includes("apps/admin"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

@@ -1,8 +1,14 @@
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { describe, it } from "node:test";
 
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+
+import {
+  assertDeepStrictEqualWithMatchers,
+  objectContaining,
+} from "./assertions.ts";
 
 type Manifest = {
   readonly packageManager?: string;
@@ -29,45 +35,50 @@ async function readJson<T>(file: string): Promise<T> {
   return JSON.parse(await readFile(file, "utf8")) as T;
 }
 
-describe("Template Repository native task model", () => {
-  it("keeps the Package Manager Pin consumable by repository automation", async () => {
+void describe("Template Repository native task model", () => {
+  void it("keeps the Package Manager Pin consumable by repository automation", async () => {
     const manifest = await readJson<Manifest>("package.json");
     const pnpm = await execa("pnpm", ["--version"], { reject: true });
 
-    expect(manifest.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/u);
-    expect(manifest.packageManager).toBe(`pnpm@${pnpm.stdout.trim()}`);
+    assert.ok(manifest.packageManager !== undefined);
+    assert.match(manifest.packageManager, /^pnpm@\d+\.\d+\.\d+$/u);
+    assert.strictEqual(manifest.packageManager, `pnpm@${pnpm.stdout.trim()}`);
   });
 
-  it("executes builds when injected workspace packages must be synchronized", async () => {
+  void it("executes builds when injected workspace packages must be synchronized", async () => {
     const workspace = parse(
       await readFile("pnpm-workspace.yaml", "utf8"),
     ) as WorkspaceConfig;
     const turbo = await readJson<TurboConfig>("turbo.json");
 
-    expect(workspace.injectWorkspacePackages).toBe(false);
-    expect(workspace.dedupeInjectedDeps).toBe(false);
-    expect(workspace.syncInjectedDepsAfterScripts).toContain("build");
-    expect(turbo.tasks.build?.cache).toBe(false);
+    assert.strictEqual(workspace.injectWorkspacePackages, false);
+    assert.strictEqual(workspace.dedupeInjectedDeps, false);
+    assert.ok(workspace.syncInjectedDepsAfterScripts?.includes("build"));
+    assert.strictEqual(turbo.tasks.build?.cache, false);
   });
 
-  it("uses conventional root leaf tasks and one native check/fix invocation", async () => {
+  void it("uses conventional root leaf tasks and one native check/fix invocation", async () => {
     const manifest = await readJson<Manifest>("package.json");
     const scripts = manifest.scripts;
 
-    expect(scripts.check).toBe(
+    assert.strictEqual(
+      scripts.check,
       "pnpm run build && pnpm run boundaries && pnpm run check:toolchain:versions && turbo run format:check lint typecheck build test test:e2e check:generated check:templates check:templates:boundary check:templates:github-yaml --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task --concurrency=1",
     );
-    expect(scripts.fix).toBe(
+    assert.strictEqual(
+      scripts.fix,
       "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
     );
-    expect(scripts.build).toBe(
+    assert.strictEqual(
+      scripts.build,
       "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     );
-    expect(scripts["check:focused"]).toBe(
+    assert.strictEqual(
+      scripts["check:focused"],
       "turbo run check:focused --output-logs=errors-only --log-order=grouped",
     );
-    expect(scripts.check).not.toContain("check:focused");
-    expect(scripts.boundaries).toBe("turbo boundaries --no-color");
+    assert.ok(!scripts.check.includes("check:focused"));
+    assert.strictEqual(scripts.boundaries, "turbo boundaries --no-color");
 
     for (const task of [
       "format:check",
@@ -77,35 +88,38 @@ describe("Template Repository native task model", () => {
       "typecheck",
       "test",
     ]) {
-      expect(scripts[task], `root ${task} script`).toBeDefined();
-      expect(scripts[task], `root ${task} is a leaf command`).not.toContain(
-        "turbo run",
+      assert.ok(scripts[task] !== undefined, `root ${task} script`);
+      assert.ok(
+        !scripts[task].includes("turbo run"),
+        `root ${task} is a leaf command`,
       );
     }
-    expect(Object.keys(scripts)).not.toContain("check:boundaries");
-    expect(Object.keys(scripts)).not.toContain("check:format");
-    expect(Object.keys(scripts)).not.toContain("check:lint");
-    expect(Object.keys(scripts)).not.toContain("format:check:root");
-    expect(Object.keys(scripts)).not.toContain("format:write:root");
-    expect(Object.keys(scripts)).not.toContain("lint:root");
-    expect(Object.keys(scripts)).not.toContain("lint:fix:root");
-    expect(Object.keys(scripts)).not.toContain("typecheck:root");
-    expect(Object.keys(scripts)).not.toContain("check:templates:shared-oxc");
-    expect(Object.keys(scripts)).not.toContain("check:templates:static-source");
+    assert.ok(!Object.keys(scripts).includes("check:boundaries"));
+    assert.ok(!Object.keys(scripts).includes("check:format"));
+    assert.ok(!Object.keys(scripts).includes("check:lint"));
+    assert.ok(!Object.keys(scripts).includes("format:check:root"));
+    assert.ok(!Object.keys(scripts).includes("format:write:root"));
+    assert.ok(!Object.keys(scripts).includes("lint:root"));
+    assert.ok(!Object.keys(scripts).includes("lint:fix:root"));
+    assert.ok(!Object.keys(scripts).includes("typecheck:root"));
+    assert.ok(!Object.keys(scripts).includes("check:templates:shared-oxc"));
+    assert.ok(!Object.keys(scripts).includes("check:templates:static-source"));
 
     for (const command of Object.values(scripts)) {
-      expect(command).not.toContain(":root");
-      expect(command).not.toContain(":run");
-      expect(command).not.toContain("transit");
+      assert.ok(!command.includes(":root"));
+      assert.ok(!command.includes(":run"));
+      assert.ok(!command.includes("transit"));
     }
 
     for (const task of ["format:check", "format:write"]) {
-      expect(scripts[task]).toContain("git ls-files -- ':!packages/**'");
-      expect(scripts[task]).not.toContain("packages/builtin-presets");
+      const script = scripts[task];
+      assert.ok(script !== undefined);
+      assert.ok(script.includes("git ls-files -- ':!packages/**'"));
+      assert.ok(!script.includes("packages/builtin-presets"));
     }
   });
 
-  it("joins root and package leaf tasks in one Turbo action graph", async () => {
+  void it("joins root and package leaf tasks in one Turbo action graph", async () => {
     const turbo = await readJson<TurboConfig>("turbo.json");
     const tasks = turbo.tasks;
 
@@ -117,24 +131,28 @@ describe("Template Repository native task model", () => {
       "typecheck",
       "test",
     ]) {
-      expect(tasks[`//#${task}`], `root ${task} configuration`).toBeDefined();
+      assert.notStrictEqual(
+        tasks[`//#${task}`],
+        undefined,
+        `root ${task} configuration`,
+      );
     }
-    expect(tasks["//#build"]).toBeUndefined();
-    expect(tasks.transit).toBeUndefined();
-    expect(tasks["check:templates:shared-oxc"]).toBeUndefined();
-    expect(tasks["check:templates:static-source"]).toBeUndefined();
-    expect(tasks.typecheck?.dependsOn).toContain("^typecheck");
-    expect(tasks.typecheck?.dependsOn).not.toContain("^build");
-    expect(tasks["//#typecheck"]?.dependsOn).toEqual(["^typecheck"]);
-    expect(tasks.build?.dependsOn).toContain("^build");
-    expect(tasks.lint?.dependsOn ?? []).not.toContain("^build");
-    expect(tasks.test?.dependsOn ?? []).not.toContain("build");
-    expect(tasks["//#test"]?.dependsOn ?? []).not.toContain("^build");
-    expect(tasks["//#test"]?.dependsOn).toContain("@ykdz/template#build");
-    expect(tasks["check:templates"]?.dependsOn).toContain("//#test");
-    expect(tasks["//#test:e2e"]).toBeUndefined();
-    expect(tasks["test:e2e"]?.dependsOn ?? []).not.toContain("build");
-    expect(tasks["test:e2e"]?.cache).toBe(false);
+    assert.strictEqual(tasks["//#build"], undefined);
+    assert.strictEqual(tasks.transit, undefined);
+    assert.strictEqual(tasks["check:templates:shared-oxc"], undefined);
+    assert.strictEqual(tasks["check:templates:static-source"], undefined);
+    assert.ok(tasks.typecheck?.dependsOn?.includes("^typecheck"));
+    assert.ok(!(tasks.typecheck?.dependsOn ?? []).includes("^build"));
+    assert.deepStrictEqual(tasks["//#typecheck"]?.dependsOn, ["^typecheck"]);
+    assert.ok(tasks.build?.dependsOn?.includes("^build"));
+    assert.ok(!(tasks.lint?.dependsOn ?? []).includes("^build"));
+    assert.ok(!(tasks.test?.dependsOn ?? []).includes("build"));
+    assert.ok(!(tasks["//#test"]?.dependsOn ?? []).includes("^build"));
+    assert.ok(tasks["//#test"]?.dependsOn?.includes("@ykdz/template#build"));
+    assert.ok(tasks["check:templates"]?.dependsOn?.includes("//#test"));
+    assert.strictEqual(tasks["//#test:e2e"], undefined);
+    assert.ok(!(tasks["test:e2e"]?.dependsOn ?? []).includes("build"));
+    assert.strictEqual(tasks["test:e2e"]?.cache, false);
     for (const task of [
       "check:fixtures",
       "check:generated",
@@ -144,7 +162,7 @@ describe("Template Repository native task model", () => {
       "check:templates:boundary",
       "check:templates:github-yaml",
     ]) {
-      expect(tasks[task]?.dependsOn ?? []).not.toContain("^build");
+      assert.ok(!(tasks[task]?.dependsOn ?? []).includes("^build"));
     }
     for (const task of [
       "check:fixtures",
@@ -152,8 +170,8 @@ describe("Template Repository native task model", () => {
       "check:focused",
       "check:deployment",
     ]) {
-      expect(tasks[task]?.cache, `${task} cache`).toBe(false);
-      expect(tasks[task]?.passThroughEnv).toEqual([
+      assert.strictEqual(tasks[task]?.cache, false, `${task} cache`);
+      assert.deepStrictEqual(tasks[task]?.passThroughEnv, [
         "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
         "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
         "TEMPLATE_FIXTURE_CONCURRENCY",
@@ -172,9 +190,9 @@ describe("Template Repository native task model", () => {
         "TEMPLATE_FIXTURE_TURBO_TOKEN",
       ]);
     }
-    expect(tasks["format:write"]?.dependsOn).toContain("lint:fix");
-    expect(tasks["format:write"]?.cache).toBe(false);
-    expect(tasks["lint:fix"]?.cache).toBe(false);
+    assert.ok(tasks["format:write"]?.dependsOn?.includes("lint:fix"));
+    assert.strictEqual(tasks["format:write"]?.cache, false);
+    assert.strictEqual(tasks["lint:fix"]?.cache, false);
 
     const result = await execa(
       "pnpm",
@@ -198,37 +216,44 @@ describe("Template Repository native task model", () => {
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
-    expect(taskIds).not.toContain("//#boundaries");
-    expect(taskIds).toContain("//#format:check");
-    expect(taskIds).toContain("//#lint");
-    expect(taskIds).toContain("//#typecheck");
-    expect(taskIds).toContain("//#test");
-    expect(taskIds).not.toContain("//#test:e2e");
-    expect(taskIds).toContain("@ykdz/template-core#format:check");
-    expect(taskIds).toContain("@ykdz/template-core#typecheck");
-    expect(
-      actionGraph.tasks.find(({ taskId }) => taskId === "@ykdz/template#lint")
-        ?.dependencies,
-    ).not.toContain("@ykdz/template-builtin-presets#build");
-    expect(
-      actionGraph.tasks.find(
-        ({ taskId }) => taskId === "@ykdz/template-checks#lint",
-      )?.dependencies,
-    ).not.toContain("@ykdz/template-core#build");
-    expect(taskIds.some((taskId) => taskId.includes("transit"))).toBe(false);
+    assert.ok(!taskIds.includes("//#boundaries"));
+    assert.ok(taskIds.includes("//#format:check"));
+    assert.ok(taskIds.includes("//#lint"));
+    assert.ok(taskIds.includes("//#typecheck"));
+    assert.ok(taskIds.includes("//#test"));
+    assert.ok(!taskIds.includes("//#test:e2e"));
+    assert.ok(taskIds.includes("@ykdz/template-core#format:check"));
+    assert.ok(taskIds.includes("@ykdz/template-core#typecheck"));
+    assert.ok(
+      !actionGraph.tasks
+        .find(({ taskId }) => taskId === "@ykdz/template#lint")
+        ?.dependencies.includes("@ykdz/template-builtin-presets#build"),
+    );
+    assert.ok(
+      !actionGraph.tasks
+        .find(({ taskId }) => taskId === "@ykdz/template-checks#lint")
+        ?.dependencies.includes("@ykdz/template-core#build"),
+    );
+    assert.strictEqual(
+      taskIds.some((taskId) => taskId.includes("transit")),
+      false,
+    );
   });
 
-  it("keeps registry and Template Source checks under the checks owner", async () => {
+  void it("keeps registry and Template Source checks under the checks owner", async () => {
     const [checks, builtInPresets] = await Promise.all([
       readJson<Manifest>("packages/checks/package.json"),
       readJson<Manifest>("packages/builtin-presets/package.json"),
     ]);
 
-    expect(checks.scripts["check:templates"]).not.toContain(
-      "@ykdz/template-builtin-presets",
+    const templateCheckScript = checks.scripts["check:templates"];
+    assert.ok(templateCheckScript !== undefined);
+    assert.ok(!templateCheckScript.includes("@ykdz/template-builtin-presets"));
+    assert.strictEqual(builtInPresets.scripts["check:templates"], undefined);
+    assert.strictEqual(
+      builtInPresets.scripts["check:templates:boundary"],
+      undefined,
     );
-    expect(builtInPresets.scripts["check:templates"]).toBeUndefined();
-    expect(builtInPresets.scripts["check:templates:boundary"]).toBeUndefined();
 
     const result = await execa(
       "pnpm",
@@ -247,20 +272,22 @@ describe("Template Repository native task model", () => {
         taskId.endsWith("#check:templates") && command !== "<NONEXISTENT>",
     );
 
-    expect(executableTemplateChecks).toEqual([
-      expect.objectContaining({
+    assertDeepStrictEqualWithMatchers(executableTemplateChecks, [
+      objectContaining({
         taskId: "@ykdz/template-checks#check:templates",
       }),
     ]);
-    expect(taskIds).not.toContain(
-      "@ykdz/template-builtin-presets#check:templates:boundary",
+    assert.ok(
+      !taskIds.includes(
+        "@ykdz/template-builtin-presets#check:templates:boundary",
+      ),
     );
-    expect(taskIds).toContain("@ykdz/template-core#build");
-    expect(taskIds).toContain("@ykdz/template-builtin-presets#build");
-    expect(taskIds).toContain("@ykdz/template#build");
+    assert.ok(taskIds.includes("@ykdz/template-core#build"));
+    assert.ok(taskIds.includes("@ykdz/template-builtin-presets#build"));
+    assert.ok(taskIds.includes("@ykdz/template#build"));
   });
 
-  it("builds every package without scheduling the recursive root build script", async () => {
+  void it("builds every package without scheduling the recursive root build script", async () => {
     const result = await execa(
       "pnpm",
       ["exec", "turbo", "run", "build", "--filter=!//", "--dry-run=json"],
@@ -271,23 +298,26 @@ describe("Template Repository native task model", () => {
     };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
-    expect(taskIds).not.toContain("//#build");
+    assert.ok(!taskIds.includes("//#build"));
     for (const packageName of [
       "@ykdz/template",
       "@ykdz/template-builtin-presets",
       "@ykdz/template-checks",
       "@ykdz/template-core",
     ]) {
-      expect(taskIds).toContain(`${packageName}#build`);
+      assert.ok(taskIds.includes(`${packageName}#build`));
     }
   });
 
-  it("lets the public CLI prepack select itself while Turbo builds dependencies", async () => {
+  void it("lets the public CLI prepack select itself while Turbo builds dependencies", async () => {
     const cli = await readJson<Manifest>("packages/cli/package.json");
 
-    expect(cli.scripts.prepack).toBe("pnpm exec turbo run build --filter=.");
-    expect(cli.scripts.prepack).not.toContain("@ykdz/template-core");
-    expect(cli.scripts.prepack).not.toContain("@ykdz/template-builtin-presets");
+    assert.strictEqual(
+      cli.scripts.prepack,
+      "pnpm exec turbo run build --filter=.",
+    );
+    assert.ok(!cli.scripts.prepack.includes("@ykdz/template-core"));
+    assert.ok(!cli.scripts.prepack.includes("@ykdz/template-builtin-presets"));
 
     const result = await execa(
       "pnpm",
@@ -306,12 +336,12 @@ describe("Template Repository native task model", () => {
         readonly tasks: readonly { readonly taskId: string }[];
       }
     ).tasks.map(({ taskId }) => taskId);
-    expect(tasks).toContain("@ykdz/template#build");
-    expect(tasks).toContain("@ykdz/template-core#build");
-    expect(tasks).toContain("@ykdz/template-builtin-presets#build");
+    assert.ok(tasks.includes("@ykdz/template#build"));
+    assert.ok(tasks.includes("@ykdz/template-core#build"));
+    assert.ok(tasks.includes("@ykdz/template-builtin-presets#build"));
   });
 
-  it("keeps source tests build-free and orders distribution e2e through Turbo", async () => {
+  void it("keeps source tests build-free and orders distribution e2e through Turbo", async () => {
     const cli = await readJson<Manifest>("packages/cli/package.json");
     const result = await execa(
       "pnpm",
@@ -335,15 +365,18 @@ describe("Template Repository native task model", () => {
       }
     ).tasks;
 
-    expect(
+    assert.deepStrictEqual(
       tasks.find(({ taskId }) => taskId === "@ykdz/template#test")
         ?.dependencies,
-    ).toEqual([]);
-    expect(
-      tasks.find(({ taskId }) => taskId === "@ykdz/template#test:e2e")
-        ?.dependencies,
-    ).toContain("@ykdz/template#build");
-    expect(cli.scripts["test:e2e"]).toBe(
+      [],
+    );
+    assert.ok(
+      tasks
+        .find(({ taskId }) => taskId === "@ykdz/template#test:e2e")
+        ?.dependencies.includes("@ykdz/template#build"),
+    );
+    assert.strictEqual(
+      cli.scripts["test:e2e"],
       "node --conditions=source test/e2e/check-source-and-distribution.ts",
     );
   });

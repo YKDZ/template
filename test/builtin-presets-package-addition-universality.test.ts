@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   lstat,
   mkdir,
@@ -9,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -25,9 +27,21 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 
-describe("Built-in Preset Package Addition universality", () => {
+import {
+  any,
+  arrayContaining,
+  assertContainsEqual,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertNotLength,
+  assertPartialDeepStrictEqual,
+  hasProperty,
+  objectContaining,
+  stringContaining,
+} from "./assertions.ts";
+
+void describe("Built-in Preset Package Addition universality", () => {
   type FixedTopologyDefinition = Exclude<
     BuiltInPresetDefinition,
     { readonly initialPrimaryPackage: object }
@@ -96,7 +110,7 @@ describe("Built-in Preset Package Addition universality", () => {
     return definition;
   }
 
-  it("initializes every Project Shape with both Standard Package Roots", () => {
+  void it("initializes every Project Shape with both Standard Package Roots", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
         definition,
@@ -115,9 +129,9 @@ describe("Built-in Preset Package Addition universality", () => {
           operation.to === "pnpm-workspace.yaml",
       );
 
-      expect(workspace).toMatchObject({
-        replacements: expect.objectContaining({
-          WORKSPACE_PACKAGE_GLOBS: expect.stringContaining(
+      assertPartialDeepStrictEqual(workspace, {
+        replacements: objectContaining({
+          WORKSPACE_PACKAGE_GLOBS: stringContaining(
             "  - apps/*\n  - packages/*",
           ),
         }),
@@ -125,7 +139,7 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("rejects reserved workspace collections from initialization and explicit Package Addition planning", async () => {
+  void it("rejects reserved workspace collections from initialization and explicit Package Addition planning", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-reserved-package-path-"),
     );
@@ -157,13 +171,17 @@ describe("Built-in Preset Package Addition universality", () => {
       },
     };
 
-    expect(() =>
-      planGeneratedRepositoryInitialization({
-        definition: invalidInitializationDefinition,
-        context,
-      }),
-    ).toThrow(
-      ".packages[0].path: Package Path dist/evil uses reserved workspace collection dist",
+    assert.throws(
+      () =>
+        planGeneratedRepositoryInitialization({
+          definition: invalidInitializationDefinition,
+          context,
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          ".packages[0].path: Package Path dist/evil uses reserved workspace collection dist",
+        ),
     );
 
     const initialization = planGeneratedRepositoryInitialization({
@@ -174,19 +192,23 @@ describe("Built-in Preset Package Addition universality", () => {
       targetRoot: context.targetDir,
       operations: [...initialization.operations],
     });
-    expect(() =>
-      planGeneratedRepositoryPackageAddition({
-        definition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "evil",
-        packagePath: "target/evil",
-      }),
-    ).toThrow(
-      `Package Path target/evil uses reserved workspace collection target`,
+    assert.throws(
+      () =>
+        planGeneratedRepositoryPackageAddition({
+          definition,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName: "evil",
+          packagePath: "target/evil",
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Path target/evil uses reserved workspace collection target`,
+        ),
     );
   });
 
-  it("reconstructs every base contribution from durable generated state before an addition", async () => {
+  void it("reconstructs every base contribution from durable generated state before an addition", async () => {
     const definitions = builtInPresetRegistry.all();
     const addableDefinitions = definitions.filter(
       (definition) => definition.planPackageAddition !== undefined,
@@ -226,47 +248,52 @@ describe("Built-in Preset Package Addition universality", () => {
               materializeProjectProjection(addition.projectProjections.before),
             ]);
 
-          expect(addition).not.toHaveProperty("checks");
-          expect(initialization).not.toHaveProperty("checks");
-          expect(addition).not.toHaveProperty("fixes");
-          expect(initialization).not.toHaveProperty("fixes");
-          expect(addition.environmentNeeds).toEqual(
-            expect.arrayContaining([...initialization.environmentNeeds]),
+          assert.ok(!hasProperty(addition, "checks"));
+          assert.ok(!hasProperty(initialization, "checks"));
+          assert.ok(!hasProperty(addition, "fixes"));
+          assert.ok(!hasProperty(initialization, "fixes"));
+          assertDeepStrictEqualWithMatchers(
+            addition.environmentNeeds,
+            arrayContaining([...initialization.environmentNeeds]),
           );
-          expect(addition).not.toHaveProperty("deploymentChecks");
-          expect(initialization).not.toHaveProperty("deploymentChecks");
-          expect(preAdditionProjection).toEqual(initializationProjection);
-          expect(addition.dependencyMaintenancePolicy.ecosystems).toEqual(
-            expect.arrayContaining(
+          assert.ok(!hasProperty(addition, "deploymentChecks"));
+          assert.ok(!hasProperty(initialization, "deploymentChecks"));
+          assert.deepStrictEqual(
+            preAdditionProjection,
+            initializationProjection,
+          );
+          assertDeepStrictEqualWithMatchers(
+            addition.dependencyMaintenancePolicy.ecosystems,
+            arrayContaining(
               initialization.dependencyMaintenancePolicy.ecosystems,
             ),
           );
-          expect(
+          assertPartialDeepStrictEqual(
             addition.dependencyMaintenancePolicy.directories,
-          ).toMatchObject(
             initialization.dependencyMaintenancePolicy.directories ?? {},
           );
-          expect(
+          assertPartialDeepStrictEqual(
             addition.operations.find(
               (operation) =>
                 operation.kind === "writeJson" &&
                 operation.to === "package.json",
             ),
-          ).toMatchObject({
-            value: {
-              scripts: expect.objectContaining({
-                check: expect.any(String),
-                ...(initialization.manifests.some(
-                  (manifest) =>
-                    (manifest.scripts as Record<string, unknown> | undefined)?.[
-                      "check:deployment"
-                    ] !== undefined,
-                )
-                  ? { "check:deployment": expect.any(String) }
-                  : {}),
-              }),
+            {
+              value: {
+                scripts: objectContaining({
+                  check: any(String),
+                  ...(initialization.manifests.some(
+                    (manifest) =>
+                      (
+                        manifest.scripts as Record<string, unknown> | undefined
+                      )?.["check:deployment"] !== undefined,
+                  )
+                    ? { "check:deployment": any(String) }
+                    : {}),
+                }),
+              },
             },
-          });
+          );
         } finally {
           await rm(workspace, { recursive: true, force: true });
         }
@@ -274,13 +301,13 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("plans every supported Package Addition for every registered initialization Definition", async () => {
+  void it("plans every supported Package Addition for every registered initialization Definition", async () => {
     const definitions = builtInPresetRegistry.all();
     const addableDefinitions = definitions.filter(
       (definition) => definition.planPackageAddition !== undefined,
     );
 
-    expect(addableDefinitions).not.toHaveLength(0);
+    assertNotLength(addableDefinitions, 0);
 
     for (const baseDefinition of definitions) {
       const targetDir = path.join(
@@ -313,15 +340,16 @@ describe("Built-in Preset Package Addition universality", () => {
             (definition) => definition.name === `@demo/${packageLeafName}`,
           );
 
-          expect(addedDefinition).toBeDefined();
-          expect(addition.operations).toContainEqual(
-            expect.objectContaining({
+          assert.notStrictEqual(addedDefinition, undefined);
+          assertContainsEqual(
+            addition.operations,
+            objectContaining({
               kind: "writeJson",
               to: `${addedDefinition?.path}/package.json`,
-              value: expect.objectContaining({
+              value: objectContaining({
                 name: `@demo/${packageLeafName}`,
               }),
-              provenance: expect.objectContaining({
+              provenance: objectContaining({
                 definitionName: additionDefinition.metadata.name,
                 planningContribution: "planPackageAddition",
               }),
@@ -338,7 +366,7 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("rejects conflicting Rust toolchain facts before repository writes", async () => {
+  void it("rejects conflicting Rust toolchain facts before repository writes", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-rust-toolchain-conflict-"),
     );
@@ -391,28 +419,39 @@ describe("Built-in Preset Package Addition universality", () => {
         },
       };
 
-      expect(() =>
-        planGeneratedRepositoryPackageAddition({
-          definition: conflictingDefinition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "worker",
-        }),
-      ).toThrow("Foundation requires compatible Rust toolchain facts");
-      await expect(readFile(dockerfilePath, "utf8")).resolves.toBe(
+      assert.throws(
+        () =>
+          planGeneratedRepositoryPackageAddition({
+            definition: conflictingDefinition,
+            localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+            packageLeafName: "worker",
+          }),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Foundation requires compatible Rust toolchain facts",
+          ),
+      );
+      assert.strictEqual(
+        await readFile(dockerfilePath, "utf8"),
         dockerfileBefore,
       );
-      await expect(
+      await assert.rejects(
         readFile(
           path.join(context.targetDir, "packages/worker/Cargo.toml"),
           "utf8",
         ),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("adds Rust to Rust with one coordinated toolchain and both Cargo package directories", async () => {
+  void it("adds Rust to Rust with one coordinated toolchain and both Cargo package directories", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-rust-to-rust-"),
     );
@@ -442,24 +481,29 @@ describe("Built-in Preset Package Addition universality", () => {
         ...addition.projectProjections,
       });
 
-      await expect(
-        readFile(
-          path.join(context.targetDir, "packages/worker/Cargo.toml"),
-          "utf8",
-        ),
-      ).resolves.toContain('name = "worker"');
+      assert.ok(
+        (
+          await readFile(
+            path.join(context.targetDir, "packages/worker/Cargo.toml"),
+            "utf8",
+          )
+        ).includes('name = "worker"'),
+      );
       const dockerfile = await readFile(
         path.join(context.targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      expect(dockerfile.match(/^ARG RUST_TOOLCHAIN$/gmu)).toHaveLength(1);
-      expect(
+      assertLength(dockerfile.match(/^ARG RUST_TOOLCHAIN$/gmu), 1);
+      assertLength(
         dockerfile.match(
           /"\$\{CARGO_HOME\}\/bin\/rustup" toolchain install \$\{RUST_TOOLCHAIN\}/gu,
         ),
-      ).toHaveLength(1);
-      expect(dockerfile).toContain(
-        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+        1,
+      );
+      assert.ok(
+        dockerfile.includes(
+          '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+        ),
       );
       const devcontainer = JSON.parse(
         await readFile(
@@ -467,11 +511,12 @@ describe("Built-in Preset Package Addition universality", () => {
           "utf8",
         ),
       ) as { readonly mounts: readonly { readonly target: string }[] };
-      expect(
+      assertLength(
         devcontainer.mounts.filter(
           (mount) => mount.target === "/usr/local/cargo/registry",
         ),
-      ).toHaveLength(1);
+        1,
+      );
       const dependabot = await readFile(
         path.join(context.targetDir, ".github/dependabot.yml"),
         "utf8",
@@ -479,14 +524,14 @@ describe("Built-in Preset Package Addition universality", () => {
       const initialRustPackagePath = initialization.blueprint.packages.find(
         (definition) => definition.role === "native-package",
       )!.path;
-      expect(dependabot).toContain(`directory: "/${initialRustPackagePath}"`);
-      expect(dependabot).toContain('directory: "/packages/worker"');
+      assert.ok(dependabot.includes(`directory: "/${initialRustPackagePath}"`));
+      assert.ok(dependabot.includes('directory: "/packages/worker"'));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("keeps the target root Rust declaration as the version owner across a real addition", async () => {
+  void it("keeps the target root Rust declaration as the version owner across a real addition", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-rust-root-owned-channel-"),
     );
@@ -515,14 +560,14 @@ describe("Built-in Preset Package Addition universality", () => {
         path.join(targetDir, "rust-toolchain.toml"),
         targetRootDeclaration,
       );
-      expect(releaseToolchainSnapshot.rustVersion).not.toBe("1.98.0");
+      assert.notStrictEqual(releaseToolchainSnapshot.rustVersion, "1.98.0");
 
       const addition = planGeneratedRepositoryPackageAddition({
         definition: rustDefinition,
         localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
         packageLeafName: "worker",
       });
-      expect(addition.developmentContainer.buildArguments).toContainEqual({
+      assertContainsEqual(addition.developmentContainer.buildArguments, {
         name: "RUST_TOOLCHAIN",
         value: "1.98.0",
       });
@@ -537,21 +582,29 @@ describe("Built-in Preset Package Addition universality", () => {
           `Package Addition produced conflicts: ${JSON.stringify(reconciliation.conflicts)}`,
         );
       }
-      expect(reconciliation.actions.map((action) => action.path)).not.toContain(
-        "rust-toolchain.toml",
+      assert.ok(
+        !reconciliation.actions
+          .map((action) => action.path)
+          .includes("rust-toolchain.toml"),
       );
-      await expect(
-        readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-      ).resolves.toBe(targetRootDeclaration);
-      await expect(
-        readFile(path.join(targetDir, "packages/worker/Cargo.toml"), "utf8"),
-      ).resolves.toContain('name = "worker"');
+      assert.strictEqual(
+        await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
+        targetRootDeclaration,
+      );
+      assert.ok(
+        (
+          await readFile(
+            path.join(targetDir, "packages/worker/Cargo.toml"),
+            "utf8",
+          )
+        ).includes('name = "worker"'),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("still creates the default root declaration when a repository first adds Rust", async () => {
+  void it("still creates the default root declaration when a repository first adds Rust", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-first-rust-addition-"),
     );
@@ -595,7 +648,7 @@ describe("Built-in Preset Package Addition universality", () => {
           "to" in operation && operation.to === "rust-toolchain.toml",
       );
 
-      expect(rootDeclarationOperation).toMatchObject({
+      assertPartialDeepStrictEqual(rootDeclarationOperation, {
         kind: "writeTextTemplate",
         replacements: { RUST_TOOLCHAIN: "stable" },
       });
@@ -603,9 +656,8 @@ describe("Built-in Preset Package Addition universality", () => {
         targetRoot: targetDir,
         ...addition.projectProjections,
       });
-      await expect(
-        readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-      ).resolves.toBe(
+      assert.strictEqual(
+        await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
         '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',
       );
     } finally {
@@ -613,7 +665,7 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("keeps default-root task entrypoints stable while Turbo discovers added scripts", async () => {
+  void it("keeps default-root task entrypoints stable while Turbo discovers added scripts", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-natural-addition-"),
     );
@@ -661,7 +713,7 @@ describe("Built-in Preset Package Addition universality", () => {
       ).scripts;
 
       for (const script of ["check", "fix", "check:deployment"] as const) {
-        expect(rootScriptsAfter[script]).toBe(rootScriptsBefore[script]);
+        assert.strictEqual(rootScriptsAfter[script], rootScriptsBefore[script]);
       }
 
       const repeatedAddition = planGeneratedRepositoryPackageAddition({
@@ -681,7 +733,10 @@ describe("Built-in Preset Package Addition universality", () => {
         }
       ).scripts;
       for (const script of ["check", "fix", "check:deployment"] as const) {
-        expect(rootScriptsAfterRepeat[script]).toBe(rootScriptsBefore[script]);
+        assert.strictEqual(
+          rootScriptsAfterRepeat[script],
+          rootScriptsBefore[script],
+        );
       }
 
       await execa("pnpm", ["install"], { cwd: targetDir });
@@ -706,7 +761,7 @@ describe("Built-in Preset Package Addition universality", () => {
           tasks: readonly { taskId: string }[];
         }
       ).tasks.map((task) => task.taskId);
-      expect(taskIds).not.toContain("//#boundaries");
+      assert.ok(!taskIds.includes("//#boundaries"));
       const addedManifest = JSON.parse(
         await readFile(
           path.join(targetDir, "packages/natural/package.json"),
@@ -717,14 +772,14 @@ describe("Built-in Preset Package Addition universality", () => {
       for (const task of Object.keys(addedManifest.scripts).filter((name) =>
         ["format:check", "lint", "typecheck", "build", "test"].includes(name),
       )) {
-        expect(taskIds).toContain(`@demo/natural#${task}`);
+        assert.ok(taskIds.includes(`@demo/natural#${task}`));
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("preserves native preparation and composes browser preparation for a Rust-to-Vue addition", async () => {
+  void it("preserves native preparation and composes browser preparation for a Rust-to-Vue addition", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-rust-vue-environment-"),
     );
@@ -777,14 +832,19 @@ describe("Built-in Preset Package Addition universality", () => {
         path.join(context.targetDir, ".devcontainer/Dockerfile"),
         "utf8",
       );
-      expect(devcontainer).toContain(
-        '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+      assert.ok(
+        devcontainer.includes(
+          '"${CARGO_HOME}/bin/rustup" toolchain install ${RUST_TOOLCHAIN}',
+        ),
       );
-      expect(devcontainer).toContain("playwright install --with-deps chromium");
-      expect(addition.environmentNeeds).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ kind: "rust-toolchain" }),
-          expect.objectContaining({ kind: "playwright-browser-assets" }),
+      assert.ok(
+        devcontainer.includes("playwright install --with-deps chromium"),
+      );
+      assertDeepStrictEqualWithMatchers(
+        addition.environmentNeeds,
+        arrayContaining([
+          objectContaining({ kind: "rust-toolchain" }),
+          objectContaining({ kind: "playwright-browser-assets" }),
         ]),
       );
     } finally {
@@ -792,93 +852,109 @@ describe("Built-in Preset Package Addition universality", () => {
     }
   });
 
-  it("adds a package after pnpm has created package-local node_modules symlinks", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-add-with-node-modules-"),
-    );
-    const targetDir = path.join(workspace, "digital");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain,
-    });
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: definitionWithPackagePath("packages/db"),
-      context,
-    });
-
-    try {
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      await mkdir(path.join(targetDir, ".pnpm-store/v11/files"), {
-        recursive: true,
-      });
-      await writeFile(
-        path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
-        "store content must stay outside staging\n",
+  void it(
+    "adds a package after pnpm has created package-local node_modules symlinks",
+    { timeout: 300000 },
+    async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-add-with-node-modules-"),
       );
-      expect(
-        (
-          await lstat(
-            path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
-          )
-        ).isSymbolicLink(),
-      ).toBe(true);
-
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: firstAddableDefinition(),
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "domain",
-        packagePath: "packages/domain",
+      const targetDir = path.join(workspace, "digital");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain,
       });
-      const installedTargetsBefore = await Promise.all([
-        realpath(path.join(targetDir, "node_modules/.bin/oxfmt")),
-        realpath(path.join(targetDir, "packages/db/node_modules/drizzle-orm")),
-      ]);
-      await expect(
-        reconcileAndApplyProjectProjections({
-          targetRoot: targetDir,
-          ...addition.projectProjections,
-        }),
-      ).resolves.toMatchObject({ ok: true });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: definitionWithPackagePath("packages/db"),
+        context,
+      });
 
-      await expect(
-        Promise.all([
+      try {
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...initialization.operations],
+        });
+        await execa("pnpm", ["install"], { cwd: targetDir });
+        await mkdir(path.join(targetDir, ".pnpm-store/v11/files"), {
+          recursive: true,
+        });
+        await writeFile(
+          path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
+          "store content must stay outside staging\n",
+        );
+        assert.strictEqual(
+          (
+            await lstat(
+              path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+            )
+          ).isSymbolicLink(),
+          true,
+        );
+
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: firstAddableDefinition(),
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName: "domain",
+          packagePath: "packages/domain",
+        });
+        const installedTargetsBefore = await Promise.all([
           realpath(path.join(targetDir, "node_modules/.bin/oxfmt")),
           realpath(
             path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
           ),
-        ]),
-      ).resolves.toEqual(installedTargetsBefore);
-      await expect(
-        readFile(
-          path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
-          "utf8",
-        ),
-      ).resolves.toBe("store content must stay outside staging\n");
-      await execa("pnpm", ["exec", "oxfmt", "--version"], {
-        cwd: targetDir,
-      });
+        ]);
+        assertPartialDeepStrictEqual(
+          await reconcileAndApplyProjectProjections({
+            targetRoot: targetDir,
+            ...addition.projectProjections,
+          }),
+          { ok: true },
+        );
 
-      await expect(
-        readFile(path.join(targetDir, "packages/domain/package.json"), "utf8"),
-      ).resolves.toContain('"name": "@demo/domain"');
-      expect(
-        (
-          await lstat(
-            path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
-          )
-        ).isSymbolicLink(),
-      ).toBe(true);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  }, 300_000);
+        assert.deepStrictEqual(
+          await Promise.all([
+            realpath(path.join(targetDir, "node_modules/.bin/oxfmt")),
+            realpath(
+              path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+            ),
+          ]),
+          installedTargetsBefore,
+        );
+        assert.strictEqual(
+          await readFile(
+            path.join(targetDir, ".pnpm-store/v11/files/staged-copy-sentinel"),
+            "utf8",
+          ),
+          "store content must stay outside staging\n",
+        );
+        await execa("pnpm", ["exec", "oxfmt", "--version"], {
+          cwd: targetDir,
+        });
 
-  it("recovers preparation only from persisted Environment Need facts, never task script text", async () => {
+        assert.ok(
+          (
+            await readFile(
+              path.join(targetDir, "packages/domain/package.json"),
+              "utf8",
+            )
+          ).includes('"name": "@demo/domain"'),
+        );
+        assert.strictEqual(
+          (
+            await lstat(
+              path.join(targetDir, "packages/db/node_modules/drizzle-orm"),
+            )
+          ).isSymbolicLink(),
+          true,
+        );
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it("recovers preparation only from persisted Environment Need facts, never task script text", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-explicit-environment-needs-"),
     );
@@ -949,23 +1025,24 @@ describe("Built-in Preset Package Addition universality", () => {
         packageLeafName: "another-library",
       });
 
-      expect(addition.environmentNeeds).toEqual([]);
-      expect(addition.deploymentEnvironmentNeeds).toEqual([]);
-      expect(
+      assert.deepStrictEqual(addition.environmentNeeds, []);
+      assert.deepStrictEqual(addition.deploymentEnvironmentNeeds, []);
+      assertPartialDeepStrictEqual(
         addition.operations.find(
           (operation) =>
             operation.kind === "writeJson" &&
             operation.to === ".template/environment-needs.json",
         ),
-      ).toMatchObject({
-        value: { schemaVersion: 1, check: [], deployment: [] },
-      });
+        {
+          value: { schemaVersion: 1, check: [], deployment: [] },
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("adds custom Package Roots only through pnpm workspace membership", async () => {
+  void it("adds custom Package Roots only through pnpm workspace membership", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-custom-package-root-"),
     );
@@ -996,21 +1073,20 @@ describe("Built-in Preset Package Addition universality", () => {
           operation.to === "pnpm-workspace.yaml",
       );
 
-      expect(workspaceRefresh).toMatchObject({
-        replacements: expect.objectContaining({
-          WORKSPACE_PACKAGE_GLOBS: expect.stringContaining("  - services/*"),
+      assertPartialDeepStrictEqual(workspaceRefresh, {
+        replacements: objectContaining({
+          WORKSPACE_PACKAGE_GLOBS: stringContaining("  - services/*"),
         }),
       });
-      expect(
+      assertDeepStrictEqualWithMatchers(
         addition.operations.filter(
           (operation) =>
             operation.kind === "writeJson" && operation.to === "package.json",
         ),
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            value: expect.objectContaining({
-              scripts: expect.objectContaining({
+        arrayContaining([
+          objectContaining({
+            value: objectContaining({
+              scripts: objectContaining({
                 check: rootScripts(initialization),
                 fix: rootFix(initialization),
               }),
@@ -1033,8 +1109,9 @@ describe("Built-in Preset Package Addition universality", () => {
           tasks: readonly { taskId: string }[];
         }
       ).tasks.map((task) => task.taskId);
-      expect(taskIds).toEqual(
-        expect.arrayContaining(["@demo/custom#build", "@demo/custom#test"]),
+      assertDeepStrictEqualWithMatchers(
+        taskIds,
+        arrayContaining(["@demo/custom#build", "@demo/custom#test"]),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });

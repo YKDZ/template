@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   access,
   chmod,
@@ -12,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, describe, it, mock } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -33,7 +35,6 @@ import {
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
-import { describe, expect, it, vi } from "vitest";
 
 import { findFixtureEvidenceArchitectureFindings } from "../packages/checks/src/check-fixture-evidence-architecture.ts";
 import {
@@ -80,6 +81,22 @@ import {
   validatePlanDependencyCatalog,
   validatePlanSources,
 } from "../packages/checks/src/registry-checks.ts";
+import {
+  any,
+  arrayContaining,
+  assertContainsEqual,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertMockCalledWith,
+  assertNotLength,
+  assertPartialDeepStrictEqual,
+  objectContaining,
+  stringContaining,
+  stringMatching,
+  waitFor,
+} from "./assertions.ts";
+
+afterEach(() => mock.restoreAll());
 
 async function temporaryRepository(prefix: string): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), prefix));
@@ -454,9 +471,9 @@ async function releaseAfterActive(options: {
 }): Promise<void> {
   let observationFailure: unknown;
   try {
-    await vi.waitFor(
+    await waitFor(
       () => {
-        expect(options.probe.active()).toBe(options.expected);
+        assert.strictEqual(options.probe.active(), options.expected);
       },
       { timeout: 30_000 },
     );
@@ -577,8 +594,8 @@ async function renderMatrixScenario(options: {
   };
 }
 
-describe("Fixture Verification Evidence", () => {
-  it("renders root and matrix initialization to the same canonical tree identity", async () => {
+void describe("Fixture Verification Evidence", () => {
+  void it("renders root and matrix initialization to the same canonical tree identity", async () => {
     const root = await temporaryRepository("fixture-canonical-init-");
     const storage = new FileFixtureEvidenceStorage(path.join(root, "evidence"));
     let matrixHits = 0;
@@ -588,14 +605,15 @@ describe("Fixture Verification Evidence", () => {
         await generatedScenariosFor("package-addition-matrix")
       ).filter((scenario) => scenario.addition === undefined);
 
-      expect(matrixInitialization.map((scenario) => scenario.id)).toEqual(
+      assert.deepStrictEqual(
+        matrixInitialization.map((scenario) => scenario.id),
         initialization.map((scenario) => scenario.id),
       );
       for (const scenario of initialization) {
         const matrixScenario = matrixInitialization.find(
           (candidate) => candidate.id === scenario.id,
         );
-        expect(matrixScenario).toBeDefined();
+        assert.notStrictEqual(matrixScenario, undefined);
         const rootProjection = await renderMatrixScenario({
           scenario,
           workspace: path.join(root, "root-init"),
@@ -604,7 +622,8 @@ describe("Fixture Verification Evidence", () => {
           scenario: matrixScenario!,
           workspace: path.join(root, "matrix-init"),
         });
-        expect(matrixProjection.generatedContentIdentity).toBe(
+        assert.strictEqual(
+          matrixProjection.generatedContentIdentity,
           rootProjection.generatedContentIdentity,
         );
         const rootContract = await deriveGeneratedRootQualityContractIdentity(
@@ -615,7 +634,7 @@ describe("Fixture Verification Evidence", () => {
           matrixProjection.plan,
           { includeFix: true },
         );
-        expect(matrixContract).toBe(rootContract);
+        assert.strictEqual(matrixContract, rootContract);
         await runFixtureEvidenceGate({
           gate: "generated-root-quality",
           generatedContentIdentity: rootProjection.generatedContentIdentity,
@@ -630,7 +649,7 @@ describe("Fixture Verification Evidence", () => {
           writeEnabled: true,
           execute: async () => undefined,
         });
-        const matrixExecutor = vi.fn<() => Promise<void>>(
+        const matrixExecutor = mock.fn<() => Promise<void>>(
           async () => undefined,
         );
         const matrixResult = await runFixtureEvidenceGate({
@@ -647,18 +666,18 @@ describe("Fixture Verification Evidence", () => {
           writeEnabled: true,
           execute: matrixExecutor,
         });
-        expect(matrixResult.status).toBe("hit");
-        expect(matrixExecutor).not.toHaveBeenCalled();
+        assert.strictEqual(matrixResult.status, "hit");
+        assert.strictEqual(matrixExecutor.mock.callCount(), 0);
         matrixHits += 1;
       }
-      expect(matrixHits).toBe(initialization.length);
-      expect(matrixHits).toBe(6);
+      assert.strictEqual(matrixHits, initialization.length);
+      assert.strictEqual(matrixHits, 6);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("accepts a complete writable miss only for its current run activity", async () => {
+  void it("accepts a complete writable miss only for its current run activity", async () => {
     const root = await temporaryRepository("fixture-evidence-activity-");
     const evidenceRoot = path.join(root, "evidence");
     const activityRoot = path.join(root, "activity");
@@ -710,47 +729,49 @@ describe("Fixture Verification Evidence", () => {
         outcome: "completed",
       });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "run-42",
           runAttempt: "2",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: true,
-        stages: [
-          expect.objectContaining({
-            scenarioSet: "init",
-            hits: 0,
-            misses: { absent: 1 },
-            executions: 1,
-            issuances: 1,
-          }),
-        ],
-      });
-      await expect(
-        checkFixtureEvidenceHealth({
+        {
+          healthy: true,
+          stages: [
+            objectContaining({
+              scenarioSet: "init",
+              hits: 0,
+              misses: { absent: 1 },
+              executions: 1,
+              issuances: 1,
+            }),
+          ],
+        },
+      );
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "run-42",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: [
-          expect.objectContaining({
-            code: "missing-scenario-set",
-            scenarioSet: "init",
-          }),
-        ],
-      });
+        {
+          healthy: false,
+          failures: [
+            objectContaining({
+              code: "missing-scenario-set",
+              scenarioSet: "init",
+            }),
+          ],
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("reports deterministic cache activity alongside stage timing", async () => {
+  void it("reports deterministic cache activity alongside stage timing", async () => {
     const root = await temporaryRepository("fixture-evidence-cache-activity-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -835,10 +856,10 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["package-addition-matrix"],
       });
-      expect(report).toMatchObject({
+      assertPartialDeepStrictEqual(report, {
         healthy: true,
         stages: [
-          expect.objectContaining({
+          objectContaining({
             scenarioSet: "package-addition-matrix",
             cacheActivity: {
               "buildkit:configured": 1,
@@ -854,15 +875,17 @@ describe("Fixture Verification Evidence", () => {
           }),
         ],
       });
-      expect(formatFixtureEvidenceHealthReport(report)).toContain(
-        "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=0 misses=absent=1 executions=1 issuances=1 lifecycle-errors=0 duration-ms=175 phase-duration-ms=scheduler-queue=2,container-preparation=1,dependency-installation=1,semantic-gate=1 retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
+      assert.ok(
+        formatFixtureEvidenceHealthReport(report).includes(
+          "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=0 misses=absent=1 executions=1 issuances=1 lifecycle-errors=0 duration-ms=175 phase-duration-ms=scheduler-queue=2,container-preparation=1,dependency-installation=1,semantic-gate=1 retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("reports paired phase duration and a recovered retry as healthy", async () => {
+  void it("reports paired phase duration and a recovered retry as healthy", async () => {
     const root = await temporaryRepository("fixture-phase-activity-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -985,10 +1008,10 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      expect(report).toMatchObject({
+      assertPartialDeepStrictEqual(report, {
         healthy: true,
         stages: [
-          expect.objectContaining({
+          objectContaining({
             phaseDurations: {
               "scheduler-queue": 11,
               "container-preparation": 10,
@@ -1001,8 +1024,9 @@ describe("Fixture Verification Evidence", () => {
           }),
         ],
       });
-      expect(formatFixtureEvidenceHealthReport(report)).toContainEqual(
-        expect.stringContaining(
+      assertContainsEqual(
+        formatFixtureEvidenceHealthReport(report),
+        stringContaining(
           "phase-duration-ms=scheduler-queue=11,container-preparation=10,dependency-installation=20,semantic-gate=1 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
         ),
       );
@@ -1011,7 +1035,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("fails closed when a cache hit carries preparation and retry activity", async () => {
+  void it("fails closed when a cache hit carries preparation and retry activity", async () => {
     const root = await temporaryRepository("fixture-hit-preparation-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1094,36 +1118,37 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "hit-preparation-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-          }),
-          expect.objectContaining({
-            code: "invalid-retry-lifecycle",
-            scenarioId: scenario.id,
-          }),
-          expect.objectContaining({
-            code: "lifecycle-error",
-            scenarioId: scenario.id,
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+            }),
+            objectContaining({
+              code: "invalid-retry-lifecycle",
+              scenarioId: scenario.id,
+            }),
+            objectContaining({
+              code: "lifecycle-error",
+              scenarioId: scenario.id,
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when successful gate spans remain outside a cold execution", async () => {
+  void it("fails closed when successful gate spans remain outside a cold execution", async () => {
     const root = await temporaryRepository("fixture-unused-gate-spans-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1184,28 +1209,29 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "unused-gate-spans-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when lookup causality has no matching execution", async () => {
+  void it("fails closed when lookup causality has no matching execution", async () => {
     const root = await temporaryRepository("fixture-lookup-causality-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1316,14 +1342,14 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      expect(report).toMatchObject({
+      assertPartialDeepStrictEqual(report, {
         healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
+        failures: arrayContaining([
+          objectContaining({
             code: "lifecycle-error",
             invocationId: "lookup-after-execution",
           }),
-          expect.objectContaining({
+          objectContaining({
             code: "lifecycle-error",
             invocationId: "miss-without-execution",
           }),
@@ -1334,7 +1360,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("fails hard-cut activity when a cold execution omits required phases", async () => {
+  void it("fails hard-cut activity when a cold execution omits required phases", async () => {
     const root = await temporaryRepository("fixture-missing-cold-phases-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1377,29 +1403,30 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "missing-cold-phases",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-            gate: "generated-root-quality",
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+              gate: "generated-root-quality",
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when complete preparation spans follow semantic execution", async () => {
+  void it("fails closed when complete preparation spans follow semantic execution", async () => {
     const root = await temporaryRepository("fixture-issuance-order-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1496,29 +1523,30 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "issuance-order-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-            gate: "generated-root-quality",
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+              gate: "generated-root-quality",
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when a semantic span starts before its execution", async () => {
+  void it("fails closed when a semantic span starts before its execution", async () => {
     const root = await temporaryRepository("fixture-semantic-span-order-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1615,29 +1643,30 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "semantic-span-order-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-            gate: "generated-root-quality",
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+              gate: "generated-root-quality",
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when a retry finishes before its enclosing phase starts", async () => {
+  void it("fails closed when a retry finishes before its enclosing phase starts", async () => {
     const root = await temporaryRepository("fixture-retry-span-order-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1703,28 +1732,29 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "retry-span-order-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-retry-lifecycle",
-            scenarioId: scenario.id,
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-retry-lifecycle",
+              scenarioId: scenario.id,
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails closed when multiple gates repeat scenario preparation", async () => {
+  void it("fails closed when multiple gates repeat scenario preparation", async () => {
     const root = await temporaryRepository("fixture-duplicate-preparation-");
     const evidenceRoot = path.join(root, "evidence");
     const scenario = {
@@ -1788,28 +1818,29 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "duplicate-preparation-run",
           runAttempt: "1",
           enabledScenarioSets: ["package-addition-matrix"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "invalid-phase-lifecycle",
-            scenarioId: scenario.id,
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "invalid-phase-lifecycle",
+              scenarioId: scenario.id,
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("isolates activity from evidence through canonical paths and rejects either parent", async () => {
+  void it("isolates activity from evidence through canonical paths and rejects either parent", async () => {
     const root = await temporaryRepository("fixture-activity-isolation-");
     const evidenceRoot = path.join(root, "evidence");
     const activityRoot = path.join(root, "activity");
@@ -1825,48 +1856,60 @@ describe("Fixture Verification Evidence", () => {
         symlink(activityRoot, evidenceAlias, "dir"),
       ]);
 
-      expect(
+      assert.throws(
         () =>
           new FileFixtureEvidenceActivityLedger({
             root: activityAlias,
             evidenceRoot,
           }),
-      ).toThrow(
-        "Fixture Evidence activity must be isolated from shared evidence storage",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Fixture Evidence activity must be isolated from shared evidence storage",
+          ),
       );
-      expect(
+      assert.throws(
         () =>
           new FileFixtureEvidenceActivityLedger({
             root: activityRoot,
             evidenceRoot: evidenceAlias,
           }),
-      ).toThrow(
-        "Fixture Evidence activity must be isolated from shared evidence storage",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Fixture Evidence activity must be isolated from shared evidence storage",
+          ),
       );
-      expect(
+      assert.throws(
         () =>
           new FileFixtureEvidenceActivityLedger({
             root: path.join(evidenceRoot, "activity"),
             evidenceRoot,
           }),
-      ).toThrow(
-        "Fixture Evidence activity must be isolated from shared evidence storage",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Fixture Evidence activity must be isolated from shared evidence storage",
+          ),
       );
-      expect(
+      assert.throws(
         () =>
           new FileFixtureEvidenceActivityLedger({
             root: activityRoot,
             evidenceRoot: path.join(activityRoot, "evidence"),
           }),
-      ).toThrow(
-        "Fixture Evidence activity must be isolated from shared evidence storage",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Fixture Evidence activity must be isolated from shared evidence storage",
+          ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("preserves every JSONL record across concurrent ledger instances", async () => {
+  void it("preserves every JSONL record across concurrent ledger instances", async () => {
     const root = await temporaryRepository("fixture-concurrent-ledgers-");
     const evidenceRoot = path.join(root, "evidence");
     const activityRoot = path.join(root, "activity");
@@ -1901,8 +1944,8 @@ describe("Fixture Verification Evidence", () => {
         root: activityRoot,
         evidenceRoot,
       }).read();
-      expect(records).toHaveLength(400);
-      expect(
+      assertLength(records, 400);
+      assert.strictEqual(
         new Set(
           records.map((record) =>
             record.event.type === "invocation" &&
@@ -1911,13 +1954,14 @@ describe("Fixture Verification Evidence", () => {
               : "",
           ),
         ).size,
-      ).toBe(400);
+        400,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects activity outside the closed schema before it reaches the ledger", async () => {
+  void it("rejects activity outside the closed schema before it reaches the ledger", async () => {
     const root = await temporaryRepository("fixture-activity-schema-");
     const evidenceRoot = path.join(root, "evidence");
     const ledger = new FileFixtureEvidenceActivityLedger({
@@ -1932,7 +1976,7 @@ describe("Fixture Verification Evidence", () => {
       writeEnabled: true,
     });
     try {
-      await expect(
+      await assert.rejects(
         invocation.record({
           type: "lookup",
           gate: "generated-root-quality",
@@ -1946,14 +1990,17 @@ describe("Fixture Verification Evidence", () => {
           outcome: "miss",
           reason: "unbounded-human-reason",
         } as unknown as FixtureEvidenceInvocationEvent),
-      ).rejects.toThrow("invalid Fixture Evidence lookup activity");
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("invalid Fixture Evidence lookup activity"),
+      );
       for (const [cache, outcome] of [
         ["buildkit", "mounted"],
         ["turbo", "mounted"],
         ["pnpm-downloads", "configured"],
         ["cargo-downloads", "configured"],
       ] as const) {
-        await expect(
+        await assert.rejects(
           invocation.record({
             type: "cache",
             cache,
@@ -1965,15 +2012,18 @@ describe("Fixture Verification Evidence", () => {
             at: new Date().toISOString(),
             outcome,
           } as unknown as FixtureEvidenceInvocationEvent),
-        ).rejects.toThrow("invalid Fixture Evidence cache activity");
+          (error) =>
+            error instanceof Error &&
+            error.message.includes("invalid Fixture Evidence cache activity"),
+        );
       }
-      await expect(ledger.read()).resolves.toEqual([]);
+      assert.deepStrictEqual(await ledger.read(), []);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects invocation activity with no lookup or no writable issuance", async () => {
+  void it("rejects invocation activity with no lookup or no writable issuance", async () => {
     const root = await temporaryRepository("fixture-incomplete-activity-");
     const evidenceRoot = path.join(root, "evidence");
     const ledger = new FileFixtureEvidenceActivityLedger({
@@ -2044,14 +2094,15 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init", "focused"],
       });
-      expect(report.healthy).toBe(false);
-      expect(report.failures).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assert.strictEqual(report.healthy, false);
+      assertDeepStrictEqualWithMatchers(
+        report.failures,
+        arrayContaining([
+          objectContaining({
             code: "no-lookup",
             invocationId: "no-lookup",
           }),
-          expect.objectContaining({
+          objectContaining({
             code: "missing-issuance",
             invocationId: "no-issuance",
             gate: "generated-root-quality",
@@ -2063,7 +2114,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("rejects failed fixture executions in current-run activity", async () => {
+  void it("rejects failed fixture executions in current-run activity", async () => {
     const root = await temporaryRepository("fixture-failed-execution-health-");
     const evidenceRoot = path.join(root, "evidence");
     const ledger = new FileFixtureEvidenceActivityLedger({
@@ -2088,7 +2139,7 @@ describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [scenario],
       });
-      await expect(
+      await assert.rejects(
         runFixtureEvidenceGate({
           gate: "generated-root-quality",
           generatedContentIdentity: "5".repeat(40),
@@ -2121,7 +2172,10 @@ describe("Fixture Verification Evidence", () => {
             throw new Error("semantic fixture failure");
           },
         }),
-      ).rejects.toThrow("semantic fixture failure");
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("semantic fixture failure"),
+      );
       await invocation.record({
         type: "scenario",
         scenario,
@@ -2140,19 +2194,21 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["focused"],
       });
-      expect(report.healthy).toBe(false);
-      expect(report.failures).toContainEqual(
-        expect.objectContaining({
+      assert.strictEqual(report.healthy, false);
+      assertContainsEqual(
+        report.failures,
+        objectContaining({
           code: "failed-execution",
           invocationId: "failed-execution",
           scenarioId: "semantic-failure",
           gate: "generated-root-quality",
-          detail: expect.stringContaining("semantic fixture failure"),
+          detail: stringContaining("semantic fixture failure"),
         }),
       );
-      expect(formatFixtureEvidenceHealthReport(report)).toEqual(
-        expect.arrayContaining([
-          expect.stringMatching(
+      assertDeepStrictEqualWithMatchers(
+        formatFixtureEvidenceHealthReport(report),
+        arrayContaining([
+          stringMatching(
             /failure code=failed-phase .*scenario=semantic-failure .*semantic-gate.*not-retryable.*semantic fixture failure/u,
           ),
         ]),
@@ -2162,7 +2218,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("executes the semantic gate after storage read failure but leaves health failed", async () => {
+  void it("executes the semantic gate after storage read failure but leaves health failed", async () => {
     const root = await temporaryRepository("fixture-storage-health-");
     const evidenceRoot = path.join(root, "evidence");
     const fileStorage = new FileFixtureEvidenceStorage(evidenceRoot);
@@ -2223,12 +2279,13 @@ describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      expect(executions).toBe(1);
-      expect(report.healthy).toBe(false);
-      expect(report.failures).toContainEqual(
-        expect.objectContaining({
+      assert.strictEqual(executions, 1);
+      assert.strictEqual(report.healthy, false);
+      assertContainsEqual(
+        report.failures,
+        objectContaining({
           code: "lifecycle-error",
-          detail: expect.stringContaining("evidence volume unavailable"),
+          detail: stringContaining("evidence volume unavailable"),
         }),
       );
     } finally {
@@ -2236,7 +2293,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("keeps invalid individual evidence as executable healthy misses", async () => {
+  void it("keeps invalid individual evidence as executable healthy misses", async () => {
     const root = await temporaryRepository("fixture-invalid-health-");
     const cases = [
       { name: "missing", reason: "absent" },
@@ -2343,26 +2400,27 @@ describe("Fixture Verification Evidence", () => {
           outcome: "completed",
         });
 
-        expect(result).toMatchObject({
+        assertPartialDeepStrictEqual(result, {
           status: "executed",
           missReason: evidenceCase.reason,
         });
-        expect(executions).toBe(1);
-        await expect(
-          checkFixtureEvidenceHealth({
+        assert.strictEqual(executions, 1);
+        assertPartialDeepStrictEqual(
+          await checkFixtureEvidenceHealth({
             ledger,
             runId: `invalid-${evidenceCase.name}`,
             runAttempt: "1",
             enabledScenarioSets: ["init"],
           }),
-        ).resolves.toMatchObject({ healthy: true });
+          { healthy: true },
+        );
       }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("continues semantic execution when the current-run activity ledger has I/O failure", async () => {
+  void it("continues semantic execution when the current-run activity ledger has I/O failure", async () => {
     const workspace = await temporaryRepository("fixture-activity-io-");
     const brokenLedger: FixtureEvidenceActivityLedger = {
       invocation: () => ({
@@ -2407,29 +2465,33 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(rootChecks).toBe((await generatedScenariosFor("init")).length * 2);
-      await expect(
-        checkFixtureEvidenceHealth({
+      assert.strictEqual(
+        rootChecks,
+        (await generatedScenariosFor("init")).length * 2,
+      );
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger: brokenLedger,
           runId: "activity-io-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: [
-          expect.objectContaining({
-            code: "activity-io-error",
-            detail: expect.stringContaining("activity disk is read-only"),
-          }),
-        ],
-      });
+        {
+          healthy: false,
+          failures: [
+            objectContaining({
+              code: "activity-io-error",
+              detail: stringContaining("activity disk is read-only"),
+            }),
+          ],
+        },
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("uses all four scenario sets by default and validates Health CLI arguments and exits", async () => {
+  void it("uses all four scenario sets by default and validates Health CLI arguments and exits", async () => {
     const root = await temporaryRepository("fixture-health-cli-");
     const evidenceRoot = path.join(root, "evidence");
     const activityRoot = path.join(root, "activity");
@@ -2487,40 +2549,49 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        execa("node", ["--conditions=source", healthCliPath, "init"], {
+      assertPartialDeepStrictEqual(
+        await execa("node", ["--conditions=source", healthCliPath, "init"], {
           cwd: process.cwd(),
           env,
         }),
-      ).resolves.toMatchObject({ exitCode: 0 });
-      await expect(
+        { exitCode: 0 },
+      );
+      await assert.rejects(
         execa("node", ["--conditions=source", healthCliPath], {
           cwd: process.cwd(),
           env,
         }),
-      ).rejects.toMatchObject({
-        exitCode: 1,
-        stderr: expect.stringContaining(
-          "Enabled scenario set package-addition-matrix has no current-run activity",
-        ),
-      });
-      await expect(
+        (error) => {
+          assertPartialDeepStrictEqual(error, {
+            exitCode: 1,
+            stderr: stringContaining(
+              "Enabled scenario set package-addition-matrix has no current-run activity",
+            ),
+          });
+          return true;
+        },
+      );
+      await assert.rejects(
         execa("node", ["--conditions=source", healthCliPath, "unknown"], {
           cwd: process.cwd(),
           env,
         }),
-      ).rejects.toMatchObject({
-        exitCode: 1,
-        stderr: expect.stringContaining(
-          "Expected enabled scenario set: init, package-addition-matrix, focused, or deployment",
-        ),
-      });
+        (error) => {
+          assertPartialDeepStrictEqual(error, {
+            exitCode: 1,
+            stderr: stringContaining(
+              "Expected enabled scenario set: init, package-addition-matrix, focused, or deployment",
+            ),
+          });
+          return true;
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("records initialization participation through the real scenario-set invocation", async () => {
+  void it("records initialization participation through the real scenario-set invocation", async () => {
     const root = await temporaryRepository("fixture-init-health-");
     const evidenceRoot = path.join(root, "evidence");
     const ledger = new FileFixtureEvidenceActivityLedger({
@@ -2557,173 +2628,195 @@ describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("init")).length;
-      await expect(
-        checkFixtureEvidenceHealth({
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "initialization-health",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: true,
-        stages: [
-          expect.objectContaining({
-            scenarioSet: "init",
-            invocations: 1,
-            scenarios: scenarioCount,
-            misses: { absent: scenarioCount },
-            executions: scenarioCount,
-            issuances: scenarioCount,
-          }),
-        ],
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("keeps a complete warm run healthy without invoking any expensive executor", async () => {
-    const root = await temporaryRepository("fixture-complete-health-");
-    const evidenceRoot = path.join(root, "evidence");
-    const storage = new FileFixtureEvidenceStorage(evidenceRoot);
-    const ledger = new FileFixtureEvidenceActivityLedger({
-      root: path.join(root, "activity"),
-      evidenceRoot,
-    });
-    const sets = [
-      "init",
-      "package-addition-matrix",
-      "focused",
-      "deployment",
-    ] as const;
-    type Command = {
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly cwd: string;
-    };
-    const createRunner =
-      (commands: Command[]) =>
-      async (
-        command: string,
-        args: readonly string[],
-        options: { readonly cwd: string; readonly stdio?: "inherit" },
-      ): Promise<unknown> => {
-        commands.push({ command, args, cwd: options.cwd });
-        if (command === "git") {
-          return await execa(command, [...args], options);
-        }
-        if (args.includes("--dry-run=json")) {
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
+        {
+          healthy: true,
+          stages: [
+            objectContaining({
+              scenarioSet: "init",
+              invocations: 1,
+              scenarios: scenarioCount,
+              misses: { absent: scenarioCount },
+              executions: scenarioCount,
+              issuances: scenarioCount,
             }),
-          };
-        }
-        if (
-          command === "pnpm" &&
-          args.includes("build") &&
-          args.includes("--force")
-        ) {
-          await materializeFocusedProviderBuild(options.cwd);
-        }
-        if (command === "node") {
-          return {
-            stdout: await focusedMarker(
-              path.dirname(path.dirname(options.cwd)),
-            ),
-          };
-        }
-        return {};
-      };
-    const coldCommands: Command[] = [];
-    const warmCommands: Command[] = [];
-    const runComplete = async (
-      runId: string,
-      workspace: string,
-      commands: Command[],
-    ) => {
-      for (const set of sets) {
-        await runGeneratedScenarioSet(set, {
-          workspace: path.join(workspace, set),
-          run: createRunner(commands),
-          scheduling: { concurrency: 4 },
-          evidence: {
-            storage,
-            clock: () => new Date("2026-07-28T00:00:00.000Z"),
-            writeEnabled: true,
-            activity: { ledger, runId, runAttempt: "1" },
-          },
-        });
-      }
-    };
-    try {
-      await runComplete("complete-cold", path.join(root, "cold"), coldCommands);
-      const coldHealth = await checkFixtureEvidenceHealth({
-        ledger,
-        runId: "complete-cold",
-        runAttempt: "1",
-        enabledScenarioSets: sets,
-      });
-      expect(coldHealth).toMatchObject({
-        healthy: true,
-        stages: expect.arrayContaining([
-          expect.objectContaining({
-            scenarioSet: "package-addition-matrix",
-            scenarios: 30,
-            hits: 6,
-            misses: { absent: 24 },
-            executions: 24,
-            issuances: 24,
-          }),
-        ]),
-      });
-      expect(
-        coldHealth.stages.some(
-          (stage) =>
-            (stage.cacheActivity["buildkit:configured"] ?? 0) > 0 &&
-            (stage.cacheActivity["turbo:configured"] ?? 0) > 0,
-        ),
-      ).toBe(true);
-      await runComplete("complete-warm", path.join(root, "warm"), warmCommands);
-
-      const warmHealth = await checkFixtureEvidenceHealth({
-        ledger,
-        runId: "complete-warm",
-        runAttempt: "1",
-        enabledScenarioSets: sets,
-      });
-      expect(warmHealth.healthy).toBe(true);
-      expect(warmHealth.stages.map(({ scenarioSet }) => scenarioSet)).toEqual(
-        sets,
+          ],
+        },
       );
-      expect(
-        warmHealth.stages.every(
-          (stage) =>
-            stage.hits > 0 && stage.executions === 0 && stage.issuances === 0,
-        ),
-      ).toBe(true);
-      expect(
-        warmHealth.stages.every((stage) =>
-          Object.values(stage.cacheActivity).every((count) => count === 0),
-        ),
-      ).toBe(true);
-      expect(warmCommands.filter(({ command }) => command !== "git")).toEqual(
-        [],
-      );
-      expect(
-        coldCommands.some(
-          ({ command, args }) => command === "pnpm" && args[0] === "install",
-        ),
-      ).toBe(true);
-      expect(coldCommands.some(({ command }) => command === "node")).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("enforces configured ordinary, browser, and Docker capacities with queued work", async () => {
+  void it(
+    "keeps a complete warm run healthy without invoking any expensive executor",
+    { timeout: 240_000 },
+    async () => {
+      const root = await temporaryRepository("fixture-complete-health-");
+      const evidenceRoot = path.join(root, "evidence");
+      const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const sets = [
+        "init",
+        "package-addition-matrix",
+        "focused",
+        "deployment",
+      ] as const;
+      type Command = {
+        readonly command: string;
+        readonly args: readonly string[];
+        readonly cwd: string;
+      };
+      const createRunner =
+        (commands: Command[]) =>
+        async (
+          command: string,
+          args: readonly string[],
+          options: { readonly cwd: string; readonly stdio?: "inherit" },
+        ): Promise<unknown> => {
+          commands.push({ command, args, cwd: options.cwd });
+          if (command === "git") {
+            return await execa(command, [...args], options);
+          }
+          if (args.includes("--dry-run=json")) {
+            return {
+              stdout: JSON.stringify({
+                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
+                  taskId,
+                })),
+              }),
+            };
+          }
+          if (
+            command === "pnpm" &&
+            args.includes("build") &&
+            args.includes("--force")
+          ) {
+            await materializeFocusedProviderBuild(options.cwd);
+          }
+          if (command === "node") {
+            return {
+              stdout: await focusedMarker(
+                path.dirname(path.dirname(options.cwd)),
+              ),
+            };
+          }
+          return {};
+        };
+      const coldCommands: Command[] = [];
+      const warmCommands: Command[] = [];
+      const runComplete = async (
+        runId: string,
+        workspace: string,
+        commands: Command[],
+      ) => {
+        for (const set of sets) {
+          await runGeneratedScenarioSet(set, {
+            workspace: path.join(workspace, set),
+            run: createRunner(commands),
+            scheduling: { concurrency: 4 },
+            evidence: {
+              storage,
+              clock: () => new Date("2026-07-28T00:00:00.000Z"),
+              writeEnabled: true,
+              activity: { ledger, runId, runAttempt: "1" },
+            },
+          });
+        }
+      };
+      try {
+        await runComplete(
+          "complete-cold",
+          path.join(root, "cold"),
+          coldCommands,
+        );
+        const coldHealth = await checkFixtureEvidenceHealth({
+          ledger,
+          runId: "complete-cold",
+          runAttempt: "1",
+          enabledScenarioSets: sets,
+        });
+        assertPartialDeepStrictEqual(coldHealth, {
+          healthy: true,
+          stages: arrayContaining([
+            objectContaining({
+              scenarioSet: "package-addition-matrix",
+              scenarios: 30,
+              hits: 6,
+              misses: { absent: 24 },
+              executions: 24,
+              issuances: 24,
+            }),
+          ]),
+        });
+        assert.strictEqual(
+          coldHealth.stages.some(
+            (stage) =>
+              (stage.cacheActivity["buildkit:configured"] ?? 0) > 0 &&
+              (stage.cacheActivity["turbo:configured"] ?? 0) > 0,
+          ),
+          true,
+        );
+        await runComplete(
+          "complete-warm",
+          path.join(root, "warm"),
+          warmCommands,
+        );
+
+        const warmHealth = await checkFixtureEvidenceHealth({
+          ledger,
+          runId: "complete-warm",
+          runAttempt: "1",
+          enabledScenarioSets: sets,
+        });
+        assert.strictEqual(warmHealth.healthy, true);
+        assert.deepStrictEqual(
+          warmHealth.stages.map(({ scenarioSet }) => scenarioSet),
+          sets,
+        );
+        assert.strictEqual(
+          warmHealth.stages.every(
+            (stage) =>
+              stage.hits > 0 && stage.executions === 0 && stage.issuances === 0,
+          ),
+          true,
+        );
+        assert.strictEqual(
+          warmHealth.stages.every((stage) =>
+            Object.values(stage.cacheActivity).every((count) => count === 0),
+          ),
+          true,
+        );
+        assert.deepStrictEqual(
+          warmCommands.filter(({ command }) => command !== "git"),
+          [],
+        );
+        assert.strictEqual(
+          coldCommands.some(
+            ({ command, args }) => command === "pnpm" && args[0] === "install",
+          ),
+          true,
+        );
+        assert.strictEqual(
+          coldCommands.some(({ command }) => command === "node"),
+          true,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it("enforces configured ordinary, browser, and Docker capacities with queued work", async () => {
     const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
 
     const ordinary = createBlockedWorkProbe();
@@ -2734,8 +2827,8 @@ describe("Fixture Verification Evidence", () => {
           async () => await ordinary.run(`ordinary-${name}`),
         ),
     );
-    await vi.waitFor(() => {
-      expect(ordinary.started()).toEqual([
+    await waitFor(() => {
+      assert.deepStrictEqual(ordinary.started(), [
         "ordinary-a",
         "ordinary-b",
         "ordinary-c",
@@ -2743,8 +2836,8 @@ describe("Fixture Verification Evidence", () => {
       ]);
     });
     ordinary.release("ordinary-a");
-    await vi.waitFor(() => {
-      expect(ordinary.started()).toContain("ordinary-e");
+    await waitFor(() => {
+      assert.ok(ordinary.started().includes("ordinary-e"));
     });
     ordinary.releaseAll();
     await Promise.all(ordinaryJobs);
@@ -2753,23 +2846,23 @@ describe("Fixture Verification Evidence", () => {
     const browserJobs = [
       scheduler.run(["browser"], async () => await browser.run("browser-a")),
     ];
-    await vi.waitFor(() => {
-      expect(browser.started()).toEqual(["browser-a"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(browser.started(), ["browser-a"]);
     });
     browserJobs.push(
       scheduler.run(["browser"], async () => await browser.run("browser-b")),
       scheduler.run(["browser"], async () => await browser.run("browser-c")),
       scheduler.run(["browser"], async () => await browser.run("browser-d")),
     );
-    expect(browser.started()).toEqual(["browser-a"]);
+    assert.deepStrictEqual(browser.started(), ["browser-a"]);
     for (const [current, next] of [
       ["browser-a", "browser-b"],
       ["browser-b", "browser-c"],
       ["browser-c", "browser-d"],
     ] as const) {
       browser.release(current);
-      await vi.waitFor(() => {
-        expect(browser.started()).toContain(next);
+      await waitFor(() => {
+        assert.ok(browser.started().includes(next));
       });
     }
     browser.release("browser-d");
@@ -2783,26 +2876,30 @@ describe("Fixture Verification Evidence", () => {
           async () => await docker.run(`docker-${name}`),
         ),
     );
-    await vi.waitFor(() => {
-      expect(docker.started()).toEqual(["docker-a"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(docker.started(), ["docker-a"]);
     });
     docker.release("docker-a");
-    await vi.waitFor(() => {
-      expect(docker.started()).toEqual(["docker-a", "docker-b"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(docker.started(), ["docker-a", "docker-b"]);
     });
     docker.release("docker-b");
-    await vi.waitFor(() => {
-      expect(docker.started()).toEqual(["docker-a", "docker-b", "docker-c"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(docker.started(), [
+        "docker-a",
+        "docker-b",
+        "docker-c",
+      ]);
     });
     docker.release("docker-c");
     await Promise.all(dockerJobs);
 
-    expect(ordinary.maximum()).toBe(4);
-    expect(browser.maximum()).toBe(1);
-    expect(docker.maximum()).toBe(1);
+    assert.strictEqual(ordinary.maximum(), 4);
+    assert.strictEqual(browser.maximum(), 1);
+    assert.strictEqual(docker.maximum(), 1);
   });
 
-  it("bounds Development Container sessions independently of ordinary work", async () => {
+  void it("bounds Development Container sessions independently of ordinary work", async () => {
     const scheduler = createFixtureEvidenceScheduler({
       concurrency: 4,
       developmentContainerSessions: 2,
@@ -2816,12 +2913,12 @@ describe("Fixture Verification Evidence", () => {
         ),
     );
 
-    await vi.waitFor(() => {
-      expect(sessions.started()).toEqual(["session-a", "session-b"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(sessions.started(), ["session-a", "session-b"]);
     });
     sessions.release("session-a");
-    await vi.waitFor(() => {
-      expect(sessions.started()).toEqual([
+    await waitFor(() => {
+      assert.deepStrictEqual(sessions.started(), [
         "session-a",
         "session-b",
         "session-c",
@@ -2830,10 +2927,10 @@ describe("Fixture Verification Evidence", () => {
     sessions.releaseAll();
     await Promise.all(jobs);
 
-    expect(sessions.maximum()).toBe(2);
+    assert.strictEqual(sessions.maximum(), 2);
   });
 
-  it("does not retain Development Container sessions for browser-queued work", async () => {
+  void it("does not retain Development Container sessions for browser-queued work", async () => {
     const scheduler = createFixtureEvidenceScheduler({
       concurrency: 4,
       developmentContainerSessions: 4,
@@ -2848,8 +2945,8 @@ describe("Fixture Verification Evidence", () => {
     ];
 
     try {
-      await vi.waitFor(() => {
-        expect(browser.active()).toBe(1);
+      await waitFor(() => {
+        assert.strictEqual(browser.active(), 1);
       });
       browserJobs.push(
         scheduler.run(
@@ -2869,8 +2966,8 @@ describe("Fixture Verification Evidence", () => {
           ),
       );
 
-      await vi.waitFor(() => {
-        expect(ordinary.active()).toBe(3);
+      await waitFor(() => {
+        assert.strictEqual(ordinary.active(), 3);
       });
 
       ordinary.release();
@@ -2882,7 +2979,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("holds a Development Container session lease until explicit release", async () => {
+  void it("holds a Development Container session lease until explicit release", async () => {
     const scheduler = createFixtureEvidenceScheduler({
       concurrency: 4,
       developmentContainerSessions: 1,
@@ -2899,14 +2996,14 @@ describe("Fixture Verification Evidence", () => {
       });
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(secondAcquired).toBe(false);
+    assert.strictEqual(secondAcquired, false);
     releaseFirst();
     const releaseSecond = await second;
-    expect(secondAcquired).toBe(true);
+    assert.strictEqual(secondAcquired, true);
     releaseSecond();
   });
 
-  it("holds Docker capacity for each deployment-capable container session", async () => {
+  void it("holds Docker capacity for each deployment-capable container session", async () => {
     const workspace = await temporaryRepository(
       "fixture-deployment-session-resources-",
     );
@@ -2954,23 +3051,25 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(acquiredResources).not.toHaveLength(0);
-      expect(acquiredResources).toEqual(
+      assertNotLength(acquiredResources, 0);
+      assert.deepStrictEqual(
+        acquiredResources,
         acquiredResources.map(() => [
           "development-container-session",
           "browser",
           "docker",
         ]),
       );
-      expect(
+      assert.strictEqual(
         scheduledResources.some((resources) => resources.includes("docker")),
-      ).toBe(false);
+        false,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("serializes ordinary evidence misses when the CLI environment sets concurrency to one", async () => {
+  void it("serializes ordinary evidence misses when the CLI environment sets concurrency to one", async () => {
     const workspace = await temporaryRepository("fixture-cli-concurrency-");
     const installs = createBlockedConcurrencyProbe();
     try {
@@ -3017,14 +3116,14 @@ describe("Fixture Verification Evidence", () => {
         expected: 1,
       });
 
-      expect(installs.maximum()).toBe(1);
+      assert.strictEqual(installs.maximum(), 1);
     } finally {
       installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("defaults the initialization CLI to two concurrent ordinary misses", async () => {
+  void it("defaults the initialization CLI to two concurrent ordinary misses", async () => {
     const workspace = await temporaryRepository(
       "fixture-cli-default-concurrency-",
     );
@@ -3059,14 +3158,14 @@ describe("Fixture Verification Evidence", () => {
         expected: Math.min(2, (await generatedScenariosFor("init")).length),
       });
 
-      expect(installs.maximum()).toBe(2);
+      assert.strictEqual(installs.maximum(), 2);
     } finally {
       installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("uses a repository-local generated workspace by default", async () => {
+  void it("uses a repository-local generated workspace by default", async () => {
     const workspaceRoot = path.join(process.cwd(), ".fixture-workspace");
     const observedProjectDirectories = new Set<string>();
 
@@ -3094,24 +3193,29 @@ describe("Fixture Verification Evidence", () => {
       },
     });
 
-    expect(observedProjectDirectories.size).toBeGreaterThan(0);
+    assert.ok(observedProjectDirectories.size > 0);
     for (const directory of observedProjectDirectories) {
-      expect(directory).toContain(
-        `${workspaceRoot}${path.sep}template-generated-check-`,
+      assert.ok(
+        directory.includes(
+          `${workspaceRoot}${path.sep}template-generated-check-`,
+        ),
       );
     }
-    await expect(access(workspaceRoot)).resolves.toBeUndefined();
+    assert.strictEqual(await access(workspaceRoot), undefined);
     const ownedWorkspaces = new Set(
       [...observedProjectDirectories].map((directory) =>
         path.dirname(directory),
       ),
     );
     for (const workspace of ownedWorkspaces) {
-      await expect(access(workspace)).rejects.toMatchObject({ code: "ENOENT" });
+      await assert.rejects(access(workspace), (error) => {
+        assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+        return true;
+      });
     }
   });
 
-  it("rejects malformed concurrency at the real generated-registry CLI environment boundary", async () => {
+  void it("rejects malformed concurrency at the real generated-registry CLI environment boundary", async () => {
     const cliPath = path.join(
       process.cwd(),
       "packages/checks/src/check-generated-registry.ts",
@@ -3138,28 +3242,33 @@ describe("Fixture Verification Evidence", () => {
         },
       );
 
-      expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain(
-        "TEMPLATE_FIXTURE_CONCURRENCY must be a positive integer",
+      assert.notStrictEqual(result.exitCode, 0);
+      assert.ok(
+        result.stderr.includes(
+          "TEMPLATE_FIXTURE_CONCURRENCY must be a positive integer",
+        ),
       );
     }
   });
 
-  it("rejects a malformed Development Container session override", async () => {
-    await expect(
+  void it("rejects a malformed Development Container session override", async () => {
+    await assert.rejects(
       runGeneratedRegistryCli({
         scenarioSet: "init",
         environment: {
           TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS: "0",
         },
       }),
-    ).rejects.toThrow(
-      "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS must be a positive integer",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS must be a positive integer",
+        ),
     );
   });
 
-  it("translates only non-empty fixture Turbo inputs for container execution", () => {
-    expect(
+  void it("translates only non-empty fixture Turbo inputs for container execution", () => {
+    assert.deepStrictEqual(
       fixtureContainerEnvironmentFromEnvironment({
         TEMPLATE_FIXTURE_TURBO_TEAM: "fixture-team",
         TEMPLATE_FIXTURE_TURBO_TOKEN: "",
@@ -3168,46 +3277,61 @@ describe("Fixture Verification Evidence", () => {
         TURBO_TOKEN: "must-not-override-an-explicit-empty-fixture-token",
         UNRELATED_SECRET: "must-not-be-forwarded",
       }),
-    ).toEqual({
-      TURBO_TEAM: "fixture-team",
-      TURBO_REMOTE_CACHE_SIGNATURE_KEY: "fixture-signature",
-      TURBO_REMOTE_CACHE_READ_ONLY: "true",
-    });
-    expect(
+      {
+        TURBO_TEAM: "fixture-team",
+        TURBO_REMOTE_CACHE_SIGNATURE_KEY: "fixture-signature",
+        TURBO_REMOTE_CACHE_READ_ONLY: "true",
+      },
+    );
+    assert.deepStrictEqual(
       fixtureContainerEnvironmentFromEnvironment({
         TURBO_TEAM: "local-team",
         TURBO_TOKEN: "local-token",
       }),
-    ).toEqual({
-      TURBO_TEAM: "local-team",
-      TURBO_TOKEN: "local-token",
-    });
+      {
+        TURBO_TEAM: "local-team",
+        TURBO_TOKEN: "local-token",
+      },
+    );
   });
 
-  it("parses only external fixture dependency-download cache directories", () => {
+  void it("parses only external fixture dependency-download cache directories", () => {
     const pnpmCache = path.resolve(".fixture-native-cache/pnpm");
     const cargoCache = path.resolve(".fixture-native-cache/cargo");
 
-    expect(
+    assert.deepStrictEqual(
       fixtureDependencyCachesFromEnvironment({
         TEMPLATE_FIXTURE_PNPM_CACHE_DIR: pnpmCache,
         TEMPLATE_FIXTURE_CARGO_CACHE_DIR: cargoCache,
       }),
-    ).toEqual({ pnpm: pnpmCache, cargo: cargoCache });
-    expect(fixtureDependencyCachesFromEnvironment({})).toBeUndefined();
-    expect(() =>
-      fixtureDependencyCachesFromEnvironment({
-        TEMPLATE_FIXTURE_PNPM_CACHE_DIR: "",
-      }),
-    ).toThrow("TEMPLATE_FIXTURE_PNPM_CACHE_DIR must not be empty");
-    expect(() =>
-      fixtureDependencyCachesFromEnvironment({
-        TEMPLATE_FIXTURE_CARGO_CACHE_DIR: "",
-      }),
-    ).toThrow("TEMPLATE_FIXTURE_CARGO_CACHE_DIR must not be empty");
+      { pnpm: pnpmCache, cargo: cargoCache },
+    );
+    assert.strictEqual(fixtureDependencyCachesFromEnvironment({}), undefined);
+    assert.throws(
+      () =>
+        fixtureDependencyCachesFromEnvironment({
+          TEMPLATE_FIXTURE_PNPM_CACHE_DIR: "",
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "TEMPLATE_FIXTURE_PNPM_CACHE_DIR must not be empty",
+        ),
+    );
+    assert.throws(
+      () =>
+        fixtureDependencyCachesFromEnvironment({
+          TEMPLATE_FIXTURE_CARGO_CACHE_DIR: "",
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "TEMPLATE_FIXTURE_CARGO_CACHE_DIR must not be empty",
+        ),
+    );
   });
 
-  it("applies the Development Container session environment override", async () => {
+  void it("applies the Development Container session environment override", async () => {
     const workspace = await temporaryRepository(
       "fixture-cli-container-session-concurrency-",
     );
@@ -3245,14 +3369,14 @@ describe("Fixture Verification Evidence", () => {
         expected: 1,
       });
 
-      expect(installs.maximum()).toBe(1);
+      assert.strictEqual(installs.maximum(), 1);
     } finally {
       installs.release();
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("applies CLI ordinary concurrency to every scenario set", async () => {
+  void it("applies CLI ordinary concurrency to every scenario set", async () => {
     const root = await temporaryRepository("fixture-cli-resource-caps-");
     const sets = [
       "init",
@@ -3327,12 +3451,15 @@ describe("Fixture Verification Evidence", () => {
         expectedMaxActiveInstalls.set(scenarioSet, expected);
         let observationFailure: unknown;
         try {
-          await vi.waitFor(
+          await waitFor(
             () => {
-              expect({ scenarioSet, active: installs.active() }).toEqual({
-                scenarioSet,
-                active: expected,
-              });
+              assert.deepStrictEqual(
+                { scenarioSet, active: installs.active() },
+                {
+                  scenarioSet,
+                  active: expected,
+                },
+              );
             },
             { timeout: 30_000 },
           );
@@ -3346,13 +3473,13 @@ describe("Fixture Verification Evidence", () => {
         maxActiveInstalls.set(scenarioSet, installs.maximum());
       }
 
-      expect(maxActiveInstalls).toEqual(expectedMaxActiveInstalls);
+      assert.deepStrictEqual(maxActiveInstalls, expectedMaxActiveInstalls);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
+  void it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
     const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
     const started: string[] = [];
     const releases = new Map<string, () => void>();
@@ -3371,29 +3498,29 @@ describe("Fixture Verification Evidence", () => {
     const jobs = [
       scheduler.run(["docker"], async () => await work("docker-a")),
     ];
-    await vi.waitFor(() => {
-      expect(started).toEqual(["docker-a"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(started, ["docker-a"]);
     });
     jobs.push(
       scheduler.run(["docker"], async () => await work("docker-b")),
       scheduler.run(["docker"], async () => await work("docker-c")),
     );
-    expect(started).toEqual(["docker-a"]);
+    assert.deepStrictEqual(started, ["docker-a"]);
     releases.get("docker-a")!();
-    await vi.waitFor(() => {
-      expect(started).toEqual(["docker-a", "docker-b"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(started, ["docker-a", "docker-b"]);
     });
     releases.get("docker-b")!();
-    await vi.waitFor(() => {
-      expect(started).toEqual(["docker-a", "docker-b", "docker-c"]);
+    await waitFor(() => {
+      assert.deepStrictEqual(started, ["docker-a", "docker-b", "docker-c"]);
     });
     releases.get("docker-c")!();
     await Promise.all(jobs);
 
-    expect(maxActiveDocker).toBe(1);
+    assert.strictEqual(maxActiveDocker, 1);
   });
 
-  it("classifies Root Quality browser resources from real Check Environment Needs", async () => {
+  void it("classifies Root Quality browser resources from real Check Environment Needs", async () => {
     const classifications = (await generatedScenariosFor("init")).map(
       (scenario) => {
         const plan = planGeneratedRepositoryInitialization({
@@ -3417,20 +3544,23 @@ describe("Fixture Verification Evidence", () => {
       },
     );
 
-    expect(classifications.some(({ hasBrowserNeed }) => hasBrowserNeed)).toBe(
+    assert.strictEqual(
+      classifications.some(({ hasBrowserNeed }) => hasBrowserNeed),
       true,
     );
-    expect(classifications.some(({ hasBrowserNeed }) => !hasBrowserNeed)).toBe(
+    assert.strictEqual(
+      classifications.some(({ hasBrowserNeed }) => !hasBrowserNeed),
       true,
     );
     for (const classification of classifications) {
-      expect(classification.resources).toEqual(
+      assert.deepStrictEqual(
+        classification.resources,
         classification.hasBrowserNeed ? ["browser"] : [],
       );
     }
   });
 
-  it("identifies Generated Repository content from the prospective Git tree", async () => {
+  void it("identifies Generated Repository content from the prospective Git tree", async () => {
     const first = await temporaryRepository("fixture-evidence-first-");
     const second = await temporaryRepository("fixture-evidence-second-");
     try {
@@ -3452,8 +3582,8 @@ describe("Fixture Verification Evidence", () => {
         repositoryRoot: second,
       });
 
-      expect(firstIdentity).toMatch(/^[0-9a-f]{40}$/u);
-      expect(secondIdentity).toBe(firstIdentity);
+      assert.match(firstIdentity, /^[0-9a-f]{40}$/u);
+      assert.strictEqual(secondIdentity, firstIdentity);
     } finally {
       await Promise.all([
         rm(first, { recursive: true, force: true }),
@@ -3462,7 +3592,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("lets Git identify bytes, paths, executable modes, symlinks, and rendered lockfiles", async () => {
+  void it("lets Git identify bytes, paths, executable modes, symlinks, and rendered lockfiles", async () => {
     const roots: string[] = [];
     const identity = async (variant: {
       readonly content?: string;
@@ -3490,19 +3620,23 @@ describe("Fixture Verification Evidence", () => {
 
     try {
       const baseline = await identity({});
-      await expect(identity({ content: "echo changed\n" })).resolves.not.toBe(
+      assert.notStrictEqual(
+        await identity({ content: "echo changed\n" }),
         baseline,
       );
-      await expect(
-        identity({ filePath: "nested/script.sh" }),
-      ).resolves.not.toBe(baseline);
-      await expect(identity({ executable: true })).resolves.not.toBe(baseline);
-      await expect(
-        identity({ symlinkTarget: "missing-target" }),
-      ).resolves.not.toBe(baseline);
-      await expect(
-        identity({ lockfile: "lockfileVersion: '9.0'\n" }),
-      ).resolves.not.toBe(baseline);
+      assert.notStrictEqual(
+        await identity({ filePath: "nested/script.sh" }),
+        baseline,
+      );
+      assert.notStrictEqual(await identity({ executable: true }), baseline);
+      assert.notStrictEqual(
+        await identity({ symlinkTarget: "missing-target" }),
+        baseline,
+      );
+      assert.notStrictEqual(
+        await identity({ lockfile: "lockfileVersion: '9.0'\n" }),
+        baseline,
+      );
     } finally {
       await Promise.all(
         roots.map(
@@ -3512,7 +3646,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("derives contract identity from a normalized plan and owned production source", async () => {
+  void it("derives contract identity from a normalized plan and owned production source", async () => {
     const root = await temporaryRepository("fixture-contract-");
     const gateRoot = path.join(root, "gates/root-quality");
     const kernelRoot = path.join(root, "kernel");
@@ -3544,7 +3678,10 @@ describe("Fixture Verification Evidence", () => {
       const initial = await derive({ command: "check", args: ["--all"] });
 
       await writeFile(path.join(testRoot, "root.test.ts"), "expect(false);\n");
-      expect(await derive({ args: ["--all"], command: "check" })).toBe(initial);
+      assert.strictEqual(
+        await derive({ args: ["--all"], command: "check" }),
+        initial,
+      );
 
       await writeFile(
         path.join(gateRoot, "index.ts"),
@@ -3554,13 +3691,14 @@ describe("Fixture Verification Evidence", () => {
         command: "check",
         args: ["--all"],
       });
-      expect(gateChanged).not.toBe(initial);
+      assert.notStrictEqual(gateChanged, initial);
 
       await writeFile(
         path.join(kernelRoot, "index.ts"),
         "export const kernel = 2;\n",
       );
-      expect(await derive({ command: "check", args: ["--all"] })).not.toBe(
+      assert.notStrictEqual(
+        await derive({ command: "check", args: ["--all"] }),
         gateChanged,
       );
     } finally {
@@ -3568,7 +3706,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("invalidates only the owning gate for plan and implementation changes while kernel changes invalidate every gate", async () => {
+  void it("invalidates only the owning gate for plan and implementation changes while kernel changes invalidate every gate", async () => {
     const root = await temporaryRepository("fixture-contract-boundaries-");
     const rootGate = path.join(root, "root-quality");
     const focusedGate = path.join(root, "focused-package-link");
@@ -3650,36 +3788,46 @@ describe("Fixture Verification Evidence", () => {
         deploymentIndex,
         `${await readFile(deploymentIndex, "utf8")}\n// deployment implementation change\n`,
       );
-      expect(await deriveRoot()).toBe(initialRoot);
-      expect(await deriveFocused("source-and-default")).toBe(initialFocused);
+      assert.strictEqual(await deriveRoot(), initialRoot);
+      assert.strictEqual(
+        await deriveFocused("source-and-default"),
+        initialFocused,
+      );
       const deploymentImplementationChanged = await deriveDeployment(
         "pnpm run check:deployment",
       );
-      expect(deploymentImplementationChanged).not.toBe(initialDeployment);
+      assert.notStrictEqual(deploymentImplementationChanged, initialDeployment);
 
       const deploymentPlanChanged = await deriveDeployment(
         "pnpm run check:deployment:changed",
       );
-      expect(deploymentPlanChanged).not.toBe(deploymentImplementationChanged);
-      expect(await deriveRoot()).toBe(initialRoot);
-      expect(await deriveFocused("source-and-default")).toBe(initialFocused);
+      assert.notStrictEqual(
+        deploymentPlanChanged,
+        deploymentImplementationChanged,
+      );
+      assert.strictEqual(await deriveRoot(), initialRoot);
+      assert.strictEqual(
+        await deriveFocused("source-and-default"),
+        initialFocused,
+      );
 
       const focusedIndex = path.join(focusedGate, "index.ts");
       await writeFile(
         focusedIndex,
         `${await readFile(focusedIndex, "utf8")}\n// focused implementation change\n`,
       );
-      expect(await deriveRoot()).toBe(initialRoot);
+      assert.strictEqual(await deriveRoot(), initialRoot);
       const focusedImplementationChanged =
         await deriveFocused("source-and-default");
-      expect(focusedImplementationChanged).not.toBe(initialFocused);
-      expect(await deriveDeployment("pnpm run check:deployment:changed")).toBe(
+      assert.notStrictEqual(focusedImplementationChanged, initialFocused);
+      assert.strictEqual(
+        await deriveDeployment("pnpm run check:deployment:changed"),
         deploymentPlanChanged,
       );
 
       const focusedPlanChanged = await deriveFocused("different-plan");
-      expect(focusedPlanChanged).not.toBe(focusedImplementationChanged);
-      expect(await deriveRoot()).toBe(initialRoot);
+      assert.notStrictEqual(focusedPlanChanged, focusedImplementationChanged);
+      assert.strictEqual(await deriveRoot(), initialRoot);
 
       const rootIndex = path.join(rootGate, "index.ts");
       await writeFile(
@@ -3687,9 +3835,13 @@ describe("Fixture Verification Evidence", () => {
         `${await readFile(rootIndex, "utf8")}\n// root implementation change\n`,
       );
       const rootImplementationChanged = await deriveRoot();
-      expect(rootImplementationChanged).not.toBe(initialRoot);
-      expect(await deriveFocused("different-plan")).toBe(focusedPlanChanged);
-      expect(await deriveDeployment("pnpm run check:deployment:changed")).toBe(
+      assert.notStrictEqual(rootImplementationChanged, initialRoot);
+      assert.strictEqual(
+        await deriveFocused("different-plan"),
+        focusedPlanChanged,
+      );
+      assert.strictEqual(
+        await deriveDeployment("pnpm run check:deployment:changed"),
         deploymentPlanChanged,
       );
 
@@ -3698,19 +3850,21 @@ describe("Fixture Verification Evidence", () => {
         kernelIndex,
         `${await readFile(kernelIndex, "utf8")}\n// kernel change\n`,
       );
-      expect(await deriveRoot()).not.toBe(rootImplementationChanged);
-      expect(await deriveFocused("different-plan")).not.toBe(
+      assert.notStrictEqual(await deriveRoot(), rootImplementationChanged);
+      assert.notStrictEqual(
+        await deriveFocused("different-plan"),
         focusedPlanChanged,
       );
-      expect(
+      assert.notStrictEqual(
         await deriveDeployment("pnpm run check:deployment:changed"),
-      ).not.toBe(deploymentPlanChanged);
+        deploymentPlanChanged,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("keeps selective invalidation and expiry healthy through the activity protocol", async () => {
+  void it("keeps selective invalidation and expiry healthy through the activity protocol", async () => {
     const root = await temporaryRepository("fixture-selective-health-");
     const baseline = {
       generatedContent: "a".repeat(40),
@@ -3890,22 +4044,23 @@ describe("Fixture Verification Evidence", () => {
           outcome: "completed",
         });
 
-        expect(executions).toEqual(invalidation.executions);
-        await expect(
-          checkFixtureEvidenceHealth({
+        assert.deepStrictEqual(executions, invalidation.executions);
+        assertPartialDeepStrictEqual(
+          await checkFixtureEvidenceHealth({
             ledger,
             runId: invalidation.name,
             runAttempt: "1",
             enabledScenarioSets: ["focused"],
           }),
-        ).resolves.toMatchObject({ healthy: true });
+          { healthy: true },
+        );
       }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("executes a cold gate once and reuses its schema-validated evidence while warm", async () => {
+  void it("executes a cold gate once and reuses its schema-validated evidence while warm", async () => {
     const root = await temporaryRepository("fixture-evidence-store-");
     const events: FixtureEvidenceLifecycleEvent[] = [];
     const storage = new FileFixtureEvidenceStorage(root);
@@ -3933,32 +4088,33 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(cold.status).toBe("executed");
-      expect(cold.missReason).toBe("absent");
-      expect(executions).toBe(1);
+      assert.strictEqual(cold.status, "executed");
+      assert.strictEqual(cold.missReason, "absent");
+      assert.strictEqual(executions, 1);
       const gateDirectory = path.join(root, "generated-root-quality");
       const [recordName] = await readdir(gateDirectory);
-      expect(recordName).toBe(`${cold.identity}.json`);
-      expect(
+      assert.strictEqual(recordName, `${cold.identity}.json`);
+      assert.deepStrictEqual(
         JSON.parse(
           await readFile(path.join(gateDirectory, recordName!), "utf8"),
         ),
-      ).toEqual({
-        schema: "fixture-verification-evidence/v1",
-        gate: "generated-root-quality",
-        identity: cold.identity,
-        components: {
-          generatedContent: "1".repeat(40),
-          contract: "2".repeat(64),
+        {
+          schema: "fixture-verification-evidence/v1",
+          gate: "generated-root-quality",
+          identity: cold.identity,
+          components: {
+            generatedContent: "1".repeat(40),
+            contract: "2".repeat(64),
+          },
+          issuedAt: "2026-07-28T00:00:00.000Z",
+          scenario: {
+            id: "fixture-first-init",
+            label: "first diagnostic",
+            presetIdentities: ["first"],
+          },
+          producerCommit: "cold-commit",
         },
-        issuedAt: "2026-07-28T00:00:00.000Z",
-        scenario: {
-          id: "fixture-first-init",
-          label: "first diagnostic",
-          presetIdentities: ["first"],
-        },
-        producerCommit: "cold-commit",
-      });
+      );
 
       const warm = await runFixtureEvidenceGate({
         gate: "generated-root-quality",
@@ -3981,27 +4137,28 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(warm).toMatchObject({
+      assertPartialDeepStrictEqual(warm, {
         status: "hit",
         identity: cold.identity,
       });
-      expect(executions).toBe(1);
-      expect(events).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assert.strictEqual(executions, 1);
+      assertDeepStrictEqualWithMatchers(
+        events,
+        arrayContaining([
+          objectContaining({
             type: "lookup",
             outcome: "miss",
             reason: "absent",
           }),
-          expect.objectContaining({
+          objectContaining({
             type: "execution",
             outcome: "succeeded",
           }),
-          expect.objectContaining({
+          objectContaining({
             type: "issuance",
             outcome: "issued",
           }),
-          expect.objectContaining({ type: "lookup", outcome: "hit" }),
+          objectContaining({ type: "lookup", outcome: "hit" }),
         ]),
       );
     } finally {
@@ -4009,7 +4166,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("issues and reuses Focused Package Link evidence independently from Root Quality", async () => {
+  void it("issues and reuses Focused Package Link evidence independently from Root Quality", async () => {
     const root = await temporaryRepository("fixture-independent-gates-");
     const storage = new FileFixtureEvidenceStorage(root);
     const clock = () => new Date("2026-07-28T00:00:00.000Z");
@@ -4046,8 +4203,8 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...shared,
           gate: "generated-root-quality",
           contractIdentity: "4".repeat(64),
@@ -4055,9 +4212,10 @@ describe("Fixture Verification Evidence", () => {
             rootExecutions += 1;
           },
         }),
-      ).resolves.toMatchObject({ status: "hit", identity: coldRoot.identity });
-      await expect(
-        runFixtureEvidenceGate({
+        { status: "hit", identity: coldRoot.identity },
+      );
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...shared,
           gate: "focused-package-link",
           contractIdentity: "5".repeat(64),
@@ -4072,10 +4230,11 @@ describe("Fixture Verification Evidence", () => {
             focusedExecutions += 1;
           },
         }),
-      ).resolves.toMatchObject({
-        status: "hit",
-        identity: coldFocused.identity,
-      });
+        {
+          status: "hit",
+          identity: coldFocused.identity,
+        },
+      );
 
       const changedRoot = await runFixtureEvidenceGate({
         ...shared,
@@ -4104,10 +4263,13 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(changedRoot.identity).not.toBe(coldRoot.identity);
-      expect(changedFocused.identity).not.toBe(coldFocused.identity);
-      expect(focusedContractChanged.identity).not.toBe(changedFocused.identity);
-      expect(
+      assert.notStrictEqual(changedRoot.identity, coldRoot.identity);
+      assert.notStrictEqual(changedFocused.identity, coldFocused.identity);
+      assert.notStrictEqual(
+        focusedContractChanged.identity,
+        changedFocused.identity,
+      );
+      assertPartialDeepStrictEqual(
         JSON.parse(
           await readFile(
             path.join(
@@ -4118,23 +4280,20 @@ describe("Fixture Verification Evidence", () => {
             "utf8",
           ),
         ),
-      ).toMatchObject({
-        components: { rootEvidence: changedRoot.identity },
-      });
-      expect(rootExecutions).toBe(2);
-      expect(focusedExecutions).toBe(3);
-      await expect(
-        readdir(path.join(root, "generated-root-quality")),
-      ).resolves.toHaveLength(2);
-      await expect(
-        readdir(path.join(root, "focused-package-link")),
-      ).resolves.toHaveLength(3);
+        {
+          components: { rootEvidence: changedRoot.identity },
+        },
+      );
+      assert.strictEqual(rootExecutions, 2);
+      assert.strictEqual(focusedExecutions, 3);
+      assertLength(await readdir(path.join(root, "generated-root-quality")), 2);
+      assertLength(await readdir(path.join(root, "focused-package-link")), 3);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("issues and reuses Deployment Quality evidence with its Root prerequisite proof", async () => {
+  void it("issues and reuses Deployment Quality evidence with its Root prerequisite proof", async () => {
     const root = await temporaryRepository("fixture-deployment-evidence-");
     const storage = new FileFixtureEvidenceStorage(root);
     const generatedContentIdentity = "d".repeat(40);
@@ -4162,8 +4321,8 @@ describe("Fixture Verification Evidence", () => {
       const cold = await runFixtureEvidenceGate(input);
       const warm = await runFixtureEvidenceGate(input);
 
-      expect(cold.status).toBe("executed");
-      expect(warm).toMatchObject({
+      assert.strictEqual(cold.status, "executed");
+      assertPartialDeepStrictEqual(warm, {
         status: "hit",
         identity: cold.identity,
       });
@@ -4181,22 +4340,24 @@ describe("Fixture Verification Evidence", () => {
         contractIdentity: "a".repeat(64),
       });
 
-      expect(rootChanged.identity).not.toBe(cold.identity);
-      expect(deploymentChanged.identity).not.toBe(rootChanged.identity);
-      expect(executions).toBe(3);
-      await expect(
-        readFile(
-          path.join(root, "deployment-quality", `${cold.identity}.json`),
-          "utf8",
-        ),
-      ).resolves.toContain(`"rootEvidence": "${rootEvidence.identity}"`);
+      assert.notStrictEqual(rootChanged.identity, cold.identity);
+      assert.notStrictEqual(deploymentChanged.identity, rootChanged.identity);
+      assert.strictEqual(executions, 3);
+      assert.ok(
+        (
+          await readFile(
+            path.join(root, "deployment-quality", `${cold.identity}.json`),
+            "utf8",
+          )
+        ).includes(`"rootEvidence": "${rootEvidence.identity}"`),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects a fabricated Root prerequisite before Focused evidence lookup", async () => {
-    const read = vi.fn<FixtureEvidenceStorage["read"]>(async () => undefined);
+  void it("rejects a fabricated Root prerequisite before Focused evidence lookup", async () => {
+    const read = mock.fn<FixtureEvidenceStorage["read"]>(async () => undefined);
     const generatedContentIdentity = "8".repeat(40);
     const fabricatedRootEvidence = {
       gate: "generated-root-quality",
@@ -4206,7 +4367,7 @@ describe("Fixture Verification Evidence", () => {
       contractIdentity: "a".repeat(64),
     } as unknown as Awaited<ReturnType<typeof successfulRootEvidence>>;
 
-    await expect(
+    await assert.rejects(
       runFixtureEvidenceGate({
         gate: "focused-package-link",
         rootEvidence: fabricatedRootEvidence,
@@ -4224,13 +4385,16 @@ describe("Fixture Verification Evidence", () => {
         },
         execute: async () => undefined,
       }),
-    ).rejects.toThrow(
-      "requires successful Root Quality evidence for the same Generated Repository content",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "requires successful Root Quality evidence for the same Generated Repository content",
+        ),
     );
-    expect(read).not.toHaveBeenCalled();
+    assert.strictEqual(read.mock.callCount(), 0);
   });
 
-  it("fails closed for corrupt, partial, unknown-schema, and mismatched records", async () => {
+  void it("fails closed for corrupt, partial, unknown-schema, and mismatched records", async () => {
     const root = await temporaryRepository("fixture-invalid-evidence-");
     const storage = new FileFixtureEvidenceStorage(root);
     const clock = () => new Date("2026-07-28T00:00:00.000Z");
@@ -4288,25 +4452,26 @@ describe("Fixture Verification Evidence", () => {
             ? invalid
             : `${JSON.stringify(invalid)}\n`,
         );
-        await expect(
-          runFixtureEvidenceGate({
+        assertPartialDeepStrictEqual(
+          await runFixtureEvidenceGate({
             ...input,
             execute: async () => {
               executions += 1;
             },
           }),
-        ).resolves.toMatchObject({
-          status: "executed",
-          missReason: "invalid",
-        });
+          {
+            status: "executed",
+            missReason: "invalid",
+          },
+        );
       }
-      expect(executions).toBe(1 + invalidRecords.length);
+      assert.strictEqual(executions, 1 + invalidRecords.length);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("does not expose evidence when atomic issuance writes only a partial temporary file", async () => {
+  void it("does not expose evidence when atomic issuance writes only a partial temporary file", async () => {
     const root = await temporaryRepository("fixture-partial-issuance-");
     const evidenceRoot = path.join(root, "evidence");
     const storage = new FileFixtureEvidenceStorage(evidenceRoot, {
@@ -4345,8 +4510,8 @@ describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [input.scenario],
       });
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...input,
           storage,
           writeEnabled: true,
@@ -4355,10 +4520,11 @@ describe("Fixture Verification Evidence", () => {
             executions += 1;
           },
         }),
-      ).resolves.toMatchObject({
-        status: "executed-unissued",
-        issuanceError: "simulated partial write",
-      });
+        {
+          status: "executed-unissued",
+          issuanceError: "simulated partial write",
+        },
+      );
       await invocation.record({
         type: "scenario",
         scenario: input.scenario,
@@ -4366,8 +4532,8 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...input,
           storage: new FileFixtureEvidenceStorage(evidenceRoot),
           writeEnabled: false,
@@ -4375,40 +4541,43 @@ describe("Fixture Verification Evidence", () => {
             executions += 1;
           },
         }),
-      ).resolves.toMatchObject({
-        status: "executed",
-        missReason: "absent",
-      });
-      expect(executions).toBe(2);
-      await expect(
-        readdir(path.join(evidenceRoot, "generated-root-quality")),
-      ).resolves.toEqual([]);
-      await expect(
-        checkFixtureEvidenceHealth({
+        {
+          status: "executed",
+          missReason: "absent",
+        },
+      );
+      assert.strictEqual(executions, 2);
+      assert.deepStrictEqual(
+        await readdir(path.join(evidenceRoot, "generated-root-quality")),
+        [],
+      );
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "partial-issuance-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "lifecycle-error",
-            detail: expect.stringContaining("simulated partial write"),
-          }),
-          expect.objectContaining({
-            code: "missing-issuance",
-            gate: "generated-root-quality",
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "lifecycle-error",
+              detail: stringContaining("simulated partial write"),
+            }),
+            objectContaining({
+              code: "missing-issuance",
+              gate: "generated-root-quality",
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("does not expose evidence when atomic replacement fails after the temporary write", async () => {
+  void it("does not expose evidence when atomic replacement fails after the temporary write", async () => {
     const root = await temporaryRepository("fixture-replace-issuance-");
     const evidenceRoot = path.join(root, "evidence");
     const storage = new FileFixtureEvidenceStorage(evidenceRoot, {
@@ -4446,8 +4615,8 @@ describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [input.scenario],
       });
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...input,
           storage,
           writeEnabled: true,
@@ -4456,10 +4625,11 @@ describe("Fixture Verification Evidence", () => {
             executions += 1;
           },
         }),
-      ).resolves.toMatchObject({
-        status: "executed-unissued",
-        issuanceError: "simulated replace failure",
-      });
+        {
+          status: "executed-unissued",
+          issuanceError: "simulated replace failure",
+        },
+      );
       await invocation.record({
         type: "scenario",
         scenario: input.scenario,
@@ -4467,8 +4637,8 @@ describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...input,
           storage: new FileFixtureEvidenceStorage(evidenceRoot),
           writeEnabled: false,
@@ -4476,40 +4646,43 @@ describe("Fixture Verification Evidence", () => {
             executions += 1;
           },
         }),
-      ).resolves.toMatchObject({
-        status: "executed",
-        missReason: "absent",
-      });
-      expect(executions).toBe(2);
-      await expect(
-        readdir(path.join(evidenceRoot, "generated-root-quality")),
-      ).resolves.toEqual([]);
-      await expect(
-        checkFixtureEvidenceHealth({
+        {
+          status: "executed",
+          missReason: "absent",
+        },
+      );
+      assert.strictEqual(executions, 2);
+      assert.deepStrictEqual(
+        await readdir(path.join(evidenceRoot, "generated-root-quality")),
+        [],
+      );
+      assertPartialDeepStrictEqual(
+        await checkFixtureEvidenceHealth({
           ledger,
           runId: "replace-issuance-run",
           runAttempt: "1",
           enabledScenarioSets: ["init"],
         }),
-      ).resolves.toMatchObject({
-        healthy: false,
-        failures: expect.arrayContaining([
-          expect.objectContaining({
-            code: "lifecycle-error",
-            detail: expect.stringContaining("simulated replace failure"),
-          }),
-          expect.objectContaining({
-            code: "missing-issuance",
-            gate: "generated-root-quality",
-          }),
-        ]),
-      });
+        {
+          healthy: false,
+          failures: arrayContaining([
+            objectContaining({
+              code: "lifecycle-error",
+              detail: stringContaining("simulated replace failure"),
+            }),
+            objectContaining({
+              code: "missing-issuance",
+              gate: "generated-root-quality",
+            }),
+          ]),
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("expires at seven days and never refreshes evidence after failed execution", async () => {
+  void it("expires at seven days and never refreshes evidence after failed execution", async () => {
     const root = await temporaryRepository("fixture-stale-evidence-");
     const storage = new FileFixtureEvidenceStorage(root);
     let now = new Date("2026-07-01T00:00:00.000Z");
@@ -4539,33 +4712,40 @@ describe("Fixture Verification Evidence", () => {
       );
 
       now = new Date("2026-07-07T23:59:59.999Z");
-      await expect(
-        runFixtureEvidenceGate({
+      assertPartialDeepStrictEqual(
+        await runFixtureEvidenceGate({
           ...input,
           execute: async () => {
             throw new Error("fresh evidence should not execute");
           },
         }),
-      ).resolves.toMatchObject({ status: "hit" });
+        { status: "hit" },
+      );
 
       now = new Date("2026-07-08T00:00:00.000Z");
-      await expect(
+      await assert.rejects(
         runFixtureEvidenceGate({
           ...input,
           execute: async () => {
             throw new Error("root quality failed");
           },
         }),
-      ).rejects.toThrow("root quality failed");
-      expect(JSON.parse(await readFile(recordPath, "utf8"))).toMatchObject({
-        issuedAt: "2026-07-01T00:00:00.000Z",
-      });
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("root quality failed"),
+      );
+      assertPartialDeepStrictEqual(
+        JSON.parse(await readFile(recordPath, "utf8")),
+        {
+          issuedAt: "2026-07-01T00:00:00.000Z",
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("prunes stale and structurally invalid records before publication", async () => {
+  void it("prunes stale and structurally invalid records before publication", async () => {
     const root = await temporaryRepository("fixture-pruned-evidence-");
     const storage = new FileFixtureEvidenceStorage(root);
     const input = {
@@ -4595,23 +4775,28 @@ describe("Fixture Verification Evidence", () => {
       const gateRoot = path.join(root, "generated-root-quality");
       await writeFile(path.join(gateRoot, "invalid.json"), '{"schema":');
 
-      await expect(
-        storage.prune({
+      assert.deepStrictEqual(
+        await storage.prune({
           clock: () => new Date("2026-07-28T00:00:00.000Z"),
         }),
-      ).resolves.toEqual({ removed: 2 });
-      await expect(readdir(gateRoot)).resolves.toEqual([
+        { removed: 2 },
+      );
+      assert.deepStrictEqual(await readdir(gateRoot), [
         `${fresh.identity}.json`,
       ]);
-      await expect(
+      await assert.rejects(
         readFile(path.join(gateRoot, `${stale.identity}.json`), "utf8"),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("prunes stale and invalid Focused records without removing fresh evidence", async () => {
+  void it("prunes stale and invalid Focused records without removing fresh evidence", async () => {
     const root = await temporaryRepository("fixture-pruned-focused-");
     const storage = new FileFixtureEvidenceStorage(root);
     const input = {
@@ -4643,23 +4828,28 @@ describe("Fixture Verification Evidence", () => {
       const gateRoot = path.join(root, "focused-package-link");
       await writeFile(path.join(gateRoot, "invalid.json"), '{"schema":');
 
-      await expect(
-        storage.prune({
+      assert.deepStrictEqual(
+        await storage.prune({
           clock: () => new Date("2026-07-28T00:00:00.000Z"),
         }),
-      ).resolves.toEqual({ removed: 2 });
-      await expect(readdir(gateRoot)).resolves.toEqual([
+        { removed: 2 },
+      );
+      assert.deepStrictEqual(await readdir(gateRoot), [
         `${fresh.identity}.json`,
       ]);
-      await expect(
+      await assert.rejects(
         readFile(path.join(gateRoot, `${stale.identity}.json`), "utf8"),
-      ).rejects.toMatchObject({ code: "ENOENT" });
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("owns the normalized Generated Root Quality contract and complete executor", async () => {
+  void it("owns the normalized Generated Root Quality contract and complete executor", async () => {
     const root = await temporaryRepository("fixture-root-contract-");
     const definition = builtInPresetRegistry.all()[0]!;
     const plan = planGeneratedRepositoryInitialization({
@@ -4691,7 +4881,7 @@ describe("Fixture Verification Evidence", () => {
     try {
       const contractIdentity =
         await deriveGeneratedRootQualityContractIdentity(plan);
-      expect(contractIdentity).toMatch(/^[0-9a-f]{64}$/u);
+      assert.match(contractIdentity, /^[0-9a-f]{64}$/u);
 
       await executeGeneratedRootQuality({
         plan,
@@ -4705,7 +4895,7 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(calls[0]).toEqual({
+      assert.deepStrictEqual(calls[0], {
         command: "pnpm",
         args: [
           "exec",
@@ -4720,7 +4910,7 @@ describe("Fixture Verification Evidence", () => {
           "--dry-run=json",
         ],
       });
-      expect(calls).toContainEqual({
+      assertContainsEqual(calls, {
         command: "pnpm",
         args: ["run", "check"],
       });
@@ -4729,7 +4919,7 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("derives the Focused contract from the normalized consumer and provider plan", async () => {
+  void it("derives the Focused contract from the normalized consumer and provider plan", async () => {
     const workspace = await temporaryRepository("fixture-focused-contract-");
     try {
       const scenario = (await generatedScenariosFor("focused"))[0]!;
@@ -4760,32 +4950,33 @@ describe("Fixture Verification Evidence", () => {
         providerPackagePath,
       } as const;
 
-      expect(normalizedFocusedPackageLinkPlan(input)).toMatchObject({
+      assertPartialDeepStrictEqual(normalizedFocusedPackageLinkPlan(input), {
         gate: "focused-package-link",
-        consumer: expect.objectContaining({
+        consumer: objectContaining({
           path: consumerPackagePath,
-          name: expect.any(String),
-          role: expect.any(String),
+          name: any(String),
+          role: any(String),
         }),
-        provider: expect.objectContaining({
+        provider: objectContaining({
           path: providerPackagePath,
-          name: expect.any(String),
-          role: expect.any(String),
+          name: any(String),
+          role: any(String),
         }),
         intent: {
           consumerPackagePath,
           providerPackagePath,
         },
       });
-      await expect(
-        deriveFocusedPackageLinkContractIdentity(input),
-      ).resolves.toMatch(/^[0-9a-f]{64}$/u);
+      assert.match(
+        await deriveFocusedPackageLinkContractIdentity(input),
+        /^[0-9a-f]{64}$/u,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("selects the Focused provider from the final Package Link Intent when addition also creates a helper package", async () => {
+  void it("selects the Focused provider from the final Package Link Intent when addition also creates a helper package", async () => {
     const workspace = await temporaryRepository(
       "fixture-focused-provider-intent-",
     );
@@ -4811,7 +5002,7 @@ describe("Fixture Verification Evidence", () => {
             (definition) => definition.path === intent.providerPackagePath,
           ),
       );
-      expect(expectedIntent).toBeDefined();
+      assert.notStrictEqual(expectedIntent, undefined);
       const finalPlan = {
         ...rendered.plan,
         blueprint: {
@@ -4828,7 +5019,7 @@ describe("Fixture Verification Evidence", () => {
         },
       };
 
-      expect(
+      assert.strictEqual(
         deriveFocusedPackageLinkPlanInput({
           initialPlan: planGeneratedRepositoryInitialization({
             definition: scenario.base,
@@ -4845,13 +5036,14 @@ describe("Fixture Verification Evidence", () => {
           finalPlan,
           consumerPackagePaths: [consumerPackagePath],
         }).providerPackagePath,
-      ).toBe(expectedIntent!.providerPackagePath);
+        expectedIntent!.providerPackagePath,
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
   });
 
-  it("issues no Focused evidence when a provider probe fails after source consumption", async () => {
+  void it("issues no Focused evidence when a provider probe fails after source consumption", async () => {
     const root = await temporaryRepository("fixture-focused-failure-");
     const projectDir = path.join(root, "project");
     const consumerPackagePath = "apps/consumer";
@@ -4887,7 +5079,7 @@ describe("Fixture Verification Evidence", () => {
         ),
       ]);
 
-      await expect(
+      await assert.rejects(
         runFixtureEvidenceGate({
           gate: "focused-package-link",
           generatedContentIdentity: "6".repeat(40),
@@ -4918,21 +5110,29 @@ describe("Fixture Verification Evidence", () => {
               },
             }),
         }),
-      ).rejects.toThrow("provider build cancelled");
-      await expect(
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("provider build cancelled"),
+      );
+      await assert.rejects(
         readdir(path.join(root, "evidence", "focused-package-link")),
-      ).rejects.toMatchObject({ code: "ENOENT" });
-      expect(
+        (error) => {
+          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          return true;
+        },
+      );
+      assert.deepStrictEqual(
         (await readdir(consumerRoot)).filter((entry) =>
           entry.includes("focused-provider-probe"),
         ),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("reruns production initialization on a warm invocation without installing or executing Root Quality", async () => {
+  void it("reruns production initialization on a warm invocation without installing or executing Root Quality", async () => {
     const root = await temporaryRepository("fixture-init-evidence-");
     const evidenceRoot = path.join(root, "evidence");
     const firstWorkspace = path.join(root, "cold");
@@ -5034,71 +5234,84 @@ describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("init")).length;
-      expect(
+      assertLength(
         coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         coldCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount * 2);
-      expect(warmCommands.filter(({ command }) => command === "pnpm")).toEqual(
+        scenarioCount * 2,
+      );
+      assert.deepStrictEqual(
+        warmCommands.filter(({ command }) => command === "pnpm"),
         [],
       );
-      expect(new Set(warmCommands.map(({ command }) => command))).toEqual(
+      assert.deepStrictEqual(
+        new Set(warmCommands.map(({ command }) => command)),
         new Set(["git"]),
       );
-      expect(
+      assert.deepStrictEqual(
         warmOuterCommands.filter(({ command }) => command !== "git"),
-      ).toEqual([]);
-      expect(
+        [],
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "add",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "write-tree",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         coldEvents.filter(
           (event) => event.type === "issuance" && event.outcome === "issued",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmEvents.filter(
           (event) => event.type === "lookup" && event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(warmEvents.filter((event) => event.type === "execution")).toEqual(
+        scenarioCount,
+      );
+      assert.deepStrictEqual(
+        warmEvents.filter((event) => event.type === "execution"),
         [],
       );
       const persistedText = `${await textBelow(firstWorkspace)}\n${await textBelow(secondWorkspace)}\n${await textBelow(evidenceRoot)}`;
-      expect(persistedText).not.toContain(coldTurboToken);
-      expect(persistedText).not.toContain(warmTurboToken);
+      assert.ok(!persistedText.includes(coldTurboToken));
+      assert.ok(!persistedText.includes(warmTurboToken));
       for (const scenario of await generatedScenariosFor("init")) {
-        await expect(
-          readFile(
-            path.join(secondWorkspace, scenario.id, "package.json"),
-            "utf8",
-          ),
-        ).resolves.toContain('"packageManager"');
+        assert.ok(
+          (
+            await readFile(
+              path.join(secondWorkspace, scenario.id, "package.json"),
+              "utf8",
+            )
+          ).includes('"packageManager"'),
+        );
       }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("establishes Root Evidence before independent Focused lookup and skips every warm executor", async () => {
+  void it("establishes Root Evidence before independent Focused lookup and skips every warm executor", async () => {
     const root = await temporaryRepository("fixture-focused-evidence-");
     const evidenceRoot = path.join(root, "evidence");
     const storage = new FileFixtureEvidenceStorage(evidenceRoot);
@@ -5245,28 +5458,31 @@ describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      expect(
+      assertLength(
         coldEvents.filter(
           (event) =>
             event.type === "issuance" &&
             event.outcome === "issued" &&
             event.gate === "generated-root-quality",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(focusedMisses.maximum()).toBe(2);
-      expect(
+        scenarioCount,
+      );
+      assert.strictEqual(focusedMisses.maximum(), 2);
+      assertLength(
         coldEvents.filter(
           (event) =>
             event.type === "issuance" &&
             event.outcome === "issued" &&
             event.gate === "focused-package-link",
         ),
-      ).toHaveLength(scenarioCount);
+        scenarioCount,
+      );
       for (const command of coldCommands.filter(
         ({ command, args }) =>
           command === "node" && args.includes("--conditions=source"),
@@ -5275,76 +5491,88 @@ describe("Fixture Verification Evidence", () => {
         const scenarioCommands = coldCommands.filter(({ cwd }) =>
           cwd.startsWith(projectDir),
         );
-        expect(
+        assert.ok(
           scenarioCommands.findIndex(
             ({ command: name, args }) =>
               name === "pnpm" && args[0] === "run" && args[1] === "check",
-          ),
-        ).toBeLessThan(scenarioCommands.indexOf(command));
+          ) < scenarioCommands.indexOf(command),
+        );
       }
 
-      expect(warmCommands.filter(({ command }) => command !== "git")).toEqual(
+      assert.deepStrictEqual(
+        warmCommands.filter(({ command }) => command !== "git"),
         [],
       );
-      expect(
+      assertLength(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "write-tree",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmEvents.filter(
           (event) => event.type === "lookup" && event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount * 2);
-      expect(warmEvents.filter((event) => event.type === "execution")).toEqual(
+        scenarioCount * 2,
+      );
+      assert.deepStrictEqual(
+        warmEvents.filter((event) => event.type === "execution"),
         [],
       );
-      expect(
+      assertLength(
         rootChangedCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount * 2);
-      expect(
+        scenarioCount * 2,
+      );
+      assert.deepStrictEqual(
         rootChangedCommands.filter(({ command }) => command === "node"),
-      ).toEqual([]);
-      expect(
+        [],
+      );
+      assertLength(
         rootChangedEvents.filter(
           (event) =>
             event.type === "execution" &&
             event.gate === "generated-root-quality" &&
             event.outcome === "succeeded",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         rootChangedEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assert.deepStrictEqual(
         rootChangedEvents.filter(
           (event) =>
             event.type === "execution" && event.gate === "focused-package-link",
         ),
-      ).toEqual([]);
-      expect(
+        [],
+      );
+      assertLength(
         rootExpiredCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
         ),
-      ).toHaveLength(scenarioCount * 2);
-      expect(
+        scenarioCount * 2,
+      );
+      assert.deepStrictEqual(
         rootExpiredCommands.filter(({ command }) => command === "node"),
-      ).toEqual([]);
-      expect(
+        [],
+      );
+      assertLength(
         rootExpiredEvents.filter(
           (event) =>
             event.type === "lookup" &&
@@ -5352,22 +5580,24 @@ describe("Fixture Verification Evidence", () => {
             event.outcome === "miss" &&
             event.reason === "stale",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         rootExpiredEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount);
+        scenarioCount,
+      );
     } finally {
       focusedMisses.release();
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("prepares dependencies when Root evidence hits and Focused evidence misses in a new workspace", async () => {
+  void it("prepares dependencies when Root evidence hits and Focused evidence misses in a new workspace", async () => {
     const root = await temporaryRepository("fixture-focused-partial-warm-");
     const evidenceRoot = path.join(root, "evidence");
     const storage = new FileFixtureEvidenceStorage(evidenceRoot);
@@ -5477,57 +5707,64 @@ describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      expect(
+      assertLength(
         partialWarmEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "generated-root-quality" &&
             event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         partialWarmEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "miss",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         partialWarmCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         partialWarmCommands.filter(
           ({ command, args }) =>
             command === "pnpm" &&
             args.includes("build") &&
             args.includes("--force"),
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         partialWarmCommands.filter(
           ({ command, args }) =>
             command === "node" && args.includes("--conditions=source"),
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assert.deepStrictEqual(
         completeWarmCommands.filter(
           ({ command, args }) =>
             command === "pnpm" &&
             (args[0] === "install" || args.includes("build")),
         ),
-      ).toEqual([]);
-      expect(
+        [],
+      );
+      assert.deepStrictEqual(
         completeWarmCommands.filter(({ command }) => command === "node"),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("never looks up Focused evidence when the current Root prerequisite fails", async () => {
+  void it("never looks up Focused evidence when the current Root prerequisite fails", async () => {
     const root = await temporaryRepository("fixture-focused-root-failure-");
     const fileStorage = new FileFixtureEvidenceStorage(
       path.join(root, "evidence"),
@@ -5535,7 +5772,7 @@ describe("Fixture Verification Evidence", () => {
     const reads: string[] = [];
     const events: FixtureEvidenceLifecycleEvent[] = [];
     try {
-      await expect(
+      await assert.rejects(
         runGeneratedScenarioSet("focused", {
           workspace: path.join(root, "workspace"),
           run: async (command, args, options) => {
@@ -5574,33 +5811,41 @@ describe("Fixture Verification Evidence", () => {
             },
           },
         }),
-      ).rejects.toThrow("Root Quality failed");
+        (error) =>
+          error instanceof Error &&
+          error.message.includes("Root Quality failed"),
+      );
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      await vi.waitFor(
+      await waitFor(
         () => {
-          expect(
+          assertLength(
             events.filter(
               (event) =>
                 event.type === "execution" &&
                 event.gate === "generated-root-quality" &&
                 event.outcome === "failed",
             ),
-          ).toHaveLength(scenarioCount);
+            scenarioCount,
+          );
         },
         { timeout: 5_000 },
       );
-      expect(reads).toHaveLength(scenarioCount);
-      expect(new Set(reads)).toEqual(new Set(["generated-root-quality"]));
-      expect(
+      assertLength(reads, scenarioCount);
+      assert.deepStrictEqual(
+        new Set(reads),
+        new Set(["generated-root-quality"]),
+      );
+      assert.deepStrictEqual(
         events.filter((event) => event.gate === "focused-package-link"),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("reconciles the complete Package Addition Matrix before warm Root Quality lookup", async () => {
+  void it("reconciles the complete Package Addition Matrix before warm Root Quality lookup", async () => {
     const root = await temporaryRepository("fixture-matrix-evidence-");
     const evidenceRoot = path.join(root, "evidence");
     const firstWorkspace = path.join(root, "cold");
@@ -5691,34 +5936,38 @@ describe("Fixture Verification Evidence", () => {
       const scenarioCount = (
         await generatedScenariosFor("package-addition-matrix")
       ).length;
-      expect(
+      assertLength(
         coldCommands.filter(
           ({ command, args }) =>
             command === "git" && gitSubcommand(args) === "init",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         coldCommands.filter(
           ({ command, args }) =>
             command === "git" && gitSubcommand(args) === "add",
         ),
-      ).toHaveLength(scenarioCount * 4);
-      expect(
+        scenarioCount * 4,
+      );
+      assertLength(
         coldCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "fix",
         ),
-      ).toHaveLength(scenarioCount);
+        scenarioCount,
+      );
       const coldInstalls = coldCommands.filter(
         ({ command, args }) => command === "pnpm" && args[0] === "install",
       );
-      expect(coldInstalls).toHaveLength(scenarioCount);
-      expect(new Set(coldInstalls.map(({ cwd }) => cwd)).size).toBe(
+      assertLength(coldInstalls, scenarioCount);
+      assert.strictEqual(
+        new Set(coldInstalls.map(({ cwd }) => cwd)).size,
         scenarioCount,
       );
       for (const install of coldInstalls) {
-        expect(path.dirname(install.cwd)).toBe(firstWorkspace);
-        expect(install.args).toEqual([
+        assert.strictEqual(path.dirname(install.cwd), firstWorkspace);
+        assert.deepStrictEqual(install.args, [
           "install",
           "--store-dir",
           path.join(firstWorkspace, ".pnpm-store"),
@@ -5726,52 +5975,61 @@ describe("Fixture Verification Evidence", () => {
         const scenarioCommands = coldCommands.filter(
           ({ cwd }) => cwd === install.cwd,
         );
-        expect(
+        assert.ok(
           scenarioCommands.findIndex(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "init",
-          ),
-        ).toBeLessThan(
-          scenarioCommands.findIndex(
-            ({ command, args }) =>
-              command === "git" && gitSubcommand(args) === "add",
-          ),
+          ) <
+            scenarioCommands.findIndex(
+              ({ command, args }) =>
+                command === "git" && gitSubcommand(args) === "add",
+            ),
         );
       }
-      expect(warmCommands.filter(({ command }) => command === "pnpm")).toEqual(
+      assert.deepStrictEqual(
+        warmCommands.filter(({ command }) => command === "pnpm"),
         [],
       );
-      expect(new Set(warmCommands.map(({ command }) => command))).toEqual(
+      assert.deepStrictEqual(
+        new Set(warmCommands.map(({ command }) => command)),
         new Set(["git"]),
       );
-      expect(
+      assertLength(
         warmCommands.filter(
           ({ command, args }) =>
             command === "git" && gitSubcommand(args) === "init",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) =>
             command === "git" && gitSubcommand(args) === "add",
         ),
-      ).toHaveLength(scenarioCount * 2);
-      expect(
+        scenarioCount * 2,
+      );
+      assertLength(
         warmCommands.filter(
           ({ command, args }) =>
             command === "git" && gitSubcommand(args) === "write-tree",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(
+        scenarioCount,
+      );
+      assertLength(
         warmEvents.filter(
           (event) => event.type === "lookup" && event.outcome === "hit",
         ),
-      ).toHaveLength(scenarioCount);
-      expect(warmEvents.filter((event) => event.type === "execution")).toEqual(
+        scenarioCount,
+      );
+      assert.deepStrictEqual(
+        warmEvents.filter((event) => event.type === "execution"),
         [],
       );
-      await expect(readFile(invalidRecordPath, "utf8")).rejects.toMatchObject({
-        code: "ENOENT",
+      await assert.rejects(readFile(invalidRecordPath, "utf8"), (error) => {
+        assertPartialDeepStrictEqual(error, {
+          code: "ENOENT",
+        });
+        return true;
       });
       for (const scenario of await generatedScenariosFor(
         "package-addition-matrix",
@@ -5791,29 +6049,33 @@ describe("Fixture Verification Evidence", () => {
             readonly definitionName: string;
           }[];
         };
-        expect(
-          generation.packages.map(({ definitionName }) => definitionName),
-        ).toContain(
-          scenario.addition?.metadata.name ?? scenario.base.metadata.name,
-        );
-        await expect(
-          readFile(
-            path.join(
-              secondWorkspace,
-              scenario.id,
-              generation.packages.at(-1)!.path,
-              "package.json",
+        assert.ok(
+          generation.packages
+            .map(({ definitionName }) => definitionName)
+            .includes(
+              scenario.addition?.metadata.name ?? scenario.base.metadata.name,
             ),
-            "utf8",
-          ),
-        ).resolves.toContain('"name"');
+        );
+        assert.ok(
+          (
+            await readFile(
+              path.join(
+                secondWorkspace,
+                scenario.id,
+                generation.packages.at(-1)!.path,
+                "package.json",
+              ),
+              "utf8",
+            )
+          ).includes('"name"'),
+        );
       }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("keeps stale and invalid records untouched in a read-only matrix run", async () => {
+  void it("keeps stale and invalid records untouched in a read-only matrix run", async () => {
     const root = await temporaryRepository("fixture-read-only-matrix-");
     const evidenceRoot = path.join(root, "evidence");
     const workspace = path.join(root, "workspace");
@@ -5838,10 +6100,10 @@ describe("Fixture Verification Evidence", () => {
       const stalePath = path.join(gateRoot, `${stale.identity}.json`);
       const invalidPath = path.join(gateRoot, "invalid.json");
       await writeFile(invalidPath, '{"schema":');
-      const prune = vi.fn<typeof fileStorage.prune>(
+      const prune = mock.fn<typeof fileStorage.prune>(
         fileStorage.prune.bind(fileStorage),
       );
-      const writeAtomically = vi.fn<typeof fileStorage.writeAtomically>(
+      const writeAtomically = mock.fn<typeof fileStorage.writeAtomically>(
         fileStorage.writeAtomically.bind(fileStorage),
       );
 
@@ -5874,18 +6136,16 @@ describe("Fixture Verification Evidence", () => {
         },
       });
 
-      expect(prune).not.toHaveBeenCalled();
-      expect(writeAtomically).not.toHaveBeenCalled();
-      await expect(readFile(stalePath, "utf8")).resolves.toContain(
-        stale.identity,
-      );
-      await expect(readFile(invalidPath, "utf8")).resolves.toBe('{"schema":');
+      assert.strictEqual(prune.mock.callCount(), 0);
+      assert.strictEqual(writeAtomically.mock.callCount(), 0);
+      assert.ok((await readFile(stalePath, "utf8")).includes(stale.identity));
+      assert.strictEqual(await readFile(invalidPath, "utf8"), '{"schema":');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("schedules real matrix misses by final Check Environment Needs", async () => {
+  void it("schedules real matrix misses by final Check Environment Needs", async () => {
     const workspace = await temporaryRepository("fixture-matrix-scheduling-");
     const installedScenarios: string[] = [];
     const acquiredLeases: (readonly FixtureEvidenceExecutionResource[])[] = [];
@@ -5896,7 +6156,7 @@ describe("Fixture Verification Evidence", () => {
     >();
     const ordinaryScenarios = new Set<string>();
     const browserScenarios = new Set<string>();
-    const schedulerFactory = vi.fn<FixtureEvidenceSchedulerFactory>(
+    const schedulerFactory = mock.fn<FixtureEvidenceSchedulerFactory>(
       (scheduling) => {
         const scheduler = createFixtureEvidenceScheduler(scheduling);
         return {
@@ -5956,24 +6216,26 @@ describe("Fixture Verification Evidence", () => {
 
       const scenarios = await generatedScenariosFor("package-addition-matrix");
       const scenarioIds = scenarios.map(({ id }) => id).sort();
-      expect(schedulerFactory).toHaveBeenCalledOnce();
-      expect(schedulerFactory).toHaveBeenCalledWith({ concurrency: 4 });
-      expect(scheduledRuns).toHaveLength(scenarios.length);
-      expect(scheduledRuns).toEqual(
+      assert.strictEqual(schedulerFactory.mock.callCount(), 1);
+      assertMockCalledWith(schedulerFactory, { concurrency: 4 });
+      assertLength(scheduledRuns, scenarios.length);
+      assert.deepStrictEqual(
+        scheduledRuns,
         Array.from({ length: scenarios.length }, () => []),
       );
-      expect(installedScenarios.sort()).toEqual(scenarioIds);
-      expect(needsByScenario.size).toBe(scenarios.length);
-      expect(ordinaryScenarios.size).toBeGreaterThanOrEqual(2);
-      expect(browserScenarios.size).toBeGreaterThanOrEqual(2);
+      assert.deepStrictEqual(installedScenarios.sort(), scenarioIds);
+      assert.strictEqual(needsByScenario.size, scenarios.length);
+      assert.ok(ordinaryScenarios.size >= 2);
+      assert.ok(browserScenarios.size >= 2);
       const resourceSignature = (
         resources: readonly FixtureEvidenceExecutionResource[],
       ) => [...resources].toSorted().join(",");
-      expect(acquiredLeases.map(resourceSignature).toSorted()).toEqual(
+      assert.deepStrictEqual(
+        acquiredLeases.map(resourceSignature).toSorted(),
         scenarios
           .map((scenario) => {
             const finalNeeds = needsByScenario.get(scenario.id);
-            expect(finalNeeds).toBeDefined();
+            assert.notStrictEqual(finalNeeds, undefined);
             const resources: readonly FixtureEvidenceExecutionResource[] = [
               "development-container-session",
               ...(finalNeeds!.check.some(
@@ -5992,263 +6254,274 @@ describe("Fixture Verification Evidence", () => {
     }
   });
 
-  it("invalidates only final matrix states changed by a Preset-local addition output", async () => {
-    const root = await temporaryRepository("fixture-matrix-invalidation-");
-    const evidenceRoot = path.join(root, "evidence");
-    const storage = new FileFixtureEvidenceStorage(evidenceRoot);
-    const clock = () => new Date("2026-07-28T00:00:00.000Z");
+  void it(
+    "invalidates only final matrix states changed by a Preset-local addition output",
+    { timeout: 180000 },
+    async () => {
+      const root = await temporaryRepository("fixture-matrix-invalidation-");
+      const evidenceRoot = path.join(root, "evidence");
+      const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+      const clock = () => new Date("2026-07-28T00:00:00.000Z");
 
-    try {
-      const scenarios = await generatedScenariosFor("package-addition-matrix");
-      const candidate = scenarios.find((scenario) => {
-        const addition = scenario.addition;
-        if (addition?.planPackageAddition === undefined) return false;
-        const context = createGenerationContext({
-          targetDir: path.join(root, "candidate"),
+      try {
+        const scenarios = await generatedScenariosFor(
+          "package-addition-matrix",
+        );
+        const candidate = scenarios.find((scenario) => {
+          const addition = scenario.addition;
+          if (addition?.planPackageAddition === undefined) return false;
+          const context = createGenerationContext({
+            targetDir: path.join(root, "candidate"),
+            defaultPackageScope: "fixture",
+            toolchain: {
+              nodeLtsMajor: "24",
+              packageManagerPin: "pnpm@11.11.0",
+            },
+          });
+          const packageLeafName = `fixture-${addition.metadata.name}`;
+          const packagePath = addition.defaultPackagePath?.({
+            context,
+            packageLeafName,
+          });
+          if (packagePath === undefined) return false;
+          const contribution = addition.planPackageAddition({
+            context,
+            packageLeafName,
+            packagePath,
+          });
+          return contribution.operations.some(
+            (operation) =>
+              "source" in operation && operation.source === addition.source,
+          );
+        });
+        assert.notStrictEqual(candidate?.addition, undefined);
+        const selectedAddition = candidate!.addition!;
+        const sourceRoot = resolveBuiltInTemplateSource(
+          selectedAddition.source,
+          ".",
+        );
+        const changedSourceRoot = path.join(root, "changed-preset-source");
+        await cp(sourceRoot, changedSourceRoot, { recursive: true });
+        const sampleContext = createGenerationContext({
+          targetDir: path.join(root, "sample"),
           defaultPackageScope: "fixture",
           toolchain: {
             nodeLtsMajor: "24",
             packageManagerPin: "pnpm@11.11.0",
           },
         });
-        const packageLeafName = `fixture-${addition.metadata.name}`;
-        const packagePath = addition.defaultPackagePath?.({
-          context,
-          packageLeafName,
+        const sampleLeafName = `fixture-${selectedAddition.metadata.name}`;
+        const samplePackagePath = selectedAddition.defaultPackagePath!({
+          context: sampleContext,
+          packageLeafName: sampleLeafName,
         });
-        if (packagePath === undefined) return false;
-        const contribution = addition.planPackageAddition({
-          context,
-          packageLeafName,
-          packagePath,
+        const sampleContribution = selectedAddition.planPackageAddition!({
+          context: sampleContext,
+          packageLeafName: sampleLeafName,
+          packagePath: samplePackagePath,
         });
-        return contribution.operations.some(
+        const changedOperation = sampleContribution.operations.find(
           (operation) =>
-            "source" in operation && operation.source === addition.source,
+            "source" in operation &&
+            operation.source === selectedAddition.source &&
+            "from" in operation &&
+            typeof operation.from === "string",
         );
-      });
-      expect(candidate?.addition).toBeDefined();
-      const selectedAddition = candidate!.addition!;
-      const sourceRoot = resolveBuiltInTemplateSource(
-        selectedAddition.source,
-        ".",
-      );
-      const changedSourceRoot = path.join(root, "changed-preset-source");
-      await cp(sourceRoot, changedSourceRoot, { recursive: true });
-      const sampleContext = createGenerationContext({
-        targetDir: path.join(root, "sample"),
-        defaultPackageScope: "fixture",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
-      });
-      const sampleLeafName = `fixture-${selectedAddition.metadata.name}`;
-      const samplePackagePath = selectedAddition.defaultPackagePath!({
-        context: sampleContext,
-        packageLeafName: sampleLeafName,
-      });
-      const sampleContribution = selectedAddition.planPackageAddition!({
-        context: sampleContext,
-        packageLeafName: sampleLeafName,
-        packagePath: samplePackagePath,
-      });
-      const changedOperation = sampleContribution.operations.find(
-        (operation) =>
-          "source" in operation &&
-          operation.source === selectedAddition.source &&
-          "from" in operation &&
-          typeof operation.from === "string",
-      );
-      expect(changedOperation).toBeDefined();
-      if (
-        changedOperation === undefined ||
-        !("from" in changedOperation) ||
-        typeof changedOperation.from !== "string"
-      ) {
-        throw new Error(
-          "Expected a Preset-local source-backed Package Addition output",
-        );
-      }
-      const changedSourceFile = path.join(
-        changedSourceRoot,
-        changedOperation.from,
-      );
-      const originalSource = await readFile(changedSourceFile);
-      await writeFile(
-        changedSourceFile,
-        Buffer.concat([
-          originalSource,
-          Buffer.from("\n// Preset-local fixture evidence change\n"),
-        ]),
-      );
-      const changedSource = createTemplateSourceHandle(changedSourceRoot);
-      const changedAddition: BuiltInPresetDefinition = {
-        ...selectedAddition,
-        source: changedSource,
-        planPackageAddition(options) {
-          return replaceContributionTemplateSource({
-            contribution: selectedAddition.planPackageAddition!(options),
-            from: selectedAddition.source,
-            to: changedSource,
-          });
-        },
-      };
-
-      const baseline = new Map<
-        string,
-        {
-          readonly generatedContentIdentity: string;
-          readonly contractIdentity: string;
+        assert.notStrictEqual(changedOperation, undefined);
+        if (
+          changedOperation === undefined ||
+          !("from" in changedOperation) ||
+          typeof changedOperation.from !== "string"
+        ) {
+          throw new Error(
+            "Expected a Preset-local source-backed Package Addition output",
+          );
         }
-      >();
-      for (const scenario of scenarios) {
-        const rendered = await renderMatrixScenario({
-          scenario,
-          workspace: path.join(root, "cold"),
-        });
-        const contractIdentity =
-          await deriveGeneratedRootQualityContractIdentity(rendered.plan, {
-            includeFix: true,
-          });
-        baseline.set(scenario.id, {
-          generatedContentIdentity: rendered.generatedContentIdentity,
-          contractIdentity,
-        });
-        await runFixtureEvidenceGate({
-          gate: "generated-root-quality",
-          generatedContentIdentity: rendered.generatedContentIdentity,
-          contractIdentity,
-          scenario: {
-            id: scenario.id,
-            label: scenario.label,
-            presetIdentities: [
-              scenario.base.metadata.name,
-              ...(scenario.addition === undefined
-                ? []
-                : [scenario.addition.metadata.name]),
-            ],
-          },
-          producerCommit: "cold-producer",
-          storage,
-          clock,
-          writeEnabled: true,
-          execute: async () => undefined,
-        });
-      }
-
-      await writeFile(
-        path.join(root, "unrelated-documentation.md"),
-        "does not belong to any Generated Repository\n",
-      );
-      for (const scenario of scenarios) {
-        const rendered = await renderMatrixScenario({
-          scenario,
-          workspace: path.join(root, "documentation-change"),
-        });
-        const previous = baseline.get(scenario.id)!;
-        expect(rendered.generatedContentIdentity).toBe(
-          previous.generatedContentIdentity,
+        const changedSourceFile = path.join(
+          changedSourceRoot,
+          changedOperation.from,
         );
-        await expect(
-          runFixtureEvidenceGate({
+        const originalSource = await readFile(changedSourceFile);
+        await writeFile(
+          changedSourceFile,
+          Buffer.concat([
+            originalSource,
+            Buffer.from("\n// Preset-local fixture evidence change\n"),
+          ]),
+        );
+        const changedSource = createTemplateSourceHandle(changedSourceRoot);
+        const changedAddition: BuiltInPresetDefinition = {
+          ...selectedAddition,
+          source: changedSource,
+          planPackageAddition(options) {
+            return replaceContributionTemplateSource({
+              contribution: selectedAddition.planPackageAddition!(options),
+              from: selectedAddition.source,
+              to: changedSource,
+            });
+          },
+        };
+
+        const baseline = new Map<
+          string,
+          {
+            readonly generatedContentIdentity: string;
+            readonly contractIdentity: string;
+          }
+        >();
+        for (const scenario of scenarios) {
+          const rendered = await renderMatrixScenario({
+            scenario,
+            workspace: path.join(root, "cold"),
+          });
+          const contractIdentity =
+            await deriveGeneratedRootQualityContractIdentity(rendered.plan, {
+              includeFix: true,
+            });
+          baseline.set(scenario.id, {
+            generatedContentIdentity: rendered.generatedContentIdentity,
+            contractIdentity,
+          });
+          await runFixtureEvidenceGate({
             gate: "generated-root-quality",
             generatedContentIdentity: rendered.generatedContentIdentity,
-            contractIdentity: previous.contractIdentity,
+            contractIdentity,
+            scenario: {
+              id: scenario.id,
+              label: scenario.label,
+              presetIdentities: [
+                scenario.base.metadata.name,
+                ...(scenario.addition === undefined
+                  ? []
+                  : [scenario.addition.metadata.name]),
+              ],
+            },
+            producerCommit: "cold-producer",
+            storage,
+            clock,
+            writeEnabled: true,
+            execute: async () => undefined,
+          });
+        }
+
+        await writeFile(
+          path.join(root, "unrelated-documentation.md"),
+          "does not belong to any Generated Repository\n",
+        );
+        for (const scenario of scenarios) {
+          const rendered = await renderMatrixScenario({
+            scenario,
+            workspace: path.join(root, "documentation-change"),
+          });
+          const previous = baseline.get(scenario.id)!;
+          assert.strictEqual(
+            rendered.generatedContentIdentity,
+            previous.generatedContentIdentity,
+          );
+          assertPartialDeepStrictEqual(
+            await runFixtureEvidenceGate({
+              gate: "generated-root-quality",
+              generatedContentIdentity: rendered.generatedContentIdentity,
+              contractIdentity: previous.contractIdentity,
+              scenario: {
+                id: scenario.id,
+                label: scenario.label,
+                presetIdentities: [],
+              },
+              producerCommit: "documentation-change",
+              storage,
+              clock,
+              writeEnabled: false,
+              execute: async () => {
+                throw new Error("unrelated documentation must remain a hit");
+              },
+            }),
+            { status: "hit" },
+          );
+        }
+
+        const changedTrees: string[] = [];
+        const executions: string[] = [];
+        const hits: string[] = [];
+        for (const scenario of scenarios) {
+          const usesChangedAddition = scenario.addition === selectedAddition;
+          const rendered = await renderMatrixScenario({
+            scenario,
+            workspace: path.join(root, "preset-local-change"),
+            ...(usesChangedAddition ? { addition: changedAddition } : {}),
+          });
+          const previous = baseline.get(scenario.id)!;
+          if (
+            rendered.generatedContentIdentity !==
+            previous.generatedContentIdentity
+          ) {
+            changedTrees.push(scenario.id);
+          }
+          const result = await runFixtureEvidenceGate({
+            gate: "generated-root-quality",
+            generatedContentIdentity: rendered.generatedContentIdentity,
+            contractIdentity: await deriveGeneratedRootQualityContractIdentity(
+              rendered.plan,
+              {
+                includeFix: true,
+              },
+            ),
             scenario: {
               id: scenario.id,
               label: scenario.label,
               presetIdentities: [],
             },
-            producerCommit: "documentation-change",
+            producerCommit: "preset-local-change",
             storage,
             clock,
             writeEnabled: false,
             execute: async () => {
-              throw new Error("unrelated documentation must remain a hit");
+              executions.push(scenario.id);
             },
-          }),
-        ).resolves.toMatchObject({ status: "hit" });
-      }
-
-      const changedTrees: string[] = [];
-      const executions: string[] = [];
-      const hits: string[] = [];
-      for (const scenario of scenarios) {
-        const usesChangedAddition = scenario.addition === selectedAddition;
-        const rendered = await renderMatrixScenario({
-          scenario,
-          workspace: path.join(root, "preset-local-change"),
-          ...(usesChangedAddition ? { addition: changedAddition } : {}),
-        });
-        const previous = baseline.get(scenario.id)!;
-        if (
-          rendered.generatedContentIdentity !==
-          previous.generatedContentIdentity
-        ) {
-          changedTrees.push(scenario.id);
+          });
+          if (result.status === "hit") hits.push(scenario.id);
         }
-        const result = await runFixtureEvidenceGate({
-          gate: "generated-root-quality",
-          generatedContentIdentity: rendered.generatedContentIdentity,
-          contractIdentity: await deriveGeneratedRootQualityContractIdentity(
-            rendered.plan,
-            {
-              includeFix: true,
-            },
-          ),
-          scenario: {
-            id: scenario.id,
-            label: scenario.label,
-            presetIdentities: [],
-          },
-          producerCommit: "preset-local-change",
-          storage,
-          clock,
-          writeEnabled: false,
-          execute: async () => {
-            executions.push(scenario.id);
-          },
-        });
-        if (result.status === "hit") hits.push(scenario.id);
+        const affectedScenarioIds = scenarios
+          .filter((scenario) => scenario.addition === selectedAddition)
+          .map((scenario) => scenario.id);
+        const unaffectedScenarioIds = scenarios
+          .filter((scenario) => scenario.addition !== selectedAddition)
+          .map((scenario) => scenario.id);
+        assert.deepStrictEqual(changedTrees, affectedScenarioIds);
+        assert.deepStrictEqual(executions, affectedScenarioIds);
+        assert.deepStrictEqual(hits, unaffectedScenarioIds);
+      } finally {
+        await rm(root, { recursive: true, force: true });
       }
-      const affectedScenarioIds = scenarios
-        .filter((scenario) => scenario.addition === selectedAddition)
-        .map((scenario) => scenario.id);
-      const unaffectedScenarioIds = scenarios
-        .filter((scenario) => scenario.addition !== selectedAddition)
-        .map((scenario) => scenario.id);
-      expect(changedTrees).toEqual(affectedScenarioIds);
-      expect(executions).toEqual(affectedScenarioIds);
-      expect(hits).toEqual(unaffectedScenarioIds);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 180_000);
+    },
+  );
 
-  it("runs all four source CLI scenario sets warm without an expensive command", async () => {
-    const root = await temporaryRepository("fixture-evidence-cli-");
-    const evidenceRoot = path.join(root, "evidence");
-    const activityRoot = path.join(root, "activity");
-    const binRoot = path.join(root, "bin");
-    const commandLog = path.join(root, "expensive-commands.jsonl");
-    const pnpmPath = path.join(binRoot, "pnpm");
-    const nodePath = path.join(binRoot, "node");
-    const dockerPath = path.join(binRoot, "docker");
-    const devcontainerPath = path.join(binRoot, "devcontainer");
-    const cliPath = path.join(
-      process.cwd(),
-      "packages/checks/src/check-generated-registry.ts",
-    );
-    const healthCliPath = path.join(
-      process.cwd(),
-      "packages/checks/src/check-fixture-evidence-health.ts",
-    );
-    try {
-      await mkdir(binRoot, { recursive: true });
-      await writeFile(
-        pnpmPath,
-        `#!${process.execPath}
+  void it(
+    "runs all four source CLI scenario sets warm without an expensive command",
+    { timeout: 180000 },
+    async () => {
+      const root = await temporaryRepository("fixture-evidence-cli-");
+      const evidenceRoot = path.join(root, "evidence");
+      const activityRoot = path.join(root, "activity");
+      const binRoot = path.join(root, "bin");
+      const commandLog = path.join(root, "expensive-commands.jsonl");
+      const pnpmPath = path.join(binRoot, "pnpm");
+      const nodePath = path.join(binRoot, "node");
+      const dockerPath = path.join(binRoot, "docker");
+      const devcontainerPath = path.join(binRoot, "devcontainer");
+      const cliPath = path.join(
+        process.cwd(),
+        "packages/checks/src/check-generated-registry.ts",
+      );
+      const healthCliPath = path.join(
+        process.cwd(),
+        "packages/checks/src/check-fixture-evidence-health.ts",
+      );
+      try {
+        await mkdir(binRoot, { recursive: true });
+        await writeFile(
+          pnpmPath,
+          `#!${process.execPath}
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeSync } from "node:fs";
 import path from "node:path";
 
@@ -6297,10 +6570,10 @@ if (commandArgs.includes("build") && commandArgs.includes("--force")) {
   }
 }
 `,
-      );
-      await writeFile(
-        nodePath,
-        `#!${process.execPath}
+        );
+        await writeFile(
+          nodePath,
+          `#!${process.execPath}
 import { appendFileSync, readFileSync, readdirSync, writeSync } from "node:fs";
 import path from "node:path";
 
@@ -6323,17 +6596,17 @@ visit(path.resolve(process.cwd(), "../.."));
 if (marker === undefined) throw new Error("focused marker was not materialized");
 writeSync(1, marker + "\\n");
 `,
-      );
-      await writeFile(
-        dockerPath,
-        `#!${process.execPath}
+        );
+        await writeFile(
+          dockerPath,
+          `#!${process.execPath}
 import { appendFileSync } from "node:fs";
 appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["docker", ...process.argv.slice(2)]) + "\\n");
 `,
-      );
-      await writeFile(
-        devcontainerPath,
-        `#!${process.execPath}
+        );
+        await writeFile(
+          devcontainerPath,
+          `#!${process.execPath}
 import { appendFileSync, writeSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -6365,118 +6638,142 @@ writeSync(1, result.stdout ?? "");
 writeSync(2, result.stderr ?? "");
 process.exitCode = result.status ?? 1;
 `,
-      );
-      await Promise.all([
-        chmod(pnpmPath, 0o755),
-        chmod(nodePath, 0o755),
-        chmod(dockerPath, 0o755),
-        chmod(devcontainerPath, 0o755),
-      ]);
-
-      const baseEnv = isolatedFixtureEnvironment({
-        FIXTURE_COMMAND_LOG: commandLog,
-        PATH: `${binRoot}${path.delimiter}${process.env.PATH ?? ""}`,
-        TEMPLATE_FIXTURE_EVIDENCE_DIR: evidenceRoot,
-        TEMPLATE_FIXTURE_EVIDENCE_READ: "1",
-        TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1",
-        TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: activityRoot,
-        TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "source-cli-run",
-      });
-      const sets = [
-        "init",
-        "package-addition-matrix",
-        "focused",
-        "deployment",
-      ] as const;
-      const invoke = async (runAttempt: string) => {
-        const env = {
-          ...baseEnv,
-          TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: runAttempt,
-        };
-        for (const set of sets) {
-          await execa(process.execPath, ["--conditions=source", cliPath, set], {
-            cwd: process.cwd(),
-            env,
-          });
-        }
-      };
-
-      await invoke("1");
-      const coldCommands = (await readFile(commandLog, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as readonly string[]);
-      expect(
-        coldCommands.filter(
-          ([binary, command]) => binary === "pnpm" && command === "install",
-        ),
-      ).not.toHaveLength(0);
-      expect(
-        coldCommands.filter(
-          ([binary, command, task]) =>
-            binary === "pnpm" && command === "run" && task === "check",
-        ),
-      ).not.toHaveLength(0);
-      expect(coldCommands.some(([binary]) => binary === "node")).toBe(true);
-      expect(coldCommands.some(([binary]) => binary === "docker")).toBe(true);
-      const containerStarts = coldCommands.filter(
-        ([binary, command]) => binary === "devcontainer" && command === "up",
-      );
-      expect(containerStarts.length).toBeGreaterThan(0);
-      for (const command of containerStarts) {
-        const cacheFrom = command.indexOf("--cache-from");
-        const cacheTo = command.indexOf("--cache-to");
-        expect(command[cacheFrom + 1]).toMatch(
-          new RegExp(
-            `^type=local,src=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64}$`,
-            "u",
-          ),
         );
-        expect(command[cacheTo + 1]).toMatch(
-          new RegExp(
-            `^type=local,dest=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64},mode=max$`,
-            "u",
-          ),
-        );
-      }
+        await Promise.all([
+          chmod(pnpmPath, 0o755),
+          chmod(nodePath, 0o755),
+          chmod(dockerPath, 0o755),
+          chmod(devcontainerPath, 0o755),
+        ]);
 
-      await invoke("2");
-      const allCommands = (await readFile(commandLog, "utf8"))
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as readonly string[]);
-      expect(allCommands).toEqual(coldCommands);
-      const warmEnv = {
-        ...baseEnv,
-        TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "2",
-      };
-      await expect(
-        execa(process.execPath, ["--conditions=source", healthCliPath], {
-          cwd: process.cwd(),
-          env: warmEnv,
-        }),
-      ).resolves.toMatchObject({ exitCode: 0 });
-      await expect(readdir(activityRoot)).resolves.toEqual(["activity.jsonl"]);
-      await expect(
-        execa(process.execPath, ["--conditions=source", healthCliPath], {
-          cwd: process.cwd(),
-          env: {
+        const baseEnv = isolatedFixtureEnvironment({
+          FIXTURE_COMMAND_LOG: commandLog,
+          PATH: `${binRoot}${path.delimiter}${process.env.PATH ?? ""}`,
+          TEMPLATE_FIXTURE_EVIDENCE_DIR: evidenceRoot,
+          TEMPLATE_FIXTURE_EVIDENCE_READ: "1",
+          TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1",
+          TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR: activityRoot,
+          TEMPLATE_FIXTURE_EVIDENCE_RUN_ID: "source-cli-run",
+        });
+        const sets = [
+          "init",
+          "package-addition-matrix",
+          "focused",
+          "deployment",
+        ] as const;
+        const invoke = async (runAttempt: string) => {
+          const env = {
             ...baseEnv,
-            TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "3",
-          },
-        }),
-      ).rejects.toMatchObject({
-        exitCode: 1,
-        stderr: expect.stringContaining(
-          "Enabled scenario set init has no current-run activity",
-        ),
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 180_000);
+            TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: runAttempt,
+          };
+          for (const set of sets) {
+            await execa(
+              process.execPath,
+              ["--conditions=source", cliPath, set],
+              {
+                cwd: process.cwd(),
+                env,
+              },
+            );
+          }
+        };
 
-  it("structurally enforces gate, kernel, test-source, and orchestrator ownership", async () => {
+        await invoke("1");
+        const coldCommands = (await readFile(commandLog, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as readonly string[]);
+        assertNotLength(
+          coldCommands.filter(
+            ([binary, command]) => binary === "pnpm" && command === "install",
+          ),
+          0,
+        );
+        assertNotLength(
+          coldCommands.filter(
+            ([binary, command, task]) =>
+              binary === "pnpm" && command === "run" && task === "check",
+          ),
+          0,
+        );
+        assert.strictEqual(
+          coldCommands.some(([binary]) => binary === "node"),
+          true,
+        );
+        assert.strictEqual(
+          coldCommands.some(([binary]) => binary === "docker"),
+          true,
+        );
+        const containerStarts = coldCommands.filter(
+          ([binary, command]) => binary === "devcontainer" && command === "up",
+        );
+        assert.ok(containerStarts.length > 0);
+        for (const command of containerStarts) {
+          const cacheFrom = command.indexOf("--cache-from");
+          const cacheTo = command.indexOf("--cache-to");
+          assert.match(
+            command[cacheFrom + 1]!,
+            new RegExp(
+              `^type=local,src=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64}$`,
+              "u",
+            ),
+          );
+          assert.match(
+            command[cacheTo + 1]!,
+            new RegExp(
+              `^type=local,dest=${path.join(evidenceRoot, "buildkit")}/[0-9a-f]{64},mode=max$`,
+              "u",
+            ),
+          );
+        }
+
+        await invoke("2");
+        const allCommands = (await readFile(commandLog, "utf8"))
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as readonly string[]);
+        assert.deepStrictEqual(allCommands, coldCommands);
+        const warmEnv = {
+          ...baseEnv,
+          TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "2",
+        };
+        assertPartialDeepStrictEqual(
+          await execa(
+            process.execPath,
+            ["--conditions=source", healthCliPath],
+            {
+              cwd: process.cwd(),
+              env: warmEnv,
+            },
+          ),
+          { exitCode: 0 },
+        );
+        assert.deepStrictEqual(await readdir(activityRoot), ["activity.jsonl"]);
+        await assert.rejects(
+          execa(process.execPath, ["--conditions=source", healthCliPath], {
+            cwd: process.cwd(),
+            env: {
+              ...baseEnv,
+              TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "3",
+            },
+          }),
+          (error) => {
+            assertPartialDeepStrictEqual(error, {
+              exitCode: 1,
+              stderr: stringContaining(
+                "Enabled scenario set init has no current-run activity",
+              ),
+            });
+            return true;
+          },
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  void it("structurally enforces gate, kernel, test-source, and orchestrator ownership", async () => {
     const root = await temporaryRepository("fixture-evidence-architecture-");
     try {
       await Promise.all([
@@ -6530,36 +6827,36 @@ process.exitCode = result.status ?? 1;
         ),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
+          objectContaining({
             rule: "gate-runtime-import-outside-contract",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "kernel-runtime-import-outside-kernel",
           }),
-          expect.objectContaining({ rule: "production-test-source" }),
-          expect.objectContaining({ rule: "hidden-root-quality-command" }),
-          expect.objectContaining({
+          objectContaining({ rule: "production-test-source" }),
+          objectContaining({ rule: "hidden-root-quality-command" }),
+          objectContaining({
             rule: "hidden-focused-package-link-command",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "hidden-deployment-quality-command",
           }),
         ]),
       );
-      await expect(
-        findFixtureEvidenceArchitectureFindings(process.cwd()),
-      ).resolves.toEqual([]);
+      assert.deepStrictEqual(
+        await findFixtureEvidenceArchitectureFindings(process.cwd()),
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("enforces gate and kernel ownership for dynamic imports and concatenated specifiers", async () => {
+  void it("enforces gate and kernel ownership for dynamic imports and concatenated specifiers", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-dynamic-import-architecture-",
     );
@@ -6597,12 +6894,11 @@ process.exitCode = result.status ?? 1;
         ),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
+          objectContaining({
             rule: "kernel-runtime-import-outside-kernel",
           }),
         ]),
@@ -6612,7 +6908,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects createRequire property calls that cross gate ownership", async () => {
+  void it("rejects createRequire property calls that cross gate ownership", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-create-require-architecture-",
     );
@@ -6641,11 +6937,10 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
         ]),
       );
     } finally {
@@ -6653,7 +6948,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects direct CommonJS require calls that cross gate ownership", async () => {
+  void it("rejects direct CommonJS require calls that cross gate ownership", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-direct-require-architecture-",
     );
@@ -6678,11 +6973,10 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
         ]),
       );
     } finally {
@@ -6690,7 +6984,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects callable createRequire results that cross gate ownership", async () => {
+  void it("rejects callable createRequire results that cross gate ownership", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-callable-create-require-architecture-",
     );
@@ -6719,11 +7013,10 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
         ]),
       );
     } finally {
@@ -6731,7 +7024,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects aliased createRequire loaders that cross gate ownership", async () => {
+  void it("rejects aliased createRequire loaders that cross gate ownership", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-aliased-create-require-architecture-",
     );
@@ -6763,11 +7056,10 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "cross-gate-runtime-import" }),
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "cross-gate-runtime-import" }),
         ]),
       );
     } finally {
@@ -6775,7 +7067,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("fails closed when an aliased CommonJS loader target is dynamic", async () => {
+  void it("fails closed when an aliased CommonJS loader target is dynamic", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-dynamic-require-architecture-",
     );
@@ -6796,11 +7088,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "gate-runtime-import-outside-contract",
           }),
         ]),
@@ -6810,7 +7101,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects hidden Root Quality commands regardless of orchestrator invocation form", async () => {
+  void it("rejects hidden Root Quality commands regardless of orchestrator invocation form", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-orchestrator-boundary-",
     );
@@ -6830,11 +7121,10 @@ process.exitCode = result.status ?? 1;
       await mkdir(path.dirname(orchestrator), { recursive: true });
       for (const source of bypasses) {
         await writeFile(orchestrator, source);
-        await expect(
-          findFixtureEvidenceArchitectureFindings(root),
-        ).resolves.toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ rule: "hidden-root-quality-command" }),
+        assertDeepStrictEqualWithMatchers(
+          await findFixtureEvidenceArchitectureFindings(root),
+          arrayContaining([
+            objectContaining({ rule: "hidden-root-quality-command" }),
           ]),
         );
       }
@@ -6843,7 +7133,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("fails closed when an orchestrator executor receives dynamic gate arguments", async () => {
+  void it("fails closed when an orchestrator executor receives dynamic gate arguments", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-dynamic-orchestrator-command-",
     );
@@ -6863,11 +7153,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "unassigned-orchestrator-command",
           }),
         ]),
@@ -6877,7 +7166,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("fails closed for dynamically computed gate arguments through a runner alias", async () => {
+  void it("fails closed for dynamically computed gate arguments through a runner alias", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-aliased-dynamic-orchestrator-command-",
     );
@@ -6899,11 +7188,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "unassigned-orchestrator-command",
           }),
         ]),
@@ -6913,7 +7201,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("fails closed when an ordinary orchestrator function forwards dynamic commands", async () => {
+  void it("fails closed when an ordinary orchestrator function forwards dynamic commands", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-forwarded-dynamic-orchestrator-command-",
     );
@@ -6934,11 +7222,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "unassigned-orchestrator-command",
           }),
         ]),
@@ -6948,7 +7235,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("rejects dependency installation contracts owned by the scenario orchestrator", async () => {
+  void it("rejects dependency installation contracts owned by the scenario orchestrator", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-orchestrator-install-contract-",
     );
@@ -6968,11 +7255,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findFixtureEvidenceArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "orchestrator-dependency-install-contract",
           }),
         ]),
@@ -6982,7 +7268,7 @@ process.exitCode = result.status ?? 1;
     }
   });
 
-  it("allows command-runner adapters and ignores unrelated command-like values", async () => {
+  void it("allows command-runner adapters and ignores unrelated command-like values", async () => {
     const root = await temporaryRepository(
       "fixture-evidence-command-false-positive-",
     );
@@ -7011,9 +7297,10 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      await expect(
-        findFixtureEvidenceArchitectureFindings(root),
-      ).resolves.toEqual([]);
+      assert.deepStrictEqual(
+        await findFixtureEvidenceArchitectureFindings(root),
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

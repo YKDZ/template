@@ -1,10 +1,11 @@
+import assert from "node:assert/strict";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import { execa } from "execa";
-import { describe, expect, it } from "vitest";
 
-describe("@ykdz/template-checks publication boundary", () => {
-  it("keeps the generated registry Task Entrypoint private under source resolution", async () => {
+void describe("@ykdz/template-checks publication boundary", () => {
+  void it("keeps the generated registry Task Entrypoint private under source resolution", async () => {
     const privateImport = await execa(
       "node",
       [
@@ -20,7 +21,7 @@ describe("@ykdz/template-checks publication boundary", () => {
       },
     );
 
-    expect(privateImport.exitCode).not.toBe(0);
-    expect(privateImport.all).toContain("ERR_PACKAGE_PATH_NOT_EXPORTED");
+    assert.notStrictEqual(privateImport.exitCode, 0);
+    assert.ok(privateImport.all.includes("ERR_PACKAGE_PATH_NOT_EXPORTED"));
   });
 });

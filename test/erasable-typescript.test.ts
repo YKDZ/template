@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   mkdtemp,
@@ -10,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -27,7 +29,14 @@ import type {
 } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertNotLength,
+  hasProperty,
+} from "./assertions.ts";
 
 type Manifest = {
   readonly name?: string;
@@ -143,8 +152,8 @@ async function compilerApiImports(
   return [...new Set(imports)].toSorted();
 }
 
-describe("Erasable TypeScript enforcement", () => {
-  it("allows transform syntax in UI application and ordinary UI test contexts", async () => {
+void describe("Erasable TypeScript enforcement", () => {
+  void it("allows transform syntax in UI application and ordinary UI test contexts", async () => {
     const fixtureSource = await readFile(
       path.join(
         process.cwd(),
@@ -211,7 +220,7 @@ describe("Erasable TypeScript enforcement", () => {
           ),
         )
       ).flat();
-      expect(uiConfigPaths.length).toBeGreaterThan(0);
+      assert.ok(uiConfigPaths.length > 0);
       await writeFile(
         path.join(projectRoot, "ui-transform-syntax.ts"),
         fixtureSource,
@@ -245,15 +254,15 @@ describe("Erasable TypeScript enforcement", () => {
           ["exec", "tsc", "-p", temporaryConfigPath],
           { reject: false, all: true },
         );
-        expect(result.exitCode, `${configPath}\n${result.all}`).toBe(0);
-        expect(result.all).not.toContain("TS1294");
+        assert.strictEqual(result.exitCode, 0, `${configPath}\n${result.all}`);
+        assert.ok(!result.all.includes("TS1294"));
       }
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it("uses TypeScript 7 to reject every non-erasable fixture construct", async () => {
+  void it("uses TypeScript 7 to reject every non-erasable fixture construct", async () => {
     const fixtureSource = await readFile(
       path.join(
         process.cwd(),
@@ -283,21 +292,21 @@ describe("Erasable TypeScript enforcement", () => {
       ]);
 
       const version = await execa("pnpm", ["exec", "tsc", "--version"]);
-      expect(version.stdout).toMatch(/^Version 7\./u);
+      assert.match(version.stdout, /^Version 7\./u);
 
       const result = await execa(
         "pnpm",
         ["exec", "tsc", "-p", path.join(projectRoot, "tsconfig.json")],
         { reject: false, all: true },
       );
-      expect(result.exitCode).not.toBe(0);
-      expect(result.all?.match(/error TS1294:/gu)).toHaveLength(3);
+      assert.notStrictEqual(result.exitCode, 0);
+      assertLength(result.all?.match(/error TS1294:/gu), 3);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
   });
 
-  it("activates the source condition for every direct TypeScript script", async () => {
+  void it("activates the source condition for every direct TypeScript script", async () => {
     const repositoryManifests = await Promise.all(
       [
         "package.json",
@@ -340,15 +349,15 @@ describe("Erasable TypeScript enforcement", () => {
         ) {
           continue;
         }
-        expect(
-          command,
+        assert.ok(
+          command.includes("--conditions=source"),
           `${manifest.name ?? "(unnamed)"}#${scriptName}`,
-        ).toContain("--conditions=source");
+        );
       }
     }
   });
 
-  it("keeps compiler ownership truthful in every package manifest", async () => {
+  void it("keeps compiler ownership truthful in every package manifest", async () => {
     const repositoryPackages = [
       ".",
       "packages/builtin-presets",
@@ -410,24 +419,27 @@ describe("Erasable TypeScript enforcement", () => {
         ),
       );
       if (scripts.some((command) => /\btsc(?:\s|$)/u.test(command))) {
-        expect(
-          {
-            ...manifest.dependencies,
-            ...manifest.devDependencies,
-          },
+        assert.ok(
+          hasProperty(
+            {
+              ...manifest.dependencies,
+              ...manifest.devDependencies,
+            },
+            "typescript-7",
+          ),
           `${manifest.name ?? "(unnamed)"} owns its TypeScript 7 CLI`,
-        ).toHaveProperty("typescript-7");
+        );
       }
       if (ownsVueCompatibility) {
-        expect(
-          manifest.devDependencies,
+        assert.ok(
+          hasProperty(manifest.devDependencies, "typescript"),
           `${manifest.name ?? "(unnamed)"} owns Vue's TypeScript 6 compatibility package`,
-        ).toHaveProperty("typescript");
+        );
       } else if (runsTypeScript6Api) {
-        expect(
-          manifest.devDependencies,
+        assert.ok(
+          hasProperty(manifest.devDependencies, "typescript"),
           `${manifest.name ?? "(unnamed)"} owns the TypeScript 6 API its own scripts run`,
-        ).toHaveProperty("typescript");
+        );
       } else if (
         !new Set([
           "@ykdz/template-repository",
@@ -437,25 +449,28 @@ describe("Erasable TypeScript enforcement", () => {
           "@ykdz/template-core",
         ]).has(manifest.name ?? "")
       ) {
-        expect(
-          {
-            ...manifest.dependencies,
-            ...manifest.devDependencies,
-          },
+        assert.ok(
+          !hasProperty(
+            {
+              ...manifest.dependencies,
+              ...manifest.devDependencies,
+            },
+            "typescript",
+          ),
           `${manifest.name ?? "(unnamed)"} does not own TypeScript 6 compatibility`,
-        ).not.toHaveProperty("typescript");
+        );
       }
     }
 
     for (const manifest of generatedManifests) {
-      expect(
-        { ...manifest.dependencies },
+      assert.ok(
+        !hasProperty({ ...manifest.dependencies }, "typescript"),
         `${manifest.name ?? "(unnamed)"} keeps compilers out of Generated deployment production dependencies`,
-      ).not.toHaveProperty("typescript");
-      expect(
-        { ...manifest.dependencies },
+      );
+      assert.ok(
+        !hasProperty({ ...manifest.dependencies }, "typescript-7"),
         `${manifest.name ?? "(unnamed)"} keeps compiler CLIs out of Generated deployment production dependencies`,
-      ).not.toHaveProperty("typescript-7");
+      );
     }
 
     for (const { packageRoot, manifest } of repositoryManifests) {
@@ -466,29 +481,25 @@ describe("Erasable TypeScript enforcement", () => {
         continue;
       }
       if (manifest.name === "@ykdz/template") {
-        expect(
-          manifest.bundleDependencies,
+        assert.ok(manifest.bundleDependencies !== undefined);
+        assert.ok(
+          manifest.bundleDependencies.includes("@ykdz/template-core"),
           "@ykdz/template owns the flattened runtime closure of its bundled private packages",
-        ).toContain("@ykdz/template-core");
-        expect(
-          await compilerApiImports(packageRoot),
-          "@ykdz/template leaves TypeScript compiler API usage in its bundled Core boundary",
-        ).toHaveLength(0);
+        );
+        assertLength(await compilerApiImports(packageRoot), 0);
         continue;
       }
-      expect(
-        await compilerApiImports(packageRoot),
-        `${manifest.name ?? "(unnamed)"} declares a runtime TypeScript 6 dependency`,
-      ).not.toHaveLength(0);
+      assertNotLength(await compilerApiImports(packageRoot), 0);
     }
 
     const core = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template-core",
     );
-    expect(core?.manifest.peerDependencies).toHaveProperty("typescript");
-    expect(core?.manifest.devDependencies).toHaveProperty("typescript");
-    await expect(compilerApiImports(core!.packageRoot)).resolves.toEqual(
-      expect.arrayContaining([
+    assert.ok(hasProperty(core?.manifest.peerDependencies, "typescript"));
+    assert.ok(hasProperty(core?.manifest.devDependencies, "typescript"));
+    assertDeepStrictEqualWithMatchers(
+      await compilerApiImports(core!.packageRoot),
+      arrayContaining([
         "packages/core/src/renderer.ts",
         "packages/core/src/template-boundary-check.ts",
       ]),
@@ -497,10 +508,11 @@ describe("Erasable TypeScript enforcement", () => {
     const cliManifest = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template",
     )?.manifest;
-    expect(cliManifest?.dependencies).toHaveProperty("typescript");
-    expect(cliManifest?.dependencies).not.toHaveProperty("@typescript/old");
-    expect(cliManifest?.bundleDependencies).toEqual(
-      expect.arrayContaining(["@ykdz/template-core", "typescript"]),
+    assert.ok(hasProperty(cliManifest?.dependencies, "typescript"));
+    assert.ok(!hasProperty(cliManifest?.dependencies, "@typescript/old"));
+    assertDeepStrictEqualWithMatchers(
+      cliManifest?.bundleDependencies,
+      arrayContaining(["@ykdz/template-core", "typescript"]),
     );
   });
 });

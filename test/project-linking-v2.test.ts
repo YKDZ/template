@@ -1,3 +1,6 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import type {
   PackageDefinition,
@@ -5,7 +8,8 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import { planExplicitProjectLinks } from "@ykdz/template-core/project-linking-v2";
-import { describe, expect, it } from "vitest";
+
+import { assertPartialDeepStrictEqual } from "./assertions.ts";
 
 function contribution(
   definition: PackageDefinition,
@@ -47,8 +51,8 @@ function persistedDefinition(
   };
 }
 
-describe("Project Linking", () => {
-  it("rejects a native consumer before planning and lists valid Package Paths", () => {
+void describe("Project Linking", () => {
+  void it("rejects a native consumer before planning and lists valid Package Paths", () => {
     const nativeDefinition: PackageDefinition = {
       name: "@demo/native",
       path: "packages/native",
@@ -79,33 +83,37 @@ describe("Project Linking", () => {
       ],
     };
 
-    expect(() =>
-      planExplicitProjectLinks({
-        blueprint,
-        contributions: [
-          contribution(nativeDefinition, { scripts: { test: "cargo test" } }),
-          contribution(runtimeDefinition, {
-            type: "module",
-            imports: { "#/*": "./src/*.ts" },
-          }),
-          contribution(providerDefinition, {
-            type: "module",
-            exports: {
-              ".": {
-                source: "./src/index.ts",
-                types: "./dist/index.d.ts",
-                default: "./dist/index.js",
+    assert.throws(
+      () =>
+        planExplicitProjectLinks({
+          blueprint,
+          contributions: [
+            contribution(nativeDefinition, { scripts: { test: "cargo test" } }),
+            contribution(runtimeDefinition, {
+              type: "module",
+              imports: { "#/*": "./src/*.ts" },
+            }),
+            contribution(providerDefinition, {
+              type: "module",
+              exports: {
+                ".": {
+                  source: "./src/index.ts",
+                  types: "./dist/index.d.ts",
+                  default: "./dist/index.js",
+                },
               },
-            },
-          }),
-        ],
-      }),
-    ).toThrow(
-      "Package Link consumer packages/native cannot consume a Node package-name import. Valid Package Paths: apps/web",
+            }),
+          ],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Package Link consumer packages/native cannot consume a Node package-name import. Valid Package Paths: apps/web",
+        ),
     );
   });
 
-  it("keeps a partial-source provider injected when its root export is default-only", () => {
+  void it("keeps a partial-source provider injected when its root export is default-only", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -146,16 +154,17 @@ describe("Project Linking", () => {
       ],
     });
 
-    expect(
+    assertPartialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
-    ).toMatchObject({
-      dependenciesMeta: {
-        [providerDefinition.name]: { injected: true },
+      {
+        dependenciesMeta: {
+          [providerDefinition.name]: { injected: true },
+        },
       },
-    });
+    );
   });
 
-  it("keeps a provider injected when its root source conditions are out of order", () => {
+  void it("keeps a provider injected when its root source conditions are out of order", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -195,16 +204,17 @@ describe("Project Linking", () => {
       ],
     });
 
-    expect(
+    assertPartialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
-    ).toMatchObject({
-      dependenciesMeta: {
-        [providerDefinition.name]: { injected: true },
+      {
+        dependenciesMeta: {
+          [providerDefinition.name]: { injected: true },
+        },
       },
-    });
+    );
   });
 
-  it("keeps a provider injected when a root source target is unusable", () => {
+  void it("keeps a provider injected when a root source target is unusable", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -244,16 +254,17 @@ describe("Project Linking", () => {
       ],
     });
 
-    expect(
+    assertPartialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
-    ).toMatchObject({
-      dependenciesMeta: {
-        [providerDefinition.name]: { injected: true },
+      {
+        dependenciesMeta: {
+          [providerDefinition.name]: { injected: true },
+        },
       },
-    });
+    );
   });
 
-  it("uses current Manifest Truth instead of reconstructed exposure for a link decision", () => {
+  void it("uses current Manifest Truth instead of reconstructed exposure for a link decision", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -303,16 +314,17 @@ describe("Project Linking", () => {
       ]),
     });
 
-    expect(
+    assertPartialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
-    ).toMatchObject({
-      dependenciesMeta: {
-        [providerDefinition.name]: { injected: true },
+      {
+        dependenciesMeta: {
+          [providerDefinition.name]: { injected: true },
+        },
       },
-    });
+    );
   });
 
-  it("preserves a conservative injected dependency from Current Manifest Truth", () => {
+  void it("preserves a conservative injected dependency from Current Manifest Truth", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -369,16 +381,17 @@ describe("Project Linking", () => {
       ]),
     });
 
-    expect(
+    assertPartialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
-    ).toMatchObject({
-      dependenciesMeta: {
-        [providerDefinition.name]: { injected: true },
+      {
+        dependenciesMeta: {
+          [providerDefinition.name]: { injected: true },
+        },
       },
-    });
+    );
   });
 
-  it("rejects a provider without an importable root package export", () => {
+  void it("rejects a provider without an importable root package export", () => {
     const consumerDefinition: PackageDefinition = {
       name: "@demo/consumer",
       path: "apps/consumer",
@@ -390,37 +403,41 @@ describe("Project Linking", () => {
       role: "shared-library",
     };
 
-    expect(() =>
-      planExplicitProjectLinks({
-        blueprint: {
-          schemaVersion: 3,
-          packages: [
-            persistedDefinition("1", consumerDefinition),
-            persistedDefinition("2", providerDefinition),
-          ],
-          packageLinkIntents: [
-            {
-              consumerPackagePath: consumerDefinition.path,
-              providerPackagePath: providerDefinition.path,
-            },
-          ],
-        },
-        contributions: [
-          contribution(consumerDefinition, { type: "module" }),
-          contribution(providerDefinition, {
-            type: "module",
-            exports: {
-              "./feature": {
-                source: "./src/feature.ts",
-                types: "./dist/feature.d.ts",
-                default: "./dist/feature.js",
+    assert.throws(
+      () =>
+        planExplicitProjectLinks({
+          blueprint: {
+            schemaVersion: 3,
+            packages: [
+              persistedDefinition("1", consumerDefinition),
+              persistedDefinition("2", providerDefinition),
+            ],
+            packageLinkIntents: [
+              {
+                consumerPackagePath: consumerDefinition.path,
+                providerPackagePath: providerDefinition.path,
               },
-            },
-          }),
-        ],
-      }),
-    ).toThrow(
-      "Package Link provider packages/provider does not expose an importable package root",
+            ],
+          },
+          contributions: [
+            contribution(consumerDefinition, { type: "module" }),
+            contribution(providerDefinition, {
+              type: "module",
+              exports: {
+                "./feature": {
+                  source: "./src/feature.ts",
+                  types: "./dist/feature.d.ts",
+                  default: "./dist/feature.js",
+                },
+              },
+            }),
+          ],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Package Link provider packages/provider does not expose an importable package root",
+        ),
     );
   });
 });

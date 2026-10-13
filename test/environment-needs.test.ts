@@ -1,38 +1,41 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+
 import {
   normalizeEnvironmentNeeds,
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
-import { describe, expect, it } from "vitest";
 
 const workspaceOwner = {
   kind: "workspace-orchestration" as const,
   path: "." as const,
 };
 
-describe("Environment Need lifecycle", () => {
-  it("uses the durable semantic declaration as canonical identity", () => {
+void describe("Environment Need lifecycle", () => {
+  void it("uses the durable semantic declaration as canonical identity", () => {
     const browser = playwrightBrowserAssetsEnvironmentNeed({
       browser: "chromium",
       owner: workspaceOwner,
     });
     const shellcheck = shellCheckEnvironmentNeed(workspaceOwner);
 
-    expect(
+    assert.deepStrictEqual(
       normalizeEnvironmentNeeds({
         check: [shellcheck, browser, shellcheck],
         deployment: [{ kind: "docker-engine" }, { kind: "docker-engine" }],
       }),
-    ).toEqual({
-      schemaVersion: 1,
-      check: [browser, shellcheck],
-      deployment: [{ kind: "docker-engine" }],
-    });
+      {
+        schemaVersion: 1,
+        check: [browser, shellcheck],
+        deployment: [{ kind: "docker-engine" }],
+      },
+    );
   });
 
-  it("strictly parses and normalizes versioned Local Template Metadata", () => {
-    expect(
+  void it("strictly parses and normalizes versioned Local Template Metadata", () => {
+    assert.deepStrictEqual(
       parseEnvironmentNeedsMetadata({
         schemaVersion: 1,
         check: [
@@ -43,66 +46,85 @@ describe("Environment Need lifecycle", () => {
         ],
         deployment: [],
       }),
-    ).toEqual({
-      schemaVersion: 1,
-      check: [{ kind: "shellcheck-command", owner: workspaceOwner }],
-      deployment: [],
-    });
-
-    expect(() =>
-      parseEnvironmentNeedsMetadata({
+      {
         schemaVersion: 1,
-        check: [
-          {
-            kind: "shellcheck-command",
-            owner: workspaceOwner,
-            inferredFromTaskGraph: true,
-          },
-        ],
+        check: [{ kind: "shellcheck-command", owner: workspaceOwner }],
         deployment: [],
-      }),
-    ).toThrow("check[0] contains unknown field: inferredFromTaskGraph");
+      },
+    );
+
+    assert.throws(
+      () =>
+        parseEnvironmentNeedsMetadata({
+          schemaVersion: 1,
+          check: [
+            {
+              kind: "shellcheck-command",
+              owner: workspaceOwner,
+              inferredFromTaskGraph: true,
+            },
+          ],
+          deployment: [],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "check[0] contains unknown field: inferredFromTaskGraph",
+        ),
+    );
   });
 
-  it("rejects semantic-parameter conflicts instead of persisting a second identity", () => {
-    expect(() =>
-      normalizeEnvironmentNeeds({
-        check: [
-          playwrightBrowserAssetsEnvironmentNeed({
-            browser: "chromium",
-            owner: workspaceOwner,
-          }),
-          {
-            kind: "playwright-browser-assets",
-            browser: "webkit" as never,
-            owner: workspaceOwner,
-          },
-        ],
-        deployment: [],
-      }),
-    ).toThrow("check[1].browser must be chromium");
+  void it("rejects semantic-parameter conflicts instead of persisting a second identity", () => {
+    assert.throws(
+      () =>
+        normalizeEnvironmentNeeds({
+          check: [
+            playwrightBrowserAssetsEnvironmentNeed({
+              browser: "chromium",
+              owner: workspaceOwner,
+            }),
+            {
+              kind: "playwright-browser-assets",
+              browser: "webkit" as never,
+              owner: workspaceOwner,
+            },
+          ],
+          deployment: [],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("check[1].browser must be chromium"),
+    );
   });
 
-  it("does not accept Deployment Environment Needs as ordinary Check Environment Needs or vice versa", () => {
-    expect(() =>
-      parseEnvironmentNeedsMetadata({
-        schemaVersion: 1,
-        check: [{ kind: "docker-engine" }],
-        deployment: [],
-      }),
-    ).toThrow("check[0] has unsupported kind: docker-engine");
+  void it("does not accept Deployment Environment Needs as ordinary Check Environment Needs or vice versa", () => {
+    assert.throws(
+      () =>
+        parseEnvironmentNeedsMetadata({
+          schemaVersion: 1,
+          check: [{ kind: "docker-engine" }],
+          deployment: [],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("check[0] has unsupported kind: docker-engine"),
+    );
 
-    expect(() =>
-      parseEnvironmentNeedsMetadata({
-        schemaVersion: 1,
-        check: [],
-        deployment: [
-          {
-            kind: "shellcheck-command",
-            owner: workspaceOwner,
-          },
-        ],
-      }),
-    ).toThrow("deployment[0] contains unknown field: owner");
+    assert.throws(
+      () =>
+        parseEnvironmentNeedsMetadata({
+          schemaVersion: 1,
+          check: [],
+          deployment: [
+            {
+              kind: "shellcheck-command",
+              owner: workspaceOwner,
+            },
+          ],
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes("deployment[0] contains unknown field: owner"),
+    );
   });
 });

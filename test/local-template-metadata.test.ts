@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   mkdtemp,
   readFile,
@@ -7,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { afterEach, describe, it, mock } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -20,7 +22,20 @@ import {
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it, vi } from "vitest";
+
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertPartialDeepStrictEqual,
+  assertThrowsContaining,
+  hasProperty,
+  objectContaining,
+  stringMatching,
+  testEach,
+} from "./assertions.ts";
+
+afterEach(() => mock.restoreAll());
 
 const toolchain = {
   nodeLtsMajor: "24",
@@ -137,31 +152,34 @@ async function expectFoundationProvenanceRejection(
     ),
     generation: await readFile(generationPath, "utf8"),
   };
-  const replaySpy = vi.spyOn(
+  const replaySpy = mock.method(
     initialized.definition.packageContributionReplayAdapters[0]!,
     "replay",
   );
   try {
-    expect(() => loadLocalTemplateMetadata(initialized.repositoryRoot)).toThrow(
+    assertThrowsContaining(
+      () => loadLocalTemplateMetadata(initialized.repositoryRoot),
       message,
     );
-    expect(replaySpy).not.toHaveBeenCalled();
-    await expect(
-      readFile(
+    assert.strictEqual(replaySpy.mock.callCount(), 0);
+    assert.strictEqual(
+      await readFile(
         path.join(initialized.repositoryRoot, ".template/blueprint.json"),
         "utf8",
       ),
-    ).resolves.toBe(metadataBeforeLoad.blueprint);
-    await expect(readFile(generationPath, "utf8")).resolves.toBe(
+      metadataBeforeLoad.blueprint,
+    );
+    assert.strictEqual(
+      await readFile(generationPath, "utf8"),
       metadataBeforeLoad.generation,
     );
   } finally {
-    replaySpy.mockRestore();
+    replaySpy.mock.restore();
   }
 }
 
-describe("Local Template Metadata", () => {
-  it("assigns deterministic opaque Package Definition IDs during initialization", async () => {
+void describe("Local Template Metadata", () => {
+  void it("assigns deterministic opaque Package Definition IDs during initialization", async () => {
     const initialized = await initializedRepository();
     const repeatedPlan = planGeneratedRepositoryInitialization({
       definition: initialized.definition,
@@ -171,12 +189,13 @@ describe("Local Template Metadata", () => {
       (definition) => definition.packageDefinitionId,
     );
 
-    expect(blueprintIds).toEqual(
-      blueprintIds.map(() => expect.stringMatching(/^package-[a-f0-9]{64}$/)),
+    assertDeepStrictEqualWithMatchers(
+      blueprintIds,
+      blueprintIds.map(() => stringMatching(/^package-[a-f0-9]{64}$/)),
     );
-    expect(new Set(blueprintIds).size).toBe(blueprintIds.length);
-    expect(repeatedPlan.blueprint).toEqual(initialized.plan.blueprint);
-    expect(
+    assert.strictEqual(new Set(blueprintIds).size, blueprintIds.length);
+    assert.deepStrictEqual(repeatedPlan.blueprint, initialized.plan.blueprint);
+    assert.deepStrictEqual(
       initialized.plan.generationRecord.packages
         .map((record) => ({
           packageDefinitionId: record.packageDefinitionId,
@@ -185,7 +204,6 @@ describe("Local Template Metadata", () => {
         .toSorted((left, right) =>
           left.packageDefinitionId.localeCompare(right.packageDefinitionId),
         ),
-    ).toEqual(
       initialized.plan.blueprint.packages
         .map((definition) => ({
           packageDefinitionId: definition.packageDefinitionId,
@@ -197,7 +215,7 @@ describe("Local Template Metadata", () => {
     );
   });
 
-  it("keeps deterministic Package Definition IDs independent of Preset plan ordering", () => {
+  void it("keeps deterministic Package Definition IDs independent of Preset plan ordering", () => {
     const context = createGenerationContext({
       targetDir: "/tmp/reordered-package-plans",
       defaultPackageScope: "recorded-scope",
@@ -230,18 +248,18 @@ describe("Local Template Metadata", () => {
         .map((item) => [item.path, item.packageDefinitionId] as const)
         .toSorted(([left], [right]) => left.localeCompare(right));
 
-    expect(idsByPath(reordered)).toEqual(idsByPath(original));
+    assert.deepStrictEqual(idsByPath(reordered), idsByPath(original));
   });
 
-  it("rebuilds Generation Context from persisted repository facts after the directory is renamed", async () => {
+  void it("rebuilds Generation Context from persisted repository facts after the directory is renamed", async () => {
     const initialized = await initializedRepository();
     const renamedRoot = path.join(initialized.parent, "renamed-directory");
     await rename(initialized.repositoryRoot, renamedRoot);
 
     const metadata = loadLocalTemplateMetadata(renamedRoot);
 
-    expect(metadata.blueprint).toEqual(initialized.plan.blueprint);
-    expect(metadata.context).toEqual({
+    assert.deepStrictEqual(metadata.blueprint, initialized.plan.blueprint);
+    assert.deepStrictEqual(metadata.context, {
       targetDir: renamedRoot,
       repositoryName: "recorded-repository",
       defaultPackageScope: "recorded-scope",
@@ -254,7 +272,7 @@ describe("Local Template Metadata", () => {
     });
   });
 
-  it("uses controlled Package Definition name, path, role, and provenance changes as the source of truth for the next addition", async () => {
+  void it("uses controlled Package Definition name, path, role, and provenance changes as the source of truth for the next addition", async () => {
     const initialized = await initializedRepository();
     const oldDefinition = initialized.plan.blueprint.packages.find(
       (definition) => definition.role === "shared-library",
@@ -346,10 +364,11 @@ describe("Local Template Metadata", () => {
     });
 
     if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
-    expect(addition.blueprint.packages).toEqual(
-      expect.arrayContaining([
+    assertDeepStrictEqualWithMatchers(
+      addition.blueprint.packages,
+      arrayContaining([
         newDefinition,
-        expect.objectContaining({
+        objectContaining({
           name: "@recorded-scope/utilities",
           path: "packages/utilities",
         }),
@@ -357,7 +376,8 @@ describe("Local Template Metadata", () => {
     );
   });
 
-  it.each(["cli-tool", "native-package"] as const)(
+  testEach(
+    ["cli-tool", "native-package"] as const,
     "replays persisted %s provenance without consulting current Preset defaults",
     async (role) => {
       // cli-tool 探测会直接规划新建公开 ts-cli 候选，初始化上下文需要快照精确值；
@@ -389,16 +409,15 @@ describe("Local Template Metadata", () => {
       if (initialized.definition.initialPrimaryPackage === undefined) {
         throw new Error(`Expected configurable ${role} Definition`);
       }
-      const defaultReplay = vi
-        .spyOn(
-          initialized.definition.initialPrimaryPackage,
-          "planInitialContribution",
-        )
-        .mockImplementation(() => {
+      const defaultReplay = mock.method(
+        initialized.definition.initialPrimaryPackage,
+        "planInitialContribution",
+        () => {
           throw new Error("current Preset default must not be replayed");
-        });
+        },
+      );
       try {
-        expect(() =>
+        assert.doesNotThrow(() =>
           planGeneratedRepositoryPackageAddition({
             definition: requireSharedLibraryAdditionDefinition(
               initialized.context,
@@ -408,14 +427,14 @@ describe("Local Template Metadata", () => {
             ),
             packageLeafName: `after-${role}`,
           }),
-        ).not.toThrow();
+        );
       } finally {
-        defaultReplay.mockRestore();
+        defaultReplay.mock.restore();
       }
     },
   );
 
-  it("replays persisted multi-Package provenance without consulting current Preset defaults", async () => {
+  void it("replays persisted multi-Package provenance without consulting current Preset defaults", async () => {
     const initialized = await initializedRepository((context) => {
       const definition = builtInPresetRegistry
         .all()
@@ -429,18 +448,26 @@ describe("Local Template Metadata", () => {
       }
       return definition;
     });
-    const defaultReplay = vi
-      .spyOn(initialized.definition, "planInitialization")
-      .mockImplementation(() => {
+    mock.method(
+      initialized.definition as unknown as {
+        planInitialization: Function;
+      },
+      "planInitialization",
+      () => {
         throw new Error("current Preset default must not be replayed");
-      });
-    const defaultReplaySet = vi
-      .spyOn(initialized.definition, "planInitializationContributions")
-      .mockImplementation(() => {
+      },
+    );
+    mock.method(
+      initialized.definition as unknown as {
+        planInitializationContributions: Function;
+      },
+      "planInitializationContributions",
+      () => {
         throw new Error("current Preset default set must not be replayed");
-      });
+      },
+    );
     try {
-      expect(() =>
+      assert.doesNotThrow(() =>
         planGeneratedRepositoryPackageAddition({
           definition: requireSharedLibraryAdditionDefinition(
             initialized.context,
@@ -450,37 +477,39 @@ describe("Local Template Metadata", () => {
           ),
           packageLeafName: "after-multi-package",
         }),
-      ).not.toThrow();
+      );
     } finally {
-      defaultReplay.mockRestore();
-      defaultReplaySet.mockRestore();
+      mock.restoreAll();
     }
   });
 
-  it("replays every persisted multi-Package contribution exactly once after preflight", async () => {
+  void it("replays every persisted multi-Package contribution exactly once after preflight", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
     const replaySpies =
       initialized.definition.packageContributionReplayAdapters.map((adapter) =>
-        vi.spyOn(adapter, "replay"),
+        mock.method(adapter, "replay"),
       );
 
     try {
       loadLocalTemplateMetadata(initialized.repositoryRoot);
 
       for (const replaySpy of replaySpies) {
-        expect(replaySpy).toHaveBeenCalledTimes(1);
-        expect(
-          replaySpy.mock.calls[0]![0].packageDefinition,
-        ).not.toHaveProperty("packageDefinitionId");
+        assert.strictEqual(replaySpy.mock.callCount(), 1);
+        assert.ok(
+          !hasProperty(
+            replaySpy.mock.calls[0]!.arguments[0]!.packageDefinition,
+            "packageDefinitionId",
+          ),
+        );
       }
     } finally {
-      for (const replaySpy of replaySpies) replaySpy.mockRestore();
+      for (const replaySpy of replaySpies) replaySpy.mock.restore();
     }
   });
 
-  it("keeps opaque IDs stable across reload and no-op while repeated adapter additions receive unique IDs", async () => {
+  void it("keeps opaque IDs stable across reload and no-op while repeated adapter additions receive unique IDs", async () => {
     const initialized = await initializedRepository();
     let latestPlan = initialized.plan;
     for (const packageLeafName of ["first-library", "second-library"]) {
@@ -503,21 +532,21 @@ describe("Local Template Metadata", () => {
     const libraryIds = latestPlan.generationRecord.packages
       .filter((record) => record.contributionIdentity === "library")
       .map((record) => record.packageDefinitionId);
-    expect(libraryIds).toHaveLength(3);
-    expect(new Set(libraryIds).size).toBe(libraryIds.length);
-    expect(reloaded.blueprint).toEqual(latestPlan.blueprint);
+    assertLength(libraryIds, 3);
+    assert.strictEqual(new Set(libraryIds).size, libraryIds.length);
+    assert.deepStrictEqual(reloaded.blueprint, latestPlan.blueprint);
 
     const noOp = planGeneratedRepositoryPackageAddition({
       definition: initialized.definition,
       localTemplateMetadata: reloaded,
       packageLeafName: "second-library",
     });
-    expect(noOp.operations).toEqual([]);
-    expect(noOp.blueprint).toEqual(latestPlan.blueprint);
-    expect(noOp.generationRecord).toEqual(latestPlan.generationRecord);
+    assert.deepStrictEqual(noOp.operations, []);
+    assert.deepStrictEqual(noOp.blueprint, latestPlan.blueprint);
+    assert.deepStrictEqual(noOp.generationRecord, latestPlan.generationRecord);
   });
 
-  it("replays the persisted Foundation Package instead of a current scope-derived default", async () => {
+  void it("replays the persisted Foundation Package instead of a current scope-derived default", async () => {
     const initialized = await initializedRepository();
     const generationPath = path.join(
       initialized.repositoryRoot,
@@ -546,13 +575,14 @@ describe("Local Template Metadata", () => {
       packageLeafName: "after-foundation-default-change",
     });
 
-    expect(addition.blueprint.packages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
+    assertDeepStrictEqualWithMatchers(
+      addition.blueprint.packages,
+      arrayContaining([
+        objectContaining({
           name: "@recorded-scope/typescript-config",
           path: "packages/typescript-config",
         }),
-        expect.objectContaining({
+        objectContaining({
           name: "@future-scope/after-foundation-default-change",
         }),
       ]),
@@ -564,15 +594,19 @@ describe("Local Template Metadata", () => {
           ? [operation.replacements.TYPESCRIPT_CONFIG_PACKAGE]
           : [],
     );
-    expect(typescriptConfigReplacementValues).not.toContain(
-      "@future-scope/typescript-config",
+    assert.ok(
+      !typescriptConfigReplacementValues.includes(
+        "@future-scope/typescript-config",
+      ),
     );
-    expect(typescriptConfigReplacementValues).toContain(
-      "@recorded-scope/typescript-config",
+    assert.ok(
+      typescriptConfigReplacementValues.includes(
+        "@recorded-scope/typescript-config",
+      ),
     );
   });
 
-  it("uses the persisted Foundation Package name before replay constructs TypeScript package operations", async () => {
+  void it("uses the persisted Foundation Package name before replay constructs TypeScript package operations", async () => {
     const initialized = await initializedRepository();
     const blueprintPath = path.join(
       initialized.repositoryRoot,
@@ -607,9 +641,10 @@ describe("Local Template Metadata", () => {
       initialized.definition.packageContributionReplayAdapters[0]!;
     const replay = replayAdapter.replay.bind(replayAdapter);
     let replayedReplacement: string | undefined;
-    const replaySpy = vi
-      .spyOn(replayAdapter, "replay")
-      .mockImplementation((options) => {
+    const replaySpy = mock.method(
+      replayAdapter,
+      "replay",
+      (options: Parameters<typeof replayAdapter.replay>[0]) => {
         const contribution = replay(options);
         replayedReplacement = contribution.operations.flatMap((operation) =>
           operation.kind === "writeTextTemplate" &&
@@ -618,7 +653,8 @@ describe("Local Template Metadata", () => {
             : [],
         )[0];
         return contribution;
-      });
+      },
+    );
     try {
       const metadata = loadLocalTemplateMetadata(initialized.repositoryRoot);
       const addition = planGeneratedRepositoryPackageAddition({
@@ -631,19 +667,19 @@ describe("Local Template Metadata", () => {
           manifest.name === initialized.plan.blueprint.packages[0]!.name,
       )!;
 
-      expect(replayedReplacement).toBe(persistedPackageName);
-      expect(metadata.context.foundationPackages).toEqual({
+      assert.strictEqual(replayedReplacement, persistedPackageName);
+      assert.deepStrictEqual(metadata.context.foundationPackages, {
         typescriptConfiguration: { name: persistedPackageName },
       });
-      expect(originalPackage.devDependencies).toMatchObject({
+      assertPartialDeepStrictEqual(originalPackage.devDependencies, {
         [persistedPackageName]: "workspace:*",
       });
     } finally {
-      replaySpy.mockRestore();
+      replaySpy.mock.restore();
     }
   });
 
-  it("rejects missing Foundation package-name facts before replay", async () => {
+  void it("rejects missing Foundation package-name facts before replay", async () => {
     await expectFoundationProvenanceRejection(
       (record, definition) => ({
         ...record,
@@ -655,7 +691,7 @@ describe("Local Template Metadata", () => {
     );
   });
 
-  it("rejects contradictory Foundation package-name facts before replay", async () => {
+  void it("rejects contradictory Foundation package-name facts before replay", async () => {
     await expectFoundationProvenanceRejection(
       (record) => ({
         ...record,
@@ -665,7 +701,7 @@ describe("Local Template Metadata", () => {
     );
   });
 
-  it("rejects a second Foundation planning record before any Preset replay", async () => {
+  void it("rejects a second Foundation planning record before any Preset replay", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
@@ -685,65 +721,70 @@ describe("Local Template Metadata", () => {
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
     const replaySpies =
       initialized.definition.packageContributionReplayAdapters.map((adapter) =>
-        vi.spyOn(adapter, "replay"),
+        mock.method(adapter, "replay"),
       );
 
     try {
-      expect(() =>
-        loadLocalTemplateMetadata(initialized.repositoryRoot),
-      ).toThrow(
-        "Package Addition requires exactly one Foundation Package Planning Provenance record; found 2",
+      assert.throws(
+        () => loadLocalTemplateMetadata(initialized.repositoryRoot),
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "Package Addition requires exactly one Foundation Package Planning Provenance record; found 2",
+          ),
       );
       for (const replaySpy of replaySpies) {
-        expect(replaySpy).not.toHaveBeenCalled();
+        assert.strictEqual(replaySpy.mock.callCount(), 0);
       }
-      expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+      assert.deepStrictEqual(
+        await workspaceByteSnapshot(initialized.repositoryRoot),
         before,
       );
     } finally {
-      for (const replaySpy of replaySpies) replaySpy.mockRestore();
+      for (const replaySpy of replaySpies) replaySpy.mock.restore();
     }
   });
 
-  it.each([
-    {
-      name: "a Record-only Foundation/web path swap",
-      mutate: (packages: Record<string, unknown>[]) => {
-        const foundation = packages.find(
-          (record) => record.planningContribution === "foundationPlan",
-        )!;
-        const web = packages.find(
-          (record) => record.contributionIdentity === "web",
-        )!;
-        const foundationPath = foundation.path;
-        foundation.path = web.path;
-        web.path = foundationPath;
+  testEach(
+    [
+      {
+        name: "a Record-only Foundation/web path swap",
+        mutate: (packages: Record<string, unknown>[]) => {
+          const foundation = packages.find(
+            (record) => record.planningContribution === "foundationPlan",
+          )!;
+          const web = packages.find(
+            (record) => record.contributionIdentity === "web",
+          )!;
+          const foundationPath = foundation.path;
+          foundation.path = web.path;
+          web.path = foundationPath;
+        },
+        message: "Generation Record path witness",
       },
-      message: "Generation Record path witness",
-    },
-    {
-      name: "a late unknown Definition name",
-      mutate: (packages: Record<string, unknown>[]) => {
-        const record = packages.findLast(
-          (candidate) => candidate.planningContribution !== "foundationPlan",
-        )!;
-        record.planningContribution = "planPackageAddition";
-        record.definitionName = "future-preset";
+      {
+        name: "a late unknown Definition name",
+        mutate: (packages: Record<string, unknown>[]) => {
+          const record = packages.findLast(
+            (candidate) => candidate.planningContribution !== "foundationPlan",
+          )!;
+          record.planningContribution = "planPackageAddition";
+          record.definitionName = "future-preset";
+        },
+        message: "references unknown Built-in Preset future-preset",
       },
-      message: "references unknown Built-in Preset future-preset",
-    },
-    {
-      name: "a late unknown contribution identity",
-      mutate: (packages: Record<string, unknown>[]) => {
-        const record = packages.findLast(
-          (candidate) => candidate.planningContribution !== "foundationPlan",
-        )!;
-        record.contributionIdentity = "future-contribution";
+      {
+        name: "a late unknown contribution identity",
+        mutate: (packages: Record<string, unknown>[]) => {
+          const record = packages.findLast(
+            (candidate) => candidate.planningContribution !== "foundationPlan",
+          )!;
+          record.contributionIdentity = "future-contribution";
+        },
+        message:
+          "unknown Package Contribution replay adapter future-contribution",
       },
-      message:
-        "unknown Package Contribution replay adapter future-contribution",
-    },
-  ])(
+    ],
     "rejects $name before any persisted Package replay",
     async ({ mutate, message }) => {
       const initialized = await initializedRepository(
@@ -764,7 +805,7 @@ describe("Local Template Metadata", () => {
       const before = await workspaceByteSnapshot(initialized.repositoryRoot);
       const replaySpies =
         initialized.definition.packageContributionReplayAdapters.map(
-          (adapter) => vi.spyOn(adapter, "replay"),
+          (adapter) => mock.method(adapter, "replay"),
         );
 
       try {
@@ -775,20 +816,21 @@ describe("Local Template Metadata", () => {
           caught = error;
         }
         for (const replaySpy of replaySpies) {
-          expect(replaySpy).not.toHaveBeenCalled();
+          assert.strictEqual(replaySpy.mock.callCount(), 0);
         }
-        expect(caught).toBeInstanceOf(Error);
-        expect((caught as Error).message).toContain(message);
-        expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+        assert.ok(caught instanceof Error);
+        assert.ok((caught as Error).message.includes(message));
+        assert.deepStrictEqual(
+          await workspaceByteSnapshot(initialized.repositoryRoot),
           before,
         );
       } finally {
-        for (const replaySpy of replaySpies) replaySpy.mockRestore();
+        for (const replaySpy of replaySpies) replaySpy.mock.restore();
       }
     },
   );
 
-  it("uses the Foundation replay adapter for unknown persisted contribution diagnostics", async () => {
+  void it("uses the Foundation replay adapter for unknown persisted contribution diagnostics", async () => {
     const initialized = await initializedRepository();
     const generationPath = path.join(
       initialized.repositoryRoot,
@@ -803,12 +845,17 @@ describe("Local Template Metadata", () => {
     packageRecord.contributionIdentity = "future-library";
     await writeFile(generationPath, `${JSON.stringify(generation, null, 2)}\n`);
 
-    expect(() => loadLocalTemplateMetadata(initialized.repositoryRoot)).toThrow(
-      "unknown Package Contribution replay adapter future-library; expected library",
+    assert.throws(
+      () => loadLocalTemplateMetadata(initialized.repositoryRoot),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "unknown Package Contribution replay adapter future-library; expected library",
+        ),
     );
   });
 
-  it("uses stable multi-Package contribution identities when link topology changes", async () => {
+  void it("uses stable multi-Package contribution identities when link topology changes", async () => {
     const initialized = await initializedRepository((context) => {
       const definition = builtInPresetRegistry
         .all()
@@ -856,19 +903,22 @@ describe("Local Template Metadata", () => {
       ),
     );
 
-    expect(manifestsByName.get("@recorded-scope/db")).toMatchObject({
+    assertPartialDeepStrictEqual(manifestsByName.get("@recorded-scope/db"), {
       scripts: {
         "db:seed:example": "node --conditions=source scripts/seed-example.ts",
       },
     });
-    expect(manifestsByName.get("@recorded-scope/db-migrations")).toMatchObject({
-      scripts: {
-        "db:migrate": "drizzle-kit migrate",
+    assertPartialDeepStrictEqual(
+      manifestsByName.get("@recorded-scope/db-migrations"),
+      {
+        scripts: {
+          "db:migrate": "drizzle-kit migrate",
+        },
       },
-    });
+    );
   });
 
-  it("rejects changed database preparation leaf commands before Package Addition", async () => {
+  void it("rejects changed database preparation leaf commands before Package Addition", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
@@ -883,23 +933,30 @@ describe("Local Template Metadata", () => {
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(() =>
-      planGeneratedRepositoryPackageAddition({
-        definition: requireSharedLibraryAdditionDefinition(initialized.context),
-        localTemplateMetadata: loadLocalTemplateMetadata(
-          initialized.repositoryRoot,
+    assert.throws(
+      () =>
+        planGeneratedRepositoryPackageAddition({
+          definition: requireSharedLibraryAdditionDefinition(
+            initialized.context,
+          ),
+          localTemplateMetadata: loadLocalTemplateMetadata(
+            initialized.repositoryRoot,
+          ),
+          packageLeafName: "after-command-change",
+        }),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Database Preparation requires exact @recorded-scope/db-migrations script db:push",
         ),
-        packageLeafName: "after-command-change",
-      }),
-    ).toThrow(
-      "Database Preparation requires exact @recorded-scope/db-migrations script db:push",
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       before,
     );
   });
 
-  it("rejects a missing database provider ordering edge before Package Addition", async () => {
+  void it("rejects a missing database provider ordering edge before Package Addition", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
@@ -918,23 +975,26 @@ describe("Local Template Metadata", () => {
     await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(() =>
-      planGeneratedRepositoryPackageAddition({
-        definition: requireSharedLibraryAdditionDefinition(initialized.context),
-        localTemplateMetadata: loadLocalTemplateMetadata(
-          initialized.repositoryRoot,
-        ),
-        packageLeafName: "after-turbo-change",
-      }),
-    ).toThrow(
+    assertThrowsContaining(
+      () =>
+        planGeneratedRepositoryPackageAddition({
+          definition: requireSharedLibraryAdditionDefinition(
+            initialized.context,
+          ),
+          localTemplateMetadata: loadLocalTemplateMetadata(
+            initialized.repositoryRoot,
+          ),
+          packageLeafName: "after-turbo-change",
+        }),
       `Package Addition root Turbo Truth requires Turbo task ${taskName} dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       before,
     );
   });
 
-  it("rejects capability truth overrides while preserving compatible consumer Turbo customizations", async () => {
+  void it("rejects capability truth overrides while preserving compatible consumer Turbo customizations", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
@@ -981,10 +1041,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${applicationName} Turbo Truth requires exact Turbo extends truth`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       packageExtendsBefore,
     );
 
@@ -996,10 +1058,12 @@ describe("Local Template Metadata", () => {
     );
     const turboBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${applicationName} Turbo Truth requires Turbo task typecheck dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       turboBefore,
     );
 
@@ -1013,10 +1077,12 @@ describe("Local Template Metadata", () => {
     );
     const e2eBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${applicationName} Turbo Truth requires Turbo task test:e2e dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       e2eBefore,
     );
 
@@ -1051,10 +1117,12 @@ describe("Local Template Metadata", () => {
     );
     const viteBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition requires ${applicationPath}/vite.config.ts to externalize ${databaseName} through Vite SSR`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       viteBefore,
     );
 
@@ -1095,10 +1163,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Database Preparation ${databaseName} exports . must preserve replayed condition order`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       exportsBefore,
     );
 
@@ -1120,10 +1190,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Database Preparation ${databaseName} imports #db/* must preserve replayed condition order`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       conditionBefore,
     );
 
@@ -1137,27 +1209,29 @@ describe("Local Template Metadata", () => {
       `${JSON.stringify(databaseManifest, null, 2)}\n`,
     );
     const acceptedAddition = addPackage();
-    await expect(
-      reconcileAndApplyProjectProjections({
+    assertPartialDeepStrictEqual(
+      await reconcileAndApplyProjectProjections({
         targetRoot: initialized.repositoryRoot,
         ...acceptedAddition.projectProjections,
       }),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(
-      readFile(applicationTurboPath, "utf8").then((source) =>
+      { ok: true },
+    );
+    assertPartialDeepStrictEqual(
+      await readFile(applicationTurboPath, "utf8").then((source) =>
         JSON.parse(source),
       ),
-    ).resolves.toMatchObject({
-      tasks: {
-        typecheck: {
-          dependsOn: [`${databaseName}#build`, "user:preflight"],
+      {
+        tasks: {
+          typecheck: {
+            dependsOn: [`${databaseName}#build`, "user:preflight"],
+          },
+          "user:report": { cache: false },
         },
-        "user:report": { cache: false },
       },
-    });
+    );
   });
 
-  it("在 Package Addition 前拒绝破坏 consumer build 有效数据库排序，同时保留等价定制", async () => {
+  void it("在 Package Addition 前拒绝破坏 consumer build 有效数据库排序，同时保留等价定制", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
@@ -1215,10 +1289,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       rootGenericBefore,
     );
 
@@ -1232,10 +1308,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       qualifiedBefore,
     );
 
@@ -1244,7 +1322,7 @@ describe("Local Template Metadata", () => {
       outputs: [],
     };
     await writeTurbo(rootTurboPath, rootTurbo);
-    expect(addPackage).not.toThrow();
+    assert.doesNotThrow(addPackage);
 
     delete rootTurbo.tasks[`${migrationName}#build`];
     migrationTurbo.tasks.build = { extends: false, outputs: [] };
@@ -1254,10 +1332,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       migrationResetBefore,
     );
 
@@ -1268,10 +1348,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       migrationOverrideBefore,
     );
 
@@ -1290,10 +1372,12 @@ describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    expect(addPackage).toThrow(
+    assertThrowsContaining(
+      addPackage,
       `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       applicationOverrideBefore,
     );
 
@@ -1306,21 +1390,24 @@ describe("Local Template Metadata", () => {
     await writeTurbo(applicationTurboPath, applicationTurbo);
 
     const acceptedAddition = addPackage();
-    await expect(
-      reconcileAndApplyProjectProjections({
+    assertPartialDeepStrictEqual(
+      await reconcileAndApplyProjectProjections({
         targetRoot: initialized.repositoryRoot,
         ...acceptedAddition.projectProjections,
       }),
-    ).resolves.toMatchObject({ ok: true });
-    await expect(readFile(migrationTurboPath, "utf8")).resolves.toContain(
-      `${databaseName}#build`,
+      { ok: true },
     );
-    await expect(readFile(applicationTurboPath, "utf8")).resolves.toContain(
-      '"user:report"',
+    assert.ok(
+      (await readFile(migrationTurboPath, "utf8")).includes(
+        `${databaseName}#build`,
+      ),
+    );
+    assert.ok(
+      (await readFile(applicationTurboPath, "utf8")).includes('"user:report"'),
     );
   });
 
-  it("rejects an added contribution relabeled as initialization without writes", async () => {
+  void it("rejects an added contribution relabeled as initialization without writes", async () => {
     const initialized = await initializedRepository();
     const addition = planGeneratedRepositoryPackageAddition({
       definition: requireSharedLibraryAdditionDefinition(initialized.context),
@@ -1345,392 +1432,408 @@ describe("Local Template Metadata", () => {
     await writeFile(generationPath, `${JSON.stringify(generation, null, 2)}\n`);
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    expect(() => loadLocalTemplateMetadata(initialized.repositoryRoot)).toThrow(
-      "duplicate initialization contribution identity",
+    assert.throws(
+      () => loadLocalTemplateMetadata(initialized.repositoryRoot),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "duplicate initialization contribution identity",
+        ),
     );
-    expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
+    assert.deepStrictEqual(
+      await workspaceByteSnapshot(initialized.repositoryRoot),
       before,
     );
   });
 
-  it.each([
-    {
-      name: "the previous Blueprint schema",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        schemaVersion: 2,
-      }),
-      message: "expected 3",
-    },
-    {
-      name: "the previous Generation Record schema",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        schemaVersion: 1,
-      }),
-      message: "expected 2",
-    },
-    {
-      name: "a missing repository identity",
-      file: "generation" as const,
-      mutate: ({
-        repositoryName: _removed,
-        ...value
-      }: Record<string, unknown>) => value,
-      message: "repositoryName must be a non-empty string",
-    },
-    {
-      name: "a whitespace repository identity",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        repositoryName: " invalid ",
-      }),
-      message: "repositoryName must be a non-empty string",
-    },
-    {
-      name: "a missing preset",
-      file: "generation" as const,
-      mutate: ({ preset: _removed, ...value }: Record<string, unknown>) =>
-        value,
-      message: "preset must be a non-empty string",
-    },
-    {
-      name: "a missing template version",
-      file: "generation" as const,
-      mutate: ({
-        templateVersion: _removed,
-        ...value
-      }: Record<string, unknown>) => value,
-      message: "templateVersion must be 0.0.0",
-    },
-    {
-      name: "an invalid Node major",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        toolchain: {
-          ...(value.toolchain as Record<string, unknown>),
-          nodeLtsMajor: "current",
-        },
-      }),
-      message: "toolchain.nodeLtsMajor must be a numeric Node major",
-    },
-    {
-      name: "a missing package-manager pin",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => {
-        const { packageManagerPin: _removed, ...toolchain } =
-          value.toolchain as Record<string, unknown>;
-        return { ...value, toolchain };
+  testEach(
+    [
+      {
+        name: "the previous Blueprint schema",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          schemaVersion: 2,
+        }),
+        message: "expected 3",
       },
-      message: "toolchain.packageManagerPin must be an exact pnpm version pin",
-    },
-    {
-      name: "a missing package Definition name",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) => {
-            if (index !== 0) return record;
-            const { definitionName: _removed, ...rest } = record;
-            return rest;
+      {
+        name: "the previous Generation Record schema",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          schemaVersion: 1,
+        }),
+        message: "expected 2",
+      },
+      {
+        name: "a missing repository identity",
+        file: "generation" as const,
+        mutate: ({
+          repositoryName: _removed,
+          ...value
+        }: Record<string, unknown>) => value,
+        message: "repositoryName must be a non-empty string",
+      },
+      {
+        name: "a whitespace repository identity",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          repositoryName: " invalid ",
+        }),
+        message: "repositoryName must be a non-empty string",
+      },
+      {
+        name: "a missing preset",
+        file: "generation" as const,
+        mutate: ({ preset: _removed, ...value }: Record<string, unknown>) =>
+          value,
+        message: "preset must be a non-empty string",
+      },
+      {
+        name: "a missing template version",
+        file: "generation" as const,
+        mutate: ({
+          templateVersion: _removed,
+          ...value
+        }: Record<string, unknown>) => value,
+        message: "templateVersion must be 0.0.0",
+      },
+      {
+        name: "an invalid Node major",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          toolchain: {
+            ...(value.toolchain as Record<string, unknown>),
+            nodeLtsMajor: "current",
           },
-        ),
-      }),
-      message: "packages[0].definitionName must be a non-empty string",
-    },
-    {
-      name: "a missing Generation Record Package Definition ID",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) => {
-            if (index !== 0) return record;
-            const { packageDefinitionId: _removed, ...rest } = record;
-            return rest;
+        }),
+        message: "toolchain.nodeLtsMajor must be a numeric Node major",
+      },
+      {
+        name: "a missing package-manager pin",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => {
+          const { packageManagerPin: _removed, ...toolchain } =
+            value.toolchain as Record<string, unknown>;
+          return { ...value, toolchain };
+        },
+        message:
+          "toolchain.packageManagerPin must be an exact pnpm version pin",
+      },
+      {
+        name: "a missing package Definition name",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) => {
+              if (index !== 0) return record;
+              const { definitionName: _removed, ...rest } = record;
+              return rest;
+            },
+          ),
+        }),
+        message: "packages[0].definitionName must be a non-empty string",
+      },
+      {
+        name: "a missing Generation Record Package Definition ID",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) => {
+              if (index !== 0) return record;
+              const { packageDefinitionId: _removed, ...rest } = record;
+              return rest;
+            },
+          ),
+        }),
+        message:
+          "packages[0].packageDefinitionId must use the package-<sha256> format",
+      },
+      {
+        name: "an invalid Generation Record Package Definition ID",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) =>
+              index === 0
+                ? { ...record, packageDefinitionId: "package-short" }
+                : record,
+          ),
+        }),
+        message:
+          "packages[0].packageDefinitionId must use the package-<sha256> format",
+      },
+      {
+        name: "a missing packages collection",
+        file: "generation" as const,
+        mutate: ({ packages: _removed, ...value }: Record<string, unknown>) =>
+          value,
+        message: "packages must be an array",
+      },
+      {
+        name: "a missing provenance path",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) => {
+              if (index !== 0) return record;
+              const { path: _removed, ...rest } = record;
+              return rest;
+            },
+          ),
+        }),
+        message: "packages[0].path must be a non-empty string",
+      },
+      {
+        name: "a missing provenance kind",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) => {
+              if (index !== 0) return record;
+              const { planningContribution: _removed, ...rest } = record;
+              return rest;
+            },
+          ),
+        }),
+        message: "packages[0].planningContribution is unsupported",
+      },
+      {
+        name: "a missing contribution identity",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) => {
+              if (index !== 0) return record;
+              const { contributionIdentity: _removed, ...rest } = record;
+              return rest;
+            },
+          ),
+        }),
+        message: "packages[0].contributionIdentity must be a non-empty string",
+      },
+      {
+        name: "an unknown Generation Record field",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          inferredFromWorkspace: true,
+        }),
+        message: "contains unknown field: inferredFromWorkspace",
+      },
+      {
+        name: "an unknown nested toolchain field",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          toolchain: {
+            ...(value.toolchain as Record<string, unknown>),
+            inferredFromManifest: true,
           },
-        ),
-      }),
-      message:
-        "packages[0].packageDefinitionId must use the package-<sha256> format",
-    },
-    {
-      name: "an invalid Generation Record Package Definition ID",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) =>
-            index === 0
-              ? { ...record, packageDefinitionId: "package-short" }
-              : record,
-        ),
-      }),
-      message:
-        "packages[0].packageDefinitionId must use the package-<sha256> format",
-    },
-    {
-      name: "a missing packages collection",
-      file: "generation" as const,
-      mutate: ({ packages: _removed, ...value }: Record<string, unknown>) =>
-        value,
-      message: "packages must be an array",
-    },
-    {
-      name: "a missing provenance path",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) => {
-            if (index !== 0) return record;
-            const { path: _removed, ...rest } = record;
-            return rest;
-          },
-        ),
-      }),
-      message: "packages[0].path must be a non-empty string",
-    },
-    {
-      name: "a missing provenance kind",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) => {
-            if (index !== 0) return record;
-            const { planningContribution: _removed, ...rest } = record;
-            return rest;
-          },
-        ),
-      }),
-      message: "packages[0].planningContribution is unsupported",
-    },
-    {
-      name: "a missing contribution identity",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) => {
-            if (index !== 0) return record;
-            const { contributionIdentity: _removed, ...rest } = record;
-            return rest;
-          },
-        ),
-      }),
-      message: "packages[0].contributionIdentity must be a non-empty string",
-    },
-    {
-      name: "an unknown Generation Record field",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        inferredFromWorkspace: true,
-      }),
-      message: "contains unknown field: inferredFromWorkspace",
-    },
-    {
-      name: "an unknown nested toolchain field",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        toolchain: {
-          ...(value.toolchain as Record<string, unknown>),
+        }),
+        message:
+          "toolchain.inferredFromManifest: contains unknown Generation Record field",
+      },
+      {
+        name: "an unknown nested provenance field",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) =>
+              index === 0 ? { ...record, inferredFromWorkspace: true } : record,
+          ),
+        }),
+        message:
+          "packages[0].inferredFromWorkspace: contains unknown Generation Record field",
+      },
+      {
+        name: "an unknown Generation Record Package Definition ID field",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) =>
+              index === 0
+                ? { ...record, packageDefinitionIdentity: "legacy-id" }
+                : record,
+          ),
+        }),
+        message:
+          "packages[0].packageDefinitionIdentity: contains unknown Generation Record field",
+      },
+      {
+        name: "an unknown Blueprint field",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
           inferredFromManifest: true,
-        },
-      }),
-      message:
-        "toolchain.inferredFromManifest: contains unknown Generation Record field",
-    },
-    {
-      name: "an unknown nested provenance field",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) =>
-            index === 0 ? { ...record, inferredFromWorkspace: true } : record,
-        ),
-      }),
-      message:
-        "packages[0].inferredFromWorkspace: contains unknown Generation Record field",
-    },
-    {
-      name: "an unknown Generation Record Package Definition ID field",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) =>
-            index === 0
-              ? { ...record, packageDefinitionIdentity: "legacy-id" }
-              : record,
-        ),
-      }),
-      message:
-        "packages[0].packageDefinitionIdentity: contains unknown Generation Record field",
-    },
-    {
-      name: "an unknown Blueprint field",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        inferredFromManifest: true,
-      }),
-      message: "Unknown Blueprint v3 field",
-    },
-    {
-      name: "a missing Blueprint Package Definition ID",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (definition, index) => {
-            if (index !== 0) return definition;
-            const { packageDefinitionId: _removed, ...rest } = definition;
-            return rest;
-          },
-        ),
-      }),
-      message: "Package Definition ID must use the package-<sha256> format",
-    },
-    {
-      name: "an invalid Blueprint Package Definition ID",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (definition, index) =>
-            index === 0
-              ? { ...definition, packageDefinitionId: "package-short" }
-              : definition,
-        ),
-      }),
-      message: "Package Definition ID must use the package-<sha256> format",
-    },
-    {
-      name: "an unknown Blueprint Package Definition ID field",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (definition, index) =>
-            index === 0
-              ? { ...definition, packageDefinitionIdentity: "legacy-id" }
-              : definition,
-        ),
-      }),
-      message: ".packages[0].packageDefinitionIdentity",
-    },
-    {
-      name: "duplicate Blueprint Package Definitions",
-      file: "blueprint" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: [
-          ...((value.packages as readonly Record<string, unknown>[]) ?? []),
-          (value.packages as readonly Record<string, unknown>[])[0],
-        ],
-      }),
-      message: "Package Definition ID must be unique",
-    },
-    {
-      name: "duplicate Package Planning Provenance",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: [
-          ...((value.packages as readonly Record<string, unknown>[]) ?? []),
-          (value.packages as readonly Record<string, unknown>[])[0],
-        ],
-      }),
-      message: "packages packageDefinitionId must be unique",
-    },
-    {
-      name: "a Blueprint and Generation Record Package Definition ID set mismatch",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) =>
-            index === 0
-              ? { ...record, packageDefinitionId: `package-${"f".repeat(64)}` }
-              : record,
-        ),
-      }),
-      message: "has no matching Project Blueprint Package Definition",
-    },
-    {
-      name: "a Blueprint and Generation Record Package Definition ID-only swap",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => {
-        const packages = [
-          ...(value.packages as readonly Record<string, unknown>[]),
-        ];
-        const firstId = packages[0]!.packageDefinitionId;
-        packages[0] = {
-          ...packages[0],
-          packageDefinitionId: packages[1]!.packageDefinitionId,
-        };
-        packages[1] = {
-          ...packages[1],
-          packageDefinitionId: firstId,
-        };
-        return { ...value, packages };
+        }),
+        message: "Unknown Blueprint v3 field",
       },
-      message: "Generation Record path witness",
-    },
-    {
-      name: "Blueprint and provenance path mismatch",
-      file: "generation" as const,
-      mutate: (value: Record<string, unknown>) => ({
-        ...value,
-        packages: (value.packages as readonly Record<string, unknown>[]).map(
-          (record, index) =>
-            index === 0 ? { ...record, path: "packages/missing" } : record,
-        ),
-      }),
-      message: "Generation Record path witness",
-    },
-  ])("fails closed on $name without rewriting metadata", async (scenario) => {
-    const initialized = await initializedRepository();
-    const filePath = path.join(
-      initialized.repositoryRoot,
-      ".template",
-      `${scenario.file}.json`,
-    );
-    const value = JSON.parse(await readFile(filePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    await writeFile(
-      filePath,
-      `${JSON.stringify(scenario.mutate(value), null, 2)}\n`,
-    );
-    const before = await workspaceByteSnapshot(initialized.repositoryRoot);
+      {
+        name: "a missing Blueprint Package Definition ID",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (definition, index) => {
+              if (index !== 0) return definition;
+              const { packageDefinitionId: _removed, ...rest } = definition;
+              return rest;
+            },
+          ),
+        }),
+        message: "Package Definition ID must use the package-<sha256> format",
+      },
+      {
+        name: "an invalid Blueprint Package Definition ID",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (definition, index) =>
+              index === 0
+                ? { ...definition, packageDefinitionId: "package-short" }
+                : definition,
+          ),
+        }),
+        message: "Package Definition ID must use the package-<sha256> format",
+      },
+      {
+        name: "an unknown Blueprint Package Definition ID field",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (definition, index) =>
+              index === 0
+                ? { ...definition, packageDefinitionIdentity: "legacy-id" }
+                : definition,
+          ),
+        }),
+        message: ".packages[0].packageDefinitionIdentity",
+      },
+      {
+        name: "duplicate Blueprint Package Definitions",
+        file: "blueprint" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: [
+            ...((value.packages as readonly Record<string, unknown>[]) ?? []),
+            (value.packages as readonly Record<string, unknown>[])[0],
+          ],
+        }),
+        message: "Package Definition ID must be unique",
+      },
+      {
+        name: "duplicate Package Planning Provenance",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: [
+            ...((value.packages as readonly Record<string, unknown>[]) ?? []),
+            (value.packages as readonly Record<string, unknown>[])[0],
+          ],
+        }),
+        message: "packages packageDefinitionId must be unique",
+      },
+      {
+        name: "a Blueprint and Generation Record Package Definition ID set mismatch",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) =>
+              index === 0
+                ? {
+                    ...record,
+                    packageDefinitionId: `package-${"f".repeat(64)}`,
+                  }
+                : record,
+          ),
+        }),
+        message: "has no matching Project Blueprint Package Definition",
+      },
+      {
+        name: "a Blueprint and Generation Record Package Definition ID-only swap",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => {
+          const packages = [
+            ...(value.packages as readonly Record<string, unknown>[]),
+          ];
+          const firstId = packages[0]!.packageDefinitionId;
+          packages[0] = {
+            ...packages[0],
+            packageDefinitionId: packages[1]!.packageDefinitionId,
+          };
+          packages[1] = {
+            ...packages[1],
+            packageDefinitionId: firstId,
+          };
+          return { ...value, packages };
+        },
+        message: "Generation Record path witness",
+      },
+      {
+        name: "Blueprint and provenance path mismatch",
+        file: "generation" as const,
+        mutate: (value: Record<string, unknown>) => ({
+          ...value,
+          packages: (value.packages as readonly Record<string, unknown>[]).map(
+            (record, index) =>
+              index === 0 ? { ...record, path: "packages/missing" } : record,
+          ),
+        }),
+        message: "Generation Record path witness",
+      },
+    ],
+    "fails closed on $name without rewriting metadata",
+    async (scenario) => {
+      const initialized = await initializedRepository();
+      const filePath = path.join(
+        initialized.repositoryRoot,
+        ".template",
+        `${scenario.file}.json`,
+      );
+      const value = JSON.parse(await readFile(filePath, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      await writeFile(
+        filePath,
+        `${JSON.stringify(scenario.mutate(value), null, 2)}\n`,
+      );
+      const before = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    const replaySpies =
-      initialized.definition.packageContributionReplayAdapters.map((adapter) =>
-        vi.spyOn(adapter, "replay"),
-      );
-    try {
-      expect(() =>
-        loadLocalTemplateMetadata(initialized.repositoryRoot),
-      ).toThrow(scenario.message);
-      for (const replaySpy of replaySpies) {
-        expect(replaySpy).not.toHaveBeenCalled();
+      const replaySpies =
+        initialized.definition.packageContributionReplayAdapters.map(
+          (adapter) => mock.method(adapter, "replay"),
+        );
+      try {
+        assertThrowsContaining(
+          () => loadLocalTemplateMetadata(initialized.repositoryRoot),
+          scenario.message,
+        );
+        for (const replaySpy of replaySpies) {
+          assert.strictEqual(replaySpy.mock.callCount(), 0);
+        }
+        assert.deepStrictEqual(
+          await workspaceByteSnapshot(initialized.repositoryRoot),
+          before,
+        );
+      } finally {
+        for (const replaySpy of replaySpies) replaySpy.mock.restore();
       }
-      expect(await workspaceByteSnapshot(initialized.repositoryRoot)).toEqual(
-        before,
-      );
-    } finally {
-      for (const replaySpy of replaySpies) replaySpy.mockRestore();
-    }
-  });
+    },
+  );
 });

@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -12,7 +14,17 @@ import {
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+
+import {
+  any,
+  assertContainsEqual,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertNotLength,
+  hasProperty,
+  objectContaining,
+  stringMatching,
+} from "./assertions.ts";
 
 // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照的精确三段版本。
 const toolchain = {
@@ -21,8 +33,8 @@ const toolchain = {
   packageManagerPin: "pnpm@11.11.0",
 } as const;
 
-describe("Generated Repository Node manifest publication policy", () => {
-  it("derives root lint fixer paths from root-owned joint E2E", () => {
+void describe("Generated Repository Node manifest publication policy", () => {
+  void it("derives root lint fixer paths from root-owned joint E2E", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const repositoryName = `manifest-lint-fix-${definition.metadata.name}`;
       const plan = planGeneratedRepositoryInitialization({
@@ -39,13 +51,14 @@ describe("Generated Repository Node manifest publication policy", () => {
       const rootAutomationPaths =
         plan.vueHonoJointE2e === undefined ? "scripts" : "scripts test";
 
-      expect(rootManifest?.scripts?.["lint:fix"]).toBe(
+      assert.strictEqual(
+        rootManifest?.scripts?.["lint:fix"],
         `oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths} --fix`,
       );
     }
   });
 
-  it("omits versions from every initially private package", () => {
+  void it("omits versions from every initially private package", () => {
     const publicManifestNames = new Set<string>();
     for (const definition of builtInPresetRegistry.all()) {
       const repositoryName = `manifest-policy-${definition.metadata.name}`;
@@ -61,18 +74,20 @@ describe("Generated Repository Node manifest publication policy", () => {
         (manifest) => manifest.name === repositoryName,
       );
 
-      expect(rootManifest).toEqual(
-        expect.objectContaining({ name: repositoryName, private: true }),
+      assertDeepStrictEqualWithMatchers(
+        rootManifest,
+        objectContaining({ name: repositoryName, private: true }),
       );
       for (const manifest of plan.manifests) {
         if (manifest.private === true) {
-          expect(manifest).not.toHaveProperty("version");
+          assert.ok(!hasProperty(manifest, "version"));
           continue;
         }
-        expect(manifest).toEqual(
-          expect.objectContaining({
-            name: expect.any(String),
-            version: expect.stringMatching(/^\d+\.\d+\.\d+(?:[-+].+)?$/u),
+        assertDeepStrictEqualWithMatchers(
+          manifest,
+          objectContaining({
+            name: any(String),
+            version: stringMatching(/^\d+\.\d+\.\d+(?:[-+].+)?$/u),
           }),
         );
         publicManifestNames.add(manifest.name as string);
@@ -85,7 +100,7 @@ describe("Generated Repository Node manifest publication policy", () => {
           packageDefinition.packageDefinitionId ===
           foundationRecord?.packageDefinitionId,
       );
-      expect(configurationDefinition).toBeDefined();
+      assert.notStrictEqual(configurationDefinition, undefined);
       const publicCandidateDefinitionIds = new Set(
         plan.packageContributions.flatMap((contribution) => {
           if (
@@ -109,7 +124,7 @@ describe("Generated Repository Node manifest publication policy", () => {
         const manifest = plan.manifests.find(
           (candidate) => candidate.name === packageDefinition.name,
         );
-        expect(manifest).toBeDefined();
+        assert.notStrictEqual(manifest, undefined);
         const dependencyEntry = [
           ...Object.entries(
             (manifest?.dependencies ?? {}) as Record<string, unknown>,
@@ -139,7 +154,8 @@ describe("Generated Repository Node manifest publication policy", () => {
         requiresPackingHookTsconfig ||=
           manifest?.private !== true &&
           dependencyEntry.field === "devDependencies";
-        expect(dependencyEntry.specifier).toBe(
+        assert.strictEqual(
+          dependencyEntry.specifier,
           isPublicDevelopmentEdge
             ? `link:${path.posix.relative(
                 packageDefinition.path,
@@ -152,47 +168,48 @@ describe("Generated Repository Node manifest publication policy", () => {
         (operation) =>
           operation.kind === "copyFile" && operation.to === ".pnpmfile.mjs",
       );
-      expect(packingHookOperations).toHaveLength(requiresPackingHook ? 1 : 0);
-      expect(
+      assertLength(packingHookOperations, requiresPackingHook ? 1 : 0);
+      assertDeepStrictEqualWithMatchers(
         plan.operations.find(
           (operation) =>
             operation.kind === "copyFile" && operation.to === "tsconfig.json",
         ),
-      ).toEqual(expect.objectContaining({ from: "tsconfig.json" }));
-      expect(
+        objectContaining({ from: "tsconfig.json" }),
+      );
+      assertLength(
         plan.operations.filter(
           (operation) =>
             operation.kind === "mergeJsonTemplate" &&
             operation.to === "tsconfig.json" &&
             operation.from === "tsconfig.packing-hook.json",
         ),
-      ).toHaveLength(requiresPackingHookTsconfig ? 1 : 0);
-      expect(plan.reconciliation).toContainEqual({
+        requiresPackingHookTsconfig ? 1 : 0,
+      );
+      assertContainsEqual(plan.reconciliation, {
         path: "tsconfig.json",
         driver: "structured",
       });
-      expect(
+      assertLength(
         plan.operations.filter(
           (operation) => "to" in operation && operation.to === "tsconfig.json",
         ),
-      ).toHaveLength(
         (requiresPackingHook ? 2 : 1) +
           (plan.vueHonoJointE2e === undefined ? 0 : 1),
       );
-      expect(plan.generationRecord.templateVersion).toBe("0.0.0");
+      assert.strictEqual(plan.generationRecord.templateVersion, "0.0.0");
     }
 
-    expect(publicManifestNames).toEqual(new Set());
+    assert.deepStrictEqual(publicManifestNames, new Set());
   });
 
-  it("preserves the policy in every complete Package Addition after projection", async () => {
+  void it("preserves the policy in every complete Package Addition after projection", async () => {
     const definitions = builtInPresetRegistry.all();
     const addableDefinitions = definitions.filter(
       (definition) => definition.planPackageAddition !== undefined,
     );
 
-    expect(definitions).not.toHaveLength(0);
-    expect(addableDefinitions).not.toHaveLength(0);
+    assertNotLength(definitions, 0);
+    assertNotLength(addableDefinitions, 0);
 
     for (const baseDefinition of definitions) {
       const workspace = await mkdtemp(
@@ -218,19 +235,23 @@ describe("Generated Repository Node manifest publication policy", () => {
           (definition) => definition.role === "native-package",
         );
         if (nativePackage !== undefined) {
-          await expect(
-            readFile(
-              path.join(targetDir, nativePackage.path, "Cargo.toml"),
-              "utf8",
+          assert.ok(
+            (
+              await readFile(
+                path.join(targetDir, nativePackage.path, "Cargo.toml"),
+                "utf8",
+              )
+            ).includes('version = "0.1.0"'),
+          );
+          assert.ok(
+            (
+              await readFile(
+                path.join(targetDir, nativePackage.path, "Cargo.lock"),
+                "utf8",
+              )
+            ).includes(
+              `name = "${nativePackage.name.slice(nativePackage.name.lastIndexOf("/") + 1)}"\nversion = "0.1.0"`,
             ),
-          ).resolves.toContain('version = "0.1.0"');
-          await expect(
-            readFile(
-              path.join(targetDir, nativePackage.path, "Cargo.lock"),
-              "utf8",
-            ),
-          ).resolves.toContain(
-            `name = "${nativePackage.name.slice(nativePackage.name.lastIndexOf("/") + 1)}"\nversion = "0.1.0"`,
           );
         }
         const localTemplateMetadata = loadLocalTemplateMetadata(targetDir);
@@ -255,27 +276,39 @@ describe("Generated Repository Node manifest publication policy", () => {
             const entry = projection.entries.find(
               (candidate) => candidate.path === manifestPath,
             );
-            expect({ manifestPath, found: entry !== undefined }).toEqual({
-              manifestPath,
-              found: true,
-            });
+            assert.deepStrictEqual(
+              { manifestPath, found: entry !== undefined },
+              {
+                manifestPath,
+                found: true,
+              },
+            );
             const manifest = JSON.parse(
               new TextDecoder().decode(entry!.content),
             ) as Record<string, unknown>;
             if (manifest.private === true) {
-              expect({
-                manifestPath,
-                hasVersion: Object.hasOwn(manifest, "version"),
-              }).toEqual({ manifestPath, hasVersion: false });
-              expect({
-                manifestPath,
-                leadingKeys: Object.keys(manifest).slice(0, 2),
-              }).toEqual({ manifestPath, leadingKeys: ["name", "private"] });
+              assert.deepStrictEqual(
+                {
+                  manifestPath,
+                  hasVersion: Object.hasOwn(manifest, "version"),
+                },
+                { manifestPath, hasVersion: false },
+              );
+              assert.deepStrictEqual(
+                {
+                  manifestPath,
+                  leadingKeys: Object.keys(manifest).slice(0, 2),
+                },
+                { manifestPath, leadingKeys: ["name", "private"] },
+              );
             } else {
-              expect({
-                manifestPath,
-                leadingKeys: Object.keys(manifest).slice(0, 2),
-              }).toEqual({ manifestPath, leadingKeys: ["name", "version"] });
+              assert.deepStrictEqual(
+                {
+                  manifestPath,
+                  leadingKeys: Object.keys(manifest).slice(0, 2),
+                },
+                { manifestPath, leadingKeys: ["name", "version"] },
+              );
             }
           }
         }

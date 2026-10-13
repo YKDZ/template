@@ -1,8 +1,9 @@
+import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
 
 type TurboBoundaries = {
   readonly boundaries: {
@@ -81,8 +82,8 @@ function importedPackage(
   )?.[0];
 }
 
-describe("Template Repository dependency DAG", () => {
-  it("keeps package manifests and source imports on the one-way architecture", async () => {
+void describe("Template Repository dependency DAG", () => {
+  void it("keeps package manifests and source imports on the one-way architecture", async () => {
     for (const [key, definition] of Object.entries(packages) as [
       PackageKey,
       (typeof packages)[PackageKey],
@@ -100,7 +101,7 @@ describe("Template Repository dependency DAG", () => {
         for (const dependency of Object.keys(manifest[field] ?? {})) {
           const target = packageByName.get(dependency);
           if (target !== undefined)
-            expect(allowed, `${key} ${field}`).toContain(target);
+            assert.ok(allowed.has(target), `${key} ${field}`);
         }
       }
 
@@ -128,10 +129,10 @@ describe("Template Repository dependency DAG", () => {
           if (specifier !== undefined) {
             const target = importedPackage(sourceFile, specifier);
             if (target !== undefined) {
-              expect(
-                allowed,
+              assert.ok(
+                allowed.has(target),
                 `${key} imports ${specifier} from ${file}`,
-              ).toContain(target);
+              );
             }
           }
           ts.forEachChild(node, inspect);
@@ -141,19 +142,19 @@ describe("Template Repository dependency DAG", () => {
     }
   });
 
-  it("keeps Turbo's target-aware compatibility rules no broader than needed", async () => {
+  void it("keeps Turbo's target-aware compatibility rules no broader than needed", async () => {
     const turbo = JSON.parse(
       await readFile("turbo.json", "utf8"),
     ) as TurboBoundaries;
     const tags = turbo.boundaries.tags;
     for (const tag of ["template-core", "template-builtin-presets"]) {
-      expect(tags[tag]?.dependencies.allow).not.toContain("template-cli");
+      assert.ok(!tags[tag]?.dependencies.allow.includes("template-cli"));
     }
-    expect(tags["template-checks"]?.dependencies.allow).not.toContain(
-      "template-cli",
+    assert.ok(
+      !tags["template-checks"]?.dependencies.allow.includes("template-cli"),
     );
     for (const [tag, rule] of Object.entries(tags)) {
-      expect(rule.dependencies.allow).toContain(tag);
+      assert.ok(rule.dependencies.allow.includes(tag));
     }
   });
 });

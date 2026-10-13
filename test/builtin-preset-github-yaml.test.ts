@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -15,8 +17,9 @@ import {
 } from "@ykdz/template-checks/workflow-contract";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+
+import { assertThrowsMatching } from "./assertions.ts";
 
 function rootOnlyPlan(): GeneratedRepositoryPlan {
   const definition = builtInPresetRegistry.all().find((candidate) => {
@@ -120,43 +123,43 @@ async function deploymentWorkflowSource(): Promise<string> {
 async function expectDeploymentWorkflowRejected(source: string): Promise<void> {
   const plan = deploymentPlan();
   const baseline = await renderedWorkflow(plan);
-  expect(() =>
+  assert.doesNotThrow(() =>
     assertWorkflowContract(
       plan,
       baseline.sourcePath,
       baseline.source,
       parse(baseline.source) as Record<string, unknown>,
     ),
-  ).not.toThrow();
-  expect(() =>
+  );
+  assert.throws(() =>
     assertWorkflowContract(
       plan,
       baseline.sourcePath,
       source,
       parse(source) as Record<string, unknown>,
     ),
-  ).toThrow();
+  );
 }
 
 async function expectRootOnlyWorkflowRejected(source: string): Promise<void> {
   const plan = rootOnlyPlan();
   const baseline = await renderedWorkflow(plan);
-  expect(() =>
+  assert.doesNotThrow(() =>
     assertWorkflowContract(
       plan,
       baseline.sourcePath,
       baseline.source,
       parse(baseline.source) as Record<string, unknown>,
     ),
-  ).not.toThrow();
-  expect(() =>
+  );
+  assert.throws(() =>
     assertWorkflowContract(
       plan,
       baseline.sourcePath,
       source,
       parse(source) as Record<string, unknown>,
     ),
-  ).toThrow();
+  );
 }
 
 function initializationPublicationPlan(): GeneratedRepositoryPlan {
@@ -186,8 +189,8 @@ function initializationPublicationPlan(): GeneratedRepositoryPlan {
   throw new Error("Expected a public CLI candidate capability");
 }
 
-describe("Built-in Preset GitHub YAML checker", () => {
-  it("accepts independent immutable upgrades and presentation-only YAML edits", async () => {
+void describe("Built-in Preset GitHub YAML checker", () => {
+  void it("accepts independent immutable upgrades and presentation-only YAML edits", async () => {
     for (const plan of [rootOnlyPlan(), deploymentPlan()]) {
       const baseline = await renderedWorkflow(plan);
       const source = baseline.source
@@ -201,13 +204,13 @@ describe("Built-in Preset GitHub YAML checker", () => {
       workflow.concurrency = Object.fromEntries(
         Object.entries(workflow.concurrency).toReversed(),
       );
-      expect(() =>
+      assert.doesNotThrow(() =>
         assertWorkflowContract(plan, baseline.sourcePath, source, workflow),
-      ).not.toThrow();
+      );
     }
   });
 
-  it("accepts publication Action upgrades and presentation changes from a real generation", async () => {
+  void it("accepts publication Action upgrades and presentation changes from a real generation", async () => {
     const plan = initializationPublicationPlan();
     const baseline = await renderedGithubSource(
       plan,
@@ -220,21 +223,21 @@ describe("Built-in Preset GitHub YAML checker", () => {
     workflow.jobs.publish.permissions = Object.fromEntries(
       Object.entries(workflow.jobs.publish.permissions).toReversed(),
     );
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertPublicationWorkflowContract(plan, source, workflow),
-    ).not.toThrow();
+    );
   });
 
-  it("rejects damaged Dependabot update, ignore, and directory semantics from a real generated file", async () => {
+  void it("rejects damaged Dependabot update, ignore, and directory semantics from a real generated file", async () => {
     const plan = rootOnlyPlan();
     const baseline = await renderedDependabot(plan);
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertDependabotContract(
         plan,
         baseline.sourcePath,
         parse(baseline.source),
       ),
-    ).not.toThrow();
+    );
 
     const mutations = [
       {
@@ -257,17 +260,19 @@ describe("Built-in Preset GitHub YAML checker", () => {
       },
     ];
     for (const mutation of mutations) {
-      expect(() =>
-        assertDependabotContract(
-          plan,
-          baseline.sourcePath,
-          parse(mutation.source),
-        ),
-      ).toThrow(mutation.diagnostic);
+      assertThrowsMatching(
+        () =>
+          assertDependabotContract(
+            plan,
+            baseline.sourcePath,
+            parse(mutation.source),
+          ),
+        mutation.diagnostic,
+      );
     }
   });
 
-  it("rejects root-only workflows with extra jobs or job-level permissions", async () => {
+  void it("rejects root-only workflows with extra jobs or job-level permissions", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
       source.replace(
@@ -280,7 +285,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
   });
 
-  it("rejects every workflow-level execution bypass", async () => {
+  void it("rejects every workflow-level execution bypass", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
       source.replace(
@@ -291,7 +296,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     await expectRootOnlyWorkflowRejected(`${source}\nenv:\n  CI: true\n`);
   });
 
-  it("rejects root-only workflows with extra steps or a second checkout", async () => {
+  void it("rejects root-only workflows with extra steps or a second checkout", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
       source.replace(
@@ -307,7 +312,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
   });
 
-  it("rejects mutable references, wrong Action identities, and detached release comments", async () => {
+  void it("rejects mutable references, wrong Action identities, and detached release comments", async () => {
     const source = await rootOnlyWorkflowSource();
     await expectRootOnlyWorkflowRejected(
       source.replace(/(uses: pnpm\/action-setup)@[a-f0-9]{40}/u, "$1@main"),
@@ -321,7 +326,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
   });
 
-  it("rejects lost setup configuration, credentials, and frozen installation before the check", async () => {
+  void it("rejects lost setup configuration, credentials, and frozen installation before the check", async () => {
     const source = await rootOnlyWorkflowSource();
     for (const mutated of [
       source.replace("persist-credentials: false", "persist-credentials: true"),
@@ -335,7 +340,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
       await expectRootOnlyWorkflowRejected(mutated);
   });
 
-  it("rejects deployment matrices without independent bounded capability legs", async () => {
+  void it("rejects deployment matrices without independent bounded capability legs", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
       source.replace("      fail-fast: false", "      fail-fast: true"),
@@ -376,7 +381,7 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
   });
 
-  it("rejects diagnostics that lose root-only staging scope, owner facts, or upload outside its fixed LCA", async () => {
+  void it("rejects diagnostics that lose root-only staging scope, owner facts, or upload outside its fixed LCA", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
       source.replace(
@@ -398,17 +403,17 @@ describe("Built-in Preset GitHub YAML checker", () => {
     );
   });
 
-  it("does not let a malformed plan supply diagnostic paths to the structured checker", async () => {
+  void it("does not let a malformed plan supply diagnostic paths to the structured checker", async () => {
     const plan = deploymentPlan();
     const baseline = await renderedWorkflow(plan);
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertWorkflowContract(
         plan,
         baseline.sourcePath,
         baseline.source,
         parse(baseline.source) as Record<string, unknown>,
       ),
-    ).not.toThrow();
+    );
 
     const maliciousPlan = {
       ...plan,
@@ -420,15 +425,19 @@ describe("Built-in Preset GitHub YAML checker", () => {
         },
       ],
     } as unknown as GeneratedRepositoryPlan;
-    expect(() =>
-      assertWorkflowContract(
-        maliciousPlan,
-        baseline.sourcePath,
-        baseline.source,
-        parse(baseline.source) as Record<string, unknown>,
-      ),
-    ).toThrow(
-      "CI Diagnostic Artifact declarations may contain only kind and owner",
+    assert.throws(
+      () =>
+        assertWorkflowContract(
+          maliciousPlan,
+          baseline.sourcePath,
+          baseline.source,
+          parse(baseline.source) as Record<string, unknown>,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "CI Diagnostic Artifact declarations may contain only kind and owner",
+        ),
     );
 
     const undeclaredOwnerPlan = {
@@ -440,15 +449,19 @@ describe("Built-in Preset GitHub YAML checker", () => {
         },
       ],
     } as unknown as GeneratedRepositoryPlan;
-    expect(() =>
-      assertWorkflowContract(
-        undeclaredOwnerPlan,
-        baseline.sourcePath,
-        baseline.source,
-        parse(baseline.source) as Record<string, unknown>,
-      ),
-    ).toThrow(
-      "CI Diagnostic Artifact owner is not a declared Package Boundary",
+    assert.throws(
+      () =>
+        assertWorkflowContract(
+          undeclaredOwnerPlan,
+          baseline.sourcePath,
+          baseline.source,
+          parse(baseline.source) as Record<string, unknown>,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "CI Diagnostic Artifact owner is not a declared Package Boundary",
+        ),
     );
 
     const unsafeOwnerPlan = {
@@ -460,19 +473,23 @@ describe("Built-in Preset GitHub YAML checker", () => {
         },
       ],
     } as unknown as GeneratedRepositoryPlan;
-    expect(() =>
-      assertWorkflowContract(
-        unsafeOwnerPlan,
-        baseline.sourcePath,
-        baseline.source,
-        parse(baseline.source) as Record<string, unknown>,
-      ),
-    ).toThrow(
-      "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
+    assert.throws(
+      () =>
+        assertWorkflowContract(
+          unsafeOwnerPlan,
+          baseline.sourcePath,
+          baseline.source,
+          parse(baseline.source) as Record<string, unknown>,
+        ),
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "CI Diagnostic Artifact owner has an unsafe Package Boundary path",
+        ),
     );
   });
 
-  it("accepts a parsed deployment workflow with multiple validated diagnostic owners", async () => {
+  void it("accepts a parsed deployment workflow with multiple validated diagnostic owners", async () => {
     const plan = deploymentPlan();
     const baseline = await renderedWorkflow(plan);
     const declarations = [
@@ -501,14 +518,14 @@ describe("Built-in Preset GitHub YAML checker", () => {
       ciDiagnosticArtifacts: declarations,
     } as GeneratedRepositoryPlan;
 
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertWorkflowContract(
         multipleOwnersPlan,
         baseline.sourcePath,
         source,
         parse(source) as Record<string, unknown>,
       ),
-    ).not.toThrow();
+    );
     const steps = (
       parse(source) as {
         readonly jobs: {
@@ -522,14 +539,22 @@ describe("Built-in Preset GitHub YAML checker", () => {
         };
       }
     ).jobs.check.steps;
-    expect(steps.at(-1)?.with?.path).toBe(".template-ci-diagnostics");
-    expect(steps.at(-2)?.run).toContain(
-      "for diagnostic_directory in test-results playwright-report; do",
+    assert.strictEqual(steps.at(-1)?.with?.path, ".template-ci-diagnostics");
+    assert.ok(
+      steps
+        .at(-2)
+        ?.run?.includes(
+          "for diagnostic_directory in test-results playwright-report; do",
+        ),
     );
-    expect(steps.at(-2)?.run).toContain(
-      'destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"',
+    assert.ok(
+      steps
+        .at(-2)
+        ?.run?.includes(
+          'destination_path=".template-ci-diagnostics/$owner_path/$diagnostic_directory"',
+        ),
     );
-    expect(steps.at(-2)?.env).toEqual({
+    assert.deepStrictEqual(steps.at(-2)?.env, {
       DIAGNOSTIC_OWNER_PATHS: "apps/admin\napps/web",
     });
   });

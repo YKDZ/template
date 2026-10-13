@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   builtInPresetRegistry,
@@ -10,8 +12,9 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { assertWorkflowContract } from "@ykdz/template-checks/workflow-contract";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+
+import { hasProperty } from "./assertions.ts";
 
 async function renderRootCheckWorkflow(): Promise<{
   readonly source: string;
@@ -61,8 +64,8 @@ async function renderRootCheckWorkflow(): Promise<{
   }
 }
 
-describe("Generated Root Check workflow", () => {
-  it("keeps raw diagnostic declarations out of the generated repository plan", () => {
+void describe("Generated Root Check workflow", () => {
+  void it("keeps raw diagnostic declarations out of the generated repository plan", () => {
     const definition = builtInPresetRegistry.all()[0];
     if (definition === undefined) {
       throw new Error("Expected at least one Built-in Preset Definition");
@@ -75,18 +78,18 @@ describe("Generated Root Check workflow", () => {
       }),
     });
 
-    expect(plan).not.toHaveProperty("ciDiagnosticArtifactDeclarations");
+    assert.ok(!hasProperty(plan, "ciDiagnosticArtifactDeclarations"));
   });
 
-  it("runs the Root Check contract through real generated files", async () => {
+  void it("runs the Root Check contract through real generated files", async () => {
     const { source, plan } = await renderRootCheckWorkflow();
-    expect(() =>
+    assert.doesNotThrow(() =>
       assertWorkflowContract(
         plan,
         ".github/workflows/check.yml",
         source,
         parse(source),
       ),
-    ).not.toThrow();
+    );
   });
 });

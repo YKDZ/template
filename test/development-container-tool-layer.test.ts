@@ -1,6 +1,8 @@
+import assert from "node:assert/strict";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { describe, it } from "node:test";
 
 import {
   planDevelopmentContainerToolLayers,
@@ -10,7 +12,12 @@ import {
   createTemplateSourceHandle,
   renderProject,
 } from "@ykdz/template-core/renderer";
-import { describe, expect, it } from "vitest";
+
+import {
+  assertPartialDeepStrictEqual,
+  testEach,
+  assertRejectsContaining,
+} from "./assertions.ts";
 
 const source = createTemplateSourceHandle(
   path.resolve("test/fixtures/development-container-tool-layers"),
@@ -28,8 +35,8 @@ function layer(
   };
 }
 
-describe("Development Container Tool Layer Contract", () => {
-  it("plans source-backed layers and their structured capability facts", async () => {
+void describe("Development Container Tool Layer Contract", () => {
+  void it("plans source-backed layers and their structured capability facts", async () => {
     const plan = await planDevelopmentContainerToolLayers({
       baseLayer: layer({
         identity: "node-pnpm",
@@ -68,15 +75,15 @@ describe("Development Container Tool Layer Contract", () => {
       ],
     });
 
-    expect(plan.layers.map(({ identity }) => identity)).toEqual([
-      "node-pnpm",
-      "rust",
-    ]);
-    expect(plan.buildArguments).toEqual([
+    assert.deepStrictEqual(
+      plan.layers.map(({ identity }) => identity),
+      ["node-pnpm", "rust"],
+    );
+    assert.deepStrictEqual(plan.buildArguments, [
       { name: "NODE_VERSION", value: "24" },
       { name: "RUST_TOOLCHAIN", value: "stable" },
     ]);
-    expect(plan.mounts).toEqual([
+    assert.deepStrictEqual(plan.mounts, [
       {
         identity: "pnpm-store",
         type: "volume",
@@ -84,19 +91,20 @@ describe("Development Container Tool Layer Contract", () => {
         target: "/pnpm/store",
       },
     ]);
-    expect(plan.probes.map(({ identity }) => identity)).toEqual([
-      "pnpm",
-      "cargo",
-    ]);
+    assert.deepStrictEqual(
+      plan.probes.map(({ identity }) => identity),
+      ["pnpm", "cargo"],
+    );
   });
 
-  it.each([
-    ["COPY", "hidden-copy.Dockerfile"],
-    ["ADD", "hidden-add-backtick.Dockerfile"],
-  ])(
+  testEach(
+    [
+      ["COPY", "hidden-copy.Dockerfile"],
+      ["ADD", "hidden-add-backtick.Dockerfile"],
+    ],
     "rejects a hidden %s instruction reconstructed from logical lines",
     async (instruction, from) => {
-      await expect(
+      await assertRejectsContaining(
         planDevelopmentContainerToolLayers({
           baseLayer: layer({
             identity: "node-pnpm",
@@ -109,13 +117,12 @@ describe("Development Container Tool Layer Contract", () => {
             }),
           ],
         }),
-      ).rejects.toThrow(
         `must not use Dockerfile instruction ${instruction}; allowed instructions are ARG, ENV, and RUN.`,
       );
     },
   );
 
-  it("validates current Dockerfile fragment operations before writing generated files", async () => {
+  void it("validates current Dockerfile fragment operations before writing generated files", async () => {
     const targetRoot = await mkdtemp(
       path.join(tmpdir(), "template-development-container-tool-layer-"),
     );
@@ -123,7 +130,7 @@ describe("Development Container Tool Layer Contract", () => {
     const dockerfilePath = path.join(targetRoot, ".devcontainer/Dockerfile");
 
     try {
-      await expect(
+      await assert.rejects(
         renderProject({
           targetRoot,
           operations: [
@@ -143,21 +150,30 @@ describe("Development Container Tool Layer Contract", () => {
             },
           ],
         }),
-      ).rejects.toThrow(
-        "must not use Dockerfile instruction COPY; allowed instructions are ARG, ENV, and RUN.",
+        (error) =>
+          error instanceof Error &&
+          error.message.includes(
+            "must not use Dockerfile instruction COPY; allowed instructions are ARG, ENV, and RUN.",
+          ),
       );
-      await expect(access(earlierGeneratedFile)).rejects.toMatchObject({
-        code: "ENOENT",
+      await assert.rejects(access(earlierGeneratedFile), (error) => {
+        assertPartialDeepStrictEqual(error, {
+          code: "ENOENT",
+        });
+        return true;
       });
-      await expect(access(dockerfilePath)).rejects.toMatchObject({
-        code: "ENOENT",
+      await assert.rejects(access(dockerfilePath), (error) => {
+        assertPartialDeepStrictEqual(error, {
+          code: "ENOENT",
+        });
+        return true;
       });
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
   });
 
-  it("orders equivalent dependency graphs independently of registration order", async () => {
+  void it("orders equivalent dependency graphs independently of registration order", async () => {
     const descriptors = [
       layer({
         identity: "zeta",
@@ -193,19 +209,17 @@ describe("Development Container Tool Layer Contract", () => {
       plan(descriptors.toReversed()),
     ]);
 
-    expect(forward.layers.map(({ identity }) => identity)).toEqual([
-      "node-pnpm",
-      "alpha",
-      "rust",
-      "cargo-tools",
-      "zeta",
-    ]);
-    expect(reverse.layers.map(({ identity }) => identity)).toEqual(
+    assert.deepStrictEqual(
+      forward.layers.map(({ identity }) => identity),
+      ["node-pnpm", "alpha", "rust", "cargo-tools", "zeta"],
+    );
+    assert.deepStrictEqual(
+      reverse.layers.map(({ identity }) => identity),
       forward.layers.map(({ identity }) => identity),
     );
   });
 
-  it("deduplicates equivalent normalized layer identities", async () => {
+  void it("deduplicates equivalent normalized layer identities", async () => {
     const first = layer({
       identity: "rust",
       from: "rust.Dockerfile",
@@ -235,18 +249,18 @@ describe("Development Container Tool Layer Contract", () => {
       layers: [first, equivalent],
     });
 
-    expect(plan.layers.map(({ identity }) => identity)).toEqual([
-      "node-pnpm",
-      "rust",
-    ]);
-    expect(plan.probes.map(({ identity }) => identity)).toEqual([
-      "cargo",
-      "rustc",
-    ]);
+    assert.deepStrictEqual(
+      plan.layers.map(({ identity }) => identity),
+      ["node-pnpm", "rust"],
+    );
+    assert.deepStrictEqual(
+      plan.probes.map(({ identity }) => identity),
+      ["cargo", "rustc"],
+    );
   });
 
-  it("rejects conflicting reuse of a stable layer identity", async () => {
-    await expect(
+  void it("rejects conflicting reuse of a stable layer identity", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -265,13 +279,16 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer identity rust has conflicting descriptors.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer identity rust has conflicting descriptors.",
+        ),
     );
   });
 
-  it("rejects a missing layer dependency by identity", async () => {
-    await expect(
+  void it("rejects a missing layer dependency by identity", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -285,13 +302,16 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer rust requires missing layer system-packages.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer rust requires missing layer system-packages.",
+        ),
     );
   });
 
-  it("rejects dependencies declared by the unique base foundation", async () => {
-    await expect(
+  void it("rejects dependencies declared by the unique base foundation", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -299,13 +319,16 @@ describe("Development Container Tool Layer Contract", () => {
           requires: ["system-packages"],
         }),
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer node-pnpm is the base foundation and must not require other layers.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer node-pnpm is the base foundation and must not require other layers.",
+        ),
     );
   });
 
-  it("rejects dependency cycles", async () => {
-    await expect(
+  void it("rejects dependency cycles", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -324,13 +347,16 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer dependency cycle involves: alpha, beta.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer dependency cycle involves: alpha, beta.",
+        ),
     );
   });
 
-  it("rejects build-argument ownership collisions", async () => {
-    await expect(
+  void it("rejects build-argument ownership collisions", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -344,13 +370,16 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer build argument NODE_VERSION is declared by both node-pnpm and duplicate-node.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer build argument NODE_VERSION is declared by both node-pnpm and duplicate-node.",
+        ),
     );
   });
 
-  it("rejects duplicate build arguments within one layer", async () => {
-    await expect(
+  void it("rejects duplicate build arguments within one layer", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -361,13 +390,16 @@ describe("Development Container Tool Layer Contract", () => {
           ],
         }),
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer node-pnpm declares build argument NODE_VERSION more than once.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer node-pnpm declares build argument NODE_VERSION more than once.",
+        ),
     );
   });
 
-  it("rejects environment ownership collisions", async () => {
-    await expect(
+  void it("rejects environment ownership collisions", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -380,13 +412,16 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer environment PNPM_HOME is declared by both node-pnpm and duplicate-pnpm-environment.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer environment PNPM_HOME is declared by both node-pnpm and duplicate-pnpm-environment.",
+        ),
     );
   });
 
-  it("rejects mount target collisions", async () => {
-    await expect(
+  void it("rejects mount target collisions", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -415,31 +450,38 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer mount target /cache is declared by both node-pnpm and rust.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer mount target /cache is declared by both node-pnpm and rust.",
+        ),
     );
   });
 
-  it("requires the base layer to establish exactly one image", async () => {
-    await expect(
+  void it("requires the base layer to establish exactly one image", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
           from: "no-from.Dockerfile",
         }),
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer node-pnpm base fragment no-from.Dockerfile must contain exactly one FROM instruction; found 0.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer node-pnpm base fragment no-from.Dockerfile must contain exactly one FROM instruction; found 0.",
+        ),
     );
   });
 
-  it.each([
-    ["FROM", "optional-from.Dockerfile"],
-    ["SHELL", "optional-shell.Dockerfile"],
-  ])(
+  testEach(
+    [
+      ["FROM", "optional-from.Dockerfile"],
+      ["SHELL", "optional-shell.Dockerfile"],
+    ],
     "reserves the %s instruction for the base layer",
     async (instruction, from) => {
-      await expect(
+      await assertRejectsContaining(
         planDevelopmentContainerToolLayers({
           baseLayer: layer({
             identity: "node-pnpm",
@@ -452,12 +494,13 @@ describe("Development Container Tool Layer Contract", () => {
             }),
           ],
         }),
-      ).rejects.toThrow(`must not use Dockerfile instruction ${instruction}`);
+        `must not use Dockerfile instruction ${instruction}`,
+      );
     },
   );
 
-  it("rejects legacy non-Dockerfile fragment paths", async () => {
-    await expect(
+  void it("rejects legacy non-Dockerfile fragment paths", async () => {
+    await assert.rejects(
       planDevelopmentContainerToolLayers({
         baseLayer: layer({
           identity: "node-pnpm",
@@ -470,8 +513,11 @@ describe("Development Container Tool Layer Contract", () => {
           }),
         ],
       }),
-    ).rejects.toThrow(
-      "Development Container Tool Layer legacy-inline-fragment must reference checked .Dockerfile template source; received legacy-fragment.txt.",
+      (error) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Development Container Tool Layer legacy-inline-fragment must reference checked .Dockerfile template source; received legacy-fragment.txt.",
+        ),
     );
   });
 });

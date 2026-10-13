@@ -1,8 +1,8 @@
+import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-
-import { describe, expect, it } from "vitest";
+import { describe, it } from "node:test";
 
 import {
   checkLegacyArchitectureRemoval,
@@ -11,13 +11,21 @@ import {
   findLegacyArchitectureTarballFindings,
   findPackedTaskVocabularyFindings,
 } from "../packages/checks/src/check-legacy-architecture-removal.ts";
+import {
+  arrayContaining,
+  assertDeepStrictEqualWithMatchers,
+  assertLength,
+  assertRejectsMatching,
+  objectContaining,
+  stringContaining,
+} from "./assertions.ts";
 
 async function fixture(): Promise<string> {
   return await mkdtemp(path.join(tmpdir(), "template-removal-audit-"));
 }
 
-describe("Legacy Architecture Removal Check", () => {
-  it("rejects every retired fixture replay API, marker, transport, and compatibility surface", async () => {
+void describe("Legacy Architecture Removal Check", () => {
+  void it("rejects every retired fixture replay API, marker, transport, and compatibility surface", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -62,25 +70,26 @@ describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      expect(findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        findings,
+        arrayContaining([
+          objectContaining({
             rule: "retired-fixture-replay-symbol",
             file: "packages/checks/src/replay-compat.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-fixture-replay-surface",
             file: "packages/checks/src/replay-compat.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-fixture-replay-marker",
             file: "packages/checks/src/replay-compat.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-fixture-replay-surface",
             file: ".github/workflows/check.yml",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-fixture-replay-surface",
             file: "turbo.json",
           }),
@@ -91,7 +100,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("reports a focused finding for every protected surface", async () => {
+  void it("reports a focused finding for every protected surface", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -124,19 +133,21 @@ describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      expect(findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "retired-path" }),
-          expect.objectContaining({ rule: "legacy-import-export" }),
-          expect.objectContaining({ rule: "retired-symbol" }),
-          expect.objectContaining({ rule: "generic-preset-identity" }),
-          expect.objectContaining({ rule: "retired-vocabulary" }),
-          expect.objectContaining({ rule: "retired-cli-command" }),
-          expect.objectContaining({ rule: "identity-branch" }),
-          expect.objectContaining({ rule: "foundation-output-branch" }),
+      assertDeepStrictEqualWithMatchers(
+        findings,
+        arrayContaining([
+          objectContaining({ rule: "retired-path" }),
+          objectContaining({ rule: "legacy-import-export" }),
+          objectContaining({ rule: "retired-symbol" }),
+          objectContaining({ rule: "generic-preset-identity" }),
+          objectContaining({ rule: "retired-vocabulary" }),
+          objectContaining({ rule: "retired-cli-command" }),
+          objectContaining({ rule: "identity-branch" }),
+          objectContaining({ rule: "foundation-output-branch" }),
         ]),
       );
-      await expect(checkLegacyArchitectureRemoval(root)).rejects.toThrow(
+      await assertRejectsMatching(
+        checkLegacyArchitectureRemoval(root),
         /\[retired-symbol\].*old\.ts/u,
       );
     } finally {
@@ -144,7 +155,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("resolves composed identities, aliases, re-exports, and non-if catalogs", async () => {
+  void it("resolves composed identities, aliases, re-exports, and non-if catalogs", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -178,12 +189,13 @@ describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      expect(findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "retired-symbol" }),
-          expect.objectContaining({ rule: "closed-identity-catalog" }),
-          expect.objectContaining({ rule: "identity-branch" }),
-          expect.objectContaining({ rule: "retired-cli-command" }),
+      assertDeepStrictEqualWithMatchers(
+        findings,
+        arrayContaining([
+          objectContaining({ rule: "retired-symbol" }),
+          objectContaining({ rule: "closed-identity-catalog" }),
+          objectContaining({ rule: "identity-branch" }),
+          objectContaining({ rule: "retired-cli-command" }),
         ]),
       );
     } finally {
@@ -191,41 +203,37 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("permits historical ADR vocabulary only with an ADR-0093 supersession note", async () => {
+  void it("permits historical ADR vocabulary only with an ADR-0093 supersession note", async () => {
     const root = await fixture();
     try {
       await mkdir(path.join(root, "docs/adr"), { recursive: true });
       await writeFile(path.join(root, "docs/adr/0001-old.md"), `Preset Source`);
-      await expect(checkLegacyArchitectureRemoval(root)).rejects.toThrow(
+      await assertRejectsMatching(
+        checkLegacyArchitectureRemoval(root),
         /historical-adr-status/u,
       );
       await writeFile(
         path.join(root, "docs/adr/0001-old.md"),
         `Superseded by ADR-0093.\n\nPreset Source`,
       );
-      await expect(
-        checkLegacyArchitectureRemoval(root),
-      ).resolves.toBeUndefined();
+      assert.strictEqual(await checkLegacyArchitectureRemoval(root), undefined);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects retired runtime and test paths in a packed public artifact", () => {
-    expect(
+  void it("rejects retired runtime and test paths in a packed public artifact", () => {
+    assertDeepStrictEqualWithMatchers(
       findLegacyArchitectureTarballFindings([
         "package/dist/cli.js",
         `package/node_modules/@ykdz/template-builtin-source/index.js`,
         "package/node_modules/@ykdz/template-builtin-presets/dist/src/example/behavior.test.js",
       ]),
-    ).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ rule: "packed-artifact" }),
-      ]),
+      arrayContaining([objectContaining({ rule: "packed-artifact" })]),
     );
   });
 
-  it("audits package exports, dependencies, and built declaration or JavaScript leakage", async () => {
+  void it("audits package exports, dependencies, and built declaration or JavaScript leakage", async () => {
     const root = await fixture();
     try {
       await Promise.all(
@@ -253,12 +261,11 @@ describe("Legacy Architecture Removal Check", () => {
           "export {};",
         ),
       ]);
-      await expect(
-        findLegacyArchitectureDistributionFindings(root),
-      ).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "package-manifest-export" }),
-          expect.objectContaining({ rule: "built-artifact" }),
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureDistributionFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "package-manifest-export" }),
+          objectContaining({ rule: "built-artifact" }),
         ]),
       );
     } finally {
@@ -266,7 +273,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("does not require unrelated distribution artifacts during a source-focused audit", async () => {
+  void it("does not require unrelated distribution artifacts during a source-focused audit", async () => {
     const root = await fixture();
     try {
       await Promise.all(
@@ -287,15 +294,16 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       );
 
-      await expect(
-        findLegacyArchitectureDistributionFindings(root),
-      ).resolves.toEqual([]);
+      assert.deepStrictEqual(
+        await findLegacyArchitectureDistributionFindings(root),
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("ignores local package-manager stores outside repository ownership", async () => {
+  void it("ignores local package-manager stores outside repository ownership", async () => {
     const root = await fixture();
     try {
       await mkdir(path.join(root, ".pnpm-store/v11/files"), {
@@ -306,13 +314,13 @@ describe("Legacy Architecture Removal Check", () => {
         "Preset File build:run",
       );
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+      assert.deepStrictEqual(await findLegacyArchitectureFindings(root), []);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("ignores local fixture cache directories outside repository ownership", async () => {
+  void it("ignores local fixture cache directories outside repository ownership", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -347,13 +355,13 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+      assert.deepStrictEqual(await findLegacyArchitectureFindings(root), []);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects retired task selection from source, generated manifests, documentation, and builds", async () => {
+  void it("rejects retired task selection from source, generated manifests, documentation, and builds", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -401,16 +409,17 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "retired-task-symbol" }),
-          expect.objectContaining({ rule: "deployment-owner-registration" }),
-          expect.objectContaining({ rule: "task-model-compatibility" }),
-          expect.objectContaining({ rule: "generated-task-filter" }),
-          expect.objectContaining({ rule: "retired-task-script" }),
-          expect.objectContaining({ rule: "retired-task-vocabulary" }),
-          expect.objectContaining({ rule: "historical-task-adr-status" }),
-          expect.objectContaining({ rule: "built-artifact-task-vocabulary" }),
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "retired-task-symbol" }),
+          objectContaining({ rule: "deployment-owner-registration" }),
+          objectContaining({ rule: "task-model-compatibility" }),
+          objectContaining({ rule: "generated-task-filter" }),
+          objectContaining({ rule: "retired-task-script" }),
+          objectContaining({ rule: "retired-task-vocabulary" }),
+          objectContaining({ rule: "historical-task-adr-status" }),
+          objectContaining({ rule: "built-artifact-task-vocabulary" }),
         ]),
       );
     } finally {
@@ -418,7 +427,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects old plan fields, render-owner parameters, and composed Turbo filters", async () => {
+  void it("rejects old plan fields, render-owner parameters, and composed Turbo filters", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -448,11 +457,12 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "retired-task-plan-field" }),
-          expect.objectContaining({ rule: "retired-task-render-parameter" }),
-          expect.objectContaining({ rule: "generated-task-filter" }),
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "retired-task-plan-field" }),
+          objectContaining({ rule: "retired-task-render-parameter" }),
+          objectContaining({ rule: "generated-task-filter" }),
         ]),
       );
     } finally {
@@ -460,7 +470,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects retired Development Container capability APIs and switches", async () => {
+  void it("rejects retired Development Container capability APIs and switches", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -543,41 +553,42 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "retired-development-container-path",
             file: "packages/core/src/devcontainer.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-symbol",
             file: "packages/core/src/devcontainer.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-switch",
             file: "packages/core/src/devcontainer.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-compatibility",
             file: "packages/core/src/devcontainer.ts",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-path",
             file: "packages/builtin-presets/templates/foundation/rust",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-path",
             file: "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-path",
             file: "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "retired-development-container-path",
             file: "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "host-prepared-fixture-execution",
             file: "packages/checks/src/check-generated-registry.ts",
           }),
@@ -588,7 +599,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects sibling Preset imports", async () => {
+  void it("rejects sibling Preset imports", async () => {
     const root = await fixture();
     try {
       await mkdir(path.join(root, "packages/builtin-presets/src/vike-app"), {
@@ -599,9 +610,10 @@ describe("Legacy Architecture Removal Check", () => {
         `import { vueAppDefinition } from "../vue-app/definition.ts"; void vueAppDefinition;`,
       );
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "preset-sibling-import",
             file: "packages/builtin-presets/src/vike-app/definition.ts",
           }),
@@ -612,7 +624,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("permits the package-local Turbo prepack build selector", async () => {
+  void it("permits the package-local Turbo prepack build selector", async () => {
     const root = await fixture();
     try {
       await mkdir(path.join(root, "packages/builtin-presets/src"), {
@@ -635,15 +647,16 @@ describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findLegacyArchitectureFindings(root);
-      expect(
+      assert.deepStrictEqual(
         findings.filter((finding) => finding.rule === "generated-task-filter"),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects the retired public CLI parser, manual prepack chain, and packed lifecycle bypass", async () => {
+  void it("rejects the retired public CLI parser, manual prepack chain, and packed lifecycle bypass", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -671,11 +684,12 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "hand-written-cli-parser" }),
-          expect.objectContaining({ rule: "manual-prepack-chain" }),
-          expect.objectContaining({ rule: "packed-lifecycle-bypass" }),
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({ rule: "hand-written-cli-parser" }),
+          objectContaining({ rule: "manual-prepack-chain" }),
+          objectContaining({ rule: "packed-lifecycle-bypass" }),
         ]),
       );
     } finally {
@@ -683,7 +697,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects directly executed TypeScript without native erasability enforcement", async () => {
+  void it("rejects directly executed TypeScript without native erasability enforcement", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -729,13 +743,14 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "non-erasable-typescript-config",
             file: "packages/missing/tsconfig.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "non-erasable-typescript-config",
             file: "packages/disabled/tsconfig.json",
           }),
@@ -746,7 +761,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects non-erasable TypeScript syntax in repository-authored source", async () => {
+  void it("rejects non-erasable TypeScript syntax in repository-authored source", async () => {
     const root = await fixture();
     try {
       const sourceRoot = path.join(root, "packages/api/src");
@@ -764,17 +779,18 @@ describe("Legacy Architecture Removal Check", () => {
       );
 
       const findings = await findLegacyArchitectureFindings(root);
-      expect(
+      assertLength(
         findings.filter(
           ({ rule }) => rule === "non-erasable-typescript-syntax",
         ),
-      ).toHaveLength(3);
+        3,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("does not scan non-erasable negative fixtures or generated output", async () => {
+  void it("does not scan non-erasable negative fixtures or generated output", async () => {
     const root = await fixture();
     const source = "enum HistoricalExample { Retired }\n";
     try {
@@ -802,13 +818,13 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([]);
+      assert.deepStrictEqual(await findLegacyArchitectureFindings(root), []);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects TypeScript runtime loaders and source runners", async () => {
+  void it("rejects TypeScript runtime loaders and source runners", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -834,13 +850,14 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "typescript-runtime-loader",
             file: "packages/cli/package.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "typescript-runtime-loader",
             file: "packages/builtin-presets/src/definition.ts",
           }),
@@ -851,7 +868,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects TypeScript paths aliases and alias rewriting", async () => {
+  void it("rejects TypeScript paths aliases and alias rewriting", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -885,17 +902,18 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "typescript-path-alias",
             file: "packages/api/tsconfig.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "typescript-path-alias",
             file: "packages/api/package.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "typescript-path-alias",
             file: "packages/builtin-presets/src/definition.ts",
           }),
@@ -906,7 +924,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects Generated Repository Vitest resolver aliases structurally", async () => {
+  void it("rejects Generated Repository Vitest resolver aliases structurally", async () => {
     const root = await fixture();
     try {
       const configDirectory = path.join(
@@ -938,18 +956,21 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual([
-        expect.objectContaining({
-          rule: "vitest-resolver-alias",
-          file: "packages/builtin-presets/templates/vue-app/vitest.config.ts",
-        }),
-      ]);
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        [
+          objectContaining({
+            rule: "vitest-resolver-alias",
+            file: "packages/builtin-presets/templates/vue-app/vitest.config.ts",
+          }),
+        ],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("rejects manual cross-package build chains outside Turbo topology", async () => {
+  void it("rejects manual cross-package build chains outside Turbo topology", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -974,13 +995,14 @@ describe("Legacy Architecture Removal Check", () => {
         ),
       ]);
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "manual-dependency-build-chain",
             file: "packages/web/package.json",
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "manual-dependency-build-chain",
             file: "packages/builtin-presets/src/definition.ts",
           }),
@@ -991,7 +1013,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("rejects lifecycle bypasses in active generated-template checks", async () => {
+  void it("rejects lifecycle bypasses in active generated-template checks", async () => {
     const root = await fixture();
     try {
       const checkRoot = path.join(root, "packages/builtin-presets/src");
@@ -1001,9 +1023,10 @@ describe("Legacy Architecture Removal Check", () => {
         'const installArgs = ["install", "--ignore-scripts"];\n',
       );
 
-      await expect(findLegacyArchitectureFindings(root)).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        await findLegacyArchitectureFindings(root),
+        arrayContaining([
+          objectContaining({
             rule: "packed-lifecycle-bypass",
             file: "packages/builtin-presets/src/check-template-source.ts",
           }),
@@ -1014,7 +1037,7 @@ describe("Legacy Architecture Removal Check", () => {
     }
   });
 
-  it("detects retired task words through Markdown and YAML punctuation, requiring explicit ADR-0094 supersession", async () => {
+  void it("detects retired task words through Markdown and YAML punctuation, requiring explicit ADR-0094 supersession", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -1033,7 +1056,8 @@ describe("Legacy Architecture Removal Check", () => {
         path.join(root, "docs/adr/0001-old.md"),
         "ADR-0094 describes this old `check:run` command.",
       );
-      await expect(checkLegacyArchitectureRemoval(root)).rejects.toThrow(
+      await assertRejectsMatching(
+        checkLegacyArchitectureRemoval(root),
         /historical-task-adr-status/u,
       );
       await writeFile(
@@ -1041,20 +1065,22 @@ describe("Legacy Architecture Removal Check", () => {
         "Superseded by ADR-0094.\n\nOld `check:run` command.",
       );
       const findings = await findLegacyArchitectureFindings(root);
-      expect(findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ rule: "retired-task-vocabulary" }),
+      assertDeepStrictEqualWithMatchers(
+        findings,
+        arrayContaining([
+          objectContaining({ rule: "retired-task-vocabulary" }),
         ]),
       );
-      expect(
+      assert.deepStrictEqual(
         findings.filter((entry) => entry.file.endsWith("0001-old.md")),
-      ).toEqual([]);
+        [],
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("requires every bundled root and audits repository-owned packed source", async () => {
+  void it("requires every bundled root and audits repository-owned packed source", async () => {
     const root = await fixture();
     try {
       await Promise.all([
@@ -1112,21 +1138,23 @@ describe("Legacy Architecture Removal Check", () => {
       ]);
 
       const findings = await findPackedTaskVocabularyFindings(root);
-      expect(findings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
+      assertDeepStrictEqualWithMatchers(
+        findings,
+        arrayContaining([
+          objectContaining({
             rule: "packed-artifact-task-vocabulary",
-            file: expect.stringContaining("templates/web/Dockerfile"),
+            file: stringContaining("templates/web/Dockerfile"),
           }),
-          expect.objectContaining({
+          objectContaining({
             rule: "packed-bundled-root",
             file: "node_modules/@ykdz/template-core",
           }),
         ]),
       );
-      expect(
+      assert.strictEqual(
         findings.some(({ file }) => file.includes("node_modules/typescript")),
-      ).toBe(false);
+        false,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
