@@ -1,0 +1,733 @@
+import assert from "node:assert/strict";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
+
+import {
+  builtInPresetRegistry,
+  createGenerationContext,
+  planGeneratedRepositoryInitialization,
+  prepareGeneratedRepositoryPackageAddition,
+} from "@ykdz/template-builtin-presets";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+
+import { vueHonoAppDefinition } from "./definition.ts";
+
+async function treeBytes(
+  root: string,
+  relativePath = "",
+): Promise<Readonly<Record<string, string>>> {
+  const entries = await readdir(path.join(root, relativePath), {
+    withFileTypes: true,
+  });
+  const snapshots = await Promise.all(
+    entries
+      .toSorted((left, right) => left.name.localeCompare(right.name))
+      .map(async (entry) => {
+        const entryPath = path.join(relativePath, entry.name);
+        if (entry.isDirectory()) return await treeBytes(root, entryPath);
+        return {
+          [entryPath]: (await readFile(path.join(root, entryPath))).toString(
+            "base64",
+          ),
+        };
+      }),
+  );
+  return Object.assign({}, ...snapshots);
+}
+
+void describe("vue-hono-app Built-in Preset Definition behavior", () => {
+  const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
+
+  void it("owns API and web contributions and derives their workspace link", async () => {
+    assert.deepStrictEqual(
+      builtInPresetRegistry.require("vue-hono-app").metadata,
+      vueHonoAppDefinition.metadata,
+    );
+    const targetDir = path.join(
+      await mkdtemp(path.join(tmpdir(), "template-vue-hono-")),
+      "demo-stack",
+    );
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain,
+    });
+    const plan = planGeneratedRepositoryInitialization({
+      definition: vueHonoAppDefinition,
+      context,
+    });
+    const browserLayer = vueHonoAppDefinition
+      .planInitializationContributions(context)
+      .flatMap(
+        (contribution) =>
+          contribution.foundation.developmentContainerToolLayers ?? [],
+      )
+      .find((layer) => layer.identity === "browser-test");
+
+    assert.partialDeepStrictEqual(plan.blueprint, {
+      schemaVersion: 3,
+      packages: [
+        { name: "@demo/api", path: "apps/api", role: "runtime-service" },
+        { name: "@demo/web", path: "apps/web", role: "runtime-service" },
+        {
+          name: "@demo/typescript-config",
+          path: "packages/typescript-config",
+          role: "shared-library",
+        },
+      ],
+      packageLinkIntents: [
+        {
+          consumerPackagePath: "apps/web",
+          providerPackagePath: "apps/api",
+        },
+      ],
+    });
+    assert.strictEqual(plan.blueprint.packages.length, 3);
+    assert.strictEqual(plan.blueprint.packageLinkIntents?.length, 1);
+    assert.deepStrictEqual(
+      plan.nextStepInstructions.map((step) => step.display),
+      ["pnpm install", "pnpm run fix", "pnpm run check"],
+    );
+    assert.ok(
+      plan.environmentNeeds.some((need) =>
+        isDeepStrictEqual(need, {
+          kind: "playwright-browser-assets",
+          browser: "chromium",
+          owner: { kind: "workspace-orchestration", path: "." },
+        }),
+      ),
+    );
+    assert.ok(browserLayer !== undefined);
+    assert.strictEqual(browserLayer.identity, "browser-test");
+    assert.deepStrictEqual(browserLayer.requires, ["node-pnpm"]);
+    assert.strictEqual(browserLayer.buildArguments?.length, 1);
+    const playwrightCliPackage = browserLayer.buildArguments?.[0]?.value ?? "";
+    assert.strictEqual(
+      browserLayer.buildArguments?.[0]?.name,
+      "PLAYWRIGHT_CLI_PACKAGE",
+    );
+    assert.match(playwrightCliPackage, /^@playwright\/test@/u);
+    assert.strictEqual(browserLayer.probes?.length, 1);
+    const playwrightProbe = browserLayer.probes?.[0];
+    assert.ok(playwrightProbe !== undefined);
+    assert.strictEqual(playwrightProbe.identity, "playwright");
+    assert.strictEqual(playwrightProbe.command, "npx");
+    assert.ok(playwrightProbe.args?.includes("playwright"));
+    assert.ok(playwrightProbe.args?.includes("--version"));
+
+    await renderNewProject({
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+
+    const apiManifest = JSON.parse(
+      await readFile(path.join(targetDir, "apps/api/package.json"), "utf8"),
+    ) as {
+      readonly devDependencies?: Readonly<Record<string, string>>;
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    assert.partialDeepStrictEqual(apiManifest, {
+      name: "@demo/api",
+      exports: {
+        ".": { default: "./dist/index.js", types: "./dist/index.d.ts" },
+      },
+      imports: {
+        "#/*": {
+          source: "./src/*.ts",
+          types: "./src/*.ts",
+          default: "./dist/*.js",
+        },
+      },
+      scripts: { build: "tsc -p tsconfig.build.json" },
+    });
+    assert.ok(
+      apiManifest.devDependencies === undefined ||
+        !("tsc-alias" in apiManifest.devDependencies),
+    );
+    assert.ok(
+      apiManifest.devDependencies !== undefined &&
+        "typescript-7" in apiManifest.devDependencies,
+    );
+    const apiTsconfig = JSON.parse(
+      await readFile(path.join(targetDir, "apps/api/tsconfig.json"), "utf8"),
+    );
+    assert.deepStrictEqual(apiTsconfig.compilerOptions.customConditions, [
+      "source",
+    ]);
+    assert.strictEqual(apiTsconfig.compilerOptions.erasableSyntaxOnly, true);
+    const apiBuildTsconfig = JSON.parse(
+      await readFile(
+        path.join(targetDir, "apps/api/tsconfig.build.json"),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(
+      apiBuildTsconfig.compilerOptions.customConditions,
+      [],
+    );
+    for (const configPath of [
+      "apps/web/tsconfig.app.json",
+      "apps/web/tsconfig.test.json",
+    ]) {
+      const config = JSON.parse(
+        await readFile(path.join(targetDir, configPath), "utf8"),
+      ) as {
+        readonly compilerOptions?: Readonly<Record<string, unknown>>;
+        readonly extends?: string;
+      };
+      assert.deepStrictEqual(config.compilerOptions?.customConditions, [
+        "source",
+      ]);
+      assert.ok(
+        config.compilerOptions === undefined ||
+          !("erasableSyntaxOnly" in config.compilerOptions),
+      );
+      if (configPath.endsWith("tsconfig.app.json")) {
+        assert.strictEqual(
+          config.compilerOptions?.exactOptionalPropertyTypes,
+          false,
+        );
+      } else {
+        assert.strictEqual(config.extends, "./tsconfig.app.json");
+      }
+    }
+    const webNodeTsconfig = JSON.parse(
+      await readFile(
+        path.join(targetDir, "apps/web/tsconfig.node.json"),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(webNodeTsconfig.compilerOptions.customConditions, [
+      "source",
+    ]);
+    assert.strictEqual(
+      webNodeTsconfig.compilerOptions.erasableSyntaxOnly,
+      true,
+    );
+    const webManifest = JSON.parse(
+      await readFile(path.join(targetDir, "apps/web/package.json"), "utf8"),
+    ) as {
+      readonly dependencies: Readonly<Record<string, string>>;
+      readonly devDependencies: Readonly<Record<string, string>>;
+      readonly scripts: Readonly<Record<string, string>>;
+    };
+    assert.partialDeepStrictEqual(webManifest, {
+      dependencies: {
+        "@demo/api": "workspace:*",
+        "@vue/devtools-api": "catalog:",
+        pinia: "catalog:",
+        vue: "catalog:",
+      },
+    });
+    assert.ok(!("@playwright/test" in webManifest.devDependencies));
+    assert.ok(!("test:e2e" in webManifest.scripts));
+    const initialTurbo = JSON.parse(
+      await readFile(path.join(targetDir, "turbo.json"), "utf8"),
+    );
+    assert.partialDeepStrictEqual(initialTurbo, {
+      boundaries: {
+        tags: {
+          app: { dependencies: { allow: ["app", "library"] } },
+        },
+      },
+      tasks: {
+        build: { dependsOn: ["^build"] },
+        typecheck: { dependsOn: ["^typecheck"] },
+      },
+    });
+    assert.deepStrictEqual(
+      initialTurbo.boundaries.tags.app.dependencies.allow,
+      ["app", "library"],
+    );
+    assert.deepStrictEqual(initialTurbo.tasks.build.dependsOn, ["^build"]);
+    assert.deepStrictEqual(initialTurbo.tasks.typecheck.dependsOn, [
+      "^typecheck",
+    ]);
+    assert.ok(
+      (
+        await readFile(path.join(targetDir, "apps/api/src/runtime.ts"), "utf8")
+      ).includes("new Hono()"),
+    );
+    assert.ok(
+      (
+        await readFile(path.join(targetDir, "apps/web/src/api.ts"), "utf8")
+      ).includes("/api/health"),
+    );
+    assert.ok(
+      (
+        await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8")
+      ).includes("playwright install --with-deps chromium"),
+    );
+    const renderedDevcontainer = JSON.parse(
+      await readFile(
+        path.join(targetDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    );
+    assert.ok(
+      typeof renderedDevcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE ===
+        "string",
+    );
+    assert.match(
+      renderedDevcontainer.build.args.PLAYWRIGHT_CLI_PACKAGE,
+      /^@playwright\/test@/u,
+    );
+    assert.ok(
+      !(
+        await readFile(path.join(targetDir, "apps/web/vite.config.ts"), "utf8")
+      ).includes("alias:"),
+    );
+    for (const configPath of ["apps/web/vitest.config.ts"]) {
+      assert.ok(
+        !(await readFile(path.join(targetDir, configPath), "utf8")).includes(
+          "alias:",
+        ),
+      );
+    }
+    for (const sourcePath of [
+      "apps/api/src/index.ts",
+      "apps/api/src/server.ts",
+      "apps/api/test/app.test.ts",
+    ]) {
+      assert.ok(
+        (await readFile(path.join(targetDir, sourcePath), "utf8")).includes(
+          'from "#/runtime"',
+        ),
+      );
+    }
+    const rootManifest = JSON.parse(
+      await readFile(path.join(targetDir, "package.json"), "utf8"),
+    ) as { readonly scripts: Readonly<Record<string, string>> };
+    assert.strictEqual(rootManifest.scripts["test:e2e"], "playwright test");
+    const e2eTurbo = JSON.parse(
+      await readFile(path.join(targetDir, "turbo.json"), "utf8"),
+    );
+    assert.partialDeepStrictEqual(e2eTurbo, {
+      tasks: {
+        "//#test:e2e": {
+          dependsOn: [
+            "@demo/api#build",
+            "@demo/web#build",
+            "@demo/web#browser:prepare",
+          ],
+          cache: false,
+        },
+      },
+    });
+    assert.deepStrictEqual(e2eTurbo.tasks["//#test:e2e"].dependsOn, [
+      "@demo/api#build",
+      "@demo/web#build",
+      "@demo/web#browser:prepare",
+    ]);
+    assert.ok(
+      (
+        await readFile(path.join(targetDir, "playwright.config.ts"), "utf8")
+      ).includes("pnpm --filter @demo/api --fail-if-no-match run start"),
+    );
+    await assert.rejects(
+      readFile(path.join(targetDir, "apps/web/playwright.config.ts"), "utf8"),
+    );
+  });
+
+  void it("replays the linked API identity through additions without guessing names or collections", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vue-hono-replay-"),
+    );
+    const targetDir = path.join(workspace, "demo-stack");
+    const context = createGenerationContext({
+      targetDir,
+      defaultPackageScope: "demo",
+      toolchain,
+    });
+    const initialization = planGeneratedRepositoryInitialization({
+      definition: vueHonoAppDefinition,
+      context,
+    });
+
+    try {
+      await renderNewProject({
+        targetRoot: targetDir,
+        operations: [...initialization.operations],
+      });
+      await Promise.all([
+        mkdir(path.join(targetDir, "services")),
+        mkdir(path.join(targetDir, "products")),
+      ]);
+      await rename(
+        path.join(targetDir, "apps/api"),
+        path.join(targetDir, "services/backend"),
+      );
+      await rename(
+        path.join(targetDir, "apps/web"),
+        path.join(targetDir, "products/client"),
+      );
+
+      const blueprintPath = path.join(targetDir, ".template/blueprint.json");
+      const blueprint = JSON.parse(await readFile(blueprintPath, "utf8")) as {
+        packages: { name: string; path: string; role: string }[];
+        packageLinkIntents: {
+          consumerPackagePath: string;
+          providerPackagePath: string;
+        }[];
+      };
+      const api = blueprint.packages.find(
+        (candidate) => candidate.path === "apps/api",
+      )!;
+      const web = blueprint.packages.find(
+        (candidate) => candidate.path === "apps/web",
+      )!;
+      Object.assign(api, { name: "@octo/backend", path: "services/backend" });
+      Object.assign(web, { name: "@octo/client", path: "products/client" });
+      blueprint.packageLinkIntents = [
+        {
+          consumerPackagePath: web.path,
+          providerPackagePath: api.path,
+        },
+      ];
+      await writeFile(blueprintPath, `${JSON.stringify(blueprint, null, 2)}\n`);
+
+      const generationPath = path.join(targetDir, ".template/generation.json");
+      const generation = JSON.parse(await readFile(generationPath, "utf8")) as {
+        packages: { contributionIdentity: string; path: string }[];
+      };
+      for (const record of generation.packages) {
+        if (record.contributionIdentity === "api")
+          record.path = "services/backend";
+        if (record.contributionIdentity === "web")
+          record.path = "products/client";
+      }
+      await writeFile(
+        generationPath,
+        `${JSON.stringify(generation, null, 2)}\n`,
+      );
+
+      const apiManifestPath = path.join(
+        targetDir,
+        "services/backend/package.json",
+      );
+      const apiManifest = JSON.parse(
+        await readFile(apiManifestPath, "utf8"),
+      ) as {
+        name: string;
+      };
+      apiManifest.name = api.name;
+      await writeFile(
+        apiManifestPath,
+        `${JSON.stringify(apiManifest, null, 2)}\n`,
+      );
+      const webManifestPath = path.join(
+        targetDir,
+        "products/client/package.json",
+      );
+      const webManifest = JSON.parse(
+        await readFile(webManifestPath, "utf8"),
+      ) as {
+        name: string;
+        dependencies: Record<string, string>;
+      };
+      webManifest.name = web.name;
+      delete webManifest.dependencies["@demo/api"];
+      webManifest.dependencies[api.name] = "workspace:*";
+      await writeFile(
+        webManifestPath,
+        `${JSON.stringify(webManifest, null, 2)}\n`,
+      );
+
+      const turboPath = path.join(targetDir, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<
+          string,
+          { dependsOn?: string[]; cache?: boolean; tags?: string[] }
+        >;
+      };
+      turbo.tasks["//#test:e2e"] = {
+        dependsOn: [
+          `${api.name}#build`,
+          `${web.name}#build`,
+          `${web.name}#browser:prepare`,
+        ],
+        cache: false,
+        tags: ["quality:heavy"],
+      };
+      await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
+      const playwrightConfigPath = path.join(targetDir, "playwright.config.ts");
+      const playwrightConfig = await readFile(playwrightConfigPath, "utf8");
+      await writeFile(
+        playwrightConfigPath,
+        playwrightConfig
+          .replace("@demo/api", api.name)
+          .replace("@demo/web", web.name)
+          .replace("env: { PORT: apiPort }", 'env: { "PORT": apiPort }')
+          .replace(
+            '  reporter: [["list"], ["html"]],',
+            '  metadata: { owner: "customer" },\n  reporter: [["list"], ["html"]],',
+          ),
+      );
+      const workspacePath = path.join(targetDir, "pnpm-workspace.yaml");
+      const workspace = await readFile(workspacePath, "utf8");
+      await writeFile(
+        workspacePath,
+        workspace.replace(
+          "  - apps/*\n  - packages/*",
+          "  - apps/*\n  - packages/*\n  - services/*\n  - products/*",
+        ),
+      );
+
+      const preparation = prepareGeneratedRepositoryPackageAddition({
+        repositoryRoot: targetDir,
+        preset: "ts-lib",
+        packageLeafName: "shared",
+      });
+      assert.strictEqual(preparation.status, "ready");
+      if (preparation.status !== "ready")
+        throw new Error("expected quoted API env key addition to prepare");
+      const addition = preparation.plan;
+      assert.ok(
+        addition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === api.name &&
+            packageDefinition.path === api.path &&
+            packageDefinition.role === api.role,
+        ),
+      );
+      assert.ok(
+        addition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === web.name &&
+            packageDefinition.path === web.path &&
+            packageDefinition.role === web.role,
+        ),
+      );
+      assert.ok(
+        addition.blueprint.packages.some(
+          (packageDefinition) =>
+            packageDefinition.name === "@demo/shared" &&
+            packageDefinition.path === "packages/shared",
+        ),
+      );
+      assert.ok(
+        addition.operations.some(
+          (operation) =>
+            operation.kind === "writeTextTemplate" &&
+            operation.to === "playwright.config.ts" &&
+            isDeepStrictEqual(operation.replacements, {
+              API_PACKAGE_NAME: "@octo/backend",
+              WEB_PACKAGE_NAME: "@octo/client",
+            }),
+        ),
+      );
+      assert.ok(
+        addition.blueprint.packageLinkIntents?.some((intent) =>
+          isDeepStrictEqual(intent, {
+            consumerPackagePath: "products/client",
+            providerPackagePath: "services/backend",
+          }),
+        ),
+      );
+      const replayedApplication = await reconcileAndApplyProjectProjections({
+        targetRoot: targetDir,
+        ...addition.projectProjections,
+      });
+      assert.strictEqual(replayedApplication.ok, true);
+      const replayedRootManifest = JSON.parse(
+        await readFile(path.join(targetDir, "package.json"), "utf8"),
+      ) as { readonly scripts: Readonly<Record<string, string>> };
+      assert.deepStrictEqual(
+        {
+          check: replayedRootManifest.scripts.check,
+          "check:heavy": replayedRootManifest.scripts["check:heavy"],
+          "check:full": replayedRootManifest.scripts["check:full"],
+        },
+        {
+          check: "node --conditions=source scripts/quality-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/quality-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/quality-gates.ts check:full",
+        },
+      );
+      const replayedTurbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        readonly tasks: Readonly<
+          Record<
+            string,
+            {
+              readonly dependsOn?: readonly string[];
+              readonly tags?: readonly string[];
+            }
+          >
+        >;
+      };
+      assert.deepStrictEqual(replayedTurbo.tasks["//#test:e2e"]?.tags, [
+        "quality:heavy",
+      ]);
+      assert.deepStrictEqual(replayedTurbo.tasks["//#test:e2e"]?.dependsOn, [
+        `${api.name}#build`,
+        `${web.name}#build`,
+        `${web.name}#browser:prepare`,
+      ]);
+      const replayedPlaywrightConfig = await readFile(
+        playwrightConfigPath,
+        "utf8",
+      );
+      assert.ok(
+        replayedPlaywrightConfig.includes(
+          `pnpm --filter ${api.name} --fail-if-no-match run start`,
+        ),
+      );
+      assert.ok(
+        replayedPlaywrightConfig.includes(
+          `pnpm --filter ${web.name} --fail-if-no-match run preview --host 127.0.0.1 --strictPort`,
+        ),
+      );
+      assert.ok(replayedPlaywrightConfig.includes('env: { "PORT": apiPort }'));
+      const workspaceGlobs = (await readFile(workspacePath, "utf8"))
+        .split("nodeLinker:")[0]!
+        .split("\n")
+        .filter((line) => line.startsWith("  - "))
+        .map((line) => line.slice("  - ".length));
+      assert.deepStrictEqual(workspaceGlobs, [
+        "apps/*",
+        "packages/*",
+        "services/*",
+        "products/*",
+      ]);
+
+      const beforeConflict = await treeBytes(targetDir);
+      const conflict = prepareGeneratedRepositoryPackageAddition({
+        repositoryRoot: targetDir,
+        preset: "ts-lib",
+        packageLeafName: "shared",
+        packagePath: "libraries/shared",
+      });
+      assert.strictEqual(conflict.status, "conflict");
+      if (conflict.status === "conflict")
+        assert.strictEqual(conflict.conflict.kind, "identity");
+      assert.deepStrictEqual(await treeBytes(targetDir), beforeConflict);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  for (const kind of [
+    "missing",
+    "stale",
+    "syntax",
+    "dynamic",
+    "api-port",
+    "web-port",
+    "api-capture",
+    "web-capture",
+    "web-endpoint-override",
+    "api-port-reassigned",
+    "web-port-duplicate",
+  ] as const) {
+    void it(`rejects ${kind} root Playwright truth before a Package Addition writes`, async () => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), `template-vue-hono-root-truth-${kind}-`),
+      );
+      const targetDir = path.join(workspace, "demo-stack");
+      const context = createGenerationContext({
+        targetDir,
+        defaultPackageScope: "demo",
+        toolchain,
+      });
+      const initialization = planGeneratedRepositoryInitialization({
+        definition: vueHonoAppDefinition,
+        context,
+      });
+
+      try {
+        await renderNewProject({
+          targetRoot: targetDir,
+          operations: [...initialization.operations],
+        });
+        const configPath = path.join(targetDir, "playwright.config.ts");
+        const config = await readFile(configPath, "utf8");
+        if (kind === "missing") await unlink(configPath);
+        if (kind === "stale")
+          await writeFile(
+            configPath,
+            config.replace("@demo/api", "@demo/stale"),
+          );
+        if (kind === "syntax")
+          await writeFile(configPath, "export default defineConfig({");
+        if (kind === "dynamic")
+          await writeFile(
+            configPath,
+            `const apiCommand = "pnpm --filter @demo/api --fail-if-no-match run start";\n${config.replace('command: "pnpm --filter @demo/api --fail-if-no-match run start"', "command: apiCommand")}`,
+          );
+        if (kind === "api-port")
+          await writeFile(
+            configPath,
+            config.replace("env: { PORT: apiPort }", 'env: { PORT: "9" }'),
+          );
+        if (kind === "web-port")
+          await writeFile(
+            configPath,
+            config.replace(
+              "env: { PLAYWRIGHT_WEB_PORT: webPort }",
+              'env: { PLAYWRIGHT_WEB_PORT: "9" }',
+            ),
+          );
+        if (kind === "api-capture")
+          await writeFile(
+            configPath,
+            config.replace("VITE_API_BASE_URL", "WRONG_API_URL"),
+          );
+        if (kind === "web-capture")
+          await writeFile(
+            configPath,
+            config.replace("PLAYWRIGHT_WEB_URL", "WRONG_WEB_URL"),
+          );
+        if (kind === "web-endpoint-override")
+          await writeFile(
+            configPath,
+            config.replace(
+              "env: { PLAYWRIGHT_WEB_PORT: webPort }",
+              'env: { PLAYWRIGHT_WEB_PORT: webPort, VITE_API_BASE_URL: "http://wrong" }',
+            ),
+          );
+        if (kind === "api-port-reassigned")
+          await writeFile(
+            configPath,
+            config.replace(
+              'const apiPort = process.env.PLAYWRIGHT_API_PORT ?? "0";',
+              'let apiPort = process.env.PLAYWRIGHT_API_PORT ?? "0";\napiPort = "9";',
+            ),
+          );
+        if (kind === "web-port-duplicate")
+          await writeFile(
+            configPath,
+            config.replace(
+              'const webPort = process.env.PLAYWRIGHT_WEB_PORT ?? "0";',
+              'const webPort = process.env.PLAYWRIGHT_WEB_PORT ?? "0";\nconst webPort = "9";',
+            ),
+          );
+
+        const beforeAddition = await treeBytes(targetDir);
+        const preparation = prepareGeneratedRepositoryPackageAddition({
+          repositoryRoot: targetDir,
+          preset: "ts-lib",
+          packageLeafName: kind,
+        });
+        assert.notStrictEqual(preparation.status, "ready");
+        assert.deepStrictEqual(await treeBytes(targetDir), beforeAddition);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    });
+  }
+});

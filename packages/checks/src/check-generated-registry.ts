@@ -548,20 +548,53 @@ async function runScenario(
   const run: GeneratedCommandRunner = async (command, args, runOptions) => {
     const cancelSignal = runOptions.cancelSignal ?? options.cancelSignal;
     cancelSignal?.throwIfAborted();
+    const commandOutput = { stdout: "", stderr: "" };
+    const commandExecution = rawRun(command, args, {
+      ...runOptions,
+      ...(cancelSignal === undefined ? {} : { cancelSignal }),
+      timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
+      killDescendants: runOptions.killDescendants ?? true,
+    }) as Promise<unknown> & {
+      readonly stdout?: {
+        on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+      };
+      readonly stderr?: {
+        on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+      };
+    };
+    commandExecution.stdout?.on("data", (chunk) => {
+      commandOutput.stdout +=
+        typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
+    commandExecution.stderr?.on("data", (chunk) => {
+      commandOutput.stderr +=
+        typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    });
     try {
-      return await rawRun(command, args, {
-        ...runOptions,
-        ...(cancelSignal === undefined ? {} : { cancelSignal }),
-        timeout: runOptions.timeout ?? fixtureCommandTimeoutMilliseconds,
-        killDescendants: runOptions.killDescendants ?? true,
-      });
+      return await commandExecution;
     } catch (error) {
       if (!cancelSignal?.aborted) throw error;
       const reason =
         cancelSignal.reason instanceof Error
           ? cancelSignal.reason
           : new Error("Fixture command cancelled");
-      if (error === reason) throw reason;
+      if (error === reason) {
+        const commandError = new Error(
+          `${failureMessage(reason)}; command stopped during cancellation`,
+          { cause: reason },
+        );
+        Object.assign(commandError, {
+          command,
+          cwd: runOptions.cwd,
+          ...(commandOutput.stdout.length === 0
+            ? {}
+            : { stdout: commandOutput.stdout }),
+          ...(commandOutput.stderr.length === 0
+            ? {}
+            : { stderr: commandOutput.stderr }),
+        });
+        throw commandError;
+      }
       throw new AggregateError(
         [reason, error],
         `${redactFixtureFailureText(failureMessage(reason), options.failureSecrets ?? [])}; command stopped during cancellation: ${redactFixtureFailureText(failureMessage(error), options.failureSecrets ?? [])}`,
@@ -1138,13 +1171,32 @@ export async function runGeneratedScenarioSet(
   const rejected = results.filter(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
-  const failed =
+  const preferredFailure =
     rejected.find(
       (result) =>
         !cleanupFailureObserved ||
         !hasFailureCause(result.reason, cleanupFailure),
     ) ?? rejected[0];
-  if (failed !== undefined) scenarioFailure = failed.reason;
+  if (preferredFailure !== undefined) {
+    const preferredReason = preferredFailure.reason;
+    const additionalFailures = [
+      ...new Set(
+        rejected
+          .map((result) => result.reason)
+          .filter((reason) => reason !== preferredReason),
+      ),
+    ];
+    scenarioFailure =
+      scenarioCancelSignal.aborted &&
+      preferredReason === scenarioCancelSignal.reason &&
+      additionalFailures.length > 0
+        ? new AggregateError(
+            additionalFailures,
+            `Fixture scenario set was cancelled: ${failureMessage(preferredReason)}`,
+            { cause: preferredReason },
+          )
+        : preferredReason;
+  }
   if (set !== "init" && options.evidence?.writeEnabled === true) {
     try {
       await options.evidence.storage?.prune?.({
@@ -1213,6 +1265,7 @@ export async function runGeneratedRegistryCli(options: {
   readonly workspace?: string;
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
+  readonly schedulerFactory?: FixtureEvidenceSchedulerFactory;
   readonly cancelSignal?: AbortSignal;
 }): Promise<void> {
   const set = options.scenarioSet;
@@ -1288,6 +1341,9 @@ export async function runGeneratedRegistryCli(options: {
       ...(options.cancelSignal === undefined
         ? {}
         : { cancelSignal: options.cancelSignal }),
+      ...(options.schedulerFactory === undefined
+        ? {}
+        : { schedulerFactory: options.schedulerFactory }),
       scheduling,
       buildKitCacheDirectory: path.resolve(buildKitCacheDirectory),
       containerEnvironment: fixtureContainerEnvironmentFromEnvironment(
