@@ -3808,7 +3808,7 @@ syncBuiltinESMExports();
       );
 
       try {
-        const rootCheck = await execa("pnpm", ["run", "check"], {
+        const rootCheck = await execa("pnpm", ["run", "check:full"], {
           cwd: project.targetDir,
           reject: false,
         });

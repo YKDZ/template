@@ -691,12 +691,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     });
     assert.deepStrictEqual(
       rootTurboConfig.tasks["@demo/web#test:e2e"].dependsOn,
-      [
-        "//#database:prepare:e2e",
-        "@demo/db#build",
-        "build",
-        "browser:prepare",
-      ],
+      ["//#database:prepare:e2e", "@demo/db#build", "build", "browser:prepare"],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
@@ -902,8 +897,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         scripts: {
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
-          "check:deployment":
-            "turbo run deployment --output-logs=errors-only --log-order=grouped --log-prefix=task",
+          check: "node --conditions=source scripts/quality-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/quality-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/quality-gates.ts check:full",
           "database:prepare:dev":
             "DATABASE_PROFILE=dev pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/db run db:seed:example",
           "database:prepare:test":
@@ -912,8 +910,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             "DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:reset && DATABASE_PROFILE=e2e pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:seed:example",
           dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/web",
           lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
-          check:
-            "pnpm run boundaries && turbo run format:check lint typecheck build test test:e2e --continue=dependencies-successful --output-logs=errors-only --log-order=grouped --log-prefix=task",
           fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
         },
       },

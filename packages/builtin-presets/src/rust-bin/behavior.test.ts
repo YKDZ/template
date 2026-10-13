@@ -741,7 +741,7 @@ printf '%s\\n' "${"$"}*" >> "${"$"}state"
       );
       await execa("pnpm", ["install"], { cwd: targetDir });
 
-      const failure = await execa("pnpm", ["run", "check"], {
+      const failure = await execa("pnpm", ["run", "check:full"], {
         cwd: targetDir,
         reject: false,
       });

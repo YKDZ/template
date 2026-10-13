@@ -25,7 +25,15 @@ function countSummaryLine(line: string): void {
 function forwardSignal(signal: InterruptSignal): void {
   if (cargo.exitCode === null && cargo.signalCode === null) {
     interruptedBy = signal;
-    cargo.kill(signal);
+    try {
+      if (process.platform !== "win32" && cargo.pid !== undefined) {
+        process.kill(-cargo.pid, signal);
+      } else {
+        cargo.kill(signal);
+      }
+    } catch {
+      cargo.kill(signal);
+    }
   }
 }
 
@@ -52,6 +60,7 @@ function consumeOutput(
 
 const cargo = spawn("cargo", ["test", "--workspace"], {
   stdio: ["inherit", "pipe", "pipe"],
+  detached: process.platform !== "win32",
 });
 
 process.on("SIGINT", forwardInterrupt);
