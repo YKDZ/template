@@ -2443,7 +2443,7 @@ void describe("Development Container Fixture Executor", () => {
     }
     assert.ok(
       execCall.args.some((argument) =>
-        /^TURBO_CACHE_DIR=\/tmp\/template-turbo-cache-/u.test(argument),
+        argument.startsWith("TURBO_CACHE_DIR=/tmp/template-turbo-cache-"),
       ),
     );
     assert.ok(!execCall?.args.join("\n").includes("UNRELATED_SECRET"));

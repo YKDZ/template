@@ -933,7 +933,12 @@ void describe("packed public CLI consumer", () => {
           ),
         );
         await assert.rejects(stat(rustToolchainPath), (error) => {
-          assert.partialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(
+            (error as { readonly code?: unknown }).code,
+            "ENOENT",
+          );
           return true;
         });
         assert.ok(!dependabotBeforeRust.includes("package-ecosystem: cargo"));
