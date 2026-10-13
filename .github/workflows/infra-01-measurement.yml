@@ -108,6 +108,28 @@ jobs:
           cat "$MEASURE_ROOT/records/preparation/shellcheck-install.log"
           exit "$result"
 
+      - name: Probe seccomp-bpf execve observation
+        shell: bash
+        run: |
+          set +e
+          pnpm_executable=$(command -v pnpm)
+          strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
+            -o "$MEASURE_ROOT/records/preparation/strace-probe.execve.log" -- pnpm --version \
+            > "$MEASURE_ROOT/records/preparation/strace-probe.stdout" \
+            2> "$MEASURE_ROOT/records/preparation/strace-probe.stderr"
+          result=$?
+          if [[ "$result" -eq 0 ]] && ! grep -Eq 'execve\(.* = 0$' \
+            "$MEASURE_ROOT/records/preparation/strace-probe.execve.log"; then
+            printf 'strace probe did not record the pnpm execve.\n' \
+              >> "$MEASURE_ROOT/records/preparation/strace-probe.stderr"
+            result=1
+          fi
+          printf 'strace -f --seccomp-bpf -e trace=execve -- pnpm --version\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/strace-probe.exit"
+          cat "$MEASURE_ROOT/records/preparation/strace-probe.stdout"
+          cat "$MEASURE_ROOT/records/preparation/strace-probe.stderr" >&2
+          exit "$result"
+
       - name: Prepare browser checks
         shell: bash
         run: |
@@ -145,7 +167,8 @@ jobs:
             printf 'apt_get_install_invocations=1\n'
             printf 'apt_packages=shellcheck,strace\n'
             printf 'playwright_chromium_install_invocations=1\n'
-            printf 'formal_gate_host_pnpm_dependency_install_calls=recorded_per_gate_by_strace\n'
+            printf 'formal_gate_host_pnpm_dependency_install_calls=recorded_per_gate_by_strace_seccomp_bpf\n'
+            printf 'strace_probe_invocations=1\n'
             printf 'fixture_dependency_installation_events=recorded_by_native_activity_ledger\n'
             printf '\n--- runner ---\n'
             date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
@@ -250,7 +273,7 @@ jobs:
             command_text=$(printf '%q ' "$@")
             /usr/bin/time -f 'observer_wrapper_wall_seconds=%e observer_wrapper_user_seconds=%U observer_wrapper_sys_seconds=%S observer_wrapper_max_rss_kb=%M exit=%x' \
               -o "$phase_dir/$name.time" \
-              strace -f -qq -e trace=execve -P "$pnpm_executable" \
+              strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
                 -o "$phase_dir/$name.execve.log" -- "$@" > "$phase_dir/$name.log" 2>&1
             status=$?
             pnpm_dependency_install_calls=$(awk \
