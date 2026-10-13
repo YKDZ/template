@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -12,7 +13,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -49,10 +50,39 @@ import {
 const publicCliPackageName = ["@ykdz", "template"].join("/");
 
 async function packTemplateArchive(workspace: string): Promise<string> {
+  const repositoryRoot = path.join(workspace, "repository");
   const archiveDirectory = path.join(workspace, "archives");
-  await rm(path.join(process.cwd(), "packages/cli/dist"), {
+  const ignoredDirectoryNames = new Set([
+    ".git",
+    ".fixture-evidence",
+    ".fixture-evidence-activity",
+    ".fixture-native-cache",
+    ".fixture-workspace",
+    ".pnpm-store",
+    ".scratch",
+    ".turbo",
+    "node_modules",
+  ]);
+  await cp(process.cwd(), repositoryRoot, {
     recursive: true,
-    force: true,
+    filter(source) {
+      const relativePath = path
+        .relative(process.cwd(), source)
+        .split(path.sep)
+        .join("/");
+      if (
+        relativePath
+          .split("/")
+          .some((segment) => ignoredDirectoryNames.has(segment))
+      ) {
+        return false;
+      }
+      return !/^packages\/[^/]+\/dist(?:\/|$)/u.test(relativePath);
+    },
+  });
+  await mkdir(archiveDirectory, { recursive: true });
+  await execa("pnpm", ["install", "--frozen-lockfile"], {
+    cwd: repositoryRoot,
   });
   await execa(
     "pnpm",
@@ -64,11 +94,11 @@ async function packTemplateArchive(workspace: string): Promise<string> {
       "--pack-destination",
       archiveDirectory,
     ],
-    { cwd: process.cwd() },
+    { cwd: repositoryRoot },
   );
   assert.match(
     await readFile(
-      path.join(process.cwd(), "packages/cli/dist/cli.js"),
+      path.join(repositoryRoot, "packages/cli/dist/cli.js"),
       "utf8",
     ),
     /^#!\/usr\/bin\/env node/u,
@@ -492,6 +522,25 @@ function initializationDiagnosticPlan(definitionName: string) {
 }
 
 void describe("packed public CLI consumer", () => {
+  let archiveWorkspace: string | undefined;
+  let packedArchivePath: string | undefined;
+
+  before(
+    async () => {
+      archiveWorkspace = await mkdtemp(
+        path.join(tmpdir(), "template-packed-artifact-"),
+      );
+      packedArchivePath = await packTemplateArchive(archiveWorkspace);
+    },
+    { timeout: 300000 },
+  );
+
+  after(async () => {
+    if (archiveWorkspace !== undefined) {
+      await rm(archiveWorkspace, { recursive: true, force: true });
+    }
+  });
+
   void it(
     "runs the archive alone: import, help, every initialization, and package addition",
     { timeout: 300000 },
@@ -500,8 +549,9 @@ void describe("packed public CLI consumer", () => {
         path.join(tmpdir(), "template-packed-consumer-"),
       );
       try {
+        assert.ok(packedArchivePath);
+        const archivePath = packedArchivePath;
         const consumer = path.join(workspace, "consumer");
-        const archivePath = await packTemplateArchive(workspace);
         const packedPaths = (await execa("tar", ["-tf", archivePath])).stdout
           .split("\n")
           .filter(Boolean);
@@ -1408,9 +1458,10 @@ void describe("packed public CLI consumer", () => {
         path.join(tmpdir(), "template-packed-ready-add-"),
       );
       try {
+        assert.ok(packedArchivePath);
+        const archivePath = packedArchivePath;
         const consumer = path.join(workspace, "consumer");
         const generated = path.join(workspace, "digital");
-        const archivePath = await packTemplateArchive(workspace);
         const baseDefinition = definitionWithPackagePath("packages/db");
         const additionDefinition = firstAddableDefinition();
         await mkdir(consumer, { recursive: true });
