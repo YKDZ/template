@@ -15,16 +15,6 @@ import { pathToFileURL } from "node:url";
 
 import { execa } from "execa";
 
-import {
-  arrayContaining,
-  assertContains,
-  assertContainsEqual,
-  assertMatches,
-  assertMatchesPartial,
-  objectContaining,
-  testEach,
-} from "../../test-support/assertions.ts";
-
 const templateRoot = path.resolve(
   import.meta.dirname,
   "../../templates/ts-cli",
@@ -296,19 +286,18 @@ void describe("Generated Repository npm publication readiness", () => {
     assert.strictEqual(result.kind, "blocked");
     if (result.kind !== "blocked") throw new Error("Expected blockers");
     assert.strictEqual(result.mode, "safe-unconfigured");
-    assertMatches(
-      result.blockers.map(({ code }) => code),
-      arrayContaining([
-        "description",
-        "version",
-        "private",
-        "license-id",
-        "repository",
-        "readme-missing",
-        "license-missing",
-        "changelog-missing",
-      ]),
-    );
+    for (const code of [
+      "description",
+      "version",
+      "private",
+      "license-id",
+      "repository",
+      "readme-missing",
+      "license-missing",
+      "changelog-missing",
+    ]) {
+      assert.ok(result.blockers.some((blocker) => blocker.code === code));
+    }
     assert.deepStrictEqual(
       result.blockers,
       result.blockers.toSorted((left, right) =>
@@ -320,10 +309,8 @@ void describe("Generated Repository npm publication readiness", () => {
     );
   });
 
-  testEach(
-    ["@demo/cli", "demo-cli"],
-    "accepts a ready scoped or unscoped package from owner facts: %s",
-    async (packageName) => {
+  for (const packageName of ["@demo/cli", "demo-cli"]) {
+    void it(`accepts a ready scoped or unscoped package from owner facts: ${packageName}`, async () => {
       const repositoryRoot = await generatedRepository();
       await writeReadyFacts(repositoryRoot, packageName);
       const { inspectNpmPublicationReadiness } =
@@ -348,16 +335,14 @@ void describe("Generated Repository npm publication readiness", () => {
           releaseNotes: "### Added\n\n- Publish the first stable CLI.\n",
         },
       });
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      ["removed", {}],
-      ["empty", { "@ykdz/cli-contract": "" }],
-    ],
-    "blocks a $0 fixed CLI runtime dependency specifier",
-    async (_state: string, dependencies: Record<string, string>) => {
+  for (const [state, dependencies] of [
+    ["removed", {}],
+    ["empty", { "@ykdz/cli-contract": "" }],
+  ] as const) {
+    void it(`blocks a ${state} fixed CLI runtime dependency specifier`, async () => {
       const repositoryRoot = await generatedRepository();
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
@@ -374,20 +359,17 @@ void describe("Generated Repository npm publication readiness", () => {
 
       assert.strictEqual(result.kind, "blocked");
       if (result.kind !== "blocked") throw new Error("Expected blockers");
-      assertContainsEqual(
-        result.blockers,
-        objectContaining({ code: "manifest-contract" }),
+      assert.ok(
+        result.blockers.some((blocker) => blocker.code === "manifest-contract"),
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      { root: "24", nodeRange: ">=24" },
-      { root: "24.16.0", nodeRange: "^24.16.0" },
-    ],
-    "checks the public CLI engine against root engines.node $root",
-    async ({ root, nodeRange }) => {
+  for (const { root, nodeRange } of [
+    { root: "24", nodeRange: ">=24" },
+    { root: "24.16.0", nodeRange: "^24.16.0" },
+  ]) {
+    void it(`checks the public CLI engine against root engines.node ${root}`, async () => {
       const repositoryRoot = await generatedRepository({ rootNode: root });
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
@@ -403,13 +385,11 @@ void describe("Generated Repository npm publication readiness", () => {
       });
 
       assert.strictEqual(result.kind, "ready");
-    },
-  );
+    });
+  }
 
-  testEach(
-    [">=24", "^24.15.0", ">=26"],
-    "blocks public CLI engine %s that does not match an exact root version",
-    async (nodeRange) => {
+  for (const nodeRange of [">=24", "^24.15.0", ">=26"]) {
+    void it(`blocks public CLI engine ${nodeRange} that does not match an exact root version`, async () => {
       const repositoryRoot = await generatedRepository({ rootNode: "24.16.0" });
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
@@ -430,13 +410,11 @@ void describe("Generated Repository npm publication readiness", () => {
         result.blockers.map(({ code }) => code),
         ["manifest-contract"],
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    [">=24", "24.16", "v24", "24.16.0-beta.1", ""],
-    "blocks an unsupported root engines.node declaration %s without substituting a baseline",
-    async (root) => {
+  for (const root of [">=24", "24.16", "v24", "24.16.0-beta.1", ""]) {
+    void it(`blocks an unsupported root engines.node declaration ${root} without substituting a baseline`, async () => {
       const repositoryRoot = await generatedRepository({ rootNode: root });
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       const { inspectNpmPublicationReadiness } =
@@ -449,15 +427,15 @@ void describe("Generated Repository npm publication readiness", () => {
 
       assert.strictEqual(result.kind, "blocked");
       if (result.kind !== "blocked") throw new Error("Expected blockers");
-      assertContainsEqual(
-        result.blockers,
-        objectContaining({
-          code: "manifest-contract",
-          owner: { path: "packages/cli/package.json" },
-        }),
+      assert.ok(
+        result.blockers.some(
+          (blocker) =>
+            blocker.code === "manifest-contract" &&
+            blocker.owner.path === "packages/cli/package.json",
+        ),
       );
-    },
-  );
+    });
+  }
 
   void it("shares one inspection across safe baseline, public intent, and require-ready callers", async () => {
     const baselineRoot = await generatedRepository();
@@ -465,27 +443,26 @@ void describe("Generated Repository npm publication readiness", () => {
     const requiredBaseline = await runReadinessCaller(baselineRoot, [
       "--require-ready",
     ]);
-    assertMatchesPartial(ordinaryBaseline, { exitCode: 0 });
-    assertContains(
-      ordinaryBaseline.stdout,
-      "npm publication readiness: blocked",
+    assert.strictEqual(ordinaryBaseline.exitCode, 0);
+    assert.ok(
+      ordinaryBaseline.stdout.includes("npm publication readiness: blocked"),
     );
-    assertMatchesPartial(requiredBaseline, { exitCode: 1 });
-    assertContains(requiredBaseline.stdout, "BLOCKER version");
+    assert.strictEqual(requiredBaseline.exitCode, 1);
+    assert.ok(requiredBaseline.stdout.includes("BLOCKER version"));
 
     const publicIntentRoot = await generatedRepository({
       manifest: { version: "1.0.0" },
     });
     const publicIntent = await runReadinessCaller(publicIntentRoot);
-    assertMatchesPartial(publicIntent, { exitCode: 1 });
-    assertContains(publicIntent.stdout, "Mode: public-intent");
+    assert.strictEqual(publicIntent.exitCode, 1);
+    assert.ok(publicIntent.stdout.includes("Mode: public-intent"));
 
     const readyRoot = await generatedRepository();
     await writeReadyFacts(readyRoot, "@demo/cli");
     const ready = await runReadinessCaller(readyRoot, ["--require-ready"]);
-    assertMatchesPartial(ready, { exitCode: 0 });
-    assertContains(ready.stdout, "npm publication readiness: ready");
-    assertContains(ready.stdout, "Package: @demo/cli@1.0.0");
+    assert.strictEqual(ready.exitCode, 0);
+    assert.ok(ready.stdout.includes("npm publication readiness: ready"));
+    assert.ok(ready.stdout.includes("Package: @demo/cli@1.0.0"));
   });
 
   void it("supports pnpm argument forwarding without accepting ambiguous arguments", async () => {
@@ -494,8 +471,8 @@ void describe("Generated Repository npm publication readiness", () => {
     const throughPnpm = await runReadinessThroughPnpm(repositoryRoot, [
       "--require-ready",
     ]);
-    assertMatchesPartial(throughPnpm, { exitCode: 1 });
-    assertContains(throughPnpm.stdout, "BLOCKER version");
+    assert.strictEqual(throughPnpm.exitCode, 1);
+    assert.ok(throughPnpm.stdout.includes("BLOCKER version"));
 
     for (const args of [
       ["--require-ready", "--require-ready"],
@@ -503,8 +480,8 @@ void describe("Generated Repository npm publication readiness", () => {
       ["--unknown"],
     ]) {
       const rejected = await runReadinessCaller(repositoryRoot, args);
-      assertMatchesPartial(rejected, { exitCode: 2 });
-      assertContains(rejected.stderr, "ERROR publication-readiness-usage");
+      assert.strictEqual(rejected.exitCode, 2);
+      assert.ok(rejected.stderr.includes("ERROR publication-readiness-usage"));
     }
   });
 
@@ -625,12 +602,12 @@ void describe("Generated Repository npm publication readiness", () => {
     if (nonDirectoryMetadataRoot.kind !== "blocked") {
       throw new Error("Expected blockers");
     }
-    assertContainsEqual(
-      nonDirectoryMetadataRoot.blockers,
-      objectContaining({
-        code: "local-template-metadata-invalid",
-        owner: { path: ".template" },
-      }),
+    assert.ok(
+      nonDirectoryMetadataRoot.blockers.some(
+        (blocker) =>
+          blocker.code === "local-template-metadata-invalid" &&
+          blocker.owner.path === ".template",
+      ),
     );
   });
 
@@ -671,9 +648,10 @@ void describe("Generated Repository npm publication readiness", () => {
     if (duplicateTargetId.kind !== "blocked") {
       throw new Error("Expected blockers");
     }
-    assertContainsEqual(
-      duplicateTargetId.blockers,
-      objectContaining({ code: "local-template-metadata-mismatch" }),
+    assert.ok(
+      duplicateTargetId.blockers.some(
+        (blocker) => blocker.code === "local-template-metadata-mismatch",
+      ),
     );
 
     await writeJson(blueprintPath, blueprint);
@@ -697,9 +675,10 @@ void describe("Generated Repository npm publication readiness", () => {
     if (additionMasquerade.kind !== "blocked") {
       throw new Error("Expected blockers");
     }
-    assertContainsEqual(
-      additionMasquerade.blockers,
-      objectContaining({ code: "local-template-metadata-mismatch" }),
+    assert.ok(
+      additionMasquerade.blockers.some(
+        (blocker) => blocker.code === "local-template-metadata-mismatch",
+      ),
     );
   });
 
@@ -717,12 +696,12 @@ void describe("Generated Repository npm publication readiness", () => {
 
     assert.strictEqual(result.kind, "blocked");
     if (result.kind !== "blocked") throw new Error("Expected blockers");
-    assertContainsEqual(
-      result.blockers,
-      objectContaining({
-        code: "manifest-contract",
-        owner: { path: "pnpm-workspace.yaml" },
-      }),
+    assert.ok(
+      result.blockers.some(
+        (blocker) =>
+          blocker.code === "manifest-contract" &&
+          blocker.owner.path === "pnpm-workspace.yaml",
+      ),
     );
   });
 
@@ -744,12 +723,11 @@ void describe("Generated Repository npm publication readiness", () => {
 
     assert.strictEqual(result.kind, "blocked");
     if (result.kind !== "blocked") throw new Error("Expected blockers");
-    assertContainsEqual(
-      result.blockers,
-      objectContaining({
-        code: "manifest-contract",
-        owner: { path: "apps" },
-      }),
+    assert.ok(
+      result.blockers.some(
+        (blocker) =>
+          blocker.code === "manifest-contract" && blocker.owner.path === "apps",
+      ),
     );
   });
 
@@ -783,9 +761,8 @@ void describe("Generated Repository npm publication readiness", () => {
     });
     assert.strictEqual(blocked.kind, "blocked");
     if (blocked.kind !== "blocked") throw new Error("Expected blockers");
-    assertContains(
-      blocked.blockers.map(({ code }) => code),
-      "license-content",
+    assert.ok(
+      blocked.blockers.map(({ code }) => code).includes("license-content"),
     );
   });
 
@@ -807,33 +784,31 @@ void describe("Generated Repository npm publication readiness", () => {
     assert.strictEqual(result.kind, "ready");
   });
 
-  testEach(
-    [
-      {
-        license: "Apache-2.0",
-        source: [
-          "Apache License",
-          "Version 2.0, January 2004",
-          "http://www.apache.org/licenses/",
-          "Copyright 2026 Ada Lovelace",
-          "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
-          "1. Definitions.",
-          "2. Grant of Copyright License.",
-          "3. Grant of Patent License.",
-          "4. Redistribution.",
-          "7. Disclaimer of Warranty.",
-          "8. Limitation of Liability.",
-          "END OF TERMS AND CONDITIONS",
-        ].join("\n\n"),
-      },
-      {
-        license: "BSD-3-Clause",
-        source:
-          "BSD 3-Clause License\n\nCopyright 2026 Ada Lovelace\n\nRedistribution and use are permitted under the reviewed terms.\n",
-      },
-    ],
-    "accepts reviewed $license owner facts",
-    async ({ license, source }) => {
+  for (const { license, source } of [
+    {
+      license: "Apache-2.0",
+      source: [
+        "Apache License",
+        "Version 2.0, January 2004",
+        "http://www.apache.org/licenses/",
+        "Copyright 2026 Ada Lovelace",
+        "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
+        "1. Definitions.",
+        "2. Grant of Copyright License.",
+        "3. Grant of Patent License.",
+        "4. Redistribution.",
+        "7. Disclaimer of Warranty.",
+        "8. Limitation of Liability.",
+        "END OF TERMS AND CONDITIONS",
+      ].join("\n\n"),
+    },
+    {
+      license: "BSD-3-Clause",
+      source:
+        "BSD 3-Clause License\n\nCopyright 2026 Ada Lovelace\n\nRedistribution and use are permitted under the reviewed terms.\n",
+    },
+  ]) {
+    void it(`accepts reviewed ${license} owner facts`, async () => {
       const repositoryRoot = await generatedRepository();
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       await writeJson(path.join(repositoryRoot, "packages/cli/package.json"), {
@@ -854,8 +829,8 @@ void describe("Generated Repository npm publication readiness", () => {
       });
 
       assert.strictEqual(result.kind, "ready");
-    },
-  );
+    });
+  }
 
   void it("blocks a public runtime edge from the actual private workspace manifest", async () => {
     const repositoryRoot = await generatedRepository();
@@ -887,17 +862,15 @@ void describe("Generated Repository npm publication readiness", () => {
 
     assert.strictEqual(blocked.kind, "blocked");
     if (blocked.kind !== "blocked") throw new Error("Expected blockers");
-    assertContainsEqual(
-      blocked.blockers,
-      objectContaining({
-        code: "private-runtime-dependency",
-        owner: {
-          path: "packages/cli/package.json",
-          pointer: "/dependencies/@demo~1runtime",
-        },
-        observed:
-          "@demo/runtime resolves to private workspace package packages/runtime",
-      }),
+    assert.ok(
+      blocked.blockers.some(
+        (blocker) =>
+          blocker.code === "private-runtime-dependency" &&
+          blocker.owner.path === "packages/cli/package.json" &&
+          blocker.owner.pointer === "/dependencies/@demo~1runtime" &&
+          blocker.observed ===
+            "@demo/runtime resolves to private workspace package packages/runtime",
+      ),
     );
 
     await writeJson(runtimeManifestPath, {
@@ -941,13 +914,13 @@ void describe("Generated Repository npm publication readiness", () => {
 
     assert.strictEqual(result.kind, "blocked");
     if (result.kind !== "blocked") throw new Error("Expected blockers");
-    assertContainsEqual(
-      result.blockers,
-      objectContaining({
-        code: "private-runtime-dependency",
-        observed:
-          "@demo/runtime resolves to private workspace package packages/aaa-private",
-      }),
+    assert.ok(
+      result.blockers.some(
+        (blocker) =>
+          blocker.code === "private-runtime-dependency" &&
+          blocker.observed ===
+            "@demo/runtime resolves to private workspace package packages/aaa-private",
+      ),
     );
   });
 
@@ -1028,12 +1001,11 @@ void describe("Generated Repository npm publication readiness", () => {
       packagePath: "packages/cli",
     });
 
-    assertMatchesPartial(result, {
-      kind: "blocked",
-      blockers: arrayContaining([
-        objectContaining({ code: "manifest-contract" }),
-      ]),
-    });
+    assert.strictEqual(result.kind, "blocked");
+    if (result.kind !== "blocked") throw new Error("Expected blockers");
+    assert.ok(
+      result.blockers.some((blocker) => blocker.code === "manifest-contract"),
+    );
   });
 
   void it("maps release-critical changelog failures into readiness blockers", async () => {

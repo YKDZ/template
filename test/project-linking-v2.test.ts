@@ -9,8 +9,6 @@ import type {
 } from "@ykdz/template-core/project-blueprint";
 import { planExplicitProjectLinks } from "@ykdz/template-core/project-linking-v2";
 
-import { assertPartialDeepStrictEqual } from "./assertions.ts";
-
 function contribution(
   definition: PackageDefinition,
   manifest: Readonly<Record<string, unknown>>,
@@ -154,7 +152,7 @@ void describe("Project Linking", () => {
       ],
     });
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
       {
         dependenciesMeta: {
@@ -204,7 +202,7 @@ void describe("Project Linking", () => {
       ],
     });
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
       {
         dependenciesMeta: {
@@ -254,7 +252,7 @@ void describe("Project Linking", () => {
       ],
     });
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
       {
         dependenciesMeta: {
@@ -314,7 +312,7 @@ void describe("Project Linking", () => {
       ]),
     });
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
       {
         dependenciesMeta: {
@@ -381,7 +379,7 @@ void describe("Project Linking", () => {
       ]),
     });
 
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       plan.manifestPatchesByPackagePath.get(consumerDefinition.path),
       {
         dependenciesMeta: {

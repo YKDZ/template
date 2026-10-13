@@ -27,19 +27,6 @@ import {
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
 
-import {
-  any,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertPartialDeepStrictEqual,
-  assertRejectsContaining,
-  hasProperty,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-  testEach,
-} from "./assertions.ts";
-
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const planTemplateSource = createTemplateSourceHandle(
@@ -150,58 +137,59 @@ void describe("Project Projection materialization", () => {
     );
   });
 
-  testEach(
-    [
-      {
-        sequence: "writeJson to mergeJson",
-        operations: [
-          { kind: "writeJson", to: "config.json", value: { first: true } },
-          { kind: "mergeJson", to: "config.json", value: { second: true } },
-        ],
-      },
-      {
-        sequence: "copyFile to mergeJson",
-        operations: [
-          {
-            kind: "copyFile",
-            source: planTemplateSource,
-            from: "config.json",
-            to: "config.json",
-          },
-          { kind: "mergeJson", to: "config.json", value: { second: true } },
-        ],
-      },
-      {
-        sequence: "copyFile to replaceAnchors to setExecutable",
-        operations: [
-          {
-            kind: "copyFile",
-            source: planTemplateSource,
-            from: "main.ts",
-            to: "src/main.ts",
-          },
-          {
-            kind: "replaceAnchors",
-            path: "src/main.ts",
-            language: "typescript",
-            replacements: { entry: "new" },
-          },
-          {
-            kind: "setExecutable",
-            path: "src/main.ts",
-            executable: true,
-          },
-        ],
-      },
-    ] satisfies readonly {
-      readonly sequence: string;
-      readonly operations: readonly RenderOperation[];
-    }[],
-    "accepts the legal $sequence sequence",
-    ({ operations }) => {
-      assert.deepStrictEqual(validateProjectProjectionPlan({ operations }), []);
+  for (const scenario of [
+    {
+      sequence: "writeJson to mergeJson",
+      operations: [
+        { kind: "writeJson", to: "config.json", value: { first: true } },
+        { kind: "mergeJson", to: "config.json", value: { second: true } },
+      ],
     },
-  );
+    {
+      sequence: "copyFile to mergeJson",
+      operations: [
+        {
+          kind: "copyFile",
+          source: planTemplateSource,
+          from: "config.json",
+          to: "config.json",
+        },
+        { kind: "mergeJson", to: "config.json", value: { second: true } },
+      ],
+    },
+    {
+      sequence: "copyFile to replaceAnchors to setExecutable",
+      operations: [
+        {
+          kind: "copyFile",
+          source: planTemplateSource,
+          from: "main.ts",
+          to: "src/main.ts",
+        },
+        {
+          kind: "replaceAnchors",
+          path: "src/main.ts",
+          language: "typescript",
+          replacements: { entry: "new" },
+        },
+        {
+          kind: "setExecutable",
+          path: "src/main.ts",
+          executable: true,
+        },
+      ],
+    },
+  ] satisfies readonly {
+    readonly sequence: string;
+    readonly operations: readonly RenderOperation[];
+  }[]) {
+    void it(`accepts the legal ${scenario.sequence} sequence`, () => {
+      assert.deepStrictEqual(
+        validateProjectProjectionPlan({ operations: scenario.operations }),
+        [],
+      );
+    });
+  }
 
   void it("materializes planner-owned text at any safe projection path", async () => {
     assert.deepStrictEqual(
@@ -468,7 +456,7 @@ void describe("Project Projection materialization", () => {
     assert.deepStrictEqual(reads, ["policy.txt"]);
     assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    assertLength(result.mutations, 1);
+    assert.strictEqual(result.mutations.length, 1);
     assert.strictEqual(
       decoder.decode(result.mutations[0]!.content),
       "first\nprivate\ncommon\ngenerated\nlast\n",
@@ -531,41 +519,44 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          path: "config.json",
-          driver: "structured",
-          location: "/settings/timeout",
-          reason: "Current and After contain incompatible scalar changes",
-          before: "10",
-          current: "20",
-          after: "30",
-        }),
-      ],
+    assert.ok(result.ok === false);
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      path: "config.json",
+      driver: "structured",
+      location: "/settings/timeout",
+      reason: "Current and After contain incompatible scalar changes",
+      before: "10",
+      current: "20",
+      after: "30",
     });
-    assert.ok(!hasProperty(result, "mutations"));
+    assert.ok(!Object.hasOwn(result, "mutations"));
   });
 
-  testEach(
-    [
-      { beforeKind: "null", beforeValue: null, beforeDiagnostic: "null" },
-      {
-        beforeKind: "string",
-        beforeValue: "legacy",
-        beforeDiagnostic: '"legacy"',
-      },
-      { beforeKind: "number", beforeValue: 7, beforeDiagnostic: "7" },
-      { beforeKind: "boolean", beforeValue: false, beforeDiagnostic: "false" },
-      {
-        beforeKind: "array",
-        beforeValue: ["legacy"],
-        beforeDiagnostic: '["legacy"]',
-      },
-    ],
-    "conflicts when explicit $beforeKind is concurrently replaced by different objects",
-    async ({ beforeValue, beforeDiagnostic }) => {
+  for (const scenario of [
+    { beforeKind: "null", beforeValue: null, beforeDiagnostic: "null" },
+    {
+      beforeKind: "string",
+      beforeValue: "legacy",
+      beforeDiagnostic: '"legacy"',
+    },
+    { beforeKind: "number", beforeValue: 7, beforeDiagnostic: "7" },
+    { beforeKind: "boolean", beforeValue: false, beforeDiagnostic: "false" },
+    {
+      beforeKind: "array",
+      beforeValue: ["legacy"],
+      beforeDiagnostic: '["legacy"]',
+    },
+  ] satisfies readonly {
+    readonly beforeKind: string;
+    readonly beforeValue: unknown;
+    readonly beforeDiagnostic: string;
+  }[]) {
+    void it(`conflicts when explicit ${scenario.beforeKind} is concurrently replaced by different objects`, async () => {
+      const { beforeValue, beforeDiagnostic } = scenario;
       const result = await reconcileProjectProjections({
         before: structuredProjection("config.json", {
           setting: beforeValue,
@@ -581,23 +572,23 @@ void describe("Project Projection materialization", () => {
         },
       });
 
-      assertDeepStrictEqualWithMatchers(result, {
-        ok: false,
-        conflicts: [
-          objectContaining({
-            path: "config.json",
-            driver: "structured",
-            location: "/setting",
-            reason: "Current and After contain incompatible changes",
-            before: beforeDiagnostic,
-            current: '{"userRetained":true}',
-            after: '{"generated":true}',
-          }),
-        ],
+      assert.ok(result.ok === false);
+      assert.strictEqual(Reflect.ownKeys(result).length, 2);
+      assert.ok(Object.hasOwn(result, "ok"));
+      assert.ok(Object.hasOwn(result, "conflicts"));
+      assert.strictEqual(result.conflicts.length, 1);
+      assert.partialDeepStrictEqual(result.conflicts[0], {
+        path: "config.json",
+        driver: "structured",
+        location: "/setting",
+        reason: "Current and After contain incompatible changes",
+        before: beforeDiagnostic,
+        current: '{"userRetained":true}',
+        after: '{"generated":true}',
       });
-      assert.ok(!hasProperty(result, "mutations"));
-    },
-  );
+      assert.ok(!Object.hasOwn(result, "mutations"));
+    });
+  }
 
   void it("recursively combines concurrent object additions only at a missing location", async () => {
     const result = await reconcileProjectProjections({
@@ -634,18 +625,20 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          location: "",
-          reason: stringContaining(
-            "Before structured content is not valid JSON",
-          ),
-          before: '{"setting":undefined}\n',
-        }),
-      ],
+    assert.ok(result.ok === false);
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      location: "",
+      before: '{"setting":undefined}\n',
     });
+    assert.ok(
+      result.conflicts[0]!.reason.includes(
+        "Before structured content is not valid JSON",
+      ),
+    );
   });
 
   void it("returns a structured parse diagnostic for invalid Current JSON", async () => {
@@ -657,20 +650,22 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          path: "config.json",
-          driver: "structured",
-          location: "",
-          reason: stringContaining(
-            "Current structured content is not valid JSON",
-          ),
-          current: '{"enabled":',
-        }),
-      ],
+    assert.ok(result.ok === false);
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      path: "config.json",
+      driver: "structured",
+      location: "",
+      current: '{"enabled":',
     });
+    assert.ok(
+      result.conflicts[0]!.reason.includes(
+        "Current structured content is not valid JSON",
+      ),
+    );
   });
 
   void it("uses the root pointer for a structured file-level conflict", async () => {
@@ -682,16 +677,16 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          path: "config.json",
-          driver: "structured",
-          location: "",
-          reason: "Path presence changed concurrently",
-        }),
-      ],
+    assert.ok(result.ok === false);
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      path: "config.json",
+      driver: "structured",
+      location: "",
+      reason: "Path presence changed concurrently",
     });
   });
 
@@ -990,20 +985,21 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          driver: "structured",
-          location: "/members/1/value",
-          reason: "Current and After contain incompatible scalar changes",
-          before: "1",
-          current: "2",
-          after: "3",
-        }),
-      ],
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      driver: "structured",
+      location: "/members/1/value",
+      reason: "Current and After contain incompatible scalar changes",
+      before: "1",
+      current: "2",
+      after: "3",
     });
-    assert.ok(!hasProperty(result, "mutations"));
+    assert.ok(!Object.hasOwn(result, "mutations"));
   });
 
   void it("decodes identity-set pointers and escapes structured conflict tokens", async () => {
@@ -1043,16 +1039,17 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          location: "/groups~1primary~0set/0/value",
-          before: "1",
-          current: "2",
-          after: "3",
-        }),
-      ],
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      location: "/groups~1primary~0set/0/value",
+      before: "1",
+      current: "2",
+      after: "3",
     });
   });
 
@@ -1095,10 +1092,8 @@ void describe("Project Projection materialization", () => {
     assert.strictEqual(reads, 0);
   });
 
-  testEach(
-    ["members", "/members/~", "/members/~2"],
-    "rejects invalid identity-set JSON Pointer %j before reading Current",
-    async (location) => {
+  for (const location of ["members", "/members/~", "/members/~2"]) {
+    void it(`rejects invalid identity-set JSON Pointer ${JSON.stringify(location)} before reading Current`, async () => {
       let reads = 0;
       const reconciliation = [
         {
@@ -1133,24 +1128,23 @@ void describe("Project Projection materialization", () => {
           ),
       );
       assert.strictEqual(reads, 0);
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      {
-        caseName: "missing",
-        currentMembers: [{ label: "missing-id" }],
-        diagnostic: "is missing its identity",
-      },
-      {
-        caseName: "duplicate",
-        currentMembers: [{ id: "same" }, { id: "same" }],
-        diagnostic: "identities must be unique",
-      },
-    ],
-    "returns a policy conflict for $caseName Current member identities",
-    async ({ currentMembers, diagnostic }) => {
+  for (const scenario of [
+    {
+      caseName: "missing",
+      currentMembers: [{ label: "missing-id" }],
+      diagnostic: "is missing its identity",
+    },
+    {
+      caseName: "duplicate",
+      currentMembers: [{ id: "same" }, { id: "same" }],
+      diagnostic: "identities must be unique",
+    },
+  ]) {
+    void it(`returns a policy conflict for ${scenario.caseName} Current member identities`, async () => {
+      const { currentMembers, diagnostic } = scenario;
       const reconciliation = [
         {
           path: "config.json",
@@ -1184,18 +1178,18 @@ void describe("Project Projection materialization", () => {
         },
       });
 
-      assertDeepStrictEqualWithMatchers(result, {
-        ok: false,
-        conflicts: [
-          objectContaining({
-            location: "/members",
-            reason: stringContaining(`Current ${diagnostic}`),
-          }),
-        ],
-      });
-      assert.ok(!hasProperty(result, "mutations"));
-    },
-  );
+      assert.strictEqual(result.ok, false);
+      if (result.ok) return;
+      assert.strictEqual(Reflect.ownKeys(result).length, 2);
+      assert.ok(Object.hasOwn(result, "ok"));
+      assert.ok(Object.hasOwn(result, "conflicts"));
+      assert.strictEqual(result.conflicts.length, 1);
+      const conflict = result.conflicts[0]!;
+      assert.partialDeepStrictEqual(conflict, { location: "/members" });
+      assert.ok(conflict.reason.includes(`Current ${diagnostic}`));
+      assert.ok(!Object.hasOwn(result, "mutations"));
+    });
+  }
 
   void it("keeps undeclared arrays atomic", async () => {
     const result = await reconcileProjectProjections({
@@ -1210,14 +1204,15 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          location: "/members",
-          reason: "Current and After contain incompatible atomic array changes",
-        }),
-      ],
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      location: "/members",
+      reason: "Current and After contain incompatible atomic array changes",
     });
   });
 
@@ -1253,37 +1248,35 @@ void describe("Project Projection materialization", () => {
     });
   });
 
-  testEach(
-    [
-      {
-        staleDimension: "content",
-        current: textEntry(
-          "state.json",
-          '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
-        ),
-        currentDescription:
-          '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
+  for (const scenario of [
+    {
+      staleDimension: "content",
+      current: textEntry(
+        "state.json",
+        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
+      ),
+      currentDescription:
+        '{"schemaVersion":1,"unknown":"user","value":"before"}\n',
+    },
+    {
+      staleDimension: "mode",
+      current: {
+        ...structuredProjection("state.json", {
+          schemaVersion: 1,
+          value: "before",
+        }).entries[0]!,
+        mode: 0o111,
       },
-      {
-        staleDimension: "mode",
-        current: {
-          ...structuredProjection("state.json", {
-            schemaVersion: 1,
-            value: "before",
-          }).entries[0]!,
-          mode: 0o111,
-        },
-        currentDescription:
-          '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
-      },
-      {
-        staleDimension: "kind",
-        current: { path: "state.json", kind: "directory" },
-        currentDescription: "directory",
-      },
-    ],
-    "rejects stale tool-owned $staleDimension unless Current exactly matches Before",
-    async ({ current, currentDescription }) => {
+      currentDescription: '{\n  "schemaVersion": 1,\n  "value": "before"\n}\n',
+    },
+    {
+      staleDimension: "kind",
+      current: { path: "state.json", kind: "directory" as const },
+      currentDescription: "directory",
+    },
+  ]) {
+    void it(`rejects stale tool-owned ${scenario.staleDimension} unless Current exactly matches Before`, async () => {
+      const { current, currentDescription } = scenario;
       const canonicalReconciliation = [
         { path: "state.json", driver: "canonical" as const },
       ];
@@ -1320,9 +1313,9 @@ void describe("Project Projection materialization", () => {
           },
         ],
       });
-      assert.ok(!hasProperty(result, "mutations"));
-    },
-  );
+      assert.ok(!Object.hasOwn(result, "mutations"));
+    });
+  }
 
   void it("rejects duplicate projection paths before reading Current", async () => {
     const duplicateBefore: ProjectProjection = {
@@ -1397,18 +1390,16 @@ void describe("Project Projection materialization", () => {
     assert.strictEqual(reads, 0);
   });
 
-  testEach(
-    [
-      "",
-      "/absolute.txt",
-      "./policy.txt",
-      "nested/../policy.txt",
-      "nested//policy.txt",
-      "nested/",
-      String.raw`C:\absolute.txt`,
-    ],
-    "rejects unsafe raw Projection path %j",
-    async (projectionPath) => {
+  for (const projectionPath of [
+    "",
+    "/absolute.txt",
+    "./policy.txt",
+    "nested/../policy.txt",
+    "nested//policy.txt",
+    "nested/",
+    String.raw`C:\absolute.txt`,
+  ]) {
+    void it(`rejects unsafe raw Projection path ${JSON.stringify(projectionPath)}`, async () => {
       let reads = 0;
 
       await assert.rejects(
@@ -1425,8 +1416,8 @@ void describe("Project Projection materialization", () => {
           error.message.includes("must be a normalized safe relative path"),
       );
       assert.strictEqual(reads, 0);
-    },
-  );
+    });
+  }
 
   void it("does not apply an escaping materialized path outside the target root", async () => {
     const workspace = await mkdtemp(
@@ -1577,15 +1568,15 @@ void describe("Project Projection materialization", () => {
 
     assert.strictEqual(result.ok, false);
     if (result.ok) return;
-    assert.ok(!hasProperty(result, "mutations"));
-    assertDeepStrictEqualWithMatchers(result.conflicts, [
-      objectContaining({
-        path: "alpha.txt",
-        driver: "text",
-        reason: "Current and After contain incompatible text changes",
-        region: any(Object),
-      }),
-    ]);
+    assert.ok(!Object.hasOwn(result, "mutations"));
+    assert.strictEqual(result.conflicts.length, 1);
+    const conflict = result.conflicts[0]!;
+    assert.partialDeepStrictEqual(conflict, {
+      path: "alpha.txt",
+      driver: "text",
+      reason: "Current and After contain incompatible text changes",
+    });
+    assert.ok(typeof conflict.region === "object" && conflict.region !== null);
   });
 
   void it("reports each text conflict as a concise line region", async () => {
@@ -1649,7 +1640,18 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    const conflict = result.conflicts[0]!;
+    const summaryPattern = /^<2 binary bytes; sha256=[a-f0-9]{64}>$/u;
+    assert.match(conflict.before, summaryPattern);
+    assert.match(conflict.current, summaryPattern);
+    assert.match(conflict.after, summaryPattern);
+    assert.deepStrictEqual(result, {
       ok: false,
       conflicts: [
         {
@@ -1657,9 +1659,9 @@ void describe("Project Projection materialization", () => {
           driver: "text",
           attribute: "binary-content",
           reason: "Current and After contain incompatible binary changes",
-          before: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
-          current: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
-          after: stringMatching(/^<2 binary bytes; sha256=[a-f0-9]{64}>$/u),
+          before: conflict.before,
+          current: conflict.current,
+          after: conflict.after,
         },
       ],
     });
@@ -1805,7 +1807,7 @@ void describe("Project Projection materialization", () => {
         await readFile(path.join(targetRoot, ".template/state.json"), "utf8"),
         '{\n  "state": "before"\n}\n',
       );
-      assertLength(committedPaths, 2);
+      assert.strictEqual(committedPaths.length, 2);
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
@@ -1851,18 +1853,18 @@ void describe("Project Projection materialization", () => {
         ],
       });
 
-      assertPartialDeepStrictEqual(result, {
-        ok: false,
-        conflicts: [
-          {
-            path: "services/race",
-            driver: "precondition",
-            reason: stringContaining(
-              "Package Path services/race already exists",
-            ),
-          },
-        ],
+      assert.strictEqual(result.ok, false);
+      if (result.ok) return;
+      assert.strictEqual(result.conflicts.length, 1);
+      assert.partialDeepStrictEqual(result.conflicts[0], {
+        path: "services/race",
+        driver: "precondition",
       });
+      assert.ok(
+        result.conflicts[0]!.reason.includes(
+          "Package Path services/race already exists",
+        ),
+      );
       assert.strictEqual(
         await readFile(path.join(targetRoot, "root.txt"), "utf8"),
         "before\n",
@@ -1874,7 +1876,9 @@ void describe("Project Projection materialization", () => {
       await assert.rejects(
         stat(path.join(targetRoot, "services/race/package.json")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         },
       );
@@ -2043,7 +2047,7 @@ void describe("Declared mirror-slot coordination", () => {
     assert.deepStrictEqual(reads, [declaredConfigPath]);
     assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    assertLength(result.mutations, 1);
+    assert.strictEqual(result.mutations.length, 1);
     assert.deepStrictEqual(
       JSON.parse(decoder.decode(result.mutations[0]!.content)) as unknown,
       {
@@ -2161,7 +2165,16 @@ void describe("Declared mirror-slot coordination", () => {
         env: { ADDITIONAL_TOOL: "1.4.0" },
         userOnly: true,
       });
-      assert.ok(!hasProperty(merged, ["env", "TOOL_VERSION"]));
+      const mergedRecord = merged as { env?: unknown };
+      const mergedEnv = mergedRecord.env;
+      assert.ok(
+        !(
+          Object.hasOwn(mergedRecord, "env") &&
+          typeof mergedEnv === "object" &&
+          mergedEnv !== null &&
+          Object.hasOwn(mergedEnv, "TOOL_VERSION")
+        ),
+      );
     } finally {
       await rm(targetRoot, { recursive: true, force: true });
     }
@@ -2189,16 +2202,15 @@ void describe("Declared mirror-slot coordination", () => {
     );
   });
 
-  testEach(
-    [
-      { absentShape: "missing file", current: undefined },
-      {
-        absentShape: "directory in place of the file",
-        current: { path: declaredConfigPath, kind: "directory" as const },
-      },
-    ],
-    "skips a pure coordination path whose Current is $absentShape",
-    async ({ current }) => {
+  for (const scenario of [
+    { absentShape: "missing file", current: undefined },
+    {
+      absentShape: "directory in place of the file",
+      current: { path: declaredConfigPath, kind: "directory" as const },
+    },
+  ]) {
+    void it(`skips a pure coordination path whose Current is ${scenario.absentShape}`, async () => {
+      const { current } = scenario;
       const projection = mirrorStructuredProjection({
         env: { TOOL_VERSION: rootValue },
       });
@@ -2213,8 +2225,8 @@ void describe("Declared mirror-slot coordination", () => {
         }),
         { ok: true, mutations: [] },
       );
-    },
-  );
+    });
+  }
 
   void it("keeps the presence conflict when a declared path also carries a delta", async () => {
     const result = await reconcileProjectProjections({
@@ -2228,15 +2240,16 @@ void describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          path: declaredConfigPath,
-          driver: "structured",
-          reason: "Path presence changed concurrently",
-        }),
-      ],
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    assert.partialDeepStrictEqual(result.conflicts[0], {
+      path: declaredConfigPath,
+      driver: "structured",
+      reason: "Path presence changed concurrently",
     });
   });
 
@@ -2273,30 +2286,29 @@ void describe("Declared mirror-slot coordination", () => {
     }
   });
 
-  testEach(
-    [
-      {
-        unusableShape: "JSON with comments",
-        currentBytes: new TextEncoder().encode(
-          `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
-        ),
-        diagnostic: "Current structured content is not valid JSON",
-      },
-      {
-        unusableShape: "non-string slot value",
-        currentBytes: new TextEncoder().encode(
-          '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
-        ),
-        diagnostic: "holds a non-string Current value",
-      },
-      {
-        unusableShape: "binary bytes",
-        currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
-        diagnostic: "Current structured content is not valid JSON",
-      },
-    ],
-    "fails atomically with zero writes for an unusable $unusableShape declared slot",
-    async ({ currentBytes, diagnostic }) => {
+  for (const scenario of [
+    {
+      unusableShape: "JSON with comments",
+      currentBytes: new TextEncoder().encode(
+        `{\n  // pinned by hand\n  "env": { "TOOL_VERSION": "${rootValue}" }\n}\n`,
+      ),
+      diagnostic: "Current structured content is not valid JSON",
+    },
+    {
+      unusableShape: "non-string slot value",
+      currentBytes: new TextEncoder().encode(
+        '{\n  "env": { "TOOL_VERSION": 24 }\n}\n',
+      ),
+      diagnostic: "holds a non-string Current value",
+    },
+    {
+      unusableShape: "binary bytes",
+      currentBytes: new Uint8Array([0xff, 0xfe, 0xfd, 0xfe, 0xff]),
+      diagnostic: "Current structured content is not valid JSON",
+    },
+  ]) {
+    void it(`fails atomically with zero writes for an unusable ${scenario.unusableShape} declared slot`, async () => {
+      const { currentBytes, diagnostic } = scenario;
       const targetRoot = await mkdtemp(
         path.join(tmpdir(), "template-projection-slot-invalid-"),
       );
@@ -2307,61 +2319,61 @@ void describe("Declared mirror-slot coordination", () => {
         await mkdir(path.dirname(configPath), { recursive: true });
         await writeFile(configPath, currentBytes);
 
-        assertDeepStrictEqualWithMatchers(
-          await reconcileAndApplyProjectProjections({
-            targetRoot,
-            before: structuredConfigPlan({
-              env: { TOOL_VERSION: rootValue },
-            }),
-            after: {
-              operations: [
-                ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
-                  .operations,
-                {
-                  kind: "writeJson",
-                  to: "services/new/package.json",
-                  value: { name: "@demo/new" },
-                },
-              ],
-              reconciliation: structuredConfigPlan({
-                env: { TOOL_VERSION: rootValue },
-              }).reconciliation,
-            },
-            preconditions: [
+        const result = await reconcileAndApplyProjectProjections({
+          targetRoot,
+          before: structuredConfigPlan({
+            env: { TOOL_VERSION: rootValue },
+          }),
+          after: {
+            operations: [
+              ...structuredConfigPlan({ env: { TOOL_VERSION: rootValue } })
+                .operations,
               {
-                path: "services/new",
-                kind: "must-not-exist",
-                reason:
-                  "Package Path services/new already exists and cannot be used for a new Package Addition",
+                kind: "writeJson",
+                to: "services/new/package.json",
+                value: { name: "@demo/new" },
               },
             ],
-          }),
-          {
-            ok: false,
-            conflicts: [
-              objectContaining({
-                path: declaredConfigPath,
-                driver: "structured",
-                reason: stringContaining(diagnostic),
-              }),
-            ],
+            reconciliation: structuredConfigPlan({
+              env: { TOOL_VERSION: rootValue },
+            }).reconciliation,
           },
-        );
+          preconditions: [
+            {
+              path: "services/new",
+              kind: "must-not-exist",
+              reason:
+                "Package Path services/new already exists and cannot be used for a new Package Addition",
+            },
+          ],
+        });
+        assert.strictEqual(result.ok, false);
+        if (result.ok) return;
+        assert.strictEqual(Reflect.ownKeys(result).length, 2);
+        assert.ok(Object.hasOwn(result, "ok"));
+        assert.ok(Object.hasOwn(result, "conflicts"));
+        assert.strictEqual(result.conflicts.length, 1);
+        const conflict = result.conflicts[0]!;
+        assert.partialDeepStrictEqual(conflict, {
+          path: declaredConfigPath,
+          driver: "structured",
+        });
+        assert.ok(conflict.reason.includes(diagnostic));
         assert.deepStrictEqual(
           await readFile(configPath),
           Buffer.from(currentBytes),
         );
         await assert.rejects(stat(reservedPath), (error) => {
-          assertPartialDeepStrictEqual(error, {
-            code: "ENOENT",
-          });
+          assert.ok(typeof error === "object" && error !== null);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         });
       } finally {
         await rm(targetRoot, { recursive: true, force: true });
       }
-    },
-  );
+    });
+  }
 
   void it("restores the anchored default while preserving out-of-region bytes exactly", async () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
@@ -2407,7 +2419,7 @@ void describe("Declared mirror-slot coordination", () => {
 
     assert.strictEqual(result.ok, true);
     if (!result.ok) return;
-    assertLength(result.mutations, 1);
+    assert.strictEqual(result.mutations.length, 1);
     assert.strictEqual(
       decoder.decode(result.mutations[0]!.content),
       anchoredText(rootValue).replace(
@@ -2428,18 +2440,20 @@ void describe("Declared mirror-slot coordination", () => {
       },
     });
 
-    assert.ok(!hasProperty(result, "mutations"));
-    assertDeepStrictEqualWithMatchers(result, {
-      ok: false,
-      conflicts: [
-        objectContaining({
-          path: declaredLauncherPath,
-          driver: "text",
-          location: "TOOL_VERSION",
-          reason: stringContaining("in Before could not be located"),
-        }),
-      ],
+    assert.ok(!Object.hasOwn(result, "mutations"));
+    assert.strictEqual(result.ok, false);
+    if (result.ok) return;
+    assert.strictEqual(Reflect.ownKeys(result).length, 2);
+    assert.ok(Object.hasOwn(result, "ok"));
+    assert.ok(Object.hasOwn(result, "conflicts"));
+    assert.strictEqual(result.conflicts.length, 1);
+    const conflict = result.conflicts[0]!;
+    assert.partialDeepStrictEqual(conflict, {
+      path: declaredLauncherPath,
+      driver: "text",
+      location: "TOOL_VERSION",
     });
+    assert.ok(conflict.reason.includes("in Before could not be located"));
   });
 
   void it("lands a template text delta together with the coordinated anchor", async () => {
@@ -2486,30 +2500,29 @@ void describe("Declared mirror-slot coordination", () => {
     }
   });
 
-  testEach(
-    [
-      {
-        brokenAnchor: "markers removed but the carrier assignment remains",
-        current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
-      },
-      {
-        brokenAnchor: "marker removed but the reference remains",
-        current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
-      },
-      {
-        brokenAnchor: "the anchored region is duplicated",
-        current: anchoredText(driftedValue) + anchoredText(driftedValue),
-      },
-      {
-        brokenAnchor: "the anchored region holds two lines",
-        current: anchoredText(driftedValue).replace(
-          `ARG TOOL_VERSION="${driftedValue}"\n`,
-          `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
-        ),
-      },
-    ],
-    "fails when $brokenAnchor while the carrier or reference is still present",
-    async ({ current }) => {
+  for (const scenario of [
+    {
+      brokenAnchor: "markers removed but the carrier assignment remains",
+      current: `FROM base:1\nARG TOOL_VERSION="${driftedValue}"\n# @end-template-mirror\nRUN existing step\n`,
+    },
+    {
+      brokenAnchor: "marker removed but the reference remains",
+      current: "FROM node:${TOOL_VERSION}-slim\nRUN existing step\n",
+    },
+    {
+      brokenAnchor: "the anchored region is duplicated",
+      current: anchoredText(driftedValue) + anchoredText(driftedValue),
+    },
+    {
+      brokenAnchor: "the anchored region holds two lines",
+      current: anchoredText(driftedValue).replace(
+        `ARG TOOL_VERSION="${driftedValue}"\n`,
+        `ARG TOOL_VERSION="${driftedValue}"\nARG EXTRA_TOOL="1"\n`,
+      ),
+    },
+  ]) {
+    void it(`fails when ${scenario.brokenAnchor} while the carrier or reference is still present`, async () => {
+      const { current } = scenario;
       const projection = mirrorTextProjection(anchoredText(rootValue));
       const result = await reconcileProjectProjections({
         before: projection,
@@ -2519,19 +2532,21 @@ void describe("Declared mirror-slot coordination", () => {
         },
       });
 
-      assertDeepStrictEqualWithMatchers(result, {
-        ok: false,
-        conflicts: [
-          objectContaining({
-            path: declaredLauncherPath,
-            driver: "text",
-            location: "TOOL_VERSION",
-            reason: stringContaining("anchor could not be located"),
-          }),
-        ],
+      assert.strictEqual(result.ok, false);
+      if (result.ok) return;
+      assert.strictEqual(Reflect.ownKeys(result).length, 2);
+      assert.ok(Object.hasOwn(result, "ok"));
+      assert.ok(Object.hasOwn(result, "conflicts"));
+      assert.strictEqual(result.conflicts.length, 1);
+      const conflict = result.conflicts[0]!;
+      assert.partialDeepStrictEqual(conflict, {
+        path: declaredLauncherPath,
+        driver: "text",
+        location: "TOOL_VERSION",
       });
-    },
-  );
+      assert.ok(conflict.reason.includes("anchor could not be located"));
+    });
+  }
 
   void it("keeps a text slot absent when the carrier and every reference exited", async () => {
     const projection = mirrorTextProjection(anchoredText(rootValue));
@@ -2611,48 +2626,46 @@ void describe("Declared mirror-slot coordination", () => {
     }
   });
 
-  testEach(
-    [
-      {
-        malformed: "a JSON Pointer location on the text driver",
-        driver: "text" as const,
-        slot: toolSlot,
-        diagnostic: "text mirror slots require a named text anchor",
-      },
-      {
-        malformed: "a named text anchor on the structured driver",
-        driver: "structured" as const,
-        slot: toolAnchorSlot,
-        diagnostic: "structured mirror slots require a JSON Pointer location",
-      },
-      {
-        malformed: "an invalid JSON Pointer",
-        driver: "structured" as const,
-        slot: {
-          id: "bad-pointer",
-          location: { kind: "json-pointer", pointer: "/env/~2" },
-        } satisfies ProjectProjectionMirrorSlot,
-        diagnostic: "must be an RFC 6901 JSON Pointer",
-      },
-      {
-        malformed: "a repeated slot id",
-        driver: "structured" as const,
-        slot: { id: "tool-version", location: { ...toolSlot.location } },
-        duplicateId: true,
-        diagnostic: "mirror slot ids must be unique and non-empty",
-      },
-      {
-        malformed: "a slot name made of separate words",
-        driver: "text" as const,
-        slot: {
-          id: "spaced",
-          location: { kind: "text-anchor", name: "TOOL VERSION" },
-        } satisfies ProjectProjectionMirrorSlot,
-        diagnostic: "text mirror slot names must be single non-empty tokens",
-      },
-    ],
-    "rejects malformed declarations such as $malformed before reading Current",
-    async (scenario) => {
+  for (const scenario of [
+    {
+      malformed: "a JSON Pointer location on the text driver",
+      driver: "text" as const,
+      slot: toolSlot,
+      diagnostic: "text mirror slots require a named text anchor",
+    },
+    {
+      malformed: "a named text anchor on the structured driver",
+      driver: "structured" as const,
+      slot: toolAnchorSlot,
+      diagnostic: "structured mirror slots require a JSON Pointer location",
+    },
+    {
+      malformed: "an invalid JSON Pointer",
+      driver: "structured" as const,
+      slot: {
+        id: "bad-pointer",
+        location: { kind: "json-pointer", pointer: "/env/~2" },
+      } satisfies ProjectProjectionMirrorSlot,
+      diagnostic: "must be an RFC 6901 JSON Pointer",
+    },
+    {
+      malformed: "a repeated slot id",
+      driver: "structured" as const,
+      slot: { id: "tool-version", location: { ...toolSlot.location } },
+      duplicateId: true,
+      diagnostic: "mirror slot ids must be unique and non-empty",
+    },
+    {
+      malformed: "a slot name made of separate words",
+      driver: "text" as const,
+      slot: {
+        id: "spaced",
+        location: { kind: "text-anchor", name: "TOOL VERSION" },
+      } satisfies ProjectProjectionMirrorSlot,
+      diagnostic: "text mirror slot names must be single non-empty tokens",
+    },
+  ]) {
+    void it(`rejects malformed declarations such as ${scenario.malformed} before reading Current`, async () => {
       const { driver, slot, diagnostic } = scenario;
       let reads = 0;
       const slots =
@@ -2668,7 +2681,7 @@ void describe("Declared mirror-slot coordination", () => {
         ],
       };
 
-      await assertRejectsContaining(
+      await assert.rejects(
         reconcileProjectProjections({
           before: projection,
           after: projection,
@@ -2677,11 +2690,11 @@ void describe("Declared mirror-slot coordination", () => {
             return projection.entries[0];
           },
         }),
-        diagnostic,
+        (error) => error instanceof Error && error.message.includes(diagnostic),
       );
       assert.strictEqual(reads, 0);
-    },
-  );
+    });
+  }
 
   void it("carries the declaration through plan preflight and materialization", async () => {
     const operations = [

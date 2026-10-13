@@ -36,14 +36,6 @@ import {
   runFixtureEvidenceGate,
   type FixtureEvidenceLifecycleEvent,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-import {
-  assertContainsEqual,
-  assertLength,
-  assertPartialDeepStrictEqual,
-  assertRejectsMatching,
-  objectContaining,
-} from "./assertions.ts";
-
 async function generatedTaskIds(root: string): Promise<readonly string[]> {
   const taskIds: string[] = [];
   async function visit(directory: string): Promise<void> {
@@ -167,45 +159,66 @@ void describe("deployment quality gate", () => {
     const fixtureWorkspace = path.join(root, "workspace");
     try {
       assert.notStrictEqual(deployment, undefined);
-      assertPartialDeepStrictEqual(
-        normalizedDeploymentQualityPlan(deployment!),
-        {
-          gate: "deployment-quality",
-          executionResources: ["docker"],
-          dependencyInstallation: {
-            storeDir: "/pnpm/store",
-            commands: [
-              {
-                command: "pnpm",
-                args: [
-                  "install",
-                  "--lockfile-only",
-                  "--store-dir",
-                  "/pnpm/store",
-                ],
-              },
-              {
-                command: "pnpm",
-                args: ["fetch", "--store-dir", "/pnpm/store"],
-              },
-              {
-                command: "pnpm",
-                args: [
-                  "install",
-                  "--offline",
-                  "--frozen-lockfile",
-                  "--store-dir",
-                  "/pnpm/store",
-                ],
-              },
-            ],
-          },
-          generatedDeployment: {
-            command: "pnpm",
-            args: ["run", "check:deployment"],
-          },
+      const normalized = normalizedDeploymentQualityPlan(deployment!) as {
+        readonly executionResources: readonly unknown[];
+        readonly dependencyInstallation: {
+          readonly commands: readonly {
+            readonly args: readonly unknown[];
+          }[];
+        };
+        readonly generatedDeployment: { readonly args: readonly unknown[] };
+      };
+      assert.partialDeepStrictEqual(normalized, {
+        gate: "deployment-quality",
+        executionResources: ["docker"],
+        dependencyInstallation: {
+          storeDir: "/pnpm/store",
+          commands: [
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--lockfile-only",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+            {
+              command: "pnpm",
+              args: ["fetch", "--store-dir", "/pnpm/store"],
+            },
+            {
+              command: "pnpm",
+              args: [
+                "install",
+                "--offline",
+                "--frozen-lockfile",
+                "--store-dir",
+                "/pnpm/store",
+              ],
+            },
+          ],
         },
+        generatedDeployment: {
+          command: "pnpm",
+          args: ["run", "check:deployment"],
+        },
+      });
+      assert.strictEqual(normalized.executionResources.length, 1);
+      assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
+      assert.strictEqual(
+        normalized.dependencyInstallation.commands[0]?.args.length,
+        4,
       );
+      assert.strictEqual(
+        normalized.dependencyInstallation.commands[1]?.args.length,
+        3,
+      );
+      assert.strictEqual(
+        normalized.dependencyInstallation.commands[2]?.args.length,
+        5,
+      );
+      assert.strictEqual(normalized.generatedDeployment.args.length, 2);
       assert.match(
         await deriveDeploymentQualityContractIdentity(deployment!),
         /^[0-9a-f]{64}$/u,
@@ -357,10 +370,10 @@ void describe("deployment quality gate", () => {
             args[1] === "check:deployment",
         );
         assert.ok(deploymentCommands.length > 0);
-        assertLength(
+        assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) => command === "pnpm" && args[0] === "install",
-          ),
+          ).length,
           deploymentCommands.length,
         );
         const deploymentMissExecutions = deploymentMissCommands.filter(
@@ -369,11 +382,14 @@ void describe("deployment quality gate", () => {
             args[0] === "run" &&
             args[1] === "check:deployment",
         );
-        assertLength(deploymentMissExecutions, deploymentCommands.length);
-        assertLength(
+        assert.strictEqual(
+          deploymentMissExecutions.length,
+          deploymentCommands.length,
+        );
+        assert.strictEqual(
           deploymentMissCommands.filter(
             ({ command, args }) => command === "pnpm" && args[0] === "install",
-          ),
+          ).length,
           deploymentMissExecutions.length,
         );
         assert.deepStrictEqual(
@@ -400,14 +416,14 @@ void describe("deployment quality gate", () => {
             event.gate === "deployment-quality" &&
             event.outcome === "issued",
         );
-        assertLength(deploymentIssues, deploymentCommands.length);
-        assertLength(
+        assert.strictEqual(deploymentIssues.length, deploymentCommands.length);
+        assert.strictEqual(
           warmEvents.filter(
             (event) =>
               event.type === "lookup" &&
               event.gate === "deployment-quality" &&
               event.outcome === "hit",
-          ),
+          ).length,
           deploymentCommands.length,
         );
         assert.deepStrictEqual(
@@ -522,7 +538,7 @@ void describe("deployment quality gate", () => {
     const root = await mkdtemp(path.join(tmpdir(), "deployment-absence-"));
     const messages: string[] = [];
     try {
-      await assertRejectsMatching(
+      await assert.rejects(
         runGeneratedScenarioSetProduction("deployment", {
           workspace: root,
           reporter: { info: (message) => messages.push(message) },
@@ -545,7 +561,11 @@ void describe("deployment quality gate", () => {
             return {};
           },
         }),
-        /Docker is required for Generated Repository Fixture quality.*docker executable unavailable/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /Docker is required for Generated Repository Fixture quality.*docker executable unavailable/u.test(
+            error.message,
+          ),
       );
       assert.ok(messages.length > 0);
     } finally {
@@ -615,13 +635,13 @@ void describe("deployment quality gate", () => {
           error.message.includes("deployment command cancelled"),
       );
 
-      assertContainsEqual(
-        events,
-        objectContaining({
-          type: "execution",
-          gate: "deployment-quality",
-          outcome: "failed",
-        }),
+      assert.ok(
+        events.some(
+          (event) =>
+            event.type === "execution" &&
+            event.gate === "deployment-quality" &&
+            event.outcome === "failed",
+        ),
       );
       assert.deepStrictEqual(
         events.filter((event) => event.type === "issuance"),
@@ -630,8 +650,12 @@ void describe("deployment quality gate", () => {
       await assert.rejects(
         readdir(path.join(root, "evidence", "deployment-quality")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
-          return true;
+          return (
+            typeof error === "object" &&
+            error !== null &&
+            Object.hasOwn(error, "code") &&
+            (error as { readonly code?: unknown }).code === "ENOENT"
+          );
         },
       );
     } finally {

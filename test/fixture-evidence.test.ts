@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, mock } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -81,21 +82,6 @@ import {
   validatePlanDependencyCatalog,
   validatePlanSources,
 } from "../packages/checks/src/registry-checks.ts";
-import {
-  any,
-  arrayContaining,
-  assertContainsEqual,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertMockCalledWith,
-  assertNotLength,
-  assertPartialDeepStrictEqual,
-  objectContaining,
-  stringContaining,
-  stringMatching,
-  waitFor,
-} from "./assertions.ts";
-
 afterEach(() => mock.restoreAll());
 
 async function temporaryRepository(prefix: string): Promise<string> {
@@ -417,10 +403,20 @@ function createBlockedConcurrencyProbe() {
   let maximum = 0;
   let released = false;
   const waiters = new Set<() => void>();
+  const activeWaiters = new Set<{
+    readonly expected: number;
+    readonly resolve: () => void;
+  }>();
   return {
     enter: async (): Promise<void> => {
       active += 1;
       maximum = Math.max(maximum, active);
+      for (const waiter of activeWaiters) {
+        if (active === waiter.expected) {
+          activeWaiters.delete(waiter);
+          waiter.resolve();
+        }
+      }
       if (!released) {
         await new Promise<void>((resolve) => {
           waiters.add(resolve);
@@ -433,6 +429,12 @@ function createBlockedConcurrencyProbe() {
       for (const resolve of waiters) resolve();
       waiters.clear();
     },
+    whenActive: (expected: number): Promise<void> => {
+      if (active === expected) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        activeWaiters.add({ expected, resolve });
+      });
+    },
     active: (): number => active,
     maximum: (): number => maximum,
   };
@@ -441,11 +443,21 @@ function createBlockedConcurrencyProbe() {
 function createBlockedWorkProbe() {
   const started: string[] = [];
   const releases = new Map<string, () => void>();
+  const startWaiters = new Set<{
+    readonly expected: number;
+    readonly resolve: () => void;
+  }>();
   let active = 0;
   let maximum = 0;
   return {
     run: async (name: string): Promise<void> => {
       started.push(name);
+      for (const waiter of startWaiters) {
+        if (started.length >= waiter.expected) {
+          startWaiters.delete(waiter);
+          waiter.resolve();
+        }
+      }
       active += 1;
       maximum = Math.max(maximum, active);
       await new Promise<void>((resolve) => {
@@ -460,6 +472,12 @@ function createBlockedWorkProbe() {
       for (const release of releases.values()) release();
     },
     started: (): readonly string[] => started,
+    whenStarted: (expected: number): Promise<void> => {
+      if (started.length >= expected) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        startWaiters.add({ expected, resolve });
+      });
+    },
     maximum: (): number => maximum,
   };
 }
@@ -471,12 +489,14 @@ async function releaseAfterActive(options: {
 }): Promise<void> {
   let observationFailure: unknown;
   try {
-    await waitFor(
-      () => {
-        assert.strictEqual(options.probe.active(), options.expected);
-      },
-      { timeout: 30_000 },
-    );
+    await Promise.race([
+      options.probe.whenActive(options.expected),
+      options.execution.then(() => {
+        throw new Error(
+          `Fixture execution completed before ${options.expected} probe tasks were active`,
+        );
+      }),
+    ]);
   } catch (error) {
     observationFailure = error;
   } finally {
@@ -729,43 +749,33 @@ void describe("Fixture Verification Evidence", () => {
         outcome: "completed",
       });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "run-42",
-          runAttempt: "2",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: true,
-          stages: [
-            objectContaining({
-              scenarioSet: "init",
-              hits: 0,
-              misses: { absent: 1 },
-              executions: 1,
-              issuances: 1,
-            }),
-          ],
-        },
-      );
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "run-42",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: [
-            objectContaining({
-              code: "missing-scenario-set",
-              scenarioSet: "init",
-            }),
-          ],
-        },
-      );
+      const currentAttempt = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "run-42",
+        runAttempt: "2",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(currentAttempt.healthy, true);
+      assert.strictEqual(currentAttempt.stages.length, 1);
+      assert.partialDeepStrictEqual(currentAttempt.stages[0], {
+        scenarioSet: "init",
+        hits: 0,
+        misses: { absent: 1 },
+        executions: 1,
+        issuances: 1,
+      });
+      const previousAttempt = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "run-42",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(previousAttempt.healthy, false);
+      assert.strictEqual(previousAttempt.failures.length, 1);
+      assert.partialDeepStrictEqual(previousAttempt.failures[0], {
+        code: "missing-scenario-set",
+        scenarioSet: "init",
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -856,24 +866,21 @@ void describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["package-addition-matrix"],
       });
-      assertPartialDeepStrictEqual(report, {
-        healthy: true,
-        stages: [
-          objectContaining({
-            scenarioSet: "package-addition-matrix",
-            cacheActivity: {
-              "buildkit:configured": 1,
-              "pnpm-downloads:mounted": 1,
-              "cargo-downloads:mounted": 1,
-              "turbo:configured": 1,
-            },
-            hits: 0,
-            misses: { absent: 1 },
-            executions: 1,
-            issuances: 1,
-            durationMilliseconds: 175,
-          }),
-        ],
+      assert.strictEqual(report.healthy, true);
+      assert.strictEqual(report.stages.length, 1);
+      assert.partialDeepStrictEqual(report.stages[0], {
+        scenarioSet: "package-addition-matrix",
+        cacheActivity: {
+          "buildkit:configured": 1,
+          "pnpm-downloads:mounted": 1,
+          "cargo-downloads:mounted": 1,
+          "turbo:configured": 1,
+        },
+        hits: 0,
+        misses: { absent: 1 },
+        executions: 1,
+        issuances: 1,
+        durationMilliseconds: 175,
       });
       assert.ok(
         formatFixtureEvidenceHealthReport(report).includes(
@@ -1008,26 +1015,24 @@ void describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      assertPartialDeepStrictEqual(report, {
-        healthy: true,
-        stages: [
-          objectContaining({
-            phaseDurations: {
-              "scheduler-queue": 11,
-              "container-preparation": 10,
-              "dependency-installation": 20,
-              "semantic-gate": 1,
-            },
-            retries: 1,
-            recoveries: 1,
-            retryDurationMilliseconds: 10,
-          }),
-        ],
+      assert.strictEqual(report.healthy, true);
+      assert.strictEqual(report.stages.length, 1);
+      assert.partialDeepStrictEqual(report.stages[0], {
+        phaseDurations: {
+          "scheduler-queue": 11,
+          "container-preparation": 10,
+          "dependency-installation": 20,
+          "semantic-gate": 1,
+        },
+        retries: 1,
+        recoveries: 1,
+        retryDurationMilliseconds: 10,
       });
-      assertContainsEqual(
-        formatFixtureEvidenceHealthReport(report),
-        stringContaining(
-          "phase-duration-ms=scheduler-queue=11,container-preparation=10,dependency-installation=20,semantic-gate=1 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
+      assert.ok(
+        formatFixtureEvidenceHealthReport(report).some((line) =>
+          line.includes(
+            "phase-duration-ms=scheduler-queue=11,container-preparation=10,dependency-installation=20,semantic-gate=1 retries=1 recoveries=1 retry-duration-ms=10 cache-activity=none",
+          ),
         ),
       );
     } finally {
@@ -1118,31 +1123,25 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "hit-preparation-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-            }),
-            objectContaining({
-              code: "invalid-retry-lifecycle",
-              scenarioId: scenario.id,
-            }),
-            objectContaining({
-              code: "lifecycle-error",
-              scenarioId: scenario.id,
-            }),
-          ]),
-        },
-      );
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "hit-preparation-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      for (const code of [
+        "invalid-phase-lifecycle",
+        "invalid-retry-lifecycle",
+        "lifecycle-error",
+      ]) {
+        assert.ok(
+          report.failures.some(
+            (failure) =>
+              failure.code === code && failure.scenarioId === scenario.id,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1209,22 +1208,19 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "unused-gate-spans-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "unused-gate-spans-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-phase-lifecycle" &&
+            failure.scenarioId === scenario.id,
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1342,19 +1338,19 @@ void describe("Fixture Verification Evidence", () => {
         runAttempt: "1",
         enabledScenarioSets: ["init"],
       });
-      assertPartialDeepStrictEqual(report, {
-        healthy: false,
-        failures: arrayContaining([
-          objectContaining({
-            code: "lifecycle-error",
-            invocationId: "lookup-after-execution",
-          }),
-          objectContaining({
-            code: "lifecycle-error",
-            invocationId: "miss-without-execution",
-          }),
-        ]),
-      });
+      assert.strictEqual(report.healthy, false);
+      for (const invocationId of [
+        "lookup-after-execution",
+        "miss-without-execution",
+      ]) {
+        assert.ok(
+          report.failures.some(
+            (failure) =>
+              failure.code === "lifecycle-error" &&
+              failure.invocationId === invocationId,
+          ),
+        );
+      }
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1403,23 +1399,20 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "missing-cold-phases",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-              gate: "generated-root-quality",
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "missing-cold-phases",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-phase-lifecycle" &&
+            failure.scenarioId === scenario.id &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1523,23 +1516,20 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "issuance-order-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-              gate: "generated-root-quality",
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "issuance-order-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-phase-lifecycle" &&
+            failure.scenarioId === scenario.id &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1643,23 +1633,20 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "semantic-span-order-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-              gate: "generated-root-quality",
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "semantic-span-order-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-phase-lifecycle" &&
+            failure.scenarioId === scenario.id &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1732,22 +1719,19 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "retry-span-order-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-retry-lifecycle",
-              scenarioId: scenario.id,
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "retry-span-order-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-retry-lifecycle" &&
+            failure.scenarioId === scenario.id,
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1818,22 +1802,19 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "duplicate-preparation-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["package-addition-matrix"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "invalid-phase-lifecycle",
-              scenarioId: scenario.id,
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "duplicate-preparation-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["package-addition-matrix"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "invalid-phase-lifecycle" &&
+            failure.scenarioId === scenario.id,
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1944,7 +1925,7 @@ void describe("Fixture Verification Evidence", () => {
         root: activityRoot,
         evidenceRoot,
       }).read();
-      assertLength(records, 400);
+      assert.strictEqual(records.length, 400);
       assert.strictEqual(
         new Set(
           records.map((record) =>
@@ -2095,19 +2076,20 @@ void describe("Fixture Verification Evidence", () => {
         enabledScenarioSets: ["init", "focused"],
       });
       assert.strictEqual(report.healthy, false);
-      assertDeepStrictEqualWithMatchers(
-        report.failures,
-        arrayContaining([
-          objectContaining({
-            code: "no-lookup",
-            invocationId: "no-lookup",
-          }),
-          objectContaining({
-            code: "missing-issuance",
-            invocationId: "no-issuance",
-            gate: "generated-root-quality",
-          }),
-        ]),
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "no-lookup" &&
+            failure.invocationId === "no-lookup",
+        ),
+      );
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "missing-issuance" &&
+            failure.invocationId === "no-issuance" &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -2195,23 +2177,22 @@ void describe("Fixture Verification Evidence", () => {
         enabledScenarioSets: ["focused"],
       });
       assert.strictEqual(report.healthy, false);
-      assertContainsEqual(
-        report.failures,
-        objectContaining({
-          code: "failed-execution",
-          invocationId: "failed-execution",
-          scenarioId: "semantic-failure",
-          gate: "generated-root-quality",
-          detail: stringContaining("semantic fixture failure"),
-        }),
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "failed-execution" &&
+            failure.invocationId === "failed-execution" &&
+            failure.scenarioId === "semantic-failure" &&
+            failure.gate === "generated-root-quality" &&
+            failure.detail.includes("semantic fixture failure"),
+        ),
       );
-      assertDeepStrictEqualWithMatchers(
-        formatFixtureEvidenceHealthReport(report),
-        arrayContaining([
-          stringMatching(
-            /failure code=failed-phase .*scenario=semantic-failure .*semantic-gate.*not-retryable.*semantic fixture failure/u,
+      assert.ok(
+        formatFixtureEvidenceHealthReport(report).some((line) =>
+          /failure code=failed-phase .*scenario=semantic-failure .*semantic-gate.*not-retryable.*semantic fixture failure/u.test(
+            line,
           ),
-        ]),
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -2281,12 +2262,12 @@ void describe("Fixture Verification Evidence", () => {
       });
       assert.strictEqual(executions, 1);
       assert.strictEqual(report.healthy, false);
-      assertContainsEqual(
-        report.failures,
-        objectContaining({
-          code: "lifecycle-error",
-          detail: stringContaining("evidence volume unavailable"),
-        }),
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "lifecycle-error" &&
+            failure.detail.includes("evidence volume unavailable"),
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -2400,12 +2381,12 @@ void describe("Fixture Verification Evidence", () => {
           outcome: "completed",
         });
 
-        assertPartialDeepStrictEqual(result, {
+        assert.partialDeepStrictEqual(result, {
           status: "executed",
           missReason: evidenceCase.reason,
         });
         assert.strictEqual(executions, 1);
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await checkFixtureEvidenceHealth({
             ledger,
             runId: `invalid-${evidenceCase.name}`,
@@ -2469,22 +2450,17 @@ void describe("Fixture Verification Evidence", () => {
         rootChecks,
         (await generatedScenariosFor("init")).length * 2,
       );
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger: brokenLedger,
-          runId: "activity-io-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: [
-            objectContaining({
-              code: "activity-io-error",
-              detail: stringContaining("activity disk is read-only"),
-            }),
-          ],
-        },
+      const health = await checkFixtureEvidenceHealth({
+        ledger: brokenLedger,
+        runId: "activity-io-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(health.healthy, false);
+      assert.strictEqual(health.failures.length, 1);
+      assert.strictEqual(health.failures[0]?.code, "activity-io-error");
+      assert.ok(
+        health.failures[0]?.detail.includes("activity disk is read-only"),
       );
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2549,12 +2525,14 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
-        await execa("node", ["--conditions=source", healthCliPath, "init"], {
-          cwd: process.cwd(),
-          env,
-        }),
-        { exitCode: 0 },
+      assert.strictEqual(
+        (
+          await execa("node", ["--conditions=source", healthCliPath, "init"], {
+            cwd: process.cwd(),
+            env,
+          })
+        ).exitCode,
+        0,
       );
       await assert.rejects(
         execa("node", ["--conditions=source", healthCliPath], {
@@ -2562,12 +2540,13 @@ void describe("Fixture Verification Evidence", () => {
           env,
         }),
         (error) => {
-          assertPartialDeepStrictEqual(error, {
-            exitCode: 1,
-            stderr: stringContaining(
+          assert.ok(error instanceof Error);
+          assert.strictEqual(Reflect.get(error, "exitCode"), 1);
+          assert.ok(
+            String(Reflect.get(error, "stderr")).includes(
               "Enabled scenario set package-addition-matrix has no current-run activity",
             ),
-          });
+          );
           return true;
         },
       );
@@ -2577,12 +2556,13 @@ void describe("Fixture Verification Evidence", () => {
           env,
         }),
         (error) => {
-          assertPartialDeepStrictEqual(error, {
-            exitCode: 1,
-            stderr: stringContaining(
+          assert.ok(error instanceof Error);
+          assert.strictEqual(Reflect.get(error, "exitCode"), 1);
+          assert.ok(
+            String(Reflect.get(error, "stderr")).includes(
               "Expected enabled scenario set: init, package-addition-matrix, focused, or deployment",
             ),
-          });
+          );
           return true;
         },
       );
@@ -2628,27 +2608,22 @@ void describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("init")).length;
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "initialization-health",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: true,
-          stages: [
-            objectContaining({
-              scenarioSet: "init",
-              invocations: 1,
-              scenarios: scenarioCount,
-              misses: { absent: scenarioCount },
-              executions: scenarioCount,
-              issuances: scenarioCount,
-            }),
-          ],
-        },
-      );
+      const health = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "initialization-health",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(health.healthy, true);
+      assert.strictEqual(health.stages.length, 1);
+      assert.partialDeepStrictEqual(health.stages[0], {
+        scenarioSet: "init",
+        invocations: 1,
+        scenarios: scenarioCount,
+        misses: { absent: scenarioCount },
+        executions: scenarioCount,
+        issuances: scenarioCount,
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -2745,19 +2720,18 @@ void describe("Fixture Verification Evidence", () => {
           runAttempt: "1",
           enabledScenarioSets: sets,
         });
-        assertPartialDeepStrictEqual(coldHealth, {
-          healthy: true,
-          stages: arrayContaining([
-            objectContaining({
-              scenarioSet: "package-addition-matrix",
-              scenarios: 30,
-              hits: 6,
-              misses: { absent: 24 },
-              executions: 24,
-              issuances: 24,
-            }),
-          ]),
-        });
+        assert.strictEqual(coldHealth.healthy, true);
+        assert.ok(
+          coldHealth.stages.some(
+            (stage) =>
+              stage.scenarioSet === "package-addition-matrix" &&
+              stage.scenarios === 30 &&
+              stage.hits === 6 &&
+              stage.misses.absent === 24 &&
+              stage.executions === 24 &&
+              stage.issuances === 24,
+          ),
+        );
         assert.strictEqual(
           coldHealth.stages.some(
             (stage) =>
@@ -2827,18 +2801,16 @@ void describe("Fixture Verification Evidence", () => {
           async () => await ordinary.run(`ordinary-${name}`),
         ),
     );
-    await waitFor(() => {
-      assert.deepStrictEqual(ordinary.started(), [
-        "ordinary-a",
-        "ordinary-b",
-        "ordinary-c",
-        "ordinary-d",
-      ]);
-    });
+    await ordinary.whenStarted(4);
+    assert.deepStrictEqual(ordinary.started(), [
+      "ordinary-a",
+      "ordinary-b",
+      "ordinary-c",
+      "ordinary-d",
+    ]);
     ordinary.release("ordinary-a");
-    await waitFor(() => {
-      assert.ok(ordinary.started().includes("ordinary-e"));
-    });
+    await ordinary.whenStarted(5);
+    assert.ok(ordinary.started().includes("ordinary-e"));
     ordinary.releaseAll();
     await Promise.all(ordinaryJobs);
 
@@ -2846,9 +2818,8 @@ void describe("Fixture Verification Evidence", () => {
     const browserJobs = [
       scheduler.run(["browser"], async () => await browser.run("browser-a")),
     ];
-    await waitFor(() => {
-      assert.deepStrictEqual(browser.started(), ["browser-a"]);
-    });
+    await browser.whenStarted(1);
+    assert.deepStrictEqual(browser.started(), ["browser-a"]);
     browserJobs.push(
       scheduler.run(["browser"], async () => await browser.run("browser-b")),
       scheduler.run(["browser"], async () => await browser.run("browser-c")),
@@ -2861,9 +2832,8 @@ void describe("Fixture Verification Evidence", () => {
       ["browser-c", "browser-d"],
     ] as const) {
       browser.release(current);
-      await waitFor(() => {
-        assert.ok(browser.started().includes(next));
-      });
+      await browser.whenStarted(browser.started().length + 1);
+      assert.ok(browser.started().includes(next));
     }
     browser.release("browser-d");
     await Promise.all(browserJobs);
@@ -2876,21 +2846,18 @@ void describe("Fixture Verification Evidence", () => {
           async () => await docker.run(`docker-${name}`),
         ),
     );
-    await waitFor(() => {
-      assert.deepStrictEqual(docker.started(), ["docker-a"]);
-    });
+    await docker.whenStarted(1);
+    assert.deepStrictEqual(docker.started(), ["docker-a"]);
     docker.release("docker-a");
-    await waitFor(() => {
-      assert.deepStrictEqual(docker.started(), ["docker-a", "docker-b"]);
-    });
+    await docker.whenStarted(2);
+    assert.deepStrictEqual(docker.started(), ["docker-a", "docker-b"]);
     docker.release("docker-b");
-    await waitFor(() => {
-      assert.deepStrictEqual(docker.started(), [
-        "docker-a",
-        "docker-b",
-        "docker-c",
-      ]);
-    });
+    await docker.whenStarted(3);
+    assert.deepStrictEqual(docker.started(), [
+      "docker-a",
+      "docker-b",
+      "docker-c",
+    ]);
     docker.release("docker-c");
     await Promise.all(dockerJobs);
 
@@ -2913,17 +2880,15 @@ void describe("Fixture Verification Evidence", () => {
         ),
     );
 
-    await waitFor(() => {
-      assert.deepStrictEqual(sessions.started(), ["session-a", "session-b"]);
-    });
+    await sessions.whenStarted(2);
+    assert.deepStrictEqual(sessions.started(), ["session-a", "session-b"]);
     sessions.release("session-a");
-    await waitFor(() => {
-      assert.deepStrictEqual(sessions.started(), [
-        "session-a",
-        "session-b",
-        "session-c",
-      ]);
-    });
+    await sessions.whenStarted(3);
+    assert.deepStrictEqual(sessions.started(), [
+      "session-a",
+      "session-b",
+      "session-c",
+    ]);
     sessions.releaseAll();
     await Promise.all(jobs);
 
@@ -2945,9 +2910,7 @@ void describe("Fixture Verification Evidence", () => {
     ];
 
     try {
-      await waitFor(() => {
-        assert.strictEqual(browser.active(), 1);
-      });
+      await browser.whenActive(1);
       browserJobs.push(
         scheduler.run(
           ["development-container-session", "browser"],
@@ -2966,9 +2929,7 @@ void describe("Fixture Verification Evidence", () => {
           ),
       );
 
-      await waitFor(() => {
-        assert.strictEqual(ordinary.active(), 3);
-      });
+      await ordinary.whenActive(3);
 
       ordinary.release();
       browser.release();
@@ -2995,7 +2956,11 @@ void describe("Fixture Verification Evidence", () => {
         return release;
       });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    const acquiredBeforeRelease = await Promise.race([
+      second.then(() => true),
+      new Promise<false>((resolve) => setImmediate(() => resolve(false))),
+    ]);
+    assert.strictEqual(acquiredBeforeRelease, false);
     assert.strictEqual(secondAcquired, false);
     releaseFirst();
     const releaseSecond = await second;
@@ -3051,7 +3016,7 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      assertNotLength(acquiredResources, 0);
+      assert.notStrictEqual(acquiredResources.length, 0);
       assert.deepStrictEqual(
         acquiredResources,
         acquiredResources.map(() => [
@@ -3209,7 +3174,8 @@ void describe("Fixture Verification Evidence", () => {
     );
     for (const workspace of ownedWorkspaces) {
       await assert.rejects(access(workspace), (error) => {
-        assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+        assert.ok(error instanceof Error);
+        assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
         return true;
       });
     }
@@ -3457,18 +3423,14 @@ void describe("Fixture Verification Evidence", () => {
           expectedMaxActiveInstalls.set(scenarioSet, expected);
           let observationFailure: unknown;
           try {
-            await waitFor(
-              () => {
-                assert.deepStrictEqual(
-                  { scenarioSet, active: installs.active() },
-                  {
-                    scenarioSet,
-                    active: expected,
-                  },
+            await Promise.race([
+              installs.whenActive(expected),
+              cli.then(() => {
+                throw new Error(
+                  `Scenario set ${scenarioSet} completed before reaching ${expected} active installs`,
                 );
-              },
-              { timeout: 30_000 },
-            );
+              }),
+            ]);
           } catch (error) {
             observationFailure = error;
           } finally {
@@ -3488,43 +3450,32 @@ void describe("Fixture Verification Evidence", () => {
 
   void it("serializes Docker execution regardless of the ordinary concurrency override", async () => {
     const scheduler = createFixtureEvidenceScheduler({ concurrency: 4 });
-    const started: string[] = [];
-    const releases = new Map<string, () => void>();
-    let activeDocker = 0;
-    let maxActiveDocker = 0;
-    const work = async (name: string): Promise<void> => {
-      started.push(name);
-      activeDocker += 1;
-      maxActiveDocker = Math.max(maxActiveDocker, activeDocker);
-      await new Promise<void>((resolve) => {
-        releases.set(name, resolve);
-      });
-      activeDocker -= 1;
-    };
+    const docker = createBlockedWorkProbe();
 
     const jobs = [
-      scheduler.run(["docker"], async () => await work("docker-a")),
+      scheduler.run(["docker"], async () => await docker.run("docker-a")),
     ];
-    await waitFor(() => {
-      assert.deepStrictEqual(started, ["docker-a"]);
-    });
+    await docker.whenStarted(1);
+    assert.deepStrictEqual(docker.started(), ["docker-a"]);
     jobs.push(
-      scheduler.run(["docker"], async () => await work("docker-b")),
-      scheduler.run(["docker"], async () => await work("docker-c")),
+      scheduler.run(["docker"], async () => await docker.run("docker-b")),
+      scheduler.run(["docker"], async () => await docker.run("docker-c")),
     );
-    assert.deepStrictEqual(started, ["docker-a"]);
-    releases.get("docker-a")!();
-    await waitFor(() => {
-      assert.deepStrictEqual(started, ["docker-a", "docker-b"]);
-    });
-    releases.get("docker-b")!();
-    await waitFor(() => {
-      assert.deepStrictEqual(started, ["docker-a", "docker-b", "docker-c"]);
-    });
-    releases.get("docker-c")!();
+    assert.deepStrictEqual(docker.started(), ["docker-a"]);
+    docker.release("docker-a");
+    await docker.whenStarted(2);
+    assert.deepStrictEqual(docker.started(), ["docker-a", "docker-b"]);
+    docker.release("docker-b");
+    await docker.whenStarted(3);
+    assert.deepStrictEqual(docker.started(), [
+      "docker-a",
+      "docker-b",
+      "docker-c",
+    ]);
+    docker.release("docker-c");
     await Promise.all(jobs);
 
-    assert.strictEqual(maxActiveDocker, 1);
+    assert.strictEqual(docker.maximum(), 1);
   });
 
   void it("classifies Root Quality browser resources from real Check Environment Needs", async () => {
@@ -4052,7 +4003,7 @@ void describe("Fixture Verification Evidence", () => {
         });
 
         assert.deepStrictEqual(executions, invalidation.executions);
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await checkFixtureEvidenceHealth({
             ledger,
             runId: invalidation.name,
@@ -4144,29 +4095,34 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      assertPartialDeepStrictEqual(warm, {
+      assert.partialDeepStrictEqual(warm, {
         status: "hit",
         identity: cold.identity,
       });
       assert.strictEqual(executions, 1);
-      assertDeepStrictEqualWithMatchers(
-        events,
-        arrayContaining([
-          objectContaining({
-            type: "lookup",
-            outcome: "miss",
-            reason: "absent",
-          }),
-          objectContaining({
-            type: "execution",
-            outcome: "succeeded",
-          }),
-          objectContaining({
-            type: "issuance",
-            outcome: "issued",
-          }),
-          objectContaining({ type: "lookup", outcome: "hit" }),
-        ]),
+      assert.ok(
+        events.some(
+          (event) =>
+            event.type === "lookup" &&
+            event.outcome === "miss" &&
+            event.reason === "absent",
+        ),
+      );
+      assert.ok(
+        events.some(
+          (event) =>
+            event.type === "execution" && event.outcome === "succeeded",
+        ),
+      );
+      assert.ok(
+        events.some(
+          (event) => event.type === "issuance" && event.outcome === "issued",
+        ),
+      );
+      assert.ok(
+        events.some(
+          (event) => event.type === "lookup" && event.outcome === "hit",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -4210,7 +4166,7 @@ void describe("Fixture Verification Evidence", () => {
         },
       });
 
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...shared,
           gate: "generated-root-quality",
@@ -4221,7 +4177,7 @@ void describe("Fixture Verification Evidence", () => {
         }),
         { status: "hit", identity: coldRoot.identity },
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...shared,
           gate: "focused-package-link",
@@ -4276,7 +4232,7 @@ void describe("Fixture Verification Evidence", () => {
         focusedContractChanged.identity,
         changedFocused.identity,
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         JSON.parse(
           await readFile(
             path.join(
@@ -4293,8 +4249,14 @@ void describe("Fixture Verification Evidence", () => {
       );
       assert.strictEqual(rootExecutions, 2);
       assert.strictEqual(focusedExecutions, 3);
-      assertLength(await readdir(path.join(root, "generated-root-quality")), 2);
-      assertLength(await readdir(path.join(root, "focused-package-link")), 3);
+      assert.strictEqual(
+        (await readdir(path.join(root, "generated-root-quality"))).length,
+        2,
+      );
+      assert.strictEqual(
+        (await readdir(path.join(root, "focused-package-link"))).length,
+        3,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -4329,7 +4291,7 @@ void describe("Fixture Verification Evidence", () => {
       const warm = await runFixtureEvidenceGate(input);
 
       assert.strictEqual(cold.status, "executed");
-      assertPartialDeepStrictEqual(warm, {
+      assert.partialDeepStrictEqual(warm, {
         status: "hit",
         identity: cold.identity,
       });
@@ -4459,7 +4421,7 @@ void describe("Fixture Verification Evidence", () => {
             ? invalid
             : `${JSON.stringify(invalid)}\n`,
         );
-        assertPartialDeepStrictEqual(
+        assert.partialDeepStrictEqual(
           await runFixtureEvidenceGate({
             ...input,
             execute: async () => {
@@ -4517,7 +4479,7 @@ void describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [input.scenario],
       });
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...input,
           storage,
@@ -4539,7 +4501,7 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...input,
           storage: new FileFixtureEvidenceStorage(evidenceRoot),
@@ -4558,26 +4520,26 @@ void describe("Fixture Verification Evidence", () => {
         await readdir(path.join(evidenceRoot, "generated-root-quality")),
         [],
       );
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "partial-issuance-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "lifecycle-error",
-              detail: stringContaining("simulated partial write"),
-            }),
-            objectContaining({
-              code: "missing-issuance",
-              gate: "generated-root-quality",
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "partial-issuance-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "lifecycle-error" &&
+            failure.detail.includes("simulated partial write"),
+        ),
+      );
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "missing-issuance" &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -4622,7 +4584,7 @@ void describe("Fixture Verification Evidence", () => {
         outcome: "started",
         scenarios: [input.scenario],
       });
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...input,
           storage,
@@ -4644,7 +4606,7 @@ void describe("Fixture Verification Evidence", () => {
       });
       await invocation.record({ type: "invocation", outcome: "completed" });
 
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...input,
           storage: new FileFixtureEvidenceStorage(evidenceRoot),
@@ -4663,26 +4625,26 @@ void describe("Fixture Verification Evidence", () => {
         await readdir(path.join(evidenceRoot, "generated-root-quality")),
         [],
       );
-      assertPartialDeepStrictEqual(
-        await checkFixtureEvidenceHealth({
-          ledger,
-          runId: "replace-issuance-run",
-          runAttempt: "1",
-          enabledScenarioSets: ["init"],
-        }),
-        {
-          healthy: false,
-          failures: arrayContaining([
-            objectContaining({
-              code: "lifecycle-error",
-              detail: stringContaining("simulated replace failure"),
-            }),
-            objectContaining({
-              code: "missing-issuance",
-              gate: "generated-root-quality",
-            }),
-          ]),
-        },
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "replace-issuance-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["init"],
+      });
+      assert.strictEqual(report.healthy, false);
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "lifecycle-error" &&
+            failure.detail.includes("simulated replace failure"),
+        ),
+      );
+      assert.ok(
+        report.failures.some(
+          (failure) =>
+            failure.code === "missing-issuance" &&
+            failure.gate === "generated-root-quality",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -4719,7 +4681,7 @@ void describe("Fixture Verification Evidence", () => {
       );
 
       now = new Date("2026-07-07T23:59:59.999Z");
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         await runFixtureEvidenceGate({
           ...input,
           execute: async () => {
@@ -4741,7 +4703,7 @@ void describe("Fixture Verification Evidence", () => {
           error instanceof Error &&
           error.message.includes("root quality failed"),
       );
-      assertPartialDeepStrictEqual(
+      assert.partialDeepStrictEqual(
         JSON.parse(await readFile(recordPath, "utf8")),
         {
           issuedAt: "2026-07-01T00:00:00.000Z",
@@ -4794,7 +4756,9 @@ void describe("Fixture Verification Evidence", () => {
       await assert.rejects(
         readFile(path.join(gateRoot, `${stale.identity}.json`), "utf8"),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(error instanceof Error);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         },
       );
@@ -4847,7 +4811,9 @@ void describe("Fixture Verification Evidence", () => {
       await assert.rejects(
         readFile(path.join(gateRoot, `${stale.identity}.json`), "utf8"),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(error instanceof Error);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         },
       );
@@ -4917,10 +4883,13 @@ void describe("Fixture Verification Evidence", () => {
           "--dry-run=json",
         ],
       });
-      assertContainsEqual(calls, {
-        command: "pnpm",
-        args: ["run", "check"],
-      });
+      assert.deepStrictEqual(
+        calls.find(
+          ({ command, args }) =>
+            command === "pnpm" && args[0] === "run" && args[1] === "check",
+        ),
+        { command: "pnpm", args: ["run", "check"] },
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -4957,23 +4926,44 @@ void describe("Fixture Verification Evidence", () => {
         providerPackagePath,
       } as const;
 
-      assertPartialDeepStrictEqual(normalizedFocusedPackageLinkPlan(input), {
+      const normalized = normalizedFocusedPackageLinkPlan(input);
+      assert.partialDeepStrictEqual(normalized, {
         gate: "focused-package-link",
-        consumer: objectContaining({
-          path: consumerPackagePath,
-          name: any(String),
-          role: any(String),
-        }),
-        provider: objectContaining({
-          path: providerPackagePath,
-          name: any(String),
-          role: any(String),
-        }),
+        consumer: { path: consumerPackagePath },
+        provider: { path: providerPackagePath },
         intent: {
           consumerPackagePath,
           providerPackagePath,
         },
       });
+      assert.ok(
+        typeof normalized === "object" &&
+          normalized !== null &&
+          !Array.isArray(normalized),
+      );
+      const normalizedRecord = normalized as Record<string, unknown>;
+      const consumer = normalizedRecord.consumer;
+      const provider = normalizedRecord.provider;
+      assert.ok(
+        typeof consumer === "object" &&
+          consumer !== null &&
+          !Array.isArray(consumer),
+      );
+      assert.ok(
+        typeof provider === "object" &&
+          provider !== null &&
+          !Array.isArray(provider),
+      );
+      const consumerRecord = consumer as Record<string, unknown>;
+      const providerRecord = provider as Record<string, unknown>;
+      assert.ok(Object.hasOwn(consumerRecord, "name"));
+      assert.strictEqual(typeof consumerRecord.name, "string");
+      assert.ok(Object.hasOwn(consumerRecord, "role"));
+      assert.strictEqual(typeof consumerRecord.role, "string");
+      assert.ok(Object.hasOwn(providerRecord, "name"));
+      assert.strictEqual(typeof providerRecord.name, "string");
+      assert.ok(Object.hasOwn(providerRecord, "role"));
+      assert.strictEqual(typeof providerRecord.role, "string");
       assert.match(
         await deriveFocusedPackageLinkContractIdentity(input),
         /^[0-9a-f]{64}$/u,
@@ -5124,7 +5114,9 @@ void describe("Fixture Verification Evidence", () => {
       await assert.rejects(
         readdir(path.join(root, "evidence", "focused-package-link")),
         (error) => {
-          assertPartialDeepStrictEqual(error, { code: "ENOENT" });
+          assert.ok(error instanceof Error);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         },
       );
@@ -5241,17 +5233,17 @@ void describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("init")).length;
-      assertLength(
+      assert.strictEqual(
         coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         coldCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
-        ),
+        ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
@@ -5266,34 +5258,34 @@ void describe("Fixture Verification Evidence", () => {
         warmOuterCommands.filter(({ command }) => command !== "git"),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "add",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "write-tree",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         coldEvents.filter(
           (event) => event.type === "issuance" && event.outcome === "issued",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         warmEvents.filter(
           (event) => event.type === "lookup" && event.outcome === "hit",
-        ),
+        ).length,
         scenarioCount,
       );
       assert.deepStrictEqual(
@@ -5465,29 +5457,29 @@ void describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      assertLength(
+      assert.strictEqual(
         coldEvents.filter(
           (event) =>
             event.type === "issuance" &&
             event.outcome === "issued" &&
             event.gate === "generated-root-quality",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
-        ),
+        ).length,
         scenarioCount,
       );
       assert.strictEqual(focusedMisses.maximum(), 2);
-      assertLength(
+      assert.strictEqual(
         coldEvents.filter(
           (event) =>
             event.type === "issuance" &&
             event.outcome === "issued" &&
             event.gate === "focused-package-link",
-        ),
+        ).length,
         scenarioCount,
       );
       for (const command of coldCommands.filter(
@@ -5510,55 +5502,55 @@ void describe("Fixture Verification Evidence", () => {
         warmCommands.filter(({ command }) => command !== "git"),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "init",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         warmCommands.filter(
           ({ command, args }) => command === "git" && args[0] === "write-tree",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         warmEvents.filter(
           (event) => event.type === "lookup" && event.outcome === "hit",
-        ),
+        ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
         warmEvents.filter((event) => event.type === "execution"),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         rootChangedCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
-        ),
+        ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
         rootChangedCommands.filter(({ command }) => command === "node"),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         rootChangedEvents.filter(
           (event) =>
             event.type === "execution" &&
             event.gate === "generated-root-quality" &&
             event.outcome === "succeeded",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         rootChangedEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "hit",
-        ),
+        ).length,
         scenarioCount,
       );
       assert.deepStrictEqual(
@@ -5568,34 +5560,34 @@ void describe("Fixture Verification Evidence", () => {
         ),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         rootExpiredCommands.filter(
           ({ command, args }) =>
             command === "pnpm" && args[0] === "run" && args[1] === "check",
-        ),
+        ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
         rootExpiredCommands.filter(({ command }) => command === "node"),
         [],
       );
-      assertLength(
+      assert.strictEqual(
         rootExpiredEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "generated-root-quality" &&
             event.outcome === "miss" &&
             event.reason === "stale",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         rootExpiredEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "hit",
-        ),
+        ).length,
         scenarioCount,
       );
     } finally {
@@ -5714,44 +5706,44 @@ void describe("Fixture Verification Evidence", () => {
       });
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      assertLength(
+      assert.strictEqual(
         partialWarmEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "generated-root-quality" &&
             event.outcome === "hit",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         partialWarmEvents.filter(
           (event) =>
             event.type === "lookup" &&
             event.gate === "focused-package-link" &&
             event.outcome === "miss",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         partialWarmCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         partialWarmCommands.filter(
           ({ command, args }) =>
             command === "pnpm" &&
             args.includes("build") &&
             args.includes("--force"),
-        ),
+        ).length,
         scenarioCount,
       );
-      assertLength(
+      assert.strictEqual(
         partialWarmCommands.filter(
           ({ command, args }) =>
             command === "node" && args.includes("--conditions=source"),
-        ),
+        ).length,
         scenarioCount,
       );
       assert.deepStrictEqual(
@@ -5824,21 +5816,16 @@ void describe("Fixture Verification Evidence", () => {
       );
 
       const scenarioCount = (await generatedScenariosFor("focused")).length;
-      await waitFor(
-        () => {
-          assertLength(
-            events.filter(
-              (event) =>
-                event.type === "execution" &&
-                event.gate === "generated-root-quality" &&
-                event.outcome === "failed",
-            ),
-            scenarioCount,
-          );
-        },
-        { timeout: 5_000 },
+      assert.strictEqual(
+        events.filter(
+          (event) =>
+            event.type === "execution" &&
+            event.gate === "generated-root-quality" &&
+            event.outcome === "failed",
+        ).length,
+        scenarioCount,
       );
-      assertLength(reads, scenarioCount);
+      assert.strictEqual(reads.length, scenarioCount);
       assert.deepStrictEqual(
         new Set(reads),
         new Set(["generated-root-quality"]),
@@ -5946,31 +5933,31 @@ void describe("Fixture Verification Evidence", () => {
         const scenarioCount = (
           await generatedScenariosFor("package-addition-matrix")
         ).length;
-        assertLength(
+        assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "init",
-          ),
+          ).length,
           scenarioCount,
         );
-        assertLength(
+        assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "add",
-          ),
+          ).length,
           scenarioCount * 4,
         );
-        assertLength(
+        assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) =>
               command === "pnpm" && args[0] === "run" && args[1] === "fix",
-          ),
+          ).length,
           scenarioCount,
         );
         const coldInstalls = coldCommands.filter(
           ({ command, args }) => command === "pnpm" && args[0] === "install",
         );
-        assertLength(coldInstalls, scenarioCount);
+        assert.strictEqual(coldInstalls.length, scenarioCount);
         assert.strictEqual(
           new Set(coldInstalls.map(({ cwd }) => cwd)).size,
           scenarioCount,
@@ -6004,31 +5991,31 @@ void describe("Fixture Verification Evidence", () => {
           new Set(warmCommands.map(({ command }) => command)),
           new Set(["git"]),
         );
-        assertLength(
+        assert.strictEqual(
           warmCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "init",
-          ),
+          ).length,
           scenarioCount,
         );
-        assertLength(
+        assert.strictEqual(
           warmCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "add",
-          ),
+          ).length,
           scenarioCount * 2,
         );
-        assertLength(
+        assert.strictEqual(
           warmCommands.filter(
             ({ command, args }) =>
               command === "git" && gitSubcommand(args) === "write-tree",
-          ),
+          ).length,
           scenarioCount,
         );
-        assertLength(
+        assert.strictEqual(
           warmEvents.filter(
             (event) => event.type === "lookup" && event.outcome === "hit",
-          ),
+          ).length,
           scenarioCount,
         );
         assert.deepStrictEqual(
@@ -6036,9 +6023,9 @@ void describe("Fixture Verification Evidence", () => {
           [],
         );
         await assert.rejects(readFile(invalidRecordPath, "utf8"), (error) => {
-          assertPartialDeepStrictEqual(error, {
-            code: "ENOENT",
-          });
+          assert.ok(error instanceof Error);
+          assert.ok(Object.hasOwn(error, "code"));
+          assert.strictEqual(Reflect.get(error, "code"), "ENOENT");
           return true;
         });
         for (const scenario of await generatedScenariosFor(
@@ -6228,8 +6215,12 @@ void describe("Fixture Verification Evidence", () => {
       const scenarios = await generatedScenariosFor("package-addition-matrix");
       const scenarioIds = scenarios.map(({ id }) => id).sort();
       assert.strictEqual(schedulerFactory.mock.callCount(), 1);
-      assertMockCalledWith(schedulerFactory, { concurrency: 4 });
-      assertLength(scheduledRuns, scenarios.length);
+      assert.ok(
+        schedulerFactory.mock.calls.some(({ arguments: actualArguments }) =>
+          isDeepStrictEqual(actualArguments, [{ concurrency: 4 }]),
+        ),
+      );
+      assert.strictEqual(scheduledRuns.length, scenarios.length);
       assert.deepStrictEqual(
         scheduledRuns,
         Array.from({ length: scenarios.length }, () => []),
@@ -6429,7 +6420,7 @@ void describe("Fixture Verification Evidence", () => {
             rendered.generatedContentIdentity,
             previous.generatedContentIdentity,
           );
-          assertPartialDeepStrictEqual(
+          assert.partialDeepStrictEqual(
             await runFixtureEvidenceGate({
               gate: "generated-root-quality",
               generatedContentIdentity: rendered.generatedContentIdentity,
@@ -6694,17 +6685,17 @@ process.exitCode = result.status ?? 1;
           .trim()
           .split("\n")
           .map((line) => JSON.parse(line) as readonly string[]);
-        assertNotLength(
+        assert.notStrictEqual(
           coldCommands.filter(
             ([binary, command]) => binary === "pnpm" && command === "install",
-          ),
+          ).length,
           0,
         );
-        assertNotLength(
+        assert.notStrictEqual(
           coldCommands.filter(
             ([binary, command, task]) =>
               binary === "pnpm" && command === "run" && task === "check",
-          ),
+          ).length,
           0,
         );
         assert.strictEqual(
@@ -6748,16 +6739,18 @@ process.exitCode = result.status ?? 1;
           ...baseEnv,
           TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT: "2",
         };
-        assertPartialDeepStrictEqual(
-          await execa(
-            process.execPath,
-            ["--conditions=source", healthCliPath],
-            {
-              cwd: process.cwd(),
-              env: warmEnv,
-            },
-          ),
-          { exitCode: 0 },
+        assert.strictEqual(
+          (
+            await execa(
+              process.execPath,
+              ["--conditions=source", healthCliPath],
+              {
+                cwd: process.cwd(),
+                env: warmEnv,
+              },
+            )
+          ).exitCode,
+          0,
         );
         assert.deepStrictEqual(await readdir(activityRoot), ["activity.jsonl"]);
         await assert.rejects(
@@ -6769,12 +6762,17 @@ process.exitCode = result.status ?? 1;
             },
           }),
           (error) => {
-            assertPartialDeepStrictEqual(error, {
-              exitCode: 1,
-              stderr: stringContaining(
+            assert.ok(error instanceof Error);
+            assert.ok(Object.hasOwn(error, "exitCode"));
+            assert.strictEqual(Reflect.get(error, "exitCode"), 1);
+            assert.ok(Object.hasOwn(error, "stderr"));
+            const stderr = Reflect.get(error, "stderr");
+            assert.strictEqual(typeof stderr, "string");
+            assert.ok(
+              (stderr as string).includes(
                 "Enabled scenario set init has no current-run activity",
               ),
-            });
+            );
             return true;
           },
         );
@@ -6838,25 +6836,56 @@ process.exitCode = result.status ?? 1;
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-          objectContaining({
-            rule: "gate-runtime-import-outside-contract",
-          }),
-          objectContaining({
-            rule: "kernel-runtime-import-outside-kernel",
-          }),
-          objectContaining({ rule: "production-test-source" }),
-          objectContaining({ rule: "hidden-root-quality-command" }),
-          objectContaining({
-            rule: "hidden-focused-package-link-command",
-          }),
-          objectContaining({
-            rule: "hidden-deployment-quality-command",
-          }),
-        ]),
+      const architectureFindings0 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "gate-runtime-import-outside-contract",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "kernel-runtime-import-outside-kernel",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "production-test-source",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "hidden-root-quality-command",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "hidden-focused-package-link-command",
+        ),
+      );
+      assert.ok(
+        architectureFindings0.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "hidden-deployment-quality-command",
+        ),
       );
       assert.deepStrictEqual(
         await findFixtureEvidenceArchitectureFindings(process.cwd()),
@@ -6905,14 +6934,21 @@ process.exitCode = result.status ?? 1;
         ),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-          objectContaining({
-            rule: "kernel-runtime-import-outside-kernel",
-          }),
-        ]),
+      const architectureFindings1 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings1.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
+      );
+      assert.ok(
+        architectureFindings1.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "kernel-runtime-import-outside-kernel",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -6948,11 +6984,14 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-        ]),
+      const architectureFindings2 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings2.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -6984,11 +7023,14 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-        ]),
+      const architectureFindings3 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings3.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7024,11 +7066,14 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-        ]),
+      const architectureFindings4 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings4.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7067,11 +7112,14 @@ process.exitCode = result.status ?? 1;
         writeFile(path.join(focusedGate, "index.ts"), "export {};\n"),
       ]);
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({ rule: "cross-gate-runtime-import" }),
-        ]),
+      const architectureFindings5 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings5.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "cross-gate-runtime-import",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7099,13 +7147,14 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "gate-runtime-import-outside-contract",
-          }),
-        ]),
+      const architectureFindings6 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings6.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "gate-runtime-import-outside-contract",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7132,11 +7181,14 @@ process.exitCode = result.status ?? 1;
       await mkdir(path.dirname(orchestrator), { recursive: true });
       for (const source of bypasses) {
         await writeFile(orchestrator, source);
-        assertDeepStrictEqualWithMatchers(
-          await findFixtureEvidenceArchitectureFindings(root),
-          arrayContaining([
-            objectContaining({ rule: "hidden-root-quality-command" }),
-          ]),
+        const architectureFindings7 =
+          await findFixtureEvidenceArchitectureFindings(root);
+        assert.ok(
+          architectureFindings7.some(
+            (finding) =>
+              Object.hasOwn(finding, "rule") &&
+              finding.rule === "hidden-root-quality-command",
+          ),
         );
       }
     } finally {
@@ -7164,13 +7216,14 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "unassigned-orchestrator-command",
-          }),
-        ]),
+      const architectureFindings8 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings8.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "unassigned-orchestrator-command",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7199,13 +7252,14 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "unassigned-orchestrator-command",
-          }),
-        ]),
+      const architectureFindings9 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings9.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "unassigned-orchestrator-command",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7233,13 +7287,14 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "unassigned-orchestrator-command",
-          }),
-        ]),
+      const architectureFindings10 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings10.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "unassigned-orchestrator-command",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -7266,13 +7321,14 @@ process.exitCode = result.status ?? 1;
         ].join("\n"),
       );
 
-      assertDeepStrictEqualWithMatchers(
-        await findFixtureEvidenceArchitectureFindings(root),
-        arrayContaining([
-          objectContaining({
-            rule: "orchestrator-dependency-install-contract",
-          }),
-        ]),
+      const architectureFindings11 =
+        await findFixtureEvidenceArchitectureFindings(root);
+      assert.ok(
+        architectureFindings11.some(
+          (finding) =>
+            Object.hasOwn(finding, "rule") &&
+            finding.rule === "orchestrator-dependency-install-contract",
+        ),
       );
     } finally {
       await rm(root, { recursive: true, force: true });

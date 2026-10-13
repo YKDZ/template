@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { assertThrows, testEach } from "../../test-support/assertions.ts";
 import {
   isValidDefaultPackageScope,
   parseGenerationRecord,
@@ -30,16 +29,18 @@ void describe("Generation Record default package scope", () => {
     }
   });
 
-  testEach(
-    [".bad", "-bad", "_bad"],
-    "rejects persisted default package scope %s",
-    (defaultPackageScope) => {
-      assertThrows(
+  for (const defaultPackageScope of [".bad", "-bad", "_bad"]) {
+    void it(`rejects persisted default package scope ${defaultPackageScope}`, () => {
+      assert.throws(
         () => parseGenerationRecord({ ...validRecord, defaultPackageScope }),
-        /^Generation Record defaultPackageScope must be a valid npm scope$/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /^Generation Record defaultPackageScope must be a valid npm scope$/u.test(
+            error.message,
+          ),
       );
-    },
-  );
+    });
+  }
 });
 
 void describe("Generation Record v2 toolchain shape", () => {
@@ -51,24 +52,24 @@ void describe("Generation Record v2 toolchain shape", () => {
   });
 
   void it("rejects a record that leaks the exact Node version into the toolchain", () => {
-    assertThrows(
+    assert.throws(
       () =>
         parseGenerationRecord({
           ...validRecord,
           toolchain: { ...validRecord.toolchain, nodeVersion: "24.16.0" },
         }),
-      /contains unknown field: nodeVersion/u,
+      (error: unknown) =>
+        error instanceof Error &&
+        /contains unknown field: nodeVersion/u.test(error.message),
     );
   });
 
-  testEach(
-    [
-      ["24", "pnpm@11.21.0"],
-      ["22", "pnpm@11.21.0-beta.5"],
-      ["20", "pnpm@11.21.0+sha.4c2f1"],
-    ],
-    "accepts the persisted Node major %s and pnpm pin %s",
-    (nodeLtsMajor: string, packageManagerPin: string) => {
+  for (const [nodeLtsMajor, packageManagerPin] of [
+    ["24", "pnpm@11.21.0"],
+    ["22", "pnpm@11.21.0-beta.5"],
+    ["20", "pnpm@11.21.0+sha.4c2f1"],
+  ]) {
+    void it(`accepts the persisted Node major ${nodeLtsMajor} and pnpm pin ${packageManagerPin}`, () => {
       assert.deepStrictEqual(
         parseGenerationRecord({
           ...validRecord,
@@ -76,43 +77,47 @@ void describe("Generation Record v2 toolchain shape", () => {
         }).toolchain,
         { nodeLtsMajor, packageManagerPin },
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    ["latest", "24.x", "v24"],
-    "rejects a persisted Node LTS major %s",
-    (nodeLtsMajor) => {
-      assertThrows(
+  for (const nodeLtsMajor of ["latest", "24.x", "v24"]) {
+    void it(`rejects a persisted Node LTS major ${nodeLtsMajor}`, () => {
+      assert.throws(
         () =>
           parseGenerationRecord({
             ...validRecord,
             toolchain: { ...validRecord.toolchain, nodeLtsMajor },
           }),
-        /^Generation Record toolchain\.nodeLtsMajor must be a numeric Node major$/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /^Generation Record toolchain\.nodeLtsMajor must be a numeric Node major$/u.test(
+            error.message,
+          ),
       );
-    },
-  );
+    });
+  }
 
-  testEach(
-    [
-      "pnpm@11",
-      "pnpm@11.21",
-      "pnpm@11.21.0.",
-      "pnpm@11.21.0-",
-      "pnpm 11.21.0",
-      "11.21.0",
-    ],
-    "rejects a persisted pnpm pin %s that is not an exact version",
-    (packageManagerPin) => {
-      assertThrows(
+  for (const packageManagerPin of [
+    "pnpm@11",
+    "pnpm@11.21",
+    "pnpm@11.21.0.",
+    "pnpm@11.21.0-",
+    "pnpm 11.21.0",
+    "11.21.0",
+  ]) {
+    void it(`rejects a persisted pnpm pin ${packageManagerPin} that is not an exact version`, () => {
+      assert.throws(
         () =>
           parseGenerationRecord({
             ...validRecord,
             toolchain: { ...validRecord.toolchain, packageManagerPin },
           }),
-        /^Generation Record toolchain\.packageManagerPin must be an exact pnpm version pin$/u,
+        (error: unknown) =>
+          error instanceof Error &&
+          /^Generation Record toolchain\.packageManagerPin must be an exact pnpm version pin$/u.test(
+            error.message,
+          ),
       );
-    },
-  );
+    });
+  }
 });

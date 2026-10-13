@@ -23,18 +23,6 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 
-import {
-  arrayContaining,
-  assertDeepStrictEqualWithMatchers,
-  assertLength,
-  assertPartialDeepStrictEqual,
-  assertThrowsContaining,
-  hasProperty,
-  objectContaining,
-  stringMatching,
-  testEach,
-} from "./assertions.ts";
-
 afterEach(() => mock.restoreAll());
 
 const toolchain = {
@@ -157,9 +145,10 @@ async function expectFoundationProvenanceRejection(
     "replay",
   );
   try {
-    assertThrowsContaining(
+    assert.throws(
       () => loadLocalTemplateMetadata(initialized.repositoryRoot),
-      message,
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(message),
     );
     assert.strictEqual(replaySpy.mock.callCount(), 0);
     assert.strictEqual(
@@ -189,10 +178,9 @@ void describe("Local Template Metadata", () => {
       (definition) => definition.packageDefinitionId,
     );
 
-    assertDeepStrictEqualWithMatchers(
-      blueprintIds,
-      blueprintIds.map(() => stringMatching(/^package-[a-f0-9]{64}$/)),
-    );
+    for (const packageDefinitionId of blueprintIds) {
+      assert.ok(/^package-[a-f0-9]{64}$/u.test(packageDefinitionId));
+    }
     assert.strictEqual(new Set(blueprintIds).size, blueprintIds.length);
     assert.deepStrictEqual(repeatedPlan.blueprint, initialized.plan.blueprint);
     assert.deepStrictEqual(
@@ -364,22 +352,26 @@ void describe("Local Template Metadata", () => {
     });
 
     if (!result.ok) throw new Error(JSON.stringify(result, null, 2));
-    assertDeepStrictEqualWithMatchers(
-      addition.blueprint.packages,
-      arrayContaining([
-        newDefinition,
-        objectContaining({
-          name: "@recorded-scope/utilities",
-          path: "packages/utilities",
-        }),
-      ]),
+    assert.deepStrictEqual(
+      addition.blueprint.packages.find(
+        ({ packageDefinitionId }) =>
+          packageDefinitionId === newDefinition.packageDefinitionId,
+      ),
+      newDefinition,
+    );
+    assert.ok(
+      addition.blueprint.packages.some(
+        (definition) =>
+          Object.hasOwn(definition, "name") &&
+          definition.name === "@recorded-scope/utilities" &&
+          Object.hasOwn(definition, "path") &&
+          definition.path === "packages/utilities",
+      ),
     );
   });
 
-  testEach(
-    ["cli-tool", "native-package"] as const,
-    "replays persisted %s provenance without consulting current Preset defaults",
-    async (role) => {
+  for (const role of ["cli-tool", "native-package"] as const) {
+    void it(`replays persisted ${role} provenance without consulting current Preset defaults`, async () => {
       // cli-tool 探测会直接规划新建公开 ts-cli 候选，初始化上下文需要快照精确值；
       // 持久化记录仍只含大版本，加包 replay 保持缺省兼容。
       const initialized = await initializedRepository(
@@ -431,8 +423,8 @@ void describe("Local Template Metadata", () => {
       } finally {
         defaultReplay.mock.restore();
       }
-    },
-  );
+    });
+  }
 
   void it("replays persisted multi-Package provenance without consulting current Preset defaults", async () => {
     const initialized = await initializedRepository((context) => {
@@ -498,8 +490,9 @@ void describe("Local Template Metadata", () => {
       for (const replaySpy of replaySpies) {
         assert.strictEqual(replaySpy.mock.callCount(), 1);
         assert.ok(
-          !hasProperty(
-            replaySpy.mock.calls[0]!.arguments[0]!.packageDefinition,
+          !Object.hasOwn(
+            (replaySpy.mock.calls[0]!.arguments[0]!.packageDefinition ??
+              {}) as object,
             "packageDefinitionId",
           ),
         );
@@ -532,7 +525,7 @@ void describe("Local Template Metadata", () => {
     const libraryIds = latestPlan.generationRecord.packages
       .filter((record) => record.contributionIdentity === "library")
       .map((record) => record.packageDefinitionId);
-    assertLength(libraryIds, 3);
+    assert.strictEqual(libraryIds.length, 3);
     assert.strictEqual(new Set(libraryIds).size, libraryIds.length);
     assert.deepStrictEqual(reloaded.blueprint, latestPlan.blueprint);
 
@@ -575,17 +568,21 @@ void describe("Local Template Metadata", () => {
       packageLeafName: "after-foundation-default-change",
     });
 
-    assertDeepStrictEqualWithMatchers(
-      addition.blueprint.packages,
-      arrayContaining([
-        objectContaining({
-          name: "@recorded-scope/typescript-config",
-          path: "packages/typescript-config",
-        }),
-        objectContaining({
-          name: "@future-scope/after-foundation-default-change",
-        }),
-      ]),
+    assert.ok(
+      addition.blueprint.packages.some(
+        (definition) =>
+          Object.hasOwn(definition, "name") &&
+          definition.name === "@recorded-scope/typescript-config" &&
+          Object.hasOwn(definition, "path") &&
+          definition.path === "packages/typescript-config",
+      ),
+    );
+    assert.ok(
+      addition.blueprint.packages.some(
+        (definition) =>
+          Object.hasOwn(definition, "name") &&
+          definition.name === "@future-scope/after-foundation-default-change",
+      ),
     );
     const typescriptConfigReplacementValues = addition.operations.flatMap(
       (operation) =>
@@ -671,7 +668,7 @@ void describe("Local Template Metadata", () => {
       assert.deepStrictEqual(metadata.context.foundationPackages, {
         typescriptConfiguration: { name: persistedPackageName },
       });
-      assertPartialDeepStrictEqual(originalPackage.devDependencies, {
+      assert.partialDeepStrictEqual(originalPackage.devDependencies, {
         [persistedPackageName]: "workspace:*",
       });
     } finally {
@@ -745,48 +742,47 @@ void describe("Local Template Metadata", () => {
     }
   });
 
-  testEach(
-    [
-      {
-        name: "a Record-only Foundation/web path swap",
-        mutate: (packages: Record<string, unknown>[]) => {
-          const foundation = packages.find(
-            (record) => record.planningContribution === "foundationPlan",
-          )!;
-          const web = packages.find(
-            (record) => record.contributionIdentity === "web",
-          )!;
-          const foundationPath = foundation.path;
-          foundation.path = web.path;
-          web.path = foundationPath;
-        },
-        message: "Generation Record path witness",
+  for (const scenario of [
+    {
+      name: "a Record-only Foundation/web path swap",
+      mutate: (packages: Record<string, unknown>[]) => {
+        const foundation = packages.find(
+          (record) => record.planningContribution === "foundationPlan",
+        )!;
+        const web = packages.find(
+          (record) => record.contributionIdentity === "web",
+        )!;
+        const foundationPath = foundation.path;
+        foundation.path = web.path;
+        web.path = foundationPath;
       },
-      {
-        name: "a late unknown Definition name",
-        mutate: (packages: Record<string, unknown>[]) => {
-          const record = packages.findLast(
-            (candidate) => candidate.planningContribution !== "foundationPlan",
-          )!;
-          record.planningContribution = "planPackageAddition";
-          record.definitionName = "future-preset";
-        },
-        message: "references unknown Built-in Preset future-preset",
+      message: "Generation Record path witness",
+    },
+    {
+      name: "a late unknown Definition name",
+      mutate: (packages: Record<string, unknown>[]) => {
+        const record = packages.findLast(
+          (candidate) => candidate.planningContribution !== "foundationPlan",
+        )!;
+        record.planningContribution = "planPackageAddition";
+        record.definitionName = "future-preset";
       },
-      {
-        name: "a late unknown contribution identity",
-        mutate: (packages: Record<string, unknown>[]) => {
-          const record = packages.findLast(
-            (candidate) => candidate.planningContribution !== "foundationPlan",
-          )!;
-          record.contributionIdentity = "future-contribution";
-        },
-        message:
-          "unknown Package Contribution replay adapter future-contribution",
+      message: "references unknown Built-in Preset future-preset",
+    },
+    {
+      name: "a late unknown contribution identity",
+      mutate: (packages: Record<string, unknown>[]) => {
+        const record = packages.findLast(
+          (candidate) => candidate.planningContribution !== "foundationPlan",
+        )!;
+        record.contributionIdentity = "future-contribution";
       },
-    ],
-    "rejects $name before any persisted Package replay",
-    async ({ mutate, message }) => {
+      message:
+        "unknown Package Contribution replay adapter future-contribution",
+    },
+  ]) {
+    void it(`rejects ${scenario.name} before any persisted Package replay`, async () => {
+      const { mutate, message } = scenario;
       const initialized = await initializedRepository(
         requireMultiPackageDefinition,
       );
@@ -827,8 +823,8 @@ void describe("Local Template Metadata", () => {
       } finally {
         for (const replaySpy of replaySpies) replaySpy.mock.restore();
       }
-    },
-  );
+    });
+  }
 
   void it("uses the Foundation replay adapter for unknown persisted contribution diagnostics", async () => {
     const initialized = await initializedRepository();
@@ -903,12 +899,12 @@ void describe("Local Template Metadata", () => {
       ),
     );
 
-    assertPartialDeepStrictEqual(manifestsByName.get("@recorded-scope/db"), {
+    assert.partialDeepStrictEqual(manifestsByName.get("@recorded-scope/db"), {
       scripts: {
         "db:seed:example": "node --conditions=source scripts/seed-example.ts",
       },
     });
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       manifestsByName.get("@recorded-scope/db-migrations"),
       {
         scripts: {
@@ -975,7 +971,7 @@ void describe("Local Template Metadata", () => {
     await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    assertThrowsContaining(
+    assert.throws(
       () =>
         planGeneratedRepositoryPackageAddition({
           definition: requireSharedLibraryAdditionDefinition(
@@ -986,7 +982,11 @@ void describe("Local Template Metadata", () => {
           ),
           packageLeafName: "after-turbo-change",
         }),
-      `Package Addition root Turbo Truth requires Turbo task ${taskName} dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition root Turbo Truth requires Turbo task ${taskName} dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1041,9 +1041,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${applicationName} Turbo Truth requires exact Turbo extends truth`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${applicationName} Turbo Truth requires exact Turbo extends truth`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1058,9 +1062,13 @@ void describe("Local Template Metadata", () => {
     );
     const turboBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${applicationName} Turbo Truth requires Turbo task typecheck dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${applicationName} Turbo Truth requires Turbo task typecheck dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1077,9 +1085,13 @@ void describe("Local Template Metadata", () => {
     );
     const e2eBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${applicationName} Turbo Truth requires Turbo task test:e2e dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${applicationName} Turbo Truth requires Turbo task test:e2e dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1117,9 +1129,13 @@ void describe("Local Template Metadata", () => {
     );
     const viteBefore = await workspaceByteSnapshot(initialized.repositoryRoot);
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition requires ${applicationPath}/vite.config.ts to externalize ${databaseName} through Vite SSR`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition requires ${applicationPath}/vite.config.ts to externalize ${databaseName} through Vite SSR`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1163,9 +1179,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Database Preparation ${databaseName} exports . must preserve replayed condition order`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Database Preparation ${databaseName} exports . must preserve replayed condition order`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1190,9 +1210,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Database Preparation ${databaseName} imports #db/* must preserve replayed condition order`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Database Preparation ${databaseName} imports #db/* must preserve replayed condition order`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1209,26 +1233,28 @@ void describe("Local Template Metadata", () => {
       `${JSON.stringify(databaseManifest, null, 2)}\n`,
     );
     const acceptedAddition = addPackage();
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       await reconcileAndApplyProjectProjections({
         targetRoot: initialized.repositoryRoot,
         ...acceptedAddition.projectProjections,
       }),
       { ok: true },
     );
-    assertPartialDeepStrictEqual(
-      await readFile(applicationTurboPath, "utf8").then((source) =>
-        JSON.parse(source),
-      ),
-      {
-        tasks: {
-          typecheck: {
-            dependsOn: [`${databaseName}#build`, "user:preflight"],
-          },
-          "user:report": { cache: false },
-        },
-      },
-    );
+    const updatedTurbo = JSON.parse(
+      await readFile(applicationTurboPath, "utf8"),
+    ) as {
+      tasks: {
+        typecheck: { dependsOn: string[] };
+        "user:report": { cache: boolean };
+      };
+    };
+    assert.deepStrictEqual(updatedTurbo.tasks.typecheck.dependsOn, [
+      `${databaseName}#build`,
+      "user:preflight",
+    ]);
+    assert.partialDeepStrictEqual(updatedTurbo, {
+      tasks: { "user:report": { cache: false } },
+    });
   });
 
   void it("在 Package Addition 前拒绝破坏 consumer build 有效数据库排序，同时保留等价定制", async () => {
@@ -1289,9 +1315,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1308,9 +1338,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1332,9 +1366,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1348,9 +1386,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${migrationName} Turbo Truth requires Turbo task build dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1372,9 +1414,13 @@ void describe("Local Template Metadata", () => {
       initialized.repositoryRoot,
     );
 
-    assertThrowsContaining(
+    assert.throws(
       addPackage,
-      `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          `Package Addition ${applicationName} Turbo Truth requires Turbo task build dependsOn`,
+        ),
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
@@ -1390,7 +1436,7 @@ void describe("Local Template Metadata", () => {
     await writeTurbo(applicationTurboPath, applicationTurbo);
 
     const acceptedAddition = addPackage();
-    assertPartialDeepStrictEqual(
+    assert.partialDeepStrictEqual(
       await reconcileAndApplyProjectProjections({
         targetRoot: initialized.repositoryRoot,
         ...acceptedAddition.projectProjections,
@@ -1446,359 +1492,356 @@ void describe("Local Template Metadata", () => {
     );
   });
 
-  testEach(
-    [
-      {
-        name: "the previous Blueprint schema",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          schemaVersion: 2,
-        }),
-        message: "expected 3",
-      },
-      {
-        name: "the previous Generation Record schema",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          schemaVersion: 1,
-        }),
-        message: "expected 2",
-      },
-      {
-        name: "a missing repository identity",
-        file: "generation" as const,
-        mutate: ({
-          repositoryName: _removed,
-          ...value
-        }: Record<string, unknown>) => value,
-        message: "repositoryName must be a non-empty string",
-      },
-      {
-        name: "a whitespace repository identity",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          repositoryName: " invalid ",
-        }),
-        message: "repositoryName must be a non-empty string",
-      },
-      {
-        name: "a missing preset",
-        file: "generation" as const,
-        mutate: ({ preset: _removed, ...value }: Record<string, unknown>) =>
-          value,
-        message: "preset must be a non-empty string",
-      },
-      {
-        name: "a missing template version",
-        file: "generation" as const,
-        mutate: ({
-          templateVersion: _removed,
-          ...value
-        }: Record<string, unknown>) => value,
-        message: "templateVersion must be 0.0.0",
-      },
-      {
-        name: "an invalid Node major",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          toolchain: {
-            ...(value.toolchain as Record<string, unknown>),
-            nodeLtsMajor: "current",
-          },
-        }),
-        message: "toolchain.nodeLtsMajor must be a numeric Node major",
-      },
-      {
-        name: "a missing package-manager pin",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => {
-          const { packageManagerPin: _removed, ...toolchain } =
-            value.toolchain as Record<string, unknown>;
-          return { ...value, toolchain };
+  for (const scenario of [
+    {
+      name: "the previous Blueprint schema",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        schemaVersion: 2,
+      }),
+      message: "expected 3",
+    },
+    {
+      name: "the previous Generation Record schema",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        schemaVersion: 1,
+      }),
+      message: "expected 2",
+    },
+    {
+      name: "a missing repository identity",
+      file: "generation" as const,
+      mutate: ({
+        repositoryName: _removed,
+        ...value
+      }: Record<string, unknown>) => value,
+      message: "repositoryName must be a non-empty string",
+    },
+    {
+      name: "a whitespace repository identity",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        repositoryName: " invalid ",
+      }),
+      message: "repositoryName must be a non-empty string",
+    },
+    {
+      name: "a missing preset",
+      file: "generation" as const,
+      mutate: ({ preset: _removed, ...value }: Record<string, unknown>) =>
+        value,
+      message: "preset must be a non-empty string",
+    },
+    {
+      name: "a missing template version",
+      file: "generation" as const,
+      mutate: ({
+        templateVersion: _removed,
+        ...value
+      }: Record<string, unknown>) => value,
+      message: "templateVersion must be 0.0.0",
+    },
+    {
+      name: "an invalid Node major",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        toolchain: {
+          ...(value.toolchain as Record<string, unknown>),
+          nodeLtsMajor: "current",
         },
-        message:
-          "toolchain.packageManagerPin must be an exact pnpm version pin",
+      }),
+      message: "toolchain.nodeLtsMajor must be a numeric Node major",
+    },
+    {
+      name: "a missing package-manager pin",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => {
+        const { packageManagerPin: _removed, ...toolchain } =
+          value.toolchain as Record<string, unknown>;
+        return { ...value, toolchain };
       },
-      {
-        name: "a missing package Definition name",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) => {
-              if (index !== 0) return record;
-              const { definitionName: _removed, ...rest } = record;
-              return rest;
-            },
-          ),
-        }),
-        message: "packages[0].definitionName must be a non-empty string",
-      },
-      {
-        name: "a missing Generation Record Package Definition ID",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) => {
-              if (index !== 0) return record;
-              const { packageDefinitionId: _removed, ...rest } = record;
-              return rest;
-            },
-          ),
-        }),
-        message:
-          "packages[0].packageDefinitionId must use the package-<sha256> format",
-      },
-      {
-        name: "an invalid Generation Record Package Definition ID",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) =>
-              index === 0
-                ? { ...record, packageDefinitionId: "package-short" }
-                : record,
-          ),
-        }),
-        message:
-          "packages[0].packageDefinitionId must use the package-<sha256> format",
-      },
-      {
-        name: "a missing packages collection",
-        file: "generation" as const,
-        mutate: ({ packages: _removed, ...value }: Record<string, unknown>) =>
-          value,
-        message: "packages must be an array",
-      },
-      {
-        name: "a missing provenance path",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) => {
-              if (index !== 0) return record;
-              const { path: _removed, ...rest } = record;
-              return rest;
-            },
-          ),
-        }),
-        message: "packages[0].path must be a non-empty string",
-      },
-      {
-        name: "a missing provenance kind",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) => {
-              if (index !== 0) return record;
-              const { planningContribution: _removed, ...rest } = record;
-              return rest;
-            },
-          ),
-        }),
-        message: "packages[0].planningContribution is unsupported",
-      },
-      {
-        name: "a missing contribution identity",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) => {
-              if (index !== 0) return record;
-              const { contributionIdentity: _removed, ...rest } = record;
-              return rest;
-            },
-          ),
-        }),
-        message: "packages[0].contributionIdentity must be a non-empty string",
-      },
-      {
-        name: "an unknown Generation Record field",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          inferredFromWorkspace: true,
-        }),
-        message: "contains unknown field: inferredFromWorkspace",
-      },
-      {
-        name: "an unknown nested toolchain field",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          toolchain: {
-            ...(value.toolchain as Record<string, unknown>),
-            inferredFromManifest: true,
+      message: "toolchain.packageManagerPin must be an exact pnpm version pin",
+    },
+    {
+      name: "a missing package Definition name",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) => {
+            if (index !== 0) return record;
+            const { definitionName: _removed, ...rest } = record;
+            return rest;
           },
-        }),
-        message:
-          "toolchain.inferredFromManifest: contains unknown Generation Record field",
-      },
-      {
-        name: "an unknown nested provenance field",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) =>
-              index === 0 ? { ...record, inferredFromWorkspace: true } : record,
-          ),
-        }),
-        message:
-          "packages[0].inferredFromWorkspace: contains unknown Generation Record field",
-      },
-      {
-        name: "an unknown Generation Record Package Definition ID field",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) =>
-              index === 0
-                ? { ...record, packageDefinitionIdentity: "legacy-id" }
-                : record,
-          ),
-        }),
-        message:
-          "packages[0].packageDefinitionIdentity: contains unknown Generation Record field",
-      },
-      {
-        name: "an unknown Blueprint field",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
+        ),
+      }),
+      message: "packages[0].definitionName must be a non-empty string",
+    },
+    {
+      name: "a missing Generation Record Package Definition ID",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) => {
+            if (index !== 0) return record;
+            const { packageDefinitionId: _removed, ...rest } = record;
+            return rest;
+          },
+        ),
+      }),
+      message:
+        "packages[0].packageDefinitionId must use the package-<sha256> format",
+    },
+    {
+      name: "an invalid Generation Record Package Definition ID",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) =>
+            index === 0
+              ? { ...record, packageDefinitionId: "package-short" }
+              : record,
+        ),
+      }),
+      message:
+        "packages[0].packageDefinitionId must use the package-<sha256> format",
+    },
+    {
+      name: "a missing packages collection",
+      file: "generation" as const,
+      mutate: ({ packages: _removed, ...value }: Record<string, unknown>) =>
+        value,
+      message: "packages must be an array",
+    },
+    {
+      name: "a missing provenance path",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) => {
+            if (index !== 0) return record;
+            const { path: _removed, ...rest } = record;
+            return rest;
+          },
+        ),
+      }),
+      message: "packages[0].path must be a non-empty string",
+    },
+    {
+      name: "a missing provenance kind",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) => {
+            if (index !== 0) return record;
+            const { planningContribution: _removed, ...rest } = record;
+            return rest;
+          },
+        ),
+      }),
+      message: "packages[0].planningContribution is unsupported",
+    },
+    {
+      name: "a missing contribution identity",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) => {
+            if (index !== 0) return record;
+            const { contributionIdentity: _removed, ...rest } = record;
+            return rest;
+          },
+        ),
+      }),
+      message: "packages[0].contributionIdentity must be a non-empty string",
+    },
+    {
+      name: "an unknown Generation Record field",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        inferredFromWorkspace: true,
+      }),
+      message: "contains unknown field: inferredFromWorkspace",
+    },
+    {
+      name: "an unknown nested toolchain field",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        toolchain: {
+          ...(value.toolchain as Record<string, unknown>),
           inferredFromManifest: true,
-        }),
-        message: "Unknown Blueprint v3 field",
-      },
-      {
-        name: "a missing Blueprint Package Definition ID",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (definition, index) => {
-              if (index !== 0) return definition;
-              const { packageDefinitionId: _removed, ...rest } = definition;
-              return rest;
-            },
-          ),
-        }),
-        message: "Package Definition ID must use the package-<sha256> format",
-      },
-      {
-        name: "an invalid Blueprint Package Definition ID",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (definition, index) =>
-              index === 0
-                ? { ...definition, packageDefinitionId: "package-short" }
-                : definition,
-          ),
-        }),
-        message: "Package Definition ID must use the package-<sha256> format",
-      },
-      {
-        name: "an unknown Blueprint Package Definition ID field",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (definition, index) =>
-              index === 0
-                ? { ...definition, packageDefinitionIdentity: "legacy-id" }
-                : definition,
-          ),
-        }),
-        message: ".packages[0].packageDefinitionIdentity",
-      },
-      {
-        name: "duplicate Blueprint Package Definitions",
-        file: "blueprint" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: [
-            ...((value.packages as readonly Record<string, unknown>[]) ?? []),
-            (value.packages as readonly Record<string, unknown>[])[0],
-          ],
-        }),
-        message: "Package Definition ID must be unique",
-      },
-      {
-        name: "duplicate Package Planning Provenance",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: [
-            ...((value.packages as readonly Record<string, unknown>[]) ?? []),
-            (value.packages as readonly Record<string, unknown>[])[0],
-          ],
-        }),
-        message: "packages packageDefinitionId must be unique",
-      },
-      {
-        name: "a Blueprint and Generation Record Package Definition ID set mismatch",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) =>
-              index === 0
-                ? {
-                    ...record,
-                    packageDefinitionId: `package-${"f".repeat(64)}`,
-                  }
-                : record,
-          ),
-        }),
-        message: "has no matching Project Blueprint Package Definition",
-      },
-      {
-        name: "a Blueprint and Generation Record Package Definition ID-only swap",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => {
-          const packages = [
-            ...(value.packages as readonly Record<string, unknown>[]),
-          ];
-          const firstId = packages[0]!.packageDefinitionId;
-          packages[0] = {
-            ...packages[0],
-            packageDefinitionId: packages[1]!.packageDefinitionId,
-          };
-          packages[1] = {
-            ...packages[1],
-            packageDefinitionId: firstId,
-          };
-          return { ...value, packages };
         },
-        message: "Generation Record path witness",
+      }),
+      message:
+        "toolchain.inferredFromManifest: contains unknown Generation Record field",
+    },
+    {
+      name: "an unknown nested provenance field",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) =>
+            index === 0 ? { ...record, inferredFromWorkspace: true } : record,
+        ),
+      }),
+      message:
+        "packages[0].inferredFromWorkspace: contains unknown Generation Record field",
+    },
+    {
+      name: "an unknown Generation Record Package Definition ID field",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) =>
+            index === 0
+              ? { ...record, packageDefinitionIdentity: "legacy-id" }
+              : record,
+        ),
+      }),
+      message:
+        "packages[0].packageDefinitionIdentity: contains unknown Generation Record field",
+    },
+    {
+      name: "an unknown Blueprint field",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        inferredFromManifest: true,
+      }),
+      message: "Unknown Blueprint v3 field",
+    },
+    {
+      name: "a missing Blueprint Package Definition ID",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (definition, index) => {
+            if (index !== 0) return definition;
+            const { packageDefinitionId: _removed, ...rest } = definition;
+            return rest;
+          },
+        ),
+      }),
+      message: "Package Definition ID must use the package-<sha256> format",
+    },
+    {
+      name: "an invalid Blueprint Package Definition ID",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (definition, index) =>
+            index === 0
+              ? { ...definition, packageDefinitionId: "package-short" }
+              : definition,
+        ),
+      }),
+      message: "Package Definition ID must use the package-<sha256> format",
+    },
+    {
+      name: "an unknown Blueprint Package Definition ID field",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (definition, index) =>
+            index === 0
+              ? { ...definition, packageDefinitionIdentity: "legacy-id" }
+              : definition,
+        ),
+      }),
+      message: ".packages[0].packageDefinitionIdentity",
+    },
+    {
+      name: "duplicate Blueprint Package Definitions",
+      file: "blueprint" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: [
+          ...((value.packages as readonly Record<string, unknown>[]) ?? []),
+          (value.packages as readonly Record<string, unknown>[])[0],
+        ],
+      }),
+      message: "Package Definition ID must be unique",
+    },
+    {
+      name: "duplicate Package Planning Provenance",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: [
+          ...((value.packages as readonly Record<string, unknown>[]) ?? []),
+          (value.packages as readonly Record<string, unknown>[])[0],
+        ],
+      }),
+      message: "packages packageDefinitionId must be unique",
+    },
+    {
+      name: "a Blueprint and Generation Record Package Definition ID set mismatch",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) =>
+            index === 0
+              ? {
+                  ...record,
+                  packageDefinitionId: `package-${"f".repeat(64)}`,
+                }
+              : record,
+        ),
+      }),
+      message: "has no matching Project Blueprint Package Definition",
+    },
+    {
+      name: "a Blueprint and Generation Record Package Definition ID-only swap",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => {
+        const packages = [
+          ...(value.packages as readonly Record<string, unknown>[]),
+        ];
+        const firstId = packages[0]!.packageDefinitionId;
+        packages[0] = {
+          ...packages[0],
+          packageDefinitionId: packages[1]!.packageDefinitionId,
+        };
+        packages[1] = {
+          ...packages[1],
+          packageDefinitionId: firstId,
+        };
+        return { ...value, packages };
       },
-      {
-        name: "Blueprint and provenance path mismatch",
-        file: "generation" as const,
-        mutate: (value: Record<string, unknown>) => ({
-          ...value,
-          packages: (value.packages as readonly Record<string, unknown>[]).map(
-            (record, index) =>
-              index === 0 ? { ...record, path: "packages/missing" } : record,
-          ),
-        }),
-        message: "Generation Record path witness",
-      },
-    ],
-    "fails closed on $name without rewriting metadata",
-    async (scenario) => {
+      message: "Generation Record path witness",
+    },
+    {
+      name: "Blueprint and provenance path mismatch",
+      file: "generation" as const,
+      mutate: (value: Record<string, unknown>) => ({
+        ...value,
+        packages: (value.packages as readonly Record<string, unknown>[]).map(
+          (record, index) =>
+            index === 0 ? { ...record, path: "packages/missing" } : record,
+        ),
+      }),
+      message: "Generation Record path witness",
+    },
+  ]) {
+    void it(`fails closed on ${scenario.name} without rewriting metadata`, async () => {
       const initialized = await initializedRepository();
       const filePath = path.join(
         initialized.repositoryRoot,
@@ -1820,9 +1863,10 @@ void describe("Local Template Metadata", () => {
           (adapter) => mock.method(adapter, "replay"),
         );
       try {
-        assertThrowsContaining(
+        assert.throws(
           () => loadLocalTemplateMetadata(initialized.repositoryRoot),
-          scenario.message,
+          (error: unknown) =>
+            error instanceof Error && error.message.includes(scenario.message),
         );
         for (const replaySpy of replaySpies) {
           assert.strictEqual(replaySpy.mock.callCount(), 0);
@@ -1834,6 +1878,6 @@ void describe("Local Template Metadata", () => {
       } finally {
         for (const replaySpy of replaySpies) replaySpy.mock.restore();
       }
-    },
-  );
+    });
+  }
 });
