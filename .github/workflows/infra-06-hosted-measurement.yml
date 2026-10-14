@@ -25,7 +25,7 @@ jobs:
       - name: Check out fixed 06 candidate
         uses: actions/checkout@v7
         with:
-          ref: b5c8617efd22a753d1ebdf6cb553fefbda510425
+          ref: 4fd71b27b4bc3ab6bc68d9b7201c4ceeb5129f75
           persist-credentials: false
 
       - name: Enable Corepack
@@ -151,8 +151,8 @@ jobs:
           records="$MEASURE_ROOT/records"
           {
             printf 'measured_source_commit=%s\n' "$(git rev-parse HEAD)"
-            printf 'expected_source_commit=b5c8617efd22a753d1ebdf6cb553fefbda510425\n'
-            printf 'measurement_GITHUB_SHA=b5c8617efd22a753d1ebdf6cb553fefbda510425\n'
+            printf 'expected_source_commit=4fd71b27b4bc3ab6bc68d9b7201c4ceeb5129f75\n'
+            printf 'measurement_GITHUB_SHA=4fd71b27b4bc3ab6bc68d9b7201c4ceeb5129f75\n'
             printf 'workflow_event_ref=%s\n' "$GITHUB_REF"
             printf 'workflow_event_sha=%s\n' "$GITHUB_SHA"
             printf 'workflow_file_in_checked_out_source='
@@ -194,7 +194,7 @@ jobs:
             printf 'pnpm_executable=%s\n' "$(command -v pnpm)"
           } > "$records/runner-environment.txt" 2>&1
 
-          if [[ "$(git rev-parse HEAD)" != b5c8617efd22a753d1ebdf6cb553fefbda510425 ]]; then
+          if [[ "$(git rev-parse HEAD)" != 4fd71b27b4bc3ab6bc68d9b7201c4ceeb5129f75 ]]; then
             echo 'The measured checkout is not the fixed 06 candidate.' >&2
             exit 1
           fi
@@ -214,7 +214,7 @@ jobs:
           fi
           cat "$records/runner-environment.txt"
 
-      - name: Run five formal CI gates cold then warm
+      - name: Run four formal Fixture gates cold then warm
         shell: bash
         run: |
           cat > "$RUNNER_TEMP/run-infra-06-scope.sh" <<'BASH'
@@ -225,7 +225,7 @@ jobs:
           records="$measure_root/records"
           final_status=0
           pnpm_executable=$(command -v pnpm)
-          export GITHUB_SHA=b5c8617efd22a753d1ebdf6cb553fefbda510425
+          export GITHUB_SHA=4fd71b27b4bc3ab6bc68d9b7201c4ceeb5129f75
           unset TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
             TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
             TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY
@@ -319,7 +319,7 @@ jobs:
             ) &
             stats_pid=$!
 
-            run_gate "$phase" check pnpm run check
+            run_gate "$phase" generated pnpm run check:generated
             run_gate "$phase" fixtures pnpm run check:fixtures
             run_gate "$phase" focused pnpm run check:focused
             run_gate "$phase" deployment pnpm run check:deployment
@@ -354,7 +354,7 @@ jobs:
             printf 'Source commit: `'
             git rev-parse HEAD
             printf '`\n\n'
-            printf 'Both phases ran the five formal CI commands from the same checkout and preparation, in this order.\n\n'
+            printf 'Both phases ran the four formal Fixture scenario-set commands and the evidence health command from the same checkout and preparation, in this order.\n\n'
             printf '| Phase | Gate | Exit | Wall ms | Observer wrapper CPU (user+sys) | Host pnpm dependency-install execve |\n|---|---|---:|---:|---:|---:|\n'
             while IFS=$'\t' read -r phase gate status started ended elapsed command; do
               [[ "$phase" == phase ]] && continue
