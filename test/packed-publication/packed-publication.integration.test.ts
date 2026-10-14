@@ -1094,6 +1094,7 @@ type NativeTurboPackage = {
 
 type NativeTurboTaskPlan = {
   readonly taskId: string;
+  readonly package: string;
   readonly command: string;
   readonly directory: string;
   readonly dependencies: readonly string[];
@@ -1703,6 +1704,298 @@ async function expectPackedHardenedRootCheckWorkflow(
   }
 }
 
+async function expectVuePackageOwnedTurboContracts(
+  installedBin: string,
+  vueProject: string,
+  vueHonoProject: string,
+): Promise<void> {
+  const light = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  });
+  const repair = expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  });
+  const build = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: ["dist/**"],
+  });
+  const typecheck = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^typecheck"],
+    outputs: [],
+  });
+  const development = expectedOwnedTask("work:development", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  });
+  const preparation = expectedOwnedTask("work:preparation", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  });
+  const webTasks = {
+    "format:check": light,
+    "format:write": expectedOwnedTask("work:repair", {
+      cache: false,
+      dependsOn: ["lint:fix"],
+      outputs: [],
+    }),
+    lint: light,
+    "lint:fix": repair,
+    test: light,
+    typecheck,
+    "browser:prepare": preparation,
+    build,
+    dev: development,
+    preview: development,
+    "test:browser": expectedOwnedTask("quality:heavy", {
+      cache: true,
+      dependsOn: ["browser:prepare"],
+      outputs: [],
+    }),
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+  const vueWebTasks = {
+    ...webTasks,
+    "test:e2e": expectedOwnedTask("quality:heavy", {
+      cache: false,
+      dependsOn: ["build", "browser:prepare"],
+      outputs: [],
+    }),
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+  const apiTasks = {
+    "format:check": light,
+    "format:write": expectedOwnedTask("work:repair", {
+      cache: false,
+      dependsOn: ["lint:fix"],
+      outputs: [],
+    }),
+    lint: light,
+    "lint:fix": repair,
+    test: light,
+    typecheck,
+    build,
+    dev: development,
+    start: development,
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+
+  const packageNameAt = async (
+    projectDir: string,
+    packagePath: string,
+  ): Promise<string> => {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(projectDir, packagePath, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly name: string };
+    return manifest.name;
+  };
+  const removeVueSpecificRootTaskDefaults = async (
+    projectDir: string,
+    packages: Readonly<
+      Record<string, Readonly<Record<string, ExpectedOwnedTask>>>
+    >,
+  ): Promise<void> => {
+    const turboPath = path.join(projectDir, "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      readonly tasks: Record<string, unknown>;
+    };
+    for (const [packageName, tasks] of Object.entries(packages)) {
+      for (const taskName of Object.keys(tasks)) {
+        if (
+          [
+            "browser:prepare",
+            "dev",
+            "preview",
+            "start",
+            "test:browser",
+            "test:e2e",
+          ].includes(taskName)
+        ) {
+          delete turbo.tasks[taskName];
+          delete turbo.tasks[packageName + "#" + taskName];
+        }
+      }
+    }
+    await writeFile(turboPath, JSON.stringify(turbo, null, 2) + "\n");
+    await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
+      cwd: projectDir,
+    });
+  };
+
+  await Promise.all([
+    execa("pnpm", ["install"], { cwd: vueProject }),
+    execa("pnpm", ["install"], { cwd: vueHonoProject }),
+  ]);
+  const vueWebName = await packageNameAt(vueProject, "apps/web");
+  await execa(
+    installedBin,
+    [
+      "add",
+      "package",
+      "--preset",
+      "ts-lib",
+      "--name",
+      "boundary-library",
+      "--path",
+      "packages/boundary-library",
+    ],
+    { cwd: vueProject },
+  );
+  await execa("pnpm", ["install"], { cwd: vueProject });
+  const vueLibraryName = await packageNameAt(
+    vueProject,
+    "packages/boundary-library",
+  );
+
+  const legalBoundaries = await execa("pnpm", ["run", "boundaries"], {
+    cwd: vueProject,
+    reject: false,
+  });
+  throwIfPackedCommandWasCancelled(legalBoundaries, "检查 Vue 合法依赖");
+  assert.strictEqual(
+    legalBoundaries.exitCode,
+    0,
+    legalBoundaries.stdout + "\n" + legalBoundaries.stderr,
+  );
+
+  const libraryManifestPath = path.join(
+    vueProject,
+    "packages/boundary-library/package.json",
+  );
+  const libraryManifest = JSON.parse(
+    await readFile(libraryManifestPath, "utf8"),
+  ) as { dependencies?: Record<string, string> };
+  libraryManifest.dependencies = {
+    ...libraryManifest.dependencies,
+    [vueWebName]: "workspace:*",
+  };
+  await writeFile(
+    libraryManifestPath,
+    JSON.stringify(libraryManifest, null, 2) + "\n",
+  );
+  await execa("pnpm", ["install"], { cwd: vueProject });
+  const rejectedBoundaries = await execa("pnpm", ["run", "boundaries"], {
+    cwd: vueProject,
+    reject: false,
+  });
+  throwIfPackedCommandWasCancelled(rejectedBoundaries, "检查 Vue 禁止依赖");
+  const boundaryOutput =
+    rejectedBoundaries.stdout + "\n" + rejectedBoundaries.stderr;
+  assert.notStrictEqual(rejectedBoundaries.exitCode, 0, boundaryOutput);
+  assert.ok(boundaryOutput.includes(vueLibraryName), boundaryOutput);
+  assert.ok(boundaryOutput.includes(vueWebName), boundaryOutput);
+
+  delete libraryManifest.dependencies[vueWebName];
+  if (Object.keys(libraryManifest.dependencies).length === 0)
+    delete libraryManifest.dependencies;
+  await writeFile(
+    libraryManifestPath,
+    JSON.stringify(libraryManifest, null, 2) + "\n",
+  );
+  await execa("pnpm", ["install"], { cwd: vueProject });
+  const restoredBoundaries = await execa("pnpm", ["run", "boundaries"], {
+    cwd: vueProject,
+    reject: false,
+  });
+  throwIfPackedCommandWasCancelled(restoredBoundaries, "恢复 Vue 合法依赖");
+  assert.strictEqual(
+    restoredBoundaries.exitCode,
+    0,
+    restoredBoundaries.stdout + "\n" + restoredBoundaries.stderr,
+  );
+
+  await removeVueSpecificRootTaskDefaults(vueProject, {
+    [vueWebName]: vueWebTasks,
+  });
+  await expectOwnedPackageTaskContracts(vueProject, [
+    {
+      path: "apps/web",
+      tags: ["app"],
+      tasks: vueWebTasks,
+    },
+  ]);
+
+  const apiName = await packageNameAt(vueHonoProject, "apps/api");
+  const webName = await packageNameAt(vueHonoProject, "apps/web");
+  const typescriptConfigName = await packageNameAt(
+    vueHonoProject,
+    "packages/typescript-config",
+  );
+  await removeVueSpecificRootTaskDefaults(vueHonoProject, {
+    [apiName]: apiTasks,
+    [webName]: webTasks,
+  });
+  await expectOwnedPackageTaskContracts(vueHonoProject, [
+    {
+      path: "apps/api",
+      tags: ["app"],
+      tasks: apiTasks,
+    },
+    {
+      path: "apps/web",
+      tags: ["app"],
+      tasks: webTasks,
+    },
+  ]);
+
+  const buildPlanResult = await execa(
+    "pnpm",
+    [
+      "exec",
+      "turbo",
+      "run",
+      "build",
+      "--filter=" + apiName,
+      "--filter=" + webName,
+      "--dry-run=json",
+      "--no-update-notifier",
+    ],
+    { cwd: vueHonoProject },
+  );
+  const buildPlan = JSON.parse(buildPlanResult.stdout) as NativeTurboDryRun;
+  const apiBuild = buildPlan.tasks.find(
+    (entry) => entry.taskId === apiName + "#build",
+  );
+  const webBuild = buildPlan.tasks.find(
+    (entry) => entry.taskId === webName + "#build",
+  );
+  assert.ok(apiBuild);
+  assert.ok(webBuild);
+  assert.deepStrictEqual(webBuild.dependencies, [
+    apiName + "#build",
+    typescriptConfigName + "#build",
+  ]);
+
+  const e2eResult = await execa(
+    "pnpm",
+    [
+      "exec",
+      "turbo",
+      "run",
+      "test:e2e",
+      "--dry-run=json",
+      "--no-update-notifier",
+    ],
+    { cwd: vueHonoProject },
+  );
+  const e2ePlan = JSON.parse(e2eResult.stdout) as NativeTurboDryRun;
+  const rootE2e = e2ePlan.tasks.find((entry) => entry.taskId === "//#test:e2e");
+  assert.ok(rootE2e);
+  assert.strictEqual(rootE2e.package, "//");
+  assert.deepStrictEqual(rootE2e.dependencies, [
+    apiName + "#build",
+    webName + "#browser:prepare",
+    webName + "#build",
+  ]);
+  assert.strictEqual(rootE2e.resolvedTaskDefinition.cache, false);
+}
 function initializationRequiresDiagnostics(definitionName: string): boolean {
   return (
     initializationDiagnosticPlan(definitionName).ciDiagnosticArtifacts.length >
@@ -2229,6 +2522,12 @@ void describe("packed public CLI consumer", () => {
         assert.deepStrictEqual(
           completedAdditions.toSorted(),
           expectedAddableDefinitions,
+        );
+        activeRun.stage = "核对 Vue 与 Vue-Hono 原生任务合同";
+        await expectVuePackageOwnedTurboContracts(
+          installedBin,
+          path.join(consumer, "generated/vue-app"),
+          path.join(consumer, "generated/vue-hono-app"),
         );
 
         const rustDefinition =
