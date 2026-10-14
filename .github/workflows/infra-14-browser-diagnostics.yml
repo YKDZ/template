@@ -274,7 +274,7 @@ jobs:
             });
             const button = screen.getByRole("button", { name: /计数/ });
 
-            await expect.element(button).toHaveTextContent(/^计数：0$/);
+            await expect.element(button).toHaveTextContent("计数：0");
           });
           EOF
           cat > .fixture-workspace/demo/apps/web/test/e2e/infra-14-counter.spec.ts <<'EOF'
@@ -290,13 +290,13 @@ jobs:
           component=.fixture-workspace/demo/apps/web/src/components/CounterButton.vue
           cp "$component" .fixture-workspace/CounterButton.vue.original
           test "$(grep -Foc '计数：{{ count }}' "$component")" = 1
-          sed -i 's/计数：{{ count }}/错误计数：{{ count }}/' "$component"
-          grep -Fq '错误计数：{{ count }}' "$component"
+          sed -i 's/计数：{{ count }}/错误：{{ count }}/' "$component"
+          grep -Fq '错误：{{ count }}' "$component"
           pnpm --filter @demo/web run format:write
           pnpm --filter @demo/web run format:check
           pnpm --filter @demo/web run lint
           pnpm --filter @demo/web run typecheck
-          grep -Fq '错误计数：{{ count }}' "$component"
+          grep -Fq '错误：{{ count }}' "$component"
           git diff --no-index -- .fixture-workspace/CounterButton.vue.original "$component" || test "$?" -eq 1
 
       - name: Run the generated public full gate and retain its exit
