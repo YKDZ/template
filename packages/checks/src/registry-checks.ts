@@ -97,7 +97,7 @@ export function builtInPresetTemplateSourceCheckContexts(): readonly BuiltInPres
       ),
       toolchain: {
         nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
+        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
         nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     });
@@ -183,7 +183,7 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
           targetDir: path.join("generated-repository", id),
           toolchain: {
             nodeLtsMajor: "24",
-            packageManagerPin: "pnpm@11.11.0",
+            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
             nodeVersion: releaseToolchainSnapshot.nodeVersion,
           },
         }),
@@ -971,7 +971,7 @@ export async function deriveVerificationPlans(): Promise<
         targetDir: path.join(workspace, scenario.id),
         toolchain: {
           nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
           nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });

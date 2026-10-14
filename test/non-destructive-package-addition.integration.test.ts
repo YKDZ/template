@@ -16,8 +16,12 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { type PackageRole } from "@ykdz/template-core/project-blueprint";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+
+import { rootInstalledIntegrationSignal } from "../test-support/root-installed-integration-signal.ts";
+import { preserveRootIntegrationFailure } from "../test-support/root-integration-failure.ts";
 
 function requireAddableDefinitionForRole(
   context: BuiltInGenerationContext,
@@ -49,7 +53,15 @@ void describe("Non-Destructive Package Addition", () => {
   void it(
     "adds the checked packing hook when a pre-hook private repository gains a public package",
     { timeout: 180000 },
-    async () => {
+    async (testContext) => {
+      const signal = rootInstalledIntegrationSignal(testContext.signal);
+      if (signal.aborted) {
+        const reason = signal.reason;
+        testContext.skip(
+          reason instanceof Error ? reason.message : String(reason),
+        );
+        return;
+      }
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-add-packing-hook-"),
       );
@@ -59,9 +71,10 @@ void describe("Non-Destructive Package Addition", () => {
         defaultPackageScope: "demo",
         toolchain: {
           nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
         },
       });
+      let completed = false;
       const privateBaseDefinition = builtInPresetRegistry
         .all()
         .find((definition) => {
@@ -199,26 +212,42 @@ void describe("Non-Destructive Package Addition", () => {
           "scripts/**/*.ts",
         ]);
 
-        await execa("pnpm", ["install"], { cwd: targetDir });
+        await execa("pnpm", ["install"], {
+          cwd: targetDir,
+          cancelSignal: signal,
+        });
         const packDestination = path.join(workspace, "packs");
         await mkdir(packDestination);
         await execa("pnpm", ["pack", "--pack-destination", packDestination], {
           cwd: path.join(targetDir, addedPackage!.path),
+          cancelSignal: signal,
         });
         const archives = (await readdir(packDestination)).filter((file) =>
           file.endsWith(".tgz"),
         );
         assert.strictEqual(archives.length, 1);
-        const packedManifest = await execa("tar", [
-          "-xOf",
-          path.join(packDestination, archives[0]!),
-          "package/package.json",
-        ]).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
+        const packedManifest = await execa(
+          "tar",
+          [
+            "-xOf",
+            path.join(packDestination, archives[0]!),
+            "package/package.json",
+          ],
+          { cancelSignal: signal },
+        ).then(({ stdout }) => JSON.parse(stdout) as Record<string, unknown>);
         assert.ok(!Object.hasOwn(packedManifest, "devDependencies"));
         assert.ok(!JSON.stringify(packedManifest).includes("link:"));
         assert.ok(!JSON.stringify(packedManifest).includes("workspace:"));
+        completed = true;
+      } catch (error) {
+        await preserveRootIntegrationFailure(
+          workspace,
+          "adds the checked packing hook when a pre-hook private repository gains a public package",
+          error,
+        );
+        throw error;
       } finally {
-        await rm(workspace, { recursive: true, force: true });
+        if (completed) await rm(workspace, { recursive: true, force: true });
       }
     },
   );

@@ -9,6 +9,7 @@
     "oxlint.config.ts",
     "oxlint.template-source.config.ts",
     "scripts/**/*.ts",
+    "test-support/**/*.ts",
     "test/**/*.ts"
   ]
 }
