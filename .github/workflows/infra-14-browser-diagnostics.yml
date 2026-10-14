@@ -1,0 +1,88 @@
+name: Ticket 14 browser diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  root-light-failure:
+    name: Final source workflow with temporary light failure
+    uses: ./.github/workflows/check.yml
+    with:
+      inject_light_failure: true
+
+  vue-browser-failures:
+    name: Generated Vue browser and E2E failures
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CI: "true"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install source dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the official CLI entry
+        run: pnpm exec turbo run build --filter=@ykdz/template
+
+      - name: Prepare Chromium for the generated checks
+        run: pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium
+
+      - name: Initialize a generated Vue repository through the CLI
+        run: |
+          mkdir -p .fixture-workspace
+          pnpm --filter @ykdz/template exec template init "$GITHUB_WORKSPACE/.fixture-workspace/demo" --preset vue-app --scope demo --no-todo
+          test -f .fixture-workspace/demo/apps/web/src/components/CounterButton.vue
+
+      - name: Install generated repository dependencies
+        working-directory: .fixture-workspace/demo
+        run: pnpm install
+
+      - name: Change only the generated counter label
+        run: |
+          component=.fixture-workspace/demo/apps/web/src/components/CounterButton.vue
+          test "$(grep -Foc '计数：{{ count }}' "$component")" = 1
+          sed -i 's/计数：{{ count }}/错误计数：{{ count }}/' "$component"
+          grep -Fq '错误计数：{{ count }}' "$component"
+          git diff --no-index -- packages/builtin-presets/templates/shared/vue/src/components/CounterButton.vue "$component" || test "$?" -eq 1
+
+      - name: Run the generated public full gate and retain its exit
+        working-directory: .fixture-workspace/demo
+        run: |
+          set +e
+          pnpm run check:full 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
+          check_status=${PIPESTATUS[0]}
+          printf '%s\n' "$check_status" > "$GITHUB_WORKSPACE/.fixture-workspace/check-full.exit"
+          exit "$check_status"
+
+      - name: Upload Fixture Failure Diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ticket14-vue-browser-failures-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .fixture-workspace/**
+            !.fixture-workspace/**/node_modules/**
+            !.fixture-workspace/**/.pnpm-store/**
+            !.fixture-workspace/**/.npm/**
+            !.fixture-workspace/**/.cargo/registry/**
+            !.fixture-workspace/**/.cargo/git/**
+            !.fixture-workspace/**/target/**
+            !.fixture-workspace/**/.cache/**
+            !.fixture-workspace/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
