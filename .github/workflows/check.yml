@@ -28,6 +28,7 @@ concurrency:
 
 jobs:
   check:
+    if: github.ref != 'refs/heads/codex/infra12-buildkit-local-cache-repro'
     name: Check package and fixture matrix
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -246,3 +247,36 @@ jobs:
         with:
           path: .fixture-evidence
           key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  buildkit-local-export-repro:
+    if: github.ref == 'refs/heads/codex/infra12-buildkit-local-cache-repro'
+    name: BuildKit local cache export concurrency probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up private Buildx builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          name: infra12-local-cache-export-repro
+          driver: docker-container
+          driver-opts: image=moby/buildkit:v0.31.2
+
+      - name: Bootstrap private builder
+        run: docker buildx inspect --bootstrap infra12-local-cache-export-repro
+
+      - name: Run small local exporter comparison
+        env:
+          BUILDER: infra12-local-cache-export-repro
+        run: bash .tmp/infra12-buildkit-local-cache-repro/repro.sh
+
+      - name: Upload probe logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: infra12-buildkit-local-cache-repro-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .tmp/infra12-buildkit-local-cache-repro/results/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
