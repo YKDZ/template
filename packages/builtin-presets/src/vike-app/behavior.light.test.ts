@@ -383,7 +383,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     });
     assert.strictEqual(addition.status, "ready");
     if (addition.status !== "ready") {
-      throw new Error("Expected valid Vike package addition to be ready");
+      throw new Error("预期有效的 Vike 加包方案已就绪");
     }
     for (const packagePath of [
       "services/frontend",
@@ -401,7 +401,9 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       targetRoot: targetDir,
       ...addition.plan.projectProjections,
     });
-    if (!replayed.ok) throw new Error(JSON.stringify(replayed));
+    if (!replayed.ok) {
+      throw new Error(`预期回放成功，实际结果：${JSON.stringify(replayed)}`);
+    }
     assert.ok(!replayed.changedPaths.includes("services/frontend/turbo.json"));
     assert.strictEqual(
       await readFile(userEditedWebTurboPath, "utf8"),
@@ -440,9 +442,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         });
         assert.strictEqual(preparation.status, "operation-failure");
         if (preparation.status !== "operation-failure") {
-          throw new Error(
-            "Expected invalid package Turbo truth to fail replay",
-          );
+          throw new Error("预期错误的包内 Turbo 配置使回放失败");
         }
         assert.strictEqual(preparation.phase, "planning");
         assert.strictEqual(await treeFingerprint(workspace), before);
