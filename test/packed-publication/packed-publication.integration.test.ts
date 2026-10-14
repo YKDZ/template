@@ -889,7 +889,7 @@ function definitionWithPackagePath(packagePath: string) {
         defaultPackageScope: "demo",
         toolchain: {
           nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
           nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
@@ -922,7 +922,7 @@ function definitionWithInitialPackageRole(role: PackageRole) {
         defaultPackageScope: "demo",
         toolchain: {
           nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
+          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
           nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       }),
@@ -940,7 +940,7 @@ function addableDefinitionWithPackageRole(role: PackageRole) {
     defaultPackageScope: "demo",
     toolchain: {
       nodeLtsMajor: "24",
-      packageManagerPin: "pnpm@11.11.0",
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     },
   });
   const packageLeafName = "role-probe";
@@ -1206,7 +1206,7 @@ function initializationDiagnosticPlan(definitionName: string) {
       ),
       toolchain: {
         nodeLtsMajor: "24",
-        packageManagerPin: "pnpm@11.11.0",
+        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
         nodeVersion: releaseToolchainSnapshot.nodeVersion,
       },
     }),
@@ -1660,7 +1660,7 @@ void describe("packed public CLI consumer", () => {
             ),
             toolchain: {
               nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
+              packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
               nodeVersion: releaseToolchainSnapshot.nodeVersion,
             },
           });

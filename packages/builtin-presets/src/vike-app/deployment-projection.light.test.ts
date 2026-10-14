@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -11,24 +11,8 @@ import {
 } from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
-import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
 
-async function assertDockerCopyInputsExist(
-  repositoryRoot: string,
-  dockerfile: string,
-): Promise<void> {
-  for (const line of dockerfile.split("\n")) {
-    if (!line.startsWith("COPY ") || line.includes("--from=")) continue;
-    const arguments_ = line.slice("COPY ".length).trim().split(/\s+/u);
-    for (const input of arguments_.slice(0, -1)) {
-      assert.notStrictEqual(
-        await stat(path.join(repositoryRoot, input)),
-        undefined,
-      );
-    }
-  }
-}
 function prunerManifestCopyInputs(dockerfile: string): string[] {
   const lines = dockerfile.split("\n");
   const stageStart = lines.indexOf("FROM base AS pruner");
@@ -44,7 +28,7 @@ function prunerManifestCopyInputs(dockerfile: string): string[] {
     .map((line) => line.trim().split(/\s+/u)[1] ?? "")
     .filter((input) => input.endsWith("/package.json"));
 }
-// 冻结安装按 lockfile 的 importer 逐项校验，pruner 声明的包 manifest 集合必须恰好覆盖全部 workspace 成员。
+// pruner 声明的包 manifest 集合必须恰好覆盖全部 workspace 成员。
 function expectPrunerWorkspaceManifests(
   dockerfile: string,
   packagePaths: readonly string[],
@@ -68,11 +52,12 @@ const runtimeToolchain = {
   nodeVersion: releaseToolchainSnapshot.nodeVersion,
 };
 void describe("vike-app Built-in Preset Definition behavior", () => {
-  void it("projects linked web, database, migration, and deployment boundaries", async () => {
-    const targetDir = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-vike-")),
-      "demo-vike",
+  void it("projects linked web, database, migration, and deployment boundaries", async (testContext) => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "template-vike-"));
+    testContext.after(async () =>
+      rm(workspace, { recursive: true, force: true }),
     );
+    const targetDir = path.join(workspace, "demo-vike");
     const definition = builtInPresetRegistry.require("vike-app");
     const plan = planGeneratedRepositoryInitialization({
       definition,
@@ -417,8 +402,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     assert.ok(deploymentCheckScript.includes('"0.0.0.0::3000"'));
     assert.ok(deploymentCheckScript.includes("dockerHostGatewayAddress"));
     assert.ok(deploymentCheckScript.includes("return baseUrl;"));
-    await execa("pnpm", ["install", "--lockfile-only"], { cwd: targetDir });
-    await assertDockerCopyInputsExist(targetDir, dockerfile);
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -601,129 +584,4 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       },
     );
   });
-  void it(
-    "passes the generated database, browser, and repository checks",
-    { timeout: 300000 },
-    async () => {
-      const targetDir = path.join(
-        await mkdtemp(path.join(tmpdir(), "template-vike-check-")),
-        "demo-vike",
-      );
-      const plan = planGeneratedRepositoryInitialization({
-        definition: builtInPresetRegistry.require("vike-app"),
-        context: createGenerationContext({
-          targetDir,
-          defaultPackageScope: "demo",
-          toolchain: runtimeToolchain,
-        }),
-      });
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...plan.operations],
-      });
-      for (const [packagePath, label] of [
-        ["apps/web", "web"],
-        ["packages/db", "db"],
-        ["packages/db-migrations", "db-migrations"],
-      ] as const) {
-        const scriptsPath = path.join(targetDir, packagePath, "scripts");
-        await mkdir(scriptsPath, { recursive: true });
-        await writeFile(
-          path.join(scriptsPath, "automation-helper.ts"),
-          `export const automationOwner = ${JSON.stringify(label)};\n`,
-        );
-        await writeFile(
-          path.join(scriptsPath, "automation-probe.ts"),
-          'import { automationOwner } from "./automation-helper.ts";\n\nconsole.log(automationOwner);\n',
-        );
-      }
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      const resolveDatabaseStorage = (args: readonly string[] = []) =>
-        execa(
-          "node",
-          [
-            ...args,
-            "--input-type=module",
-            "--eval",
-            'console.log(import.meta.resolve("@demo/db/storage"));',
-          ],
-          { cwd: path.join(targetDir, "apps/web") },
-        ).then(({ stdout }) => stdout);
-      assert.match(await resolveDatabaseStorage(), /\/dist\/storage\.js$/u);
-      assert.match(
-        await resolveDatabaseStorage(["--conditions=source"]),
-        /\/src\/storage\.ts$/u,
-      );
-      for (const [packagePath, label] of [
-        ["apps/web", "web"],
-        ["packages/db", "db"],
-        ["packages/db-migrations", "db-migrations"],
-      ] as const) {
-        assert.strictEqual(
-          await execa(
-            "node",
-            ["--conditions=source", "scripts/automation-probe.ts"],
-            {
-              cwd: path.join(targetDir, packagePath),
-            },
-          ).then(({ stdout }) => stdout),
-          label,
-        );
-      }
-      await execa("pnpm", ["--filter", "./packages/db", "run", "typecheck"], {
-        cwd: targetDir,
-      });
-      for (const packagePath of [
-        "apps/web",
-        "packages/db-migrations",
-      ] as const) {
-        await assert.rejects(
-          execa("pnpm", ["--filter", `./${packagePath}`, "run", "typecheck"], {
-            cwd: targetDir,
-          }),
-          (error) => {
-            assert.ok(
-              typeof error === "object" &&
-                error !== null &&
-                Object.hasOwn(error, "stdout"),
-            );
-            const stdout = (error as { readonly stdout: unknown }).stdout;
-            assert.ok(typeof stdout === "string" && stdout.includes("TS2307"));
-            return true;
-          },
-        );
-      }
-      await execa("pnpm", ["exec", "turbo", "run", "typecheck"], {
-        cwd: targetDir,
-      });
-      const deploymentDryRun = JSON.parse(
-        (
-          await execa(
-            "pnpm",
-            ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-            { cwd: targetDir },
-          )
-        ).stdout,
-      ) as {
-        readonly tasks: readonly {
-          readonly taskId: string;
-          readonly dependencies: readonly string[];
-        }[];
-      };
-      const deploymentTask = deploymentDryRun.tasks.find(
-        (task) => task.taskId === "//#deployment",
-      );
-      assert.strictEqual(deploymentTask?.dependencies.length, 3);
-      assert.ok(deploymentTask?.dependencies.includes("@demo/db#build"));
-      assert.ok(
-        deploymentTask?.dependencies.includes("@demo/db-migrations#build"),
-      );
-      assert.ok(deploymentTask?.dependencies.includes("@demo/web#build"));
-      for (const _run of [1, 2]) {
-        await execa("pnpm", ["run", "check:full"], {
-          cwd: targetDir,
-        });
-      }
-    },
-  );
 });

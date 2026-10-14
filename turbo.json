@@ -280,7 +280,12 @@
       "dependsOn": ["@ykdz/template#build"],
       "tags": ["quality:heavy"],
       "outputs": [],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+        "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR"
+      ]
     },
     "//#test:packed-publication": {
       "dependsOn": ["@ykdz/template#build"],

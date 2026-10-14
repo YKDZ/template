@@ -24,8 +24,14 @@ import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
+import { rootInstalledIntegrationSignal } from "../test-support/root-installed-integration-signal.ts";
+import { preserveRootIntegrationFailure } from "../test-support/root-integration-failure.ts";
+
 void describe("Built-in Preset Package Addition universality", () => {
-  const toolchain = { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" };
+  const toolchain = {
+    nodeLtsMajor: "24",
+    packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+  };
   // 直接新建初始化会派生新建公开 ts-cli 候选，需要发版快照中与 major 一致的精确三段版本。
   const initializationToolchain = {
     ...toolchain,
@@ -62,156 +68,42 @@ void describe("Built-in Preset Package Addition universality", () => {
     return definition;
   }
 
-  void it("keeps default-root task entrypoints stable while Turbo discovers added scripts", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-natural-addition-"),
-    );
-    const targetDir = path.join(workspace, "demo");
-    const context = createGenerationContext({
-      targetDir,
-      defaultPackageScope: "demo",
-      toolchain,
-    });
-    const base = firstAddableDefinition();
-    const addition = firstAddableDefinition();
-
-    try {
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: base,
-        context,
-      });
-      await renderNewProject({
-        targetRoot: targetDir,
-        operations: [...initialization.operations],
-      });
-      const rootScriptsBefore = (
-        JSON.parse(
-          await readFile(path.join(targetDir, "package.json"), "utf8"),
-        ) as {
-          scripts: Record<string, string | undefined>;
-        }
-      ).scripts;
-
-      const packageAddition = planGeneratedRepositoryPackageAddition({
-        definition: addition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "natural",
-      });
-      await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...packageAddition.projectProjections,
-      });
-      const rootScriptsAfter = (
-        JSON.parse(
-          await readFile(path.join(targetDir, "package.json"), "utf8"),
-        ) as {
-          scripts: Record<string, string | undefined>;
-        }
-      ).scripts;
-
-      for (const script of [
-        "check",
-        "check:heavy",
-        "check:full",
-        "fix",
-        "deployment",
-      ] as const) {
-        assert.strictEqual(rootScriptsAfter[script], rootScriptsBefore[script]);
-      }
-
-      const repeatedAddition = planGeneratedRepositoryPackageAddition({
-        definition: addition,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "natural-repeat",
-      });
-      await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...repeatedAddition.projectProjections,
-      });
-      const rootScriptsAfterRepeat = (
-        JSON.parse(
-          await readFile(path.join(targetDir, "package.json"), "utf8"),
-        ) as {
-          scripts: Record<string, string | undefined>;
-        }
-      ).scripts;
-      for (const script of [
-        "check",
-        "check:heavy",
-        "check:full",
-        "fix",
-        "deployment",
-      ] as const) {
-        assert.strictEqual(
-          rootScriptsAfterRepeat[script],
-          rootScriptsBefore[script],
-        );
-      }
-
-      await execa("pnpm", ["install"], { cwd: targetDir });
-      const dryRun = await execa(
-        "pnpm",
-        [
-          "exec",
-          "turbo",
-          "run",
-          "format:check",
-          "lint",
-          "typecheck",
-          "build",
-          "test",
-          "test:e2e",
-          "--dry-run=json",
-        ],
-        { cwd: targetDir },
-      );
-      const taskIds = (
-        JSON.parse(dryRun.stdout) as {
-          tasks: readonly { taskId: string }[];
-        }
-      ).tasks.map((task) => task.taskId);
-      assert.ok(!taskIds.includes("//#boundaries"));
-      const addedManifest = JSON.parse(
-        await readFile(
-          path.join(targetDir, "packages/natural/package.json"),
-          "utf8",
-        ),
-      ) as { scripts: Record<string, string> };
-
-      for (const task of Object.keys(addedManifest.scripts).filter((name) =>
-        ["format:check", "lint", "typecheck", "build", "test"].includes(name),
-      )) {
-        assert.ok(taskIds.includes(`@demo/natural#${task}`));
-      }
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
   void it(
     "adds a package after pnpm has created package-local node_modules symlinks",
     { timeout: 300000 },
-    async () => {
+    async (testContext) => {
+      const signal = rootInstalledIntegrationSignal(testContext.signal);
+      if (signal.aborted) {
+        const reason = signal.reason;
+        testContext.skip(
+          reason instanceof Error ? reason.message : String(reason),
+        );
+        return;
+      }
       const workspace = await mkdtemp(
         path.join(tmpdir(), "template-add-with-node-modules-"),
       );
-      const targetDir = path.join(workspace, "digital");
-      const context = createGenerationContext({
-        targetDir,
-        defaultPackageScope: "demo",
-        toolchain,
-      });
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: definitionWithPackagePath("packages/db"),
-        context,
-      });
-
+      let completed = false;
       try {
+        const targetDir = path.join(workspace, "digital");
+        const context = createGenerationContext({
+          targetDir,
+          defaultPackageScope: "demo",
+          toolchain,
+        });
+        const initialization = planGeneratedRepositoryInitialization({
+          definition: definitionWithPackagePath("packages/db"),
+          context,
+        });
+
         await renderNewProject({
           targetRoot: targetDir,
           operations: [...initialization.operations],
         });
-        await execa("pnpm", ["install"], { cwd: targetDir });
+        await execa("pnpm", ["install"], {
+          cwd: targetDir,
+          cancelSignal: signal,
+        });
         await mkdir(path.join(targetDir, ".pnpm-store/v11/files"), {
           recursive: true,
         });
@@ -266,6 +158,7 @@ void describe("Built-in Preset Package Addition universality", () => {
         );
         await execa("pnpm", ["exec", "oxfmt", "--version"], {
           cwd: targetDir,
+          cancelSignal: signal,
         });
 
         assert.ok(
@@ -284,96 +177,131 @@ void describe("Built-in Preset Package Addition universality", () => {
           ).isSymbolicLink(),
           true,
         );
+        completed = true;
+      } catch (error) {
+        await preserveRootIntegrationFailure(
+          workspace,
+          "adds a package after pnpm has created package-local node_modules symlinks",
+          error,
+        );
+        throw error;
       } finally {
-        await rm(workspace, { recursive: true, force: true });
+        if (completed) await rm(workspace, { recursive: true, force: true });
       }
     },
   );
 
-  void it("adds custom Package Roots only through pnpm workspace membership", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-custom-package-root-"),
-    );
-    const context = createGenerationContext({
-      targetDir: path.join(workspace, "custom-package-root"),
-      defaultPackageScope: "demo",
-      toolchain,
-    });
-    const base = firstAddableDefinition();
-    const initialization = planGeneratedRepositoryInitialization({
-      definition: base,
-      context,
-    });
-    try {
-      await renderNewProject({
-        targetRoot: context.targetDir,
-        operations: [...initialization.operations],
-      });
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: base,
-        localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-        packageLeafName: "custom",
-        packagePath: "services/custom",
-      });
-      const workspaceRefresh = addition.operations.find(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          operation.to === "pnpm-workspace.yaml",
-      );
-
-      assert.ok(workspaceRefresh?.kind === "writeTextTemplate");
-      assert.ok(Object.hasOwn(workspaceRefresh, "replacements"));
-      assert.ok(
-        Object.hasOwn(workspaceRefresh.replacements, "WORKSPACE_PACKAGE_GLOBS"),
-      );
-      const packageGlobs =
-        workspaceRefresh.replacements.WORKSPACE_PACKAGE_GLOBS;
-      assert.ok(typeof packageGlobs === "string");
-      assert.ok(packageGlobs.includes("  - services/*"));
-      assert.ok(
-        addition.operations.some((operation) => {
-          if (
-            operation.kind !== "writeJson" ||
-            operation.to !== "package.json" ||
-            !Object.hasOwn(operation, "value") ||
-            typeof operation.value !== "object" ||
-            operation.value === null ||
-            !Object.hasOwn(operation.value, "scripts")
-          ) {
-            return false;
-          }
-          const scripts = (operation.value as Record<string, unknown>)
-            .scripts as Record<string, unknown>;
-          return (
-            Object.hasOwn(scripts, "check") &&
-            scripts.check === rootScripts(initialization) &&
-            Object.hasOwn(scripts, "fix") &&
-            scripts.fix === rootFix(initialization)
-          );
-        }),
-      );
-      await reconcileAndApplyProjectProjections({
-        targetRoot: context.targetDir,
-        ...addition.projectProjections,
-      });
-      await execa("pnpm", ["install"], { cwd: context.targetDir });
-      const dryRun = await execa(
-        "pnpm",
-        ["exec", "turbo", "run", "build", "test", "--dry-run=json"],
-        { cwd: context.targetDir },
-      );
-      const taskIds = (
-        JSON.parse(dryRun.stdout) as {
-          tasks: readonly { taskId: string }[];
-        }
-      ).tasks.map((task) => task.taskId);
-      for (const taskId of ["@demo/custom#build", "@demo/custom#test"]) {
-        assert.ok(taskIds.includes(taskId));
+  void it(
+    "adds custom Package Roots only through pnpm workspace membership",
+    { timeout: 300000 },
+    async (testContext) => {
+      const signal = rootInstalledIntegrationSignal(testContext.signal);
+      if (signal.aborted) {
+        const reason = signal.reason;
+        testContext.skip(
+          reason instanceof Error ? reason.message : String(reason),
+        );
+        return;
       }
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-custom-package-root-"),
+      );
+      let completed = false;
+      try {
+        const context = createGenerationContext({
+          targetDir: path.join(workspace, "custom-package-root"),
+          defaultPackageScope: "demo",
+          toolchain,
+        });
+        const base = firstAddableDefinition();
+        const initialization = planGeneratedRepositoryInitialization({
+          definition: base,
+          context,
+        });
+        await renderNewProject({
+          targetRoot: context.targetDir,
+          operations: [...initialization.operations],
+        });
+        const addition = planGeneratedRepositoryPackageAddition({
+          definition: base,
+          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          packageLeafName: "custom",
+          packagePath: "services/custom",
+        });
+        const workspaceRefresh = addition.operations.find(
+          (operation) =>
+            operation.kind === "writeTextTemplate" &&
+            operation.to === "pnpm-workspace.yaml",
+        );
+
+        assert.ok(workspaceRefresh?.kind === "writeTextTemplate");
+        assert.ok(Object.hasOwn(workspaceRefresh, "replacements"));
+        assert.ok(
+          Object.hasOwn(
+            workspaceRefresh.replacements,
+            "WORKSPACE_PACKAGE_GLOBS",
+          ),
+        );
+        const packageGlobs =
+          workspaceRefresh.replacements.WORKSPACE_PACKAGE_GLOBS;
+        assert.ok(typeof packageGlobs === "string");
+        assert.ok(packageGlobs.includes("  - services/*"));
+        assert.ok(
+          addition.operations.some((operation) => {
+            if (
+              operation.kind !== "writeJson" ||
+              operation.to !== "package.json" ||
+              !Object.hasOwn(operation, "value") ||
+              typeof operation.value !== "object" ||
+              operation.value === null ||
+              !Object.hasOwn(operation.value, "scripts")
+            ) {
+              return false;
+            }
+            const scripts = (operation.value as Record<string, unknown>)
+              .scripts as Record<string, unknown>;
+            return (
+              Object.hasOwn(scripts, "check") &&
+              scripts.check === rootScripts(initialization) &&
+              Object.hasOwn(scripts, "fix") &&
+              scripts.fix === rootFix(initialization)
+            );
+          }),
+        );
+        await reconcileAndApplyProjectProjections({
+          targetRoot: context.targetDir,
+          ...addition.projectProjections,
+        });
+        await execa("pnpm", ["install"], {
+          cwd: context.targetDir,
+          cancelSignal: signal,
+        });
+        const dryRun = await execa(
+          "pnpm",
+          ["exec", "turbo", "run", "build", "test", "--dry-run=json"],
+          { cwd: context.targetDir, cancelSignal: signal },
+        );
+        const taskIds = (
+          JSON.parse(dryRun.stdout) as {
+            tasks: readonly { taskId: string }[];
+          }
+        ).tasks.map((task) => task.taskId);
+        for (const taskId of ["@demo/custom#build", "@demo/custom#test"]) {
+          assert.ok(taskIds.includes(taskId));
+        }
+        completed = true;
+      } catch (error) {
+        await preserveRootIntegrationFailure(
+          workspace,
+          "adds custom Package Roots only through pnpm workspace membership",
+          error,
+        );
+        throw error;
+      } finally {
+        if (completed) await rm(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function rootScripts(

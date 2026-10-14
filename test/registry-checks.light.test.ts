@@ -45,7 +45,7 @@ const rustPresetName = ["rust", "bin"].join("-");
 // 直接规划新建初始化会派生新建公开 ts-cli 候选，需要发版快照中与 major 一致的精确三段版本。
 const toolchain = {
   nodeLtsMajor: "24",
-  packageManagerPin: "pnpm@11.11.0",
+  packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
   nodeVersion: releaseToolchainSnapshot.nodeVersion,
 } as const;
 
@@ -606,7 +606,10 @@ void describe("Preset Registry generated scenarios", () => {
     const definition = builtInPresetRegistry.all()[0]!;
     const context = createGenerationContext({
       targetDir: path.join("generated-repository", "provenance"),
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
+      toolchain: {
+        nodeLtsMajor: "24",
+        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
+      },
     });
     const plan = planGeneratedRepositoryInitialization({ definition, context });
     const source = createTemplateSourceHandle(process.cwd());

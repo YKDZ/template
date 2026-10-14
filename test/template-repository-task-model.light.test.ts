@@ -133,7 +133,7 @@ void describe("Template Repository native task model", () => {
     assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
     assert.strictEqual(
       scripts["test:integration"],
-      "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/*.integration.test.ts'",
+      "node --conditions=source --experimental-strip-types scripts/run-root-integration.ts",
     );
     assert.strictEqual(
       scripts["test:packed-publication"],
