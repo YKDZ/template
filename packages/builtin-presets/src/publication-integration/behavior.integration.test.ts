@@ -619,6 +619,7 @@ void describe("ts-cli publication owner-fact integration", () => {
             env: {
               ...process.env,
               PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: workflowOutput,
+              PUBLICATION_ARTIFACT_REQUIRED: "true",
             },
             reject: false,
           },
@@ -759,9 +760,10 @@ void describe("ts-cli publication owner-fact integration", () => {
           string,
           string
         >;
-        rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('.build-witness', 'build\\n')"`;
+        const buildWitnessPath = path.join(workspace, "build-witness");
+        rootCandidateScripts.postbuild = `${rootCandidateScripts.postbuild} && node -e "require('node:fs').appendFileSync('../../../build-witness', 'build\\n')"`;
         await writeJson(publicManifestPath, rootCandidateManifest);
-        const rootCheck = await execa("pnpm", ["run", "check"], {
+        const rootCheck = await execa("pnpm", ["run", "check:full"], {
           cwd: repositoryRoot,
           reject: false,
         });
@@ -776,13 +778,7 @@ void describe("ts-cli publication owner-fact integration", () => {
           ).mode,
           "number",
         );
-        assert.strictEqual(
-          await readFile(
-            path.join(repositoryRoot, "packages/cli/.build-witness"),
-            "utf8",
-          ),
-          "build\n",
-        );
+        assert.strictEqual(await readFile(buildWitnessPath, "utf8"), "build\n");
       } finally {
         await rm(workspace, { recursive: true, force: true });
       }

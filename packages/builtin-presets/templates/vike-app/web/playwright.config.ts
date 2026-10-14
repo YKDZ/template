@@ -101,6 +101,7 @@ async function sharedPort(envName: string): Promise<string> {
 }
 
 const externalServiceUrl = externalBaseUrl();
+const usesExternalService = externalServiceUrl !== undefined;
 let previewUrl: string;
 
 if (externalServiceUrl === undefined) {
@@ -115,12 +116,27 @@ if (externalServiceUrl === undefined) {
 export default defineConfig({
   testDir: "./test/e2e",
   timeout: 60_000,
+  outputDir: usesExternalService
+    ? "test-results/deployment"
+    : "test-results/e2e",
   use: {
     baseURL: previewUrl,
     trace: "retain-on-failure",
   },
-  reporter: [["list"], ["html"]],
-  globalTeardown: "./test/playwright-teardown.ts",
+  reporter: [
+    ["list"],
+    [
+      "html",
+      {
+        outputFolder: usesExternalService
+          ? "playwright-report/deployment"
+          : "playwright-report/e2e",
+      },
+    ],
+  ],
+  ...(usesExternalService
+    ? {}
+    : { globalTeardown: "./test/playwright-teardown.ts" }),
   ...(externalServiceUrl === undefined
     ? {
         webServer: {

@@ -547,9 +547,10 @@ void describe("Development Container Fixture Executor", () => {
         },
       });
 
-      await session.execute(
-        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
-      );
+      await session.execute(async (run) => {
+        await run("pnpm", ["run", "check"], { cwd: projectDir });
+        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+      });
 
       for (const expected of [
         { cache: "buildkit", outcome: "configured" },
@@ -1266,7 +1267,7 @@ void describe("Development Container Fixture Executor", () => {
     );
   });
 
-  void it("checks before Fix, compares tree identities, and checks again", async () => {
+  void it("runs full checks before and after Fix with no tree delta", async () => {
     const projectDir = path.resolve("/fixture/root-order");
     const plan = planGeneratedRepositoryInitialization({
       definition: builtInPresetRegistry.all()[0]!,
@@ -1314,16 +1315,16 @@ void describe("Development Container Fixture Executor", () => {
           ({ command, args }) =>
             (command === "pnpm" &&
               args[0] === "run" &&
-              (args[1] === "check" || args[1] === "fix")) ||
+              (args[1] === "check:full" || args[1] === "fix")) ||
             (command === "git" && args[0] === "write-tree"),
         )
         .map(({ command, args }) => [command, ...args]),
       [
-        ["pnpm", "run", "check"],
+        ["pnpm", "run", "check:full"],
         ["git", "write-tree"],
         ["pnpm", "run", "fix"],
         ["git", "write-tree"],
-        ["pnpm", "run", "check"],
+        ["pnpm", "run", "check:full"],
       ],
     );
   });
@@ -1368,7 +1369,7 @@ void describe("Development Container Fixture Executor", () => {
             treeWrites += 1;
             return { stdout: `${treeWrites}`.repeat(40) };
           }
-          if (command === "pnpm" && args[1] === "check") rootChecks += 1;
+          if (command === "pnpm" && args[1] === "check:full") rootChecks += 1;
           return {};
         },
       }),

@@ -26,7 +26,6 @@ import {
   deploymentQualityExecutionResources,
   deriveDeploymentQualityContractIdentity,
   deriveDeploymentQualityPlanInput,
-  executeDeploymentQuality,
 } from "./fixture-evidence/gates/deployment-quality/index.ts";
 import {
   deriveFocusedPackageLinkContractIdentity,
@@ -697,13 +696,14 @@ async function runScenario(
     plan: finalPlan,
     projectDir,
   });
-  const deployment =
-    mode === "deployment"
-      ? deriveDeploymentQualityPlanInput(finalPlan)
-      : undefined;
+  const deployment = deriveDeploymentQualityPlanInput(finalPlan);
   if (mode === "deployment" && deployment === undefined) {
     return "not-applicable";
   }
+  const deploymentContractIdentity =
+    deployment === undefined
+      ? undefined
+      : await deriveDeploymentQualityContractIdentity(deployment);
 
   const diagnostics = scenarioDiagnostics(scenario);
   const clock = options.evidence?.clock ?? (() => new Date());
@@ -939,12 +939,22 @@ async function runScenario(
       });
       const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
         finalPlan,
-        { includeFix },
+        {
+          includeFix,
+          ...(deploymentContractIdentity === undefined
+            ? {}
+            : { deploymentContractIdentity }),
+        },
       );
       const rootEvidence = await runFixtureEvidenceGate({
         gate: "generated-root-quality",
         generatedContentIdentity,
         contractIdentity,
+        ...(deploymentContractIdentity === undefined
+          ? {}
+          : {
+              coversDeploymentContractIdentity: deploymentContractIdentity,
+            }),
         ...evidenceOptions,
         execute: executeRootQuality,
       });
@@ -980,27 +990,21 @@ async function runScenario(
           },
         });
       }
-      if (mode === "deployment" && deployment !== undefined) {
+      if (
+        mode === "deployment" &&
+        deployment !== undefined &&
+        deploymentContractIdentity !== undefined
+      ) {
         await runFixtureEvidenceGate({
           gate: "deployment-quality",
           rootEvidence,
           generatedContentIdentity,
-          contractIdentity:
-            await deriveDeploymentQualityContractIdentity(deployment),
+          contractIdentity: deploymentContractIdentity,
           ...evidenceOptions,
           execute: async () => {
-            await executeSemanticGate({
-              gate: "deployment-quality",
-              resources: [],
-              execute: async () => {
-                await executeDeploymentQuality({
-                  deployment,
-                  projectDir,
-                  fixtureWorkspace: options.workspace,
-                  run: containerSession.run,
-                });
-              },
-            });
+            throw new Error(
+              "部署验收必须由成功的 Root Quality check:full 路径覆盖",
+            );
           },
         });
       }

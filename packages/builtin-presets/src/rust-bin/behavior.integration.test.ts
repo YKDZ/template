@@ -149,7 +149,18 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       const rootManifest = JSON.parse(
         await readFile(path.join(targetDir, "package.json"), "utf8"),
       );
-      assert.ok(rootManifest.scripts.check.includes("test"));
+      assert.strictEqual(
+        rootManifest.scripts.check,
+        "node --conditions=source scripts/quality-gates.ts check",
+      );
+      assert.strictEqual(
+        rootManifest.scripts["check:heavy"],
+        "node --conditions=source scripts/quality-gates.ts check:heavy",
+      );
+      assert.strictEqual(
+        rootManifest.scripts["check:full"],
+        "node --conditions=source scripts/quality-gates.ts check:full",
+      );
       assert.strictEqual(
         rootManifest.scripts.fix,
         "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
@@ -297,7 +308,10 @@ if [ ! -e "$prepared" ]; then
   printf '%s\\n' 'Cargo task ran before toolchain preparation' >&2
   exit 90
 fi
-printf '%s\\n' "$*" >> "$state"
+printf '%s\\n' "${"$"}*" >> "${"$"}state"
+if [ "${"$"}1" = "test" ]; then
+  printf '%s\\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'
+fi
 `,
         { mode: 0o755 },
       );
@@ -364,7 +378,7 @@ printf '%s\\n' "$*" >> "$state"
       );
       await execa("pnpm", ["install"], { cwd: targetDir });
 
-      const failure = await execa("pnpm", ["run", "check"], {
+      const failure = await execa("pnpm", ["run", "check:full"], {
         cwd: targetDir,
         reject: false,
       });

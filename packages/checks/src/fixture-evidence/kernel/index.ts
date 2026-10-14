@@ -788,6 +788,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       command === "pnpm" &&
       ((args[0] === "run" &&
         (args[1] === "check" ||
+          args[1] === "check:full" ||
           args[1] === "fix" ||
           args[1] === "check:deployment")) ||
         (args[0] === "exec" && args[1] === "turbo"))
@@ -1275,6 +1276,20 @@ export type FixtureEvidenceLifecycleEvent =
       readonly at: string;
       readonly outcome: "issued" | "error";
       readonly error?: string;
+    }
+  | {
+      readonly type: "derivation";
+      readonly gate: "deployment-quality";
+      readonly identity: string;
+      readonly scenario: FixtureEvidenceScenarioDiagnostics;
+      readonly at: string;
+      readonly generatedContentIdentity: string;
+      readonly contractIdentity: string;
+      readonly rootEvidence: {
+        readonly identity: string;
+        readonly contractIdentity: string;
+        readonly coversDeploymentContractIdentity: string;
+      };
     };
 
 export type FixtureEvidenceCacheFact =
@@ -1396,7 +1411,7 @@ export type FixtureEvidenceInvocationEvent =
     };
 
 export type FixtureEvidenceActivityRecord = {
-  readonly schema: "fixture-evidence-activity/v2";
+  readonly schema: "fixture-evidence-activity/v3";
   readonly runId: string;
   readonly runAttempt: string;
   readonly invocationId: string;
@@ -1429,6 +1444,7 @@ export type FixtureEvidenceHealthFailureCode =
   | "failed-execution"
   | "failed-phase"
   | "failed-retry"
+  | "invalid-derivation"
   | "invalid-phase-lifecycle"
   | "invalid-retry-lifecycle"
   | "issuance-order"
@@ -1457,6 +1473,7 @@ export type FixtureEvidenceHealthStage = {
     Record<FixtureEvidenceCacheActivityKey, number>
   >;
   readonly executions: number;
+  readonly derivations: number;
   readonly issuances: number;
   readonly lifecycleErrors: number;
   readonly durationMilliseconds: number;
@@ -1474,7 +1491,7 @@ export type FixtureEvidenceHealthScenario = {
   readonly outcome: "completed" | "failed" | "not-applicable";
   readonly gates: readonly {
     readonly gate: FixtureEvidenceGate;
-    readonly status: "executed" | "failed" | "hit";
+    readonly status: "derived" | "executed" | "failed" | "hit";
     readonly missReason?: FixtureEvidenceMissReason;
     readonly issued: boolean;
   }[];
@@ -2166,6 +2183,45 @@ function parseFixtureEvidenceInvocationEvent(
     }
     throw new Error("invalid Fixture Evidence retry activity");
   }
+  if (value.type === "derivation") {
+    const rootEvidence = value.rootEvidence;
+    parseScenarioDiagnostics(value.scenario);
+    if (
+      value.gate !== "deployment-quality" ||
+      !hasExactKeys(value, [
+        "type",
+        "gate",
+        "identity",
+        "scenario",
+        "at",
+        "generatedContentIdentity",
+        "contractIdentity",
+        "rootEvidence",
+      ]) ||
+      typeof value.identity !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(value.identity) ||
+      !isIsoTimestamp(value.at) ||
+      typeof value.generatedContentIdentity !== "string" ||
+      !/^[0-9a-f]{40}$/u.test(value.generatedContentIdentity) ||
+      typeof value.contractIdentity !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(value.contractIdentity) ||
+      !isRecord(rootEvidence) ||
+      !hasExactKeys(rootEvidence, [
+        "identity",
+        "contractIdentity",
+        "coversDeploymentContractIdentity",
+      ]) ||
+      typeof rootEvidence.identity !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(rootEvidence.identity) ||
+      typeof rootEvidence.contractIdentity !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(rootEvidence.contractIdentity) ||
+      typeof rootEvidence.coversDeploymentContractIdentity !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(rootEvidence.coversDeploymentContractIdentity)
+    ) {
+      throw new Error("Fixture 验证证据派生活动记录无效");
+    }
+    return value as FixtureEvidenceInvocationEvent;
+  }
   if (
     value.type !== "lookup" &&
     value.type !== "execution" &&
@@ -2256,7 +2312,7 @@ function parseFixtureEvidenceActivityRecord(
       "recordedAt",
       "event",
     ]) ||
-    value.schema !== "fixture-evidence-activity/v2" ||
+    value.schema !== "fixture-evidence-activity/v3" ||
     typeof value.runId !== "string" ||
     value.runId.length === 0 ||
     typeof value.runAttempt !== "string" ||
@@ -2328,7 +2384,7 @@ export class FileFixtureEvidenceActivityLedger implements FixtureEvidenceActivit
     return {
       record: async (event) => {
         const record = parseFixtureEvidenceActivityRecord({
-          schema: "fixture-evidence-activity/v2",
+          schema: "fixture-evidence-activity/v3",
           runId: options.runId,
           runAttempt: options.runAttempt,
           invocationId: options.invocationId,
@@ -2436,6 +2492,7 @@ export async function checkFixtureEvidenceHealth(options: {
       Record<FixtureEvidenceCacheActivityKey, number>
     > = {};
     let executions = 0;
+    let derivations = 0;
     let issuances = 0;
     let lifecycleErrors = 0;
     const phaseDurations: Partial<Record<FixtureEvidencePhase, number>> = {};
@@ -2503,7 +2560,8 @@ export async function checkFixtureEvidenceHealth(options: {
       const lifecycle = invocationRecords.flatMap((record) =>
         record.event.type === "lookup" ||
         record.event.type === "execution" ||
-        record.event.type === "issuance"
+        record.event.type === "issuance" ||
+        record.event.type === "derivation"
           ? [record.event]
           : [],
       );
@@ -2667,6 +2725,10 @@ export async function checkFixtureEvidenceHealth(options: {
         FixtureEvidenceLifecycleEvent,
         { readonly type: "lookup" }
       >;
+      type DerivationActivity = Extract<
+        FixtureEvidenceLifecycleEvent,
+        { readonly type: "derivation" }
+      >;
       type SuccessfulPhaseSpan = PhaseSpan & {
         readonly terminal: Extract<
           FixtureEvidencePhaseActivity,
@@ -2685,7 +2747,11 @@ export async function checkFixtureEvidenceHealth(options: {
       const lookupEvents = lifecycle.filter(
         (event): event is LookupActivity => event.type === "lookup",
       );
+      const derivationEvents = lifecycle.filter(
+        (event): event is DerivationActivity => event.type === "derivation",
+      );
       const validExecutionLookupKeys = new Set<string>();
+      const validDerivationLookupKeys = new Set<string>();
       for (const key of new Set(
         [...lookupEvents, ...executionEvents].map(fixtureActivityGateKey),
       )) {
@@ -2737,6 +2803,13 @@ export async function checkFixtureEvidenceHealth(options: {
           continue;
         }
         const lookup = matchingLookups[0]!;
+        if (
+          derivationEvents.some(
+            (event) => fixtureActivityGateKey(event) === key,
+          )
+        ) {
+          continue;
+        }
         if (lookup.outcome === "hit") {
           if (events.length > 0) {
             reportLookupCausalityFailure(
@@ -2759,6 +2832,126 @@ export async function checkFixtureEvidenceHealth(options: {
           continue;
         }
         validExecutionLookupKeys.add(key);
+      }
+      for (const derivation of derivationEvents) {
+        const key = fixtureActivityGateKey(derivation);
+        const deploymentLookups = lookupEvents.filter(
+          (event) => fixtureActivityGateKey(event) === key,
+        );
+        const deploymentExecutions = executionEvents.filter(
+          (event) => fixtureActivityGateKey(event) === key,
+        );
+        const rootKey = [
+          derivation.scenario.id,
+          "generated-root-quality",
+          derivation.rootEvidence.identity,
+        ].join("\u0000");
+        const rootLookups = lookupEvents.filter(
+          (event) => fixtureActivityGateKey(event) === rootKey,
+        );
+        const rootExecutions = executionEvents.filter(
+          (event) => fixtureActivityGateKey(event) === rootKey,
+        );
+        const rootIssuances = lifecycle.filter(
+          (event) =>
+            event.type === "issuance" &&
+            fixtureActivityGateKey(event) === rootKey,
+        );
+        const deploymentIssuances = lifecycle.filter(
+          (event) =>
+            event.type === "issuance" && fixtureActivityGateKey(event) === key,
+        );
+        const deploymentLookup = deploymentLookups[0];
+        const rootLookup = rootLookups[0];
+        const rootExecutionStart = rootExecutions.find(
+          (event): event is StartedExecutionActivity =>
+            event.outcome === "started",
+        );
+        const rootExecutionTerminal = rootExecutions.find(
+          (event): event is TerminalExecutionActivity =>
+            event.outcome !== "started",
+        );
+        const rootHit =
+          rootLookup?.outcome === "hit" &&
+          rootExecutions.length === 0 &&
+          rootIssuances.length === 0;
+        const rootCold =
+          rootLookup?.outcome === "miss" &&
+          rootExecutionTerminal?.outcome === "succeeded" &&
+          rootExecutionStart !== undefined &&
+          rootExecutions.length === 2 &&
+          eventIndex(rootLookup) < eventIndex(rootExecutionStart) &&
+          eventIndex(rootExecutionStart) < eventIndex(rootExecutionTerminal) &&
+          validExecutionLookupKeys.has(rootKey);
+        const writable = invocationRecords[0]?.writeEnabled === true;
+        const deploymentIssuanceIsValid = writable
+          ? deploymentIssuances.length <= 1 &&
+            deploymentIssuances.every(
+              (event) => eventIndex(derivation) < eventIndex(event),
+            )
+          : deploymentIssuances.length === 0;
+        const rootIssuanceIsValid = writable
+          ? rootHit
+            ? rootIssuances.length === 0
+            : rootCold &&
+              rootIssuances.length === 1 &&
+              rootIssuances[0]?.type === "issuance" &&
+              rootIssuances[0].outcome === "issued" &&
+              rootExecutionTerminal !== undefined &&
+              eventIndex(rootExecutionTerminal) <
+                eventIndex(rootIssuances[0]) &&
+              deploymentLookup !== undefined &&
+              eventIndex(rootIssuances[0]) < eventIndex(deploymentLookup)
+          : rootIssuances.length === 0;
+        const identitiesMatch =
+          fixtureEvidenceIdentity({
+            gate: "generated-root-quality",
+            generatedContentIdentity: derivation.generatedContentIdentity,
+            contractIdentity: derivation.rootEvidence.contractIdentity,
+          }) === derivation.rootEvidence.identity &&
+          fixtureEvidenceIdentity({
+            gate: "deployment-quality",
+            generatedContentIdentity: derivation.generatedContentIdentity,
+            contractIdentity: derivation.contractIdentity,
+            rootEvidenceIdentity: derivation.rootEvidence.identity,
+          }) === derivation.identity;
+        const validDerivation =
+          derivation.gate === "deployment-quality" &&
+          derivationEvents.filter(
+            (candidate) => fixtureActivityGateKey(candidate) === key,
+          ).length === 1 &&
+          deploymentLookups.length === 1 &&
+          deploymentLookup?.outcome === "miss" &&
+          deploymentExecutions.length === 0 &&
+          eventIndex(deploymentLookup!) < eventIndex(derivation) &&
+          rootLookups.length === 1 &&
+          rootLookup?.identity === derivation.rootEvidence.identity &&
+          rootLookup.scenario.id === derivation.scenario.id &&
+          eventIndex(rootLookup) < eventIndex(deploymentLookup!) &&
+          (rootHit ||
+            (rootCold &&
+              rootExecutionTerminal !== undefined &&
+              eventIndex(rootExecutionTerminal) <
+                eventIndex(deploymentLookup!))) &&
+          rootIssuanceIsValid &&
+          deploymentIssuanceIsValid &&
+          derivation.rootEvidence.coversDeploymentContractIdentity ===
+            derivation.contractIdentity &&
+          identitiesMatch;
+        if (!validDerivation) {
+          failures.push({
+            code: "invalid-derivation",
+            scenarioSet,
+            invocationId,
+            scenarioId: derivation.scenario.id,
+            gate: derivation.gate,
+            identity: derivation.identity,
+            detail:
+              "部署证据派生必须发生在本次部署查找未命中之后，并由成功且覆盖相同部署合同的本次 Root 证明支持",
+          });
+          continue;
+        }
+        validDerivationLookupKeys.add(key);
       }
       const executionStartFor = (
         execution: TerminalExecutionActivity,
@@ -3092,10 +3285,12 @@ export async function checkFixtureEvidenceHealth(options: {
               status:
                 lookup?.type === "lookup" && lookup.outcome === "hit"
                   ? ("hit" as const)
-                  : execution?.type === "execution" &&
-                      execution.outcome === "succeeded"
-                    ? ("executed" as const)
-                    : ("failed" as const),
+                  : gateEvents.some((event) => event.type === "derivation")
+                    ? ("derived" as const)
+                    : execution?.type === "execution" &&
+                        execution.outcome === "succeeded"
+                      ? ("executed" as const)
+                      : ("failed" as const),
               ...(lookup?.type === "lookup" && lookup.outcome === "miss"
                 ? { missReason: lookup.reason }
                 : {}),
@@ -3127,6 +3322,7 @@ export async function checkFixtureEvidenceHealth(options: {
       }
       const misses = new Map<string, FixtureEvidenceLifecycleEvent>();
       const successfulExecutions = new Set<string>();
+      const successfulDerivations = new Set(validDerivationLookupKeys);
       const issued = new Set<string>();
       for (const event of lifecycle) {
         if (event.type === "lookup") {
@@ -3153,6 +3349,8 @@ export async function checkFixtureEvidenceHealth(options: {
         ) {
           executions += 1;
           successfulExecutions.add(fixtureActivityGateKey(event));
+        } else if (event.type === "derivation") {
+          derivations += 1;
         } else if (event.type === "execution" && event.outcome === "failed") {
           failures.push({
             code: "failed-execution",
@@ -3184,6 +3382,14 @@ export async function checkFixtureEvidenceHealth(options: {
       for (const event of lifecycle) {
         if (event.type !== "issuance" || event.outcome !== "issued") continue;
         const issuanceIndex = eventIndex(event);
+        const derivation = derivationEvents.find(
+          (candidate) =>
+            fixtureActivityGateKey(candidate) ===
+              fixtureActivityGateKey(event) &&
+            eventIndex(candidate) < issuanceIndex &&
+            validDerivationLookupKeys.has(fixtureActivityGateKey(candidate)),
+        );
+        if (derivation !== undefined) continue;
         const successfulExecution = lifecycle.find(
           (candidate): candidate is SuccessfulExecutionActivity =>
             candidate.type === "execution" &&
@@ -3258,7 +3464,10 @@ export async function checkFixtureEvidenceHealth(options: {
       }
       if (invocationRecords[0]?.writeEnabled === true) {
         for (const [key, miss] of misses) {
-          if (successfulExecutions.has(key) && !issued.has(key)) {
+          if (
+            (successfulExecutions.has(key) || successfulDerivations.has(key)) &&
+            !issued.has(key)
+          ) {
             failures.push({
               code: "missing-issuance",
               scenarioSet,
@@ -3280,6 +3489,7 @@ export async function checkFixtureEvidenceHealth(options: {
       misses: missCounts,
       cacheActivity,
       executions,
+      derivations,
       issuances,
       lifecycleErrors,
       phaseDurations,
@@ -3343,7 +3553,7 @@ export function formatFixtureEvidenceHealthReport(
         return duration === undefined ? [] : [`${phase}=${duration}`];
       })
       .join(",");
-    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} phase-duration-ms=${phaseDurations || "none"} retries=${stage.retries} recoveries=${stage.recoveries} retry-duration-ms=${stage.retryDurationMilliseconds} cache-activity=${cacheActivity || "none"}`;
+    return `[Fixture Evidence] ${stage.scenarioSet}: scenarios=${stage.scenarios} hits=${stage.hits} misses=${misses || "none"} executions=${stage.executions} derivations=${stage.derivations} issuances=${stage.issuances} lifecycle-errors=${stage.lifecycleErrors} duration-ms=${stage.durationMilliseconds} phase-duration-ms=${phaseDurations || "none"} retries=${stage.retries} recoveries=${stage.recoveries} retry-duration-ms=${stage.retryDurationMilliseconds} cache-activity=${cacheActivity || "none"}`;
   });
   const failureLines = report.failures.map((failure) => {
     const fields = [
@@ -3513,13 +3723,19 @@ export type FixtureEvidenceGateResult<
 > = {
   readonly [fixtureEvidenceProof]: true;
   readonly gate: Gate;
-  readonly status: "hit" | "executed" | "executed-unissued";
+  readonly status:
+    | "hit"
+    | "executed"
+    | "executed-unissued"
+    | "derived"
+    | "derived-unissued";
   readonly identity: string;
   readonly generatedContentIdentity: string;
   readonly contractIdentity: string;
   readonly missReason?: FixtureEvidenceMissReason;
   readonly issuanceError?: string;
   readonly record?: FixtureEvidenceRecord;
+  readonly coversDeploymentContractIdentity?: string;
 };
 
 const fixtureEvidenceProof = Symbol("fixture-evidence-proof");
@@ -3527,6 +3743,7 @@ const fixtureEvidenceProof = Symbol("fixture-evidence-proof");
 type GeneratedRootQualityEvidenceOptions = FixtureEvidenceGateOptions & {
   readonly gate: "generated-root-quality";
   readonly rootEvidence?: never;
+  readonly coversDeploymentContractIdentity?: string;
 };
 
 type FocusedPackageLinkEvidenceOptions = FixtureEvidenceGateOptions & {
@@ -3560,6 +3777,10 @@ export async function runFixtureEvidenceGate(
     options.gate === "generated-root-quality"
       ? undefined
       : options.rootEvidence.identity;
+  const coversDeploymentContractIdentity =
+    options.gate === "generated-root-quality"
+      ? options.coversDeploymentContractIdentity
+      : undefined;
   if (
     options.gate !== "generated-root-quality" &&
     (!options.rootEvidence[fixtureEvidenceProof] ||
@@ -3632,6 +3853,9 @@ export async function runFixtureEvidenceGate(
               generatedContentIdentity: options.generatedContentIdentity,
               contractIdentity: options.contractIdentity,
               record,
+              ...(coversDeploymentContractIdentity === undefined
+                ? {}
+                : { coversDeploymentContractIdentity }),
             };
           }
         }
@@ -3656,6 +3880,95 @@ export async function runFixtureEvidenceGate(
       outcome: "miss",
       reason: missReason,
     });
+  }
+  if (
+    options.gate === "deployment-quality" &&
+    missReason !== undefined &&
+    options.rootEvidence.coversDeploymentContractIdentity ===
+      options.contractIdentity &&
+    (options.rootEvidence.status === "hit" ||
+      (options.rootEvidence.status === "executed" &&
+        (!(options.writeEnabled ?? false) ||
+          options.rootEvidence.record !== undefined)))
+  ) {
+    const deploymentRootEvidence = options.rootEvidence;
+    await emitLifecycle(options.recordLifecycle, {
+      ...baseEvent,
+      gate: "deployment-quality",
+      type: "derivation",
+      at: clock().toISOString(),
+      generatedContentIdentity: options.generatedContentIdentity,
+      contractIdentity: options.contractIdentity,
+      rootEvidence: {
+        identity: deploymentRootEvidence.identity,
+        contractIdentity: deploymentRootEvidence.contractIdentity,
+        coversDeploymentContractIdentity:
+          deploymentRootEvidence.coversDeploymentContractIdentity!,
+      },
+    });
+    options.cancelSignal?.throwIfAborted();
+    if (!(options.writeEnabled ?? false) || options.storage === undefined) {
+      return {
+        [fixtureEvidenceProof]: true,
+        gate: options.gate,
+        status: "derived-unissued",
+        identity,
+        generatedContentIdentity: options.generatedContentIdentity,
+        contractIdentity: options.contractIdentity,
+        ...(missReason === undefined ? {} : { missReason }),
+      };
+    }
+    const record: FixtureEvidenceRecord = {
+      schema: "fixture-verification-evidence/v1",
+      gate: options.gate,
+      identity,
+      components: {
+        generatedContent: options.generatedContentIdentity,
+        contract: options.contractIdentity,
+        rootEvidence: rootEvidenceIdentity!,
+      },
+      issuedAt: clock().toISOString(),
+      scenario: options.scenario,
+      producerCommit: options.producerCommit,
+    };
+    options.cancelSignal?.throwIfAborted();
+    try {
+      await options.storage.writeAtomically(record);
+      await emitLifecycle(options.recordLifecycle, {
+        ...baseEvent,
+        type: "issuance",
+        at: clock().toISOString(),
+        outcome: "issued",
+      });
+    } catch (error) {
+      await emitLifecycle(options.recordLifecycle, {
+        ...baseEvent,
+        type: "issuance",
+        at: clock().toISOString(),
+        outcome: "error",
+        error: errorMessage(error),
+      });
+      return {
+        [fixtureEvidenceProof]: true,
+        gate: options.gate,
+        status: "derived-unissued",
+        identity,
+        generatedContentIdentity: options.generatedContentIdentity,
+        contractIdentity: options.contractIdentity,
+        ...(missReason === undefined ? {} : { missReason }),
+        issuanceError: errorMessage(error),
+      };
+    }
+    return {
+      [fixtureEvidenceProof]: true,
+      gate: options.gate,
+      status: "derived",
+      identity,
+      generatedContentIdentity: options.generatedContentIdentity,
+      contractIdentity: options.contractIdentity,
+      ...(missReason === undefined ? {} : { missReason }),
+      record,
+    };
   }
   await emitLifecycle(options.recordLifecycle, {
     ...baseEvent,
@@ -3695,6 +4008,9 @@ export async function runFixtureEvidenceGate(
       generatedContentIdentity: options.generatedContentIdentity,
       contractIdentity: options.contractIdentity,
       ...(missReason === undefined ? {} : { missReason }),
+      ...(coversDeploymentContractIdentity === undefined
+        ? {}
+        : { coversDeploymentContractIdentity }),
     };
   }
   const record: FixtureEvidenceRecord = {
@@ -3738,6 +4054,9 @@ export async function runFixtureEvidenceGate(
       contractIdentity: options.contractIdentity,
       ...(missReason === undefined ? {} : { missReason }),
       issuanceError: errorMessage(error),
+      ...(coversDeploymentContractIdentity === undefined
+        ? {}
+        : { coversDeploymentContractIdentity }),
     };
   }
   return {
@@ -3749,6 +4068,9 @@ export async function runFixtureEvidenceGate(
     contractIdentity: options.contractIdentity,
     ...(missReason === undefined ? {} : { missReason }),
     record,
+    ...(coversDeploymentContractIdentity === undefined
+      ? {}
+      : { coversDeploymentContractIdentity }),
   };
 }
 

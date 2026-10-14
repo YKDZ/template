@@ -13,6 +13,7 @@ GLOSSARY*.md
 .fixture-native-cache/
 .fixture-workspace/
 .cli-journey-diagnostics/
+.verified-packed-publication/
 .pnpm-store/
 .turbo/
 packages/**/.turbo/

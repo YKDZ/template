@@ -104,7 +104,7 @@ const runGeneratedScenarioSet = async (
 
 void describe("deployment quality gate", () => {
   void it(
-    "establishes Root proof for real matrix-derived Deployment evidence and skips every warm executor",
+    "derives Deployment evidence from Root full and skips the repeated full path on a Deployment miss",
     { timeout: 180_000 },
     async () => {
       const root = await mkdtemp(path.join(tmpdir(), "deployment-evidence-"));
@@ -160,6 +160,7 @@ void describe("deployment quality gate", () => {
       const deploymentMissCommands: Command[] = [];
       const warmCommands: Command[] = [];
       const coldEvents: FixtureEvidenceLifecycleEvent[] = [];
+      const deploymentMissEvents: FixtureEvidenceLifecycleEvent[] = [];
       const warmEvents: FixtureEvidenceLifecycleEvent[] = [];
       const clock = () => new Date("2026-07-28T00:00:00.000Z");
       try {
@@ -196,6 +197,9 @@ void describe("deployment quality gate", () => {
             clock,
             writeEnabled: true,
             producerCommit: "deployment-miss",
+            recordLifecycle: (event) => {
+              deploymentMissEvents.push(event);
+            },
           },
         });
         await runGeneratedScenarioSet("deployment", {
@@ -213,41 +217,75 @@ void describe("deployment quality gate", () => {
           },
         });
 
-        const deploymentCommands = coldCommands.filter(
+        const standaloneDeploymentCommands = coldCommands.filter(
           ({ command, args }) =>
             command === "pnpm" &&
             args[0] === "run" &&
             args[1] === "check:deployment",
         );
-        assert.ok(deploymentCommands.length > 0);
+        assert.deepStrictEqual(standaloneDeploymentCommands, []);
+        const rootFullCommands = coldCommands.filter(
+          ({ command, args }) =>
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+        );
+        const coldRootExecutions = coldEvents.filter(
+          (event) =>
+            event.type === "execution" &&
+            event.gate === "generated-root-quality" &&
+            event.outcome === "started",
+        ).length;
+        const coldRootLookups = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" && event.gate === "generated-root-quality",
+        ).length;
+        const coldDeploymentLookups = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" && event.gate === "deployment-quality",
+        ).length;
+        assert.ok(coldRootExecutions > 0);
+        assert.strictEqual(rootFullCommands.length, coldRootExecutions * 2);
         assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) => command === "pnpm" && args[0] === "install",
           ).length,
-          deploymentCommands.length,
+          coldRootExecutions,
         );
-        const deploymentMissExecutions = deploymentMissCommands.filter(
-          ({ command, args }) =>
-            command === "pnpm" &&
-            args[0] === "run" &&
-            args[1] === "check:deployment",
-        );
-        assert.strictEqual(
-          deploymentMissExecutions.length,
-          deploymentCommands.length,
-        );
-        assert.strictEqual(
-          deploymentMissCommands.filter(
-            ({ command, args }) => command === "pnpm" && args[0] === "install",
-          ).length,
-          deploymentMissExecutions.length,
-        );
+        const coldDeploymentMisses = coldEvents.filter(
+          (event) =>
+            event.type === "lookup" &&
+            event.gate === "deployment-quality" &&
+            event.outcome === "miss",
+        ).length;
         assert.deepStrictEqual(
-          deploymentMissCommands.filter(
-            ({ command, args }) =>
-              command === "pnpm" && args[0] === "run" && args[1] === "check",
-          ),
+          deploymentMissCommands.filter(({ command }) => command !== "git"),
           [],
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "lookup" &&
+              event.gate === "generated-root-quality" &&
+              event.outcome === "hit",
+          ).length,
+          coldRootLookups,
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "derivation" &&
+              event.gate === "deployment-quality",
+          ).length,
+          deploymentMissEvents.filter(
+            (event) =>
+              event.type === "lookup" &&
+              event.gate === "deployment-quality" &&
+              event.outcome === "miss",
+          ).length,
+        );
+        assert.strictEqual(
+          deploymentMissEvents.filter((event) => event.type === "execution")
+            .length,
+          0,
         );
         assert.deepStrictEqual(
           warmCommands.filter(({ command }) => command !== "git"),
@@ -266,7 +304,15 @@ void describe("deployment quality gate", () => {
             event.gate === "deployment-quality" &&
             event.outcome === "issued",
         );
-        assert.strictEqual(deploymentIssues.length, deploymentCommands.length);
+        assert.strictEqual(deploymentIssues.length, coldDeploymentMisses);
+        assert.strictEqual(
+          coldEvents.filter(
+            (event) =>
+              event.type === "derivation" &&
+              event.gate === "deployment-quality",
+          ).length,
+          coldDeploymentMisses,
+        );
         assert.strictEqual(
           warmEvents.filter(
             (event) =>
@@ -274,7 +320,7 @@ void describe("deployment quality gate", () => {
               event.gate === "deployment-quality" &&
               event.outcome === "hit",
           ).length,
-          deploymentCommands.length,
+          coldDeploymentLookups,
         );
         assert.deepStrictEqual(
           warmEvents.filter((event) => event.type === "execution"),
