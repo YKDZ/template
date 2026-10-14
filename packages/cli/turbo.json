@@ -2,11 +2,104 @@
   "extends": ["//"],
   "tags": ["template-cli"],
   "tasks": {
-    "test": { "dependsOn": [] },
+    "build": {
+      "dependsOn": ["^build"],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ],
+      "outputs": ["dist/**"],
+      "persistent": false
+    },
+    "format:check": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxfmt.config.ts"],
+      "outputs": [],
+      "persistent": false
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "lint": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxlint.config.ts"],
+      "outputs": [],
+      "persistent": false
+    },
+    "lint:fix": {
+      "dependsOn": [],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ],
+      "outputs": [],
+      "persistent": false
+    },
+    "pack:bundled": {
+      "dependsOn": [],
+      "tags": ["work:release"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "prepack": {
+      "dependsOn": [],
+      "tags": ["work:lifecycle"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "test": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
     "test:e2e": {
       "dependsOn": ["build"],
+      "tags": ["quality:heavy"],
       "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false,
       "passThroughEnv": ["TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR"]
+    },
+    "test:integration": {
+      "dependsOn": [],
+      "tags": ["quality:heavy"],
+      "cache": true,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
     }
   }
 }

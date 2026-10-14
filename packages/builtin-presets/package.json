@@ -103,10 +103,5 @@
     "smol-toml",
     "unbash",
     "yaml"
-  ],
-  "turbo": {
-    "tags": [
-      "template-builtin-presets"
-    ]
-  }
+  ]
 }
