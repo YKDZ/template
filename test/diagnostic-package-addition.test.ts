@@ -340,7 +340,7 @@ void describe("diagnostic Package Addition", () => {
     }
   });
 
-  void it("reports overlapping workflow edits atomically and composes deployment with root-only diagnostics", async () => {
+  void it("reports overlapping workflow edits atomically and composes deployment diagnostics", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-diagnostic-conflict-"),
     );
@@ -351,8 +351,8 @@ void describe("diagnostic Package Addition", () => {
       await writeFile(
         workflowPath,
         (await readFile(workflowPath, "utf8")).replace(
-          "      - name: Run Root Check\n        run: pnpm run check\n",
-          "      - name: Run Root Check\n        run: pnpm run check\n      - name: Upload Root Check diagnostics\n        run: echo user-owned\n",
+          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n",
+          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n      - name: Upload Root Check diagnostics\n        run: echo user-owned\n",
         ),
       );
       const before = await snapshot(targetDir);
@@ -418,31 +418,48 @@ void describe("diagnostic Package Addition", () => {
       const workflow = parse(deploymentWorkflowSource) as {
         readonly jobs: {
           readonly check: {
-            readonly strategy: {
-              readonly matrix: {
-                readonly include: readonly { readonly job_name: string }[];
-              };
-            };
+            readonly name: string;
+            readonly "timeout-minutes": number;
             readonly steps: readonly {
               readonly name: string;
+              readonly run?: string;
+              readonly uses?: string;
               readonly if?: string;
+              readonly env?: Readonly<Record<string, string>>;
               readonly with?: { readonly path?: string };
             }[];
           };
         };
       };
-      assert.deepStrictEqual(
-        workflow.jobs.check.strategy.matrix.include.map(
-          (entry) => entry.job_name,
-        ),
-        ["Root Check", "Deployment Check"],
+      const job = workflow.jobs.check;
+      assert.strictEqual(job.name, "Full Check");
+      assert.strictEqual(job["timeout-minutes"], 45);
+      const steps = job.steps;
+      const lightCheckIndex = steps.findIndex(
+        (step) => step.name === "Run Light Check",
+      );
+      const buildxSetupIndex = steps.findIndex((step) =>
+        step.uses?.startsWith("docker/setup-buildx-action@"),
+      );
+      const heavyCheckIndex = steps.findIndex(
+        (step) => step.name === "Run Heavy Check",
+      );
+      assert.ok(lightCheckIndex >= 0);
+      assert.ok(buildxSetupIndex > lightCheckIndex);
+      assert.ok(heavyCheckIndex > buildxSetupIndex);
+      assert.strictEqual(steps[lightCheckIndex]?.run, "pnpm run check");
+      assert.strictEqual(steps[heavyCheckIndex]?.run, "pnpm run check:heavy");
+      const stage = steps.find(
+        (step) => step.name === "Stage Check diagnostics",
+      );
+      assert.strictEqual(
+        stage?.env?.PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS,
+        "apps/admin\napps/web",
       );
       const upload = workflow.jobs.check.steps.find(
-        (step) => step.name === "Upload Root Check diagnostics",
+        (step) => step.name === "Upload Check diagnostics",
       );
-      assert.partialDeepStrictEqual(upload, {
-        if: "failure() && matrix.capability == 'root'",
-      });
+      assert.strictEqual(upload?.if, "failure()");
       assert.strictEqual(upload?.with?.path, ".template-ci-diagnostics");
       assert.ok(deploymentWorkflowSource.includes("apps/admin"));
     } finally {

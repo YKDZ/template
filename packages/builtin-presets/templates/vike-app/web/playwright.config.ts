@@ -116,7 +116,9 @@ if (externalServiceUrl === undefined) {
 export default defineConfig({
   testDir: "./test/e2e",
   timeout: 60_000,
-  outputDir: usesExternalService ? "test-results/deployment" : "test-results",
+  outputDir: usesExternalService
+    ? "test-results/deployment"
+    : "test-results/e2e",
   use: {
     baseURL: previewUrl,
     trace: "retain-on-failure",
@@ -128,7 +130,7 @@ export default defineConfig({
       {
         outputFolder: usesExternalService
           ? "playwright-report/deployment"
-          : "playwright-report",
+          : "playwright-report/e2e",
       },
     ],
   ],
