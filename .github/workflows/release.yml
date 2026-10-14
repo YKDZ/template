@@ -16,6 +16,8 @@ jobs:
   check:
     name: Check package
     uses: ./.github/workflows/check.yml
+    with:
+      publish_verified_candidate: true
     secrets:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
@@ -32,23 +34,27 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Enable Corepack
-        run: corepack enable
-
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version-file: package.json
           registry-url: https://registry.npmjs.org
-          cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: 下载已验证的 packed 候选
+        uses: actions/download-artifact@v8
+        with:
+          name: verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/verified-packed-publication
 
-      - name: Publish package
-        run: pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance
-        env:
-          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
-          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-          TURBO_REMOTE_CACHE_READ_ONLY: "true"
+      - name: 校验并发布已验证的归档
+        run: |
+          set -euo pipefail
+          artifact_directory="$RUNNER_TEMP/verified-packed-publication"
+          archive_paths=("$artifact_directory"/*.tgz)
+          test "${#archive_paths[@]}" -eq 1
+          archive_path="${archive_paths[0]}"
+          test "$(find "$artifact_directory" -mindepth 1 -maxdepth 1 | wc -l)" -eq 2
+          test -f "$artifact_directory/SHA512SUMS"
+          test "$(wc -l < "$artifact_directory/SHA512SUMS")" -eq 1
+          (cd "$artifact_directory" && sha512sum --check --strict SHA512SUMS)
+          npm publish "$archive_path" --access public --provenance --ignore-scripts

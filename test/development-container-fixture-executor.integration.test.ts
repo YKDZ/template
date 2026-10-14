@@ -261,7 +261,7 @@ void describe("Development Container Fixture Executor", () => {
     }
   });
 
-  void it("shares one cold container session across independent Root and Deployment gates", async () => {
+  void it("shares one cold container session while Deployment derives from Root full", async () => {
     const workspace = path.resolve(
       "/tmp/template-development-container-shared-deployment-test",
     );
@@ -325,19 +325,49 @@ void describe("Development Container Fixture Executor", () => {
       const started = lifecycle.filter(
         (event) => event.type === "execution" && event.outcome === "started",
       );
-      const deploymentStarts = started.filter(
+      const rootStarts = started.filter(
+        (event) => event.gate === "generated-root-quality",
+      );
+      const deploymentExecutions = started.filter(
         (event) => event.gate === "deployment-quality",
       );
-      assert.ok(deploymentStarts.length > 0);
-      for (const deployment of deploymentStarts) {
+      const deploymentDerivations = lifecycle.filter(
+        (event) =>
+          event.type === "derivation" && event.gate === "deployment-quality",
+      );
+      assert.ok(rootStarts.length > 0);
+      assert.ok(deploymentDerivations.length > 0);
+      assert.deepStrictEqual(deploymentExecutions, []);
+      const fullCommands = calls.filter(({ command, args }) => {
+        if (command !== "devcontainer" || args[0] !== "exec") return false;
+        const nested = nestedDevcontainerCommand(args);
+        return (
+          nested.command === "pnpm" &&
+          nested.args[0] === "run" &&
+          nested.args[1] === "check:full"
+        );
+      });
+      assert.strictEqual(fullCommands.length, rootStarts.length * 2);
+      assert.deepStrictEqual(
+        calls.filter(
+          ({ command, args }) =>
+            command === "pnpm" &&
+            args[0] === "run" &&
+            args[1] === "check:deployment",
+        ),
+        [],
+      );
+      for (const derivation of deploymentDerivations) {
         const root = started.find(
           (event) =>
             event.gate === "generated-root-quality" &&
-            event.scenario?.id === deployment.scenario?.id,
+            event.scenario?.id === derivation.scenario?.id,
         );
         assert.notStrictEqual(root, undefined);
-        assert.notStrictEqual(root?.identity, deployment.identity);
-        const projectDir = path.join(workspace, deployment.scenario!.id);
+        assert.notStrictEqual(root?.identity, derivation.identity);
+      }
+      for (const root of rootStarts) {
+        const projectDir = path.join(workspace, root.scenario!.id);
         assert.strictEqual(
           calls.filter(
             ({ command, args, cwd }) =>

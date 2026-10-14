@@ -165,7 +165,7 @@ void describe("Fixture Verification Evidence", () => {
               }),
             };
           }
-          if (args[0] === "run" && args[1] === "check") {
+          if (args[0] === "run" && args[1] === "check:full") {
             rootChecks += 1;
           }
           return {};
@@ -1057,7 +1057,7 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         coldCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check",
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
         ).length,
         scenarioCount * 2,
       );
@@ -1308,7 +1308,7 @@ void describe("Fixture Verification Evidence", () => {
         assert.ok(
           scenarioCommands.findIndex(
             ({ command: name, args }) =>
-              name === "pnpm" && args[0] === "run" && args[1] === "check",
+              name === "pnpm" && args[0] === "run" && args[1] === "check:full",
           ) < scenarioCommands.indexOf(command),
         );
       }
@@ -1342,7 +1342,7 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         rootChangedCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check",
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
         ).length,
         scenarioCount * 2,
       );
@@ -1378,7 +1378,7 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         rootExpiredCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check",
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
         ).length,
         scenarioCount * 2,
       );
@@ -1605,7 +1605,7 @@ void describe("Fixture Verification Evidence", () => {
             if (
               command === "pnpm" &&
               args[0] === "run" &&
-              args[1] === "check"
+              args[1] === "check:full"
             ) {
               throw new Error("Root Quality failed");
             }
@@ -1958,14 +1958,17 @@ void describe("Fixture Verification Evidence", () => {
     }
   });
 
-  void it("schedules real matrix misses by final Check Environment Needs", async () => {
+  void it("schedules real matrix misses by final Environment Needs", async () => {
     const workspace = await temporaryRepository("fixture-matrix-scheduling-");
     const installedScenarios: string[] = [];
     const acquiredLeases: (readonly FixtureEvidenceExecutionResource[])[] = [];
     const scheduledRuns: (readonly FixtureEvidenceExecutionResource[])[] = [];
     const needsByScenario = new Map<
       string,
-      { readonly check: readonly { readonly kind?: string }[] }
+      {
+        readonly check: readonly { readonly kind?: string }[];
+        readonly deployment: readonly { readonly kind?: string }[];
+      }
     >();
     const ordinaryScenarios = new Set<string>();
     const browserScenarios = new Set<string>();
@@ -2001,6 +2004,7 @@ void describe("Fixture Verification Evidence", () => {
               ),
             ) as {
               readonly check: readonly { readonly kind?: string }[];
+              readonly deployment: readonly { readonly kind?: string }[];
             };
             const browser = environmentNeeds.check.some(
               (need) => need.kind === "playwright-browser-assets",
@@ -2055,6 +2059,11 @@ void describe("Fixture Verification Evidence", () => {
             assert.notStrictEqual(finalNeeds, undefined);
             const resources: readonly FixtureEvidenceExecutionResource[] = [
               "development-container-session",
+              ...(finalNeeds!.deployment.some(
+                (need) => need.kind === "docker-engine",
+              )
+                ? ["docker" as const]
+                : []),
               ...(finalNeeds!.check.some(
                 (need) => need.kind === "playwright-browser-assets",
               )
@@ -2509,7 +2518,7 @@ process.exitCode = result.status ?? 1;
         assert.notStrictEqual(
           coldCommands.filter(
             ([binary, command, task]) =>
-              binary === "pnpm" && command === "run" && task === "check",
+              binary === "pnpm" && command === "run" && task === "check:full",
           ).length,
           0,
         );

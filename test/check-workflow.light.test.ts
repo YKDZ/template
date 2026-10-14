@@ -24,6 +24,15 @@ type CheckWorkflow = {
     readonly push: { readonly branches: readonly string[] };
     readonly workflow_dispatch: null;
     readonly workflow_call: {
+      readonly inputs: Record<
+        string,
+        {
+          readonly default: boolean;
+          readonly description: string;
+          readonly required: boolean;
+          readonly type: string;
+        }
+      >;
       readonly secrets: Record<string, { readonly required: boolean }>;
     };
   };
@@ -285,6 +294,8 @@ void describe("Fixture Verification Evidence check workflow", () => {
         "${{ github.workspace }}/.fixture-native-cache/cargo",
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR:
         "${{ github.workspace }}/.cli-journey-diagnostics",
+      TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR:
+        "${{ inputs.publish_verified_candidate && format('{0}/.verified-packed-publication', github.workspace) || '' }}",
     });
 
     const scenarioCommands = new Set([
@@ -331,6 +342,14 @@ void describe("Fixture Verification Evidence check workflow", () => {
       TURBO_TOKEN: { required: false },
       TURBO_REMOTE_CACHE_SIGNATURE_KEY: { required: false },
     });
+    assert.deepStrictEqual(checkWorkflowDocument.on.workflow_call.inputs, {
+      publish_verified_candidate: {
+        description: "发布流程是否要求保留已验证的 packed 候选",
+        required: false,
+        type: "boolean",
+        default: false,
+      },
+    });
     assert.strictEqual(packageCheck?.env, undefined);
     assert.strictEqual(
       check.steps.every((step) =>
@@ -355,21 +374,46 @@ void describe("Fixture Verification Evidence check workflow", () => {
       TURBO_REMOTE_CACHE_SIGNATURE_KEY:
         "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
     });
-    assert.deepStrictEqual(
-      release.jobs.publish.steps.find(
+    assert.strictEqual(
+      release.jobs.check.with?.publish_verified_candidate,
+      true,
+    );
+    assert.ok(
+      release.jobs.publish.steps.some(
         (step) =>
-          step.run ===
-          "pnpm --filter @ykdz/template run publish:bundled --no-git-checks --access public --provenance",
-      )?.env,
-      {
-        TURBO_TEAM: "${{ vars.TURBO_TEAM }}",
-        TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
-        TURBO_REMOTE_CACHE_SIGNATURE_KEY:
-          "${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}",
-        TURBO_REMOTE_CACHE_READ_ONLY: "true",
-      },
+          step.name === "校验并发布已验证的归档" &&
+          step.run?.includes(
+            'npm publish "$archive_path" --access public --provenance --ignore-scripts',
+          ),
+      ),
+    );
+    assert.strictEqual(
+      release.jobs.publish.steps.find(
+        (step) => step.name === "下载已验证的 packed 候选",
+      )?.with?.name,
+      "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
     );
     assert.deepStrictEqual(turboConfig.remoteCache, { signature: true });
+  });
+
+  void it("uploads the packed candidate only when a release caller requires it", async () => {
+    const workflow = await checkWorkflow();
+    const upload = workflow.jobs.check.steps.find(
+      (step) => step.name === "Upload Verified Packed Candidate",
+    );
+
+    assert.deepStrictEqual(upload, {
+      name: "Upload Verified Packed Candidate",
+      if: "always() && inputs.publish_verified_candidate",
+      uses: "actions/upload-artifact@v7",
+      with: {
+        name: "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
+        path: ".verified-packed-publication/*.tgz\n.verified-packed-publication/SHA512SUMS\n",
+        "include-hidden-files": true,
+        "if-no-files-found": "error",
+        "retention-days": 7,
+      },
+    });
   });
 
   void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
@@ -577,10 +621,10 @@ void describe("Fixture Verification Evidence check workflow", () => {
       await readFile(".github/workflows/release.yml", "utf8"),
     ) as ReleaseWorkflow;
 
-    assert.strictEqual(workflow.jobs.check.with, undefined);
     assert.deepStrictEqual(workflow.jobs.check, {
       name: "Check package",
       uses: "./.github/workflows/check.yml",
+      with: { publish_verified_candidate: true },
       secrets: {
         TURBO_TOKEN: "${{ secrets.TURBO_TOKEN }}",
         TURBO_REMOTE_CACHE_SIGNATURE_KEY:
@@ -600,6 +644,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
       release.jobs.check.uses,
       "./.github/workflows/check.yml",
     );
+    assert.deepStrictEqual(release.jobs.check.with, {
+      publish_verified_candidate: true,
+    });
     assert.strictEqual(release.jobs.publish.needs, "check");
     assert.notStrictEqual(
       check.find((step) => step.run === "pnpm run check"),
@@ -613,7 +660,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
     }
   });
 
-  void it("keeps local evidence and journey diagnostics out of version control", async () => {
+  void it("忽略本地证据、旅程诊断与发布候选目录", async () => {
     const ignored = new Set(
       (await readFile(".gitignore", "utf8"))
         .split("\n")
@@ -624,5 +671,6 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.ok(ignored.has(".fixture-evidence-activity/"));
     assert.ok(ignored.has(".fixture-native-cache/"));
     assert.ok(ignored.has(".cli-journey-diagnostics/"));
+    assert.ok(ignored.has(".verified-packed-publication/"));
   });
 });

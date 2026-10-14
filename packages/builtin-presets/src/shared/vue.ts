@@ -44,7 +44,10 @@ export function vueApplicationScripts(): Record<string, string> {
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
     preview: "vite preview",
-    test: "vitest run --reporter=agent --silent=passed-only",
+    "browser:prepare": "playwright install chromium",
+    test: "vitest run --project=node --reporter=agent --silent=passed-only",
+    "test:browser":
+      "vitest run --project=browser --reporter=agent --silent=passed-only",
     "test:e2e": "playwright test",
   };
 }

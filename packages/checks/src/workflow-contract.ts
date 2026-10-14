@@ -281,10 +281,10 @@ function assertPublicationVerifySteps(
   plan: GeneratedRepositoryPlan,
   steps: unknown,
 ): void {
-  if (!Array.isArray(steps) || steps.length !== 8) {
+  if (!Array.isArray(steps) || steps.length !== 9) {
     failPublicationWorkflow(
       plan,
-      "verify must have the closed eight-step sequence",
+      "verify must have the closed nine-step sequence",
     );
   }
   const gate = step(plan, steps[0], "Require the default branch dispatch");
@@ -308,8 +308,9 @@ function assertPublicationVerifySteps(
   const pnpm = step(plan, steps[3], "Set up pnpm");
   const install = step(plan, steps[4], "Install dependencies");
   const staging = step(plan, steps[5], "Create publication staging directory");
-  const check = step(plan, steps[6], "Run Root Check once");
-  const upload = step(plan, steps[7], "Upload verified npm artifact");
+  const check = step(plan, steps[6], "Run Full Check once");
+  const artifact = step(plan, steps[7], "Verify publication artifact");
+  const upload = step(plan, steps[8], "Upload verified npm artifact");
   if (
     !hasExactKeys(pnpm, ["name", "uses", "with"]) ||
     !matchesAction(pnpm.uses, "pnpm/action-setup") ||
@@ -321,12 +322,20 @@ function assertPublicationVerifySteps(
     !hasExactKeys(staging, ["name", "run"]) ||
     staging.run !==
       'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
-    !hasExactKeys(check, ["name", "run", "env"]) ||
-    check.run !== "pnpm run check" ||
-    !isParsedObject(check.env) ||
-    !hasExactKeys(check.env, ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]) ||
-    check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
+    !hasExactKeys(check, ["name", "run"]) ||
+    !isWorkflowStepName(check.name) ||
+    check.run !== "pnpm run check:full" ||
+    !hasExactKeys(artifact, ["name", "run", "env"]) ||
+    !isWorkflowStepName(artifact.name) ||
+    artifact.run !== "pnpm run publication:artifact" ||
+    !isParsedObject(artifact.env) ||
+    !hasExactKeys(artifact.env, [
+      "PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY",
+      "PUBLICATION_ARTIFACT_REQUIRED",
+    ]) ||
+    artifact.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
       "${{ runner.temp }}/npm-publication-artifact" ||
+    artifact.env.PUBLICATION_ARTIFACT_REQUIRED !== "true" ||
     !hasExactKeys(upload, ["name", "uses", "with"]) ||
     !matchesAction(upload.uses, "actions/upload-artifact") ||
     !isParsedObject(upload.with) ||
@@ -424,7 +433,6 @@ type WorkflowActionContract = {
   readonly name: string;
   readonly action: string;
   readonly with?: Readonly<ParsedObject>;
-  readonly condition?: string;
 };
 
 type WorkflowActionKey = "checkout" | "node" | "pnpm" | "buildx" | "upload";
@@ -443,6 +451,10 @@ const workflowPolicy = {
     name: "Root Check",
     runner: "ubuntu-latest",
     timeoutMinutes: 30,
+  },
+  deploymentJob: {
+    name: "Full Check",
+    timeoutMinutes: 45,
   },
   actions: {
     checkout: {
@@ -463,7 +475,6 @@ const workflowPolicy = {
     buildx: {
       name: "Set up Docker Buildx",
       action: "docker/setup-buildx-action",
-      condition: "matrix.requires_docker",
     },
     upload: {
       name: "Upload Root Check diagnostics",
@@ -474,27 +485,14 @@ const workflowPolicy = {
     name: "Install dependencies",
     command: "pnpm install --frozen-lockfile",
   },
-  rootCheckStep: { name: "Run Root Check", command: "pnpm run check" },
-  selectedCheckStep: {
-    name: "Run selected Check",
-    command: "${{ matrix.task_entrypoint }}",
+  lightCheckStep: {
+    name: "Run Light Check",
+    command: "pnpm run check",
   },
-  deploymentMatrix: [
-    {
-      capability: "root",
-      job_name: "Root Check",
-      task_entrypoint: "pnpm run check",
-      timeout_minutes: 30,
-      requires_docker: false,
-    },
-    {
-      capability: "deployment",
-      job_name: "Deployment Check",
-      task_entrypoint: "pnpm run check:deployment",
-      timeout_minutes: 45,
-      requires_docker: true,
-    },
-  ],
+  heavyCheckStep: {
+    name: "Run Heavy Check",
+    command: "pnpm run check:heavy",
+  },
 } as const;
 
 const rootActionKeys: readonly WorkflowActionKey[] = [
@@ -547,7 +545,7 @@ function assertActionReferences(source: string): void {
 
 function diagnosticStepContracts(
   oracle: WorkflowOracle,
-  deploymentMatrix: boolean,
+  deployment: boolean,
 ):
   | {
       readonly stage: ParsedObject;
@@ -560,13 +558,12 @@ function diagnosticStepContracts(
   ) {
     return undefined;
   }
-  const condition = deploymentMatrix
-    ? "failure() && matrix.capability == 'root'"
-    : "failure()";
+  const checkName = deployment ? "Check" : "Root Check";
+  const condition = "failure()";
   const upload = workflowPolicy.actions.upload;
   return {
     stage: {
-      name: "Stage Root Check diagnostics",
+      name: `Stage ${checkName} diagnostics`,
       if: condition,
       env: {
         PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS:
@@ -602,11 +599,11 @@ function diagnosticStepContracts(
       ].join("\n"),
     },
     upload: {
-      name: upload.name,
+      name: `Upload ${checkName} diagnostics`,
       if: condition,
       uses: upload.action,
       with: {
-        name: "root-check-diagnostics",
+        name: deployment ? "check-diagnostics" : "root-check-diagnostics",
         path: ".template-ci-diagnostics",
         "include-hidden-files": true,
         "if-no-files-found": "ignore",
@@ -621,9 +618,9 @@ function assertDiagnosticSteps(
   stageStep: unknown,
   uploadStep: unknown,
   oracle: WorkflowOracle,
-  deploymentMatrix: boolean,
+  deployment: boolean,
 ): void {
-  const contract = diagnosticStepContracts(oracle, deploymentMatrix);
+  const contract = diagnosticStepContracts(oracle, deployment);
   if (contract === undefined) return;
   if (
     !isParsedObject(stageStep) ||
@@ -633,7 +630,7 @@ function assertDiagnosticSteps(
     stageStep.run !== contract.stage.run
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check diagnostics must stage only closed native evidence before upload`,
+      `${plan.definitionName}: Check diagnostics must stage only closed native evidence before upload`,
     );
   }
   const withValues = isParsedObject(uploadStep) ? uploadStep.with : undefined;
@@ -658,7 +655,7 @@ function assertDiagnosticSteps(
     withValues["retention-days"] !== 7
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check diagnostic upload must retain only aggregate native evidence`,
+      `${plan.definitionName}: Check diagnostic upload must retain only aggregate native evidence`,
     );
   }
 }
@@ -667,7 +664,11 @@ function isParsedObject(value: unknown): value is ParsedObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function assertRootOnlyWorkflowContract(
+function isWorkflowStepName(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function assertGeneratedCheckWorkflowContract(
   plan: GeneratedRepositoryPlan,
   workflow: ParsedWorkflow,
   oracle: WorkflowOracle,
@@ -681,156 +682,102 @@ function assertRootOnlyWorkflowContract(
     );
   }
   const job = workflow.jobs.check;
+  const deployment = oracle.deployment;
   if (
     !isParsedObject(job) ||
     !hasExactKeys(job, ["name", "runs-on", "timeout-minutes", "steps"])
   ) {
-    throw new Error(
-      `${plan.definitionName}: Root Check job has unexpected fields or permissions`,
-    );
+    throw new Error(`${plan.definitionName}: Check job has unexpected fields`);
   }
-  const diagnostic = diagnosticStepContracts(oracle, false);
+  const diagnostic = diagnosticStepContracts(oracle, deployment);
+  const diagnosticStart = deployment ? 7 : 6;
   if (
     !Array.isArray(job.steps) ||
-    job.steps.length !== 5 + (diagnostic === undefined ? 0 : 2)
+    job.steps.length !== diagnosticStart + (diagnostic === undefined ? 0 : 2)
   ) {
     throw new Error(
-      `${plan.definitionName}: Root Check must have exactly five steps`,
+      `${plan.definitionName}: Check has an unexpected step count`,
     );
   }
-  const actionSteps = job.steps.slice(0, rootActionKeys.length);
+  if (
+    job.name !==
+      (deployment
+        ? workflowPolicy.deploymentJob.name
+        : workflowPolicy.rootJob.name) ||
+    job["runs-on"] !== workflowPolicy.rootJob.runner ||
+    job["timeout-minutes"] !==
+      (deployment
+        ? workflowPolicy.deploymentJob.timeoutMinutes
+        : workflowPolicy.rootJob.timeoutMinutes)
+  ) {
+    throw new Error(`${plan.definitionName}: Check job identity is not stable`);
+  }
   for (const [index, actionKey] of rootActionKeys.entries()) {
     const contract = workflowPolicy.actions[actionKey];
-    const step = actionSteps[index];
+    const step = job.steps[index];
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "uses", "with"]) ||
+      !isWorkflowStepName(step.name) ||
       !matchesAction(step.uses, contract.action) ||
       stableJson(step.with) !== stableJson(contract.with)
     ) {
       throw new Error(
-        `${plan.definitionName}: Root Check ${contract.name} step diverges from its capability contract`,
+        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
   }
-  const runStepContracts = [
-    workflowPolicy.installStep,
-    workflowPolicy.rootCheckStep,
+  const runSteps = [
+    [job.steps[3], workflowPolicy.installStep],
+    [job.steps[4], workflowPolicy.lightCheckStep],
   ] as const;
-  for (const [index, contract] of runStepContracts.entries()) {
-    const step = job.steps[rootActionKeys.length + index];
+  for (const [step, contract] of runSteps) {
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "run"]) ||
+      !isWorkflowStepName(step.name) ||
       step.run !== contract.command
     ) {
       throw new Error(
-        `${plan.definitionName}: Root Check ${contract.name} step diverges from its capability contract`,
+        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
   }
-  assertDiagnosticSteps(plan, job.steps[5], job.steps[6], oracle, false);
-}
-
-function assertDeploymentWorkflowContract(
-  plan: GeneratedRepositoryPlan,
-  workflow: ParsedWorkflow,
-  oracle: WorkflowOracle,
-): void {
-  if (
-    !oracle.deployment ||
-    !isParsedObject(workflow.jobs) ||
-    !hasExactKeys(workflow.jobs, ["check"])
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Deployment Check jobs are invalid`,
-    );
-  }
-  const job = workflow.jobs.check;
-  if (
-    !isParsedObject(job) ||
-    !hasExactKeys(job, [
-      "name",
-      "runs-on",
-      "timeout-minutes",
-      "strategy",
-      "steps",
-    ]) ||
-    job["runs-on"] !== workflowPolicy.rootJob.runner ||
-    job["timeout-minutes"] !== "${{ matrix.timeout_minutes }}"
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Deployment matrix job must retain independent names, timeouts, and no dependencies`,
-    );
-  }
-  if (
-    !isParsedObject(job.strategy) ||
-    !hasExactKeys(job.strategy, ["fail-fast", "matrix"]) ||
-    job.strategy["fail-fast"] !== false ||
-    !isParsedObject(job.strategy.matrix) ||
-    !hasExactKeys(job.strategy.matrix, ["include"]) ||
-    !Array.isArray(job.strategy.matrix.include)
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Deployment matrix must use explicit non-fail-fast include entries`,
-    );
-  }
-  if (
-    stableJson(job.strategy.matrix.include) !==
-    stableJson(workflowPolicy.deploymentMatrix)
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Deployment matrix include entries diverge from its capability plan`,
-    );
-  }
-  const diagnostic = diagnosticStepContracts(oracle, true);
-  if (
-    !Array.isArray(job.steps) ||
-    job.steps.length !== 6 + (diagnostic === undefined ? 0 : 2)
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Deployment matrix legs must be self-contained`,
-    );
-  }
-  const steps = job.steps;
-  const actionKeys: readonly WorkflowActionKey[] = [
-    ...rootActionKeys,
-    "buildx",
-  ];
-  for (const [index, actionKey] of actionKeys.entries()) {
-    const contract = workflowPolicy.actions[actionKey];
-    const step = steps[index];
-    const expectedKeys = contract.condition
-      ? ["name", "uses", "if"]
-      : ["name", "uses", "with"];
+  let heavyCheckIndex = 5;
+  if (deployment) {
+    const buildx = job.steps[heavyCheckIndex];
+    const contract = workflowPolicy.actions.buildx;
     if (
-      !isParsedObject(step) ||
-      !hasExactKeys(step, expectedKeys) ||
-      !matchesAction(step.uses, contract.action) ||
-      (contract.condition
-        ? step.if !== contract.condition
-        : stableJson(step.with) !== stableJson(contract.with))
+      !isParsedObject(buildx) ||
+      !hasExactKeys(buildx, ["name", "uses"]) ||
+      !isWorkflowStepName(buildx.name) ||
+      !matchesAction(buildx.uses, contract.action)
     ) {
       throw new Error(
-        `${plan.definitionName}: Deployment matrix ${contract.name} step diverges from its capability contract`,
+        `${plan.definitionName}: Check ${contract.name} step diverges from its capability contract`,
       );
     }
+    heavyCheckIndex += 1;
   }
-  const install = steps[4];
-  const selectedCheck = steps[5];
+  const heavyCheck = job.steps[heavyCheckIndex];
+  const heavyContract = workflowPolicy.heavyCheckStep;
   if (
-    !isParsedObject(install) ||
-    !hasExactKeys(install, ["name", "run"]) ||
-    install.run !== workflowPolicy.installStep.command ||
-    !isParsedObject(selectedCheck) ||
-    !hasExactKeys(selectedCheck, ["name", "run"]) ||
-    selectedCheck.run !== workflowPolicy.selectedCheckStep.command
+    !isParsedObject(heavyCheck) ||
+    !hasExactKeys(heavyCheck, ["name", "run"]) ||
+    !isWorkflowStepName(heavyCheck.name) ||
+    heavyCheck.run !== heavyContract.command
   ) {
     throw new Error(
-      `${plan.definitionName}: Deployment matrix must install and invoke its selected task in each leg`,
+      `${plan.definitionName}: Check ${heavyContract.name} step diverges from its capability contract`,
     );
   }
-  assertDiagnosticSteps(plan, steps[6], steps[7], oracle, true);
+  assertDiagnosticSteps(
+    plan,
+    job.steps[diagnosticStart],
+    job.steps[diagnosticStart + 1],
+    oracle,
+    deployment,
+  );
 }
 
 export function assertWorkflowContract(
@@ -889,27 +836,7 @@ export function assertWorkflowContract(
       `${plan.definitionName}: Check concurrency is not same-ref cancellation`,
     );
   }
-  if (oracle.deployment) {
-    assertDeploymentWorkflowContract(plan, workflow, oracle);
-    if (
-      !plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")
-    ) {
-      throw new Error(
-        `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,
-      );
-    }
-    return;
-  }
-  if (
-    job["runs-on"] !== workflowPolicy.rootJob.runner ||
-    job["timeout-minutes"] !== workflowPolicy.rootJob.timeoutMinutes
-  ) {
-    throw new Error(
-      `${plan.definitionName}: Root Check identity is not stable`,
-    );
-  }
-
-  assertRootOnlyWorkflowContract(plan, workflow, oracle);
+  assertGeneratedCheckWorkflowContract(plan, workflow, oracle);
   if (!plan.dependencyMaintenancePolicy.ecosystems.includes("github-actions")) {
     throw new Error(
       `${plan.definitionName}: Check action SHAs are outside the Dependency Maintenance Policy`,

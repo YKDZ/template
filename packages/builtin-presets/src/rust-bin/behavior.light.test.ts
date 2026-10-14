@@ -171,9 +171,11 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     assert.partialDeepStrictEqual(contribution.manifest, {
       name: "@demo/app",
       scripts: {
-        "format:check": "cargo fmt --all -- --check",
-        lint: "cargo clippy --workspace --all-targets -- -D warnings",
-        test: "cargo test --workspace",
+        "format:check":
+          "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+        lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+        test: "node --conditions=source scripts/run-rust-tests.ts",
+        typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
       },
     });
     assert.ok(
@@ -182,6 +184,14 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
           operation.kind === "copyFile" &&
           operation.from === "src/main.rs" &&
           operation.to === "packages/app/src/main.rs",
+      ),
+    );
+    assert.ok(
+      contribution.operations.some(
+        (operation) =>
+          operation.kind === "copyFile" &&
+          operation.from === "scripts/run-rust-tests.ts" &&
+          operation.to === "packages/app/scripts/run-rust-tests.ts",
       ),
     );
     assert.ok(

@@ -245,15 +245,6 @@ export function dockerEngineEnvironmentNeed(): DockerEngineEnvironmentNeed {
   return { kind: "docker-engine" };
 }
 
-export const qualityTaskVocabulary = [
-  "format:check",
-  "lint",
-  "typecheck",
-  "build",
-  "test",
-  "test:e2e",
-] as const;
-
 export function renderTurboRunCommand(
   taskNames: readonly string[],
   args: readonly string[] = [],
@@ -274,22 +265,6 @@ export function renderTurboRunCommand(
     "--log-order=grouped",
     ...(options.taskPrefix ? ["--log-prefix=task"] : []),
   ].join(" ");
-}
-
-export function renderRootCheckCommand(
-  additionalTasks: readonly string[] = [],
-): string {
-  return [
-    "pnpm run boundaries",
-    renderTurboRunCommand([...qualityTaskVocabulary, ...additionalTasks], [], {
-      continueAfterFailure: true,
-      taskPrefix: true,
-    }),
-  ].join(" && ");
-}
-
-export function renderDeploymentCheckCommand(): string {
-  return renderTurboRunCommand(["deployment"], [], { taskPrefix: true });
 }
 
 export function renderFixCommand(): string {

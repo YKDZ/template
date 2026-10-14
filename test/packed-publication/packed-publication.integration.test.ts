@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   mkdirSync,
@@ -59,6 +60,7 @@ const packedDiagnosticExclusions = new Set([
   ".turbo",
   ".cache",
   ".cli-journey-diagnostics",
+  ".verified-packed-publication",
   "node_modules",
   "target",
 ]);
@@ -82,6 +84,7 @@ type ActivePackedRun = {
 let preservePackedWorkspaceAfterSignal = false;
 let activePackedRun: ActivePackedRun | undefined;
 let receivedPackedSignal: NodeJS.Signals | undefined;
+let passedPackedConsumers = 0;
 const packedJourneyKillGracePeriodMs = 10_000;
 const packedJourneyTimeoutMs = 900_000;
 const packedCancellationController = new AbortController();
@@ -710,6 +713,7 @@ async function packTemplateArchive(workspace: string): Promise<string> {
     ".fixture-native-cache",
     ".fixture-workspace",
     ".cli-journey-diagnostics",
+    ".verified-packed-publication",
     ".pnpm-store",
     ".scratch",
     ".turbo",
@@ -767,6 +771,37 @@ async function packTemplateArchive(workspace: string): Promise<string> {
   );
   assert.notStrictEqual(archive, undefined);
   return path.join(archiveDirectory, archive!);
+}
+
+async function prepareVerifiedPackedArtifactDirectory(): Promise<void> {
+  const outputDirectory = process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+  if (outputDirectory === undefined || outputDirectory.length === 0) return;
+  await rm(outputDirectory, { recursive: true, force: true });
+  await mkdir(outputDirectory, { recursive: true });
+}
+
+async function writeVerifiedPackedArtifact(
+  packedArchivePath: string | undefined,
+): Promise<void> {
+  const outputDirectory = process.env.TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR;
+  if (outputDirectory === undefined || outputDirectory.length === 0) return;
+  if (passedPackedConsumers !== 2 || receivedPackedSignal !== undefined) {
+    throw new Error("两个 packed 消费者未全部成功，不能保留发布候选。");
+  }
+  if (packedArchivePath === undefined) {
+    throw new Error("packed 消费者通过后缺少已验证归档。");
+  }
+
+  const archiveName = path.basename(packedArchivePath);
+  const outputArchive = path.join(outputDirectory, archiveName);
+  await cp(packedArchivePath, outputArchive);
+  const digest = createHash("sha512")
+    .update(await readFile(outputArchive))
+    .digest("hex");
+  await writeFile(
+    path.join(outputDirectory, "SHA512SUMS"),
+    `${digest}  ${archiveName}\n`,
+  );
 }
 
 async function expectPackedProjectionRollback(
@@ -1003,26 +1038,24 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   if (checkCommand === undefined) {
     throw new Error("Generated Repository root manifest must define check");
   }
+  assert.strictEqual(
+    checkCommand,
+    "node --conditions=source scripts/quality-gates.ts check",
+  );
+  assert.strictEqual(
+    manifest.scripts["check:heavy"],
+    "node --conditions=source scripts/quality-gates.ts check:heavy",
+  );
+  assert.strictEqual(
+    manifest.scripts["check:full"],
+    "node --conditions=source scripts/quality-gates.ts check:full",
+  );
 
   const scriptNames = Object.keys(manifest.scripts);
   assert.ok(!scriptNames.some((name) => /:(?:run|root)$/u.test(name)));
   assert.ok(!scriptNames.includes("transit"));
-  for (const command of [
-    manifest.scripts.fix,
-    manifest.scripts["check:deployment"],
-  ]) {
+  for (const command of [manifest.scripts.fix]) {
     if (command !== undefined) assert.ok(!command.includes("--filter"));
-  }
-  if (manifest.scripts["publication:artifact"] === undefined) {
-    assert.ok(!checkCommand.includes("--filter"));
-  } else {
-    const publicationExclusions = checkCommand.match(
-      /--filter=!\.\/[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*/gu,
-    );
-    assert.strictEqual(publicationExclusions?.length, 1);
-    assert.ok(
-      !checkCommand.replace(publicationExclusions![0], "").includes("--filter"),
-    );
   }
   assert.doesNotMatch(taskModel, /(?:Check|Fix) (?:Component|Plan)/u);
   assert.doesNotMatch(taskModel, /Deployment Check Component/u);
@@ -1186,6 +1219,7 @@ void describe("packed public CLI consumer", () => {
 
   before(
     async () => {
+      await prepareVerifiedPackedArtifactDirectory();
       await mkdir(journeyDiagnosticsRoot, { recursive: true });
       archiveWorkspace = await mkdtemp(
         path.join(tmpdir(), "template-packed-artifact-"),
@@ -1233,10 +1267,17 @@ void describe("packed public CLI consumer", () => {
   );
 
   after(async () => {
-    if (!preservePackedWorkspaceAfterSignal && archiveWorkspace !== undefined) {
-      await rm(archiveWorkspace, { recursive: true, force: true });
+    try {
+      await writeVerifiedPackedArtifact(packedArchivePath);
+    } finally {
+      if (
+        !preservePackedWorkspaceAfterSignal &&
+        archiveWorkspace !== undefined
+      ) {
+        await rm(archiveWorkspace, { recursive: true, force: true });
+      }
+      activePackedRun = undefined;
     }
-    activePackedRun = undefined;
   });
 
   void it(
@@ -1758,9 +1799,13 @@ void describe("packed public CLI consumer", () => {
           {
             name: `@${nonRustBase!.metadata.name}/worker`,
             scripts: {
-              "format:check": "cargo fmt --all -- --check",
-              lint: "cargo clippy --workspace --all-targets -- -D warnings",
-              test: "cargo test --workspace",
+              "format:check":
+                "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+              "format:write":
+                "cargo fmt --all && oxfmt --write --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+              lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+              test: "node --conditions=source scripts/run-rust-tests.ts",
+              typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
             },
           },
         );
@@ -1885,16 +1930,17 @@ void describe("packed public CLI consumer", () => {
           await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),
         ) as { readonly scripts: Readonly<Record<string, string>> };
         const rootCheckScript = rootManifestAfterRust.scripts.check;
-        assert.ok(rootCheckScript !== undefined);
-        assert.ok(
-          rootCheckScript.includes(
-            "pnpm run boundaries && turbo run format:check lint typecheck test",
-          ),
+        assert.strictEqual(
+          rootCheckScript,
+          "node --conditions=source scripts/quality-gates.ts check",
         );
-        assert.ok(
-          rootCheckScript.includes(
-            "turbo run build test:e2e --filter=!./packages/cli",
-          ),
+        assert.strictEqual(
+          rootManifestAfterRust.scripts["check:heavy"],
+          "node --conditions=source scripts/quality-gates.ts check:heavy",
+        );
+        assert.strictEqual(
+          rootManifestAfterRust.scripts["check:full"],
+          "node --conditions=source scripts/quality-gates.ts check:full",
         );
 
         await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
@@ -2225,6 +2271,7 @@ void describe("packed public CLI consumer", () => {
         }
         activePackedRun = undefined;
       }
+      passedPackedConsumers += 1;
     },
   );
 
@@ -2486,6 +2533,7 @@ void describe("packed public CLI consumer", () => {
       } finally {
         activePackedRun = undefined;
       }
+      passedPackedConsumers += 1;
     },
   );
 });

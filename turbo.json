@@ -215,8 +215,14 @@
     },
     "test:packed-publication": {
       "tags": ["quality:heavy"],
-      "outputs": [],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+      "cache": false,
+      "outputs": [".verified-packed-publication/**"],
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
+      ]
     },
     "test:e2e": {
       "dependsOn": ["build"],
@@ -228,10 +234,6 @@
       "cache": false
     },
     "pack:bundled": {
-      "tags": ["work:release"],
-      "cache": false
-    },
-    "publish:bundled": {
       "tags": ["work:release"],
       "cache": false
     },
@@ -272,8 +274,15 @@
     "//#test:packed-publication": {
       "dependsOn": ["@ykdz/template#build"],
       "tags": ["quality:heavy"],
-      "outputs": [],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+      "cache": false,
+      "outputs": [".verified-packed-publication/**"],
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR",
+        "TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR"
+      ]
     },
     "//#check": {
       "tags": ["quality:entry"],

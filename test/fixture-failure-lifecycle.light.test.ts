@@ -469,7 +469,7 @@ void it(
         args[0] === "exec" &&
         pnpmIndex >= 0 &&
         args[pnpmIndex + 1] === "run" &&
-        args[pnpmIndex + 2] === "check" &&
+        args[pnpmIndex + 2] === "check:full" &&
         scenarioIndex === 1
       ) {
         const activeCommand = execa(
