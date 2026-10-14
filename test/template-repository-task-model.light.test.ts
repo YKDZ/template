@@ -102,7 +102,7 @@ void describe("Template Repository native task model", () => {
     assert.strictEqual(manifest.packageManager, `pnpm@${pnpm.stdout.trim()}`);
   });
 
-  void it("resolves package labels and build contracts through native Turbo", async () => {
+  void it("通过 Turbo 原生能力解析包标签和构建合同", async () => {
     const workspace = parse(
       await readFile("pnpm-workspace.yaml", "utf8"),
     ) as WorkspaceConfig;
@@ -131,7 +131,7 @@ void describe("Template Repository native task model", () => {
         assert.strictEqual(
           task.tags.length,
           1,
-          `${task.fullName} has one task role`,
+          `${task.fullName} 应恰有一个任务职责`,
         );
       }
     }
@@ -152,7 +152,7 @@ void describe("Template Repository native task model", () => {
       (id) => id !== "@ykdz/template-core#build",
     )) {
       const task = buildTasks.get(taskId);
-      assert.ok(task, `${taskId} is in the native build plan`);
+      assert.ok(task, `${taskId} 应出现在原生构建计划中`);
       assert.deepStrictEqual(task.resolvedTaskDefinition.dependsOn, ["^build"]);
       assert.strictEqual(task.resolvedTaskDefinition.cache, true);
       assert.deepStrictEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);

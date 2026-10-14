@@ -691,7 +691,7 @@ void it("rejects an executable root task with conflicting roles", async () => {
   }
 });
 
-void it("rejects package tasks that explicitly clear their owning role", async () => {
+void it("拒绝清除所属任务职责的包任务", async () => {
   const root = await createWorkspace();
   try {
     const packageTurboPath = path.join(root, "packages", "app", "turbo.json");

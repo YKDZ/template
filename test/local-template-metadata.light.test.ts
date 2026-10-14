@@ -952,21 +952,32 @@ void describe("Local Template Metadata", () => {
     );
   });
 
-  void it("rejects a missing database provider ordering edge before Package Addition", async () => {
+  void it("加包前拒绝缺少数据库提供包顺序边的 typecheck 任务", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
     const deploymentCheck = initialized.plan.deploymentCheck;
     if (deploymentCheck === undefined) {
-      throw new Error("Expected a deployment-capable multi-Package Definition");
+      throw new Error("预期存在支持部署检查的多包定义");
     }
-    const taskName = `${deploymentCheck.applicationPackageName}#typecheck`;
-    const turboPath = path.join(initialized.repositoryRoot, "turbo.json");
+    const applicationPackage = initialized.plan.blueprint.packages.find(
+      (package_) => package_.name === deploymentCheck.applicationPackageName,
+    );
+    if (applicationPackage === undefined) {
+      throw new Error("部署检查未解析到应用包");
+    }
+    const turboPath = path.join(
+      initialized.repositoryRoot,
+      applicationPackage.path,
+      "turbo.json",
+    );
     const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
       tasks: Record<string, { dependsOn?: string[] }>;
     };
-    const task = turbo.tasks[taskName];
-    if (task === undefined) throw new Error(`Expected Turbo task ${taskName}`);
+    const task = turbo.tasks.typecheck;
+    if (task === undefined) {
+      throw new Error("应用包本地 Turbo 配置缺少 typecheck 任务");
+    }
     task.dependsOn = [];
     await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
     const before = await workspaceByteSnapshot(initialized.repositoryRoot);
@@ -985,7 +996,7 @@ void describe("Local Template Metadata", () => {
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes(
-          `Package Addition root Turbo Truth requires Turbo task ${taskName} dependsOn`,
+          `Package Addition ${deploymentCheck.applicationPackageName} Turbo Truth requires Turbo task typecheck dependsOn`,
         ),
     );
     assert.deepStrictEqual(
@@ -994,20 +1005,20 @@ void describe("Local Template Metadata", () => {
     );
   });
 
-  void it("rejects capability truth overrides while preserving compatible consumer Turbo customizations", async () => {
+  void it("加包前拒绝能力事实覆写并保留兼容的消费者 Turbo 定制", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
     const deploymentCheck = initialized.plan.deploymentCheck;
     if (deploymentCheck === undefined) {
-      throw new Error("Expected a deployment-capable multi-Package Definition");
+      throw new Error("预期存在支持部署检查的多包定义");
     }
     const packagePath = (packageName: string) => {
       const definition = initialized.plan.blueprint.packages.find(
         (candidate) => candidate.name === packageName,
       );
       if (definition === undefined) {
-        throw new Error(`Expected Package ${packageName}`);
+        throw new Error(`预期存在软件包 ${packageName}`);
       }
       return definition.path;
     };
@@ -1032,6 +1043,12 @@ void describe("Local Template Metadata", () => {
     const applicationTurbo = JSON.parse(
       await readFile(applicationTurboPath, "utf8"),
     ) as Record<string, unknown> & { tasks: Record<string, unknown> };
+    const applicationTypecheck = applicationTurbo.tasks.typecheck as
+      | (Record<string, unknown> & { dependsOn?: string[] })
+      | undefined;
+    if (applicationTypecheck === undefined) {
+      throw new Error("应用包本地 Turbo 配置缺少 typecheck 任务");
+    }
     applicationTurbo.extends = ["//", "../additional-turbo-base"];
     await writeFile(
       applicationTurboPath,
@@ -1055,7 +1072,11 @@ void describe("Local Template Metadata", () => {
     );
 
     applicationTurbo.extends = ["//"];
-    applicationTurbo.tasks.typecheck = { extends: false };
+    applicationTurbo.tasks.typecheck = {
+      ...applicationTypecheck,
+      extends: false,
+      dependsOn: [],
+    };
     await writeFile(
       applicationTurboPath,
       `${JSON.stringify(applicationTurbo, null, 2)}\n`,
@@ -1076,9 +1097,20 @@ void describe("Local Template Metadata", () => {
     );
 
     applicationTurbo.tasks.typecheck = {
+      ...applicationTypecheck,
       dependsOn: [`${databaseName}#build`, "user:preflight"],
     };
-    applicationTurbo.tasks["test:e2e"] = { extends: false };
+    const applicationE2e = applicationTurbo.tasks["test:e2e"] as
+      | (Record<string, unknown> & { dependsOn?: string[] })
+      | undefined;
+    if (applicationE2e === undefined) {
+      throw new Error("应用包本地 Turbo 配置缺少 test:e2e 任务");
+    }
+    applicationTurbo.tasks["test:e2e"] = {
+      ...applicationE2e,
+      extends: false,
+      dependsOn: [],
+    };
     await writeFile(
       applicationTurboPath,
       `${JSON.stringify(applicationTurbo, null, 2)}\n`,
@@ -1098,7 +1130,7 @@ void describe("Local Template Metadata", () => {
       e2eBefore,
     );
 
-    delete applicationTurbo.tasks["test:e2e"];
+    applicationTurbo.tasks["test:e2e"] = applicationE2e;
     await writeFile(
       applicationTurboPath,
       `${JSON.stringify(applicationTurbo, null, 2)}\n`,
@@ -1257,20 +1289,20 @@ void describe("Local Template Metadata", () => {
     });
   });
 
-  void it("在 Package Addition 前拒绝破坏 consumer build 有效数据库排序，同时保留等价定制", async () => {
+  void it("加包前拒绝破坏消费者 build 的有效数据库排序，同时保留等价定制", async () => {
     const initialized = await initializedRepository(
       requireMultiPackageDefinition,
     );
     const deploymentCheck = initialized.plan.deploymentCheck;
     if (deploymentCheck === undefined) {
-      throw new Error("Expected a deployment-capable multi-Package Definition");
+      throw new Error("预期存在支持部署检查的多包定义");
     }
     const packagePath = (packageName: string) => {
       const definition = initialized.plan.blueprint.packages.find(
         (candidate) => candidate.name === packageName,
       );
       if (definition === undefined) {
-        throw new Error(`Expected Package ${packageName}`);
+        throw new Error(`预期存在软件包 ${packageName}`);
       }
       return definition.path;
     };
@@ -1287,7 +1319,6 @@ void describe("Local Template Metadata", () => {
       packagePath(applicationName),
       "turbo.json",
     );
-    const rootTurboPath = path.join(initialized.repositoryRoot, "turbo.json");
     const addPackage = () =>
       planGeneratedRepositoryPackageAddition({
         definition: requireSharedLibraryAdditionDefinition(initialized.context),
@@ -1308,10 +1339,17 @@ void describe("Local Template Metadata", () => {
       turbo: { tasks: Record<string, unknown> },
     ) => writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
 
-    const rootTurbo = await readTurbo(rootTurboPath);
-    rootTurbo.tasks.build = { dependsOn: [] };
-    await writeTurbo(rootTurboPath, rootTurbo);
-    const rootGenericBefore = await workspaceByteSnapshot(
+    const applicationTurbo = await readTurbo(applicationTurboPath);
+    const applicationBuild = applicationTurbo.tasks.build;
+    if (applicationBuild === undefined) {
+      throw new Error("应用包本地 Turbo 配置缺少 build 任务");
+    }
+    applicationTurbo.tasks.build = {
+      ...applicationBuild,
+      dependsOn: [],
+    };
+    await writeTurbo(applicationTurboPath, applicationTurbo);
+    const applicationBuildBefore = await workspaceByteSnapshot(
       initialized.repositoryRoot,
     );
 
@@ -1325,16 +1363,20 @@ void describe("Local Template Metadata", () => {
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
-      rootGenericBefore,
+      applicationBuildBefore,
     );
 
-    rootTurbo.tasks.build = { dependsOn: ["^build"] };
-    rootTurbo.tasks[`${migrationName}#build`] = { outputs: [] };
-    await writeTurbo(rootTurboPath, rootTurbo);
+    applicationTurbo.tasks.build = applicationBuild;
+    await writeTurbo(applicationTurboPath, applicationTurbo);
     const migrationTurbo = await readTurbo(migrationTurboPath);
-    delete migrationTurbo.tasks.build?.dependsOn;
+    const migrationBuild = migrationTurbo.tasks.build;
+    if (migrationBuild === undefined) {
+      throw new Error("迁移包本地 Turbo 配置缺少 build 任务");
+    }
+    migrationTurbo.tasks.build = { ...migrationBuild };
+    delete migrationTurbo.tasks.build.dependsOn;
     await writeTurbo(migrationTurboPath, migrationTurbo);
-    const qualifiedBefore = await workspaceByteSnapshot(
+    const migrationBuildBefore = await workspaceByteSnapshot(
       initialized.repositoryRoot,
     );
 
@@ -1348,19 +1390,21 @@ void describe("Local Template Metadata", () => {
     );
     assert.deepStrictEqual(
       await workspaceByteSnapshot(initialized.repositoryRoot),
-      qualifiedBefore,
+      migrationBuildBefore,
     );
 
-    rootTurbo.tasks[`${migrationName}#build`] = {
-      dependsOn: [`${databaseName}#build`],
-      outputs: [],
+    migrationTurbo.tasks.build = {
+      ...migrationBuild,
+      dependsOn: ["^build"],
     };
-    await writeTurbo(rootTurboPath, rootTurbo);
-    assert.doesNotThrow(addPackage);
+    await writeTurbo(migrationTurboPath, migrationTurbo);
+    assert.doesNotThrow(addPackage, "有效的本地 ^build 前置应继续接受");
 
-    delete rootTurbo.tasks[`${migrationName}#build`];
-    migrationTurbo.tasks.build = { extends: false, outputs: [] };
-    await writeTurbo(rootTurboPath, rootTurbo);
+    migrationTurbo.tasks.build = {
+      ...migrationBuild,
+      extends: false,
+    };
+    delete migrationTurbo.tasks.build.dependsOn;
     await writeTurbo(migrationTurboPath, migrationTurbo);
     const migrationResetBefore = await workspaceByteSnapshot(
       initialized.repositoryRoot,
@@ -1379,8 +1423,10 @@ void describe("Local Template Metadata", () => {
       migrationResetBefore,
     );
 
-    migrationTurbo.tasks.build = { dependsOn: [] };
-    await writeTurbo(rootTurboPath, rootTurbo);
+    migrationTurbo.tasks.build = {
+      ...migrationBuild,
+      dependsOn: [],
+    };
     await writeTurbo(migrationTurboPath, migrationTurbo);
     const migrationOverrideBefore = await workspaceByteSnapshot(
       initialized.repositoryRoot,
@@ -1400,13 +1446,12 @@ void describe("Local Template Metadata", () => {
     );
 
     migrationTurbo.tasks.build = {
+      ...migrationBuild,
       dependsOn: [`${databaseName}#build`, "user:preflight"],
-      outputs: [],
     };
-    const applicationTurbo = await readTurbo(applicationTurboPath);
     applicationTurbo.tasks.build = {
+      ...applicationBuild,
       dependsOn: [],
-      outputs: ["dist/**"],
     };
     await writeTurbo(migrationTurboPath, migrationTurbo);
     await writeTurbo(applicationTurboPath, applicationTurbo);
@@ -1428,8 +1473,8 @@ void describe("Local Template Metadata", () => {
     );
 
     applicationTurbo.tasks.build = {
+      ...applicationBuild,
       dependsOn: [`${databaseName}#build`, "user:preflight"],
-      outputs: ["dist/**"],
     };
     applicationTurbo.tasks["user:report"] = { outputs: [] };
     await writeTurbo(migrationTurboPath, migrationTurbo);
