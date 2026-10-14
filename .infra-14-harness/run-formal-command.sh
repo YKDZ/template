@@ -246,6 +246,121 @@ case "$mode" in
   restored)
     run_phase restored cross-job
     ;;
+  source-diagnostics)
+    source_records="$records/final-diagnostics-source"
+    mkdir -p "$source_records"
+    if ! node --input-type=module <<'NODE'
+import { createHash } from 'node:crypto';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { parse } from 'yaml';
+
+const sourceSha = process.env.SOURCE_SHA;
+const checkedOutSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+if (checkedOutSha !== sourceSha) throw new Error(`源提交不匹配：${checkedOutSha}`);
+
+const workflowPath = resolve(process.env.GITHUB_WORKSPACE, '.github/workflows/check.yml');
+const workflowBytes = readFileSync(workflowPath);
+const workflow = parse(workflowBytes.toString('utf8'));
+const steps = workflow?.jobs?.check?.steps;
+if (!Array.isArray(steps)) throw new Error('固定源没有 jobs.check.steps');
+const positions = new Map(steps.map((step, index) => [step.name, index]));
+const stepByName = new Map(steps.map((step) => [step.name, step]));
+const cleanup = stepByName.get('清理测试容器');
+const owner = stepByName.get('恢复 Fixture 诊断属主');
+const diagnostics = [
+  stepByName.get('Upload Fixture Failure Diagnostics'),
+  stepByName.get('Upload CLI Journey Diagnostics'),
+  stepByName.get('Upload Preset Behavior Diagnostics'),
+];
+if (!cleanup || !owner || diagnostics.some((step) => !step)) {
+  throw new Error('固定源缺少 Fixture 清理、属主恢复或诊断上传步骤');
+}
+if (!(positions.get(cleanup.name) < positions.get(owner.name)
+  && diagnostics.every((step) => positions.get(owner.name) < positions.get(step.name)))) {
+  throw new Error('固定源没有按清理、属主恢复、诊断上传顺序编排');
+}
+const expectedFixtureGuard = "always() && steps.fixture-prerequisites.outcome == 'success'";
+if (cleanup.if !== expectedFixtureGuard || owner.if !== expectedFixtureGuard) {
+  throw new Error('固定源 Fixture 清理或属主恢复条件已变化');
+}
+for (const step of diagnostics) {
+  if (step.uses !== 'actions/upload-artifact@v7') throw new Error(`诊断 action 已变化：${step.name}`);
+  if (step.with?.['include-hidden-files'] !== true || step.with?.['if-no-files-found'] !== 'ignore') {
+    throw new Error(`诊断上传选项已变化：${step.name}`);
+  }
+}
+const [fixtureDiagnostics, cliDiagnostics, presetDiagnostics] = diagnostics;
+if (!String(fixtureDiagnostics.with.path).includes('.fixture-workspace/**')) {
+  throw new Error('Fixture 诊断路径没有包含 .fixture-workspace');
+}
+if (new Set(diagnostics.map((step) => step.with['retention-days'])).size !== 1) {
+  throw new Error('诊断上传的保留天数不一致，不能合并为同一制品');
+}
+
+const recordsDir = resolve(process.env.MEASURE_ROOT, 'records/final-diagnostics-source');
+mkdirSync(recordsDir, { recursive: true });
+const cleanupPath = resolve(recordsDir, 'cleanup-test-containers.sh');
+const ownerPath = resolve(recordsDir, 'restore-diagnostics-owner.sh');
+writeFileSync(cleanupPath, cleanup.run, 'utf8');
+writeFileSync(ownerPath, owner.run, 'utf8');
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const metadata = {
+  source_sha: sourceSha,
+  check_workflow_sha256: sha256(workflowBytes),
+  cleanup_step: { name: cleanup.name, index: positions.get(cleanup.name), run_sha256: sha256(cleanup.run) },
+  owner_step: { name: owner.name, index: positions.get(owner.name), run_sha256: sha256(owner.run) },
+  diagnostic_steps: diagnostics.map((step) => ({
+    name: step.name,
+    index: positions.get(step.name),
+    action: step.uses,
+    path_sha256: sha256(step.with.path),
+    include_hidden_files: step.with['include-hidden-files'],
+    if_no_files_found: step.with['if-no-files-found'],
+    retention_days: step.with['retention-days'],
+  })),
+};
+writeFileSync(resolve(recordsDir, 'source-step-contract.json'), `${JSON.stringify(metadata, null, 2)}\n`);
+console.log(JSON.stringify(metadata));
+
+const artifactPath = [
+  resolve(recordsDir, '**'),
+  '.fixture-evidence/**',
+  '.fixture-evidence-activity/**',
+  fixtureDiagnostics.with.path.trimEnd(),
+  cliDiagnostics.with.path.trimEnd(),
+  presetDiagnostics.with.path.trimEnd(),
+].join('\n');
+const delimiter = 'INFRA14_FINAL_DIAGNOSTICS_PATH';
+if (artifactPath.includes(delimiter)) throw new Error('诊断路径包含 GitHub 输出分隔符');
+appendFileSync(process.env.GITHUB_OUTPUT,
+  `artifact_path<<${delimiter}\n${artifactPath}\n${delimiter}\n`
+  + `include_hidden_files=true\nif_no_files_found=ignore\nretention_days=${fixtureDiagnostics.with['retention-days']}\n`);
+NODE
+    then
+      printf '源诊断步骤提取失败。\n' > "$source_records/extraction-failed.txt"
+      exit 1
+    fi
+
+    if bash --noprofile --norc -e -o pipefail "$source_records/cleanup-test-containers.sh" \
+      > "$source_records/cleanup.stdout.log" 2> "$source_records/cleanup.stderr.log"; then
+      cleanup_status=0
+    else
+      cleanup_status=$?
+    fi
+    if bash --noprofile --norc -e -o pipefail "$source_records/restore-diagnostics-owner.sh" \
+      > "$source_records/owner-restore.stdout.log" 2> "$source_records/owner-restore.stderr.log"; then
+      owner_status=0
+    else
+      owner_status=$?
+    fi
+    printf 'cleanup_exit=%s\nowner_restore_exit=%s\n' "$cleanup_status" "$owner_status" \
+      > "$source_records/source-step-results.txt"
+    printf '固定源的容器清理与诊断属主恢复结果：cleanup=%s owner_restore=%s\n' \
+      "$cleanup_status" "$owner_status" >&2
+    if [[ "$cleanup_status" -ne 0 || "$owner_status" -ne 0 ]]; then overall_status=1; fi
+    ;;
   probe)
     probe_command_cwd="$RUNNER_TEMP/infra-14-observability-command"
     mkdir -p "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe"

@@ -278,45 +278,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: 执行固定源的容器清理与诊断属主恢复
+        id: source-diagnostics-finalize
+        if: always()
+        shell: bash
+        run: '"$MEASURE_ROOT/run-formal-command.sh" source-diagnostics'
+
       - name: 上传生成现场诊断
         id: diagnostics-artifact-upload
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: infra-14-performance-diagnostics-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .fixture-evidence/**
-            .fixture-evidence-activity/**
-            .fixture-workspace/**
-            !.fixture-workspace/**/node_modules/**
-            !.fixture-workspace/**/.pnpm-store/**
-            !.fixture-workspace/**/.npm/**
-            !.fixture-workspace/**/.cargo/registry/**
-            !.fixture-workspace/**/.cargo/git/**
-            !.fixture-workspace/**/target/**
-            !.fixture-workspace/**/.cache/**
-            !.fixture-workspace/**/.turbo/cache/**
-            .cli-journey-diagnostics/**
-            !.cli-journey-diagnostics/**/node_modules/**
-            !.cli-journey-diagnostics/**/.pnpm-store/**
-            !.cli-journey-diagnostics/**/.npm/**
-            !.cli-journey-diagnostics/**/.cargo/registry/**
-            !.cli-journey-diagnostics/**/.cargo/git/**
-            !.cli-journey-diagnostics/**/target/**
-            !.cli-journey-diagnostics/**/.cache/**
-            !.cli-journey-diagnostics/**/.turbo/cache/**
-            .preset-behavior-diagnostics/**
-            !.preset-behavior-diagnostics/**/node_modules/**
-            !.preset-behavior-diagnostics/**/.pnpm-store/**
-            !.preset-behavior-diagnostics/**/.npm/**
-            !.preset-behavior-diagnostics/**/.cargo/registry/**
-            !.preset-behavior-diagnostics/**/.cargo/git/**
-            !.preset-behavior-diagnostics/**/target/**
-            !.preset-behavior-diagnostics/**/.cache/**
-            !.preset-behavior-diagnostics/**/.turbo/cache/**
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
+          path: ${{ steps.source-diagnostics-finalize.outputs.artifact_path }}
+          include-hidden-files: ${{ steps.source-diagnostics-finalize.outputs.include_hidden_files }}
+          if-no-files-found: ${{ steps.source-diagnostics-finalize.outputs.if_no_files_found }}
+          retention-days: ${{ steps.source-diagnostics-finalize.outputs.retention_days }}
 
       - name: 记录生成现场上传结果
         if: always()
@@ -527,45 +504,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      - name: 执行固定源的容器清理与诊断属主恢复
+        id: source-diagnostics-finalize
+        if: always()
+        shell: bash
+        run: '"$MEASURE_ROOT/run-restored-command.sh" source-diagnostics'
+
       - name: 上传恢复 job 生成现场诊断
         id: restored-diagnostics-artifact-upload
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: infra-14-performance-restore-diagnostics-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .fixture-evidence/**
-            .fixture-evidence-activity/**
-            .fixture-workspace/**
-            !.fixture-workspace/**/node_modules/**
-            !.fixture-workspace/**/.pnpm-store/**
-            !.fixture-workspace/**/.npm/**
-            !.fixture-workspace/**/.cargo/registry/**
-            !.fixture-workspace/**/.cargo/git/**
-            !.fixture-workspace/**/target/**
-            !.fixture-workspace/**/.cache/**
-            !.fixture-workspace/**/.turbo/cache/**
-            .cli-journey-diagnostics/**
-            !.cli-journey-diagnostics/**/node_modules/**
-            !.cli-journey-diagnostics/**/.pnpm-store/**
-            !.cli-journey-diagnostics/**/.npm/**
-            !.cli-journey-diagnostics/**/.cargo/registry/**
-            !.cli-journey-diagnostics/**/.cargo/git/**
-            !.cli-journey-diagnostics/**/target/**
-            !.cli-journey-diagnostics/**/.cache/**
-            !.cli-journey-diagnostics/**/.turbo/cache/**
-            .preset-behavior-diagnostics/**
-            !.preset-behavior-diagnostics/**/node_modules/**
-            !.preset-behavior-diagnostics/**/.pnpm-store/**
-            !.preset-behavior-diagnostics/**/.npm/**
-            !.preset-behavior-diagnostics/**/.cargo/registry/**
-            !.preset-behavior-diagnostics/**/.cargo/git/**
-            !.preset-behavior-diagnostics/**/target/**
-            !.preset-behavior-diagnostics/**/.cache/**
-            !.preset-behavior-diagnostics/**/.turbo/cache/**
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 7
+          path: ${{ steps.source-diagnostics-finalize.outputs.artifact_path }}
+          include-hidden-files: ${{ steps.source-diagnostics-finalize.outputs.include_hidden_files }}
+          if-no-files-found: ${{ steps.source-diagnostics-finalize.outputs.if_no_files_found }}
+          retention-days: ${{ steps.source-diagnostics-finalize.outputs.retention_days }}
 
       - name: 记录恢复 job 现场上传结果
         if: always()

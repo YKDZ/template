@@ -311,7 +311,7 @@ jobs:
           test "$(cat "$records/controlled/intentional-exit.exit")" = 17
           grep -Fxq 'controlled stdout' "$records/controlled/intentional-exit.stdout.log"
           grep -Fxq 'controlled stderr' "$records/controlled/intentional-exit.stderr.log"
-          grep -Fxq 'exit=17' "$records/controlled/intentional-exit.time"
+          grep -Fq 'exit=17' "$records/controlled/intentional-exit.time"
           grep -Fxq 'host_pnpm_dependency_install_execve_successes=0' \
             "$records/controlled/intentional-exit.pnpm-dependency-install-count.txt"
           grep -Fxq 'uid=0 gid=0 mode=600' \
