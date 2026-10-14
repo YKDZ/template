@@ -51,6 +51,9 @@ jobs:
         with:
           node-version-file: package.json
 
+      - name: 准备声明版本的 Rust 格式化器
+        run: rustup component add --toolchain 1.99.0 rustfmt
+
       - name: 准备独立 Docker Buildx builder
         uses: docker/setup-buildx-action@v4
         with:
