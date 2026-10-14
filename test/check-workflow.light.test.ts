@@ -294,6 +294,8 @@ void describe("Fixture Verification Evidence check workflow", () => {
         "${{ github.workspace }}/.fixture-native-cache/cargo",
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR:
         "${{ github.workspace }}/.cli-journey-diagnostics",
+      TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR:
+        "${{ github.workspace }}/.preset-behavior-diagnostics",
       TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR:
         "${{ inputs.publish_verified_candidate && format('{0}/.verified-packed-publication', github.workspace) || '' }}",
     });

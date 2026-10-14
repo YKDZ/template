@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import {
+import fsPromises, {
+  mkdtemp,
   mkdir,
   readFile,
   readdir,
@@ -9,22 +10,445 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it, mock } from "node:test";
 
 import { execa } from "execa";
 
 import {
+  installedIntegrationSignal,
+  throwIfInstalledIntegrationWasCancelled,
+} from "../../test-support/installed-integration-signal.ts";
+import {
   driveGeneratedTerminal,
   expectNoControlCharacters,
   renderGeneratedRepository,
-  renderInstalledGeneratedRepository,
+  cleanupSharedInstalledTsCliRepository,
+  withSharedInstalledGeneratedRepository,
   writeAcceptedFirstReleaseArtifact,
   writeExecutable,
   type TerminalConfirmationStep,
 } from "../../test-support/ts-cli-behavior.ts";
 
 void describe("ts-cli Preset Definition integration behavior", () => {
+  after(async () => await cleanupSharedInstalledTsCliRepository());
+
+  void it(
+    "terminates the owned terminal process when a confirmation prompt is missing",
+    { timeout: 45_000 },
+    async (testContext) => {
+      const workspace = await mkdtemp(
+        path.join(tmpdir(), "template-ts-cli-terminal-prompt-failure-"),
+      );
+      const pidPath = path.join(workspace, "owned-processes.txt");
+      const nodeScript = [
+        'require("node:fs").writeFileSync(process.env.PID_PATH, String(process.pid));',
+        'console.log("terminal-started");',
+        'for (const signal of ["SIGTERM", "SIGHUP", "SIGINT"]) process.on(signal, () => {});',
+        "setInterval(() => {}, 1000);",
+      ].join(" ");
+      const quotedNodeScript = `'${nodeScript.replaceAll("'", "'\\''")}'`;
+      const nodePath = `'${process.execPath.replaceAll("'", "'\\''")}'`;
+      let driving: ReturnType<typeof driveGeneratedTerminal> | undefined;
+      let testFailure: { readonly cause: unknown } | undefined;
+      try {
+        driving = driveGeneratedTerminal(
+          `exec ${nodePath} -e ${quotedNodeScript}`,
+          {
+            cwd: workspace,
+            env: { ...process.env, PID_PATH: pidPath },
+            signal: installedIntegrationSignal(testContext.signal),
+          },
+          [{ marker: "missing-stage", prompt: ">", line: "unused" }],
+        );
+        const pidDeadline = Date.now() + 5_000;
+        let processFile = "";
+        while (processFile.length === 0 && Date.now() < pidDeadline) {
+          processFile = await readFile(pidPath, "utf8").catch(() => "");
+          if (processFile.length === 0)
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.notStrictEqual(processFile.length, 0);
+        const ownedProcess = Number(processFile.trim());
+        const processGroup = await execa("ps", [
+          "-o",
+          "pgid=",
+          "-p",
+          `${ownedProcess}`,
+        ]);
+        assert.strictEqual(Number(processGroup.stdout.trim()), ownedProcess);
+        await assert.rejects(driving, (error: unknown) => {
+          assert.ok(error instanceof Error);
+          if (!error.message.includes("Terminal protocol stalled")) throw error;
+          assert.ok(error.message.includes("terminal-started"));
+          return true;
+        });
+        const ownedProcesses = (await readFile(pidPath, "utf8"))
+          .trim()
+          .split("\n")
+          .map(Number);
+        const runningProcesses = [] as number[];
+        for (const processId of ownedProcesses) {
+          const status = await execa(
+            "ps",
+            ["-o", "stat=", "-p", `${processId}`],
+            {
+              reject: false,
+            },
+          );
+          if (status.exitCode === 0 && !status.stdout.trim().startsWith("Z"))
+            runningProcesses.push(processId);
+        }
+        assert.deepStrictEqual(runningProcesses, []);
+      } catch (cause) {
+        testFailure = { cause };
+      }
+      const cleanupCauses: unknown[] = [];
+      const ownedProcesses = await readFile(pidPath, "utf8").catch(() => "");
+      for (const processId of ownedProcesses.trim().split("\n").map(Number)) {
+        if (!Number.isInteger(processId) || processId <= 1) continue;
+        try {
+          process.kill(processId, "SIGKILL");
+        } catch (cause) {
+          if ((cause as NodeJS.ErrnoException).code !== "ESRCH")
+            cleanupCauses.push(cause);
+        }
+      }
+      await driving?.catch(() => undefined);
+      try {
+        await rm(workspace, { recursive: true, force: true });
+      } catch (cause) {
+        cleanupCauses.push(cause);
+      }
+      if (testFailure !== undefined && cleanupCauses.length > 0)
+        throw new AggregateError(
+          [testFailure.cause, ...cleanupCauses],
+          "Terminal prompt failure cleanup also failed",
+          { cause: testFailure.cause },
+        );
+      if (testFailure !== undefined) throw testFailure.cause;
+      if (cleanupCauses.length > 0)
+        throw new AggregateError(
+          cleanupCauses,
+          "Terminal prompt test cleanup failed",
+        );
+    },
+  );
+
+  void it(
+    "keeps installed scenarios independent and retries failure cleanup",
+    { timeout: 90_000 },
+    async () => {
+      const diagnosticsRoot = await mkdtemp(
+        path.join(tmpdir(), "template-ts-cli-diagnostics-test-"),
+      );
+      const diagnosticsVariable =
+        "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR" as const;
+      const priorDiagnosticsRoot = process.env[diagnosticsVariable];
+      const originalRm = fsPromises.rm.bind(fsPromises);
+      let failedWorkspace: string | undefined;
+      let matchingRemovals = 0;
+      const rmMock = mock.method(
+        fsPromises,
+        "rm",
+        async (
+          target: Parameters<typeof fsPromises.rm>[0],
+          options?: Parameters<typeof fsPromises.rm>[1],
+        ) => {
+          if (
+            failedWorkspace !== undefined &&
+            path.resolve(String(target)) === failedWorkspace
+          ) {
+            matchingRemovals += 1;
+            if (matchingRemovals === 1)
+              throw new Error("transient workspace cleanup failure");
+          }
+          return await originalRm(target, options);
+        },
+      );
+      syncBuiltinESMExports();
+      process.env[diagnosticsVariable] = diagnosticsRoot;
+      const scenarioFailure = Object.assign(
+        new Error("generated CLI assertion failed"),
+        {
+          command: "node src/cli.ts lookup missing",
+          stdout: "captured generated CLI output",
+          stderr: "captured generated CLI diagnostic",
+        },
+      );
+      try {
+        await assert.rejects(
+          withSharedInstalledGeneratedRepository(
+            "template-ts-cli-failure-lifecycle-",
+            async (repository) => {
+              failedWorkspace = repository.workspace;
+              const changedFile = path.join(
+                repository.packageRoot,
+                "src/scenario-isolated.ts",
+              );
+              await writeFile(changedFile, "export const changed = true;\n");
+              throw scenarioFailure;
+            },
+          ),
+          (cause: unknown) => cause === scenarioFailure,
+        );
+
+        assert.strictEqual(matchingRemovals, 2);
+        await assert.rejects(stat(failedWorkspace!), { code: "ENOENT" });
+        const [diagnosticName] = await readdir(diagnosticsRoot);
+        assert.ok(diagnosticName);
+        const diagnosticDirectory = path.join(diagnosticsRoot, diagnosticName);
+        const report = JSON.parse(
+          await readFile(
+            path.join(diagnosticDirectory, "failure.json"),
+            "utf8",
+          ),
+        ) as {
+          readonly originalWorkspace: string;
+          readonly retainedWorkspace: string;
+          readonly generatedRepository: string;
+          readonly cause: {
+            readonly command: string;
+            readonly stdout: string;
+            readonly stderr: string;
+          };
+        };
+        assert.strictEqual(report.originalWorkspace, failedWorkspace);
+        assert.strictEqual(
+          report.cause.command,
+          "node src/cli.ts lookup missing",
+        );
+        assert.strictEqual(
+          report.cause.stdout,
+          "captured generated CLI output",
+        );
+        assert.strictEqual(
+          report.cause.stderr,
+          "captured generated CLI diagnostic",
+        );
+        assert.strictEqual(
+          await readFile(
+            path.join(
+              report.generatedRepository,
+              "packages/cli/src/scenario-isolated.ts",
+            ),
+            "utf8",
+          ),
+          "export const changed = true;\n",
+        );
+        await assert.rejects(
+          stat(path.join(report.retainedWorkspace, "demo-cli/node_modules")),
+          { code: "ENOENT" },
+        );
+      } finally {
+        rmMock.mock.restore();
+        syncBuiltinESMExports();
+        if (priorDiagnosticsRoot === undefined)
+          delete process.env[diagnosticsVariable];
+        else process.env[diagnosticsVariable] = priorDiagnosticsRoot;
+      }
+
+      const unavailableCommandDirectory = await mkdtemp(
+        path.join(tmpdir(), "template-ts-cli-no-pnpm-"),
+      );
+      const priorPath = process.env.PATH;
+      let preparationWorkspace: string | undefined;
+      let preparationRemovals = 0;
+      const preparationOriginalRm = fsPromises.rm.bind(fsPromises);
+      const preparationCleanupMock = mock.method(
+        fsPromises,
+        "rm",
+        async (
+          target: Parameters<typeof fsPromises.rm>[0],
+          options?: Parameters<typeof fsPromises.rm>[1],
+        ) => {
+          const targetPath = path.resolve(String(target));
+          if (
+            path
+              .basename(targetPath)
+              .startsWith("template-ts-cli-preparation-cleanup-failure-")
+          ) {
+            preparationWorkspace = targetPath;
+            preparationRemovals += 1;
+            throw new Error(
+              `preparation cleanup attempt ${preparationRemovals}`,
+            );
+          }
+          return await preparationOriginalRm(target, options);
+        },
+      );
+      syncBuiltinESMExports();
+      process.env.PATH = unavailableCommandDirectory;
+      const priorPreparationDiagnosticsRoot = process.env[diagnosticsVariable];
+      process.env[diagnosticsVariable] = diagnosticsRoot;
+      try {
+        let preparationCause: unknown;
+        await assert.rejects(
+          renderGeneratedRepository(
+            "template-ts-cli-preparation-cleanup-failure-",
+            true,
+          ),
+          (cause: unknown) => {
+            assert.ok(cause instanceof AggregateError);
+            const [originalCause, cleanupCause] = cause.errors;
+            assert.strictEqual(cause.cause, originalCause);
+            assert.ok(originalCause instanceof Error);
+            assert.match(originalCause.message, /pnpm/u);
+            assert.ok(cleanupCause instanceof AggregateError);
+            preparationCause = originalCause;
+            return true;
+          },
+        );
+        assert.strictEqual(preparationRemovals, 2);
+        assert.ok(preparationWorkspace);
+        const reports = await Promise.all(
+          (await readdir(diagnosticsRoot)).map(async (entry) => {
+            const report = JSON.parse(
+              await readFile(
+                path.join(diagnosticsRoot, entry, "failure.json"),
+                "utf8",
+              ),
+            ) as {
+              readonly originalWorkspace: string;
+              readonly generatedRepository: string;
+              readonly cause: { readonly message: string };
+            };
+            return report.originalWorkspace === preparationWorkspace
+              ? report
+              : undefined;
+          }),
+        );
+        const preparationReport = reports.find(
+          (report) => report !== undefined,
+        );
+        assert.ok(preparationReport);
+        assert.match(preparationReport.cause.message, /pnpm/u);
+        assert.strictEqual(
+          await readFile(
+            path.join(preparationReport.generatedRepository, "package.json"),
+            "utf8",
+          ).then((value) => JSON.parse(value).name),
+          "demo-cli",
+        );
+        assert.strictEqual(
+          (preparationCause as Error).message,
+          preparationReport.cause.message,
+        );
+      } finally {
+        preparationCleanupMock.mock.restore();
+        syncBuiltinESMExports();
+        if (priorPath === undefined) delete process.env.PATH;
+        else process.env.PATH = priorPath;
+        if (priorPreparationDiagnosticsRoot === undefined)
+          delete process.env[diagnosticsVariable];
+        else process.env[diagnosticsVariable] = priorPreparationDiagnosticsRoot;
+        if (preparationWorkspace !== undefined)
+          await preparationOriginalRm(preparationWorkspace, {
+            recursive: true,
+            force: true,
+          });
+        await rm(unavailableCommandDirectory, { recursive: true, force: true });
+      }
+
+      try {
+        await withSharedInstalledGeneratedRepository(
+          "template-ts-cli-independent-scenario-",
+          async (repository) => {
+            await assert.rejects(
+              stat(
+                path.join(repository.packageRoot, "src/scenario-isolated.ts"),
+              ),
+              { code: "ENOENT" },
+            );
+          },
+        );
+
+        let sharedWorkspace: string | undefined;
+        let sharedRemovalAttempts = 0;
+        const sharedOriginalRm = fsPromises.rm.bind(fsPromises);
+        const sharedCleanupMock = mock.method(
+          fsPromises,
+          "rm",
+          async (
+            target: Parameters<typeof fsPromises.rm>[0],
+            options?: Parameters<typeof fsPromises.rm>[1],
+          ) => {
+            const targetPath = path.resolve(String(target));
+            if (
+              path
+                .basename(targetPath)
+                .startsWith("template-ts-cli-shared-installed-base-")
+            ) {
+              sharedWorkspace = targetPath;
+              sharedRemovalAttempts += 1;
+              throw new Error(
+                `shared base removal attempt ${sharedRemovalAttempts}`,
+              );
+            }
+            return await sharedOriginalRm(target, options);
+          },
+        );
+        syncBuiltinESMExports();
+        const previousCleanupDiagnostics = process.env[diagnosticsVariable];
+        process.env[diagnosticsVariable] = diagnosticsRoot;
+        let cleanupReport:
+          | {
+              readonly scenario: string;
+              readonly cause: {
+                readonly name: string;
+                readonly errors?: readonly { readonly message: string }[];
+              };
+            }
+          | undefined;
+        try {
+          await assert.rejects(cleanupSharedInstalledTsCliRepository(), {
+            name: "AggregateError",
+          });
+          assert.strictEqual(sharedRemovalAttempts, 2);
+          assert.ok(sharedWorkspace);
+          cleanupReport = await Promise.all(
+            (await readdir(diagnosticsRoot)).map(async (entry) => {
+              const report = JSON.parse(
+                await readFile(
+                  path.join(diagnosticsRoot, entry, "failure.json"),
+                  "utf8",
+                ),
+              ) as {
+                readonly scenario: string;
+                readonly cause: {
+                  readonly name: string;
+                  readonly errors?: readonly { readonly message: string }[];
+                };
+              };
+              return report.scenario ===
+                "template-ts-cli-shared-installed-base-"
+                ? report
+                : undefined;
+            }),
+          ).then((reports) => reports.find((report) => report !== undefined));
+        } finally {
+          sharedCleanupMock.mock.restore();
+          syncBuiltinESMExports();
+          if (previousCleanupDiagnostics === undefined)
+            delete process.env[diagnosticsVariable];
+          else process.env[diagnosticsVariable] = previousCleanupDiagnostics;
+        }
+
+        await cleanupSharedInstalledTsCliRepository();
+        await assert.rejects(stat(sharedWorkspace!), { code: "ENOENT" });
+        assert.ok(cleanupReport);
+        assert.deepStrictEqual(
+          cleanupReport.cause.errors?.map((error) => error.message),
+          ["shared base removal attempt 1", "shared base removal attempt 2"],
+        );
+      } finally {
+        await rm(diagnosticsRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   void it(
     "restores SIGTERM from blocked confirmation, captured read, and interactive write owners",
     { timeout: 90_000 },
@@ -914,14 +1338,13 @@ esac
   });
 
   void it("reports the existing Ticket 09 artifact failure without forwarding child bytes", async () => {
-    const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+    await withSharedInstalledGeneratedRepository(
       "template-publication-setup-artifact-failure-",
-    );
-    try {
-      const fakeBin = path.join(workspace, "fake-bin");
-      await writeExecutable(
-        path.join(fakeBin, "git"),
-        `#!/usr/bin/env bash
+      async ({ workspace, targetDir }) => {
+        const fakeBin = path.join(workspace, "fake-bin");
+        await writeExecutable(
+          path.join(fakeBin, "git"),
+          `#!/usr/bin/env bash
 case "$1" in
   status) exit 0 ;;
   symbolic-ref) printf 'main\\n' ;;
@@ -932,194 +1355,197 @@ case "$1" in
   *) exit 97 ;;
 esac
 `,
-      );
-      await writeExecutable(
-        path.join(fakeBin, "pnpm"),
-        `#!/usr/bin/env bash
+        );
+        await writeExecutable(
+          path.join(fakeBin, "pnpm"),
+          `#!/usr/bin/env bash
 [ "$1" = pack ] || exit 97
 printf 'TOKEN=artifact-secret \\033[2J\\r\\302\\205\\n' >&2
 exit 19
 `,
-      );
-      const result = await execa(
-        "./scripts/npm-publication-setup/setup.sh",
-        [
-          "--package-name",
-          "@demo/ship",
-          "--bin",
-          "ship",
-          "--description",
-          "A focused command-line release tool.",
-          "--license",
-          "MIT",
-          "--copyright-holder",
-          "Ada Lovelace",
-          "--repository",
-          "https://github.com/demo/ship",
-          "--non-interactive",
-        ],
-        {
-          cwd: targetDir,
-          env: { PATH: `${fakeBin}:${process.env.PATH}` },
-          reject: false,
-        },
-      );
-      assert.strictEqual(result.exitCode, 5);
-      assert.ok(result.stderr.includes("ERROR artifact-pack-failed"));
-      assert.ok(result.stderr.includes("TOKEN=[REDACTED]"));
-      assert.strictEqual(
-        `${result.stdout}\n${result.stderr}`.includes("artifact-secret"),
-        false,
-      );
-      expectNoControlCharacters(`${result.stdout}\n${result.stderr}`);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
+        );
+        const result = await execa(
+          "./scripts/npm-publication-setup/setup.sh",
+          [
+            "--package-name",
+            "@demo/ship",
+            "--bin",
+            "ship",
+            "--description",
+            "A focused command-line release tool.",
+            "--license",
+            "MIT",
+            "--copyright-holder",
+            "Ada Lovelace",
+            "--repository",
+            "https://github.com/demo/ship",
+            "--non-interactive",
+          ],
+          {
+            cwd: targetDir,
+            env: { PATH: `${fakeBin}:${process.env.PATH}` },
+            reject: false,
+          },
+        );
+        assert.strictEqual(result.exitCode, 5);
+        assert.ok(result.stderr.includes("ERROR artifact-pack-failed"));
+        assert.ok(result.stderr.includes("TOKEN=[REDACTED]"));
+        assert.strictEqual(
+          `${result.stdout}\n${result.stderr}`.includes("artifact-secret"),
+          false,
+        );
+        expectNoControlCharacters(`${result.stdout}\n${result.stderr}`);
+      },
+    );
   });
 
   void it(
     "runs the isolated npm first-publish and exact-resume bridge through a generated terminal",
     { timeout: 600_000 },
     async () => {
-      const { workspace, targetDir } = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-publication-setup-ticket-13-",
-      );
-      const fakeBin = path.join(workspace, "fake-bin");
-      const statePath = path.join(workspace, "npm-state.json");
-      const isolatedTemporaryParent = path.join(workspace, "isolated-tmp");
-      const setupDirectory = path.join(
-        targetDir,
-        "scripts/npm-publication-setup",
-      );
-      const bridgePath = path.join(setupDirectory, "bridge.ts");
-      const configureEnvironment = {
-        REPOSITORY_ROOT: targetDir,
-        SETUP_DIR: setupDirectory,
-        PACKAGE_NAME: "@demo/ship",
-        COMMAND_NAME: "ship",
-        DESCRIPTION: "A focused command-line release tool.",
-        LICENSE_NAME: "MIT",
-        COPYRIGHT_HOLDER: "Ada Lovelace",
-        REPOSITORY_URL: "https://github.com/demo/ship",
-      };
-      try {
-        await mkdir(isolatedTemporaryParent);
-        for (const command of ["format:check", "lint", "typecheck"] as const) {
-          const checked = await execa("pnpm", ["run", command], {
+        async ({ workspace, targetDir }) => {
+          const fakeBin = path.join(workspace, "fake-bin");
+          const statePath = path.join(workspace, "npm-state.json");
+          const isolatedTemporaryParent = path.join(workspace, "isolated-tmp");
+          const setupDirectory = path.join(
+            targetDir,
+            "scripts/npm-publication-setup",
+          );
+          const bridgePath = path.join(setupDirectory, "bridge.ts");
+          const configureEnvironment = {
+            REPOSITORY_ROOT: targetDir,
+            SETUP_DIR: setupDirectory,
+            PACKAGE_NAME: "@demo/ship",
+            COMMAND_NAME: "ship",
+            DESCRIPTION: "A focused command-line release tool.",
+            LICENSE_NAME: "MIT",
+            COPYRIGHT_HOLDER: "Ada Lovelace",
+            REPOSITORY_URL: "https://github.com/demo/ship",
+          };
+
+          await mkdir(isolatedTemporaryParent);
+          for (const command of [
+            "format:check",
+            "lint",
+            "typecheck",
+          ] as const) {
+            const checked = await execa("pnpm", ["run", command], {
+              cwd: targetDir,
+              reject: false,
+            });
+            assert.strictEqual(
+              checked.exitCode,
+              0,
+              `${command}: ${checked.stdout}\n${checked.stderr}`,
+            );
+          }
+          const projectedBridge = await readFile(bridgePath, "utf8");
+          await writeFile(
+            bridgePath,
+            `${projectedBridge}\nconst formatProbe={ value: 1 };\n`,
+          );
+          const malformed = await execa("pnpm", ["run", "format:check"], {
             cwd: targetDir,
             reject: false,
           });
-          assert.strictEqual(
-            checked.exitCode,
-            0,
-            `${command}: ${checked.stdout}\n${checked.stderr}`,
+          assert.notStrictEqual(malformed.exitCode, 0);
+          await writeFile(bridgePath, projectedBridge);
+          await writeFile(
+            bridgePath,
+            `${projectedBridge}\nconst lintProbe = 1;\n`,
           );
-        }
-        const projectedBridge = await readFile(bridgePath, "utf8");
-        await writeFile(
-          bridgePath,
-          `${projectedBridge}\nconst formatProbe={ value: 1 };\n`,
-        );
-        const malformed = await execa("pnpm", ["run", "format:check"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.notStrictEqual(malformed.exitCode, 0);
-        await writeFile(bridgePath, projectedBridge);
-        await writeFile(
-          bridgePath,
-          `${projectedBridge}\nconst lintProbe = 1;\n`,
-        );
-        const lintViolation = await execa("pnpm", ["run", "lint"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.notStrictEqual(lintViolation.exitCode, 0);
-        await writeFile(bridgePath, projectedBridge);
-        await writeFile(
-          bridgePath,
-          `${projectedBridge}\nenum InvalidBridgeEnum { Value }\n`,
-        );
-        const nonErasable = await execa("pnpm", ["run", "typecheck"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.notStrictEqual(nonErasable.exitCode, 0);
-        await writeFile(bridgePath, projectedBridge);
-        const restoredTypecheck = await execa("pnpm", ["run", "typecheck"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.strictEqual(restoredTypecheck.exitCode, 0);
-        const generatedManifestPath = path.join(targetDir, "package.json");
-        const generatedManifestBytes = await readFile(generatedManifestPath);
-        const manifestBeforeMapping = JSON.parse(
-          generatedManifestBytes.toString(),
-        ) as {
-          imports: Record<string, string>;
-        };
-        await writeFile(
-          generatedManifestPath,
-          `${JSON.stringify({ ...manifestBeforeMapping, imports: {} }, null, 2)}\n`,
-        );
-        const missingImports = await execa("pnpm", ["run", "typecheck"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.notStrictEqual(missingImports.exitCode, 0);
-        await writeFile(
-          generatedManifestPath,
-          `${JSON.stringify(
-            {
-              ...manifestBeforeMapping,
-              imports: {
-                "#npm-publication/*": "./scripts/not-publication/*.ts",
+          const lintViolation = await execa("pnpm", ["run", "lint"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.notStrictEqual(lintViolation.exitCode, 0);
+          await writeFile(bridgePath, projectedBridge);
+          await writeFile(
+            bridgePath,
+            `${projectedBridge}\nenum InvalidBridgeEnum { Value }\n`,
+          );
+          const nonErasable = await execa("pnpm", ["run", "typecheck"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.notStrictEqual(nonErasable.exitCode, 0);
+          await writeFile(bridgePath, projectedBridge);
+          const restoredTypecheck = await execa("pnpm", ["run", "typecheck"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.strictEqual(restoredTypecheck.exitCode, 0);
+          const generatedManifestPath = path.join(targetDir, "package.json");
+          const generatedManifestBytes = await readFile(generatedManifestPath);
+          const manifestBeforeMapping = JSON.parse(
+            generatedManifestBytes.toString(),
+          ) as {
+            imports: Record<string, string>;
+          };
+          await writeFile(
+            generatedManifestPath,
+            `${JSON.stringify({ ...manifestBeforeMapping, imports: {} }, null, 2)}\n`,
+          );
+          const missingImports = await execa("pnpm", ["run", "typecheck"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.notStrictEqual(missingImports.exitCode, 0);
+          await writeFile(
+            generatedManifestPath,
+            `${JSON.stringify(
+              {
+                ...manifestBeforeMapping,
+                imports: {
+                  "#npm-publication/*": "./scripts/not-publication/*.ts",
+                },
               },
-            },
-            null,
-            2,
-          )}\n`,
-        );
-        const wrongImports = await execa("pnpm", ["run", "typecheck"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.notStrictEqual(wrongImports.exitCode, 0);
-        await writeFile(generatedManifestPath, generatedManifestBytes);
-        assert.deepStrictEqual(
-          [
-            ...projectedBridge.matchAll(
-              /from "([^"]*(?:npm-)?publication[^"]*)"/gu,
-            ),
-          ].map((match) => match[1]),
-          [
-            "#npm-publication/artifact",
-            "#npm-publication/handoff",
-            "#npm-publication/readiness",
-          ],
-        );
-        assert.doesNotMatch(
-          projectedBridge,
-          /from "\.\.\/(?:npm-)?publication\//u,
-        );
-        const mappingRestored = await execa("pnpm", ["run", "typecheck"], {
-          cwd: targetDir,
-          reject: false,
-        });
-        assert.strictEqual(mappingRestored.exitCode, 0);
-        const configured = await execa(
-          process.execPath,
-          [
-            "--conditions=source",
-            "scripts/npm-publication-setup/bridge.ts",
-            "configure",
-          ],
-          { cwd: targetDir, env: configureEnvironment, reject: false },
-        );
-        assert.strictEqual(configured.exitCode, 0);
-        await writeExecutable(
-          path.join(fakeBin, "git"),
-          `#!/usr/bin/env bash
+              null,
+              2,
+            )}\n`,
+          );
+          const wrongImports = await execa("pnpm", ["run", "typecheck"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.notStrictEqual(wrongImports.exitCode, 0);
+          await writeFile(generatedManifestPath, generatedManifestBytes);
+          assert.deepStrictEqual(
+            [
+              ...projectedBridge.matchAll(
+                /from "([^"]*(?:npm-)?publication[^"]*)"/gu,
+              ),
+            ].map((match) => match[1]),
+            [
+              "#npm-publication/artifact",
+              "#npm-publication/handoff",
+              "#npm-publication/readiness",
+            ],
+          );
+          assert.doesNotMatch(
+            projectedBridge,
+            /from "\.\.\/(?:npm-)?publication\//u,
+          );
+          const mappingRestored = await execa("pnpm", ["run", "typecheck"], {
+            cwd: targetDir,
+            reject: false,
+          });
+          assert.strictEqual(mappingRestored.exitCode, 0);
+          const configured = await execa(
+            process.execPath,
+            [
+              "--conditions=source",
+              "scripts/npm-publication-setup/bridge.ts",
+              "configure",
+            ],
+            { cwd: targetDir, env: configureEnvironment, reject: false },
+          );
+          assert.strictEqual(configured.exitCode, 0);
+          await writeExecutable(
+            path.join(fakeBin, "git"),
+            `#!/usr/bin/env bash
 case "$1" in
   status) exit 0 ;;
   symbolic-ref) printf 'main\\n' ;;
@@ -1134,10 +1560,10 @@ case "$1" in
   *) exit 97 ;;
 esac
 `,
-        );
-        await writeExecutable(
-          path.join(fakeBin, "corepack"),
-          `#!/usr/bin/env bash
+          );
+          await writeExecutable(
+            path.join(fakeBin, "corepack"),
+            `#!/usr/bin/env bash
 node -e ${JSON.stringify(`const fs=require("node:fs");const statePath=${JSON.stringify(statePath)};const state=fs.existsSync(statePath)?JSON.parse(fs.readFileSync(statePath,"utf8")):{published:false,trusted:false,calls:[]};state.corepackCalls=[...(state.corepackCalls||[]),process.argv.slice(1)];fs.writeFileSync(statePath,JSON.stringify(state));`)} "$@"
 if [ "$1" = pnpm ]; then shift; fi
 repository=""
@@ -1148,10 +1574,10 @@ if [ "$1" = exec ] && [ "$2" = npm ]; then
 fi
 exit 0
 `,
-        );
-        await writeExecutable(
-          path.join(fakeBin, "gh"),
-          `#!/usr/bin/env node
+          );
+          await writeExecutable(
+            path.join(fakeBin, "gh"),
+            `#!/usr/bin/env node
 const fs = require("node:fs"); const path = require("node:path");
 const statePath = ${JSON.stringify(path.join(workspace, "github-state.json"))};
 const blockPath = ${JSON.stringify(path.join(workspace, "github-block.json"))};
@@ -1175,21 +1601,21 @@ if (args[0] === "release" && args[1] === "create") { const tag = args[2], tgz = 
 if (args[0] === "release" && args[1] === "edit") { state.release.draft = false; state.release.immutable = state.failure !== "public-write-nonimmutable"; state.release.published_at = "2026-08-30T00:00:00Z"; if (state.failure === "post-public-drift") state.release.assets[0].bytes = "eA=="; save(); if (["public-write-exact", "public-write-nonimmutable", "public-write-attestation", "public-write-multiple"].includes(state.failure)) process.exit(1); process.exit(0); }
 if (args[0] === "release" && (args[1] === "verify" || args[1] === "verify-asset")) { if (state.failure === "public-write-attestation") process.exit(1); process.exit(0); } if (state.failure !== "gh-signal") process.exit(97);
 `,
-        );
-        await rm(path.join(targetDir, "node_modules/npm"), {
-          recursive: true,
-          force: true,
-        });
-        await mkdir(path.join(targetDir, "node_modules/npm/bin"), {
-          recursive: true,
-        });
-        await writeFile(
-          path.join(targetDir, "node_modules/npm/package.json"),
-          '{"version":"11.19.1","bin":{"npm":"bin/npm-cli.js"}}\n',
-        );
-        await writeFile(
-          path.join(targetDir, "node_modules/npm/bin/npm-cli.js"),
-          `const fs = require("node:fs");
+          );
+          await rm(path.join(targetDir, "node_modules/npm"), {
+            recursive: true,
+            force: true,
+          });
+          await mkdir(path.join(targetDir, "node_modules/npm/bin"), {
+            recursive: true,
+          });
+          await writeFile(
+            path.join(targetDir, "node_modules/npm/package.json"),
+            '{"version":"11.19.1","bin":{"npm":"bin/npm-cli.js"}}\n',
+          );
+          await writeFile(
+            path.join(targetDir, "node_modules/npm/bin/npm-cli.js"),
+            `const fs = require("node:fs");
 const path = require("node:path");
 const args = process.argv.slice(2);
 const statePath = ${JSON.stringify(statePath)};
@@ -1217,15 +1643,15 @@ if (args[0] === "trust") { state.trusted = true; save(); process.exit(0); }
 if (args[0] === "access") { process.stdout.write('{"alice":"read-write"}'); save(); process.exit(0); }
 save(); process.exit(97);
 `,
-        );
-        const first = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        await writeExecutable(
-          path.join(fakeBin, "node"),
-          `#!/usr/bin/env bash
+          );
+          const first = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          await writeExecutable(
+            path.join(fakeBin, "node"),
+            `#!/usr/bin/env bash
 last=\${!#}
 if [ "$last" = artifact ]; then
   fixture=\${ARTIFACT_FIXTURE_ROOT:-}
@@ -1246,689 +1672,721 @@ if [ "$last" = artifact ]; then
 fi
 exec ${JSON.stringify(process.execPath)} "$@"
 `,
-        );
-        // The business journey intentionally enters through the real generated
-        // shell owner; bridge.ts is direct only for the compiler probes above.
-        const bridge = "./scripts/npm-publication-setup/setup.sh";
-        const terminalInput = (lines: readonly string[]) =>
-          lines
-            .map((line) => `printf '%s\\n' ${JSON.stringify(line)}; sleep 1`)
-            .join("; ");
-        const firstRun = await driveGeneratedTerminal(
-          bridge,
-          {
-            cwd: targetDir,
-            env: {
-              PATH: `${fakeBin}:${process.env.PATH}`,
-              TMPDIR: isolatedTemporaryParent,
-              ARTIFACT_FIXTURE_ROOT: first.directory,
-              ARTIFACT_FIXTURE_INTEGRITY: first.integrity,
-            },
-          },
-          [
-            {
-              marker: "STAGE 4/9 Verify the first release artifact",
-              prompt: "Acceptance: ",
-              line: `ACCEPT @demo/ship@1.0.0 ${first.integrity}`,
-            },
-            {
-              marker: "STAGE 5/9 Authenticate with npm",
-              prompt: "Confirmation: ",
-              line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
-            },
-            {
-              marker: "STAGE 6/9 Publish version 1.0.0",
-              prompt: "Confirmation: ",
-              line: `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
-            },
-            {
-              marker: "STAGE 7/9 Configure trusted publishing",
-              prompt: "Confirmation: ",
-              line: "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
-            },
-            {
-              marker: "STAGE 8/9 Create the first GitHub release",
-              prompt: "Confirmation: ",
-              line: `RELEASE @demo/ship@1.0.0 ${first.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
-            },
-          ],
-        );
-        assert.strictEqual(
-          firstRun.exitCode,
-          0,
-          `${firstRun.stdout}\n${firstRun.stderr}`,
-        );
-        assert.ok(firstRun.stdout.includes("STAGE 5/9 Authenticate with npm"));
-        assert.ok(firstRun.stdout.includes("INTERACTIVE npm-login BEGIN"));
-        assert.ok(firstRun.stdout.includes("INTERACTIVE npm-publish END 0"));
-        assert.ok(
-          firstRun.stdout.includes("INTERACTIVE npm-trust-write END 0"),
-        );
-        assert.ok(
-          firstRun.stdout.includes("STAGE 7/9 Configure trusted publishing"),
-        );
-        assert.ok(
-          firstRun.stdout.includes("STAGE 8/9 Create the first GitHub release"),
-        );
-        const firstTranscript = firstRun.stdout.replace(/\r/g, "");
-        assert.ok(
-          firstTranscript.includes(
-            "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.",
-          ),
-        );
-        const calls = (
-          JSON.parse(await readFile(statePath, "utf8")) as {
-            calls: string[][];
-          }
-        ).calls;
-        const corepackCalls = (
-          JSON.parse(await readFile(statePath, "utf8")) as {
-            corepackCalls: string[][];
-          }
-        ).corepackCalls;
-        assert.ok(
-          calls.some(
-            (call) =>
-              call.includes("login") && call.includes("--auth-type=web"),
-          ),
-        );
-        assert.ok(
-          calls.some(
-            (call) =>
-              call.includes("publish") &&
-              call.some((argument) => argument.endsWith(".tgz")) &&
-              call.includes("--access=public") &&
-              call.includes("--tag=latest"),
-          ),
-        );
-        assert.ok(
-          calls.some(
-            (call) =>
-              call.includes("trust") &&
-              call.includes("github") &&
-              call.includes("@demo/ship") &&
-              call.includes("--yes"),
-          ),
-        );
-        assert.ok(calls.some((call) => call.includes("logout")));
-        assert.strictEqual(
-          (
-            JSON.parse(await readFile(statePath, "utf8")) as {
-              readonly interactiveTty: unknown;
-            }
-          ).interactiveTty,
-          true,
-        );
-        assert.ok(
-          corepackCalls.some(
-            (call) =>
-              call.includes("pnpm") &&
-              call.includes("--dir") &&
-              call.includes(targetDir) &&
-              call.includes("exec") &&
-              call.includes("npm") &&
-              call.includes("login"),
-          ),
-        );
-        assert.ok(
-          corepackCalls.some(
-            (call) =>
-              call.includes("pnpm") &&
-              call.includes("--dir") &&
-              call.includes(targetDir) &&
-              call.includes("exec") &&
-              call.includes("npm") &&
-              call.includes("publish"),
-          ),
-        );
-        assert.strictEqual(
-          calls
-            .flat()
-            .some(
-              (argument) => argument === "--provenance" || argument === "--otp",
-            ),
-          false,
-        );
-        assert.deepStrictEqual(await readdir(isolatedTemporaryParent), []);
-
-        const resume = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const resumeRun = await driveGeneratedTerminal(
-          bridge,
-          {
-            cwd: targetDir,
-            env: {
-              PATH: `${fakeBin}:${process.env.PATH}`,
-              TMPDIR: isolatedTemporaryParent,
-              ARTIFACT_FIXTURE_ROOT: resume.directory,
-              ARTIFACT_FIXTURE_INTEGRITY: resume.integrity,
-            },
-          },
-          [
-            {
-              marker: "STAGE 4/9 Verify the first release artifact",
-              prompt: "Acceptance: ",
-              line: `ACCEPT @demo/ship@1.0.0 ${resume.integrity}`,
-            },
-            {
-              marker: "STAGE 5/9 Authenticate with npm",
-              prompt: "Confirmation: ",
-              line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
-            },
-          ],
-        );
-        assert.strictEqual(
-          resumeRun.exitCode,
-          0,
-          `${resumeRun.stdout}\n${resumeRun.stderr}`,
-        );
-        assert.ok(resumeRun.stdout.includes("OK npm-publish-resumed-exact"));
-        assert.deepStrictEqual(await readdir(isolatedTemporaryParent), []);
-        const afterResume = JSON.parse(await readFile(statePath, "utf8")) as {
-          calls: string[][];
-        };
-        assert.strictEqual(
-          afterResume.calls.filter((args) => args[0] === "publish").length,
-          1,
-        );
-        assert.strictEqual(
-          afterResume.calls.filter(
-            (args) => args[0] === "trust" && args[1] === "github",
-          ).length,
-          2,
-        );
-        const githubStatePath = path.join(workspace, "github-state.json");
-        const readGithub = async () =>
-          JSON.parse(await readFile(githubStatePath, "utf8")) as {
-            immutable: boolean;
-            tag: boolean;
-            annotation: string;
-            release: Record<string, unknown> | null;
-            failure?: string;
-            branch?: string;
-            calls: string[][];
-          };
-        const writeGithub = async (state: unknown) =>
-          writeFile(githubStatePath, `${JSON.stringify(state)}\n`);
-        const githubWrites = (calls: readonly string[][]) =>
-          calls.filter(
-            (args) =>
-              (args[0] === "api" && args.includes("PUT")) ||
-              (args[0] === "api" && args.includes("POST")) ||
-              (args[0] === "release" &&
-                ["create", "edit"].includes(args[1] ?? "")),
           );
-        const resumeGithub = async (
-          artifact: {
-            readonly directory: string;
-            readonly integrity: string;
-          },
-          enterRelease = true,
-        ) =>
-          await driveGeneratedTerminal(
+          // The business journey intentionally enters through the real generated
+          // shell owner; bridge.ts is direct only for the compiler probes above.
+          const bridge = "./scripts/npm-publication-setup/setup.sh";
+          const terminalInput = (lines: readonly string[]) =>
+            lines
+              .map((line) => `printf '%s\\n' ${JSON.stringify(line)}; sleep 1`)
+              .join("; ");
+          const firstRun = await driveGeneratedTerminal(
             bridge,
             {
               cwd: targetDir,
               env: {
                 PATH: `${fakeBin}:${process.env.PATH}`,
                 TMPDIR: isolatedTemporaryParent,
-                ARTIFACT_FIXTURE_ROOT: artifact.directory,
-                ARTIFACT_FIXTURE_INTEGRITY: artifact.integrity,
+                ARTIFACT_FIXTURE_ROOT: first.directory,
+                ARTIFACT_FIXTURE_INTEGRITY: first.integrity,
               },
             },
             [
               {
                 marker: "STAGE 4/9 Verify the first release artifact",
                 prompt: "Acceptance: ",
-                line: `ACCEPT @demo/ship@1.0.0 ${artifact.integrity}`,
+                line: `ACCEPT @demo/ship@1.0.0 ${first.integrity}`,
               },
               {
                 marker: "STAGE 5/9 Authenticate with npm",
                 prompt: "Confirmation: ",
                 line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
               },
-              ...(enterRelease
-                ? [
-                    {
-                      marker: "STAGE 8/9 Create the first GitHub release",
-                      prompt: "Confirmation: ",
-                      line: `RELEASE @demo/ship@1.0.0 ${artifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
-                    },
-                  ]
-                : []),
-            ],
-          );
-        const publicState = await readGithub();
-        const tagOnly = {
-          ...publicState,
-          immutable: true,
-          tag: true,
-          release: null,
-          failure: undefined,
-          calls: [],
-        };
-        await writeGithub(tagOnly);
-        const tagOnlyArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const tagOnlyResult = await resumeGithub(tagOnlyArtifact);
-        assert.strictEqual(tagOnlyResult.exitCode, 0);
-        const tagOnlyWrites = githubWrites((await readGithub()).calls);
-        assert.strictEqual(tagOnlyWrites.length, 2);
-        assert.ok(tagOnlyWrites[0]?.includes("release"));
-        assert.ok(tagOnlyWrites[0]?.includes("create"));
-        assert.ok(tagOnlyWrites[1]?.includes("release"));
-        assert.ok(tagOnlyWrites[1]?.includes("edit"));
-
-        const drafted = await readGithub();
-        const exactDraft = {
-          ...drafted,
-          immutable: true,
-          release: {
-            ...drafted.release,
-            draft: true,
-            immutable: false,
-            published_at: null,
-          },
-          failure: undefined,
-          calls: [],
-        };
-        await writeGithub(exactDraft);
-        const draftArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const draftResult = await resumeGithub(draftArtifact);
-        assert.strictEqual(draftResult.exitCode, 0);
-        const draftWrites = githubWrites((await readGithub()).calls);
-        assert.strictEqual(draftWrites.length, 1);
-        assert.ok(draftWrites[0]?.includes("release"));
-        assert.ok(draftWrites[0]?.includes("edit"));
-
-        const partial = await readGithub();
-        const partialAssets = Array.isArray(partial.release?.assets)
-          ? partial.release.assets
-          : [];
-        await writeGithub({
-          ...partial,
-          immutable: true,
-          release: {
-            ...partial.release,
-            draft: true,
-            immutable: false,
-            published_at: null,
-            assets: [
-              ...partialAssets,
               {
-                id: 3,
-                name: "extra",
-                size: 1,
-                label: null,
-                state: "uploaded",
-                bytes: "eA==",
+                marker: "STAGE 6/9 Publish version 1.0.0",
+                prompt: "Confirmation: ",
+                line: `PUBLISH @demo/ship@1.0.0 ${first.integrity}`,
+              },
+              {
+                marker: "STAGE 7/9 Configure trusted publishing",
+                prompt: "Confirmation: ",
+                line: "TRUST @demo/ship GITHUB demo/ship release.yml createPackage",
+              },
+              {
+                marker: "STAGE 8/9 Create the first GitHub release",
+                prompt: "Confirmation: ",
+                line: `RELEASE @demo/ship@1.0.0 ${first.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
               },
             ],
-          },
-          failure: undefined,
-          calls: [],
-        });
-        const partialArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const partialResult = await resumeGithub(partialArtifact, false);
-        assert.strictEqual(partialResult.exitCode, 4);
-        assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
-
-        await writeGithub({
-          ...exactDraft,
-          immutable: false,
-          failure: "immutable-race",
-          calls: [],
-        });
-        const immutableRaceArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const immutableRaceResult = await resumeGithub(immutableRaceArtifact);
-        assert.strictEqual(immutableRaceResult.exitCode, 4);
-        assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
-
-        await writeGithub({ ...exactDraft, immutable: true, calls: [] });
-        const receiptRaceArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const receiptRaceOwnedArtifact = path.join(
-          workspace,
-          "receipt-race-owned-artifact",
-        );
-        const mutateReceipt = `node -e ${JSON.stringify(
-          `const fs=require("node:fs");const root=fs.readFileSync(${JSON.stringify(receiptRaceOwnedArtifact)},"utf8").trim();const receipt=root+"/verified-publication-artifact.json";fs.writeFileSync(receipt,fs.readFileSync(receipt,"utf8").replace("Initial release.","Changed release."));`,
-        )}`;
-        const receiptRaceRun = execa("script", ["-qefc", bridge, "/dev/null"], {
-          cwd: targetDir,
-          env: {
-            PATH: `${fakeBin}:${process.env.PATH}`,
-            TMPDIR: isolatedTemporaryParent,
-            ARTIFACT_FIXTURE_ROOT: receiptRaceArtifact.directory,
-            ARTIFACT_FIXTURE_INTEGRITY: receiptRaceArtifact.integrity,
-            ARTIFACT_OUTPUT_RECORD: receiptRaceOwnedArtifact,
-          },
-          reject: false,
-          stdin: "pipe",
-          timeout: 60_000,
-        });
-        let receiptTranscript = "";
-        receiptRaceRun.stdout?.on("data", (chunk: Buffer) => {
-          receiptTranscript += chunk.toString("utf8");
-        });
-        const waitForReceiptPrompt = async (prompt: string) => {
-          const deadline = Date.now() + 20_000;
-          while (!receiptTranscript.includes(prompt) && Date.now() < deadline)
-            await new Promise((resolve) => setTimeout(resolve, 20));
-          assert.ok(receiptTranscript.includes(prompt));
-        };
-        await waitForReceiptPrompt("Acceptance: ");
-        receiptRaceRun.stdin?.write(
-          `ACCEPT @demo/ship@1.0.0 ${receiptRaceArtifact.integrity}\n`,
-        );
-        await waitForReceiptPrompt("STAGE 5/9 Authenticate with npm");
-        await waitForReceiptPrompt("Confirmation: ");
-        receiptRaceRun.stdin?.write(
-          "CONFIRM NPM 2FA AND RECOVERY CODES READY\n",
-        );
-        await waitForReceiptPrompt("GitHub release preview: ExactDraft");
-        await waitForReceiptPrompt("GitHub release preview: ExactDraft");
-        await execa("bash", ["-c", mutateReceipt], { cwd: targetDir });
-        receiptRaceRun.stdin?.write(
-          `RELEASE @demo/ship@1.0.0 ${receiptRaceArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789\n`,
-        );
-        const receiptRaceResult = await receiptRaceRun;
-        assert.strictEqual(receiptRaceResult.exitCode, 4);
-        assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
-
-        for (const drift of [
-          "pre-public-drift",
-          "post-public-drift",
-        ] as const) {
-          await writeGithub({
-            ...exactDraft,
-            immutable: true,
-            failure: drift,
-            releaseReads: 0,
-            calls: [],
-          });
-          const driftArtifact = await writeAcceptedFirstReleaseArtifact({
-            root: targetDir,
-            packageName: "@demo/ship",
-            commandName: "ship",
-          });
-          const driftResult = await resumeGithub(driftArtifact);
-          assert.strictEqual(driftResult.exitCode, 4);
-          const writes = githubWrites((await readGithub()).calls);
-          if (drift === "pre-public-drift") {
-            assert.deepStrictEqual(writes, []);
-          } else {
-            assert.strictEqual(writes.length, 1);
-            assert.ok(writes[0]?.includes("release"));
-            assert.ok(writes[0]?.includes("edit"));
-          }
-        }
-
-        await writeGithub({
-          ...exactDraft,
-          immutable: true,
-          failure: "pre-publish-immutable-drift",
-          assetDownloads: 0,
-          calls: [],
-        });
-        const immutableAfterAssetsArtifact =
-          await writeAcceptedFirstReleaseArtifact({
-            root: targetDir,
-            packageName: "@demo/ship",
-            commandName: "ship",
-          });
-        const immutableAfterAssetsResult = await resumeGithub(
-          immutableAfterAssetsArtifact,
-        );
-        assert.strictEqual(immutableAfterAssetsResult.exitCode, 4);
-        assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
-
-        await writeGithub({
-          ...tagOnly,
-          immutable: true,
-          tag: false,
-          release: null,
-          failure: "tag-object-malformed",
-          calls: [],
-        });
-        const malformedTagObjectArtifact =
-          await writeAcceptedFirstReleaseArtifact({
-            root: targetDir,
-            packageName: "@demo/ship",
-            commandName: "ship",
-          });
-        const malformedTagObjectResult = await resumeGithub(
-          malformedTagObjectArtifact,
-        );
-        assert.strictEqual(malformedTagObjectResult.exitCode, 4);
-        assert.ok(
-          malformedTagObjectResult.stdout.includes(
-            "github-release-write-failed",
-          ),
-        );
-        const malformedTagObjectCalls = (await readGithub()).calls;
-        const malformedTagWrites = githubWrites(malformedTagObjectCalls);
-        assert.strictEqual(malformedTagWrites.length, 1);
-        assert.ok(malformedTagWrites[0]?.includes("api"));
-        assert.ok(malformedTagWrites[0]?.includes("POST"));
-        assert.ok(malformedTagWrites[0]?.includes("repos/demo/ship/git/tags"));
-        const callsAfterMalformedTagWrite = malformedTagObjectCalls.slice(
-          malformedTagObjectCalls.findIndex(
-            (args) => args[0] === "api" && args.includes("POST"),
-          ) + 1,
-        );
-        assert.ok(
-          callsAfterMalformedTagWrite.some(
-            (call) => call.includes("api") && call.includes("GET"),
-          ),
-        );
-        assert.strictEqual(
-          (
+          );
+          assert.strictEqual(
+            firstRun.exitCode,
+            0,
+            `${firstRun.stdout}\n${firstRun.stderr}`,
+          );
+          assert.ok(
+            firstRun.stdout.includes("STAGE 5/9 Authenticate with npm"),
+          );
+          assert.ok(firstRun.stdout.includes("INTERACTIVE npm-login BEGIN"));
+          assert.ok(firstRun.stdout.includes("INTERACTIVE npm-publish END 0"));
+          assert.ok(
+            firstRun.stdout.includes("INTERACTIVE npm-trust-write END 0"),
+          );
+          assert.ok(
+            firstRun.stdout.includes("STAGE 7/9 Configure trusted publishing"),
+          );
+          assert.ok(
+            firstRun.stdout.includes(
+              "STAGE 8/9 Create the first GitHub release",
+            ),
+          );
+          const firstTranscript = firstRun.stdout.replace(/\r/g, "");
+          assert.ok(
+            firstTranscript.includes(
+              "STAGE 9/9 Finish setup\nOK setup-complete\nYou may now delete scripts/npm-publication-setup/ manually.",
+            ),
+          );
+          const calls = (
             JSON.parse(await readFile(statePath, "utf8")) as {
-              readonly interactiveTty: unknown;
+              calls: string[][];
             }
-          ).interactiveTty,
-          true,
-        );
+          ).calls;
+          const corepackCalls = (
+            JSON.parse(await readFile(statePath, "utf8")) as {
+              corepackCalls: string[][];
+            }
+          ).corepackCalls;
+          assert.ok(
+            calls.some(
+              (call) =>
+                call.includes("login") && call.includes("--auth-type=web"),
+            ),
+          );
+          assert.ok(
+            calls.some(
+              (call) =>
+                call.includes("publish") &&
+                call.some((argument) => argument.endsWith(".tgz")) &&
+                call.includes("--access=public") &&
+                call.includes("--tag=latest"),
+            ),
+          );
+          assert.ok(
+            calls.some(
+              (call) =>
+                call.includes("trust") &&
+                call.includes("github") &&
+                call.includes("@demo/ship") &&
+                call.includes("--yes"),
+            ),
+          );
+          assert.ok(calls.some((call) => call.includes("logout")));
+          assert.strictEqual(
+            (
+              JSON.parse(await readFile(statePath, "utf8")) as {
+                readonly interactiveTty: unknown;
+              }
+            ).interactiveTty,
+            true,
+          );
+          assert.ok(
+            corepackCalls.some(
+              (call) =>
+                call.includes("pnpm") &&
+                call.includes("--dir") &&
+                call.includes(targetDir) &&
+                call.includes("exec") &&
+                call.includes("npm") &&
+                call.includes("login"),
+            ),
+          );
+          assert.ok(
+            corepackCalls.some(
+              (call) =>
+                call.includes("pnpm") &&
+                call.includes("--dir") &&
+                call.includes(targetDir) &&
+                call.includes("exec") &&
+                call.includes("npm") &&
+                call.includes("publish"),
+            ),
+          );
+          assert.strictEqual(
+            calls
+              .flat()
+              .some(
+                (argument) =>
+                  argument === "--provenance" || argument === "--otp",
+              ),
+            false,
+          );
+          assert.deepStrictEqual(await readdir(isolatedTemporaryParent), []);
 
-        for (const [failure, diagnosis] of [
-          ["public-write-exact", "state=PublicIncident"],
-          ["public-write-nonimmutable", "state=PublicIncident"],
-          ["public-write-attestation", "state=PublicIncident"],
-          ["public-write-multiple", "state=PublicIncident"],
-        ] as const) {
+          const resume = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const resumeRun = await driveGeneratedTerminal(
+            bridge,
+            {
+              cwd: targetDir,
+              env: {
+                PATH: `${fakeBin}:${process.env.PATH}`,
+                TMPDIR: isolatedTemporaryParent,
+                ARTIFACT_FIXTURE_ROOT: resume.directory,
+                ARTIFACT_FIXTURE_INTEGRITY: resume.integrity,
+              },
+            },
+            [
+              {
+                marker: "STAGE 4/9 Verify the first release artifact",
+                prompt: "Acceptance: ",
+                line: `ACCEPT @demo/ship@1.0.0 ${resume.integrity}`,
+              },
+              {
+                marker: "STAGE 5/9 Authenticate with npm",
+                prompt: "Confirmation: ",
+                line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+              },
+            ],
+          );
+          assert.strictEqual(
+            resumeRun.exitCode,
+            0,
+            `${resumeRun.stdout}\n${resumeRun.stderr}`,
+          );
+          assert.ok(resumeRun.stdout.includes("OK npm-publish-resumed-exact"));
+          assert.deepStrictEqual(await readdir(isolatedTemporaryParent), []);
+          const afterResume = JSON.parse(await readFile(statePath, "utf8")) as {
+            calls: string[][];
+          };
+          assert.strictEqual(
+            afterResume.calls.filter((args) => args[0] === "publish").length,
+            1,
+          );
+          assert.strictEqual(
+            afterResume.calls.filter(
+              (args) => args[0] === "trust" && args[1] === "github",
+            ).length,
+            2,
+          );
+          const githubStatePath = path.join(workspace, "github-state.json");
+          const readGithub = async () =>
+            JSON.parse(await readFile(githubStatePath, "utf8")) as {
+              immutable: boolean;
+              tag: boolean;
+              annotation: string;
+              release: Record<string, unknown> | null;
+              failure?: string;
+              branch?: string;
+              calls: string[][];
+            };
+          const writeGithub = async (state: unknown) =>
+            writeFile(githubStatePath, `${JSON.stringify(state)}\n`);
+          const githubWrites = (calls: readonly string[][]) =>
+            calls.filter(
+              (args) =>
+                (args[0] === "api" && args.includes("PUT")) ||
+                (args[0] === "api" && args.includes("POST")) ||
+                (args[0] === "release" &&
+                  ["create", "edit"].includes(args[1] ?? "")),
+            );
+          const resumeGithub = async (
+            artifact: {
+              readonly directory: string;
+              readonly integrity: string;
+            },
+            enterRelease = true,
+          ) =>
+            await driveGeneratedTerminal(
+              bridge,
+              {
+                cwd: targetDir,
+                env: {
+                  PATH: `${fakeBin}:${process.env.PATH}`,
+                  TMPDIR: isolatedTemporaryParent,
+                  ARTIFACT_FIXTURE_ROOT: artifact.directory,
+                  ARTIFACT_FIXTURE_INTEGRITY: artifact.integrity,
+                },
+              },
+              [
+                {
+                  marker: "STAGE 4/9 Verify the first release artifact",
+                  prompt: "Acceptance: ",
+                  line: `ACCEPT @demo/ship@1.0.0 ${artifact.integrity}`,
+                },
+                {
+                  marker: "STAGE 5/9 Authenticate with npm",
+                  prompt: "Confirmation: ",
+                  line: "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+                },
+                ...(enterRelease
+                  ? [
+                      {
+                        marker: "STAGE 8/9 Create the first GitHub release",
+                        prompt: "Confirmation: ",
+                        line: `RELEASE @demo/ship@1.0.0 ${artifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+                      },
+                    ]
+                  : []),
+              ],
+            );
+          const publicState = await readGithub();
+          const tagOnly = {
+            ...publicState,
+            immutable: true,
+            tag: true,
+            release: null,
+            failure: undefined,
+            calls: [],
+          };
+          await writeGithub(tagOnly);
+          const tagOnlyArtifact = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const tagOnlyResult = await resumeGithub(tagOnlyArtifact);
+          assert.strictEqual(tagOnlyResult.exitCode, 0);
+          const tagOnlyWrites = githubWrites((await readGithub()).calls);
+          assert.strictEqual(tagOnlyWrites.length, 2);
+          assert.ok(tagOnlyWrites[0]?.includes("release"));
+          assert.ok(tagOnlyWrites[0]?.includes("create"));
+          assert.ok(tagOnlyWrites[1]?.includes("release"));
+          assert.ok(tagOnlyWrites[1]?.includes("edit"));
+
+          const drafted = await readGithub();
+          const exactDraft = {
+            ...drafted,
+            immutable: true,
+            release: {
+              ...drafted.release,
+              draft: true,
+              immutable: false,
+              published_at: null,
+            },
+            failure: undefined,
+            calls: [],
+          };
+          await writeGithub(exactDraft);
+          const draftArtifact = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const draftResult = await resumeGithub(draftArtifact);
+          assert.strictEqual(draftResult.exitCode, 0);
+          const draftWrites = githubWrites((await readGithub()).calls);
+          assert.strictEqual(draftWrites.length, 1);
+          assert.ok(draftWrites[0]?.includes("release"));
+          assert.ok(draftWrites[0]?.includes("edit"));
+
+          const partial = await readGithub();
+          const partialAssets = Array.isArray(partial.release?.assets)
+            ? partial.release.assets
+            : [];
+          await writeGithub({
+            ...partial,
+            immutable: true,
+            release: {
+              ...partial.release,
+              draft: true,
+              immutable: false,
+              published_at: null,
+              assets: [
+                ...partialAssets,
+                {
+                  id: 3,
+                  name: "extra",
+                  size: 1,
+                  label: null,
+                  state: "uploaded",
+                  bytes: "eA==",
+                },
+              ],
+            },
+            failure: undefined,
+            calls: [],
+          });
+          const partialArtifact = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const partialResult = await resumeGithub(partialArtifact, false);
+          assert.strictEqual(partialResult.exitCode, 4);
+          assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
+
+          await writeGithub({
+            ...exactDraft,
+            immutable: false,
+            failure: "immutable-race",
+            calls: [],
+          });
+          const immutableRaceArtifact = await writeAcceptedFirstReleaseArtifact(
+            {
+              root: targetDir,
+              packageName: "@demo/ship",
+              commandName: "ship",
+            },
+          );
+          const immutableRaceResult = await resumeGithub(immutableRaceArtifact);
+          assert.strictEqual(immutableRaceResult.exitCode, 4);
+          assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
+
+          await writeGithub({ ...exactDraft, immutable: true, calls: [] });
+          const receiptRaceArtifact = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const receiptRaceOwnedArtifact = path.join(
+            workspace,
+            "receipt-race-owned-artifact",
+          );
+          const mutateReceipt = `node -e ${JSON.stringify(
+            `const fs=require("node:fs");const root=fs.readFileSync(${JSON.stringify(receiptRaceOwnedArtifact)},"utf8").trim();const receipt=root+"/verified-publication-artifact.json";fs.writeFileSync(receipt,fs.readFileSync(receipt,"utf8").replace("Initial release.","Changed release."));`,
+          )}`;
+          const receiptRaceRun = execa(
+            "script",
+            ["-qefc", bridge, "/dev/null"],
+            {
+              cwd: targetDir,
+              env: {
+                PATH: `${fakeBin}:${process.env.PATH}`,
+                TMPDIR: isolatedTemporaryParent,
+                ARTIFACT_FIXTURE_ROOT: receiptRaceArtifact.directory,
+                ARTIFACT_FIXTURE_INTEGRITY: receiptRaceArtifact.integrity,
+                ARTIFACT_OUTPUT_RECORD: receiptRaceOwnedArtifact,
+              },
+              reject: false,
+              stdin: "pipe",
+              timeout: 60_000,
+            },
+          );
+          let receiptTranscript = "";
+          receiptRaceRun.stdout?.on("data", (chunk: Buffer) => {
+            receiptTranscript += chunk.toString("utf8");
+          });
+          const waitForReceiptPrompt = async (prompt: string) => {
+            const deadline = Date.now() + 20_000;
+            while (!receiptTranscript.includes(prompt) && Date.now() < deadline)
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            assert.ok(receiptTranscript.includes(prompt));
+          };
+          await waitForReceiptPrompt("Acceptance: ");
+          receiptRaceRun.stdin?.write(
+            `ACCEPT @demo/ship@1.0.0 ${receiptRaceArtifact.integrity}\n`,
+          );
+          await waitForReceiptPrompt("STAGE 5/9 Authenticate with npm");
+          await waitForReceiptPrompt("Confirmation: ");
+          receiptRaceRun.stdin?.write(
+            "CONFIRM NPM 2FA AND RECOVERY CODES READY\n",
+          );
+          await waitForReceiptPrompt("GitHub release preview: ExactDraft");
+          await waitForReceiptPrompt("GitHub release preview: ExactDraft");
+          await execa("bash", ["-c", mutateReceipt], { cwd: targetDir });
+          receiptRaceRun.stdin?.write(
+            `RELEASE @demo/ship@1.0.0 ${receiptRaceArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789\n`,
+          );
+          const receiptRaceResult = await receiptRaceRun;
+          assert.strictEqual(receiptRaceResult.exitCode, 4);
+          assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
+
+          for (const drift of [
+            "pre-public-drift",
+            "post-public-drift",
+          ] as const) {
+            await writeGithub({
+              ...exactDraft,
+              immutable: true,
+              failure: drift,
+              releaseReads: 0,
+              calls: [],
+            });
+            const driftArtifact = await writeAcceptedFirstReleaseArtifact({
+              root: targetDir,
+              packageName: "@demo/ship",
+              commandName: "ship",
+            });
+            const driftResult = await resumeGithub(driftArtifact);
+            assert.strictEqual(driftResult.exitCode, 4);
+            const writes = githubWrites((await readGithub()).calls);
+            if (drift === "pre-public-drift") {
+              assert.deepStrictEqual(writes, []);
+            } else {
+              assert.strictEqual(writes.length, 1);
+              assert.ok(writes[0]?.includes("release"));
+              assert.ok(writes[0]?.includes("edit"));
+            }
+          }
+
           await writeGithub({
             ...exactDraft,
             immutable: true,
-            failure,
+            failure: "pre-publish-immutable-drift",
+            assetDownloads: 0,
             calls: [],
           });
-          const publicWriteFailureArtifact =
+          const immutableAfterAssetsArtifact =
             await writeAcceptedFirstReleaseArtifact({
               root: targetDir,
               packageName: "@demo/ship",
               commandName: "ship",
             });
-          const publicWriteFailureResult = await resumeGithub(
-            publicWriteFailureArtifact,
+          const immutableAfterAssetsResult = await resumeGithub(
+            immutableAfterAssetsArtifact,
           );
-          assert.strictEqual(publicWriteFailureResult.exitCode, 4);
-          assert.ok(publicWriteFailureResult.stdout.includes(diagnosis));
-          const failureWrites = githubWrites((await readGithub()).calls);
-          assert.ok(
-            failureWrites.some(
-              (call) => call.includes("release") && call.includes("edit"),
-            ),
-          );
-        }
+          assert.strictEqual(immutableAfterAssetsResult.exitCode, 4);
+          assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
 
-        await writeGithub({ ...tagOnly, branch: "release", calls: [] });
-        const branchArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const branchResult = await resumeGithub(branchArtifact, false);
-        assert.strictEqual(branchResult.exitCode, 4);
-        assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
-
-        for (const failure of ["permission", "unknown", "tag-write"] as const) {
           await writeGithub({
             ...tagOnly,
-            immutable: failure === "tag-write",
+            immutable: true,
             tag: false,
             release: null,
-            failure,
+            failure: "tag-object-malformed",
             calls: [],
           });
-          const artifact = await writeAcceptedFirstReleaseArtifact({
+          const malformedTagObjectArtifact =
+            await writeAcceptedFirstReleaseArtifact({
+              root: targetDir,
+              packageName: "@demo/ship",
+              commandName: "ship",
+            });
+          const malformedTagObjectResult = await resumeGithub(
+            malformedTagObjectArtifact,
+          );
+          assert.strictEqual(malformedTagObjectResult.exitCode, 4);
+          assert.ok(
+            malformedTagObjectResult.stdout.includes(
+              "github-release-write-failed",
+            ),
+          );
+          const malformedTagObjectCalls = (await readGithub()).calls;
+          const malformedTagWrites = githubWrites(malformedTagObjectCalls);
+          assert.strictEqual(malformedTagWrites.length, 1);
+          assert.ok(malformedTagWrites[0]?.includes("api"));
+          assert.ok(malformedTagWrites[0]?.includes("POST"));
+          assert.ok(
+            malformedTagWrites[0]?.includes("repos/demo/ship/git/tags"),
+          );
+          const callsAfterMalformedTagWrite = malformedTagObjectCalls.slice(
+            malformedTagObjectCalls.findIndex(
+              (args) => args[0] === "api" && args.includes("POST"),
+            ) + 1,
+          );
+          assert.ok(
+            callsAfterMalformedTagWrite.some(
+              (call) => call.includes("api") && call.includes("GET"),
+            ),
+          );
+          assert.strictEqual(
+            (
+              JSON.parse(await readFile(statePath, "utf8")) as {
+                readonly interactiveTty: unknown;
+              }
+            ).interactiveTty,
+            true,
+          );
+
+          for (const [failure, diagnosis] of [
+            ["public-write-exact", "state=PublicIncident"],
+            ["public-write-nonimmutable", "state=PublicIncident"],
+            ["public-write-attestation", "state=PublicIncident"],
+            ["public-write-multiple", "state=PublicIncident"],
+          ] as const) {
+            await writeGithub({
+              ...exactDraft,
+              immutable: true,
+              failure,
+              calls: [],
+            });
+            const publicWriteFailureArtifact =
+              await writeAcceptedFirstReleaseArtifact({
+                root: targetDir,
+                packageName: "@demo/ship",
+                commandName: "ship",
+              });
+            const publicWriteFailureResult = await resumeGithub(
+              publicWriteFailureArtifact,
+            );
+            assert.strictEqual(publicWriteFailureResult.exitCode, 4);
+            assert.ok(publicWriteFailureResult.stdout.includes(diagnosis));
+            const failureWrites = githubWrites((await readGithub()).calls);
+            assert.ok(
+              failureWrites.some(
+                (call) => call.includes("release") && call.includes("edit"),
+              ),
+            );
+          }
+
+          await writeGithub({ ...tagOnly, branch: "release", calls: [] });
+          const branchArtifact = await writeAcceptedFirstReleaseArtifact({
             root: targetDir,
             packageName: "@demo/ship",
             commandName: "ship",
           });
-          const result = await resumeGithub(artifact, failure === "tag-write");
-          assert.strictEqual(result.exitCode, failure === "tag-write" ? 4 : 4);
-          const writes = githubWrites((await readGithub()).calls);
-          if (failure === "tag-write") {
-            assert.strictEqual(writes.length, 1);
-            const callsAfterFailure = (await readGithub()).calls.slice(
-              (await readGithub()).calls.findIndex(
-                (args) => args[0] === "api" && args.includes("POST"),
-              ) + 1,
+          const branchResult = await resumeGithub(branchArtifact, false);
+          assert.strictEqual(branchResult.exitCode, 4);
+          assert.deepStrictEqual(githubWrites((await readGithub()).calls), []);
+
+          for (const failure of [
+            "permission",
+            "unknown",
+            "tag-write",
+          ] as const) {
+            await writeGithub({
+              ...tagOnly,
+              immutable: failure === "tag-write",
+              tag: false,
+              release: null,
+              failure,
+              calls: [],
+            });
+            const artifact = await writeAcceptedFirstReleaseArtifact({
+              root: targetDir,
+              packageName: "@demo/ship",
+              commandName: "ship",
+            });
+            const result = await resumeGithub(
+              artifact,
+              failure === "tag-write",
             );
-            assert.ok(
-              callsAfterFailure.some(
-                (call) => call.includes("api") && call.includes("GET"),
-              ),
+            assert.strictEqual(
+              result.exitCode,
+              failure === "tag-write" ? 4 : 4,
             );
-            assert.deepStrictEqual(githubWrites(callsAfterFailure), []);
-          } else assert.deepStrictEqual(writes, []);
-        }
-        await writeGithub({
-          ...publicState,
-          immutable: true,
-          release: {
-            ...publicState.release,
-            draft: true,
-            immutable: false,
-            published_at: null,
-          },
-          failure: "gh-signal",
-          calls: [],
-        });
-        const ghSignalArtifact = await writeAcceptedFirstReleaseArtifact({
-          root: targetDir,
-          packageName: "@demo/ship",
-          commandName: "ship",
-        });
-        const ghSignalOwnedArtifact = path.join(
-          workspace,
-          "github-owned-artifact",
-        );
-        const logoutCountBeforeSignal = (
-          JSON.parse(await readFile(statePath, "utf8")) as { calls: string[][] }
-        ).calls.filter((args) => args[0] === "logout").length;
-        const ghSignalRun = execa(
-          "bash",
-          [
-            "-c",
-            `(sleep 1; ${terminalInput([
-              `ACCEPT @demo/ship@1.0.0 ${ghSignalArtifact.integrity}`,
-              "CONFIRM NPM 2FA AND RECOVERY CODES READY",
-              `RELEASE @demo/ship@1.0.0 ${ghSignalArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
-            ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
-          ],
-          {
-            cwd: targetDir,
-            env: {
-              PATH: `${fakeBin}:${process.env.PATH}`,
-              TMPDIR: isolatedTemporaryParent,
-              ARTIFACT_FIXTURE_ROOT: ghSignalArtifact.directory,
-              ARTIFACT_FIXTURE_INTEGRITY: ghSignalArtifact.integrity,
-              ARTIFACT_OUTPUT_RECORD: ghSignalOwnedArtifact,
+            const writes = githubWrites((await readGithub()).calls);
+            if (failure === "tag-write") {
+              assert.strictEqual(writes.length, 1);
+              const callsAfterFailure = (await readGithub()).calls.slice(
+                (await readGithub()).calls.findIndex(
+                  (args) => args[0] === "api" && args.includes("POST"),
+                ) + 1,
+              );
+              assert.ok(
+                callsAfterFailure.some(
+                  (call) => call.includes("api") && call.includes("GET"),
+                ),
+              );
+              assert.deepStrictEqual(githubWrites(callsAfterFailure), []);
+            } else assert.deepStrictEqual(writes, []);
+          }
+          await writeGithub({
+            ...publicState,
+            immutable: true,
+            release: {
+              ...publicState.release,
+              draft: true,
+              immutable: false,
+              published_at: null,
             },
-            reject: false,
-            timeout: 60_000,
-          },
-        );
-        const githubBlockPath = path.join(workspace, "github-block.json");
-        let blockedBridgePid: number | undefined;
-        for (
-          let attempt = 0;
-          attempt < 1_000 && blockedBridgePid === undefined;
-          attempt += 1
-        ) {
-          const block = await readFile(githubBlockPath, "utf8").catch(() => "");
-          blockedBridgePid = JSON.parse(block || "null")?.bridgePid;
-          if (blockedBridgePid === undefined)
-            await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        assert.strictEqual(typeof blockedBridgePid, "number");
-        process.kill(blockedBridgePid!, "SIGTERM");
-        const ghSignalResult = await ghSignalRun;
-        assert.strictEqual(ghSignalResult.exitCode, 143);
-        let ghChildSignalled = false;
-        for (
-          let attempt = 0;
-          attempt < 100 && !ghChildSignalled;
-          attempt += 1
-        ) {
-          const block = JSON.parse(await readFile(githubBlockPath, "utf8")) as {
-            readonly childSignalled?: boolean;
-          };
-          ghChildSignalled = block.childSignalled === true;
-          if (!ghChildSignalled)
-            await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-        assert.strictEqual(ghChildSignalled, true);
-        await assert.rejects(
-          stat((await readFile(ghSignalOwnedArtifact, "utf8")).trim()),
-        );
-        assert.strictEqual(
-          (
+            failure: "gh-signal",
+            calls: [],
+          });
+          const ghSignalArtifact = await writeAcceptedFirstReleaseArtifact({
+            root: targetDir,
+            packageName: "@demo/ship",
+            commandName: "ship",
+          });
+          const ghSignalOwnedArtifact = path.join(
+            workspace,
+            "github-owned-artifact",
+          );
+          const logoutCountBeforeSignal = (
             JSON.parse(await readFile(statePath, "utf8")) as {
               calls: string[][];
             }
-          ).calls.filter((args) => args[0] === "logout").length,
-          logoutCountBeforeSignal + 1,
-        );
-        const generatedManifest = JSON.parse(
-          await readFile(path.join(targetDir, "package.json"), "utf8"),
-        ) as { readonly imports?: Record<string, string> };
-        assert.deepStrictEqual(generatedManifest.imports, {
-          "#npm-publication/*": "./scripts/npm-publication/*.ts",
-        });
-        for (const command of ["format:check", "lint", "typecheck"] as const) {
-          const permanentTask = await execa("pnpm", ["run", command], {
-            cwd: targetDir,
-            reject: false,
+          ).calls.filter((args) => args[0] === "logout").length;
+          const ghSignalRun = execa(
+            "bash",
+            [
+              "-c",
+              `(sleep 1; ${terminalInput([
+                `ACCEPT @demo/ship@1.0.0 ${ghSignalArtifact.integrity}`,
+                "CONFIRM NPM 2FA AND RECOVERY CODES READY",
+                `RELEASE @demo/ship@1.0.0 ${ghSignalArtifact.integrity} TO demo/ship v1.0.0 AT 0123456789012345678901234567890123456789`,
+              ])}) | script -qefc ${JSON.stringify(bridge)} /dev/null`,
+            ],
+            {
+              cwd: targetDir,
+              env: {
+                PATH: `${fakeBin}:${process.env.PATH}`,
+                TMPDIR: isolatedTemporaryParent,
+                ARTIFACT_FIXTURE_ROOT: ghSignalArtifact.directory,
+                ARTIFACT_FIXTURE_INTEGRITY: ghSignalArtifact.integrity,
+                ARTIFACT_OUTPUT_RECORD: ghSignalOwnedArtifact,
+              },
+              reject: false,
+              timeout: 60_000,
+            },
+          );
+          const githubBlockPath = path.join(workspace, "github-block.json");
+          let blockedBridgePid: number | undefined;
+          for (
+            let attempt = 0;
+            attempt < 1_000 && blockedBridgePid === undefined;
+            attempt += 1
+          ) {
+            const block = await readFile(githubBlockPath, "utf8").catch(
+              () => "",
+            );
+            blockedBridgePid = JSON.parse(block || "null")?.bridgePid;
+            if (blockedBridgePid === undefined)
+              await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          assert.strictEqual(typeof blockedBridgePid, "number");
+          process.kill(blockedBridgePid!, "SIGTERM");
+          const ghSignalResult = await ghSignalRun;
+          assert.strictEqual(ghSignalResult.exitCode, 143);
+          let ghChildSignalled = false;
+          for (
+            let attempt = 0;
+            attempt < 100 && !ghChildSignalled;
+            attempt += 1
+          ) {
+            const block = JSON.parse(
+              await readFile(githubBlockPath, "utf8"),
+            ) as {
+              readonly childSignalled?: boolean;
+            };
+            ghChildSignalled = block.childSignalled === true;
+            if (!ghChildSignalled)
+              await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          assert.strictEqual(ghChildSignalled, true);
+          await assert.rejects(
+            stat((await readFile(ghSignalOwnedArtifact, "utf8")).trim()),
+          );
+          assert.strictEqual(
+            (
+              JSON.parse(await readFile(statePath, "utf8")) as {
+                calls: string[][];
+              }
+            ).calls.filter((args) => args[0] === "logout").length,
+            logoutCountBeforeSignal + 1,
+          );
+          const generatedManifest = JSON.parse(
+            await readFile(path.join(targetDir, "package.json"), "utf8"),
+          ) as { readonly imports?: Record<string, string> };
+          assert.deepStrictEqual(generatedManifest.imports, {
+            "#npm-publication/*": "./scripts/npm-publication/*.ts",
           });
-          assert.strictEqual(permanentTask.exitCode, 0);
-        }
-      } finally {
-        await rm(workspace, { recursive: true, force: true });
-      }
+          for (const command of [
+            "format:check",
+            "lint",
+            "typecheck",
+          ] as const) {
+            const permanentTask = await execa("pnpm", ["run", command], {
+              cwd: targetDir,
+              reject: false,
+            });
+            assert.strictEqual(permanentTask.exitCode, 0);
+          }
+        },
+      );
     },
   );
 
@@ -1936,33 +2394,30 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "runs identity unit tests from TypeScript source without a build",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-unit-",
+        async (project) => {
+          await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+            code: "ENOENT",
+          });
+          await execa(
+            "pnpm",
+            [
+              "--dir",
+              project.packageRoot,
+              "exec",
+              "node",
+              "--conditions=source",
+              "--test",
+              "test/unit/cli-command-identity.test.ts",
+            ],
+            { cwd: project.targetDir },
+          );
+          await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+            code: "ENOENT",
+          });
+        },
       );
-
-      try {
-        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
-          code: "ENOENT",
-        });
-        await execa(
-          "pnpm",
-          [
-            "--dir",
-            project.packageRoot,
-            "exec",
-            "node",
-            "--conditions=source",
-            "--test",
-            "test/unit/cli-command-identity.test.ts",
-          ],
-          { cwd: project.targetDir },
-        );
-        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
-          code: "ENOENT",
-        });
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
     },
   );
 
@@ -1970,43 +2425,50 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "未配置发布条件时报告制品验收未执行，发布必需模式失败",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-publication-artifact-required-",
+        async (project) => {
+          const optional = await execa(
+            "pnpm",
+            ["run", "publication:artifact"],
+            {
+              cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(
+            optional.exitCode,
+            0,
+            `${optional.stdout}\n${optional.stderr}`,
+          );
+          assert.ok(
+            `${optional.stdout}\n${optional.stderr}`.includes(
+              "发布制品验收未执行",
+            ),
+          );
+
+          const required = await execa(
+            "pnpm",
+            ["run", "publication:artifact"],
+            {
+              cwd: project.targetDir,
+              env: {
+                ...process.env,
+                PUBLICATION_ARTIFACT_REQUIRED: "true",
+              },
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(required.exitCode, 1);
+          assert.ok(
+            `${required.stdout}\n${required.stderr}`.includes(
+              "ERROR publication-artifact-required",
+            ),
+          );
+        },
       );
-
-      try {
-        const optional = await execa("pnpm", ["run", "publication:artifact"], {
-          cwd: project.targetDir,
-          reject: false,
-        });
-        assert.strictEqual(
-          optional.exitCode,
-          0,
-          `${optional.stdout}\n${optional.stderr}`,
-        );
-        assert.ok(
-          `${optional.stdout}\n${optional.stderr}`.includes(
-            "发布制品验收未执行",
-          ),
-        );
-
-        const required = await execa("pnpm", ["run", "publication:artifact"], {
-          cwd: project.targetDir,
-          env: {
-            ...process.env,
-            PUBLICATION_ARTIFACT_REQUIRED: "true",
-          },
-          reject: false,
-        });
-        assert.strictEqual(required.exitCode, 1);
-        assert.ok(
-          `${required.stdout}\n${required.stderr}`.includes(
-            "ERROR publication-artifact-required",
-          ),
-        );
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
     },
   );
 
@@ -2014,47 +2476,54 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "keeps the private candidate Root Check green while require-ready fails closed",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-publication-readiness-",
+        async (project) => {
+          const rootCheck = await execa("pnpm", ["run", "check:full"], {
+            cwd: project.targetDir,
+            cancelSignal: installedIntegrationSignal(),
+            reject: false,
+          });
+          assert.strictEqual(
+            rootCheck.exitCode,
+            0,
+            `${rootCheck.stdout}\n${rootCheck.stderr}`,
+          );
+          assert.ok(rootCheck.stderr.includes("条件验收未执行"));
+          assert.ok(rootCheck.stderr.includes("publication:artifact"));
+          assert.ok(
+            !rootCheck.stdout.includes("npm publication artifact: blocked"),
+          );
+
+          const baseline = await execa(
+            "pnpm",
+            ["run", "publication:readiness"],
+            {
+              cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(baseline.exitCode, 0);
+          assert.ok(
+            baseline.stdout.includes("npm publication readiness: blocked"),
+          );
+
+          const required = await execa(
+            "pnpm",
+            ["run", "publication:readiness", "--require-ready"],
+            {
+              cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(required.exitCode, 1);
+          assert.ok(
+            required.stdout.includes("npm publication readiness: blocked"),
+          );
+        },
       );
-
-      try {
-        const rootCheck = await execa("pnpm", ["run", "check:full"], {
-          cwd: project.targetDir,
-          reject: false,
-        });
-        assert.strictEqual(
-          rootCheck.exitCode,
-          0,
-          `${rootCheck.stdout}\n${rootCheck.stderr}`,
-        );
-        assert.ok(rootCheck.stderr.includes("条件验收未执行"));
-        assert.ok(rootCheck.stderr.includes("publication:artifact"));
-        assert.ok(
-          !rootCheck.stdout.includes("npm publication artifact: blocked"),
-        );
-
-        const baseline = await execa("pnpm", ["run", "publication:readiness"], {
-          cwd: project.targetDir,
-          reject: false,
-        });
-        assert.strictEqual(baseline.exitCode, 0);
-        assert.ok(
-          baseline.stdout.includes("npm publication readiness: blocked"),
-        );
-
-        const required = await execa(
-          "pnpm",
-          ["run", "publication:readiness", "--require-ready"],
-          { cwd: project.targetDir, reject: false },
-        );
-        assert.strictEqual(required.exitCode, 1);
-        assert.ok(
-          required.stdout.includes("npm publication readiness: blocked"),
-        );
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
     },
   );
 
@@ -2062,48 +2531,45 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "runs CLI contract integration tests in process without a build",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-integration-",
-      );
-
-      try {
-        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
-          code: "ENOENT",
-        });
-        await execa(
-          "pnpm",
-          [
-            "--dir",
-            project.packageRoot,
-            "exec",
+        async (project) => {
+          await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+            code: "ENOENT",
+          });
+          await execa(
+            "pnpm",
+            [
+              "--dir",
+              project.packageRoot,
+              "exec",
+              "node",
+              "--conditions=source",
+              "--test",
+              "test/integration/command.test.ts",
+            ],
+            { cwd: project.targetDir },
+          );
+          await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+            code: "ENOENT",
+          });
+          const manifestPath = path.join(project.packageRoot, "package.json");
+          const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+          manifest.bin = { "not a valid command": "./dist/cli.js" };
+          await writeFile(manifestPath, JSON.stringify(manifest));
+          const invalidIdentity = await execa(
             "node",
-            "--conditions=source",
-            "--test",
-            "test/integration/command.test.ts",
-          ],
-          { cwd: project.targetDir },
-        );
-        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
-          code: "ENOENT",
-        });
-        const manifestPath = path.join(project.packageRoot, "package.json");
-        const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-        manifest.bin = { "not a valid command": "./dist/cli.js" };
-        await writeFile(manifestPath, JSON.stringify(manifest));
-        const invalidIdentity = await execa(
-          "node",
-          ["--conditions=source", "src/cli.ts", "lookup", "ada"],
-          { cwd: project.packageRoot, reject: false },
-        );
-        assert.strictEqual(invalidIdentity.exitCode, 70);
-        assert.strictEqual(invalidIdentity.stdout, "");
-        assert.strictEqual(
-          invalidIdentity.stderr,
-          "命令执行失败；请检查运行环境或报告此问题。",
-        );
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
+            ["--conditions=source", "src/cli.ts", "lookup", "ada"],
+            { cwd: project.packageRoot, reject: false },
+          );
+          assert.strictEqual(invalidIdentity.exitCode, 70);
+          assert.strictEqual(invalidIdentity.stdout, "");
+          assert.strictEqual(
+            invalidIdentity.stderr,
+            "命令执行失败；请检查运行环境或报告此问题。",
+          );
+        },
+      );
     },
   );
 
@@ -2111,71 +2577,68 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "discovers and runs the complete lookup journey through source",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-source-e2e-",
-      );
-
-      try {
-        const manifestPath = path.join(project.packageRoot, "package.json");
-        const manifest = JSON.parse(
-          await readFile(manifestPath, "utf8"),
-        ) as Record<string, unknown>;
-        assert.strictEqual(
-          await execa(
-            "node",
-            ["--conditions=source", "src/cli.ts", "--version"],
-            {
-              cwd: project.packageRoot,
-            },
-          ).then(({ stdout }) => stdout),
-          "cli unpublished",
-        );
-        await writeFile(
-          manifestPath,
-          `${JSON.stringify(
-            {
-              ...manifest,
-              version: "7.8.9",
-              bin: { release: "./dist/cli.js" },
-            },
-            null,
-            2,
-          )}\n`,
-        );
-        assert.strictEqual(
-          await execa(
-            "node",
-            ["--conditions=source", "src/cli.ts", "--version"],
-            {
-              cwd: project.packageRoot,
-            },
-          ).then(({ stdout }) => stdout),
-          "release 7.8.9",
-        );
-        assert.ok(
-          (
+        async (project) => {
+          const manifestPath = path.join(project.packageRoot, "package.json");
+          const manifest = JSON.parse(
+            await readFile(manifestPath, "utf8"),
+          ) as Record<string, unknown>;
+          assert.strictEqual(
             await execa(
               "node",
-              ["--conditions=source", "src/cli.ts", "--help"],
+              ["--conditions=source", "src/cli.ts", "--version"],
               {
                 cwd: project.packageRoot,
               },
-            ).then(({ stdout }) => stdout)
-          ).includes("release"),
-        );
-        const result = await execa(
-          "node",
-          ["--conditions=source", "test/e2e/run-journeys.ts", "source"],
-          { cwd: project.packageRoot },
-        );
+            ).then(({ stdout }) => stdout),
+            "cli unpublished",
+          );
+          await writeFile(
+            manifestPath,
+            `${JSON.stringify(
+              {
+                ...manifest,
+                version: "7.8.9",
+                bin: { release: "./dist/cli.js" },
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          assert.strictEqual(
+            await execa(
+              "node",
+              ["--conditions=source", "src/cli.ts", "--version"],
+              {
+                cwd: project.packageRoot,
+              },
+            ).then(({ stdout }) => stdout),
+            "release 7.8.9",
+          );
+          assert.ok(
+            (
+              await execa(
+                "node",
+                ["--conditions=source", "src/cli.ts", "--help"],
+                {
+                  cwd: project.packageRoot,
+                },
+              ).then(({ stdout }) => stdout)
+            ).includes("release"),
+          );
+          const result = await execa(
+            "node",
+            ["--conditions=source", "test/e2e/run-journeys.ts", "source"],
+            { cwd: project.packageRoot },
+          );
 
-        assert.strictEqual(result.stdout, "source:lookup:passed");
-        await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
-          code: "ENOENT",
-        });
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
+          assert.strictEqual(result.stdout, "source:lookup:passed");
+          await assert.rejects(stat(path.join(project.packageRoot, "dist")), {
+            code: "ENOENT",
+          });
+        },
+      );
     },
   );
 
@@ -2183,101 +2646,101 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "builds through Turbo and runs both modes from the package e2e script",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-dist-e2e-",
-      );
+        async (project) => {
+          const dryRun = await execa(
+            "pnpm",
+            [
+              "exec",
+              "turbo",
+              "run",
+              "test",
+              "test:e2e",
+              "--filter=@demo/cli",
+              "--dry-run=json",
+            ],
+            { cwd: project.targetDir },
+          );
+          const tasks = (
+            JSON.parse(dryRun.stdout) as {
+              tasks: readonly {
+                taskId: string;
+                dependencies: readonly string[];
+              }[];
+            }
+          ).tasks;
+          const nodeTestTask = tasks.find(
+            ({ taskId }) => taskId === "@demo/cli#test",
+          );
+          assert.ok(nodeTestTask);
+          assert.strictEqual(
+            nodeTestTask.dependencies.includes("@demo/cli#build"),
+            false,
+          );
+          const endToEndTestTask = tasks.find(
+            ({ taskId }) => taskId === "@demo/cli#test:e2e",
+          );
+          assert.ok(endToEndTestTask);
+          assert.ok(endToEndTestTask.dependencies.includes("@demo/cli#build"));
 
-      try {
-        const dryRun = await execa(
-          "pnpm",
-          [
-            "exec",
-            "turbo",
-            "run",
-            "test",
-            "test:e2e",
-            "--filter=@demo/cli",
-            "--dry-run=json",
-          ],
-          { cwd: project.targetDir },
-        );
-        const tasks = (
-          JSON.parse(dryRun.stdout) as {
-            tasks: readonly {
-              taskId: string;
-              dependencies: readonly string[];
-            }[];
-          }
-        ).tasks;
-        const nodeTestTask = tasks.find(
-          ({ taskId }) => taskId === "@demo/cli#test",
-        );
-        assert.ok(nodeTestTask);
-        assert.strictEqual(
-          nodeTestTask.dependencies.includes("@demo/cli#build"),
-          false,
-        );
-        const endToEndTestTask = tasks.find(
-          ({ taskId }) => taskId === "@demo/cli#test:e2e",
-        );
-        assert.ok(endToEndTestTask);
-        assert.ok(endToEndTestTask.dependencies.includes("@demo/cli#build"));
-
-        await execa(
-          "pnpm",
-          ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
-          { cwd: project.targetDir },
-        );
-        assert.match(
-          await readFile(path.join(project.packageRoot, "dist/cli.js"), "utf8"),
-          /^#!\/usr\/bin\/env node/u,
-        );
-        assert.strictEqual(
-          await execa("node", ["dist/cli.js", "--version"], {
-            cwd: project.packageRoot,
-          }).then(({ stdout }) => stdout),
-          "cli unpublished",
-        );
-        const manifestPath = path.join(project.packageRoot, "package.json");
-        const manifest = JSON.parse(
-          await readFile(manifestPath, "utf8"),
-        ) as Record<string, unknown>;
-        await writeFile(
-          manifestPath,
-          `${JSON.stringify(
-            {
-              ...manifest,
-              version: "4.5.6",
-              bin: { deliver: "./dist/cli.js" },
-            },
-            null,
-            2,
-          )}\n`,
-        );
-        assert.strictEqual(
-          await execa("node", ["dist/cli.js", "--version"], {
-            cwd: project.packageRoot,
-          }).then(({ stdout }) => stdout),
-          "deliver 4.5.6",
-        );
-        assert.ok(
-          (
-            await execa("node", ["dist/cli.js", "--help"], {
+          await execa(
+            "pnpm",
+            ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
+            { cwd: project.targetDir },
+          );
+          assert.match(
+            await readFile(
+              path.join(project.packageRoot, "dist/cli.js"),
+              "utf8",
+            ),
+            /^#!\/usr\/bin\/env node/u,
+          );
+          assert.strictEqual(
+            await execa("node", ["dist/cli.js", "--version"], {
               cwd: project.packageRoot,
-            }).then(({ stdout }) => stdout)
-          ).includes("deliver"),
-        );
+            }).then(({ stdout }) => stdout),
+            "cli unpublished",
+          );
+          const manifestPath = path.join(project.packageRoot, "package.json");
+          const manifest = JSON.parse(
+            await readFile(manifestPath, "utf8"),
+          ) as Record<string, unknown>;
+          await writeFile(
+            manifestPath,
+            `${JSON.stringify(
+              {
+                ...manifest,
+                version: "4.5.6",
+                bin: { deliver: "./dist/cli.js" },
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          assert.strictEqual(
+            await execa("node", ["dist/cli.js", "--version"], {
+              cwd: project.packageRoot,
+            }).then(({ stdout }) => stdout),
+            "deliver 4.5.6",
+          );
+          assert.ok(
+            (
+              await execa("node", ["dist/cli.js", "--help"], {
+                cwd: project.packageRoot,
+              }).then(({ stdout }) => stdout)
+            ).includes("deliver"),
+          );
 
-        const result = await execa("pnpm", ["run", "test:e2e"], {
-          cwd: project.packageRoot,
-          env: { ...process.env, NODE_TEST_CONTEXT: undefined },
-        });
-        const output = `${result.stdout}\n${result.stderr}`;
-        assert.ok(output.includes("runs all source CLI journeys"));
-        assert.ok(output.includes("runs all distribution CLI journeys"));
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
+          const result = await execa("pnpm", ["run", "test:e2e"], {
+            cwd: project.packageRoot,
+            env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+          });
+          const output = `${result.stdout}\n${result.stderr}`;
+          assert.ok(output.includes("runs all source CLI journeys"));
+          assert.ok(output.includes("runs all distribution CLI journeys"));
+        },
+      );
     },
   );
 
@@ -2285,65 +2748,63 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "rejects invalid journey runner arguments before running a journey",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-e2e-argv-",
-      );
-      const invalidCases = [
-        {
-          name: "missing mode",
-          args: [],
-          message: "missing journey mode",
-        },
-        {
-          name: "unknown mode",
-          args: ["preview"],
-          message: 'unknown journey mode "preview"',
-        },
-        {
-          name: "duplicate mode",
-          args: ["source", "source"],
-          message: 'duplicate journey mode "source"',
-        },
-        {
-          name: "packed without bin",
-          args: ["packed"],
-          message: "packed journey mode requires exactly one bin path",
-        },
-        {
-          name: "packed with extra argument",
-          args: ["packed", "/tmp/demo-cli", "distribution"],
-          message: "packed journey mode accepts exactly one bin path",
-        },
-        {
-          name: "packed combined with source",
-          args: ["source", "packed", "/tmp/demo-cli"],
-          message: "packed journey mode cannot be combined",
-        },
-        {
-          name: "mode used as packed bin",
-          args: ["packed", "source"],
-          message: 'packed bin path cannot be journey mode "source"',
-        },
-      ] as const;
+        async (project) => {
+          const invalidCases = [
+            {
+              name: "missing mode",
+              args: [],
+              message: "missing journey mode",
+            },
+            {
+              name: "unknown mode",
+              args: ["preview"],
+              message: 'unknown journey mode "preview"',
+            },
+            {
+              name: "duplicate mode",
+              args: ["source", "source"],
+              message: 'duplicate journey mode "source"',
+            },
+            {
+              name: "packed without bin",
+              args: ["packed"],
+              message: "packed journey mode requires exactly one bin path",
+            },
+            {
+              name: "packed with extra argument",
+              args: ["packed", "/tmp/demo-cli", "distribution"],
+              message: "packed journey mode accepts exactly one bin path",
+            },
+            {
+              name: "packed combined with source",
+              args: ["source", "packed", "/tmp/demo-cli"],
+              message: "packed journey mode cannot be combined",
+            },
+            {
+              name: "mode used as packed bin",
+              args: ["packed", "source"],
+              message: 'packed bin path cannot be journey mode "source"',
+            },
+          ] as const;
 
-      try {
-        for (const invalidCase of invalidCases) {
-          const result = await execa(
-            "node",
-            [
-              "--conditions=source",
-              "test/e2e/run-journeys.ts",
-              ...invalidCase.args,
-            ],
-            { cwd: project.packageRoot, reject: false },
-          );
-          assert.notStrictEqual(result.exitCode, 0);
-          assert.ok(result.stderr.includes(invalidCase.message));
-          assert.strictEqual(result.stdout.includes(":passed"), false);
-        }
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
+          for (const invalidCase of invalidCases) {
+            const result = await execa(
+              "node",
+              [
+                "--conditions=source",
+                "test/e2e/run-journeys.ts",
+                ...invalidCase.args,
+              ],
+              { cwd: project.packageRoot, reject: false },
+            );
+            assert.notStrictEqual(result.exitCode, 0);
+            assert.ok(result.stderr.includes(invalidCase.message));
+            assert.strictEqual(result.stdout.includes(":passed"), false);
+          }
+        },
+      );
     },
   );
 
@@ -2351,53 +2812,55 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "installs the compiled CLI bin into a workspace consumer without a package version",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-workspace-bin-",
+        async (project) => {
+          const consumerRoot = path.join(
+            project.targetDir,
+            "packages/consumer",
+          );
+          await mkdir(consumerRoot);
+          await writeFile(
+            path.join(consumerRoot, "package.json"),
+            `${JSON.stringify(
+              {
+                name: "@demo/consumer",
+                private: true,
+                dependencies: { "@demo/cli": "workspace:*" },
+              },
+              null,
+              2,
+            )}\n`,
+          );
+          throwIfInstalledIntegrationWasCancelled();
+          await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+            cwd: project.targetDir,
+            cancelSignal: installedIntegrationSignal(),
+          });
+          await execa(
+            "pnpm",
+            ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
+            { cwd: project.targetDir },
+          );
+
+          const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
+          const binStat = await stat(binPath);
+          assert.strictEqual(Object.hasOwn(binStat, "mode"), true);
+          assert.strictEqual(typeof binStat.mode, "number");
+          assert.strictEqual(
+            await execa(binPath, ["--version"], { cwd: consumerRoot }).then(
+              ({ stdout }) => stdout,
+            ),
+            "cli unpublished",
+          );
+          assert.strictEqual(
+            await execa(binPath, ["lookup", "ada", "--output-format", "text"], {
+              cwd: consumerRoot,
+            }).then(({ stdout }) => stdout),
+            "找到记录：Ada Lovelace（ada）",
+          );
+        },
       );
-
-      try {
-        const consumerRoot = path.join(project.targetDir, "packages/consumer");
-        await mkdir(consumerRoot);
-        await writeFile(
-          path.join(consumerRoot, "package.json"),
-          `${JSON.stringify(
-            {
-              name: "@demo/consumer",
-              private: true,
-              dependencies: { "@demo/cli": "workspace:*" },
-            },
-            null,
-            2,
-          )}\n`,
-        );
-        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
-          cwd: project.targetDir,
-        });
-        await execa(
-          "pnpm",
-          ["exec", "turbo", "run", "build", "--filter=@demo/cli", "--force"],
-          { cwd: project.targetDir },
-        );
-
-        const binPath = path.join(consumerRoot, "node_modules/.bin/cli");
-        const binStat = await stat(binPath);
-        assert.strictEqual(Object.hasOwn(binStat, "mode"), true);
-        assert.strictEqual(typeof binStat.mode, "number");
-        assert.strictEqual(
-          await execa(binPath, ["--version"], { cwd: consumerRoot }).then(
-            ({ stdout }) => stdout,
-          ),
-          "cli unpublished",
-        );
-        assert.strictEqual(
-          await execa(binPath, ["lookup", "ada", "--output-format", "text"], {
-            cwd: consumerRoot,
-          }).then(({ stdout }) => stdout),
-          "找到记录：Ada Lovelace（ada）",
-        );
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
     },
   );
 
@@ -2405,84 +2868,87 @@ exec ${JSON.stringify(process.execPath)} "$@"
     "refuses to pack the unpublished CLI without injecting a version",
     { timeout: 180_000 },
     async () => {
-      const project = await renderInstalledGeneratedRepository(
+      await withSharedInstalledGeneratedRepository(
         "template-ts-cli-unpublished-pack-",
+        async (project) => {
+          await rm(path.join(project.packageRoot, "dist"), {
+            recursive: true,
+            force: true,
+          });
+          const sourceManifestPath = path.join(
+            project.packageRoot,
+            "package.json",
+          );
+          const sourceManifestBytes = await readFile(
+            sourceManifestPath,
+            "utf8",
+          );
+          const sourceManifest = JSON.parse(sourceManifestBytes) as Record<
+            string,
+            unknown
+          >;
+          assert.partialDeepStrictEqual(sourceManifest, {
+            private: true,
+            bin: { cli: "./dist/cli.js" },
+            devDependencies: {
+              "@demo/typescript-config": "link:../typescript-config",
+            },
+          });
+          assert.strictEqual("version" in sourceManifest, false);
+          const pnpmfileStat = await stat(
+            path.join(project.targetDir, ".pnpmfile.mjs"),
+          );
+          assert.strictEqual(Object.hasOwn(pnpmfileStat, "mode"), true);
+          assert.strictEqual(typeof pnpmfileStat.mode, "number");
+
+          const packDestination = path.join(project.workspace, "packs");
+          await mkdir(packDestination);
+          const pack = await execa(
+            "pnpm",
+            ["pack", "--pack-destination", packDestination],
+            { cwd: project.packageRoot, reject: false },
+          );
+          assert.strictEqual(pack.exitCode, 1);
+          assert.ok(
+            `${pack.stdout}\n${pack.stderr}`.includes(
+              "ERR_PNPM_PACKAGE_VERSION_NOT_FOUND",
+            ),
+          );
+          assert.strictEqual(
+            await readFile(sourceManifestPath, "utf8"),
+            sourceManifestBytes,
+          );
+          assert.deepStrictEqual(await readdir(packDestination), []);
+          assert.match(
+            await readFile(
+              path.join(project.packageRoot, "dist/cli.js"),
+              "utf8",
+            ),
+            /^#!\/usr\/bin\/env node/u,
+          );
+          assert.notStrictEqual(
+            (await stat(path.join(project.packageRoot, "dist/cli.js"))).mode &
+              0o111,
+            0,
+          );
+          assert.strictEqual(
+            await execa("node", ["dist/cli.js", "--version"], {
+              cwd: project.packageRoot,
+            }).then(({ stdout }) => stdout),
+            "cli unpublished",
+          );
+          for (const absentField of [
+            "version",
+            "main",
+            "types",
+            "exports",
+            "imports",
+            "publishConfig",
+          ]) {
+            assert.strictEqual(absentField in sourceManifest, false);
+          }
+        },
       );
-
-      try {
-        await rm(path.join(project.packageRoot, "dist"), {
-          recursive: true,
-          force: true,
-        });
-        const sourceManifestPath = path.join(
-          project.packageRoot,
-          "package.json",
-        );
-        const sourceManifestBytes = await readFile(sourceManifestPath, "utf8");
-        const sourceManifest = JSON.parse(sourceManifestBytes) as Record<
-          string,
-          unknown
-        >;
-        assert.partialDeepStrictEqual(sourceManifest, {
-          private: true,
-          bin: { cli: "./dist/cli.js" },
-          devDependencies: {
-            "@demo/typescript-config": "link:../typescript-config",
-          },
-        });
-        assert.strictEqual("version" in sourceManifest, false);
-        const pnpmfileStat = await stat(
-          path.join(project.targetDir, ".pnpmfile.mjs"),
-        );
-        assert.strictEqual(Object.hasOwn(pnpmfileStat, "mode"), true);
-        assert.strictEqual(typeof pnpmfileStat.mode, "number");
-
-        const packDestination = path.join(project.workspace, "packs");
-        await mkdir(packDestination);
-        const pack = await execa(
-          "pnpm",
-          ["pack", "--pack-destination", packDestination],
-          { cwd: project.packageRoot, reject: false },
-        );
-        assert.strictEqual(pack.exitCode, 1);
-        assert.ok(
-          `${pack.stdout}\n${pack.stderr}`.includes(
-            "ERR_PNPM_PACKAGE_VERSION_NOT_FOUND",
-          ),
-        );
-        assert.strictEqual(
-          await readFile(sourceManifestPath, "utf8"),
-          sourceManifestBytes,
-        );
-        assert.deepStrictEqual(await readdir(packDestination), []);
-        assert.match(
-          await readFile(path.join(project.packageRoot, "dist/cli.js"), "utf8"),
-          /^#!\/usr\/bin\/env node/u,
-        );
-        assert.notStrictEqual(
-          (await stat(path.join(project.packageRoot, "dist/cli.js"))).mode &
-            0o111,
-          0,
-        );
-        assert.strictEqual(
-          await execa("node", ["dist/cli.js", "--version"], {
-            cwd: project.packageRoot,
-          }).then(({ stdout }) => stdout),
-          "cli unpublished",
-        );
-        for (const absentField of [
-          "version",
-          "main",
-          "types",
-          "exports",
-          "imports",
-          "publishConfig",
-        ]) {
-          assert.strictEqual(absentField in sourceManifest, false);
-        }
-      } finally {
-        await rm(project.workspace, { recursive: true, force: true });
-      }
     },
   );
 });
