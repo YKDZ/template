@@ -428,6 +428,29 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           },
         }),
       );
+      await writeFile(
+        path.join(targetDir, "apps/repair/turbo.json"),
+        JSON.stringify({
+          extends: ["//"],
+          tags: ["app"],
+          tasks: {
+            "lint:fix": {
+              dependsOn: [],
+              inputs: [],
+              outputs: [],
+              cache: false,
+              tags: ["work:repair"],
+            },
+            "format:write": {
+              dependsOn: ["lint:fix"],
+              inputs: [],
+              outputs: [],
+              cache: false,
+              tags: ["work:repair"],
+            },
+          },
+        }),
+      );
       throwIfInstalledIntegrationWasCancelled();
       await execa("pnpm", ["install"], {
         cwd: targetDir,
@@ -531,6 +554,22 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           },
         }),
       );
+      await writeFile(
+        path.join(targetDir, "apps/lint-only/turbo.json"),
+        JSON.stringify({
+          extends: ["//"],
+          tags: ["app"],
+          tasks: {
+            "lint:fix": {
+              dependsOn: [],
+              inputs: [],
+              outputs: [],
+              cache: false,
+              tags: ["work:repair"],
+            },
+          },
+        }),
+      );
       throwIfInstalledIntegrationWasCancelled();
       await execa("pnpm", ["install"], {
         cwd: targetDir,
@@ -552,13 +591,6 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           (task) =>
             task.command.includes("writeFileSync") &&
             task.taskId === "@demo/lint-only#lint:fix",
-        ),
-      );
-      assert.ok(
-        tasks.some(
-          (task) =>
-            task.command === "<NONEXISTENT>" &&
-            task.taskId === "@demo/lint-only#format:write",
         ),
       );
 

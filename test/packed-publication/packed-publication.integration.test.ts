@@ -903,16 +903,6 @@ function definitionWithPackagePath(packagePath: string) {
   return definition;
 }
 
-function firstAddableDefinition() {
-  const definition = builtInPresetRegistry
-    .all()
-    .find((candidate) => candidate.planPackageAddition !== undefined);
-  if (definition === undefined) {
-    throw new Error("Expected an addable Built-in Preset Definition");
-  }
-  return definition;
-}
-
 function definitionWithInitialPackageRole(role: PackageRole) {
   const definition = builtInPresetRegistry.all().find((candidate) =>
     planGeneratedRepositoryInitialization({
@@ -932,6 +922,18 @@ function definitionWithInitialPackageRole(role: PackageRole) {
     throw new Error(`Expected a Definition for initial Package Role ${role}`);
   }
   return definition;
+}
+
+function initialPackagePath(
+  definition: ReturnType<typeof builtInPresetRegistry.require>,
+): string {
+  const capability = definition.initialPrimaryPackage;
+  if (capability === undefined) {
+    throw new Error("预设未声明可配置的初始包");
+  }
+  return capability.defaultPackagePath({
+    packageLeafName: capability.defaultLeafName,
+  });
 }
 
 function addableDefinitionWithPackageRole(role: PackageRole) {
@@ -1142,6 +1144,7 @@ type ExpectedOwnedTask = {
   readonly inputs: readonly string[];
   readonly outputs: readonly string[];
   readonly persistent?: boolean;
+  readonly providerPaths?: readonly string[];
 };
 
 type ExpectedOwnedPackage = {
@@ -1166,6 +1169,7 @@ const tsCliOwnedTasks = {
     cache: true,
     dependsOn: ["^build"],
     outputs: ["dist/**"],
+    providerPaths: [],
   }),
   "format:check": expectedOwnedTask("quality:light", {
     cache: true,
@@ -1206,6 +1210,21 @@ const tsCliOwnedTasks = {
     cache: false,
     dependsOn: ["build"],
     outputs: [],
+  }),
+  typecheck: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^typecheck"],
+    outputs: [],
+    providerPaths: [],
+  }),
+} satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+
+const tsCliWorkspaceOwnedTasks = {
+  ...tsCliOwnedTasks,
+  build: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: ["dist/**"],
   }),
   typecheck: expectedOwnedTask("quality:light", {
     cache: true,
@@ -1389,21 +1408,50 @@ async function expectOwnedPackageTaskContracts(
         },
         `${manifest.name}#${name} 的 Turbo 有效执行定义`,
       );
+      if (expected.providerPaths !== undefined) {
+        const providerTaskIds = await Promise.all(
+          expected.providerPaths.map(async (packagePath) => {
+            const providerManifest = JSON.parse(
+              await readFile(
+                path.join(projectDir, packagePath, "package.json"),
+                "utf8",
+              ),
+            ) as { readonly name: string };
+            const providerTask = expected.dependsOn.find((dependency) =>
+              dependency.startsWith("^"),
+            );
+            assert.notStrictEqual(providerTask, undefined);
+            return `${providerManifest.name}#${providerTask!.slice(1)}`;
+          }),
+        );
+        assert.deepStrictEqual(taskPlan(name).dependencies, providerTaskIds);
+      }
       for (const dependency of expected.dependsOn.filter((item) =>
         item.startsWith("^"),
       )) {
         const providerTaskName = dependency.slice(1);
-        const providerId = `${configPackageName}#${providerTaskName}`;
-        assert.ok(
-          taskPlan(name).dependencies.includes(providerId),
-          `${providerId} 应先于 ${manifest.name}#${name}`,
-        );
-        const provider = report.tasks.find(
-          (task) => task.taskId === providerId,
-        );
-        assert.notStrictEqual(provider, undefined);
-        assert.strictEqual(provider!.directory, "packages/typescript-config");
-        assert.strictEqual(provider!.command, "<NONEXISTENT>");
+        const providerPaths = expected.providerPaths ?? [
+          "packages/typescript-config",
+        ];
+        for (const packagePath of providerPaths) {
+          const providerManifest = JSON.parse(
+            await readFile(
+              path.join(projectDir, packagePath, "package.json"),
+              "utf8",
+            ),
+          ) as { readonly name: string };
+          const providerId = `${providerManifest.name}#${providerTaskName}`;
+          assert.ok(
+            taskPlan(name).dependencies.includes(providerId),
+            `${providerId} 应先于 ${manifest.name}#${name}`,
+          );
+          const provider = report.tasks.find(
+            (task) => task.taskId === providerId,
+          );
+          assert.notStrictEqual(provider, undefined);
+          assert.strictEqual(provider!.directory, packagePath);
+          assert.strictEqual(provider!.command, "<NONEXISTENT>");
+        }
       }
     }
     if (expectedPackage.passThroughEnv !== undefined) {
@@ -1417,7 +1465,6 @@ async function expectOwnedPackageTaskContracts(
 
 async function expectVikePackageTaskContracts(
   projectDir: string,
-  includeAddedPackage: boolean,
 ): Promise<void> {
   const packageNameAt = async (packagePath: string): Promise<string> => {
     const manifest = JSON.parse(
@@ -1591,18 +1638,8 @@ async function expectVikePackageTaskContracts(
       tags: ["library"],
       tasks: migrationsTasks,
     },
-    ...(includeAddedPackage
-      ? [
-          {
-            path: "packages/archive-addition",
-            tags: ["library"],
-            tasks: tsLibOwnedTasks,
-          },
-        ]
-      : []),
   ]);
 
-  if (!includeAddedPackage) return;
   const taskReport = async (
     tasks: readonly string[],
     filter?: string,
@@ -1713,21 +1750,22 @@ async function expectVikePackageTaskContracts(
   );
 }
 
-async function expectTypeScriptLibraryTaskOwnership(
+async function expectSharedPackageTaskOwnership(
   projectDir: string,
+  libraryPath: string,
+  additionPath: string,
 ): Promise<void> {
   const libraryManifestPath = path.join(
     projectDir,
-    "packages/lib/package.json",
+    libraryPath,
+    "package.json",
   );
   const additionManifestPath = path.join(
     projectDir,
-    "packages/archive-addition/package.json",
+    additionPath,
+    "package.json",
   );
-  const additionTurboPath = path.join(
-    projectDir,
-    "packages/archive-addition/turbo.json",
-  );
+  const additionTurboPath = path.join(projectDir, additionPath, "turbo.json");
   const libraryManifest = JSON.parse(
     await readFile(libraryManifestPath, "utf8"),
   ) as { readonly name: string };
@@ -1779,8 +1817,8 @@ async function expectTypeScriptLibraryTaskOwnership(
       "exec",
       "oxfmt",
       "--write",
-      "packages/archive-addition/package.json",
-      "packages/archive-addition/turbo.json",
+      `${additionPath}/package.json`,
+      `${additionPath}/turbo.json`,
     ],
     { cwd: projectDir },
   );
@@ -1865,10 +1903,7 @@ async function expectTypeScriptLibraryTaskOwnership(
   }
   assert.strictEqual(
     await readFile(
-      path.join(
-        projectDir,
-        "packages/archive-addition/.selected-by-quality-check",
-      ),
+      path.join(projectDir, additionPath, ".selected-by-quality-check"),
       "utf8",
     ),
     "selected",
@@ -2044,7 +2079,7 @@ async function expectVuePackageOwnedTurboContracts(
     ...webTasks,
     "test:e2e": expectedOwnedTask("quality:heavy", {
       cache: false,
-      dependsOn: ["build", "browser:prepare"],
+      dependsOn: ["browser:prepare", "build"],
       outputs: [],
     }),
   } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
@@ -2081,13 +2116,15 @@ async function expectVuePackageOwnedTurboContracts(
     execa("pnpm", ["install"], { cwd: vueHonoProject }),
   ]);
   const vueWebName = await packageNameAt(vueProject, "apps/web");
+  const sharedLibraryDefinition =
+    addableDefinitionWithPackageRole("shared-library");
   await execa(
     installedBin,
     [
       "add",
       "package",
       "--preset",
-      "ts-lib",
+      sharedLibraryDefinition.metadata.name,
       "--name",
       "boundary-library",
       "--path",
@@ -2613,35 +2650,6 @@ void describe("packed public CLI consumer", () => {
             "generated",
             definition.name,
           );
-          if (definition.name === "ts-lib") {
-            await execa("pnpm", ["install"], { cwd: generatedProject });
-            await expectTypeScriptLibraryTaskContracts(generatedProject, [
-              "packages/lib",
-            ]);
-          } else if (definition.name === "ts-cli") {
-            await execa("pnpm", ["install"], { cwd: generatedProject });
-            await expectOwnedPackageTaskContracts(generatedProject, [
-              {
-                path: "packages/cli",
-                tags: ["app"],
-                tasks: tsCliOwnedTasks,
-              },
-            ]);
-          } else if (definition.name === "rust-bin") {
-            await execa("pnpm", ["install"], { cwd: generatedProject });
-            await expectOwnedPackageTaskContracts(generatedProject, [
-              {
-                path: "packages/app",
-                filter: "./packages/app",
-                tags: ["native"],
-                tasks: rustOwnedTasks,
-                passThroughEnv: rustPassThroughEnv,
-              },
-            ]);
-          } else if (definition.name === "vike-app") {
-            await execa("pnpm", ["install"], { cwd: generatedProject });
-            await expectVikePackageTaskContracts(generatedProject, false);
-          }
           const requiresDiagnostics = initializationRequiresDiagnostics(
             definition.name,
           );
@@ -2654,6 +2662,63 @@ void describe("packed public CLI consumer", () => {
             requiresDiagnostics,
           );
         }
+
+        const sharedLibraryDefinition =
+          addableDefinitionWithPackageRole("shared-library");
+        const sharedLibraryProject = path.join(
+          consumer,
+          "generated",
+          sharedLibraryDefinition.metadata.name,
+        );
+        const sharedLibraryPath = initialPackagePath(sharedLibraryDefinition);
+        await execa("pnpm", ["install"], { cwd: sharedLibraryProject });
+        await expectTypeScriptLibraryTaskContracts(sharedLibraryProject, [
+          sharedLibraryPath,
+        ]);
+
+        const cliToolDefinition = addableDefinitionWithPackageRole("cli-tool");
+        const cliToolProject = path.join(
+          consumer,
+          "generated",
+          cliToolDefinition.metadata.name,
+        );
+        await execa("pnpm", ["install"], { cwd: cliToolProject });
+        await expectOwnedPackageTaskContracts(cliToolProject, [
+          {
+            path: initialPackagePath(cliToolDefinition),
+            tags: ["app"],
+            tasks: tsCliOwnedTasks,
+          },
+        ]);
+
+        const nativePackageDefinition =
+          addableDefinitionWithPackageRole("native-package");
+        const nativePackageProject = path.join(
+          consumer,
+          "generated",
+          nativePackageDefinition.metadata.name,
+        );
+        const nativePackagePath = initialPackagePath(nativePackageDefinition);
+        await execa("pnpm", ["install"], { cwd: nativePackageProject });
+        await expectOwnedPackageTaskContracts(nativePackageProject, [
+          {
+            path: nativePackagePath,
+            filter: `./${nativePackagePath}`,
+            tags: ["native"],
+            tasks: rustOwnedTasks,
+            passThroughEnv: rustPassThroughEnv,
+          },
+        ]);
+
+        const deploymentDefinition = definitionWithPackagePath("packages/db");
+        const deploymentProject = path.join(
+          consumer,
+          "generated",
+          deploymentDefinition.metadata.name,
+        );
+        await execa("pnpm", ["install"], { cwd: deploymentProject });
+        await expectVikePackageTaskContracts(deploymentProject);
+
         const expectedAddableDefinitions = builtInPresetRegistry
           .all()
           .filter((definition) => definition.planPackageAddition !== undefined)
@@ -2704,54 +2769,6 @@ void describe("packed public CLI consumer", () => {
             await expectNativeTaskModel(
               path.join(consumer, "generated", candidate.name),
             );
-            const generatedProject = path.join(
-              consumer,
-              "generated",
-              candidate.name,
-            );
-            if (candidate.name === "ts-lib") {
-              await expectTypeScriptLibraryTaskContracts(generatedProject, [
-                "packages/lib",
-                "packages/archive-addition",
-              ]);
-              await execa("pnpm", ["install"], { cwd: generatedProject });
-              await expectTypeScriptLibraryTaskOwnership(generatedProject);
-            } else if (candidate.name === "ts-cli") {
-              await execa("pnpm", ["install"], { cwd: generatedProject });
-              await expectOwnedPackageTaskContracts(generatedProject, [
-                {
-                  path: "packages/cli",
-                  tags: ["app"],
-                  tasks: tsCliOwnedTasks,
-                },
-                {
-                  path: "packages/archive-addition",
-                  tags: ["app"],
-                  tasks: tsCliOwnedTasks,
-                },
-              ]);
-            } else if (candidate.name === "rust-bin") {
-              await execa("pnpm", ["install"], { cwd: generatedProject });
-              await expectOwnedPackageTaskContracts(generatedProject, [
-                {
-                  path: "packages/app",
-                  filter: "./packages/app",
-                  tags: ["native"],
-                  tasks: rustOwnedTasks,
-                  passThroughEnv: rustPassThroughEnv,
-                },
-                {
-                  path: "packages/archive-addition",
-                  filter: "./packages/archive-addition",
-                  tags: ["native"],
-                  tasks: rustOwnedTasks,
-                  passThroughEnv: rustPassThroughEnv,
-                },
-              ]);
-            } else if (candidate.name === "vike-app") {
-              await execa("pnpm", ["install"], { cwd: generatedProject });
-              await expectVikePackageTaskContracts(generatedProject, true);
-            }
             assert.notStrictEqual(additionPlan, undefined);
             const requiresDiagnostics =
               additionPlan!.ciDiagnosticArtifacts.length > 0;
@@ -2769,6 +2786,81 @@ void describe("packed public CLI consumer", () => {
           completedAdditions.toSorted(),
           expectedAddableDefinitions,
         );
+
+        const sharedLibraryAdditionDefinition =
+          addableDefinitionWithPackageRole("shared-library");
+        const sharedLibraryAdditionProject = path.join(
+          consumer,
+          "generated",
+          sharedLibraryAdditionDefinition.metadata.name,
+        );
+        const sharedLibraryAdditionPath = initialPackagePath(
+          sharedLibraryAdditionDefinition,
+        );
+        await execa("pnpm", ["install"], {
+          cwd: sharedLibraryAdditionProject,
+        });
+        await expectTypeScriptLibraryTaskContracts(
+          sharedLibraryAdditionProject,
+          [sharedLibraryAdditionPath, "packages/archive-addition"],
+        );
+        await expectSharedPackageTaskOwnership(
+          sharedLibraryAdditionProject,
+          sharedLibraryAdditionPath,
+          "packages/archive-addition",
+        );
+
+        const cliToolAdditionDefinition =
+          addableDefinitionWithPackageRole("cli-tool");
+        const cliToolAdditionProject = path.join(
+          consumer,
+          "generated",
+          cliToolAdditionDefinition.metadata.name,
+        );
+        await execa("pnpm", ["install"], { cwd: cliToolAdditionProject });
+        await expectOwnedPackageTaskContracts(cliToolAdditionProject, [
+          {
+            path: initialPackagePath(cliToolAdditionDefinition),
+            tags: ["app"],
+            tasks: tsCliOwnedTasks,
+          },
+          {
+            path: "packages/archive-addition",
+            tags: ["app"],
+            tasks: tsCliWorkspaceOwnedTasks,
+          },
+        ]);
+
+        const nativePackageAdditionDefinition =
+          addableDefinitionWithPackageRole("native-package");
+        const nativePackageAdditionProject = path.join(
+          consumer,
+          "generated",
+          nativePackageAdditionDefinition.metadata.name,
+        );
+        const nativePackageAdditionPath = initialPackagePath(
+          nativePackageAdditionDefinition,
+        );
+        await execa("pnpm", ["install"], {
+          cwd: nativePackageAdditionProject,
+        });
+        await expectOwnedPackageTaskContracts(nativePackageAdditionProject, [
+          {
+            path: nativePackageAdditionPath,
+            filter: `./${nativePackageAdditionPath}`,
+            tags: ["native"],
+            tasks: rustOwnedTasks,
+            passThroughEnv: rustPassThroughEnv,
+          },
+          {
+            path: "packages/archive-addition",
+            filter: "./packages/archive-addition",
+            tags: ["native"],
+            tasks: rustOwnedTasks,
+            passThroughEnv: rustPassThroughEnv,
+          },
+        ]);
+
         activeRun.stage = "核对 Vue 与 Vue-Hono 原生任务合同";
         await expectVuePackageOwnedTurboContracts(
           installedBin,
@@ -3408,7 +3500,8 @@ void describe("packed public CLI consumer", () => {
           const archivePath = packedArchivePath;
           activeRun.archivePath = archivePath;
           const baseDefinition = definitionWithPackagePath("packages/db");
-          const additionDefinition = firstAddableDefinition();
+          const additionDefinition =
+            addableDefinitionWithPackageRole("native-package");
           await mkdir(consumer, { recursive: true });
           activeRun.stage = "初始化 packed 消费者";
           await execa("npm", ["init", "--yes"], { cwd: consumer });
@@ -3495,6 +3588,16 @@ void describe("packed public CLI consumer", () => {
           };
 
           await addPackage("domain");
+          await expectOwnedPackageTaskContracts(generated, [
+            {
+              path: "services/domain",
+              filter: "./services/domain",
+              tags: ["native"],
+              tasks: rustOwnedTasks,
+              passThroughEnv: rustPassThroughEnv,
+            },
+          ]);
+          await expectVikePackageTaskContracts(generated);
           const firstAdditionManifest = await readFile(
             path.join(generated, "services/domain/package.json"),
             "utf8",
