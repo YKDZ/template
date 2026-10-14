@@ -18,6 +18,7 @@ type TurboTask = {
 };
 
 type TurboConfig = {
+  readonly concurrency?: string;
   readonly tasks: Record<string, TurboTask>;
 };
 
@@ -95,7 +96,7 @@ void describe("Template Repository native task model", () => {
     assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
     assert.strictEqual(
       scripts["test:integration"],
-      "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/*.integration.test.ts'",
+      "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/*.integration.test.ts'",
     );
     assert.strictEqual(
       scripts["test:packed-publication"],
@@ -149,6 +150,8 @@ void describe("Template Repository native task model", () => {
   void it("joins root and package leaf tasks in one Turbo action graph", async () => {
     const turbo = await readJson<TurboConfig>("turbo.json");
     const tasks = turbo.tasks;
+
+    assert.strictEqual(turbo.concurrency, "2");
 
     for (const task of [
       "format:check",
