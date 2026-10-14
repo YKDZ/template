@@ -46,6 +46,20 @@ jobs:
           test -f .fixture-workspace/demo/apps/web/src/components/CounterButton.vue
           test ! -e .fixture-workspace/demo/apps/web/test/infra-14-node-discovery.node.test.ts
           test ! -e .fixture-workspace/vitest.config.ts.for-zero
+          git -C .fixture-workspace/demo init --quiet
+          git -C .fixture-workspace/demo rev-parse --show-toplevel | tee .fixture-workspace/generated-git-root.txt
+          test "$(cat .fixture-workspace/generated-git-root.txt)" = "$GITHUB_WORKSPACE/.fixture-workspace/demo"
+          set +e
+          git -C .fixture-workspace/demo check-ignore -v apps/web/test/counter.node.test.ts > .fixture-workspace/generated-counter-test-ignore.txt 2>&1
+          ignore_status=$?
+          set -e
+          printf '%s\n' "$ignore_status" > .fixture-workspace/generated-counter-test-ignore.exit
+          if test "$ignore_status" -eq 0; then
+            echo "generated Node tests must not inherit the source checkout's ignored state" >&2
+            exit 1
+          fi
+          test "$ignore_status" -eq 1
+          git -C .fixture-workspace/demo status --short -- apps/web/test/counter.node.test.ts | tee .fixture-workspace/generated-counter-test-status.txt | grep -Fq '?? apps/web/test/counter.node.test.ts'
 
       - name: Install generated repository dependencies
         id: generated-install
@@ -78,7 +92,6 @@ jobs:
             status=${PIPESTATUS[0]}
             set -e
             printf '%s\n' "$status" > "$evidence/node-turbo-$label.exit"
-            test "$status" -eq "$expected_status"
             hash=$(grep -Eo 'cache (miss, executing|hit, replaying logs) [[:xdigit:]]{16}' "$log" | tail -n 1 | awk '{print $NF}')
             test "${#hash}" -eq 16
             printf '%s\n' "$hash" > "$evidence/node-turbo-$label.hash"
@@ -86,7 +99,9 @@ jobs:
             test -n "$summary"
             test -f "$summary"
             cp "$summary" "$evidence/node-turbo-$label.summary.json"
+            node -e 'const summary = require(process.argv[1]); process.stdout.write(JSON.stringify(summary.tasks.map(({ taskId, hash, inputs }) => ({ taskId, hash, inputs })), null, 2) + "\n");' "$summary" > "$evidence/node-turbo-$label.inputs.json"
             printf 'stage=%s exit=%s hash=%s summary=%s\n' "$label" "$status" "$hash" "$summary"
+            test "$status" -eq "$expected_status"
           }
 
           run_native_test baseline-miss 0
@@ -309,6 +324,7 @@ jobs:
           path: |
             .fixture-workspace/**
             !.fixture-workspace/**/node_modules/**
+            !.fixture-workspace/**/.git/**
             !.fixture-workspace/**/.pnpm-store/**
             !.fixture-workspace/**/.npm/**
             !.fixture-workspace/**/.cargo/registry/**
