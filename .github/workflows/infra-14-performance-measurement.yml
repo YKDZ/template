@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: infra-14-performance-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}
+  group: infra-14-performance-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       full_health_success: ${{ steps.full-measurement.outputs.full_health_success }}
     env:
       CI: "true"
-      SOURCE_SHA: c3e2129fb35a318751068b499240808348ab3c21
+      SOURCE_SHA: a74329befedddc1613e0a21c6fe7aa781631ed55
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -40,7 +40,7 @@ jobs:
       - name: 检出固定源提交
         uses: actions/checkout@v7
         with:
-          ref: c3e2129fb35a318751068b499240808348ab3c21
+          ref: a74329befedddc1613e0a21c6fe7aa781631ed55
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -50,9 +50,6 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: package.json
-
-      - name: 准备声明版本的 Rust 格式化器
-        run: rustup component add --toolchain 1.99.0 rustfmt
 
       - name: 准备独立 Docker Buildx builder
         uses: docker/setup-buildx-action@v4
@@ -272,6 +269,7 @@ jobs:
               printf 'full_health_success=%s\n' "$full_health_success" >> "$GITHUB_OUTPUT"
               ;;
             light)
+              mkdir -p "$MEASURE_ROOT/records/light"
               if ! rm -rf .turbo || ! mkdir -p .turbo; then
                 printf '无法清空 Turbo 缓存目录，日常 light 冷测无效。\n' >&2
                 exit 1
@@ -426,7 +424,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 记录 Fixture evidence 保存结果
         if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
@@ -451,7 +449,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-measure-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-measure-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance/records/**
             ${{ runner.temp }}/infra-14-performance/run-formal-command.sh
@@ -496,7 +494,7 @@ jobs:
     timeout-minutes: 240
     env:
       CI: "true"
-      SOURCE_SHA: c3e2129fb35a318751068b499240808348ab3c21
+      SOURCE_SHA: a74329befedddc1613e0a21c6fe7aa781631ed55
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -515,7 +513,7 @@ jobs:
       - name: 检出相同固定源提交
         uses: actions/checkout@v7
         with:
-          ref: c3e2129fb35a318751068b499240808348ab3c21
+          ref: a74329befedddc1613e0a21c6fe7aa781631ed55
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -565,7 +563,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 验证 Fixture evidence 精确恢复
         if: always()
@@ -752,7 +750,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-restore-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-restore-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance-restore/records/**
             ${{ runner.temp }}/infra-14-performance-restore/run-restored-command.sh
