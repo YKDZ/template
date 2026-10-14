@@ -1036,18 +1036,29 @@ void describe("Development Container Fixture Executor", () => {
     }
   });
 
-  void it("does not single-flight Development Container startup across projects with equivalent builds", async () => {
+  void it("serializes equivalent BuildKit cache writes across independent projects", async () => {
     const cacheDirectory = path.resolve("/cache/template-buildkit");
     const buildIdentity = "b".repeat(64);
     const calls: Command[] = [];
+    const buildStarts: string[] = [];
     let releaseBuild: (() => void) | undefined;
     let signalBuildStarted!: () => void;
     const buildStarted = new Promise<void>((resolve) => {
       signalBuildStarted = resolve;
     });
+    let versionChecks = 0;
+    let signalBothVersions!: () => void;
+    const bothVersions = new Promise<void>((resolve) => {
+      signalBothVersions = resolve;
+    });
     const run: FixtureCommandRunner = async (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd });
+      if (command === "devcontainer" && args[0] === "--version") {
+        versionChecks += 1;
+        if (versionChecks === 2) signalBothVersions();
+      }
       if (command === "devcontainer" && args[0] === "up") {
+        buildStarts.push(options.cwd);
         if (releaseBuild === undefined) {
           await new Promise<void>((resolve) => {
             releaseBuild = resolve;
@@ -1082,10 +1093,15 @@ void describe("Development Container Fixture Executor", () => {
             }),
         ),
     );
-    await buildStarted;
-    assert.ok(releaseBuild);
-    releaseBuild();
-    await Promise.all(executions);
+    try {
+      await Promise.all([buildStarted, bothVersions]);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.ok(releaseBuild);
+      assert.strictEqual(buildStarts.length, 1);
+    } finally {
+      releaseBuild?.();
+      await Promise.allSettled(executions);
+    }
 
     assert.strictEqual(
       calls.filter(
@@ -1093,6 +1109,7 @@ void describe("Development Container Fixture Executor", () => {
       ).length,
       2,
     );
+    const identityCache = path.join(cacheDirectory, buildIdentity);
     for (const projectDir of projectDirs) {
       const requiredUpArguments = [
         "up",
@@ -1100,6 +1117,8 @@ void describe("Development Container Fixture Executor", () => {
         projectDir,
         "--id-label",
         fixtureIdLabel(projectDir),
+        "--cache-to",
+        `type=local,dest=${identityCache},mode=max`,
       ];
       assert.ok(
         calls.some(
@@ -1162,6 +1181,220 @@ void describe("Development Container Fixture Executor", () => {
             ),
         ),
       );
+    }
+  });
+
+  void it("prepares different BuildKit destinations concurrently", async () => {
+    const cacheDirectory = path.resolve("/cache/template-buildkit");
+    const projectDirs = [
+      path.resolve("/fixture/independent-build-a"),
+      path.resolve("/fixture/independent-build-b"),
+    ];
+    const buildIdentities = ["c".repeat(64), "d".repeat(64)];
+    const upStarts: string[] = [];
+    const upDestinations: string[] = [];
+    let releaseBuilds!: () => void;
+    const buildGate = new Promise<void>((resolve) => {
+      releaseBuilds = resolve;
+    });
+    let signalBothBuilds!: () => void;
+    const bothBuildsStarted = new Promise<void>((resolve) => {
+      signalBothBuilds = resolve;
+    });
+    const run: FixtureCommandRunner = async (command, args, options) => {
+      if (command === "devcontainer" && args[0] === "up") {
+        upStarts.push(options.cwd);
+        upDestinations.push(args[args.indexOf("--cache-to") + 1]!);
+        if (upStarts.length === projectDirs.length) signalBothBuilds();
+        await buildGate;
+      }
+      if (command === "docker" && args[0] === "ps") {
+        return { stdout: "" };
+      }
+      return {};
+    };
+    const sessions = projectDirs.map((projectDir, index) =>
+      createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        build: {
+          identity: buildIdentities[index]!,
+          cacheDirectory,
+        },
+        run,
+      }),
+    );
+    const preparations = sessions.map((session) => session.prepare());
+
+    try {
+      await bothBuildsStarted;
+      assert.deepStrictEqual([...upStarts].sort(), [...projectDirs].sort());
+      assert.deepStrictEqual(
+        [...upDestinations].sort(),
+        buildIdentities
+          .map(
+            (identity) =>
+              `type=local,dest=${path.join(cacheDirectory, identity)},mode=max`,
+          )
+          .sort(),
+      );
+    } finally {
+      releaseBuilds();
+      await Promise.allSettled(preparations);
+      await Promise.all(sessions.map(async (session) => await session.close()));
+    }
+  });
+
+  void it("keeps a cancelled queued BuildKit writer behind an active destination owner", async () => {
+    const cacheDirectory = path.resolve("/cache/template-buildkit");
+    const buildIdentity = "e".repeat(64);
+    const projectDirs = [
+      path.resolve("/fixture/cancel-active-build"),
+      path.resolve("/fixture/cancel-queued-build"),
+      path.resolve("/fixture/after-cancelled-build"),
+    ];
+    const activeCancellation = new AbortController();
+    const queuedCancellation = new AbortController();
+    const activeCancelReason = new Error("active BuildKit writer cancelled");
+    const queuedCancelReason = new Error("queued BuildKit writer cancelled");
+    const upStarts: string[] = [];
+    const cleanupStarts: string[] = [];
+    let releaseActiveBuild: (() => void) | undefined;
+    let signalActiveBuild!: () => void;
+    const activeBuildStarted = new Promise<void>((resolve) => {
+      signalActiveBuild = resolve;
+    });
+    let signalQueuedVersion!: () => void;
+    const queuedVersionChecked = new Promise<void>((resolve) => {
+      signalQueuedVersion = resolve;
+    });
+    let signalNextVersion!: () => void;
+    const nextVersionChecked = new Promise<void>((resolve) => {
+      signalNextVersion = resolve;
+    });
+    let signalActiveCancellation!: () => void;
+    const activeCancellationReceived = new Promise<void>((resolve) => {
+      signalActiveCancellation = resolve;
+    });
+    const run: FixtureCommandRunner = async (command, args, options) => {
+      if (command === "devcontainer" && args[0] === "--version") {
+        if (options.cwd === projectDirs[1]) signalQueuedVersion();
+        if (options.cwd === projectDirs[2]) signalNextVersion();
+      }
+      if (command === "devcontainer" && args[0] === "up") {
+        upStarts.push(options.cwd);
+        if (options.cwd === projectDirs[0]) {
+          signalActiveBuild();
+          await new Promise<never>((_resolve, reject) => {
+            const cancelSignal = options.cancelSignal;
+            const onCancel = () => signalActiveCancellation();
+            if (cancelSignal?.aborted) {
+              onCancel();
+            } else {
+              cancelSignal?.addEventListener("abort", onCancel, {
+                once: true,
+              });
+            }
+            releaseActiveBuild = () => {
+              cancelSignal?.removeEventListener("abort", onCancel);
+              reject(cancelSignal?.reason ?? activeCancelReason);
+            };
+          });
+        }
+      }
+      if (command === "docker" && args[0] === "ps") {
+        cleanupStarts.push(options.cwd);
+        return { stdout: "" };
+      }
+      return {};
+    };
+    const sessions = projectDirs.map((projectDir, index) =>
+      createDevelopmentContainerFixtureSession({
+        projectDir,
+        probes: [],
+        ...(index === 0
+          ? { cancelSignal: activeCancellation.signal }
+          : index === 1
+            ? { cancelSignal: queuedCancellation.signal }
+            : {}),
+        build: { identity: buildIdentity, cacheDirectory },
+        run,
+      }),
+    );
+    let activeExecutionSettled = false;
+    const activeExecution = sessions[0]!
+      .execute(async () => await sessions[0]!.prepare())
+      .then(
+        () => {
+          activeExecutionSettled = true;
+          return undefined;
+        },
+        (error: unknown) => {
+          activeExecutionSettled = true;
+          return error;
+        },
+      );
+    let queuedPreparationSettled = false;
+    let queuedPreparation: Promise<unknown> | undefined;
+    let nextPreparation: Promise<unknown> | undefined;
+
+    try {
+      await activeBuildStarted;
+      queuedPreparation = sessions[1]!.prepare().then(
+        () => {
+          queuedPreparationSettled = true;
+          return undefined;
+        },
+        (error: unknown) => {
+          queuedPreparationSettled = true;
+          return error;
+        },
+      );
+      await queuedVersionChecked;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepStrictEqual(upStarts, [projectDirs[0]]);
+
+      queuedCancellation.abort(queuedCancelReason);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(queuedPreparationSettled, true);
+      assert.strictEqual(await queuedPreparation, queuedCancelReason);
+
+      nextPreparation = sessions[2]!.prepare().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await nextVersionChecked;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.deepStrictEqual(upStarts, [projectDirs[0]]);
+
+      activeCancellation.abort(activeCancelReason);
+      await activeCancellationReceived;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      assert.strictEqual(activeExecutionSettled, false);
+      assert.ok(!cleanupStarts.includes(projectDirs[0]!));
+      assert.deepStrictEqual(upStarts, [projectDirs[0]]);
+
+      releaseActiveBuild?.();
+      const activeResult = await activeExecution;
+      assert.ok(activeResult instanceof AggregateError);
+      assert.strictEqual(activeResult.errors[0], activeCancelReason);
+      assert.match(
+        activeResult.message,
+        /active BuildKit writer cancelled.*command stopped during cancellation/u,
+      );
+      assert.ok(cleanupStarts.includes(projectDirs[0]!));
+      assert.strictEqual(await nextPreparation, undefined);
+      assert.deepStrictEqual(upStarts, [projectDirs[0], projectDirs[2]]);
+    } finally {
+      queuedCancellation.abort(queuedCancelReason);
+      activeCancellation.abort(activeCancelReason);
+      releaseActiveBuild?.();
+      await Promise.allSettled([
+        activeExecution,
+        ...(queuedPreparation === undefined ? [] : [queuedPreparation]),
+        ...(nextPreparation === undefined ? [] : [nextPreparation]),
+      ]);
+      await Promise.all(sessions.map(async (session) => await session.close()));
     }
   });
 

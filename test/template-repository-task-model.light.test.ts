@@ -403,8 +403,13 @@ void describe("Template Repository native task model", () => {
     );
     assert.ok(
       taskById
-        .get("@ykdz/template-checks#check:fixtures")
+        .get("@ykdz/template-checks#check:focused")
         ?.dependencies.includes("@ykdz/template-checks#check:generated"),
+    );
+    assert.ok(
+      taskById
+        .get("@ykdz/template-checks#check:fixtures")
+        ?.dependencies.includes("@ykdz/template-checks#check:focused"),
     );
     assert.ok(
       taskById
@@ -423,8 +428,13 @@ void describe("Template Repository native task model", () => {
       }[];
     };
     assert.ok(
+      focusedGraph.tasks.some(
+        ({ taskId }) => taskId === "@ykdz/template-checks#check:generated",
+      ),
+    );
+    assert.ok(
       !focusedGraph.tasks.some(({ taskId }) =>
-        ["check:generated", "check:fixtures", "check:deployment"].some(
+        ["check:fixtures", "check:deployment"].some(
           (task) => taskId === `@ykdz/template-checks#${task}`,
         ),
       ),
