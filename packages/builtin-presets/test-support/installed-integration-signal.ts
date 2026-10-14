@@ -1,9 +1,10 @@
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { beforeEach } from "node:test";
 
 const controller = new AbortController();
-const pidFile =
-  process.env.TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_FILE;
+const workerPidDirectory =
+  process.env.TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_DIRECTORY;
 const signalFile = process.env.TEMPLATE_BUILTIN_PRESETS_INTEGRATION_SIGNAL_FILE;
 
 function signalError(signal: NodeJS.Signals): Error {
@@ -16,9 +17,10 @@ function abortForSignal(signal: NodeJS.Signals): void {
 
 if (
   process.env.NODE_TEST_CONTEXT === "child-v8" &&
-  pidFile !== undefined &&
+  workerPidDirectory !== undefined &&
   signalFile !== undefined
 ) {
+  const pidFile = path.join(workerPidDirectory, `${process.pid}.pid`);
   for (const signal of ["SIGINT", "SIGTERM"] as const)
     process.on(signal, () => abortForSignal(signal));
 
@@ -26,6 +28,7 @@ if (
   if (priorSignal === "SIGINT" || priorSignal === "SIGTERM")
     abortForSignal(priorSignal);
 
+  mkdirSync(workerPidDirectory, { recursive: true });
   writeFileSync(pidFile, `${process.pid}\n`);
   beforeEach((testContext) => {
     if (controller.signal.aborted && "skip" in testContext) {

@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,7 +16,8 @@ const ownerDirectory = await mkdtemp(
   path.join(tmpdir(), "template-builtin-presets-integration-owner-"),
 );
 const signalFile = path.join(ownerDirectory, "signal.txt");
-const workerPidFile = path.join(ownerDirectory, "worker.pid");
+const workerPidDirectory = path.join(ownerDirectory, "workers");
+await mkdir(workerPidDirectory);
 await writeFile(signalFile, "");
 const forwardedArguments = process.argv.slice(2);
 if (forwardedArguments[0] === "--") forwardedArguments.shift();
@@ -33,7 +41,8 @@ const runner = spawn(process.execPath, runnerArguments, {
   env: {
     ...process.env,
     TEMPLATE_BUILTIN_PRESETS_INTEGRATION_SIGNAL_FILE: signalFile,
-    TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_FILE: workerPidFile,
+    TEMPLATE_BUILTIN_PRESETS_INTEGRATION_WORKER_PID_DIRECTORY:
+      workerPidDirectory,
   },
   detached: process.platform !== "win32",
   stdio: "inherit",
@@ -47,39 +56,64 @@ let forcedTermination = false;
 let childClosed = false;
 let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
-async function readWorkerPid(): Promise<number | undefined> {
-  const candidate = Number(
-    (await readFile(workerPidFile, "utf8").catch(() => "")).trim(),
-  );
-  if (!Number.isSafeInteger(candidate) || candidate < 2) return undefined;
-  try {
-    process.kill(candidate, 0);
-    return candidate;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH")
-      return undefined;
-    throw error;
+async function readWorkerPids(): Promise<ReadonlySet<number>> {
+  const entries = await readdir(workerPidDirectory, { withFileTypes: true });
+  const workerPids = new Set<number>();
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const match = /^(\d+)\.pid$/.exec(entry.name);
+    if (match === null) continue;
+    const workerPid = Number(match[1]);
+    if (!Number.isSafeInteger(workerPid) || workerPid < 2) continue;
+    const registeredPid = Number(
+      (
+        await readFile(path.join(workerPidDirectory, entry.name), "utf8").catch(
+          () => "",
+        )
+      ).trim(),
+    );
+    if (registeredPid !== workerPid) continue;
+    try {
+      process.kill(workerPid, 0);
+      workerPids.add(workerPid);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ESRCH")
+        continue;
+      throw error;
+    }
   }
+  return workerPids;
 }
 
 async function relaySignal(signal: Signal): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  const signalledWorkers = new Set<number>();
+  let registeredWorker = false;
+  const registrationDeadline = Date.now() + 5_000;
+  while (!childClosed) {
     if (childClosed) return;
-    const workerPid = await readWorkerPid();
-    if (workerPid !== undefined) {
+    for (const workerPid of await readWorkerPids()) {
+      registeredWorker = true;
+      if (signalledWorkers.has(workerPid)) continue;
       try {
         process.kill(workerPid, signal);
-        return;
+        signalledWorkers.add(workerPid);
       } catch (error) {
         if (
-          !(error instanceof Error && "code" in error && error.code === "ESRCH")
-        )
+          error instanceof Error &&
+          "code" in error &&
+          error.code === "ESRCH"
+        ) {
+          signalledWorkers.add(workerPid);
+        } else {
           throw error;
+        }
       }
     }
+    if (childClosed) return;
+    if (!registeredWorker && Date.now() >= registrationDeadline)
+      throw new Error("未能在 5 秒内发现原生测试文件 worker");
     await delay(25);
   }
-  throw new Error("未能在 5 秒内取得当前原生测试文件的 worker PID");
 }
 
 function stopRunnerGroup(signal: NodeJS.Signals): void {
