@@ -1121,28 +1121,6 @@ type NativeTurboDryRun = {
 const packageOwnedTaskQuery =
   "{ packages { items { name tags tasks { items { name fullName tags script } } } } }";
 
-async function removeRootTaskDefaults(projectDir: string): Promise<void> {
-  const rootTurboPath = path.join(projectDir, "turbo.json");
-  const rootTurbo = JSON.parse(await readFile(rootTurboPath, "utf8")) as {
-    readonly tasks: Record<string, unknown>;
-  };
-  for (const name of [
-    "build",
-    "format:check",
-    "format:write",
-    "lint",
-    "lint:fix",
-    "test",
-    "typecheck",
-  ]) {
-    delete rootTurbo.tasks[name];
-  }
-  await writeFile(rootTurboPath, `${JSON.stringify(rootTurbo, null, 2)}\n`);
-  await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
-    cwd: projectDir,
-  });
-}
-
 async function expectTypeScriptLibraryTaskContracts(
   projectDir: string,
   packagePaths: readonly string[],
@@ -1308,7 +1286,6 @@ async function expectOwnedPackageTaskContracts(
   projectDir: string,
   expectedPackages: readonly ExpectedOwnedPackage[],
 ): Promise<void> {
-  await removeRootTaskDefaults(projectDir);
   const query = await execa(
     "pnpm",
     ["exec", "turbo", "query", packageOwnedTaskQuery],
@@ -2099,39 +2076,6 @@ async function expectVuePackageOwnedTurboContracts(
     ) as { readonly name: string };
     return manifest.name;
   };
-  const removeVueSpecificRootTaskDefaults = async (
-    projectDir: string,
-    packages: Readonly<
-      Record<string, Readonly<Record<string, ExpectedOwnedTask>>>
-    >,
-  ): Promise<void> => {
-    const turboPath = path.join(projectDir, "turbo.json");
-    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
-      readonly tasks: Record<string, unknown>;
-    };
-    for (const [packageName, tasks] of Object.entries(packages)) {
-      for (const taskName of Object.keys(tasks)) {
-        if (
-          [
-            "browser:prepare",
-            "dev",
-            "preview",
-            "start",
-            "test:browser",
-            "test:e2e",
-          ].includes(taskName)
-        ) {
-          delete turbo.tasks[taskName];
-          delete turbo.tasks[packageName + "#" + taskName];
-        }
-      }
-    }
-    await writeFile(turboPath, JSON.stringify(turbo, null, 2) + "\n");
-    await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
-      cwd: projectDir,
-    });
-  };
-
   await Promise.all([
     execa("pnpm", ["install"], { cwd: vueProject }),
     execa("pnpm", ["install"], { cwd: vueHonoProject }),
@@ -2214,9 +2158,6 @@ async function expectVuePackageOwnedTurboContracts(
     restoredBoundaries.stdout + "\n" + restoredBoundaries.stderr,
   );
 
-  await removeVueSpecificRootTaskDefaults(vueProject, {
-    [vueWebName]: vueWebTasks,
-  });
   await expectOwnedPackageTaskContracts(vueProject, [
     {
       path: "apps/web",
@@ -2231,10 +2172,6 @@ async function expectVuePackageOwnedTurboContracts(
     vueHonoProject,
     "packages/typescript-config",
   );
-  await removeVueSpecificRootTaskDefaults(vueHonoProject, {
-    [apiName]: apiTasks,
-    [webName]: webTasks,
-  });
   await expectOwnedPackageTaskContracts(vueHonoProject, [
     {
       path: "apps/api",
