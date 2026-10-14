@@ -144,6 +144,7 @@ const turboCacheSecretEnvironmentNames = [
   "TURBO_REMOTE_CACHE_SIGNATURE_KEY",
 ] as const;
 const developmentContainerBuildFlights = new Map<string, Promise<void>>();
+const developmentContainerBuildTails = new Map<string, Promise<void>>();
 
 function redactSecretValues(
   value: string,
@@ -311,6 +312,7 @@ function awaitWithCancellation<Result>(
 
 async function runDevelopmentContainerBuildFlight(
   key: string,
+  destination: string,
   execute: () => Promise<unknown>,
   cancelSignal?: AbortSignal,
 ): Promise<void> {
@@ -319,17 +321,48 @@ async function runDevelopmentContainerBuildFlight(
     await awaitWithCancellation(existing, cancelSignal);
     return;
   }
+  const previous = developmentContainerBuildTails.get(destination);
+  let executionStarted = false;
+  let signalExecutionStarted!: () => void;
+  const executionStartedPromise = new Promise<void>((resolve) => {
+    signalExecutionStarted = resolve;
+  });
   const current = (async () => {
+    if (previous !== undefined) {
+      await previous.catch(() => undefined);
+    }
+    cancelSignal?.throwIfAborted();
+    executionStarted = true;
+    signalExecutionStarted();
     await execute();
   })();
   developmentContainerBuildFlights.set(key, current);
-  try {
-    await current;
-  } finally {
+  developmentContainerBuildTails.set(destination, current);
+  const removeFlight = () => {
     if (developmentContainerBuildFlights.get(key) === current) {
       developmentContainerBuildFlights.delete(key);
     }
+    if (developmentContainerBuildTails.get(destination) === current) {
+      developmentContainerBuildTails.delete(destination);
+    }
+  };
+  void current.then(removeFlight, removeFlight);
+
+  if (cancelSignal !== undefined) {
+    const startOrFinish = Promise.race([
+      executionStartedPromise,
+      current.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]);
+    try {
+      await awaitWithCancellation(startOrFinish, cancelSignal);
+    } catch (error) {
+      if (!executionStarted) throw error;
+    }
   }
+  await current;
 }
 
 export async function deriveDevelopmentContainerBuildIdentity(options: {
@@ -886,8 +919,14 @@ export function createDevelopmentContainerFixtureSession(options: {
             cache: "buildkit",
             outcome: "configured",
           });
+          const cacheDestination = path.resolve(
+            options.projectDir,
+            options.build.cacheDirectory,
+            options.build.identity,
+          );
           await runDevelopmentContainerBuildFlight(
-            `${path.resolve(options.build.cacheDirectory)}\0${options.build.identity}\0${projectIdentity}`,
+            `${cacheDestination}\0${projectIdentity}`,
+            cacheDestination,
             upWithRetry,
             options.cancelSignal,
           );
