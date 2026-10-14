@@ -62,13 +62,6 @@ jobs:
           set -euo pipefail
           evidence="$GITHUB_WORKSPACE/.fixture-workspace"
           node_test=apps/web/test/infra-14-node-discovery.node.test.ts
-          cat > "$node_test" <<'EOF'
-          import { expect, test } from "vitest";
-
-          test("票14临时 Node glob 自动发现", () => {
-            expect("已发现").toBe("故意失败");
-          });
-          EOF
           run_native_test() {
             label=$1
             expected_status=$2
@@ -86,6 +79,13 @@ jobs:
           run_native_test baseline-hit 0
           grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-turbo-baseline-hit.log"
 
+          cat > "$node_test" <<'EOF'
+          import { expect, test } from "vitest";
+
+          test("票14临时 Node glob 自动发现", () => {
+            expect("已发现").toBe("故意失败");
+          });
+          EOF
           run_native_test added-file-miss 1
           grep -Fq '票14临时 Node glob 自动发现' "$evidence/node-turbo-added-file-miss.log"
           grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-turbo-added-file-miss.log"
