@@ -226,18 +226,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     );
     assert.ok(playwrightConfig.includes("availablePort"));
     assert.ok(playwrightConfig.includes("node dist/server/index.mjs"));
-    assert.match(
-      playwrightConfig,
-      /outputDir:\s*usesExternalService\s*\?\s*"test-results\/deployment"\s*:\s*"test-results"/u,
-    );
-    assert.match(
-      playwrightConfig,
-      /outputFolder:\s*usesExternalService\s*\?\s*"playwright-report\/deployment"\s*:\s*"playwright-report"/u,
-    );
-    assert.match(
-      playwrightConfig,
-      /\.\.\.\(usesExternalService\s*\?\s*\{\}\s*:\s*\{\s*globalTeardown:\s*"\.\/test\/playwright-teardown\.ts"\s*\}\)/su,
-    );
+    assert.ok(playwrightConfig.includes("globalTeardown"));
     const viteConfig = await readFile(
       path.join(targetDir, "apps/web/vite.config.ts"),
       "utf8",

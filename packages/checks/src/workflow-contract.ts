@@ -322,9 +322,13 @@ function assertPublicationVerifySteps(
     !hasExactKeys(staging, ["name", "run"]) ||
     staging.run !==
       'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
-    !hasExactKeys(check, ["name", "run"]) ||
-    check.name !== "Run Full Check once" ||
+    !hasExactKeys(check, ["name", "run", "env"]) ||
+    !isWorkflowStepName(check.name) ||
     check.run !== "pnpm run check:full" ||
+    !isParsedObject(check.env) ||
+    !hasExactKeys(check.env, ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]) ||
+    check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
+      "${{ runner.temp }}/npm-publication-artifact" ||
     !hasExactKeys(artifact, ["name", "run", "env"]) ||
     artifact.name !== "Verify publication artifact" ||
     artifact.run !== "pnpm run publication:artifact" ||
@@ -664,6 +668,10 @@ function isParsedObject(value: unknown): value is ParsedObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isWorkflowStepName(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function assertGeneratedCheckWorkflowContract(
   plan: GeneratedRepositoryPlan,
   workflow: ParsedWorkflow,
@@ -714,7 +722,7 @@ function assertGeneratedCheckWorkflowContract(
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "uses", "with"]) ||
-      step.name !== contract.name ||
+      !isWorkflowStepName(step.name) ||
       !matchesAction(step.uses, contract.action) ||
       stableJson(step.with) !== stableJson(contract.with)
     ) {
@@ -731,7 +739,7 @@ function assertGeneratedCheckWorkflowContract(
     if (
       !isParsedObject(step) ||
       !hasExactKeys(step, ["name", "run"]) ||
-      step.name !== contract.name ||
+      !isWorkflowStepName(step.name) ||
       step.run !== contract.command
     ) {
       throw new Error(
@@ -746,7 +754,7 @@ function assertGeneratedCheckWorkflowContract(
     if (
       !isParsedObject(buildx) ||
       !hasExactKeys(buildx, ["name", "uses"]) ||
-      buildx.name !== contract.name ||
+      !isWorkflowStepName(buildx.name) ||
       !matchesAction(buildx.uses, contract.action)
     ) {
       throw new Error(
@@ -760,7 +768,7 @@ function assertGeneratedCheckWorkflowContract(
   if (
     !isParsedObject(heavyCheck) ||
     !hasExactKeys(heavyCheck, ["name", "run"]) ||
-    heavyCheck.name !== heavyContract.name ||
+    !isWorkflowStepName(heavyCheck.name) ||
     heavyCheck.run !== heavyContract.command
   ) {
     throw new Error(

@@ -352,7 +352,7 @@ void describe("diagnostic Package Addition", () => {
         workflowPath,
         (await readFile(workflowPath, "utf8")).replace(
           "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n",
-          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n      - name: Upload Root Check diagnostics\n        run: echo user-owned\n",
+          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n      - name: Upload User-owned diagnostics\n        run: echo user-owned\n",
         ),
       );
       const before = await snapshot(targetDir);
@@ -383,7 +383,7 @@ void describe("diagnostic Package Addition", () => {
       await writeFile(
         workflowPath,
         (await readFile(workflowPath, "utf8")).replace(
-          "      - name: Upload Root Check diagnostics\n        run: echo user-owned\n",
+          "      - name: Upload User-owned diagnostics\n        run: echo user-owned\n",
           "",
         ),
       );
@@ -459,9 +459,7 @@ void describe("diagnostic Package Addition", () => {
       const upload = steps.find(
         (step) => step.name === "Upload Check diagnostics",
       );
-      assert.partialDeepStrictEqual(upload, {
-        if: "failure()",
-      });
+      assert.strictEqual(upload?.if, "failure()");
       assert.strictEqual(upload?.with?.path, ".template-ci-diagnostics");
       assert.ok(deploymentWorkflowSource.includes("apps/admin"));
     } finally {

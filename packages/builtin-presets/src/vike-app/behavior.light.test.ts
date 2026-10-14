@@ -143,7 +143,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
     );
   });
-  void it("keeps source-linked workspaces while injecting pnpm 11 deploy closures", async () => {
+  void it("keeps source-linked workspaces, isolated browser artifacts, and deploy closures", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-vike-deploy-policy-")),
       "demo-vike",
@@ -175,6 +175,24 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
     );
     assert.ok(!dockerfile.includes("--legacy"));
+    const playwrightConfig = await readFile(
+      path.join(targetDir, "apps/web/playwright.config.ts"),
+      "utf8",
+    );
+    assert.ok(playwrightConfig.includes("availablePort"));
+    assert.ok(playwrightConfig.includes("node dist/server/index.mjs"));
+    assert.match(
+      playwrightConfig,
+      /outputDir:\s*usesExternalService\s*\?\s*"test-results\/deployment"\s*:\s*"test-results\/e2e"/u,
+    );
+    assert.match(
+      playwrightConfig,
+      /outputFolder:\s*usesExternalService\s*\?\s*"playwright-report\/deployment"\s*:\s*"playwright-report\/e2e"/u,
+    );
+    assert.match(
+      playwrightConfig,
+      /\.\.\.\(usesExternalService\s*\?\s*\{\}\s*:\s*\{\s*globalTeardown:\s*"\.\/test\/playwright-teardown\.ts"\s*\}\)/su,
+    );
     const workspaceConfiguration = parseYaml(workspace) as {
       readonly injectWorkspacePackages: boolean;
       readonly syncInjectedDepsAfterScripts: readonly string[];

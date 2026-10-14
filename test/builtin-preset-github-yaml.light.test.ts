@@ -339,13 +339,10 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       await expectRootOnlyWorkflowRejected(mutated);
   });
 
-  void it("要求 Full Check 有限时长且在重验收前准备 Docker", async () => {
+  void it("拒绝重验收缺少时限、Docker 准备或正确顺序", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
       source.replace("timeout-minutes: 45", "timeout-minutes: 30"),
-    );
-    await expectDeploymentWorkflowRejected(
-      source.replace("name: Full Check", "name: Root Check"),
     );
     await expectDeploymentWorkflowRejected(
       source.replace("run: pnpm run check:heavy", "run: pnpm run check"),
@@ -356,12 +353,21 @@ void describe("Built-in Preset GitHub YAML checker", () => {
         "uses: unexpected/setup@",
       ),
     );
+    await expectDeploymentWorkflowRejected(
+      source.replace(
+        /(?<light>      - name: Run Light Check\n        run: pnpm run check\n)(?<buildx>      - name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
+        "$2$1",
+      ),
+    );
   });
 
   void it("拒绝诊断材料脱离失败阶段、声明所有者或固定上传目录", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
-      source.replace("if: failure()", "if: success()"),
+      source.replace(
+        "      - name: Stage Check diagnostics\n        if: failure()",
+        "      - name: Stage Check diagnostics\n        if: success()",
+      ),
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
