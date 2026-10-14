@@ -1,4 +1,14 @@
 {
   "extends": ["//"],
-  "tags": ["template-core"]
+  "tags": ["template-core"],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/pnpm-workspace.yaml",
+        "$TURBO_ROOT$/Cargo.toml",
+        "$TURBO_ROOT$/Cargo.lock"
+      ]
+    }
+  }
 }
