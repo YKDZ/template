@@ -449,8 +449,14 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const uploadIndex = steps.findIndex(
       (step) => step.name === "Upload Fixture Evidence Activity",
     );
+    const restoreIndex = steps.findIndex(
+      (step) =>
+        step.run?.includes("sudo chown -hR") &&
+        step.run.includes(".fixture-workspace"),
+    );
 
-    assert.strictEqual(uploadIndex, healthIndex + 1);
+    assert.ok(uploadIndex > healthIndex);
+    assert.ok(restoreIndex < uploadIndex);
     assert.deepStrictEqual(steps[uploadIndex], {
       name: "Upload Fixture Evidence Activity",
       if: "always()",
@@ -500,6 +506,45 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.equal(upload.with?.["include-hidden-files"], true);
     assert.equal(upload.with?.["if-no-files-found"], "ignore");
     assert.equal(upload.with?.["retention-days"], 7);
+  });
+
+  void it("在诊断上传前清理 Fixture 容器并恢复工作区属主", async () => {
+    const steps = (await checkWorkflow()).jobs.check.steps;
+    const prerequisiteCondition =
+      "always() && steps.fixture-prerequisites.outcome == 'success'";
+    const cleanupIndex = steps.findIndex(
+      (step) =>
+        step.run?.includes(
+          "docker ps -aq --filter label=com.ykdz.template.fixture.project",
+        ) && step.run.includes('docker rm -f "${fixture_containers[@]}"'),
+    );
+    const restoreIndex = steps.findIndex(
+      (step) =>
+        step.run?.includes("sudo chown -hR") &&
+        step.run.includes(".fixture-workspace"),
+    );
+    const uploadIndex = steps.findIndex(
+      (step) => step.name === "Upload Fixture Failure Diagnostics",
+    );
+    const firstArtifactUploadIndex = steps.findIndex(
+      (step) => step.uses === "actions/upload-artifact@v7",
+    );
+    const cleanup = steps[cleanupIndex];
+    const restore = steps[restoreIndex];
+
+    assert.ok(cleanupIndex >= 0);
+    assert.ok(restoreIndex >= 0);
+    assert.ok(uploadIndex >= 0);
+    assert.ok(cleanupIndex < restoreIndex);
+    assert.ok(restoreIndex < firstArtifactUploadIndex);
+    assert.ok(firstArtifactUploadIndex < uploadIndex);
+    assert.equal(cleanup?.if, prerequisiteCondition);
+    assert.equal(restore?.if, prerequisiteCondition);
+    assert.match(
+      restore?.run ?? "",
+      /if \[ -d \.fixture-workspace \]; then\n\s+sudo chown -hR "\$\(id -u\):\$\(id -g\)" -- \.fixture-workspace\n\s*fi/u,
+    );
+    assert.doesNotMatch(restore?.run ?? "", /\|\|\s*true/u);
   });
 
   void it("always uploads CLI journey diagnostics from the durable workspace directory", async () => {

@@ -766,7 +766,6 @@ export function createDevelopmentContainerFixtureSession(options: {
   let startup: Promise<void> | undefined;
   let reservation: Promise<void> | undefined;
   let upAttempted = false;
-  let upSucceeded = false;
   let closed = false;
   let closing: Promise<void> | undefined;
   let releaseSession: (() => void) | undefined;
@@ -936,7 +935,6 @@ export function createDevelopmentContainerFixtureSession(options: {
           classifyRegistryTransportFailure(error, "docker") ?? "not-retryable";
         throw error;
       }
-      upSucceeded = true;
       for (const cache of dependencyCacheOverride?.caches ?? []) {
         await recordCacheActivity({ cache, outcome: "mounted" });
       }
@@ -1065,11 +1063,9 @@ export function createDevelopmentContainerFixtureSession(options: {
         } else {
           const restoreUid = process.getuid?.();
           const restoreGid = process.getgid?.();
-          if (
-            upSucceeded &&
-            restoreUid !== undefined &&
-            restoreGid !== undefined
-          ) {
+          let workspaceOwnerRestored =
+            restoreUid === undefined || restoreGid === undefined;
+          if (restoreUid !== undefined && restoreGid !== undefined) {
             try {
               await run(
                 "devcontainer",
@@ -1090,21 +1086,34 @@ export function createDevelopmentContainerFixtureSession(options: {
                     fixtureCleanupTimeoutMilliseconds,
                 },
               );
+              workspaceOwnerRestored = true;
             } catch (error) {
-              cleanupErrors.push(error);
+              cleanupErrors.push(
+                new Error(
+                  `恢复 Fixture 工作区属主失败，容器清理未完成：${errorMessage(error)}`,
+                  { cause: error },
+                ),
+              );
             }
           }
-          try {
-            await run("docker", ["rm", "-f", ...containerIds], {
-              cwd: options.projectDir,
-              cancelSignal: cleanupSignal,
-              timeout:
-                options.cleanupTimeoutMilliseconds ??
-                fixtureCleanupTimeoutMilliseconds,
-            });
-            containerCleanupComplete = true;
-          } catch (error) {
-            cleanupErrors.push(error);
+          if (workspaceOwnerRestored) {
+            try {
+              await run("docker", ["rm", "-f", ...containerIds], {
+                cwd: options.projectDir,
+                cancelSignal: cleanupSignal,
+                timeout:
+                  options.cleanupTimeoutMilliseconds ??
+                  fixtureCleanupTimeoutMilliseconds,
+              });
+              containerCleanupComplete = true;
+            } catch (error) {
+              cleanupErrors.push(
+                new Error(
+                  `移除 Fixture 容器失败，容器清理未完成：${errorMessage(error)}`,
+                  { cause: error },
+                ),
+              );
+            }
           }
         }
       } catch (error) {
@@ -1152,7 +1161,7 @@ export function createDevelopmentContainerFixtureSession(options: {
     if (cleanupErrors.length > 0) {
       throw new AggregateError(
         cleanupErrors,
-        "Development Container Fixture cleanup failed",
+        `Development Container Fixture cleanup failed: ${cleanupErrors.map((error) => commandErrorDiagnostic(error).replaceAll(/\r?\n/gu, "; ")).join("; ")}`,
       );
     }
   };
@@ -1203,7 +1212,7 @@ export function createDevelopmentContainerFixtureSession(options: {
             succeeded: false,
             error: new AggregateError(
               [firstError, retryError],
-              `Development Container Fixture cleanup retry failed: ${errorMessage(retryError)}`,
+              `Development Container Fixture cleanup retry failed: ${commandErrorDiagnostic(retryError).replaceAll(/\r?\n/gu, "; ")}`,
               { cause: firstError },
             ),
           };
@@ -1224,7 +1233,7 @@ export function createDevelopmentContainerFixtureSession(options: {
             : [cleanup.error];
         throw new AggregateError(
           [execution.error, ...cleanupErrors],
-          `${errorMessage(execution.error)}; Development Container Fixture cleanup also failed: ${cleanupErrors.map(errorMessage).join("; ")}`,
+          `${errorMessage(execution.error)}; Development Container Fixture cleanup also failed: ${cleanupErrors.map((error) => commandErrorDiagnostic(error).replaceAll(/\r?\n/gu, "; ")).join("; ")}`,
           { cause: execution.error },
         );
       }

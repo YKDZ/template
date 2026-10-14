@@ -43,6 +43,217 @@ function hasCause(error: unknown, expected: unknown): boolean {
   return error instanceof Error && hasCause(error.cause, expected);
 }
 
+function hasErrorMessage(error: unknown, expected: string): boolean {
+  if (
+    error instanceof AggregateError &&
+    error.errors.some((nested) => hasErrorMessage(nested, expected))
+  ) {
+    return true;
+  }
+  return (
+    error instanceof Error &&
+    (error.message.includes(expected) || hasErrorMessage(error.cause, expected))
+  );
+}
+
+void it("部分启动失败后先恢复属主，再移除所属容器", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "fixture-partial-up-owner-"));
+  const projectDir = path.join(root, "project");
+  await mkdir(projectDir, { recursive: true });
+  const startupCause = new Error("devcontainer up cause");
+  const startupFailure = new Error("partial devcontainer up failed", {
+    cause: startupCause,
+  });
+  const events: string[] = [];
+  const session = createDevelopmentContainerFixtureSession({
+    projectDir,
+    probes: [],
+    run: async (command, args) => {
+      if (command === "devcontainer" && args[0] === "up") {
+        throw startupFailure;
+      }
+      if (command === "docker" && args[0] === "ps") {
+        return { stdout: "partial-up-container\n" };
+      }
+      if (
+        command === "devcontainer" &&
+        args[0] === "exec" &&
+        args.includes("chown")
+      ) {
+        events.push("restore-owner");
+        assert.equal(
+          args.at(-2),
+          `${process.getuid?.()}:${process.getgid?.()}`,
+        );
+      }
+      if (command === "docker" && args[0] === "rm") {
+        events.push("remove-container");
+      }
+      return {};
+    },
+  });
+
+  try {
+    const failure = await session
+      .execute(async (run) => {
+        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+      })
+      .catch((error: unknown) => error);
+
+    assert.ok(failure instanceof Error);
+    assert.match(failure.message, /^partial devcontainer up failed/u);
+    assert.match(failure.message, /devcontainer up cause/u);
+    assert.deepStrictEqual(events, ["restore-owner", "remove-container"]);
+
+    await session.close();
+    assert.deepStrictEqual(events, ["restore-owner", "remove-container"]);
+  } finally {
+    await session.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("清理时首次恢复属主失败后，execute 重试成功再移除容器", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "fixture-owner-retry-"));
+  const projectDir = path.join(root, "project");
+  await mkdir(projectDir, { recursive: true });
+  const operationFailure = new Error("fixture operation failed");
+  const restoreFailure = new Error("owner restore failed once");
+  const events: string[] = [];
+  let restoreAttempts = 0;
+  let removeAttempts = 0;
+  const session = createDevelopmentContainerFixtureSession({
+    projectDir,
+    probes: [],
+    run: async (command, args) => {
+      if (command === "docker" && args[0] === "ps") {
+        return { stdout: "owned-fixture-container\n" };
+      }
+      if (
+        command === "devcontainer" &&
+        args[0] === "exec" &&
+        args.includes("chown")
+      ) {
+        restoreAttempts += 1;
+        events.push(`restore-${restoreAttempts}`);
+        if (restoreAttempts === 1) throw restoreFailure;
+      }
+      if (command === "docker" && args[0] === "rm") {
+        removeAttempts += 1;
+        events.push("remove-container");
+      }
+      return {};
+    },
+  });
+
+  try {
+    const failure = await session
+      .execute(async (run) => {
+        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+        throw operationFailure;
+      })
+      .catch((error: unknown) => error);
+
+    assert.ok(failure instanceof AggregateError);
+    assert.ok(hasCause(failure, operationFailure));
+    assert.match(failure.message, /owner restore failed once/u);
+    assert.deepStrictEqual(events, [
+      "restore-1",
+      "restore-2",
+      "remove-container",
+    ]);
+    assert.equal(restoreAttempts, 2);
+    assert.equal(removeAttempts, 1);
+    await session.close();
+    assert.deepStrictEqual(events, [
+      "restore-1",
+      "restore-2",
+      "remove-container",
+    ]);
+  } finally {
+    await session.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("连续恢复属主失败时保留容器并允许显式 close 再试", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "fixture-owner-persistent-"));
+  const projectDir = path.join(root, "project");
+  await mkdir(projectDir, { recursive: true });
+  const operationFailure = new Error("fixture operation failed");
+  const restoreFailure = new Error("owner restore remains unavailable");
+  const events: string[] = [];
+  let restoreAttempts = 0;
+  let removeAttempts = 0;
+  let allowRestore = false;
+  let notifiedCleanupFailure: unknown;
+  const session = createDevelopmentContainerFixtureSession({
+    projectDir,
+    probes: [],
+    onCleanupFailure: (error) => {
+      notifiedCleanupFailure = error;
+    },
+    run: async (command, args) => {
+      if (command === "docker" && args[0] === "ps") {
+        return { stdout: "owned-fixture-container\n" };
+      }
+      if (
+        command === "devcontainer" &&
+        args[0] === "exec" &&
+        args.includes("chown")
+      ) {
+        restoreAttempts += 1;
+        events.push(`restore-${restoreAttempts}`);
+        if (!allowRestore) throw restoreFailure;
+      }
+      if (command === "docker" && args[0] === "rm") {
+        removeAttempts += 1;
+        events.push("remove-container");
+      }
+      return {};
+    },
+  });
+
+  try {
+    const failure = await session
+      .execute(async (run) => {
+        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+        throw operationFailure;
+      })
+      .catch((error: unknown) => error);
+
+    assert.ok(failure instanceof AggregateError);
+    assert.ok(hasCause(failure, operationFailure));
+    assert.ok(hasErrorMessage(failure, "owner restore remains unavailable"));
+    assert.match(failure.message, /清理未完成/u);
+    assert.ok(notifiedCleanupFailure instanceof AggregateError);
+    assert.ok(hasErrorMessage(notifiedCleanupFailure, "清理未完成"));
+    assert.deepStrictEqual(events, ["restore-1", "restore-2"]);
+    assert.equal(removeAttempts, 0);
+
+    allowRestore = true;
+    await session.close();
+    assert.deepStrictEqual(events, [
+      "restore-1",
+      "restore-2",
+      "restore-3",
+      "remove-container",
+    ]);
+    assert.equal(removeAttempts, 1);
+
+    await session.close();
+    assert.deepStrictEqual(events, [
+      "restore-1",
+      "restore-2",
+      "restore-3",
+      "remove-container",
+    ]);
+  } finally {
+    await session.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 void it("retries owned container cleanup when close is called again", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "fixture-cleanup-retry-"));
   const projectDir = path.join(root, "project");
