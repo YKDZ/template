@@ -2,8 +2,11 @@
   "extends": ["//"],
   "tags": ["template-checks"],
   "tasks": {
-    "check:fixtures": {
+    "check:focused": {
       "dependsOn": ["check:generated"]
+    },
+    "check:fixtures": {
+      "dependsOn": ["check:focused"]
     },
     "check:deployment": {
       "dependsOn": ["check:fixtures"]
