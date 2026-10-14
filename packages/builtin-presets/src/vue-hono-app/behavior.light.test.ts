@@ -153,10 +153,7 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
       },
       scripts: { build: "tsc -p tsconfig.build.json" },
     });
-    assert.ok(
-      apiManifest.devDependencies === undefined ||
-        !("tsc-alias" in apiManifest.devDependencies),
-    );
+    assert.ok(!Object.hasOwn(apiManifest.devDependencies ?? {}, "tsc-alias"));
     assert.ok(
       apiManifest.devDependencies !== undefined &&
         "typescript-7" in apiManifest.devDependencies,

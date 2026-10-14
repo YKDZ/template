@@ -386,7 +386,9 @@ async function preserveFailure(error: unknown): Promise<string> {
             "pnpm install --frozen-lockfile",
             "cd packages/cli",
             `TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR=${JSON.stringify(diagnostics)} TEMPLATE_CLI_JOURNEY_MODE=source node --conditions=source --test --test-reporter=tap test/e2e/run-journeys.ts`,
-            "pnpm exec turbo run build --filter=!// --force",
+            "cd ../..",
+            "TURBO_FORCE=true pnpm run build",
+            "cd packages/cli",
             `TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR=${JSON.stringify(diagnostics)} TEMPLATE_CLI_JOURNEY_MODE=distribution node --test --test-reporter=tap test/e2e/run-journeys.ts`,
           ],
           cleanup: {

@@ -115,17 +115,6 @@ void describe("Template Repository native task model", () => {
       scripts.build,
       "turbo run build --filter=!// --output-logs=errors-only --log-order=grouped",
     );
-    for (const alias of [
-      "check:fixtures",
-      "check:focused",
-      "check:generated",
-      "check:deployment",
-      "check:templates",
-      "check:templates:boundary",
-      "check:templates:github-yaml",
-    ]) {
-      assert.strictEqual(scripts[alias], undefined, `root ${alias} alias`);
-    }
     assert.strictEqual(
       scripts.boundaries,
       "node --conditions=source --experimental-strip-types scripts/run-turbo-boundaries.ts",
@@ -367,6 +356,7 @@ void describe("Template Repository native task model", () => {
     const actionGraph = JSON.parse(result.stdout) as {
       readonly tasks: readonly {
         readonly command: string;
+        readonly dependencies: readonly string[];
         readonly taskId: string;
       }[];
     };
@@ -381,6 +371,12 @@ void describe("Template Repository native task model", () => {
       executableTemplateChecks[0]?.taskId,
       "@ykdz/template-checks#check:templates",
     );
+    assert.ok(taskIds.includes("@ykdz/template-checks#prepare:rustfmt"));
+    assert.ok(
+      executableTemplateChecks[0]?.dependencies.includes(
+        "@ykdz/template-checks#prepare:rustfmt",
+      ),
+    );
     assert.ok(
       !taskIds.includes(
         "@ykdz/template-builtin-presets#check:templates:boundary",
@@ -390,6 +386,49 @@ void describe("Template Repository native task model", () => {
     assert.ok(!taskIds.includes("@ykdz/template-core#build"));
     assert.ok(!taskIds.includes("@ykdz/template-builtin-presets#build"));
     assert.ok(!taskIds.includes("@ykdz/template#build"));
+
+    const registryGraphResult = await execa(
+      "pnpm",
+      ["exec", "turbo", "run", "check:deployment", "--dry-run=json"],
+      { reject: true },
+    );
+    const registryGraph = JSON.parse(registryGraphResult.stdout) as {
+      readonly tasks: readonly {
+        readonly dependencies: readonly string[];
+        readonly taskId: string;
+      }[];
+    };
+    const taskById = new Map(
+      registryGraph.tasks.map((task) => [task.taskId, task]),
+    );
+    assert.ok(
+      taskById
+        .get("@ykdz/template-checks#check:fixtures")
+        ?.dependencies.includes("@ykdz/template-checks#check:generated"),
+    );
+    assert.ok(
+      taskById
+        .get("@ykdz/template-checks#check:deployment")
+        ?.dependencies.includes("@ykdz/template-checks#check:fixtures"),
+    );
+
+    const focusedGraphResult = await execa(
+      "pnpm",
+      ["exec", "turbo", "run", "check:focused", "--dry-run=json"],
+      { reject: true },
+    );
+    const focusedGraph = JSON.parse(focusedGraphResult.stdout) as {
+      readonly tasks: readonly {
+        readonly taskId: string;
+      }[];
+    };
+    assert.ok(
+      !focusedGraph.tasks.some(({ taskId }) =>
+        ["check:generated", "check:fixtures", "check:deployment"].some(
+          (task) => taskId === `@ykdz/template-checks#${task}`,
+        ),
+      ),
+    );
   });
 
   void it("builds every package without scheduling the recursive root build script", async () => {
