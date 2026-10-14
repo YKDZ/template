@@ -394,7 +394,10 @@ const journey: CliJourney = {
         path.join(project, "packages/upgraded/package.json"),
         "utf8",
       ),
-    ) as { readonly engines: { readonly node: string } };
+    ) as {
+      readonly name: string;
+      readonly engines: { readonly node: string };
+    };
     assert.equal(upgradedManifest.engines.node, upgradedNode);
     const rootAfterAddition = JSON.parse(
       await readFile(
@@ -507,33 +510,30 @@ const journey: CliJourney = {
       node: releaseToolchainSnapshot.nodeVersion,
       packageManager: releaseToolchainSnapshot.packageManagerPin,
     });
-    const rootTurboPath = path.join(project, "turbo.json");
-    const rootTurbo = JSON.parse(await readFile(rootTurboPath, "utf8")) as {
-      readonly tasks: Record<string, unknown>;
+
+    const utilityManifestPath = path.join(
+      project,
+      "packages/utility/package.json",
+    );
+    const utilityManifest = JSON.parse(
+      await readFile(utilityManifestPath, "utf8"),
+    ) as {
+      readonly name: string;
+      scripts: Record<string, string>;
+      dependencies?: Record<string, string>;
     };
-    for (const name of [
-      "build",
-      "format:check",
-      "format:write",
-      "lint",
-      "lint:fix",
-      "test",
-      "typecheck",
-    ]) {
-      delete rootTurbo.tasks[name];
-    }
-    await writeFile(rootTurboPath, `${JSON.stringify(rootTurbo, null, 2)}\n`);
-    await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
-      cwd: project,
-    });
+    // 构造真实依赖链：utility 保留 ^build 任务配置但不提供 build 命令。
+    delete utilityManifest.scripts.build;
+    utilityManifest.dependencies = {
+      ...utilityManifest.dependencies,
+      [upgradedManifest.name]: "workspace:*",
+    };
+    await writeFile(
+      utilityManifestPath,
+      `${JSON.stringify(utilityManifest, null, 2)}\n`,
+    );
     await execa("pnpm", ["install"], { cwd: project });
 
-    const utilityManifest = JSON.parse(
-      await readFile(
-        path.join(project, "packages/utility/package.json"),
-        "utf8",
-      ),
-    ) as { readonly name: string };
     const blueprint = JSON.parse(
       await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
     ) as {
@@ -608,6 +608,7 @@ const journey: CliJourney = {
     };
     const utility = nativePackage(utilityManifest.name);
     const consumer = nativePackage(consumerManifest.name);
+    const upgraded = nativePackage(upgradedManifest.name);
     assert.deepStrictEqual(
       utility.tags,
       packageTagsForRole(packageRole("packages/utility")),
@@ -616,7 +617,11 @@ const journey: CliJourney = {
       consumer.tags,
       packageTagsForRole(packageRole(consumerPath)),
     );
-    for (const packageTasks of [utility, consumer]) {
+    assert.deepStrictEqual(
+      upgraded.tags,
+      packageTagsForRole(packageRole("packages/upgraded")),
+    );
+    for (const packageTasks of [consumer, upgraded]) {
       for (const name of ["build", "typecheck"] as const) {
         const task = packageTasks.tasks.items.find(
           (candidate) => candidate.name === name,
@@ -630,6 +635,17 @@ const journey: CliJourney = {
         assert.notStrictEqual(task!.script, null);
       }
     }
+    const utilityBuild = utility.tasks.items.find(
+      (candidate) => candidate.name === "build",
+    );
+    assert.notStrictEqual(utilityBuild, undefined);
+    assert.deepStrictEqual(utilityBuild!.tags, ["quality:light"]);
+    assert.strictEqual(utilityBuild!.script, null);
+    const utilityTypecheck = utility.tasks.items.find(
+      (candidate) => candidate.name === "typecheck",
+    );
+    assert.notStrictEqual(utilityTypecheck, undefined);
+    assert.strictEqual(utilityTypecheck!.script === null, false);
 
     const taskPlanResult = await execa(
       "pnpm",
@@ -650,6 +666,10 @@ const journey: CliJourney = {
           readonly taskId: string;
           readonly directory: string;
           readonly dependencies: readonly string[];
+          readonly command: string;
+          readonly resolvedTaskDefinition: {
+            readonly dependsOn: readonly string[];
+          };
         }[];
       }
     ).tasks;
@@ -660,15 +680,38 @@ const journey: CliJourney = {
       const utilityTask = taskPlan.find(
         (task) => task.taskId === `${utilityManifest.name}#${name}`,
       );
+      const upgradedTask = taskPlan.find(
+        (task) => task.taskId === `${upgradedManifest.name}#${name}`,
+      );
       assert.notStrictEqual(consumerTask, undefined);
       assert.notStrictEqual(utilityTask, undefined);
+      assert.notStrictEqual(upgradedTask, undefined);
       assert.strictEqual(consumerTask!.directory, consumerPath);
       assert.strictEqual(utilityTask!.directory, "packages/utility");
+      assert.strictEqual(upgradedTask!.directory, "packages/upgraded");
       assert.ok(
         consumerTask!.dependencies.includes(utilityTask!.taskId),
         `${utilityTask!.taskId} 应先于 ${consumerTask!.taskId}`,
       );
     }
+    const consumerBuild = taskPlan.find(
+      (task) => task.taskId === `${consumerManifest.name}#build`,
+    )!;
+    const utilityBuildPlan = taskPlan.find(
+      (task) => task.taskId === `${utilityManifest.name}#build`,
+    )!;
+    const upgradedBuild = taskPlan.find(
+      (task) => task.taskId === `${upgradedManifest.name}#build`,
+    )!;
+    assert.strictEqual(utilityBuildPlan.command, "<NONEXISTENT>");
+    assert.deepStrictEqual(utilityBuildPlan.resolvedTaskDefinition.dependsOn, [
+      "^build",
+    ]);
+    assert.ok(
+      consumerBuild.dependencies.includes(utilityBuildPlan.taskId) &&
+        utilityBuildPlan.dependencies.includes(upgradedBuild.taskId),
+      `${upgradedBuild.taskId} 应经无命令的 ${utilityBuildPlan.taskId} 先于 ${consumerBuild.taskId}`,
+    );
   },
 };
 

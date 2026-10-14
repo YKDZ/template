@@ -240,19 +240,20 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
           app: { dependencies: { allow: ["app", "library"] } },
         },
       },
-      tasks: {
-        build: { dependsOn: ["^build"] },
-        typecheck: { dependsOn: ["^typecheck"] },
-      },
     });
     assert.deepStrictEqual(
       initialTurbo.boundaries.tags.app.dependencies.allow,
       ["app", "library"],
     );
-    assert.deepStrictEqual(initialTurbo.tasks.build.dependsOn, ["^build"]);
-    assert.deepStrictEqual(initialTurbo.tasks.typecheck.dependsOn, [
-      "^typecheck",
-    ]);
+    for (const packagePath of ["apps/api", "apps/web"]) {
+      const packageTurbo = JSON.parse(
+        await readFile(path.join(targetDir, packagePath, "turbo.json"), "utf8"),
+      );
+      assert.deepStrictEqual(packageTurbo.tasks.build.dependsOn, ["^build"]);
+      assert.deepStrictEqual(packageTurbo.tasks.typecheck.dependsOn, [
+        "^typecheck",
+      ]);
+    }
     assert.ok(
       (
         await readFile(path.join(targetDir, "apps/api/src/runtime.ts"), "utf8")
