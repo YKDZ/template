@@ -42,6 +42,7 @@ jobs:
       TEMPLATE_FIXTURE_PNPM_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/pnpm
       TEMPLATE_FIXTURE_CARGO_CACHE_DIR: ${{ github.workspace }}/.fixture-native-cache/cargo
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
+      TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR: ${{ github.workspace }}/.preset-behavior-diagnostics
       TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR: ${{ inputs.publish_verified_candidate && format('{0}/.verified-packed-publication', github.workspace) || '' }}
     steps:
       - name: Check out repository
@@ -174,6 +175,25 @@ jobs:
             !.cli-journey-diagnostics/**/target/**
             !.cli-journey-diagnostics/**/.cache/**
             !.cli-journey-diagnostics/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Preset Behavior Diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: preset-behavior-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .preset-behavior-diagnostics/**
+            !.preset-behavior-diagnostics/**/node_modules/**
+            !.preset-behavior-diagnostics/**/.pnpm-store/**
+            !.preset-behavior-diagnostics/**/.npm/**
+            !.preset-behavior-diagnostics/**/.cargo/registry/**
+            !.preset-behavior-diagnostics/**/.cargo/git/**
+            !.preset-behavior-diagnostics/**/target/**
+            !.preset-behavior-diagnostics/**/.cache/**
+            !.preset-behavior-diagnostics/**/.turbo/cache/**
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

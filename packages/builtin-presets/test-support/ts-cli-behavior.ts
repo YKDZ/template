@@ -4,6 +4,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readFile,
   readdir,
   symlink,
   writeFile,
@@ -19,6 +20,16 @@ import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
 import { tsCliDefinition } from "../src/ts-cli/definition.ts";
+import {
+  cloneInstalledGeneratedRepository,
+  preserveInstalledGeneratedRepositoryFailure,
+  removeWithRetry,
+  type InstalledGeneratedRepository,
+} from "./installed-generated-repository.ts";
+import {
+  installedIntegrationSignal,
+  throwIfInstalledIntegrationWasCancelled,
+} from "./installed-integration-signal.ts";
 
 export function requireReadyInitialization(
   options: Parameters<typeof prepareGeneratedRepositoryInitialization>[0],
@@ -32,56 +43,169 @@ export function requireReadyInitialization(
   return preparation;
 }
 
+type GeneratedRepository = InstalledGeneratedRepository & {
+  readonly packageRoot: string;
+};
+
+let sharedInstalledTsCliRepository: Promise<GeneratedRepository> | undefined;
+
 export async function renderGeneratedRepository(
   prefix: string,
   installDependencies: boolean,
   initialName?: string,
-): Promise<{
-  readonly workspace: string;
-  readonly targetDir: string;
-  readonly packageRoot: string;
-}> {
+): Promise<GeneratedRepository> {
+  if (installDependencies) throwIfInstalledIntegrationWasCancelled();
   const workspace = await mkdtemp(path.join(tmpdir(), prefix));
   const targetDir = path.join(workspace, "demo-cli");
-  const prepared = requireReadyInitialization({
-    definition: tsCliDefinition,
-    targetDir,
-    overrides: {
-      scope: "demo",
-      ...(initialName === undefined ? {} : { name: initialName }),
-    },
-  });
-  const plan = prepared.plan;
-  await renderNewProject({
-    targetRoot: targetDir,
-    operations: [...plan.operations],
-  });
-  if (installDependencies) await execa("pnpm", ["install"], { cwd: targetDir });
-  else {
-    const sourceModules = path.resolve(import.meta.dirname, "../node_modules");
-    const targetModules = path.join(targetDir, "node_modules");
-    await mkdir(targetModules);
-    for (const entry of await readdir(sourceModules))
-      await symlink(
-        path.join(sourceModules, entry),
-        path.join(targetModules, entry),
-        "dir",
+  let packageRoot = path.join(targetDir, "packages/cli");
+  try {
+    const prepared = requireReadyInitialization({
+      definition: tsCliDefinition,
+      targetDir,
+      overrides: {
+        scope: "demo",
+        ...(initialName === undefined ? {} : { name: initialName }),
+      },
+    });
+    const plan = prepared.plan;
+    await renderNewProject({
+      targetRoot: targetDir,
+      operations: [...plan.operations],
+    });
+    if (installDependencies)
+      await execa("pnpm", ["install"], {
+        cwd: targetDir,
+        cancelSignal: installedIntegrationSignal(),
+      });
+    else {
+      const sourceModules = path.resolve(
+        import.meta.dirname,
+        "../node_modules",
       );
-  }
-  return {
-    workspace,
-    targetDir,
-    packageRoot: path.join(
+      const targetModules = path.join(targetDir, "node_modules");
+      await mkdir(targetModules);
+      for (const entry of await readdir(sourceModules))
+        await symlink(
+          path.join(sourceModules, entry),
+          path.join(targetModules, entry),
+          "dir",
+        );
+    }
+    packageRoot = path.join(
       targetDir,
       prepared.resolved.packages.find((candidate) =>
         candidate.path.startsWith("packages/"),
       )?.path ?? "packages/cli",
-    ),
-  };
+    );
+    return { workspace, targetDir, packageRoot };
+  } catch (cause) {
+    const retained = await preserveInstalledGeneratedRepositoryFailure({
+      label: "TS CLI",
+      scenario: prefix,
+      repository: { workspace, targetDir },
+      cause,
+    });
+    if (retained !== undefined) {
+      try {
+        await removeWithRetry(workspace);
+      } catch (cleanupCause) {
+        throw new AggregateError(
+          [cause, cleanupCause],
+          `TS CLI preparation failed and its workspace could not be removed: ${workspace}`,
+          { cause },
+        );
+      }
+    }
+    throw cause;
+  }
 }
 
-export async function renderInstalledGeneratedRepository(prefix: string) {
-  return await renderGeneratedRepository(prefix, true);
+async function getSharedInstalledTsCliRepository(): Promise<GeneratedRepository> {
+  sharedInstalledTsCliRepository ??= renderGeneratedRepository(
+    "template-ts-cli-shared-installed-base-",
+    true,
+  );
+  return await sharedInstalledTsCliRepository;
+}
+
+export async function withSharedInstalledGeneratedRepository<T>(
+  prefix: string,
+  runScenario: (repository: GeneratedRepository) => Promise<T>,
+): Promise<T> {
+  throwIfInstalledIntegrationWasCancelled();
+  const copied = await cloneInstalledGeneratedRepository(
+    await getSharedInstalledTsCliRepository(),
+    prefix,
+    "TS CLI",
+  );
+  const source = await getSharedInstalledTsCliRepository();
+  const repository = {
+    ...copied,
+    packageRoot: path.join(
+      copied.targetDir,
+      path.relative(source.targetDir, source.packageRoot),
+    ),
+  };
+  let result: T;
+  try {
+    throwIfInstalledIntegrationWasCancelled();
+    result = await runScenario(repository);
+  } catch (cause) {
+    const retained = await preserveInstalledGeneratedRepositoryFailure({
+      label: "TS CLI",
+      scenario: prefix,
+      repository,
+      cause,
+    });
+    if (retained !== undefined) {
+      try {
+        await removeWithRetry(repository.workspace);
+      } catch (cleanupCause) {
+        throw new AggregateError(
+          [cause, cleanupCause],
+          `TS CLI scenario failed and its workspace could not be removed: ${repository.workspace}`,
+          { cause },
+        );
+      }
+    }
+    throw cause;
+  }
+  try {
+    await removeWithRetry(repository.workspace);
+  } catch (cause) {
+    await preserveInstalledGeneratedRepositoryFailure({
+      label: "TS CLI",
+      scenario: prefix,
+      repository,
+      cause,
+    });
+    throw cause;
+  }
+  return result;
+}
+
+export async function cleanupSharedInstalledTsCliRepository(): Promise<void> {
+  const pending = sharedInstalledTsCliRepository;
+  if (pending === undefined) return;
+  const repository = await pending.catch(() => undefined);
+  if (repository === undefined) {
+    if (sharedInstalledTsCliRepository === pending)
+      sharedInstalledTsCliRepository = undefined;
+    return;
+  }
+  try {
+    await removeWithRetry(repository.workspace);
+  } catch (cause) {
+    await preserveInstalledGeneratedRepositoryFailure({
+      label: "TS CLI",
+      scenario: "template-ts-cli-shared-installed-base-",
+      repository,
+      cause,
+    });
+    throw cause;
+  }
+  if (sharedInstalledTsCliRepository === pending)
+    sharedInstalledTsCliRepository = undefined;
 }
 
 export async function writeExecutable(
@@ -117,53 +241,160 @@ export async function driveGeneratedTerminal(
   options: {
     readonly cwd: string;
     readonly env: Record<string, string | undefined>;
+    readonly signal?: AbortSignal;
   },
   steps: readonly TerminalConfirmationStep[],
 ) {
-  const running = execa("script", ["-qefc", command, "/dev/null"], {
+  const ownerDirectory = await mkdtemp(
+    path.join(tmpdir(), "template-generated-terminal-owner-"),
+  );
+  const ownerPath = path.join(ownerDirectory, "pty-process-group.txt");
+  const ownedCommand = `ps -o pgid= -p "$$" > "$TEMPLATE_GENERATED_TERMINAL_OWNER_FILE"; ${command}`;
+  const signal = options.signal ?? installedIntegrationSignal();
+  const running = execa("script", ["-qefc", ownedCommand, "/dev/null"], {
     cwd: options.cwd,
-    env: options.env,
+    env: {
+      ...options.env,
+      TEMPLATE_GENERATED_TERMINAL_OWNER_FILE: ownerPath,
+    },
+    killDescendants: true,
     reject: false,
+    cancelSignal: signal,
     stdin: "pipe",
     timeout: 60_000,
   });
   let transcript = "";
   let closed = false;
+  let runningSettled = false;
+  const exited = running.then(
+    () => {
+      runningSettled = true;
+    },
+    () => {
+      runningSettled = true;
+    },
+  );
   running.stdout?.on("data", (chunk: Buffer) => {
     transcript += chunk.toString("utf8");
   });
   running.stdout?.on("end", () => {
     closed = true;
   });
-  let typedThrough = 0;
-  for (const step of steps) {
-    const waitForPrompt = async (): Promise<number> => {
-      const deadline = Date.now() + 20_000;
-      for (;;) {
-        const observed = transcript.replaceAll("\r", "");
-        const markerAt = observed.indexOf(step.marker, typedThrough);
-        if (markerAt >= 0) {
-          const promptAt = observed.indexOf(
-            step.prompt,
-            markerAt + step.marker.length,
-          );
-          if (promptAt >= 0) return promptAt;
+  try {
+    let typedThrough = 0;
+    for (const step of steps) {
+      const waitForPrompt = async (): Promise<number> => {
+        const deadline = Date.now() + 20_000;
+        for (;;) {
+          if (signal.aborted) throw signal.reason;
+          const observed = transcript.replaceAll("\r", "");
+          const markerAt = observed.indexOf(step.marker, typedThrough);
+          if (markerAt >= 0) {
+            const promptAt = observed.indexOf(
+              step.prompt,
+              markerAt + step.marker.length,
+            );
+            if (promptAt >= 0) return promptAt;
+          }
+          if (closed) return -1;
+          if (Date.now() >= deadline)
+            throw new Error(
+              `Terminal protocol stalled before ${step.marker}: ${observed}`,
+            );
+          await new Promise((resolve) => setTimeout(resolve, 20));
         }
-        if (closed) return -1;
-        if (Date.now() >= deadline)
+      };
+      const promptAt = await waitForPrompt();
+      if (promptAt < 0) break;
+      typedThrough = promptAt + step.prompt.length;
+      await step.before?.();
+      running.stdin?.write(`${step.line}\n`);
+    }
+    const result = await running;
+    if (signal.aborted) throw signal.reason;
+    await removeWithRetry(ownerDirectory);
+    return result;
+  } catch (cause) {
+    const failureCause = signal.aborted
+      ? new AggregateError(
+          cause === signal.reason ? [] : [cause],
+          "生成终端命令已收到取消信号",
+          { cause: signal.reason },
+        )
+      : cause;
+    if (signal.aborted && failureCause instanceof Error)
+      Object.assign(failureCause, { command, stdout: transcript, stderr: "" });
+    const processGroup = Number(
+      (await readFile(ownerPath, "utf8").catch(() => "")).trim(),
+    );
+    const processGroups = new Set<number>();
+    if (running.pid !== undefined) processGroups.add(running.pid);
+    if (Number.isInteger(processGroup) && processGroup > 1)
+      processGroups.add(processGroup);
+    const signalOwnedProcessGroups = (signal: NodeJS.Signals): void => {
+      running.kill(signal);
+      for (const ownedGroup of processGroups) {
+        if (ownedGroup === running.pid) continue;
+        try {
+          process.kill(-ownedGroup, signal);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        }
+      }
+    };
+    const waitForOwnedProcessGroups = async (
+      timeout: number,
+    ): Promise<boolean> => {
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const processList = await execa("ps", ["-eo", "pgid=,stat="], {
+          reject: false,
+        });
+        if (processList.exitCode !== 0)
           throw new Error(
-            `Terminal protocol stalled before ${step.marker}: ${observed}`,
+            `Could not inspect owned PTY process groups: ${processList.stderr}`,
           );
+        const activeGroups = new Set<number>();
+        for (const line of processList.stdout.split("\n")) {
+          const [groupValue, state] = line.trim().split(/\s+/u);
+          const listedGroup = Number(groupValue);
+          if (
+            Number.isInteger(listedGroup) &&
+            processGroups.has(listedGroup) &&
+            state !== undefined &&
+            !state.startsWith("Z") &&
+            state !== "X"
+          ) {
+            activeGroups.add(listedGroup);
+          }
+        }
+        if (!runningSettled && running.pid !== undefined)
+          activeGroups.add(running.pid);
+        if (activeGroups.size === 0) return true;
+        if (Date.now() >= deadline) return false;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     };
-    const promptAt = await waitForPrompt();
-    if (promptAt < 0) break;
-    typedThrough = promptAt + step.prompt.length;
-    await step.before?.();
-    running.stdin?.write(`${step.line}\n`);
+    try {
+      signalOwnedProcessGroups("SIGTERM");
+      if (!(await waitForOwnedProcessGroups(1_000))) {
+        signalOwnedProcessGroups("SIGKILL");
+        if (!(await waitForOwnedProcessGroups(1_000)))
+          throw new Error(
+            `Owned terminal process groups did not exit: ${[...processGroups].join(", ")}`,
+          );
+      }
+      await exited;
+      await removeWithRetry(ownerDirectory);
+    } catch (cleanupCause) {
+      throw new AggregateError(
+        [failureCause, cleanupCause],
+        "Could not stop the owned generated terminal processes",
+        { cause: failureCause },
+      );
+    }
+    throw failureCause;
   }
-  return await running;
 }
 
 export async function writeAcceptedFirstReleaseArtifact(options: {
