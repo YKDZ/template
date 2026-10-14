@@ -63,12 +63,16 @@
     "PNPM_CONFIG_STORE_DIR",
     "PNPM_CONFIG_CACHE_DIR"
   ],
-  "concurrency": "1",
+  "concurrency": "2",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "tags": ["quality:light"],
-      "cache": false,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ],
       "outputs": ["dist/**"]
     },
     "check:fixtures": {
@@ -183,6 +187,7 @@
     },
     "format:check": {
       "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxfmt.config.ts"],
       "outputs": []
     },
     "format:write": {
@@ -192,6 +197,7 @@
     },
     "lint": {
       "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxlint.config.ts"],
       "outputs": []
     },
     "lint:fix": {
@@ -201,6 +207,11 @@
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/tsconfig.json",
+        "$TURBO_ROOT$/tsconfig.base.json"
+      ],
       "outputs": []
     },
     "test": {
@@ -298,6 +309,7 @@
     },
     "//#check:toolchain:versions": {
       "tags": ["quality:light"],
+      "cache": false,
       "outputs": []
     },
     "//#sync:toolchain": {
