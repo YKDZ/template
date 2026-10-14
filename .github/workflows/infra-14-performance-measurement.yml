@@ -3,13 +3,13 @@ name: 临时票14性能测量
 on:
   push:
     branches:
-      - codex/infra-14-performance-measurement
+      - codex/infra-14-final-buildkit-605ff21
 
 permissions:
   contents: read
 
 concurrency:
-  group: infra-14-performance-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}
+  group: infra-14-performance-605ff217415bfc909f76c1367359b99aacf7a7d3-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       full_health_success: ${{ steps.full-measurement.outputs.full_health_success }}
     env:
       CI: "true"
-      SOURCE_SHA: a74329befedddc1613e0a21c6fe7aa781631ed55
+      SOURCE_SHA: 605ff217415bfc909f76c1367359b99aacf7a7d3
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -40,7 +40,7 @@ jobs:
       - name: 检出固定源提交
         uses: actions/checkout@v7
         with:
-          ref: a74329befedddc1613e0a21c6fe7aa781631ed55
+          ref: 605ff217415bfc909f76c1367359b99aacf7a7d3
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -424,7 +424,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-605ff217415bfc909f76c1367359b99aacf7a7d3-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 记录 Fixture evidence 保存结果
         if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
@@ -449,7 +449,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-measure-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-measure-605ff217415bfc909f76c1367359b99aacf7a7d3-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance/records/**
             ${{ runner.temp }}/infra-14-performance/run-formal-command.sh
@@ -494,7 +494,7 @@ jobs:
     timeout-minutes: 240
     env:
       CI: "true"
-      SOURCE_SHA: a74329befedddc1613e0a21c6fe7aa781631ed55
+      SOURCE_SHA: 605ff217415bfc909f76c1367359b99aacf7a7d3
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -513,7 +513,7 @@ jobs:
       - name: 检出相同固定源提交
         uses: actions/checkout@v7
         with:
-          ref: a74329befedddc1613e0a21c6fe7aa781631ed55
+          ref: 605ff217415bfc909f76c1367359b99aacf7a7d3
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -563,7 +563,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-605ff217415bfc909f76c1367359b99aacf7a7d3-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 验证 Fixture evidence 精确恢复
         if: always()
@@ -750,7 +750,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-restore-a74329befedddc1613e0a21c6fe7aa781631ed55-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-restore-605ff217415bfc909f76c1367359b99aacf7a7d3-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance-restore/records/**
             ${{ runner.temp }}/infra-14-performance-restore/run-restored-command.sh
