@@ -27,7 +27,7 @@ const runnerArguments = [
   "--experimental-strip-types",
   "--import=./test-support/setup.ts",
   "--test",
-  "--test-concurrency=1",
+  "--test-concurrency=2",
   "--test-timeout=300000",
   "--test-reporter=spec",
   "--test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter",
