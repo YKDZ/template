@@ -131,6 +131,22 @@ jobs:
         if: always() && steps.package-check.outcome == 'success'
         run: pnpm --filter @ykdz/template-checks run check:evidence-health
 
+      - name: 清理测试容器
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
+        run: |
+          fixture_container_ids="$(docker ps -aq --filter label=com.ykdz.template.fixture.project)"
+          if [[ -n "$fixture_container_ids" ]]; then
+            readarray -t fixture_containers <<< "$fixture_container_ids"
+            docker rm -f "${fixture_containers[@]}"
+          fi
+
+      - name: 恢复 Fixture 诊断属主
+        if: always() && steps.fixture-prerequisites.outcome == 'success'
+        run: |
+          if [ -d .fixture-workspace ]; then
+            sudo chown -hR "$(id -u):$(id -g)" -- .fixture-workspace
+          fi
+
       - name: Upload Fixture Evidence Activity
         if: always()
         uses: actions/upload-artifact@v7
@@ -209,15 +225,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      - name: 清理测试容器
-        if: always() && steps.fixture-prerequisites.outcome == 'success'
-        run: |
-          fixture_container_ids="$(docker ps -aq --filter label=com.ykdz.template.fixture.project)"
-          if [[ -n "$fixture_container_ids" ]]; then
-            readarray -t fixture_containers <<< "$fixture_container_ids"
-            docker rm -f "${fixture_containers[@]}"
-          fi
 
       - name: Save BuildKit cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
