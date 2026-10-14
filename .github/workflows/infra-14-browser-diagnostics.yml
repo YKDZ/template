@@ -40,9 +40,12 @@ jobs:
       - name: Initialize a generated Vue repository through the CLI
         id: generated-init
         run: |
-          mkdir -p .fixture-workspace
+          test ! -e .fixture-workspace
+          mkdir .fixture-workspace
           node packages/cli/dist/cli.js init "$GITHUB_WORKSPACE/.fixture-workspace/demo" --preset vue-app --scope demo --no-todo
           test -f .fixture-workspace/demo/apps/web/src/components/CounterButton.vue
+          test ! -e .fixture-workspace/demo/apps/web/test/infra-14-node-discovery.node.test.ts
+          test ! -e .fixture-workspace/vitest.config.ts.for-zero
 
       - name: Install generated repository dependencies
         id: generated-install
@@ -62,37 +65,61 @@ jobs:
           set -euo pipefail
           evidence="$GITHUB_WORKSPACE/.fixture-workspace"
           node_test=apps/web/test/infra-14-node-discovery.node.test.ts
+          cleanup_node_probe() {
+            rm -f "$node_test"
+          }
+          trap cleanup_node_probe EXIT
           run_native_test() {
             label=$1
             expected_status=$2
+            log="$evidence/node-turbo-$label.log"
             set +e
-            pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-turbo-$label.log"
+            pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$log"
             status=${PIPESTATUS[0]}
             set -e
             printf '%s\n' "$status" > "$evidence/node-turbo-$label.exit"
             test "$status" -eq "$expected_status"
-            printf 'stage=%s exit=%s\n' "$label" "$status"
+            hash=$(grep -Eo 'cache (miss, executing|hit, replaying logs) [[:xdigit:]]{16}' "$log" | tail -n 1 | awk '{print $NF}')
+            test "${#hash}" -eq 16
+            printf '%s\n' "$hash" > "$evidence/node-turbo-$label.hash"
+            summary=$(sed -n 's/.*Summary:[[:space:]]*//p' "$log" | tail -n 1)
+            test -n "$summary"
+            test -f "$summary"
+            cp "$summary" "$evidence/node-turbo-$label.summary.json"
+            printf 'stage=%s exit=%s hash=%s summary=%s\n' "$label" "$status" "$hash" "$summary"
           }
 
           run_native_test baseline-miss 0
           grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-turbo-baseline-miss.log"
           run_native_test baseline-hit 0
           grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-turbo-baseline-hit.log"
+          baseline_hash=$(cat "$evidence/node-turbo-baseline-miss.hash")
+          test "$baseline_hash" = "$(cat "$evidence/node-turbo-baseline-hit.hash")"
 
           cat > "$node_test" <<'EOF'
+          import { createPinia, setActivePinia } from "pinia";
           import { expect, test } from "vitest";
 
+          import { useCounterStore } from "#/stores/counter";
+
           test("票14临时 Node glob 自动发现", () => {
-            expect("已发现").toBe("故意失败");
+            setActivePinia(createPinia());
+            const counter = useCounterStore();
+
+            counter.increment();
+
+            expect(counter.count).toBe(2);
           });
           EOF
           run_native_test added-file-miss 1
           grep -Fq '票14临时 Node glob 自动发现' "$evidence/node-turbo-added-file-miss.log"
           grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-turbo-added-file-miss.log"
+          test "$baseline_hash" != "$(cat "$evidence/node-turbo-added-file-miss.hash")"
           rm "$node_test"
 
           run_native_test restored-hit 0
           grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-turbo-restored-hit.log"
+          test "$baseline_hash" = "$(cat "$evidence/node-turbo-restored-hit.hash")"
 
       - name: Prove an empty generated Node project fails
         id: node-zero
@@ -101,18 +128,33 @@ jobs:
         run: |
           set -euo pipefail
           evidence="$GITHUB_WORKSPACE/.fixture-workspace"
-          set +e
+          baseline_hash=$(cat "$evidence/node-turbo-baseline-miss.hash")
           cp apps/web/vitest.config.ts "$evidence/vitest.config.ts.for-zero"
+          restore_vitest_config() {
+            cp "$evidence/vitest.config.ts.for-zero" apps/web/vitest.config.ts
+          }
+          trap restore_vitest_config EXIT
           sed -i 's|test/\*\*/\*\.node.test.ts|test/__infra14_empty__/**/*.node.test.ts|' apps/web/vitest.config.ts
+          grep -Fq 'test/__infra14_empty__/**/*.node.test.ts' apps/web/vitest.config.ts
+          set +e
           pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-zero.log"
           node_status=${PIPESTATUS[0]}
           set -e
           printf '%s\n' "$node_status" > "$evidence/node-zero.exit"
-          cp "$evidence/vitest.config.ts.for-zero" apps/web/vitest.config.ts
-          test "$node_status" -ne 0
+          test "$node_status" -eq 1
           grep -Eiq 'no test files found|no tests found|no test files' "$evidence/node-zero.log"
           grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-zero.log"
+          zero_hash=$(grep -Eo 'cache miss, executing [[:xdigit:]]{16}' "$evidence/node-zero.log" | tail -n 1 | awk '{print $NF}')
+          test "${#zero_hash}" -eq 16
+          printf '%s\n' "$zero_hash" > "$evidence/node-zero.hash"
+          zero_summary=$(sed -n 's/.*Summary:[[:space:]]*//p' "$evidence/node-zero.log" | tail -n 1)
+          test -n "$zero_summary"
+          test -f "$zero_summary"
+          cp "$zero_summary" "$evidence/node-zero.summary.json"
+          test "$baseline_hash" != "$zero_hash"
 
+          restore_vitest_config
+          trap - EXIT
           set +e
           pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-zero-restored.log"
           restored_status=${PIPESTATUS[0]}
@@ -120,6 +162,15 @@ jobs:
           printf '%s\n' "$restored_status" > "$evidence/node-zero-restored.exit"
           test "$restored_status" -eq 0
           grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-zero-restored.log"
+          restored_hash=$(grep -Eo 'cache hit, replaying logs [[:xdigit:]]{16}' "$evidence/node-zero-restored.log" | tail -n 1 | awk '{print $NF}')
+          test "${#restored_hash}" -eq 16
+          printf '%s\n' "$restored_hash" > "$evidence/node-zero-restored.hash"
+          restored_summary=$(sed -n 's/.*Summary:[[:space:]]*//p' "$evidence/node-zero-restored.log" | tail -n 1)
+          test -n "$restored_summary"
+          test -f "$restored_summary"
+          cp "$restored_summary" "$evidence/node-zero-restored.summary.json"
+          test "$baseline_hash" = "$restored_hash"
+          cmp apps/web/vitest.config.ts "$evidence/vitest.config.ts.for-zero"
 
       - name: Prove an empty generated browser project fails
         id: browser-zero
@@ -128,6 +179,17 @@ jobs:
         run: |
           set -euo pipefail
           stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-browser-tests"
+          restore_browser_tests() {
+            if [[ -d "$stash" ]]; then
+              while IFS= read -r -d '' file; do
+                relative=${file#"$stash"/}
+                mkdir -p "apps/web/$(dirname "$relative")"
+                mv "$file" "apps/web/$relative"
+              done < <(find "$stash" -type f -name '*.browser.test.ts' -print0)
+              rm -rf "$stash"
+            fi
+          }
+          trap restore_browser_tests EXIT
           mapfile -d '' files < <(find apps/web/test -type f -name '*.browser.test.ts' -print0)
           test "${#files[@]}" -gt 0
           for file in "${files[@]}"; do
@@ -140,13 +202,9 @@ jobs:
           browser_status=${PIPESTATUS[0]}
           set -e
           printf '%s\n' "$browser_status" > "$GITHUB_WORKSPACE/.fixture-workspace/browser-zero.exit"
-          while IFS= read -r -d '' file; do
-            relative=${file#"$stash"/}
-            mkdir -p "apps/web/$(dirname "$relative")"
-            mv "$file" "apps/web/$relative"
-          done < <(find "$stash" -type f -name '*.browser.test.ts' -print0)
-          rm -rf "$stash"
-          test "$browser_status" -ne 0
+          restore_browser_tests
+          trap - EXIT
+          test "$browser_status" -eq 1
           grep -Eiq 'no test files|no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/browser-zero.log"
 
       - name: Prove an empty generated Playwright project fails
@@ -156,6 +214,17 @@ jobs:
         run: |
           set -euo pipefail
           stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-playwright-tests"
+          restore_playwright_tests() {
+            if [[ -d "$stash" ]]; then
+              while IFS= read -r -d '' file; do
+                relative=${file#"$stash"/}
+                mkdir -p "apps/web/$(dirname "$relative")"
+                mv "$file" "apps/web/$relative"
+              done < <(find "$stash" -type f -name '*.spec.ts' -print0)
+              rm -rf "$stash"
+            fi
+          }
+          trap restore_playwright_tests EXIT
           mapfile -d '' files < <(find apps/web/test/e2e -type f -name '*.spec.ts' -print0)
           test "${#files[@]}" -gt 0
           for file in "${files[@]}"; do
@@ -168,13 +237,9 @@ jobs:
           playwright_status=${PIPESTATUS[0]}
           set -e
           printf '%s\n' "$playwright_status" > "$GITHUB_WORKSPACE/.fixture-workspace/playwright-zero.exit"
-          while IFS= read -r -d '' file; do
-            relative=${file#"$stash"/}
-            mkdir -p "apps/web/$(dirname "$relative")"
-            mv "$file" "apps/web/$relative"
-          done < <(find "$stash" -type f -name '*.spec.ts' -print0)
-          rm -rf "$stash"
-          test "$playwright_status" -ne 0
+          restore_playwright_tests
+          trap - EXIT
+          test "$playwright_status" -eq 1
           grep -Eiq 'no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/playwright-zero.log"
 
       - name: Change only the generated counter label
@@ -194,7 +259,7 @@ jobs:
             });
             const button = screen.getByRole("button", { name: /计数/ });
 
-            await expect.element(button).toHaveTextContent("计数：0");
+            await expect.element(button).toHaveTextContent(/^计数：0$/);
           });
           EOF
           cat > .fixture-workspace/demo/apps/web/test/e2e/infra-14-counter.spec.ts <<'EOF'
@@ -203,15 +268,21 @@ jobs:
           test("票14临时 Playwright glob 自动发现", async ({ page }) => {
             await page.goto("/");
             await expect(
-              page.getByRole("button", { name: "计数：0" }),
+              page.getByRole("button", { name: "计数：0", exact: true }),
             ).toBeVisible();
           });
           EOF
           component=.fixture-workspace/demo/apps/web/src/components/CounterButton.vue
+          cp "$component" .fixture-workspace/CounterButton.vue.original
           test "$(grep -Foc '计数：{{ count }}' "$component")" = 1
           sed -i 's/计数：{{ count }}/错误计数：{{ count }}/' "$component"
           grep -Fq '错误计数：{{ count }}' "$component"
-          git diff --no-index -- packages/builtin-presets/templates/shared/vue/src/components/CounterButton.vue "$component" || test "$?" -eq 1
+          pnpm --filter @demo/web run format:write
+          pnpm --filter @demo/web run format:check
+          pnpm --filter @demo/web run lint
+          pnpm --filter @demo/web run typecheck
+          grep -Fq '错误计数：{{ count }}' "$component"
+          git diff --no-index -- .fixture-workspace/CounterButton.vue.original "$component" || test "$?" -eq 1
 
       - name: Run the generated public full gate and retain its exit
         id: generated-full
@@ -221,10 +292,13 @@ jobs:
           set +e
           pnpm run check:full 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
           check_status=${PIPESTATUS[0]}
+          set -e
           printf '%s\n' "$check_status" > "$GITHUB_WORKSPACE/.fixture-workspace/check-full.exit"
           grep -Fq '票14临时 Browser glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
           grep -Fq '票14临时 Playwright glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
-          test "$check_status" -ne 0
+          grep -Fq '@demo/web#test:browser' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
+          grep -Fq '@demo/web#test:e2e' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
+          test "$check_status" -eq 1
           exit "$check_status"
 
       - name: Upload Fixture Failure Diagnostics
@@ -245,3 +319,23 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Restore temporary generated Browser and E2E inputs
+        if: always() && steps.generated-install.outcome == 'success'
+        run: |
+          component=.fixture-workspace/demo/apps/web/src/components/CounterButton.vue
+          original=.fixture-workspace/CounterButton.vue.original
+          if [[ -f "$original" ]]; then
+            cp "$original" "$component"
+            cmp "$component" "$original"
+          fi
+          rm -f .fixture-workspace/demo/apps/web/test/infra-14-browser-discovery.browser.test.ts
+          rm -f .fixture-workspace/demo/apps/web/test/e2e/infra-14-counter.spec.ts
+          rm -f .fixture-workspace/CounterButton.vue.original
+          rm -f .fixture-workspace/vitest.config.ts.for-zero
+          rm -rf .fixture-workspace/disabled-browser-tests
+          rm -rf .fixture-workspace/disabled-playwright-tests
+          test ! -e .fixture-workspace/demo/apps/web/test/infra-14-node-discovery.node.test.ts
+          test ! -e .fixture-workspace/demo/apps/web/test/infra-14-browser-discovery.browser.test.ts
+          test ! -e .fixture-workspace/demo/apps/web/test/e2e/infra-14-counter.spec.ts
+          test ! -e .fixture-workspace/vitest.config.ts.for-zero
