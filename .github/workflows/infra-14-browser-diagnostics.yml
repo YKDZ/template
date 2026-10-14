@@ -15,13 +15,15 @@ jobs:
 
   vue-browser-failures:
     name: Generated Vue browser and E2E failures
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       CI: "true"
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: c3e2129fb35a318751068b499240808348ab3c21
 
       - name: Enable Corepack
         run: corepack enable
@@ -42,17 +44,154 @@ jobs:
         run: pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium
 
       - name: Initialize a generated Vue repository through the CLI
+        id: generated-init
         run: |
           mkdir -p .fixture-workspace
-          pnpm --filter @ykdz/template exec template init "$GITHUB_WORKSPACE/.fixture-workspace/demo" --preset vue-app --scope demo --no-todo
+          node packages/cli/dist/cli.js init "$GITHUB_WORKSPACE/.fixture-workspace/demo" --preset vue-app --scope demo --no-todo
           test -f .fixture-workspace/demo/apps/web/src/components/CounterButton.vue
 
       - name: Install generated repository dependencies
+        id: generated-install
         working-directory: .fixture-workspace/demo
         run: pnpm install
 
-      - name: Change only the generated counter label
+      - name: Prove generated Node glob discovery
+        id: node-discovery
+        if: always() && steps.generated-install.outcome == 'success'
+        working-directory: .fixture-workspace/demo
         run: |
+          node_test=apps/web/test/infra-14-node-discovery.node.test.ts
+          cat > "$node_test" <<'EOF'
+          import assert from "node:assert/strict";
+          import { test } from "node:test";
+
+          test("票14临时 Node glob 自动发现", () => {
+            assert.equal("已发现", "故意失败");
+          });
+          EOF
+          set +e
+          pnpm --filter @demo/web test 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.log"
+          node_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$node_status" > "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.exit"
+          rm "$node_test"
+          test "$node_status" -ne 0
+          grep -Fq '票14临时 Node glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.log"
+
+      - name: Prove an empty generated Node project fails
+        id: node-zero
+        if: always() && steps.generated-install.outcome == 'success' && steps.node-discovery.outcome == 'success'
+        working-directory: .fixture-workspace/demo
+        run: |
+          set -euo pipefail
+          stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-node-tests"
+          mapfile -d '' files < <(find apps/web/test -type f -name '*.node.test.ts' -print0)
+          test "${#files[@]}" -gt 0
+          for file in "${files[@]}"; do
+            relative=${file#apps/web/}
+            mkdir -p "$stash/$(dirname "$relative")"
+            mv "$file" "$stash/$relative"
+          done
+          set +e
+          pnpm --filter @demo/web test 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.log"
+          node_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$node_status" > "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.exit"
+          while IFS= read -r -d '' file; do
+            relative=${file#"$stash"/}
+            mkdir -p "apps/web/$(dirname "$relative")"
+            mv "$file" "apps/web/$relative"
+          done < <(find "$stash" -type f -name '*.node.test.ts' -print0)
+          rm -rf "$stash"
+          test "$node_status" -ne 0
+          grep -Eiq 'no test files|no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.log"
+
+      - name: Prove an empty generated browser project fails
+        id: browser-zero
+        if: always() && steps.generated-install.outcome == 'success' && steps.node-zero.outcome == 'success'
+        working-directory: .fixture-workspace/demo
+        run: |
+          set -euo pipefail
+          stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-browser-tests"
+          mapfile -d '' files < <(find apps/web/test -type f -name '*.browser.test.ts' -print0)
+          test "${#files[@]}" -gt 0
+          for file in "${files[@]}"; do
+            relative=${file#apps/web/}
+            mkdir -p "$stash/$(dirname "$relative")"
+            mv "$file" "$stash/$relative"
+          done
+          set +e
+          pnpm --filter @demo/web run test:browser 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/browser-zero.log"
+          browser_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$browser_status" > "$GITHUB_WORKSPACE/.fixture-workspace/browser-zero.exit"
+          while IFS= read -r -d '' file; do
+            relative=${file#"$stash"/}
+            mkdir -p "apps/web/$(dirname "$relative")"
+            mv "$file" "apps/web/$relative"
+          done < <(find "$stash" -type f -name '*.browser.test.ts' -print0)
+          rm -rf "$stash"
+          test "$browser_status" -ne 0
+          grep -Eiq 'no test files|no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/browser-zero.log"
+
+      - name: Prove an empty generated Playwright project fails
+        id: playwright-zero
+        if: always() && steps.generated-install.outcome == 'success' && steps.browser-zero.outcome == 'success'
+        working-directory: .fixture-workspace/demo
+        run: |
+          set -euo pipefail
+          stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-playwright-tests"
+          mapfile -d '' files < <(find apps/web/test/e2e -type f -name '*.spec.ts' -print0)
+          test "${#files[@]}" -gt 0
+          for file in "${files[@]}"; do
+            relative=${file#apps/web/}
+            mkdir -p "$stash/$(dirname "$relative")"
+            mv "$file" "$stash/$relative"
+          done
+          set +e
+          pnpm --filter @demo/web run test:e2e 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/playwright-zero.log"
+          playwright_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$playwright_status" > "$GITHUB_WORKSPACE/.fixture-workspace/playwright-zero.exit"
+          while IFS= read -r -d '' file; do
+            relative=${file#"$stash"/}
+            mkdir -p "apps/web/$(dirname "$relative")"
+            mv "$file" "apps/web/$relative"
+          done < <(find "$stash" -type f -name '*.spec.ts' -print0)
+          rm -rf "$stash"
+          test "$playwright_status" -ne 0
+          grep -Eiq 'no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/playwright-zero.log"
+
+      - name: Change only the generated counter label
+        id: inject-browser-failures
+        if: always() && steps.generated-install.outcome == 'success' && steps.playwright-zero.outcome == 'success'
+        run: |
+          cat > .fixture-workspace/demo/apps/web/test/infra-14-browser-discovery.browser.test.ts <<'EOF'
+          import { createPinia } from "pinia";
+          import { expect, it } from "vitest";
+          import { render } from "vitest-browser-vue";
+
+          import CounterButton from "../src/components/CounterButton.vue";
+
+          it("票14临时 Browser glob 自动发现", async () => {
+            const screen = await render(CounterButton, {
+              global: { plugins: [createPinia()] },
+            });
+            const button = screen.getByRole("button", { name: /计数/ });
+
+            await expect.element(button).toHaveTextContent("计数：0");
+          });
+          EOF
+          cat > .fixture-workspace/demo/apps/web/test/e2e/infra-14-counter.spec.ts <<'EOF'
+          import { expect, test } from "@playwright/test";
+
+          test("票14临时 Playwright glob 自动发现", async ({ page }) => {
+            await page.goto("/");
+            await expect(
+              page.getByRole("button", { name: "计数：0" }),
+            ).toBeVisible();
+          });
+          EOF
           component=.fixture-workspace/demo/apps/web/src/components/CounterButton.vue
           test "$(grep -Foc '计数：{{ count }}' "$component")" = 1
           sed -i 's/计数：{{ count }}/错误计数：{{ count }}/' "$component"
@@ -60,12 +199,17 @@ jobs:
           git diff --no-index -- packages/builtin-presets/templates/shared/vue/src/components/CounterButton.vue "$component" || test "$?" -eq 1
 
       - name: Run the generated public full gate and retain its exit
+        id: generated-full
+        if: always() && steps.generated-install.outcome == 'success' && steps.inject-browser-failures.outcome == 'success'
         working-directory: .fixture-workspace/demo
         run: |
           set +e
           pnpm run check:full 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
           check_status=${PIPESTATUS[0]}
           printf '%s\n' "$check_status" > "$GITHUB_WORKSPACE/.fixture-workspace/check-full.exit"
+          grep -Fq '票14临时 Browser glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
+          grep -Fq '票14临时 Playwright glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/check-full.log"
+          test "$check_status" -ne 0
           exit "$check_status"
 
       - name: Upload Fixture Failure Diagnostics

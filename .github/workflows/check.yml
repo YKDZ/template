@@ -34,7 +34,7 @@ concurrency:
 jobs:
   check:
     name: Check package and fixture matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
       TEMPLATE_FIXTURE_EVIDENCE_DIR: ${{ github.workspace }}/.fixture-evidence
@@ -52,6 +52,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          ref: c3e2129fb35a318751068b499240808348ab3c21
 
       - name: Enable Corepack
         run: corepack enable
