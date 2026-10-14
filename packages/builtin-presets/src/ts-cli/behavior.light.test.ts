@@ -67,7 +67,7 @@ void describe("ts-cli Preset Definition behavior", () => {
     );
     assert.strictEqual(
       sourceManifest.scripts.typecheck,
-      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.quality-gates.json --noEmit --pretty false",
+      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false",
     );
     const publicationSpecifiers = [
       ...bridge.matchAll(/from "([^"]*(?:npm-)?publication[^"]*)"/gu),
@@ -313,15 +313,9 @@ void describe("ts-cli Preset Definition behavior", () => {
     assert.ok(rootScripts);
     assert.ok(Object.hasOwn(rootScripts, "check"));
     const rootCheck = rootScripts.check;
-    assert.ok(
-      typeof rootCheck === "string" &&
-        rootCheck.includes("publication:artifact") &&
-        rootCheck.includes("build test:e2e --filter=!./packages/cli"),
-    );
     assert.strictEqual(
-      typeof rootCheck === "string" &&
-        rootCheck.includes("publication:readiness --continue"),
-      false,
+      rootCheck,
+      "node --conditions=source scripts/quality-gates.ts check",
     );
     assert.ok(
       plan.operations.some(

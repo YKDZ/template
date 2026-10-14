@@ -2422,14 +2422,66 @@ exec ${JSON.stringify(process.execPath)} "$@"
   );
 
   void it(
+    "未配置发布条件时报告制品验收未执行，发布必需模式失败",
+    { timeout: 180_000 },
+    async () => {
+      await withSharedInstalledGeneratedRepository(
+        "template-ts-cli-publication-artifact-required-",
+        async (project) => {
+          const optional = await execa(
+            "pnpm",
+            ["run", "publication:artifact"],
+            {
+              cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(
+            optional.exitCode,
+            0,
+            `${optional.stdout}\n${optional.stderr}`,
+          );
+          assert.ok(
+            `${optional.stdout}\n${optional.stderr}`.includes(
+              "发布制品验收未执行",
+            ),
+          );
+
+          const required = await execa(
+            "pnpm",
+            ["run", "publication:artifact"],
+            {
+              cwd: project.targetDir,
+              env: {
+                ...process.env,
+                PUBLICATION_ARTIFACT_REQUIRED: "true",
+              },
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
+          );
+          assert.strictEqual(required.exitCode, 1);
+          assert.ok(
+            `${required.stdout}\n${required.stderr}`.includes(
+              "ERROR publication-artifact-required",
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  void it(
     "keeps the private candidate Root Check green while require-ready fails closed",
     { timeout: 180_000 },
     async () => {
       await withSharedInstalledGeneratedRepository(
         "template-ts-cli-publication-readiness-",
         async (project) => {
-          const rootCheck = await execa("pnpm", ["run", "check"], {
+          const rootCheck = await execa("pnpm", ["run", "check:full"], {
             cwd: project.targetDir,
+            cancelSignal: installedIntegrationSignal(),
             reject: false,
           });
           assert.strictEqual(
@@ -2437,12 +2489,18 @@ exec ${JSON.stringify(process.execPath)} "$@"
             0,
             `${rootCheck.stdout}\n${rootCheck.stderr}`,
           );
+          assert.ok(rootCheck.stderr.includes("条件验收未执行"));
+          assert.ok(rootCheck.stderr.includes("publication:artifact"));
+          assert.ok(
+            !rootCheck.stdout.includes("npm publication artifact: blocked"),
+          );
 
           const baseline = await execa(
             "pnpm",
             ["run", "publication:readiness"],
             {
               cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
               reject: false,
             },
           );
@@ -2454,7 +2512,11 @@ exec ${JSON.stringify(process.execPath)} "$@"
           const required = await execa(
             "pnpm",
             ["run", "publication:readiness", "--require-ready"],
-            { cwd: project.targetDir, reject: false },
+            {
+              cwd: project.targetDir,
+              cancelSignal: installedIntegrationSignal(),
+              reject: false,
+            },
           );
           assert.strictEqual(required.exitCode, 1);
           assert.ok(

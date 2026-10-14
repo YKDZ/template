@@ -51,10 +51,7 @@ void describe("vue-hono-app Built-in Preset Definition integration behavior", ()
       });
 
       await execa("pnpm", ["install"], { cwd: targetDir });
-      await execa("pnpm", ["exec", "playwright", "install", "chromium"], {
-        cwd: targetDir,
-      });
-      await execa("pnpm", ["run", "check"], { cwd: targetDir });
+      await execa("pnpm", ["run", "check:full"], { cwd: targetDir });
     },
   );
 });

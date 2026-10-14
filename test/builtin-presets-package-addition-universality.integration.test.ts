@@ -109,7 +109,13 @@ void describe("Built-in Preset Package Addition universality", () => {
         }
       ).scripts;
 
-      for (const script of ["check", "fix", "check:deployment"] as const) {
+      for (const script of [
+        "check",
+        "check:heavy",
+        "check:full",
+        "fix",
+        "deployment",
+      ] as const) {
         assert.strictEqual(rootScriptsAfter[script], rootScriptsBefore[script]);
       }
 
@@ -129,7 +135,13 @@ void describe("Built-in Preset Package Addition universality", () => {
           scripts: Record<string, string | undefined>;
         }
       ).scripts;
-      for (const script of ["check", "fix", "check:deployment"] as const) {
+      for (const script of [
+        "check",
+        "check:heavy",
+        "check:full",
+        "fix",
+        "deployment",
+      ] as const) {
         assert.strictEqual(
           rootScriptsAfterRepeat[script],
           rootScriptsBefore[script],

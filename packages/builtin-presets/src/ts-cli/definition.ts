@@ -61,9 +61,9 @@ function packageScripts(): Record<string, string> {
     postbuild:
       "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
-    test: "node --conditions=source --test test/unit/*.test.ts test/integration/*.test.ts",
+    test: "node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
     "test:e2e":
-      "node --conditions=source --test --test-timeout=180000 test/e2e/run-journeys.test.ts",
+      "node --conditions=source --test --test-timeout=180000 --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/e2e/**/*.test.ts'",
     prepack: "pnpm exec turbo run build --filter=.",
   };
 }
@@ -178,6 +178,12 @@ function cliContribution(
       from: "test/e2e/journeys/lookup.journey.ts",
       to: `${definition.path}/test/e2e/journeys/lookup.journey.ts`,
     },
+    ...["node-test-count-reporter.ts"].map((name) => ({
+      kind: "copyFile" as const,
+      source: templateSources.foundation,
+      from: `scripts/${name}`,
+      to: `${definition.path}/scripts/${name}`,
+    })),
   ];
   return {
     definition,

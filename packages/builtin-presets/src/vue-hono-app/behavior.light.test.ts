@@ -318,7 +318,11 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
     assert.partialDeepStrictEqual(e2eTurbo, {
       tasks: {
         "//#test:e2e": {
-          dependsOn: ["@demo/api#build", "@demo/web#build"],
+          dependsOn: [
+            "@demo/api#build",
+            "@demo/web#build",
+            "@demo/web#browser:prepare",
+          ],
           cache: false,
         },
       },
@@ -326,6 +330,7 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
     assert.deepStrictEqual(e2eTurbo.tasks["//#test:e2e"].dependsOn, [
       "@demo/api#build",
       "@demo/web#build",
+      "@demo/web#browser:prepare",
     ]);
     assert.ok(
       (
@@ -443,11 +448,19 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
 
       const turboPath = path.join(targetDir, "turbo.json");
       const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
-        tasks: Record<string, { dependsOn?: string[]; cache?: boolean }>;
+        tasks: Record<
+          string,
+          { dependsOn?: string[]; cache?: boolean; tags?: string[] }
+        >;
       };
       turbo.tasks["//#test:e2e"] = {
-        dependsOn: [`${api.name}#build`, `${web.name}#build`],
+        dependsOn: [
+          `${api.name}#build`,
+          `${web.name}#build`,
+          `${web.name}#browser:prepare`,
+        ],
         cache: false,
+        tags: ["quality:heavy"],
       };
       await writeFile(turboPath, `${JSON.stringify(turbo, null, 2)}\n`);
       const playwrightConfigPath = path.join(targetDir, "playwright.config.ts");
@@ -529,6 +542,42 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
         ...addition.projectProjections,
       });
       assert.strictEqual(replayedApplication.ok, true);
+      const replayedRootManifest = JSON.parse(
+        await readFile(path.join(targetDir, "package.json"), "utf8"),
+      ) as { readonly scripts: Readonly<Record<string, string>> };
+      assert.deepStrictEqual(
+        {
+          check: replayedRootManifest.scripts.check,
+          "check:heavy": replayedRootManifest.scripts["check:heavy"],
+          "check:full": replayedRootManifest.scripts["check:full"],
+        },
+        {
+          check: "node --conditions=source scripts/quality-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/quality-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/quality-gates.ts check:full",
+        },
+      );
+      const replayedTurbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        readonly tasks: Readonly<
+          Record<
+            string,
+            {
+              readonly dependsOn?: readonly string[];
+              readonly tags?: readonly string[];
+            }
+          >
+        >;
+      };
+      assert.deepStrictEqual(replayedTurbo.tasks["//#test:e2e"]?.tags, [
+        "quality:heavy",
+      ]);
+      assert.deepStrictEqual(replayedTurbo.tasks["//#test:e2e"]?.dependsOn, [
+        `${api.name}#build`,
+        `${web.name}#build`,
+        `${web.name}#browser:prepare`,
+      ]);
       const replayedPlaywrightConfig = await readFile(
         playwrightConfigPath,
         "utf8",

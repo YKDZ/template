@@ -1,6 +1,10 @@
 import { describe, it, mock } from "node:test";
 
 import {
+  deriveDeploymentQualityContractIdentity,
+  deriveDeploymentQualityPlanInput,
+} from "../packages/checks/src/fixture-evidence/gates/deployment-quality/index.ts";
+import {
   FileFixtureEvidenceActivityLedger,
   FileFixtureEvidenceStorage,
   assert,
@@ -43,12 +47,154 @@ import {
   writeGeneratedRepositoryTree,
 } from "./fixture-evidence.test-support.ts";
 import type {
+  FixtureEvidenceGate,
   FixtureEvidenceInvocationEvent,
   FixtureEvidenceLifecycleEvent,
   FixtureEvidenceStorage,
 } from "./fixture-evidence.test-support.ts";
 
 void describe("Fixture Verification Evidence", () => {
+  void it("invalidates Root proof when its covered Deployment contract changes", async () => {
+    const definition = builtInPresetRegistry.all().find(
+      (candidate) =>
+        planGeneratedRepositoryInitialization({
+          definition: candidate,
+          context: createGenerationContext({
+            targetDir: path.join("generated-repository", "deployment-contract"),
+            toolchain: {
+              nodeLtsMajor: "24",
+              packageManagerPin: "pnpm@11.11.0",
+              nodeVersion: releaseToolchainSnapshot.nodeVersion,
+            },
+          }),
+        }).deploymentCheck !== undefined,
+    );
+    assert.notStrictEqual(definition, undefined);
+    const plan = planGeneratedRepositoryInitialization({
+      definition: definition!,
+      context: createGenerationContext({
+        targetDir: path.join("generated-repository", "deployment-contract"),
+        toolchain: {
+          nodeLtsMajor: "24",
+          packageManagerPin: "pnpm@11.11.0",
+          nodeVersion: releaseToolchainSnapshot.nodeVersion,
+        },
+      }),
+    });
+    const deployment = deriveDeploymentQualityPlanInput(plan);
+    assert.notStrictEqual(deployment, undefined);
+    const deploymentContractIdentity =
+      await deriveDeploymentQualityContractIdentity(deployment!);
+    const changedDeploymentContractIdentity =
+      await deriveDeploymentQualityContractIdentity({
+        plan: {
+          ...deployment!.plan,
+          deploymentCheck: {
+            ...deployment!.plan.deploymentCheck,
+            environmentNeeds: [],
+          },
+        },
+      });
+    const rootContractIdentity =
+      await deriveGeneratedRootQualityContractIdentity(plan, {
+        deploymentContractIdentity,
+      });
+    const changedRootContractIdentity =
+      await deriveGeneratedRootQualityContractIdentity(plan, {
+        deploymentContractIdentity: changedDeploymentContractIdentity,
+      });
+
+    assert.notStrictEqual(
+      changedDeploymentContractIdentity,
+      deploymentContractIdentity,
+    );
+    assert.notStrictEqual(changedRootContractIdentity, rootContractIdentity);
+
+    const scenario = {
+      id: "deployment-contract-invalidation",
+      label: "deployment contract invalidation",
+      presetIdentities: [definition!.metadata.name],
+    };
+    const generatedContentIdentity = "a".repeat(40);
+    const rootEvidence = await runFixtureEvidenceGate({
+      gate: "generated-root-quality",
+      generatedContentIdentity,
+      contractIdentity: rootContractIdentity,
+      coversDeploymentContractIdentity: deploymentContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+    const changedRootEvidence = await runFixtureEvidenceGate({
+      gate: "generated-root-quality",
+      generatedContentIdentity,
+      contractIdentity: changedRootContractIdentity,
+      coversDeploymentContractIdentity: changedDeploymentContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+    const focusedContractIdentity = "b".repeat(64);
+    const focusedEvidence = await runFixtureEvidenceGate({
+      gate: "focused-package-link",
+      rootEvidence,
+      generatedContentIdentity,
+      contractIdentity: focusedContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+    const changedFocusedEvidence = await runFixtureEvidenceGate({
+      gate: "focused-package-link",
+      rootEvidence: changedRootEvidence,
+      generatedContentIdentity,
+      contractIdentity: focusedContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+    const deploymentEvidence = await runFixtureEvidenceGate({
+      gate: "deployment-quality",
+      rootEvidence,
+      generatedContentIdentity,
+      contractIdentity: deploymentContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+    const changedDeploymentEvidence = await runFixtureEvidenceGate({
+      gate: "deployment-quality",
+      rootEvidence: changedRootEvidence,
+      generatedContentIdentity,
+      contractIdentity: changedDeploymentContractIdentity,
+      scenario,
+      producerCommit: "test",
+      readEnabled: false,
+      writeEnabled: false,
+      execute: async () => undefined,
+    });
+
+    assert.notStrictEqual(changedRootEvidence.identity, rootEvidence.identity);
+    assert.notStrictEqual(
+      changedFocusedEvidence.identity,
+      focusedEvidence.identity,
+    );
+    assert.notStrictEqual(
+      changedDeploymentEvidence.identity,
+      deploymentEvidence.identity,
+    );
+  });
+
   void it("accepts a complete writable miss only for its current run activity", async () => {
     const root = await temporaryRepository("fixture-evidence-activity-");
     const evidenceRoot = path.join(root, "evidence");
@@ -128,6 +274,257 @@ void describe("Fixture Verification Evidence", () => {
         code: "missing-scenario-set",
         scenarioSet: "init",
       });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  void it("derives Deployment evidence from the current complete Root proof without a second execution", async () => {
+    const root = await temporaryRepository("fixture-deployment-derivation-");
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "deployment-derived-current-run",
+      label: "deployment derived current run",
+      presetIdentities: ["fixture"],
+    };
+    const deploymentContractIdentity = "3".repeat(64);
+    let deploymentExecutions = 0;
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "deployment-derived-run",
+        runAttempt: "1",
+        invocationId: "deployment-derived-invocation",
+        scenarioSet: "deployment",
+        writeEnabled: true,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      const executePhases = createSuccessfulFixturePhaseExecutor({
+        record: invocation.record,
+        scenario,
+      });
+      const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+      const rootEvidence = await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity: "1".repeat(40),
+        contractIdentity: "2".repeat(64),
+        coversDeploymentContractIdentity: deploymentContractIdentity,
+        scenario,
+        producerCommit: "test",
+        storage,
+        writeEnabled: true,
+        recordLifecycle: invocation.record,
+        execute: async () => await executePhases("generated-root-quality"),
+      });
+      const deployment = await runFixtureEvidenceGate({
+        gate: "deployment-quality",
+        rootEvidence,
+        generatedContentIdentity: "1".repeat(40),
+        contractIdentity: deploymentContractIdentity,
+        scenario,
+        producerCommit: "test",
+        storage,
+        writeEnabled: true,
+        recordLifecycle: invocation.record,
+        execute: async () => {
+          deploymentExecutions += 1;
+          await executePhases("deployment-quality");
+        },
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "completed",
+      });
+
+      assert.strictEqual(deployment.status, "derived");
+      assert.strictEqual(deploymentExecutions, 0);
+      assert.deepStrictEqual(
+        JSON.parse(
+          await readFile(
+            path.join(
+              evidenceRoot,
+              "deployment-quality",
+              `${deployment.identity}.json`,
+            ),
+            "utf8",
+          ),
+        ),
+        {
+          schema: "fixture-verification-evidence/v1",
+          gate: "deployment-quality",
+          identity: deployment.identity,
+          components: {
+            generatedContent: "1".repeat(40),
+            contract: deploymentContractIdentity,
+            rootEvidence: rootEvidence.identity,
+          },
+          issuedAt: deployment.record?.issuedAt,
+          scenario,
+          producerCommit: "test",
+        },
+      );
+
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "deployment-derived-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["deployment"],
+      });
+      assert.strictEqual(report.healthy, true, JSON.stringify(report.failures));
+      assert.deepStrictEqual(report.scenarios[0]?.gates, [
+        {
+          gate: "deployment-quality",
+          status: "derived",
+          missReason: "absent",
+          issued: true,
+        },
+        {
+          gate: "generated-root-quality",
+          status: "executed",
+          missReason: "absent",
+          issued: true,
+        },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  void it("derives read-only Deployment proof from a successful cold Root execution", async () => {
+    const root = await temporaryRepository(
+      "fixture-deployment-readonly-derivation-",
+    );
+    const evidenceRoot = path.join(root, "evidence");
+    const scenario = {
+      id: "deployment-readonly-derived",
+      label: "deployment read-only derived",
+      presetIdentities: ["fixture"],
+    };
+    const deploymentContractIdentity = "4".repeat(64);
+    const executions: FixtureEvidenceGate[] = [];
+    try {
+      const ledger = new FileFixtureEvidenceActivityLedger({
+        root: path.join(root, "activity"),
+        evidenceRoot,
+      });
+      const invocation = ledger.invocation({
+        runId: "deployment-readonly-run",
+        runAttempt: "1",
+        invocationId: "deployment-readonly-invocation",
+        scenarioSet: "deployment",
+        writeEnabled: false,
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "started",
+        scenarios: [scenario],
+      });
+      const executePhases = createSuccessfulFixturePhaseExecutor({
+        record: invocation.record,
+        scenario,
+      });
+      const storage = new FileFixtureEvidenceStorage(evidenceRoot);
+      const rootEvidence = await runFixtureEvidenceGate({
+        gate: "generated-root-quality",
+        generatedContentIdentity: "5".repeat(40),
+        contractIdentity: "6".repeat(64),
+        coversDeploymentContractIdentity: deploymentContractIdentity,
+        scenario,
+        producerCommit: "readonly",
+        storage,
+        writeEnabled: false,
+        recordLifecycle: invocation.record,
+        execute: async () => {
+          executions.push("generated-root-quality");
+          await executePhases("generated-root-quality");
+        },
+      });
+      const deployment = await runFixtureEvidenceGate({
+        gate: "deployment-quality",
+        rootEvidence,
+        generatedContentIdentity: "5".repeat(40),
+        contractIdentity: deploymentContractIdentity,
+        scenario,
+        producerCommit: "readonly",
+        storage,
+        writeEnabled: false,
+        recordLifecycle: invocation.record,
+        execute: async () => {
+          executions.push("deployment-quality");
+          await executePhases("deployment-quality");
+        },
+      });
+      await invocation.record({
+        type: "scenario",
+        scenario,
+        outcome: "completed",
+      });
+      await invocation.record({
+        type: "invocation",
+        outcome: "completed",
+      });
+
+      assert.strictEqual(rootEvidence.status, "executed");
+      assert.strictEqual(deployment.status, "derived-unissued");
+      assert.deepStrictEqual(executions, ["generated-root-quality"]);
+      const report = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "deployment-readonly-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["deployment"],
+      });
+      assert.strictEqual(report.healthy, true, JSON.stringify(report.failures));
+      assert.partialDeepStrictEqual(report.stages[0], {
+        executions: 1,
+        derivations: 1,
+        issuances: 0,
+      });
+      assert.deepStrictEqual(report.scenarios[0]?.gates, [
+        {
+          gate: "deployment-quality",
+          status: "derived",
+          missReason: "absent",
+          issued: false,
+        },
+        {
+          gate: "generated-root-quality",
+          status: "executed",
+          missReason: "absent",
+          issued: false,
+        },
+      ]);
+      await invocation.record({
+        type: "issuance",
+        gate: "deployment-quality",
+        identity: deployment.identity,
+        scenario,
+        at: new Date().toISOString(),
+        outcome: "issued",
+      });
+      const invalidReadOnlyIssue = await checkFixtureEvidenceHealth({
+        ledger,
+        runId: "deployment-readonly-run",
+        runAttempt: "1",
+        enabledScenarioSets: ["deployment"],
+      });
+      assert.strictEqual(invalidReadOnlyIssue.healthy, false);
+      assert.ok(
+        invalidReadOnlyIssue.failures.some(
+          (failure) => failure.code === "invalid-derivation",
+        ),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -236,7 +633,7 @@ void describe("Fixture Verification Evidence", () => {
       });
       assert.ok(
         formatFixtureEvidenceHealthReport(report).includes(
-          "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=0 misses=absent=1 executions=1 issuances=1 lifecycle-errors=0 duration-ms=175 phase-duration-ms=scheduler-queue=2,container-preparation=1,dependency-installation=1,semantic-gate=1 retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
+          "[Fixture Evidence] package-addition-matrix: scenarios=1 hits=0 misses=absent=1 executions=1 derivations=0 issuances=1 lifecycle-errors=0 duration-ms=175 phase-duration-ms=scheduler-queue=2,container-preparation=1,dependency-installation=1,semantic-gate=1 retries=0 recoveries=0 retry-duration-ms=0 cache-activity=buildkit:configured=1,cargo-downloads:mounted=1,pnpm-downloads:mounted=1,turbo:configured=1",
         ),
       );
     } finally {
@@ -3567,15 +3964,16 @@ void describe("Fixture Verification Evidence", () => {
           "build",
           "test",
           "test:e2e",
+          "deployment",
           "--dry-run=json",
         ],
       });
       assert.deepStrictEqual(
         calls.find(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check",
+            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
         ),
-        { command: "pnpm", args: ["run", "check"] },
+        { command: "pnpm", args: ["run", "check:full"] },
       );
     } finally {
       await rm(root, { recursive: true, force: true });

@@ -339,53 +339,34 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       await expectRootOnlyWorkflowRejected(mutated);
   });
 
-  void it("rejects deployment matrices without independent bounded capability legs", async () => {
+  void it("拒绝重验收缺少时限、Docker 准备或正确顺序", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
-      source.replace("      fail-fast: false", "      fail-fast: true"),
+      source.replace("timeout-minutes: 45", "timeout-minutes: 30"),
+    );
+    await expectDeploymentWorkflowRejected(
+      source.replace("run: pnpm run check:heavy", "run: pnpm run check"),
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
-        `        include:
-          - capability: root
-            job_name: Root Check
-            task_entrypoint: pnpm run check
-            timeout_minutes: 30
-            requires_docker: false
-          - capability: deployment
-            job_name: Deployment Check
-            task_entrypoint: pnpm run check:deployment
-            timeout_minutes: 45
-            requires_docker: true`,
-        "        check: [root, deployment]",
+        "uses: docker/setup-buildx-action@",
+        "uses: unexpected/setup@",
       ),
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
-        "    runs-on: ubuntu-latest\n",
-        "    runs-on: ubuntu-latest\n    needs: root\n",
+        /(?<light>      - name: Run Light Check\n        run: pnpm run check\n)(?<buildx>      - name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
+        "$2$1",
       ),
-    );
-    await expectDeploymentWorkflowRejected(
-      source.replace(
-        "if: matrix.requires_docker",
-        "if: matrix.capability == 'deployment'",
-      ),
-    );
-    await expectDeploymentWorkflowRejected(
-      source.replace(
-        /(uses: docker\/setup-buildx-action@[^ #]+) #[^\n]+/u,
-        "$1",
-      ) + "\n# v123\n",
     );
   });
 
-  void it("rejects diagnostics that lose root-only staging scope, owner facts, or upload outside its fixed LCA", async () => {
+  void it("拒绝诊断材料脱离失败阶段、声明所有者或固定上传目录", async () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
       source.replace(
-        "if: failure() && matrix.capability == 'root'",
-        "if: failure()",
+        "      - name: Stage Check diagnostics\n        if: failure()",
+        "      - name: Stage Check diagnostics\n        if: success()",
       ),
     );
     await expectDeploymentWorkflowRejected(

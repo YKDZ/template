@@ -576,7 +576,10 @@ function isForwardingCommandRunnerCall(
 function rootQualityCommand(command: string, args: readonly string[]): boolean {
   if (command !== "pnpm") return false;
   if (args[0] === "install") return true;
-  if (args[0] === "run" && (args[1] === "check" || args[1] === "fix")) {
+  if (
+    args[0] === "run" &&
+    (args[1] === "check" || args[1] === "check:full" || args[1] === "fix")
+  ) {
     return true;
   }
   const qualityTasks = new Set([

@@ -23,7 +23,7 @@ function packageScripts(): Record<string, string> {
     lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
     build: "tsc -p tsconfig.build.json --pretty false",
-    test: "node --conditions=source --test test/greet.test.ts",
+    test: "node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -93,6 +93,12 @@ function libraryContribution(options: {
       from: "test/greet.test.ts",
       to: `${definition.path}/test/greet.test.ts`,
     },
+    ...["node-test-count-reporter.ts"].map((name) => ({
+      kind: "copyFile" as const,
+      source: templateSources.foundation,
+      from: `scripts/${name}`,
+      to: `${definition.path}/scripts/${name}`,
+    })),
   ];
   return {
     definition,

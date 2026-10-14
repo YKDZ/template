@@ -3244,7 +3244,10 @@ void describe("Generated Repository toolchain checker projection", () => {
       boundariesScript,
       "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
     );
-    assert.strictEqual(checkScript.startsWith("pnpm run boundaries &&"), true);
+    assert.strictEqual(
+      checkScript,
+      "node --conditions=source scripts/quality-gates.ts check",
+    );
     assert.strictEqual("toolchain:prepare" in scripts, false);
   });
 });

@@ -18,10 +18,13 @@ function packagePathForLeaf(packageLeafName: string): string {
 
 function packageScripts(): Record<string, string> {
   return {
-    "format:check": "cargo fmt --all -- --check",
-    "format:write": "cargo fmt --all",
-    lint: "cargo clippy --workspace --all-targets -- -D warnings",
-    test: "cargo test --workspace",
+    "format:check":
+      "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+    "format:write":
+      "cargo fmt --all && oxfmt --write --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
+    lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+    test: "node --conditions=source scripts/run-rust-tests.ts",
+    typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
   };
 }
 
@@ -41,6 +44,16 @@ function rustContribution(options: {
   const rustChannel = options.context.toolchain.rustVersion ?? "stable";
   const operations: RenderOperation[] = [
     { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
+    {
+      kind: "writeTextTemplate",
+      source: templateSources.rustBin,
+      from: "tsconfig.scripts.json",
+      to: `${definition.path}/tsconfig.scripts.json`,
+      replacements: {
+        TYPESCRIPT_CONFIG_PACKAGE:
+          options.context.foundationPackages.typescriptConfiguration.name,
+      },
+    },
     {
       kind: "writeTextTemplate",
       source: templateSources.rustBin,
@@ -73,6 +86,12 @@ function rustContribution(options: {
       from: "src/main.rs",
       to: `${definition.path}/src/main.rs`,
     },
+    {
+      kind: "copyFile",
+      source: templateSources.foundation,
+      from: "scripts/run-rust-tests.ts",
+      to: `${definition.path}/scripts/run-rust-tests.ts`,
+    },
   ];
   return {
     definition,
@@ -80,7 +99,16 @@ function rustContribution(options: {
     manifest: {
       name: definition.name,
       private: true,
+      type: "module",
       scripts: packageScripts(),
+      devDependencies: {
+        [options.context.foundationPackages.typescriptConfiguration.name]:
+          "link:../typescript-config",
+        "@types/node": "catalog:",
+        oxfmt: "catalog:",
+        oxlint: "catalog:",
+        "typescript-7": "catalog:",
+      },
       engines: { node: options.context.toolchain.nodeLtsMajor },
     },
     operations,
@@ -102,6 +130,7 @@ function rustContribution(options: {
         },
       },
       editorCapabilities: ["rust-tooling"],
+      typescriptConfigurationPackage: { dependency: "required" },
       dependencyMaintenance: {
         ecosystems: [
           "npm",

@@ -92,7 +92,10 @@ function webScripts(): Record<string, string> {
     "lint:fix": "oxlint --type-aware --format=unix . --fix",
     preview: "DATABASE_PROFILE=dev vike preview",
     start: "node ./dist/server/index.mjs",
-    test: "vitest run --reporter=agent --silent=passed-only --passWithNoTests",
+    "browser:prepare": "playwright install chromium",
+    test: "vitest run --project=node --reporter=agent --silent=passed-only --passWithNoTests",
+    "test:browser":
+      "vitest run --project=browser --reporter=agent --silent=passed-only",
     "test:e2e": "DATABASE_PROFILE=e2e playwright test",
     typecheck:
       "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
@@ -108,7 +111,7 @@ function databaseScripts(): Record<string, string> {
     "format:write": "oxfmt --write .",
     lint: "oxlint --quiet --format=unix .",
     "lint:fix": "oxlint --format=unix . --fix",
-    test: "DATABASE_PROFILE=test node --conditions=source --test test/todos.test.ts",
+    test: "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
   };
 }
@@ -450,6 +453,12 @@ function databaseContribution(
         multilineArrays: ["files"],
       },
       ...copyOperations(context, db.path, sourceFiles),
+      ...["node-test-count-reporter.ts"].map((name) => ({
+        kind: "copyFile" as const,
+        source: templateSources.foundation,
+        from: `scripts/${name}`,
+        to: `${db.path}/scripts/${name}`,
+      })),
     ],
     environmentNeeds: [],
     foundation: {

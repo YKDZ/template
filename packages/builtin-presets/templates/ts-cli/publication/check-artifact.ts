@@ -14,6 +14,8 @@ function oneLine(value: string): string {
 const rawArguments = process.argv.slice(2);
 const arguments_ =
   rawArguments[0] === "--" ? rawArguments.slice(1) : rawArguments;
+const requiredSetting = process.env.PUBLICATION_ARTIFACT_REQUIRED;
+const required = requiredSetting === "true";
 const outputDirectoryFromEnvironment =
   process.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY;
 const explicitOutputDirectory =
@@ -30,9 +32,10 @@ const environmentOutputDirectory =
       ? null
       : outputDirectoryFromEnvironment;
 const validArguments =
-  (arguments_.length === 0 && environmentOutputDirectory !== null) ||
-  (explicitOutputDirectory !== undefined &&
-    environmentOutputDirectory === undefined);
+  (requiredSetting === undefined || required) &&
+  ((arguments_.length === 0 && environmentOutputDirectory !== null) ||
+    (explicitOutputDirectory !== undefined &&
+      environmentOutputDirectory === undefined));
 if (!validArguments) {
   console.error("ERROR publication-artifact-usage");
   console.error(`Observed: ${JSON.stringify(arguments_)}`);
@@ -57,7 +60,16 @@ if (!validArguments) {
       outputDirectory,
     });
     if (result.kind === "blocked") {
-      console.log("npm publication artifact: blocked");
+      if (result.readiness.mode === "safe-unconfigured") {
+        console.log("发布制品验收未执行：候选尚未满足公开发布条件。");
+        if (required) {
+          console.error("ERROR publication-artifact-required");
+          process.exitCode = 1;
+        }
+      } else {
+        console.log("npm publication artifact: blocked");
+        process.exitCode = 1;
+      }
       console.log(`Mode: ${result.readiness.mode}`);
       for (const item of result.readiness.blockers) {
         console.log(`BLOCKER ${item.code}`);
@@ -66,7 +78,6 @@ if (!validArguments) {
         console.log(`Expected: ${oneLine(item.expected)}`);
         console.log(`Next action: ${oneLine(item.nextAction)}`);
       }
-      if (result.readiness.mode === "public-intent") process.exitCode = 1;
     } else if (result.kind === "failed") {
       console.error(`ERROR ${result.failure.code}`);
       console.error(`Observed: ${oneLine(result.failure.observed)}`);
