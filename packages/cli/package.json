@@ -99,10 +99,5 @@
   ],
   "engines": {
     "node": "^24.21.0"
-  },
-  "turbo": {
-    "tags": [
-      "template-cli"
-    ]
   }
 }

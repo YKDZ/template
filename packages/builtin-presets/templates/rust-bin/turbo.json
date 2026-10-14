@@ -4,19 +4,34 @@
   "tasks": {
     "format:check": {
       "dependsOn": ["//#toolchain:prepare"],
-      "outputs": []
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "format:write": {
       "dependsOn": ["//#toolchain:prepare"],
-      "cache": false
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
     },
     "lint": {
       "dependsOn": ["//#toolchain:prepare"],
-      "outputs": []
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "test": {
       "dependsOn": ["//#toolchain:prepare"],
-      "outputs": []
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }

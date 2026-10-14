@@ -112,7 +112,53 @@ async function createWorkspace(
               }
             : {}),
         },
-        turbo: { tags: ["quality:heavy"] },
+      },
+      null,
+      2,
+    ),
+  );
+  await writeFile(
+    path.join(root, "packages", "app", "turbo.json"),
+    JSON.stringify(
+      {
+        extends: ["//"],
+        tags: ["quality-gates-app"],
+        tasks: {
+          build: { dependsOn: [], tags: ["work:preparation"] },
+          "format:check": {
+            dependsOn: ["build"],
+            tags: ["quality:light"],
+          },
+          test: {
+            dependsOn: [],
+            tags: ["quality:heavy"],
+            ...(options.withConditionalHeavyTask === true
+              ? { with: ["verify:conditional"] }
+              : {}),
+          },
+          "verify:generated": {
+            dependsOn: [],
+            tags: ["quality:light"],
+          },
+          prepare: { dependsOn: [], tags: ["work:lifecycle"] },
+          ...(options.withConditionalHeavyTask === true ||
+          options.reportConditionalTask === true
+            ? {
+                "verify:conditional": {
+                  dependsOn: [],
+                  tags: ["quality:conditional"],
+                },
+              }
+            : {}),
+          ...(options.commandOnlyTask === true
+            ? {
+                "verify:command": {
+                  command: ["node", "../../record.cjs", "package-command-only"],
+                  tags: ["quality:light"],
+                },
+              }
+            : {}),
+        },
       },
       null,
       2,
@@ -123,6 +169,7 @@ async function createWorkspace(
     JSON.stringify(
       {
         futureFlags: { experimentalTaskCommand: true },
+        tags: ["quality-gates-root"],
         tasks: {
           "//#check": { tags: ["quality:entry"] },
           "//#check:heavy": { tags: ["quality:entry"] },
@@ -137,31 +184,6 @@ async function createWorkspace(
           "//#publish": { tags: ["work:release"] },
           ...(options.invalidCheckCustom === true
             ? { "//#check:custom": { tags: ["work:repair"] } }
-            : {}),
-          build: { tags: ["work:preparation"] },
-          "format:check": {
-            dependsOn: ["build"],
-            tags: ["quality:light"],
-          },
-          test: {
-            tags: ["quality:heavy"],
-            ...(options.withConditionalHeavyTask === true
-              ? { with: ["verify:conditional"] }
-              : {}),
-          },
-          "verify:generated": { tags: ["quality:light"] },
-          prepare: { tags: ["work:lifecycle"] },
-          ...(options.withConditionalHeavyTask === true ||
-          options.reportConditionalTask === true
-            ? { "verify:conditional": { tags: ["quality:conditional"] } }
-            : {}),
-          ...(options.commandOnlyTask === true
-            ? {
-                "verify:command": {
-                  command: ["node", "../../record.cjs", "package-command-only"],
-                  tags: ["quality:light"],
-                },
-              }
             : {}),
         },
       },
@@ -475,12 +497,14 @@ void it("continues independent heavy tasks after one task fails", async () => {
 void it("rejects a light task whose native dependency closure includes heavy verification", async () => {
   const root = await createWorkspace();
   try {
-    const turboPath = path.join(root, "turbo.json");
-    const turboConfig = JSON.parse(await readFile(turboPath, "utf8")) as {
+    const packageTurboPath = path.join(root, "packages", "app", "turbo.json");
+    const packageTurbo = JSON.parse(
+      await readFile(packageTurboPath, "utf8"),
+    ) as {
       tasks: Record<string, { dependsOn?: string[] }>;
     };
-    turboConfig.tasks["format:check"]!.dependsOn = ["test"];
-    await writeFile(turboPath, JSON.stringify(turboConfig, null, 2));
+    packageTurbo.tasks["format:check"]!.dependsOn = ["test"];
+    await writeFile(packageTurboPath, JSON.stringify(packageTurbo, null, 2));
 
     const result = await execa("pnpm", ["run", "check"], {
       cwd: root,
@@ -667,20 +691,17 @@ void it("rejects an executable root task with conflicting roles", async () => {
   }
 });
 
-void it("rejects package tasks that explicitly clear an inherited role", async () => {
+void it("rejects package tasks that explicitly clear their owning role", async () => {
   const root = await createWorkspace();
   try {
-    await writeFile(
-      path.join(root, "packages", "app", "turbo.json"),
-      JSON.stringify(
-        {
-          extends: ["//"],
-          tasks: { "verify:generated": { tags: [] } },
-        },
-        null,
-        2,
-      ),
-    );
+    const packageTurboPath = path.join(root, "packages", "app", "turbo.json");
+    const packageTurbo = JSON.parse(
+      await readFile(packageTurboPath, "utf8"),
+    ) as { tasks: Record<string, Record<string, unknown>> };
+    const generatedTask = packageTurbo.tasks["verify:generated"];
+    assert.ok(generatedTask);
+    packageTurbo.tasks["verify:generated"] = { ...generatedTask, tags: [] };
+    await writeFile(packageTurboPath, JSON.stringify(packageTurbo, null, 2));
     const result = await execa("pnpm", ["run", "check"], {
       cwd: root,
       reject: false,
