@@ -13,6 +13,7 @@ import {
   canProvideSourceConditionPackageNameImport,
 } from "@ykdz/template-core/project-linking-v2";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
+import { execa } from "execa";
 
 import type { CliJourney } from "../journey.ts";
 
@@ -501,6 +502,173 @@ const journey: CliJourney = {
         ),
       ) as unknown,
     );
+
+    await rewriteRootManifest(project, {
+      node: releaseToolchainSnapshot.nodeVersion,
+      packageManager: releaseToolchainSnapshot.packageManagerPin,
+    });
+    const rootTurboPath = path.join(project, "turbo.json");
+    const rootTurbo = JSON.parse(await readFile(rootTurboPath, "utf8")) as {
+      readonly tasks: Record<string, unknown>;
+    };
+    for (const name of [
+      "build",
+      "format:check",
+      "format:write",
+      "lint",
+      "lint:fix",
+      "test",
+      "typecheck",
+    ]) {
+      delete rootTurbo.tasks[name];
+    }
+    await writeFile(rootTurboPath, `${JSON.stringify(rootTurbo, null, 2)}\n`);
+    await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
+      cwd: project,
+    });
+    await execa("pnpm", ["install"], { cwd: project });
+
+    const utilityManifest = JSON.parse(
+      await readFile(
+        path.join(project, "packages/utility/package.json"),
+        "utf8",
+      ),
+    ) as { readonly name: string };
+    const blueprint = JSON.parse(
+      await readFile(path.join(project, ".template/blueprint.json"), "utf8"),
+    ) as {
+      readonly packages: readonly {
+        readonly name: string;
+        readonly path: string;
+        readonly role: string;
+      }[];
+    };
+    const packageRole = (packagePath: string): string => {
+      const definition = blueprint.packages.find(
+        (candidate) => candidate.path === packagePath,
+      );
+      assert.notStrictEqual(
+        definition,
+        undefined,
+        `Blueprint 应记录 ${packagePath} 的身份`,
+      );
+      return definition!.role;
+    };
+    const packageTagsForRole = (role: string): readonly string[] => {
+      switch (role) {
+        case "cli-tool":
+        case "runtime-service":
+          return ["app"];
+        case "shared-library":
+          return ["library"];
+        case "native-package":
+          return ["native"];
+        default:
+          throw new Error(`未识别的 PackageDefinition.role：${role}`);
+      }
+    };
+    const consumerManifest = JSON.parse(
+      await readFile(path.join(project, consumerPath, "package.json"), "utf8"),
+    ) as { readonly name: string };
+    const nativeDirectory = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "query",
+        "{ packages { items { name tags tasks { items { name tags script } } } } }",
+      ],
+      { cwd: project },
+    );
+    const nativePackages = (
+      JSON.parse(nativeDirectory.stdout) as {
+        readonly data: {
+          readonly packages: {
+            readonly items: readonly {
+              readonly name: string;
+              readonly tags: readonly string[];
+              readonly tasks: {
+                readonly items: readonly {
+                  readonly name: string;
+                  readonly tags: readonly string[];
+                  readonly script: string | null;
+                }[];
+              };
+            }[];
+          };
+        };
+      }
+    ).data.packages.items;
+    const nativePackage = (name: string) => {
+      const result = nativePackages.find(
+        (candidate) => candidate.name === name,
+      );
+      assert.notStrictEqual(result, undefined, `Turbo 原生目录缺少 ${name}`);
+      return result!;
+    };
+    const utility = nativePackage(utilityManifest.name);
+    const consumer = nativePackage(consumerManifest.name);
+    assert.deepStrictEqual(
+      utility.tags,
+      packageTagsForRole(packageRole("packages/utility")),
+    );
+    assert.deepStrictEqual(
+      consumer.tags,
+      packageTagsForRole(packageRole(consumerPath)),
+    );
+    for (const packageTasks of [utility, consumer]) {
+      for (const name of ["build", "typecheck"] as const) {
+        const task = packageTasks.tasks.items.find(
+          (candidate) => candidate.name === name,
+        );
+        assert.notStrictEqual(
+          task,
+          undefined,
+          `${packageTasks.name} 应发现 ${name}`,
+        );
+        assert.deepStrictEqual(task!.tags, ["quality:light"]);
+        assert.notStrictEqual(task!.script, null);
+      }
+    }
+
+    const taskPlanResult = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        "build",
+        "typecheck",
+        `--filter=${consumerManifest.name}`,
+        "--dry-run=json",
+      ],
+      { cwd: project },
+    );
+    const taskPlan = (
+      JSON.parse(taskPlanResult.stdout) as {
+        readonly tasks: readonly {
+          readonly taskId: string;
+          readonly directory: string;
+          readonly dependencies: readonly string[];
+        }[];
+      }
+    ).tasks;
+    for (const name of ["build", "typecheck"] as const) {
+      const consumerTask = taskPlan.find(
+        (task) => task.taskId === `${consumerManifest.name}#${name}`,
+      );
+      const utilityTask = taskPlan.find(
+        (task) => task.taskId === `${utilityManifest.name}#${name}`,
+      );
+      assert.notStrictEqual(consumerTask, undefined);
+      assert.notStrictEqual(utilityTask, undefined);
+      assert.strictEqual(consumerTask!.directory, consumerPath);
+      assert.strictEqual(utilityTask!.directory, "packages/utility");
+      assert.ok(
+        consumerTask!.dependencies.includes(utilityTask!.taskId),
+        `${utilityTask!.taskId} 应先于 ${consumerTask!.taskId}`,
+      );
+    }
   },
 };
 

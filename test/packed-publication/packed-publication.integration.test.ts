@@ -1079,6 +1079,522 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   assert.notStrictEqual(retiredBuild.exitCode, 0);
 }
 
+type NativeTurboPackage = {
+  readonly name: string;
+  readonly tags: readonly string[];
+  readonly tasks: {
+    readonly items: readonly {
+      readonly name: string;
+      readonly fullName: string;
+      readonly tags: readonly string[];
+      readonly script: string | null;
+    }[];
+  };
+};
+
+type NativeTurboTaskPlan = {
+  readonly taskId: string;
+  readonly command: string;
+  readonly directory: string;
+  readonly dependencies: readonly string[];
+  readonly resolvedTaskDefinition: {
+    readonly cache: boolean;
+    readonly dependsOn: readonly string[];
+    readonly inputs: readonly string[];
+    readonly outputs: readonly string[];
+  };
+};
+
+type NativeTurboDryRun = {
+  readonly tasks: readonly NativeTurboTaskPlan[];
+  readonly globalCacheInputs?: {
+    readonly environmentVariables: {
+      readonly specified: {
+        readonly passThroughEnv: readonly string[] | null;
+      };
+    };
+  };
+};
+
+const packageOwnedTaskQuery =
+  "{ packages { items { name tags tasks { items { name fullName tags script } } } } }";
+
+async function removeRootTaskDefaults(projectDir: string): Promise<void> {
+  const rootTurboPath = path.join(projectDir, "turbo.json");
+  const rootTurbo = JSON.parse(await readFile(rootTurboPath, "utf8")) as {
+    readonly tasks: Record<string, unknown>;
+  };
+  for (const name of [
+    "build",
+    "format:check",
+    "format:write",
+    "lint",
+    "lint:fix",
+    "test",
+    "typecheck",
+  ]) {
+    delete rootTurbo.tasks[name];
+  }
+  await writeFile(rootTurboPath, `${JSON.stringify(rootTurbo, null, 2)}\n`);
+  await execa("pnpm", ["exec", "oxfmt", "--write", "turbo.json"], {
+    cwd: projectDir,
+  });
+}
+
+async function expectTypeScriptLibraryTaskContracts(
+  projectDir: string,
+  packagePaths: readonly string[],
+): Promise<void> {
+  await expectOwnedPackageTaskContracts(
+    projectDir,
+    packagePaths.map((packagePath) => ({
+      path: packagePath,
+      tags: ["library"],
+      tasks: tsLibOwnedTasks,
+    })),
+  );
+}
+
+type ExpectedOwnedTask = {
+  readonly role: string;
+  readonly cache: boolean;
+  readonly dependsOn: readonly string[];
+  readonly inputs: readonly string[];
+  readonly outputs: readonly string[];
+};
+
+type ExpectedOwnedPackage = {
+  readonly path: string;
+  readonly tags: readonly string[];
+  readonly tasks: Readonly<Record<string, ExpectedOwnedTask>>;
+  readonly filter?: string;
+  readonly passThroughEnv?: readonly string[];
+};
+
+function expectedOwnedTask(
+  role: string,
+  contract: Omit<ExpectedOwnedTask, "role" | "inputs"> & {
+    readonly inputs?: readonly string[];
+  },
+): ExpectedOwnedTask {
+  return { ...contract, inputs: contract.inputs ?? [], role };
+}
+
+const tsCliOwnedTasks = {
+  build: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: ["dist/**"],
+  }),
+  "format:check": expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  "format:write": expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: ["lint:fix"],
+    outputs: [],
+  }),
+  lint: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  "lint:fix": expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  }),
+  postbuild: expectedOwnedTask("work:lifecycle", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  prepack: expectedOwnedTask("work:release", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  test: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  "test:e2e": expectedOwnedTask("quality:heavy", {
+    cache: false,
+    dependsOn: ["build"],
+    outputs: [],
+  }),
+  typecheck: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^typecheck"],
+    outputs: [],
+  }),
+} satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+
+const rustOwnedTasks = {
+  "format:check": expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["//#toolchain:prepare"],
+    outputs: [],
+  }),
+  "format:write": expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: ["//#toolchain:prepare"],
+    outputs: [],
+  }),
+  lint: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["//#toolchain:prepare"],
+    outputs: [],
+  }),
+  test: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["//#toolchain:prepare"],
+    outputs: [],
+  }),
+  typecheck: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^typecheck"],
+    outputs: [],
+  }),
+} satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+
+const tsLibOwnedTasks = {
+  build: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: [],
+  }),
+  "format:check": expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  "format:write": expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: ["lint:fix"],
+    outputs: [],
+  }),
+  lint: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  "lint:fix": expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  }),
+  test: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  }),
+  typecheck: expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^typecheck"],
+    outputs: [],
+  }),
+} satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+
+const rustPassThroughEnv = ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"];
+
+async function expectOwnedPackageTaskContracts(
+  projectDir: string,
+  expectedPackages: readonly ExpectedOwnedPackage[],
+): Promise<void> {
+  await removeRootTaskDefaults(projectDir);
+  const query = await execa(
+    "pnpm",
+    ["exec", "turbo", "query", packageOwnedTaskQuery],
+    { cwd: projectDir },
+  );
+  const nativePackages = (
+    JSON.parse(query.stdout) as {
+      readonly data: {
+        readonly packages: { readonly items: readonly NativeTurboPackage[] };
+      };
+    }
+  ).data.packages.items;
+  const nativePackage = (packageName: string): NativeTurboPackage => {
+    const result = nativePackages.find(
+      (candidate) => candidate.name === packageName,
+    );
+    assert.notStrictEqual(
+      result,
+      undefined,
+      `Turbo 原生目录缺少 ${packageName}`,
+    );
+    return result!;
+  };
+  const configManifest = JSON.parse(
+    await readFile(
+      path.join(projectDir, "packages/typescript-config/package.json"),
+      "utf8",
+    ),
+  ) as { readonly name: string };
+  const configPackageName = configManifest.name;
+  const configPackage = nativePackage(configPackageName);
+  assert.deepStrictEqual(configPackage.tags, ["library"]);
+  const configTasks = new Map(
+    configPackage.tasks.items.map((task) => [task.name, task]),
+  );
+  for (const [name, role] of [
+    ["format:check", "quality:light"],
+    ["format:write", "work:repair"],
+  ] as const) {
+    const task = configTasks.get(name);
+    assert.notStrictEqual(task, undefined, `TypeScript 配置包应发现 ${name}`);
+    assert.deepStrictEqual(task!.tags, [role]);
+    assert.notStrictEqual(task!.script, null, `${name} 应有命令`);
+  }
+  for (const expectedPackage of expectedPackages) {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(projectDir, expectedPackage.path, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly name: string };
+    const owner = nativePackage(manifest.name);
+    assert.deepStrictEqual(owner.tags, expectedPackage.tags);
+    const tasksByName = new Map(
+      owner.tasks.items.map((task) => [task.name, task]),
+    );
+    const taskNames = Object.keys(expectedPackage.tasks);
+    for (const [name, expected] of Object.entries(expectedPackage.tasks)) {
+      const task = tasksByName.get(name);
+      assert.notStrictEqual(task, undefined, `${manifest.name} 应发现 ${name}`);
+      assert.deepStrictEqual(task!.tags, [expected.role]);
+      assert.notStrictEqual(task!.script, null, `${manifest.name}#${name}`);
+    }
+
+    const dryRun = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        ...taskNames,
+        `--filter=${expectedPackage.filter ?? manifest.name}`,
+        "--dry-run=json",
+      ],
+      { cwd: projectDir },
+    );
+    const report = JSON.parse(dryRun.stdout) as NativeTurboDryRun;
+    const taskPlan = (name: string): NativeTurboTaskPlan => {
+      const result = report.tasks.find(
+        (task) => task.taskId === `${manifest.name}#${name}`,
+      );
+      assert.notStrictEqual(
+        result,
+        undefined,
+        `执行计划缺少 ${manifest.name}#${name}`,
+      );
+      assert.strictEqual(result!.directory, expectedPackage.path);
+      return result!;
+    };
+    for (const [name, expected] of Object.entries(expectedPackage.tasks)) {
+      assert.partialDeepStrictEqual(
+        taskPlan(name).resolvedTaskDefinition,
+        {
+          cache: expected.cache,
+          dependsOn: expected.dependsOn,
+          inputs: expected.inputs,
+          outputs: expected.outputs,
+        },
+        `${manifest.name}#${name} 的 Turbo 有效执行定义`,
+      );
+      for (const dependency of expected.dependsOn.filter((item) =>
+        item.startsWith("^"),
+      )) {
+        const providerTaskName = dependency.slice(1);
+        const providerId = `${configPackageName}#${providerTaskName}`;
+        assert.ok(
+          taskPlan(name).dependencies.includes(providerId),
+          `${providerId} 应先于 ${manifest.name}#${name}`,
+        );
+        const provider = report.tasks.find(
+          (task) => task.taskId === providerId,
+        );
+        assert.notStrictEqual(provider, undefined);
+        assert.strictEqual(provider!.directory, "packages/typescript-config");
+        assert.strictEqual(provider!.command, "<NONEXISTENT>");
+      }
+    }
+    if (expectedPackage.passThroughEnv !== undefined) {
+      assert.deepStrictEqual(
+        report.globalCacheInputs?.environmentVariables.specified.passThroughEnv,
+        expectedPackage.passThroughEnv,
+      );
+    }
+  }
+}
+
+async function expectTypeScriptLibraryTaskOwnership(
+  projectDir: string,
+): Promise<void> {
+  const libraryManifestPath = path.join(
+    projectDir,
+    "packages/lib/package.json",
+  );
+  const additionManifestPath = path.join(
+    projectDir,
+    "packages/archive-addition/package.json",
+  );
+  const additionTurboPath = path.join(
+    projectDir,
+    "packages/archive-addition/turbo.json",
+  );
+  const libraryManifest = JSON.parse(
+    await readFile(libraryManifestPath, "utf8"),
+  ) as { readonly name: string };
+  const additionManifest = JSON.parse(
+    await readFile(additionManifestPath, "utf8"),
+  ) as {
+    readonly name: string;
+    scripts: Record<string, string>;
+  };
+  const configManifest = JSON.parse(
+    await readFile(
+      path.join(projectDir, "packages/typescript-config/package.json"),
+      "utf8",
+    ),
+  ) as { readonly name: string };
+  additionManifest.scripts["test:focused"] =
+    "node --eval \"require('node:fs').writeFileSync('.selected-by-quality-check', 'selected')\"";
+  await writeFile(
+    additionManifestPath,
+    `${JSON.stringify(additionManifest, null, 2)}\n`,
+  );
+
+  const additionTurbo = JSON.parse(
+    await readFile(additionTurboPath, "utf8"),
+  ) as {
+    tasks: Record<string, Record<string, unknown>>;
+  };
+  additionTurbo.tasks.build = {
+    dependsOn: ["^build"],
+    inputs: [],
+    outputs: ["custom-dist/**"],
+    cache: false,
+    tags: ["quality:heavy"],
+  };
+  additionTurbo.tasks["test:focused"] = {
+    dependsOn: [],
+    inputs: [],
+    outputs: [],
+    cache: false,
+    tags: ["quality:light"],
+  };
+  await writeFile(
+    additionTurboPath,
+    `${JSON.stringify(additionTurbo, null, 2)}\n`,
+  );
+  await execa(
+    "pnpm",
+    [
+      "exec",
+      "oxfmt",
+      "--write",
+      "packages/archive-addition/package.json",
+      "packages/archive-addition/turbo.json",
+    ],
+    { cwd: projectDir },
+  );
+
+  const query = await execa(
+    "pnpm",
+    ["exec", "turbo", "query", packageOwnedTaskQuery],
+    { cwd: projectDir },
+  );
+  const nativePackages = (
+    JSON.parse(query.stdout) as {
+      readonly data: {
+        readonly packages: { readonly items: readonly NativeTurboPackage[] };
+      };
+    }
+  ).data.packages.items;
+  const nativeTask = (packageName: string, taskName: string) => {
+    const task = nativePackages
+      .find((pkg) => pkg.name === packageName)
+      ?.tasks.items.find((candidate) => candidate.name === taskName);
+    assert.notStrictEqual(
+      task,
+      undefined,
+      `Turbo 原生目录缺少 ${packageName}#${taskName}`,
+    );
+    return task!;
+  };
+
+  assert.deepStrictEqual(nativeTask(libraryManifest.name, "build").tags, [
+    "quality:light",
+  ]);
+  assert.deepStrictEqual(nativeTask(additionManifest.name, "build").tags, [
+    "quality:heavy",
+  ]);
+  assert.notStrictEqual(
+    nativeTask(additionManifest.name, "test:focused").script,
+    null,
+    "新增的包内任务应由 Turbo 原生目录发现",
+  );
+  assert.deepStrictEqual(
+    nativeTask(additionManifest.name, "test:focused").tags,
+    ["quality:light"],
+  );
+
+  for (const [packageName, expected] of [
+    [libraryManifest.name, { cache: true, outputs: [] }],
+    [additionManifest.name, { cache: false, outputs: ["custom-dist/**"] }],
+  ] as const) {
+    const dryRun = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        "build",
+        `--filter=${packageName}`,
+        "--dry-run=json",
+      ],
+      { cwd: projectDir },
+    );
+    const task = (
+      JSON.parse(dryRun.stdout) as {
+        readonly tasks: readonly NativeTurboTaskPlan[];
+      }
+    ).tasks.find((candidate) => candidate.taskId === `${packageName}#build`);
+    assert.notStrictEqual(task, undefined);
+    assert.strictEqual(task!.resolvedTaskDefinition.cache, expected.cache);
+    assert.deepStrictEqual(
+      task!.resolvedTaskDefinition.outputs,
+      expected.outputs,
+    );
+  }
+
+  const qualityCheck = await execa("pnpm", ["run", "check"], {
+    cwd: projectDir,
+  });
+  for (const name of ["build", "typecheck"] as const) {
+    assert.ok(
+      !qualityCheck.stdout.includes(`${configManifest.name}#${name}`),
+      `${configManifest.name}#${name} 不应进入正式轻检查选择`,
+    );
+  }
+  assert.strictEqual(
+    await readFile(
+      path.join(
+        projectDir,
+        "packages/archive-addition/.selected-by-quality-check",
+      ),
+      "utf8",
+    ),
+    "selected",
+    "现有轻检查入口应执行新声明的包内任务",
+  );
+}
+
 function configProperty(
   object: ts.ObjectLiteralExpression,
   name: string,
@@ -1564,6 +2080,32 @@ void describe("packed public CLI consumer", () => {
             "generated",
             definition.name,
           );
+          if (definition.name === "ts-lib") {
+            await execa("pnpm", ["install"], { cwd: generatedProject });
+            await expectTypeScriptLibraryTaskContracts(generatedProject, [
+              "packages/lib",
+            ]);
+          } else if (definition.name === "ts-cli") {
+            await execa("pnpm", ["install"], { cwd: generatedProject });
+            await expectOwnedPackageTaskContracts(generatedProject, [
+              {
+                path: "packages/cli",
+                tags: ["app"],
+                tasks: tsCliOwnedTasks,
+              },
+            ]);
+          } else if (definition.name === "rust-bin") {
+            await execa("pnpm", ["install"], { cwd: generatedProject });
+            await expectOwnedPackageTaskContracts(generatedProject, [
+              {
+                path: "packages/app",
+                filter: "./packages/app",
+                tags: ["native"],
+                tasks: rustOwnedTasks,
+                passThroughEnv: rustPassThroughEnv,
+              },
+            ]);
+          }
           const requiresDiagnostics = initializationRequiresDiagnostics(
             definition.name,
           );
@@ -1631,6 +2173,46 @@ void describe("packed public CLI consumer", () => {
               "generated",
               candidate.name,
             );
+            if (candidate.name === "ts-lib") {
+              await expectTypeScriptLibraryTaskContracts(generatedProject, [
+                "packages/lib",
+                "packages/archive-addition",
+              ]);
+              await execa("pnpm", ["install"], { cwd: generatedProject });
+              await expectTypeScriptLibraryTaskOwnership(generatedProject);
+            } else if (candidate.name === "ts-cli") {
+              await execa("pnpm", ["install"], { cwd: generatedProject });
+              await expectOwnedPackageTaskContracts(generatedProject, [
+                {
+                  path: "packages/cli",
+                  tags: ["app"],
+                  tasks: tsCliOwnedTasks,
+                },
+                {
+                  path: "packages/archive-addition",
+                  tags: ["app"],
+                  tasks: tsCliOwnedTasks,
+                },
+              ]);
+            } else if (candidate.name === "rust-bin") {
+              await execa("pnpm", ["install"], { cwd: generatedProject });
+              await expectOwnedPackageTaskContracts(generatedProject, [
+                {
+                  path: "packages/app",
+                  filter: "./packages/app",
+                  tags: ["native"],
+                  tasks: rustOwnedTasks,
+                  passThroughEnv: rustPassThroughEnv,
+                },
+                {
+                  path: "packages/archive-addition",
+                  filter: "./packages/archive-addition",
+                  tags: ["native"],
+                  tasks: rustOwnedTasks,
+                  passThroughEnv: rustPassThroughEnv,
+                },
+              ]);
+            }
             assert.notStrictEqual(additionPlan, undefined);
             const requiresDiagnostics =
               additionPlan!.ciDiagnosticArtifacts.length > 0;
@@ -1898,34 +2480,6 @@ void describe("packed public CLI consumer", () => {
             .map((update) => update.directory),
           ["/packages/worker"],
         );
-        assert.deepStrictEqual(
-          await readFile(
-            path.join(rustAdditionTarget, "packages/worker/turbo.json"),
-            "utf8",
-          ).then((source) => JSON.parse(source)),
-          {
-            extends: ["//"],
-            tags: ["native"],
-            tasks: {
-              "format:check": {
-                dependsOn: ["//#toolchain:prepare"],
-                outputs: [],
-              },
-              "format:write": {
-                dependsOn: ["//#toolchain:prepare"],
-                cache: false,
-              },
-              lint: {
-                dependsOn: ["//#toolchain:prepare"],
-                outputs: [],
-              },
-              test: {
-                dependsOn: ["//#toolchain:prepare"],
-                outputs: [],
-              },
-            },
-          },
-        );
         const rootManifestAfterRust = JSON.parse(
           await readFile(path.join(rustAdditionTarget, "package.json"), "utf8"),
         ) as { readonly scripts: Readonly<Record<string, string>> };
@@ -1944,6 +2498,15 @@ void describe("packed public CLI consumer", () => {
         );
 
         await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
+        await expectOwnedPackageTaskContracts(rustAdditionTarget, [
+          {
+            path: "packages/worker",
+            filter: "./packages/worker",
+            tags: ["native"],
+            tasks: rustOwnedTasks,
+            passThroughEnv: rustPassThroughEnv,
+          },
+        ]);
         await execa("pnpm", ["run", "check"], { cwd: rustAdditionTarget });
         await expectPackedHardenedRootCheckWorkflow(
           rustAdditionTarget,
