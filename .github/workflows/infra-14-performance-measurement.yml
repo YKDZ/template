@@ -1,0 +1,788 @@
+name: 临时票14性能测量
+
+on:
+  push:
+    branches:
+      - codex/infra-14-performance-measurement
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-14-performance-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: 同机 full 与日常 light 冷暖
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    outputs:
+      full_health_success: ${{ steps.full-measurement.outputs.full_health_success }}
+    env:
+      CI: "true"
+      SOURCE_SHA: c3e2129fb35a318751068b499240808348ab3c21
+      TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
+      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
+      TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
+      TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR: ${{ github.workspace }}/.preset-behavior-diagnostics
+      TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR: ""
+    steps:
+      - name: 校验固定源提交
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'source_sha 必须是完整的 40 位小写十六进制提交 SHA。' >&2
+            exit 1
+          }
+
+      - name: 检出固定源提交
+        uses: actions/checkout@v7
+        with:
+          ref: c3e2129fb35a318751068b499240808348ab3c21
+          persist-credentials: false
+
+      - name: 启用 Corepack
+        run: corepack enable
+
+      - name: 准备声明版本的 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+
+      - name: 准备独立 Docker Buildx builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          name: infra-14-performance
+          driver: docker-container
+          use: true
+
+      - name: 建立私有测量目录与临时脚本
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure_root="$RUNNER_TEMP/infra-14-performance"
+          mkdir -p "$measure_root/records/preparation" "$measure_root/records/turbo"
+          {
+            printf 'MEASURE_ROOT=%s\n' "$measure_root"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_DIR=%s/.fixture-evidence\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR=%s/.fixture-evidence-activity\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR=%s/.fixture-native-cache/buildkit\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_PNPM_CACHE_DIR=%s/.fixture-native-cache/pnpm\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_CARGO_CACHE_DIR=%s/.fixture-native-cache/cargo\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_WORKSPACE_DIR=%s/.fixture-workspace\n' "$GITHUB_WORKSPACE"
+            printf 'PNPM_CONFIG_STORE_DIR=%s/measurement-pnpm-store\n' "$RUNNER_TEMP/infra-14-performance"
+          } >> "$GITHUB_ENV"
+          cat > "$measure_root/run-formal-command.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -uo pipefail
+
+          mode=${1:?mode required: full, light, or restored}
+          records="$MEASURE_ROOT/records"
+          pnpm_executable=$(command -v pnpm)
+          PNPM_CONFIG_STORE_DIR=${PNPM_CONFIG_STORE_DIR:?pnpm store directory was not configured}
+          overall_status=0
+          last_status=0
+          unset TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
+            TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
+            TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY
+          export GITHUB_SHA="$SOURCE_SHA"
+
+          record_cache_state() {
+            local scope=$1 phase=$2 point=$3 target
+            target="$records/$scope/$phase/cache-$point.txt"
+            {
+              date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+              printf 'loadavg='; cat /proc/loadavg
+              grep '^Cpus_allowed_list:' /proc/self/status
+              free -h
+              df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+              for path in \
+                "$GITHUB_WORKSPACE/.turbo" \
+                "$TEMPLATE_FIXTURE_EVIDENCE_DIR" \
+                "$GITHUB_WORKSPACE/.fixture-native-cache" \
+                "$PNPM_CONFIG_STORE_DIR" "$HOME/.cache/ms-playwright"; do
+                if [[ -e "$path" ]]; then
+                  printf '\npath=%s\n' "$path"
+                  du -sh "$path" 2>&1 || true
+                  printf 'files=%s\n' "$(find "$path" -type f -printf . 2>/dev/null | wc -c)"
+                else
+                  printf 'path=%s\tstate=absent\n' "$path"
+                fi
+              done
+            } > "$target"
+            timeout --signal=TERM --kill-after=3s 30s docker buildx du --builder infra-14-performance \
+              > "$records/$scope/$phase/buildx-du-$point.txt" 2>&1 || true
+          }
+
+          run_command() {
+            local scope=$1 phase=$2 command_name=$3
+            shift 3
+            local command_dir="$records/$scope/$phase"
+            local activity_dir="$GITHUB_WORKSPACE/.fixture-evidence-activity/$scope-$phase"
+            local started ended started_ms ended_ms elapsed command_text install_count
+            mkdir -p "$command_dir" "$activity_dir"
+            export TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR="$activity_dir"
+            export TEMPLATE_FIXTURE_EVIDENCE_RUN_ID="infra-14-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${scope}-${phase}"
+            export TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+            started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            started_ms=$(date +%s%3N)
+            command_text=$(printf '%q ' "$@")
+            if /usr/bin/time -f 'observer_wrapper_wall_seconds=%e observer_wrapper_user_seconds=%U observer_wrapper_sys_seconds=%S max_rss_kb=%M exit=%x' \
+              -o "$command_dir/$command_name.time" \
+              strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
+                -o "$command_dir/$command_name.execve.log" -- "$@" \
+                > "$command_dir/$command_name.log" 2>&1; then
+              last_status=0
+            else
+              last_status=$?
+              overall_status=1
+            fi
+            install_count=$(awk \
+              '/execve\(/ && /\["[^"]*", "(install|i|add)"(,|\])/ && /= 0$/ { count++ } END { print count + 0 }' \
+              "$command_dir/$command_name.execve.log" 2>/dev/null || printf '0')
+            printf 'host_pnpm_dependency_install_execve_successes=%s\npnpm_executable=%s\n' \
+              "$install_count" "$pnpm_executable" > "$command_dir/$command_name.pnpm-dependency-install-count.txt"
+            ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            ended_ms=$(date +%s%3N)
+            elapsed=$((ended_ms - started_ms))
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$scope-$phase" "$command_name" "$last_status" "$started" "$ended" "$elapsed" "$command_text" \
+              >> "$records/steps.tsv"
+            printf 'scope=%s phase=%s command=%s exit=%s elapsed_ms=%s run_id=%s\n' \
+              "$scope" "$phase" "$command_name" "$last_status" "$elapsed" "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" \
+              >> "$command_dir/progress.log"
+            command_exit=$last_status
+            printf '%s\n' "$command_exit" > "$command_dir/$command_name.exit"
+            if [[ "$command_name" == full || "$command_name" == restored-full ]]; then
+              activity_file="$activity_dir/activity.jsonl"
+              if [[ ! -s "$activity_file" ]] || ! grep -Fq "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" "$activity_file"; then
+                printf '缺少本次正式 full 调用的 Fixture activity: %s\n' "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" \
+                  >> "$command_dir/activity-check.log"
+                last_status=1
+                overall_status=1
+              else
+                grep -F "$TEMPLATE_FIXTURE_EVIDENCE_RUN_ID" "$activity_file" \
+                  > "$command_dir/current-run-activity.jsonl"
+                wc -l < "$command_dir/current-run-activity.jsonl" \
+                  > "$command_dir/current-run-activity-count.txt"
+              fi
+            fi
+            return 0
+          }
+
+          run_phase() {
+            local scope=$1 phase=$2 summary_copy_status=0
+            local phase_dir="$records/$scope/$phase"
+            mkdir -p "$phase_dir"
+            record_cache_state "$scope" "$phase" before
+            docker ps -a --no-trunc > "$phase_dir/docker-ps-before.txt" 2>&1 || true
+            (
+              while [[ ! -e "$phase_dir/stop-docker-stats" ]]; do
+                captured=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                snapshot=$(timeout --signal=TERM --kill-after=2s 10s docker stats --no-stream --format '{{json .}}' \
+                  2>> "$phase_dir/docker-stats-errors.log")
+                result=$?
+                if [[ "$result" -eq 0 ]]; then
+                  while IFS= read -r row; do
+                    [[ -n "$row" ]] && printf '%s\t%s\n' "$captured" "$row" >> "$phase_dir/docker-stats.jsonl"
+                  done <<< "$snapshot"
+                else
+                  printf '%s\texit=%s\n' "$captured" "$result" >> "$phase_dir/docker-stats-errors.log"
+                fi
+                sleep 5
+              done
+            ) &
+            stats_pid=$!
+
+            if [[ "$scope" == full ]]; then
+              run_command "$scope" "$phase" full pnpm run check:full
+              full_status=$last_status
+              run_command "$scope" "$phase" evidence-health pnpm --filter @ykdz/template-checks run check:evidence-health
+              health_status=$last_status
+              printf 'full_exit=%s\nevidence_health_exit=%s\n' "$full_status" "$health_status" \
+                > "$phase_dir/phase-results.txt"
+              if [[ "$full_status" -ne 0 || "$health_status" -ne 0 ]]; then overall_status=1; fi
+            elif [[ "$scope" == light ]]; then
+              run_command "$scope" "$phase" check pnpm run check
+              printf 'check_exit=%s\n' "$last_status" > "$phase_dir/phase-results.txt"
+            else
+              run_command "$scope" "$phase" restored-full pnpm run check:full
+              full_status=$last_status
+              run_command "$scope" "$phase" evidence-health pnpm --filter @ykdz/template-checks run check:evidence-health
+              health_status=$last_status
+              printf 'full_exit=%s\nevidence_health_exit=%s\n' "$full_status" "$health_status" \
+                > "$phase_dir/phase-results.txt"
+              if [[ "$full_status" -ne 0 || "$health_status" -ne 0 ]]; then overall_status=1; fi
+            fi
+
+            : > "$phase_dir/stop-docker-stats"
+            wait "$stats_pid" 2>/dev/null || true
+            docker ps -a --no-trunc > "$phase_dir/docker-ps-after.txt" 2>&1 || true
+            docker buildx inspect infra-14-performance > "$phase_dir/buildx-inspect-after.txt" 2>&1 || true
+            record_cache_state "$scope" "$phase" after
+            fixture_ids=$(docker ps -aq --filter label=com.ykdz.template.fixture.project)
+            list_status=$?
+            if [[ "$list_status" -ne 0 ]]; then
+              printf 'fixture_container_cleanup_exit=%s\n' "$list_status" > "$phase_dir/fixture-cleanup.txt"
+              overall_status=1
+            elif [[ -n "$fixture_ids" ]]; then
+              mapfile -t fixture_containers <<< "$fixture_ids"
+              if docker rm -f "${fixture_containers[@]}" > "$phase_dir/fixture-cleanup.log" 2>&1; then
+                printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=%s\n' \
+                  "${#fixture_containers[@]}" > "$phase_dir/fixture-cleanup.txt"
+              else
+                cleanup_status=$?
+                printf 'fixture_container_cleanup_exit=%s\n' "$cleanup_status" > "$phase_dir/fixture-cleanup.txt"
+                overall_status=1
+              fi
+            else
+              printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=0\n' > "$phase_dir/fixture-cleanup.txt"
+            fi
+            docker ps -a --no-trunc > "$phase_dir/docker-ps-after-cleanup.txt" 2>&1 || true
+            if [[ -d .turbo/runs ]]; then
+              if ! cp -a .turbo/runs "$records/turbo/$scope-$phase-runs"; then
+                printf '无法保存此阶段的 Turbo 原生运行摘要。\n' > "$phase_dir/turbo-summary-copy-error.txt"
+                summary_copy_status=1
+                overall_status=1
+              fi
+            else
+              printf '此阶段没有生成 .turbo/runs。\n' > "$phase_dir/turbo-summary-absent.txt"
+            fi
+            printf 'turbo_summary_copy_exit=%s\n' "$summary_copy_status" \
+              >> "$phase_dir/phase-results.txt"
+            date -u '+phase_completed_utc=%Y-%m-%dT%H:%M:%SZ' > "$phase_dir/phase-complete.txt"
+          }
+
+          if [[ ! -e "$records/steps.tsv" ]]; then
+            printf 'scope\tstep\texit_code\tstarted_utc\tended_utc\telapsed_ms\tcommand\n' > "$records/steps.tsv"
+          fi
+
+          case "$mode" in
+            full)
+              full_health_success=true
+              run_phase full cold
+              [[ "$overall_status" -eq 0 ]] || full_health_success=false
+              run_phase full warm
+              [[ "$overall_status" -eq 0 ]] || full_health_success=false
+              printf 'full_health_success=%s\n' "$full_health_success" >> "$GITHUB_OUTPUT"
+              ;;
+            light)
+              if ! rm -rf .turbo || ! mkdir -p .turbo; then
+                printf '无法清空 Turbo 缓存目录，日常 light 冷测无效。\n' >&2
+                exit 1
+              fi
+              printf 'cold_cache_boundary=Turbo 本地结果缓存已清空；full 阶段生成的 dist 构建产物保留，因此此阶段属于结果缓存冷、构建产物暖。\n' \
+                > "$MEASURE_ROOT/records/light/cold-boundary.txt"
+              run_phase light cold
+              run_phase light warm
+              ;;
+            restored)
+              run_phase restored cross-job
+              ;;
+            *)
+              printf '未知测量模式：%s\n' "$mode" >&2
+              exit 2
+              ;;
+          esac
+          exit "$overall_status"
+          BASH
+          chmod +x "$measure_root/run-formal-command.sh"
+
+      - name: 验证 pnpm 使用私有下载 store
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_store=$(realpath -m "$PNPM_CONFIG_STORE_DIR")
+          actual_store=$(realpath -m "$(pnpm store path)")
+          printf 'expected_private_store=%s\nactual_pnpm_store=%s\n' \
+            "$expected_store" "$actual_store" > "$MEASURE_ROOT/records/preparation/pnpm-store-path.txt"
+          [[ "$actual_store" == "$expected_store" || "$actual_store" == "$expected_store/"* ]]
+
+      - name: 安装锁定依赖一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/pnpm-install.time" \
+            pnpm install --frozen-lockfile > "$MEASURE_ROOT/records/preparation/pnpm-install.log" 2>&1
+          result=$?
+          printf 'pnpm install --frozen-lockfile\t%s\n' "$result" > "$MEASURE_ROOT/records/preparation/pnpm-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/pnpm-install.log"
+          exit "$result"
+
+      - name: 安装 ShellCheck 与 strace 一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/host-tools.time" \
+            bash -c 'sudo apt-get update && sudo apt-get install -y shellcheck strace' \
+            > "$MEASURE_ROOT/records/preparation/host-tools.log" 2>&1
+          result=$?
+          printf 'sudo apt-get update && sudo apt-get install -y shellcheck strace\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/host-tools.exit"
+          cat "$MEASURE_ROOT/records/preparation/host-tools.log"
+          exit "$result"
+
+      - name: 安装 Playwright Chromium 一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/playwright-install.time" \
+            pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.log" 2>&1
+          result=$?
+          printf 'playwright install --with-deps chromium\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/playwright-install.log"
+          exit "$result"
+
+      - name: 检查 seccomp-BPF execve 观测
+        shell: bash
+        run: |
+          set +e
+          pnpm_executable=$(command -v pnpm)
+          strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
+            -o "$MEASURE_ROOT/records/preparation/strace-probe.execve.log" -- pnpm --version \
+            > "$MEASURE_ROOT/records/preparation/strace-probe.stdout" \
+            2> "$MEASURE_ROOT/records/preparation/strace-probe.stderr"
+          result=$?
+          if [[ "$result" -eq 0 ]] && ! grep -Eq 'execve\(.* = 0$' \
+            "$MEASURE_ROOT/records/preparation/strace-probe.execve.log"; then
+            printf '预检没有记录到 pnpm 的成功 execve。\n' \
+              >> "$MEASURE_ROOT/records/preparation/strace-probe.stderr"
+            result=1
+          fi
+          printf 'strace seccomp-BPF pnpm --version\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/strace-probe.exit"
+          cat "$MEASURE_ROOT/records/preparation/strace-probe.stdout"
+          cat "$MEASURE_ROOT/records/preparation/strace-probe.stderr" >&2
+          exit "$result"
+
+      - name: 记录 runner 与冷缓存边界
+        shell: bash
+        run: |
+          set -euo pipefail
+          records="$MEASURE_ROOT/records"
+          {
+            printf 'workflow_commit=%s\n' "$GITHUB_SHA"
+            printf 'workflow_ref=%s\nworkflow_run_id=%s\nworkflow_run_attempt=%s\n' \
+              "$GITHUB_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'measured_source_commit=%s\n' "$(git rev-parse HEAD)"
+            printf 'expected_source_commit=%s\n' "$SOURCE_SHA"
+            printf 'actions_cache_restore_steps_before_full_cold=0\n'
+            printf 'setup_node_pnpm_cache=disabled\n'
+            printf 'turbo_remote_cache=disabled\n'
+            printf 'trigger=push_to_temporary_measurement_branch_only\n'
+            printf 'cross_job_restore_scope=same_workflow_run_and_harness_branch_not_production_push_main\n'
+            printf 'fixture_activity_run_id=shared_by_formal_full_and_independent_health_within_each_phase\n'
+            printf 'light_cold_boundary=Turbo_result_cache_cleared;dist_outputs_retained_from_full_measurement\n'
+            printf 'root_pnpm_install_invocations=1\n'
+            printf 'apt_get_update_invocations=1\napt_get_install_invocations=1\napt_packages=shellcheck,strace\n'
+            printf 'playwright_chromium_install_invocations=1\n'
+            printf 'playwright_browser_path=default_home_cache; no PLAYWRIGHT_BROWSERS_PATH pass-through assumed\n'
+            printf 'buildx_builder_setup_invocations=1\n'
+            printf 'strace_scope=host_pnpm_execve_only_with_seccomp_bpf; measured_wall_and_cpu_include_observer\n'
+            printf 'docker_stats_scope=five_second_instantaneous_container_samples_not_integrated_cpu\n'
+            printf 'actions_setup_and_cache_step_durations=available_from_github_job_timing_api\n'
+            date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+            cat /etc/os-release
+            uname -a
+            printf 'nproc=%s\n' "$(nproc)"
+            grep '^Cpus_allowed_list:' /proc/self/status
+            printf '\n--- load and memory ---\n'
+            cat /proc/loadavg; lscpu; free -h; df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+            printf '\n--- tools ---\n'
+            node --version; pnpm --version; pnpm store path
+            docker version; docker buildx version; docker buildx inspect infra-14-performance
+            pnpm --filter @ykdz/template-checks exec devcontainer --version
+            pnpm --filter @ykdz/template-builtin-presets exec playwright --version
+            shellcheck --version; strace --version
+            printf 'pnpm_executable=%s\npnpm_store_env=PNPM_CONFIG_STORE_DIR\npnpm_store_path=%s\n' \
+              "$(command -v pnpm)" "$PNPM_CONFIG_STORE_DIR"
+          } > "$records/runner-environment.txt" 2>&1
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          for path in .turbo .fixture-evidence .fixture-native-cache .fixture-workspace; do
+            [[ ! -e "$path" ]] || { printf '测量前冷缓存目录已存在：%s\n' "$path" >&2; exit 1; }
+          done
+          docker buildx du --builder infra-14-performance > "$records/buildx-du-before-cold.txt"
+          grep -Eq '^Total:[[:space:]]+0B$' "$records/buildx-du-before-cold.txt"
+          cat "$records/runner-environment.txt"
+
+      - name: 执行正式 full 冷暖阶段
+        id: full-measurement
+        shell: bash
+        run: '"$MEASURE_ROOT/run-formal-command.sh" full'
+
+      - name: 保存 Fixture evidence 供跨 job 恢复
+        id: fixture-evidence-save
+        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .fixture-evidence
+          key: fixture-verification-evidence-${{ runner.os }}-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 记录 Fixture evidence 保存结果
+        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        shell: bash
+        env:
+          SAVE_OUTCOME: ${{ steps.fixture-evidence-save.outcome }}
+        run: |
+          set -euo pipefail
+          printf 'action=actions/cache/save@v6\nsource_sha=%s\ncache_outcome=%s\ncache_key=fixture-verification-evidence-%s-%s-%s-%s\n' \
+            "$SOURCE_SHA" "$SAVE_OUTCOME" "$RUNNER_OS" "$SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            > "$MEASURE_ROOT/records/cache-save.txt"
+          du -sh .fixture-evidence >> "$MEASURE_ROOT/records/cache-save.txt"
+          find .fixture-evidence -type f -printf . | wc -c | \
+            sed 's/^/file_count=/' >> "$MEASURE_ROOT/records/cache-save.txt"
+
+      - name: 执行日常 light 冷暖阶段
+        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        shell: bash
+        run: '"$MEASURE_ROOT/run-formal-command.sh" light'
+
+      - name: 上传性能测量记录
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-performance-measure-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/infra-14-performance/records/**
+            ${{ runner.temp }}/infra-14-performance/run-formal-command.sh
+            .fixture-evidence/**
+            .fixture-evidence-activity/**
+            .fixture-workspace/**
+            !.fixture-workspace/**/node_modules/**
+            !.fixture-workspace/**/.pnpm-store/**
+            !.fixture-workspace/**/.npm/**
+            !.fixture-workspace/**/.cargo/registry/**
+            !.fixture-workspace/**/.cargo/git/**
+            !.fixture-workspace/**/target/**
+            !.fixture-workspace/**/.cache/**
+            !.fixture-workspace/**/.turbo/cache/**
+            .cli-journey-diagnostics/**
+            !.cli-journey-diagnostics/**/node_modules/**
+            !.cli-journey-diagnostics/**/.pnpm-store/**
+            !.cli-journey-diagnostics/**/.npm/**
+            !.cli-journey-diagnostics/**/.cargo/registry/**
+            !.cli-journey-diagnostics/**/.cargo/git/**
+            !.cli-journey-diagnostics/**/target/**
+            !.cli-journey-diagnostics/**/.cache/**
+            !.cli-journey-diagnostics/**/.turbo/cache/**
+            .preset-behavior-diagnostics/**
+            !.preset-behavior-diagnostics/**/node_modules/**
+            !.preset-behavior-diagnostics/**/.pnpm-store/**
+            !.preset-behavior-diagnostics/**/.npm/**
+            !.preset-behavior-diagnostics/**/.cargo/registry/**
+            !.preset-behavior-diagnostics/**/.cargo/git/**
+            !.preset-behavior-diagnostics/**/target/**
+            !.preset-behavior-diagnostics/**/.cache/**
+            !.preset-behavior-diagnostics/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
+
+  restore:
+    name: 新 runner 跨 job 恢复 Fixture evidence
+    needs: measure
+    if: ${{ always() && !cancelled() && needs.measure.outputs.full_health_success == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      CI: "true"
+      SOURCE_SHA: c3e2129fb35a318751068b499240808348ab3c21
+      TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
+      TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
+      TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
+      TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR: ${{ github.workspace }}/.preset-behavior-diagnostics
+      TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR: ""
+    steps:
+      - name: 校验固定源提交
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo 'source_sha 必须是完整的 40 位小写十六进制提交 SHA。' >&2
+            exit 1
+          }
+
+      - name: 检出相同固定源提交
+        uses: actions/checkout@v7
+        with:
+          ref: c3e2129fb35a318751068b499240808348ab3c21
+          persist-credentials: false
+
+      - name: 启用 Corepack
+        run: corepack enable
+
+      - name: 准备声明版本的 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+
+      - name: 准备全新 Docker Buildx builder
+        uses: docker/setup-buildx-action@v4
+        with:
+          name: infra-14-performance-restore
+          driver: docker-container
+          use: true
+
+      - name: 建立新 runner 私有目录
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure_root="$RUNNER_TEMP/infra-14-performance-restore"
+          mkdir -p "$measure_root/records/preparation" "$measure_root/records/turbo"
+          {
+            printf 'MEASURE_ROOT=%s\n' "$measure_root"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_DIR=%s/.fixture-evidence\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR=%s/.fixture-evidence-activity\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR=%s/.fixture-native-cache/buildkit\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_PNPM_CACHE_DIR=%s/.fixture-native-cache/pnpm\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_CARGO_CACHE_DIR=%s/.fixture-native-cache/cargo\n' "$GITHUB_WORKSPACE"
+            printf 'TEMPLATE_FIXTURE_WORKSPACE_DIR=%s/.fixture-workspace\n' "$GITHUB_WORKSPACE"
+            printf 'PNPM_CONFIG_STORE_DIR=%s/measurement-pnpm-store\n' "$RUNNER_TEMP/infra-14-performance-restore"
+          } >> "$GITHUB_ENV"
+
+      - name: 验证新 runner 使用私有 pnpm store
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_store=$(realpath -m "$PNPM_CONFIG_STORE_DIR")
+          actual_store=$(realpath -m "$(pnpm store path)")
+          printf 'expected_private_store=%s\nactual_pnpm_store=%s\n' \
+            "$expected_store" "$actual_store" > "$MEASURE_ROOT/records/preparation/pnpm-store-path.txt"
+          [[ "$actual_store" == "$expected_store" || "$actual_store" == "$expected_store/"* ]]
+
+      - name: 使用正式 cache action 恢复 Fixture evidence
+        id: fixture-evidence-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: .fixture-evidence
+          key: fixture-verification-evidence-${{ runner.os }}-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: 验证 Fixture evidence 精确恢复
+        if: always()
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.fixture-evidence-restore.outputs.cache-hit }}
+          RESTORE_OUTCOME: ${{ steps.fixture-evidence-restore.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'action=actions/cache/restore@v6\nrestore_outcome=%s\ncache_hit=%s\nsource_sha=%s\n' \
+              "$RESTORE_OUTCOME" "$CACHE_HIT" "$SOURCE_SHA"
+            printf 'cache_key=fixture-verification-evidence-%s-%s-%s-%s\n' \
+              "$RUNNER_OS" "$SOURCE_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          } > "$MEASURE_ROOT/records/cache-restore.txt"
+          [[ "$CACHE_HIT" == true ]] || { echo 'Fixture evidence 的跨 job 精确键未命中。' >&2; exit 1; }
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ -d .fixture-evidence ]]
+          find .fixture-evidence -type f -print0 | sort -z | xargs -0 -r sha256sum \
+            > "$RUNNER_TEMP/infra-14-restored-evidence.sha256"
+          test -s "$RUNNER_TEMP/infra-14-restored-evidence.sha256"
+          cat "$RUNNER_TEMP/infra-14-restored-evidence.sha256"
+
+      - name: 安装锁定依赖一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/pnpm-install.time" \
+            pnpm install --frozen-lockfile > "$MEASURE_ROOT/records/preparation/pnpm-install.log" 2>&1
+          result=$?
+          printf 'pnpm install --frozen-lockfile\t%s\n' "$result" > "$MEASURE_ROOT/records/preparation/pnpm-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/pnpm-install.log"
+          exit "$result"
+
+      - name: 安装 ShellCheck 与 strace 一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/host-tools.time" \
+            bash -c 'sudo apt-get update && sudo apt-get install -y shellcheck strace' \
+            > "$MEASURE_ROOT/records/preparation/host-tools.log" 2>&1
+          result=$?
+          printf 'sudo apt-get update && sudo apt-get install -y shellcheck strace\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/host-tools.exit"
+          cat "$MEASURE_ROOT/records/preparation/host-tools.log"
+          exit "$result"
+
+      - name: 安装 Playwright Chromium 一次
+        shell: bash
+        run: |
+          set +e
+          /usr/bin/time -f 'wall_seconds=%e user_seconds=%U sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$MEASURE_ROOT/records/preparation/playwright-install.time" \
+            pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.log" 2>&1
+          result=$?
+          printf 'playwright install --with-deps chromium\t%s\n' "$result" \
+            > "$MEASURE_ROOT/records/preparation/playwright-install.exit"
+          cat "$MEASURE_ROOT/records/preparation/playwright-install.log"
+          exit "$result"
+
+      - name: 写入恢复验证临时脚本
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$MEASURE_ROOT/run-restored-command.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          records="$MEASURE_ROOT/records"
+          mkdir -p "$records/restored/cross-job" "$GITHUB_WORKSPACE/.fixture-evidence-activity/restored"
+          printf 'scope\tstep\texit_code\tstarted_utc\tended_utc\telapsed_ms\tcommand\n' > "$records/steps.tsv"
+          unset TURBO_TEAM TURBO_TOKEN TURBO_REMOTE_CACHE_SIGNATURE_KEY \
+            TEMPLATE_FIXTURE_TURBO_TEAM TEMPLATE_FIXTURE_TURBO_TOKEN \
+            TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY
+          export GITHUB_SHA="$SOURCE_SHA"
+          export TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR="$GITHUB_WORKSPACE/.fixture-evidence-activity/restored"
+          export TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT"
+          pnpm_executable=$(command -v pnpm)
+          command_status=0
+          run_id="infra-14-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-restored-cross-job"
+          export TEMPLATE_FIXTURE_EVIDENCE_RUN_ID="$run_id"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ); started_ms=$(date +%s%3N)
+          if /usr/bin/time -f 'observer_wrapper_wall_seconds=%e observer_wrapper_user_seconds=%U observer_wrapper_sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$records/restored/cross-job/full.time" \
+            strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
+              -o "$records/restored/cross-job/full.execve.log" -- pnpm run check:full \
+              > "$records/restored/cross-job/full.log" 2>&1; then
+            command_status=0
+          else command_status=$?; fi
+          ended=$(date -u +%Y-%m-%dT%H:%M:%SZ); ended_ms=$(date +%s%3N)
+          printf '%s\n' "$command_status" > "$records/restored/cross-job/full.exit"
+          printf 'restored\tfull\t%s\t%s\t%s\t%s\tpnpm run check:full\n' \
+            "$command_status" "$started" "$ended" "$((ended_ms - started_ms))" >> "$records/steps.tsv"
+          activity_file="$TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR/activity.jsonl"
+          if [[ ! -s "$activity_file" ]] || ! grep -Fq "$run_id" "$activity_file"; then
+            printf 'Full 聚合命令没有写入本次 run id 的 Fixture activity。\n' \
+              > "$records/restored/cross-job/activity-check.log"
+            command_status=1
+          else
+            grep -F "$run_id" "$activity_file" > "$records/restored/cross-job/current-run-activity.jsonl"
+            wc -l < "$records/restored/cross-job/current-run-activity.jsonl" \
+              > "$records/restored/cross-job/current-run-activity-count.txt"
+          fi
+          full_status=$command_status
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ); started_ms=$(date +%s%3N)
+          if /usr/bin/time -f 'observer_wrapper_wall_seconds=%e observer_wrapper_user_seconds=%U observer_wrapper_sys_seconds=%S max_rss_kb=%M exit=%x' \
+            -o "$records/restored/cross-job/evidence-health.time" \
+            strace -f --seccomp-bpf -qq -e trace=execve -P "$pnpm_executable" \
+              -o "$records/restored/cross-job/evidence-health.execve.log" -- \
+              pnpm --filter @ykdz/template-checks run check:evidence-health \
+              > "$records/restored/cross-job/evidence-health.log" 2>&1; then
+            health_status=0
+          else health_status=$?; fi
+          ended=$(date -u +%Y-%m-%dT%H:%M:%SZ); ended_ms=$(date +%s%3N)
+          printf '%s\n' "$health_status" > "$records/restored/cross-job/evidence-health.exit"
+          printf 'restored\tevidence-health\t%s\t%s\t%s\t%s\tpnpm --filter @ykdz/template-checks run check:evidence-health\n' \
+            "$health_status" "$started" "$ended" "$((ended_ms - started_ms))" >> "$records/steps.tsv"
+          docker ps -a --no-trunc > "$records/restored/cross-job/docker-ps-before-cleanup.txt" 2>&1 || true
+          cleanup_status=0
+          fixture_ids=$(docker ps -aq --filter label=com.ykdz.template.fixture.project)
+          list_status=$?
+          if [[ "$list_status" -ne 0 ]]; then
+            printf 'fixture_container_cleanup_exit=%s\n' "$list_status" > "$records/restored/cross-job/fixture-cleanup.txt"
+            cleanup_status=$list_status
+          elif [[ -n "$fixture_ids" ]]; then
+            mapfile -t fixture_containers <<< "$fixture_ids"
+            if docker rm -f "${fixture_containers[@]}" > "$records/restored/cross-job/fixture-cleanup.log" 2>&1; then
+              printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=%s\n' \
+                "${#fixture_containers[@]}" > "$records/restored/cross-job/fixture-cleanup.txt"
+            else
+              cleanup_status=$?
+              printf 'fixture_container_cleanup_exit=%s\n' "$cleanup_status" > "$records/restored/cross-job/fixture-cleanup.txt"
+            fi
+          else
+            printf 'fixture_container_cleanup_exit=0\nfixture_containers_removed=0\n' > "$records/restored/cross-job/fixture-cleanup.txt"
+          fi
+          docker ps -a --no-trunc > "$records/restored/cross-job/docker-ps-after-cleanup.txt" 2>&1 || true
+          summary_status=0
+          if [[ -d .turbo/runs ]]; then
+            if ! cp -a .turbo/runs "$records/turbo/restored-runs"; then
+              printf '无法保存恢复阶段的 Turbo 原生运行摘要。\n' \
+                > "$records/restored/cross-job/turbo-summary-copy-error.txt"
+              summary_status=1
+            fi
+          else
+            printf '恢复阶段没有生成 .turbo/runs。\n' \
+              > "$records/restored/cross-job/turbo-summary-absent.txt"
+          fi
+          printf 'full_exit=%s\nevidence_health_exit=%s\nfixture_cleanup_exit=%s\nturbo_summary_copy_exit=%s\n' \
+            "$full_status" "$health_status" "$cleanup_status" "$summary_status" \
+            > "$records/restored/cross-job/phase-results.txt"
+          exit $((full_status != 0 || health_status != 0 || cleanup_status != 0 || summary_status != 0))
+          BASH
+          chmod +x "$MEASURE_ROOT/run-restored-command.sh"
+          printf 'restored_source_commit=%s\nworkflow_commit=%s\n' "$SOURCE_SHA" "$GITHUB_SHA" \
+            > "$MEASURE_ROOT/records/runner-and-cache.txt"
+          {
+            date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
+            cat /etc/os-release; uname -a; printf 'nproc=%s\n' "$(nproc)"
+            grep '^Cpus_allowed_list:' /proc/self/status
+            cat /proc/loadavg; lscpu; free -h; df -h "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+            node --version; pnpm --version; pnpm store path; docker version; docker buildx version
+            pnpm --filter @ykdz/template-checks exec devcontainer --version
+            pnpm --filter @ykdz/template-builtin-presets exec playwright --version
+            shellcheck --version; strace --version
+          } >> "$MEASURE_ROOT/records/runner-and-cache.txt" 2>&1
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+
+      - name: 确认未恢复其它原生缓存
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in .turbo .fixture-native-cache .fixture-workspace; do
+            [[ ! -e "$path" ]] || { printf '新 runner 上已出现非 evidence 缓存：%s\n' "$path" >&2; exit 1; }
+          done
+
+      - name: 执行恢复后的正式 full 与独立 health
+        shell: bash
+        run: '"$MEASURE_ROOT/run-restored-command.sh"'
+
+      - name: 上传跨 job 恢复记录
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-performance-restore-c3e2129fb35a318751068b499240808348ab3c21-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/infra-14-performance-restore/records/**
+            ${{ runner.temp }}/infra-14-performance-restore/run-restored-command.sh
+            ${{ runner.temp }}/infra-14-restored-evidence.sha256
+            .fixture-evidence/**
+            .fixture-evidence-activity/**
+            .fixture-workspace/**
+            !.fixture-workspace/**/node_modules/**
+            !.fixture-workspace/**/.pnpm-store/**
+            !.fixture-workspace/**/.npm/**
+            !.fixture-workspace/**/.cargo/registry/**
+            !.fixture-workspace/**/.cargo/git/**
+            !.fixture-workspace/**/target/**
+            !.fixture-workspace/**/.cache/**
+            !.fixture-workspace/**/.turbo/cache/**
+            .cli-journey-diagnostics/**
+            !.cli-journey-diagnostics/**/node_modules/**
+            !.cli-journey-diagnostics/**/.pnpm-store/**
+            !.cli-journey-diagnostics/**/.npm/**
+            !.cli-journey-diagnostics/**/.cargo/registry/**
+            !.cli-journey-diagnostics/**/.cargo/git/**
+            !.cli-journey-diagnostics/**/target/**
+            !.cli-journey-diagnostics/**/.cache/**
+            !.cli-journey-diagnostics/**/.turbo/cache/**
+            .preset-behavior-diagnostics/**
+            !.preset-behavior-diagnostics/**/node_modules/**
+            !.preset-behavior-diagnostics/**/.pnpm-store/**
+            !.preset-behavior-diagnostics/**/.npm/**
+            !.preset-behavior-diagnostics/**/.cargo/registry/**
+            !.preset-behavior-diagnostics/**/.cargo/git/**
+            !.preset-behavior-diagnostics/**/target/**
+            !.preset-behavior-diagnostics/**/.cache/**
+            !.preset-behavior-diagnostics/**/.turbo/cache/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
