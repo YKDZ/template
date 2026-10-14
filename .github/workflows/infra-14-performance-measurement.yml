@@ -3,13 +3,13 @@ name: 临时票14性能测量
 on:
   push:
     branches:
-      - codex/infra-14-final-buildkit-9c02bd6
+      - codex/infra-14-final-ownership-7f5ebc7
 
 permissions:
   contents: read
 
 concurrency:
-  group: infra-14-performance-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}
+  group: infra-14-performance-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -18,10 +18,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     outputs:
-      full_health_success: ${{ steps.full-measurement.outputs.full_health_success }}
+      full_health_success: ${{ steps.full-warm.outputs.full_health_success }}
     env:
       CI: "true"
-      SOURCE_SHA: 9c02bd60c7fac05270d98b120f267e5946ce2536
+      SOURCE_SHA: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -56,7 +56,7 @@ jobs:
       - name: 检出固定源提交
         uses: actions/checkout@v7
         with:
-          ref: 9c02bd60c7fac05270d98b120f267e5946ce2536
+          ref: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -215,21 +215,40 @@ jobs:
           grep -Eq '^Total:[[:space:]]+0B$' "$records/buildx-du-before-cold.txt"
           cat "$records/runner-environment.txt"
 
-      - name: 执行正式 full 冷暖阶段
-        id: full-measurement
+      - name: 执行正式 full 冷阶段
+        id: full-cold
         shell: bash
-        run: '"$MEASURE_ROOT/run-formal-command.sh" full'
+        run: '"$MEASURE_ROOT/run-formal-command.sh" full-cold'
+
+      - name: 先上传 full 冷阶段记录
+        if: ${{ !cancelled() && steps.full-cold.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-performance-full-cold-records-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/infra-14-performance/records/full/cold/**
+            ${{ runner.temp }}/infra-14-performance/records/turbo/full-cold-runs/**
+            ${{ runner.temp }}/infra-14-performance/records/steps.tsv
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 执行正式 full 暖阶段
+        id: full-warm
+        if: ${{ !cancelled() && steps.full-cold.outputs.cold_success == 'true' }}
+        shell: bash
+        run: '"$MEASURE_ROOT/run-formal-command.sh" full-warm'
 
       - name: 保存 Fixture evidence 供跨 job 恢复
         id: fixture-evidence-save
-        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        if: ${{ !cancelled() && steps.full-warm.outputs.full_health_success == 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 记录 Fixture evidence 保存结果
-        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        if: ${{ !cancelled() && steps.full-warm.outputs.full_health_success == 'true' }}
         shell: bash
         env:
           SAVE_OUTCOME: ${{ steps.fixture-evidence-save.outcome }}
@@ -243,7 +262,7 @@ jobs:
             sed 's/^/file_count=/' >> "$MEASURE_ROOT/records/cache-save.txt"
 
       - name: 执行日常 light 冷暖阶段
-        if: ${{ !cancelled() && steps.full-measurement.outputs.full_health_success == 'true' }}
+        if: ${{ !cancelled() && steps.full-warm.outputs.full_health_success == 'true' }}
         shell: bash
         run: '"$MEASURE_ROOT/run-formal-command.sh" light'
 
@@ -251,7 +270,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-records-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-records-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance/records/**
             ${{ runner.temp }}/infra-14-performance/run-formal-command.sh
@@ -264,7 +283,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-diagnostics-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-diagnostics-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .fixture-evidence/**
             .fixture-evidence-activity/**
@@ -314,7 +333,7 @@ jobs:
     timeout-minutes: 240
     env:
       CI: "true"
-      SOURCE_SHA: 9c02bd60c7fac05270d98b120f267e5946ce2536
+      SOURCE_SHA: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
       TEMPLATE_FIXTURE_EVIDENCE_READ: "1"
       TEMPLATE_FIXTURE_EVIDENCE_WRITE: "1"
       TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR: ${{ github.workspace }}/.cli-journey-diagnostics
@@ -349,7 +368,7 @@ jobs:
       - name: 检出相同固定源提交
         uses: actions/checkout@v7
         with:
-          ref: 9c02bd60c7fac05270d98b120f267e5946ce2536
+          ref: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
           persist-credentials: false
 
       - name: 启用 Corepack
@@ -399,7 +418,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-evidence
-          key: fixture-verification-evidence-${{ runner.os }}-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-verification-evidence-${{ runner.os }}-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: 验证 Fixture evidence 精确恢复
         if: always()
@@ -499,7 +518,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-restore-records-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-restore-records-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-performance-restore/records/**
             ${{ runner.temp }}/infra-14-performance-restore/run-restored-command.sh
@@ -513,7 +532,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-performance-restore-diagnostics-9c02bd60c7fac05270d98b120f267e5946ce2536-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-performance-restore-diagnostics-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             .fixture-evidence/**
             .fixture-evidence-activity/**

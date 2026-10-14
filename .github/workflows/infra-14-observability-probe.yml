@@ -1,26 +1,27 @@
-name: 临时票14日志与诊断权限探针
+name: 临时 Fixture 诊断属主恢复探针
 
 on:
   push:
     branches:
-      - codex/infra-14-observability-9c02
+      - codex/infra-14-observability-7f5ebc7
 
 permissions:
   contents: read
 
 jobs:
-  probe:
-    name: 验证正式记录日志与诊断权限隔离
+  fixture-owner-probe:
+    name: 验证正式 Fixture 诊断清理与上传
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CI: "true"
-      SOURCE_SHA: 9c02bd60c7fac05270d98b120f267e5946ce2536
+      SOURCE_SHA: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
     steps:
       - name: 检出临时观测 harness
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          path: .infra-14-harness-source
           persist-credentials: false
 
       - name: 准备声明版本的 Node.js
@@ -31,74 +32,357 @@ jobs:
       - name: 启用 Corepack
         run: corepack enable
 
-      - name: 安装 strace
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y strace
-
-      - name: 建立短探针记录目录
+      - name: 暂存正式观测 runner
         shell: bash
         run: |
           set -euo pipefail
           measure_root="$RUNNER_TEMP/infra-14-observability"
           mkdir -p "$measure_root/records/turbo" "$measure_root/pnpm-store"
-          cp .infra-14-harness/run-formal-command.sh "$measure_root/run-formal-command.sh"
+          cp "$GITHUB_WORKSPACE/.infra-14-harness-source/.infra-14-harness/run-formal-command.sh" \
+            "$measure_root/run-formal-command.sh"
           chmod +x "$measure_root/run-formal-command.sh"
           printf 'MEASURE_ROOT=%s\n' "$measure_root" >> "$GITHUB_ENV"
           printf 'PNPM_CONFIG_STORE_DIR=%s/pnpm-store\n' "$measure_root" >> "$GITHUB_ENV"
 
-      - name: 执行正式 runner 受控故障
+      - name: 检出固定源提交
+        uses: actions/checkout@v7
+        with:
+          ref: 7f5ebc72e8ae448fc06cc4d1572f7268d2436246
+          persist-credentials: false
+
+      - name: 准备探针工具
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml strace
+
+      - name: 准备模拟的 Fixture 失败现场
+        id: fixture-prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$MEASURE_ROOT/records/probe"
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          existing_fixture_containers=$(docker ps -aq --filter label=com.ykdz.template.fixture.project)
+          if [[ -n "$existing_fixture_containers" ]]; then
+            printf '隔离 runner 已存在 Fixture label 容器，拒绝清理非本轮资源：%s\n' \
+              "$existing_fixture_containers" >&2
+            exit 1
+          fi
+          docker pull busybox:1.36 \
+            | tee "$MEASURE_ROOT/records/probe/fixture-image-pull.log"
+          image_ref=$(docker image inspect --format='{{index .RepoDigests 0}}' busybox:1.36)
+          image_id=$(docker image inspect --format='{{.Id}}' busybox:1.36)
+          container_name="infra-14-fixture-owner-probe-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container_id=$(docker run --detach --name "$container_name" \
+            --label com.ykdz.template.fixture.project=infra-14-observability-probe \
+            "$image_ref" sleep 600)
+          container_status=$(docker inspect --format='{{.State.Status}}' "$container_id")
+          test "$container_status" = running
+          printf 'container_name=%s\ncontainer_id=%s\ncontainer_status=%s\nimage_ref=%s\nimage_id=%s\n' \
+            "$container_name" "$container_id" "$container_status" "$image_ref" "$image_id" \
+            > "$MEASURE_ROOT/records/probe/fixture-container-before.txt"
+          docker inspect "$container_id" \
+            > "$MEASURE_ROOT/records/probe/fixture-container-inspect.json"
+          printf 'FIXTURE_PROBE_CONTAINER_ID=%s\n' "$container_id" >> "$GITHUB_ENV"
+          fixture_root="$GITHUB_WORKSPACE/.fixture-workspace/permission-probe"
+          mkdir -p "$fixture_root/.hidden"
+          printf '{"probe":"hidden-report","status":"failed"}\n' \
+            > "$fixture_root/.hidden/diagnostics.json"
+          cp "$fixture_root/.hidden/diagnostics.json" \
+            "$MEASURE_ROOT/records/probe/expected-hidden-report.json"
+          excluded_samples=(
+            'node_modules/probe/dependency.txt'
+            '.pnpm-store/probe/store.marker'
+            '.npm/probe/npm.marker'
+            '.cargo/registry/probe/registry.marker'
+            '.cargo/git/probe/git.marker'
+            'target/probe/target.marker'
+            '.cache/probe/cache.marker'
+            '.turbo/cache/probe/turbo.marker'
+          )
+          for relative_path in "${excluded_samples[@]}"; do
+            sample_path="$fixture_root/$relative_path"
+            mkdir -p "$(dirname "$sample_path")"
+            printf 'EXCLUDED_SAMPLE:%s\n' "$relative_path" > "$sample_path"
+            printf '%s\n' "$relative_path" \
+              >> "$MEASURE_ROOT/records/probe/expected-exclusions.txt"
+          done
+
+      - name: 提取固定源的正式清理与诊断上传步骤
+        id: extract-source-steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import yaml
+
+          source = Path(os.environ["GITHUB_WORKSPACE"]) / ".github/workflows/check.yml"
+          workflow_bytes = source.read_bytes()
+          steps = yaml.safe_load(workflow_bytes)["jobs"]["check"]["steps"]
+          by_name = {step.get("name"): step for step in steps if step.get("name")}
+          cleanup = by_name["清理测试容器"]
+          owner = by_name["恢复 Fixture 诊断属主"]
+          diagnostics = by_name["Upload Fixture Failure Diagnostics"]
+          step_positions = {
+              step.get("name"): index for index, step in enumerate(steps) if step.get("name")
+          }
+          if not (
+              step_positions[cleanup["name"]]
+              < step_positions[owner["name"]]
+              < step_positions[diagnostics["name"]]
+          ):
+              raise SystemExit("固定源没有按清理、属主恢复、诊断上传顺序编排")
+          expected_fixture_guard = "always() && steps.fixture-prerequisites.outcome == 'success'"
+          if any(
+              step.get("if") != expected_fixture_guard
+              for step in (cleanup, owner, diagnostics)
+          ):
+              raise SystemExit("固定源 Fixture 清理、恢复、上传条件已变化")
+          if diagnostics.get("uses") != "actions/upload-artifact@v7":
+              raise SystemExit("固定源的 Fixture 诊断上传 action 已变化")
+          diagnostics_path = diagnostics["with"]["path"]
+          if ".fixture-workspace/**" not in diagnostics_path:
+              raise SystemExit("固定源诊断上传范围没有包含 Fixture workspace")
+          if diagnostics["with"]["include-hidden-files"] is not True:
+              raise SystemExit("固定源诊断上传没有包含隐藏文件")
+
+          records = Path(os.environ["MEASURE_ROOT"]) / "records/probe/official-source"
+          records.mkdir(parents=True, exist_ok=True)
+          cleanup_path = records / "cleanup-test-containers.sh"
+          owner_path = records / "restore-diagnostics-owner.sh"
+          cleanup_run = cleanup["run"]
+          owner_run = owner["run"]
+          cleanup_path.write_text(cleanup_run, encoding="utf-8")
+          owner_path.write_text(owner_run, encoding="utf-8")
+          (records / "fixture-failure-diagnostics.path").write_text(
+              diagnostics_path, encoding="utf-8"
+          )
+          metadata = {
+              "source_sha": os.environ["SOURCE_SHA"],
+              "check_workflow_sha256": hashlib.sha256(workflow_bytes).hexdigest(),
+              "cleanup_step_name": cleanup["name"],
+              "cleanup_step_index": step_positions[cleanup["name"]],
+              "cleanup_step_if": cleanup.get("if"),
+              "cleanup_run_sha256": hashlib.sha256(cleanup_run.encode()).hexdigest(),
+              "owner_step_name": owner["name"],
+              "owner_step_index": step_positions[owner["name"]],
+              "owner_step_if": owner.get("if"),
+              "owner_run_sha256": hashlib.sha256(owner_run.encode()).hexdigest(),
+              "diagnostics_step_name": diagnostics["name"],
+              "diagnostics_step_index": step_positions[diagnostics["name"]],
+              "diagnostics_step_if": diagnostics.get("if"),
+              "diagnostics_action": diagnostics["uses"],
+              "diagnostics_path_sha256": hashlib.sha256(
+                  diagnostics_path.encode()
+              ).hexdigest(),
+              "diagnostics_include_hidden_files": diagnostics["with"]["include-hidden-files"],
+              "diagnostics_if_no_files_found": diagnostics["with"]["if-no-files-found"],
+              "diagnostics_retention_days": diagnostics["with"]["retention-days"],
+          }
+          (records / "extracted-step-contract.json").write_text(
+              json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          delimiter = "INFRA14_DIAGNOSTICS_PATH"
+          if delimiter in diagnostics_path:
+              raise SystemExit("诊断路径意外包含 GitHub 输出分隔符")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+              output.write(f"diagnostics_path<<{delimiter}\n")
+              output.write(diagnostics_path.rstrip("\n") + "\n")
+              output.write(f"{delimiter}\n")
+              output.write(
+                  "include_hidden_files="
+                  + str(diagnostics["with"]["include-hidden-files"]).lower()
+                  + "\n"
+              )
+              output.write(
+                  "if_no_files_found="
+                  + str(diagnostics["with"]["if-no-files-found"])
+                  + "\n"
+              )
+              output.write(
+                  "retention_days="
+                  + str(diagnostics["with"]["retention-days"])
+                  + "\n"
+              )
+          PY
+
+      - name: 运行带实时日志的正式命令探针
         id: probe-runner
+        continue-on-error: true
         shell: bash
         run: '"$MEASURE_ROOT/run-formal-command.sh" probe'
 
-      - name: 上传独立 runner 记录
-        id: records-upload
+      - name: 在属主恢复前负向上传正式诊断文件
+        id: diagnostics-negative-upload
+        if: ${{ always() && steps.fixture-prerequisites.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-fixture-diagnostics-before-owner-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.extract-source-steps.outputs.diagnostics_path }}
+          include-hidden-files: ${{ steps.extract-source-steps.outputs.include_hidden_files }}
+          if-no-files-found: ${{ steps.extract-source-steps.outputs.if_no_files_found }}
+          retention-days: ${{ steps.extract-source-steps.outputs.retention_days }}
+
+      - name: 运行正式测试容器清理 step.run
+        id: fixture-container-cleanup
+        if: ${{ always() && steps.fixture-prerequisites.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: bash --noprofile --norc -e "$MEASURE_ROOT/records/probe/official-source/cleanup-test-containers.sh"
+
+      - name: 确认正式清理已移除本轮容器
+        id: fixture-container-removal-verify
+        if: ${{ always() && steps.fixture-prerequisites.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          matching_ids=$(docker ps -aq --no-trunc --filter "id=$FIXTURE_PROBE_CONTAINER_ID")
+          all_fixture_ids=$(docker ps -aq --no-trunc --filter label=com.ykdz.template.fixture.project)
+          printf 'expected_container_id=%s\nmatching_ids_after_cleanup=%s\nfixture_label_ids_after_cleanup=%s\n' \
+            "$FIXTURE_PROBE_CONTAINER_ID" "$matching_ids" "$all_fixture_ids" \
+            > "$MEASURE_ROOT/records/probe/fixture-container-after-cleanup.txt"
+          test -z "$matching_ids"
+          test -z "$all_fixture_ids"
+
+      - name: 运行正式诊断属主恢复 step.run
+        id: fixture-diagnostics-owner-restore
+        if: ${{ always() && steps.fixture-prerequisites.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: bash --noprofile --norc -e "$MEASURE_ROOT/records/probe/official-source/restore-diagnostics-owner.sh"
+
+      - name: 属主恢复后正向上传正式诊断文件
+        id: diagnostics-positive-upload
+        if: ${{ always() && steps.fixture-prerequisites.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-fixture-diagnostics-after-owner-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.extract-source-steps.outputs.diagnostics_path }}
+          include-hidden-files: ${{ steps.extract-source-steps.outputs.include_hidden_files }}
+          if-no-files-found: ${{ steps.extract-source-steps.outputs.if_no_files_found }}
+          retention-days: ${{ steps.extract-source-steps.outputs.retention_days }}
+
+      - name: 下载属主恢复后的诊断 artifact
+        id: diagnostics-download
+        if: ${{ always() && steps.diagnostics-positive-upload.outcome == 'success' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: infra-14-fixture-diagnostics-after-owner-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/infra-14-observability/downloaded-diagnostics
+
+      - name: 核对权限、正式步骤与 artifact 内容
+        if: always()
+        shell: bash
+        env:
+          PROBE_OUTCOME: ${{ steps.probe-runner.outcome }}
+          NEGATIVE_UPLOAD_OUTCOME: ${{ steps.diagnostics-negative-upload.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.fixture-container-cleanup.outcome }}
+          CONTAINER_REMOVAL_VERIFY_OUTCOME: ${{ steps.fixture-container-removal-verify.outcome }}
+          OWNER_RESTORE_OUTCOME: ${{ steps.fixture-diagnostics-owner-restore.outcome }}
+          POSITIVE_UPLOAD_OUTCOME: ${{ steps.diagnostics-positive-upload.outcome }}
+          DOWNLOAD_OUTCOME: ${{ steps.diagnostics-download.outcome }}
+        run: |
+          set -euo pipefail
+          records="$MEASURE_ROOT/records/probe"
+          printf 'probe_outcome=%s\nnegative_upload_outcome=%s\ncleanup_outcome=%s\ncontainer_removal_verify_outcome=%s\nowner_restore_outcome=%s\npositive_upload_outcome=%s\ndownload_outcome=%s\n' \
+            "$PROBE_OUTCOME" "$NEGATIVE_UPLOAD_OUTCOME" "$CLEANUP_OUTCOME" \
+            "$CONTAINER_REMOVAL_VERIFY_OUTCOME" \
+            "$OWNER_RESTORE_OUTCOME" "$POSITIVE_UPLOAD_OUTCOME" "$DOWNLOAD_OUTCOME" \
+            > "$records/step-outcomes.txt"
+          cat "$records/step-outcomes.txt"
+          test "$PROBE_OUTCOME" = failure
+          test "$NEGATIVE_UPLOAD_OUTCOME" = failure
+          test "$CLEANUP_OUTCOME" = success
+          test "$CONTAINER_REMOVAL_VERIFY_OUTCOME" = success
+          test "$OWNER_RESTORE_OUTCOME" = success
+          test "$POSITIVE_UPLOAD_OUTCOME" = success
+          test "$DOWNLOAD_OUTCOME" = success
+          test "$(cat "$records/controlled/intentional-exit.exit")" = 17
+          grep -Fxq 'controlled stdout' "$records/controlled/intentional-exit.stdout.log"
+          grep -Fxq 'controlled stderr' "$records/controlled/intentional-exit.stderr.log"
+          grep -Fxq 'exit=17' "$records/controlled/intentional-exit.time"
+          grep -Fxq 'host_pnpm_dependency_install_execve_successes=0' \
+            "$records/controlled/intentional-exit.pnpm-dependency-install-count.txt"
+          grep -Fxq 'uid=0 gid=0 mode=600' \
+            "$records/controlled/diagnostics-permission-target.stat"
+          command_cwd="$RUNNER_TEMP/infra-14-observability-command"
+          cmp "$records/controlled/command-cwd-package.json" "$command_cwd/package.json"
+          test ! -e "$command_cwd/node_modules"
+          test -z "$(find "$command_cwd" -mindepth 1 ! -name package.json -print -quit)"
+          stat -c '%u:%g %a' "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/pnpm-lock.yaml" \
+            > "$records/controlled/owner-after-restore.stat"
+          test "$(cat "$records/controlled/owner-after-restore.stat")" = "$(id -u):$(id -g) 600"
+          download_root="$RUNNER_TEMP/infra-14-observability/downloaded-diagnostics"
+          lockfile=$(find "$download_root" -type f -name pnpm-lock.yaml -print -quit)
+          hidden_report=$(find "$download_root" -type f -path '*/.hidden/diagnostics.json' -print -quit)
+          test -n "$lockfile"
+          test -n "$hidden_report"
+          cmp "$records/controlled/expected-pnpm-lock.yaml" "$lockfile"
+          cmp "$records/expected-hidden-report.json" "$hidden_report"
+          if grep -R -lF 'EXCLUDED_SAMPLE:' "$download_root"; then
+            echo '上传 artifact 中出现了应排除的依赖或缓存样本。' >&2
+            exit 1
+          fi
+          if find "$download_root" -type f -printf '%P\n' | \
+            grep -E '(^|/)(node_modules|\.pnpm-store|\.npm|target|\.cache)(/|$)|(^|/)\.cargo/(registry|git)(/|$)|(^|/)\.turbo/cache(/|$)'; then
+            echo '上传 artifact 路径包含应排除的依赖或缓存。' >&2
+            exit 1
+          fi
+          printf 'source_sha=%s\nlockfile=%s\nhidden_report=%s\n' \
+            "$SOURCE_SHA" "$lockfile" "$hidden_report" \
+            > "$records/positive-artifact-content.txt"
+
+      - name: 仅按本轮容器 ID 兜底回收
+        if: ${{ always() && env.FIXTURE_PROBE_CONTAINER_ID != '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+          container_id="$FIXTURE_PROBE_CONTAINER_ID"
+          result_file="$MEASURE_ROOT/records/probe/fallback-container-cleanup.txt"
+          if ! remaining_ids=$(docker ps -aq --no-trunc --filter "id=$container_id"); then
+            printf 'container_id=%s\nprecheck=failed\n' "$container_id" > "$result_file"
+            exit 1
+          fi
+          if [[ -z "$remaining_ids" ]]; then
+            printf 'container_id=%s\nremoved_by_fallback=false\nremaining_ids=\n' \
+              "$container_id" > "$result_file"
+            exit 0
+          fi
+          if docker rm -f "$container_id"; then
+            remove_exit=0
+          else
+            remove_exit=$?
+          fi
+          if remaining_ids=$(docker ps -aq --no-trunc --filter "id=$container_id"); then
+            list_exit=0
+          else
+            list_exit=$?
+          fi
+          printf 'container_id=%s\nremoved_by_fallback=true\nremove_exit=%s\nlist_exit=%s\nremaining_ids=%s\n' \
+            "$container_id" "$remove_exit" "$list_exit" "$remaining_ids" \
+            > "$result_file"
+          [[ "$remove_exit" -eq 0 && "$list_exit" -eq 0 && -z "$remaining_ids" ]]
+
+      - name: 上传短探针记录
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: infra-14-observability-records-${{ github.run_id }}-${{ github.run_attempt }}
+          name: infra-14-observability-records-7f5ebc72e8ae448fc06cc4d1572f7268d2436246-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/infra-14-observability/records/**
             ${{ runner.temp }}/infra-14-observability/run-formal-command.sh
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-
-      - name: 上传 root-owned 诊断文件
-        id: diagnostics-upload
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: infra-14-observability-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .fixture-workspace/**
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: 核对短探针 step 结果
-        if: always()
-        shell: bash
-        env:
-          PROBE_OUTCOME: ${{ steps.probe-runner.outcome }}
-          RECORDS_OUTCOME: ${{ steps.records-upload.outcome }}
-          DIAGNOSTICS_OUTCOME: ${{ steps.diagnostics-upload.outcome }}
-        run: |
-          set -euo pipefail
-          printf 'probe_step_outcome=%s\nrecords_upload_outcome=%s\ndiagnostics_upload_outcome=%s\n' \
-            "$PROBE_OUTCOME" "$RECORDS_OUTCOME" "$DIAGNOSTICS_OUTCOME"
-          grep -Fxq 'uid=0 gid=0 mode=600' \
-            "$MEASURE_ROOT/records/probe/controlled/diagnostics-permission-target.stat"
-          test "$PROBE_OUTCOME" = failure
-          test "$RECORDS_OUTCOME" = success
-          test "$DIAGNOSTICS_OUTCOME" = failure
-          command_records="$MEASURE_ROOT/records/probe/controlled/intentional-exit"
-          test "$(cat "$command_records.exit")" = 17
-          grep -Fxq 'controlled stdout' "$command_records.stdout.log"
-          grep -Fxq 'controlled stderr' "$command_records.stderr.log"
-          grep -Fq 'controlled stdout' "$command_records.log"
-          grep -Fq 'controlled stderr' "$command_records.log"
-          grep -Fq 'exit=17' "$command_records.time"
-          test -s "$command_records.execve.log"

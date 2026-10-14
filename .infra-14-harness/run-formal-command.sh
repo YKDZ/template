@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-mode=${1:?mode required: full, light, restored, or probe}
+mode=${1:?mode required: full-cold, full-warm, light, restored, or probe}
 records="$MEASURE_ROOT/records"
 pnpm_executable=$(command -v pnpm)
 PNPM_CONFIG_STORE_DIR=${PNPM_CONFIG_STORE_DIR:?pnpm store directory was not configured}
@@ -220,12 +220,16 @@ if [[ ! -e "$records/steps.tsv" ]]; then
 fi
 
 case "$mode" in
-  full)
-    full_health_success=true
+  full-cold)
     run_phase full cold
-    [[ "$overall_status" -eq 0 ]] || full_health_success=false
+    cold_success=false
+    [[ "$overall_status" -eq 0 ]] && cold_success=true
+    printf 'cold_success=%s\n' "$cold_success" >> "$GITHUB_OUTPUT"
+    ;;
+  full-warm)
     run_phase full warm
-    [[ "$overall_status" -eq 0 ]] || full_health_success=false
+    full_health_success=false
+    [[ "$overall_status" -eq 0 ]] && full_health_success=true
     printf 'full_health_success=%s\n' "$full_health_success" >> "$GITHUB_OUTPUT"
     ;;
   light)
@@ -243,17 +247,29 @@ case "$mode" in
     run_phase restored cross-job
     ;;
   probe)
+    probe_command_cwd="$RUNNER_TEMP/infra-14-observability-command"
     mkdir -p "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe"
+    mkdir -p "$probe_command_cwd"
     mkdir -p "$records/probe/controlled"
-    sudo install -o root -g root -m 0600 /dev/null \
-      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/root-owned-0600.txt"
+    printf '{"name":"infra-14-empty-command-project","private":true}\n' \
+      > "$probe_command_cwd/package.json"
+    cp "$probe_command_cwd/package.json" "$records/probe/controlled/command-cwd-package.json"
+    printf 'probe_command_cwd=%s\n' "$probe_command_cwd" \
+      > "$records/probe/controlled/command-cwd.txt"
+    printf 'controlled diagnostic payload\n' \
+      > "$records/probe/controlled/expected-diagnostic.txt"
+    printf 'lockfileVersion: "9.0"\nsettings:\n  autoInstallPeers: true\n' \
+      > "$records/probe/controlled/expected-pnpm-lock.yaml"
+    sudo install -o root -g root -m 0600 \
+      "$records/probe/controlled/expected-pnpm-lock.yaml" \
+      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/pnpm-lock.yaml"
     stat -c 'uid=%u gid=%g mode=%a' \
-      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/root-owned-0600.txt" \
+      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/pnpm-lock.yaml" \
       > "$records/probe/controlled/diagnostics-permission-target.stat"
     printf 'diagnostic_target=%s\n' \
-      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/root-owned-0600.txt" \
+      "$GITHUB_WORKSPACE/.fixture-workspace/permission-probe/pnpm-lock.yaml" \
       > "$records/probe/controlled/diagnostics-permission-target.txt"
-    run_command probe controlled intentional-exit pnpm exec node -e \
+    run_command probe controlled intentional-exit pnpm --dir "$probe_command_cwd" exec node -e \
       'process.stdout.write("controlled stdout\n"); process.stderr.write("controlled stderr\n"); process.exitCode = 17'
     printf 'expected_command_exit=17\nactual_command_exit=%s\n' "$last_status" \
       > "$records/probe/controlled/phase-results.txt"
