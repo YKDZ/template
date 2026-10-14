@@ -322,15 +322,11 @@ function assertPublicationVerifySteps(
     !hasExactKeys(staging, ["name", "run"]) ||
     staging.run !==
       'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
-    !hasExactKeys(check, ["name", "run", "env"]) ||
+    !hasExactKeys(check, ["name", "run"]) ||
     !isWorkflowStepName(check.name) ||
     check.run !== "pnpm run check:full" ||
-    !isParsedObject(check.env) ||
-    !hasExactKeys(check.env, ["PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY"]) ||
-    check.env.PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY !==
-      "${{ runner.temp }}/npm-publication-artifact" ||
     !hasExactKeys(artifact, ["name", "run", "env"]) ||
-    artifact.name !== "Verify publication artifact" ||
+    !isWorkflowStepName(artifact.name) ||
     artifact.run !== "pnpm run publication:artifact" ||
     !isParsedObject(artifact.env) ||
     !hasExactKeys(artifact.env, [

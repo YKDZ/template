@@ -3,6 +3,10 @@
   "tags": ["template-cli"],
   "tasks": {
     "test": { "dependsOn": [] },
-    "test:e2e": { "dependsOn": ["build"], "cache": false }
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "passThroughEnv": ["TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR"]
+    }
   }
 }
