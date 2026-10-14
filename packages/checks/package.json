@@ -41,10 +41,5 @@
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:"
-  },
-  "turbo": {
-    "tags": [
-      "template-checks"
-    ]
   }
 }

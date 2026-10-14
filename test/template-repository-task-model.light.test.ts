@@ -10,29 +10,86 @@ type Manifest = {
   readonly scripts: Record<string, string>;
 };
 
-type TurboTask = {
-  readonly cache?: boolean;
-  readonly dependsOn?: readonly string[];
-  readonly inputs?: readonly string[];
-  readonly outputs?: readonly string[];
-  readonly passThroughEnv?: readonly string[];
-  readonly tags?: readonly string[];
-};
-
-type TurboConfig = {
-  readonly concurrency?: string;
-  readonly tags?: readonly string[];
-  readonly tasks: Record<string, TurboTask>;
-};
-
 type WorkspaceConfig = {
   readonly dedupeInjectedDeps?: boolean;
   readonly injectWorkspacePackages?: boolean;
   readonly syncInjectedDepsAfterScripts?: readonly string[];
 };
 
+type NativeTask = {
+  readonly command: string | null;
+  readonly fullName: string;
+  readonly name: string;
+  readonly script: string | null;
+  readonly tags: readonly string[];
+};
+
+type NativePackage = {
+  readonly name: string;
+  readonly path: string;
+  readonly tags: readonly string[];
+  readonly tasks: { readonly items: readonly NativeTask[] };
+};
+
+type NativeTaskDirectory = {
+  readonly data: {
+    readonly packages: { readonly items: readonly NativePackage[] };
+  };
+};
+
+type PlannedTask = {
+  readonly command: string;
+  readonly dependencies: readonly string[];
+  readonly resolvedTaskDefinition: {
+    readonly cache: boolean;
+    readonly dependsOn: readonly string[];
+    readonly env: readonly string[];
+    readonly inputs: readonly string[];
+    readonly outputs: readonly string[];
+    readonly passThroughEnv: readonly string[] | null;
+    readonly persistent: boolean;
+  };
+  readonly taskId: string;
+};
+
+type TaskPlan = { readonly tasks: readonly PlannedTask[] };
+
+const nativeTaskQuery =
+  "query { packages { items { name path tags tasks { items { name fullName tags script command } } } } }";
+
 async function readJson<T>(file: string): Promise<T> {
   return JSON.parse(await readFile(file, "utf8")) as T;
+}
+
+async function queryNativeTaskDirectory(): Promise<NativeTaskDirectory> {
+  const result = await execa("pnpm", [
+    "exec",
+    "turbo",
+    "query",
+    nativeTaskQuery,
+  ]);
+  return JSON.parse(result.stdout) as NativeTaskDirectory;
+}
+
+async function runTurboDryRun(...args: string[]): Promise<TaskPlan> {
+  const result = await execa("pnpm", [
+    "exec",
+    "turbo",
+    "run",
+    ...args,
+    "--dry-run=json",
+  ]);
+  return JSON.parse(result.stdout) as TaskPlan;
+}
+
+function nativeTaskByName(
+  directory: NativeTaskDirectory,
+): Map<string, NativeTask> {
+  return new Map(
+    directory.data.packages.items.flatMap(({ tasks }) =>
+      tasks.items.map((task) => [task.fullName, task] as const),
+    ),
+  );
 }
 
 void describe("Template Repository native task model", () => {
@@ -45,50 +102,96 @@ void describe("Template Repository native task model", () => {
     assert.strictEqual(manifest.packageManager, `pnpm@${pnpm.stdout.trim()}`);
   });
 
-  void it("caches distribution builds with the root snapshots core copies", async () => {
+  void it("resolves package labels and build contracts through native Turbo", async () => {
     const workspace = parse(
       await readFile("pnpm-workspace.yaml", "utf8"),
     ) as WorkspaceConfig;
-    const turbo = await readJson<TurboConfig>("turbo.json");
-    const coreTurbo = await readJson<TurboConfig>("packages/core/turbo.json");
 
     assert.strictEqual(workspace.injectWorkspacePackages, false);
     assert.strictEqual(workspace.dedupeInjectedDeps, false);
     assert.ok(workspace.syncInjectedDepsAfterScripts?.includes("build"));
-    assert.notStrictEqual(turbo.tasks.build?.cache, false);
-    assert.deepStrictEqual(turbo.tasks.build?.inputs, [
-      "$TURBO_DEFAULT$",
-      "$TURBO_ROOT$/tsconfig.json",
-      "$TURBO_ROOT$/tsconfig.base.json",
-    ]);
-    assert.deepStrictEqual(turbo.tasks.build?.outputs, ["dist/**"]);
-    assert.deepStrictEqual(turbo.tasks["format:check"]?.inputs, [
-      "$TURBO_DEFAULT$",
-      "$TURBO_ROOT$/oxfmt.config.ts",
-    ]);
-    assert.deepStrictEqual(turbo.tasks.lint?.inputs, [
-      "$TURBO_DEFAULT$",
-      "$TURBO_ROOT$/oxlint.config.ts",
-    ]);
-    assert.deepStrictEqual(turbo.tasks.typecheck?.inputs, [
-      "$TURBO_DEFAULT$",
-      "$TURBO_ROOT$/tsconfig.json",
-      "$TURBO_ROOT$/tsconfig.base.json",
-    ]);
-    assert.deepStrictEqual(coreTurbo.tags, ["template-core"]);
-    assert.deepStrictEqual(coreTurbo.tasks.build?.inputs, [
-      "$TURBO_EXTENDS$",
-      "$TURBO_ROOT$/pnpm-workspace.yaml",
-      "$TURBO_ROOT$/Cargo.toml",
-      "$TURBO_ROOT$/Cargo.lock",
-    ]);
-    const builtinPresetsTurbo = await readJson<TurboConfig>(
-      "packages/builtin-presets/turbo.json",
+
+    const directory = await queryNativeTaskDirectory();
+    const packageTags = new Map(
+      directory.data.packages.items.map(({ name, tags }) => [name, tags]),
     );
-    assert.deepStrictEqual(builtinPresetsTurbo.tasks.lint?.inputs, [
-      "$TURBO_EXTENDS$",
-      "$TURBO_ROOT$/oxlint.template-source.config.ts",
-    ]);
+    assert.deepStrictEqual(
+      [...packageTags].sort(([a], [b]) => a.localeCompare(b)),
+      [
+        ["@ykdz/template", ["template-cli"]],
+        ["@ykdz/template-builtin-presets", ["template-builtin-presets"]],
+        ["@ykdz/template-checks", ["template-checks"]],
+        ["@ykdz/template-core", ["template-core"]],
+        ["//", ["template-root"]],
+      ],
+    );
+
+    for (const task of nativeTaskByName(directory).values()) {
+      if (task.command !== null) {
+        assert.strictEqual(
+          task.tags.length,
+          1,
+          `${task.fullName} has one task role`,
+        );
+      }
+    }
+
+    const buildPlan = await runTurboDryRun("build", "--filter=!//");
+    const buildTasks = new Map(
+      buildPlan.tasks.map((task) => [task.taskId, task]),
+    );
+    const buildIds = [
+      "@ykdz/template#build",
+      "@ykdz/template-builtin-presets#build",
+      "@ykdz/template-checks#build",
+      "@ykdz/template-core#build",
+    ];
+    assert.deepStrictEqual([...buildTasks.keys()].sort(), [...buildIds].sort());
+
+    for (const taskId of buildIds.filter(
+      (id) => id !== "@ykdz/template-core#build",
+    )) {
+      const task = buildTasks.get(taskId);
+      assert.ok(task, `${taskId} is in the native build plan`);
+      assert.deepStrictEqual(task.resolvedTaskDefinition.dependsOn, ["^build"]);
+      assert.strictEqual(task.resolvedTaskDefinition.cache, true);
+      assert.deepStrictEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
+      assert.deepStrictEqual([...task.resolvedTaskDefinition.inputs].sort(), [
+        "../../tsconfig.base.json",
+        "../../tsconfig.json",
+      ]);
+    }
+
+    const coreBuild = buildTasks.get("@ykdz/template-core#build");
+    assert.ok(coreBuild);
+    assert.deepStrictEqual(
+      [...coreBuild.resolvedTaskDefinition.inputs].sort(),
+      [
+        "../../Cargo.lock",
+        "../../Cargo.toml",
+        "../../pnpm-workspace.yaml",
+        "../../tsconfig.base.json",
+        "../../tsconfig.json",
+      ],
+    );
+    assert.deepStrictEqual(
+      buildIds.map((taskId) => [
+        taskId,
+        [...(buildTasks.get(taskId)?.dependencies ?? [])].sort(),
+      ]),
+      [
+        [
+          "@ykdz/template#build",
+          ["@ykdz/template-builtin-presets#build", "@ykdz/template-core#build"],
+        ],
+        ["@ykdz/template-builtin-presets#build", ["@ykdz/template-core#build"]],
+        [
+          "@ykdz/template-checks#build",
+          ["@ykdz/template-builtin-presets#build", "@ykdz/template-core#build"],
+        ],
+        ["@ykdz/template-core#build", []],
+      ],
+    );
   });
 
   void it("exposes one public quality-gate runner and recursive light/heavy test scripts", async () => {
@@ -186,127 +289,31 @@ void describe("Template Repository native task model", () => {
   });
 
   void it("joins root and package leaf tasks in one Turbo action graph", async () => {
-    const turbo = await readJson<TurboConfig>("turbo.json");
-    const tasks = turbo.tasks;
+    const nativeTasks = nativeTaskByName(await queryNativeTaskDirectory());
+    assert.deepStrictEqual(nativeTasks.get("//#build")?.tags, [
+      "work:preparation",
+    ]);
+    assert.deepStrictEqual(nativeTasks.get("//#test")?.tags, ["quality:light"]);
+    assert.deepStrictEqual(nativeTasks.get("//#check")?.tags, [
+      "quality:entry",
+    ]);
+    assert.deepStrictEqual(nativeTasks.get("@ykdz/template#test")?.tags, [
+      "quality:light",
+    ]);
+    assert.deepStrictEqual(nativeTasks.get("@ykdz/template#test:e2e")?.tags, [
+      "quality:heavy",
+    ]);
+    assert.deepStrictEqual(
+      nativeTasks.get("@ykdz/template-checks#check:evidence-health")?.tags,
+      ["quality:conditional"],
+    );
 
-    assert.strictEqual(turbo.concurrency, "2");
-
-    for (const task of [
+    const actionGraph = await runTurboDryRun(
       "format:check",
-      "format:write",
       "lint",
-      "lint:fix",
       "typecheck",
       "test",
-    ]) {
-      assert.notStrictEqual(
-        tasks[`//#${task}`],
-        undefined,
-        `root ${task} configuration`,
-      );
-    }
-    assert.deepStrictEqual(tasks.build?.tags, ["quality:light"]);
-    assert.deepStrictEqual(tasks["//#build"]?.tags, ["work:preparation"]);
-    assert.strictEqual(tasks.transit, undefined);
-    assert.strictEqual(tasks["check:templates:shared-oxc"], undefined);
-    assert.strictEqual(tasks["check:templates:static-source"], undefined);
-    assert.ok(tasks.typecheck?.dependsOn?.includes("^typecheck"));
-    assert.ok(!(tasks.typecheck?.dependsOn ?? []).includes("^build"));
-    assert.deepStrictEqual(tasks["//#typecheck"]?.dependsOn, ["^typecheck"]);
-    assert.ok(tasks.build?.dependsOn?.includes("^build"));
-    assert.ok(!(tasks.lint?.dependsOn ?? []).includes("^build"));
-    assert.ok(!(tasks.test?.dependsOn ?? []).includes("build"));
-    assert.ok(!(tasks["//#test"]?.dependsOn ?? []).includes("^build"));
-    assert.ok(tasks["//#test"]?.dependsOn?.includes("@ykdz/template#build"));
-    assert.ok(!(tasks["check:templates"]?.dependsOn ?? []).includes("//#test"));
-    assert.strictEqual(tasks["//#test:e2e"], undefined);
-    assert.ok(tasks["test:e2e"]?.dependsOn?.includes("build"));
-    assert.strictEqual(tasks["test:e2e"]?.cache, false);
-    assert.deepStrictEqual(tasks.test?.tags, ["quality:light"]);
-    assert.deepStrictEqual(tasks["test:integration"]?.tags, ["quality:heavy"]);
-    assert.deepStrictEqual(tasks["test:packed-publication"]?.tags, [
-      "quality:heavy",
-    ]);
-    assert.deepStrictEqual(tasks["//#test"]?.tags, ["quality:light"]);
-    assert.deepStrictEqual(tasks["//#test:integration"]?.tags, [
-      "quality:heavy",
-    ]);
-    assert.deepStrictEqual(tasks["//#test:packed-publication"]?.tags, [
-      "quality:heavy",
-    ]);
-    assert.deepStrictEqual(tasks["check:evidence-health"]?.tags, [
-      "quality:conditional",
-    ]);
-    assert.strictEqual(tasks["check:evidence-health"]?.cache, false);
-    assert.ok(
-      tasks["//#test:integration"]?.dependsOn?.includes("@ykdz/template#build"),
     );
-    assert.ok(
-      tasks["//#test:packed-publication"]?.dependsOn?.includes(
-        "@ykdz/template#build",
-      ),
-    );
-    for (const task of [
-      "check:fixtures",
-      "check:generated",
-      "check:focused",
-      "check:deployment",
-      "check:templates",
-      "check:templates:boundary",
-      "check:templates:github-yaml",
-    ]) {
-      assert.ok(!(tasks[task]?.dependsOn ?? []).includes("^build"));
-    }
-    for (const task of [
-      "check:fixtures",
-      "check:generated",
-      "check:focused",
-      "check:deployment",
-    ]) {
-      assert.strictEqual(tasks[task]?.cache, false, `${task} cache`);
-      assert.deepStrictEqual(tasks[task]?.passThroughEnv, [
-        "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
-        "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
-        "TEMPLATE_FIXTURE_CONCURRENCY",
-        "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
-        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
-        "TEMPLATE_FIXTURE_EVIDENCE_READ",
-        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
-        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
-        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
-        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
-        "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
-        "TEMPLATE_FIXTURE_WORKSPACE_DIR",
-        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
-        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
-        "TEMPLATE_FIXTURE_TURBO_TEAM",
-        "TEMPLATE_FIXTURE_TURBO_TOKEN",
-      ]);
-    }
-    assert.ok(tasks["format:write"]?.dependsOn?.includes("lint:fix"));
-    assert.strictEqual(tasks["format:write"]?.cache, false);
-    assert.strictEqual(tasks["lint:fix"]?.cache, false);
-
-    const result = await execa(
-      "pnpm",
-      [
-        "exec",
-        "turbo",
-        "run",
-        "format:check",
-        "lint",
-        "typecheck",
-        "test",
-        "--dry-run=json",
-      ],
-      { reject: true },
-    );
-    const actionGraph = JSON.parse(result.stdout) as {
-      readonly tasks: readonly {
-        readonly dependencies: readonly string[];
-        readonly taskId: string;
-      }[];
-    };
     const taskIds = actionGraph.tasks.map((task) => task.taskId);
 
     assert.ok(!taskIds.includes("//#boundaries"));

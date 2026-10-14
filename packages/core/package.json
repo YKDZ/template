@@ -36,10 +36,5 @@
   },
   "peerDependencies": {
     "typescript": ">=6 <7"
-  },
-  "turbo": {
-    "tags": [
-      "template-core"
-    ]
   }
 }
