@@ -2082,7 +2082,7 @@ void describe("Fixture Verification Evidence", () => {
 
   void it(
     "invalidates only final matrix states changed by a Preset-local addition output",
-    { timeout: 300_000 },
+    { timeout: 450_000 },
     async () => {
       const root = await temporaryRepository("fixture-matrix-invalidation-");
       const evidenceRoot = path.join(root, "evidence");

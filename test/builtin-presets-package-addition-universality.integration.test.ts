@@ -276,19 +276,51 @@ void describe("Built-in Preset Package Addition universality", () => {
           cwd: context.targetDir,
           cancelSignal: signal,
         });
+        const customManifest = JSON.parse(
+          await readFile(
+            path.join(context.targetDir, "services/custom/package.json"),
+            "utf8",
+          ),
+        ) as {
+          readonly name: string;
+          readonly scripts: Readonly<Record<string, string>>;
+        };
+        const customTurbo = JSON.parse(
+          await readFile(
+            path.join(context.targetDir, "services/custom/turbo.json"),
+            "utf8",
+          ),
+        ) as { readonly tasks: Readonly<Record<string, unknown>> };
+        const taskName = Object.keys(customTurbo.tasks).find((name) =>
+          Object.hasOwn(customManifest.scripts, name),
+        );
+        assert.notStrictEqual(taskName, undefined);
         const dryRun = await execa(
           "pnpm",
-          ["exec", "turbo", "run", "build", "test", "--dry-run=json"],
+          [
+            "exec",
+            "turbo",
+            "run",
+            taskName!,
+            `--filter=${customManifest.name}`,
+            "--dry-run=json",
+          ],
           { cwd: context.targetDir, cancelSignal: signal },
         );
-        const taskIds = (
+        const customTask = (
           JSON.parse(dryRun.stdout) as {
-            tasks: readonly { taskId: string }[];
+            tasks: readonly {
+              taskId: string;
+              directory: string;
+              command: string;
+            }[];
           }
-        ).tasks.map((task) => task.taskId);
-        for (const taskId of ["@demo/custom#build", "@demo/custom#test"]) {
-          assert.ok(taskIds.includes(taskId));
-        }
+        ).tasks.find(
+          (task) => task.taskId === `${customManifest.name}#${taskName}`,
+        );
+        assert.notStrictEqual(customTask, undefined);
+        assert.strictEqual(customTask!.directory, "services/custom");
+        assert.notStrictEqual(customTask!.command, "<NONEXISTENT>");
         completed = true;
       } catch (error) {
         await preserveRootIntegrationFailure(

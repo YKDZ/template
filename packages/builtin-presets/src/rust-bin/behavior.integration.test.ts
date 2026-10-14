@@ -253,6 +253,39 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
               },
             }),
           );
+          await writeFile(
+            path.join(targetDir, "apps/discovered/turbo.json"),
+            JSON.stringify({
+              extends: ["//"],
+              tags: ["app"],
+              tasks: {
+                lint: {
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
+                build: {
+                  dependsOn: ["^build"],
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
+                test: {
+                  dependsOn: [],
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
+                "test:e2e": {
+                  dependsOn: ["build"],
+                  inputs: [],
+                  outputs: [],
+                  cache: false,
+                  tags: ["quality:heavy"],
+                },
+              },
+            }),
+          );
 
           await execa("pnpm", ["install"], { cwd: targetDir, cancelSignal });
           const dryRun = await execa(
@@ -426,6 +459,32 @@ fi
                   "node --eval \"console.error('BUILD_FAIL'); process.exit(1)\"",
                 lint: "node --eval \"console.error('LINT_FAIL'); process.exit(1)\"",
                 test: "node --eval \"require('node:fs').writeFileSync('TEST_EXECUTED', 'yes')\"",
+              },
+            }),
+          );
+          await writeFile(
+            path.join(targetDir, "apps/controlled/turbo.json"),
+            JSON.stringify({
+              extends: ["//"],
+              tags: ["app"],
+              tasks: {
+                build: {
+                  dependsOn: ["^build"],
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
+                lint: {
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
+                test: {
+                  dependsOn: [],
+                  inputs: [],
+                  outputs: [],
+                  tags: ["quality:light"],
+                },
               },
             }),
           );
