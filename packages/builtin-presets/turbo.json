@@ -2,11 +2,17 @@
   "extends": ["//"],
   "tags": ["template-builtin-presets"],
   "tasks": {
+    "lint": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/oxlint.template-source.config.ts"
+      ]
+    },
     "test:integration": {
+      "env": ["RUSTUP_TOOLCHAIN"],
       "passThroughEnv": [
         "CARGO_HOME",
         "RUSTUP_HOME",
-        "RUSTUP_TOOLCHAIN",
         "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR"
       ]
     }

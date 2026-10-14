@@ -13,18 +13,19 @@ type Manifest = {
 type TurboTask = {
   readonly cache?: boolean;
   readonly dependsOn?: readonly string[];
+  readonly inputs?: readonly string[];
+  readonly outputs?: readonly string[];
   readonly passThroughEnv?: readonly string[];
   readonly tags?: readonly string[];
 };
 
 type TurboConfig = {
+  readonly tags?: readonly string[];
   readonly tasks: Record<string, TurboTask>;
 };
 
 type WorkspaceConfig = {
-  readonly dedupeInjectedDeps?: boolean;
   readonly injectWorkspacePackages?: boolean;
-  readonly syncInjectedDepsAfterScripts?: readonly string[];
 };
 
 async function readJson<T>(file: string): Promise<T> {
@@ -41,16 +42,48 @@ void describe("Template Repository native task model", () => {
     assert.strictEqual(manifest.packageManager, `pnpm@${pnpm.stdout.trim()}`);
   });
 
-  void it("executes builds when injected workspace packages must be synchronized", async () => {
+  void it("caches distribution builds with the root snapshots core copies", async () => {
     const workspace = parse(
       await readFile("pnpm-workspace.yaml", "utf8"),
     ) as WorkspaceConfig;
     const turbo = await readJson<TurboConfig>("turbo.json");
+    const coreTurbo = await readJson<TurboConfig>("packages/core/turbo.json");
 
     assert.strictEqual(workspace.injectWorkspacePackages, false);
-    assert.strictEqual(workspace.dedupeInjectedDeps, false);
-    assert.ok(workspace.syncInjectedDepsAfterScripts?.includes("build"));
-    assert.strictEqual(turbo.tasks.build?.cache, false);
+    assert.notStrictEqual(turbo.tasks.build?.cache, false);
+    assert.deepStrictEqual(turbo.tasks.build?.inputs, [
+      "$TURBO_DEFAULT$",
+      "$TURBO_ROOT$/tsconfig.json",
+      "$TURBO_ROOT$/tsconfig.base.json",
+    ]);
+    assert.deepStrictEqual(turbo.tasks.build?.outputs, ["dist/**"]);
+    assert.deepStrictEqual(turbo.tasks["format:check"]?.inputs, [
+      "$TURBO_DEFAULT$",
+      "$TURBO_ROOT$/oxfmt.config.ts",
+    ]);
+    assert.deepStrictEqual(turbo.tasks.lint?.inputs, [
+      "$TURBO_DEFAULT$",
+      "$TURBO_ROOT$/oxlint.config.ts",
+    ]);
+    assert.deepStrictEqual(turbo.tasks.typecheck?.inputs, [
+      "$TURBO_DEFAULT$",
+      "$TURBO_ROOT$/tsconfig.json",
+      "$TURBO_ROOT$/tsconfig.base.json",
+    ]);
+    assert.deepStrictEqual(coreTurbo.tags, ["template-core"]);
+    assert.deepStrictEqual(coreTurbo.tasks.build?.inputs, [
+      "$TURBO_EXTENDS$",
+      "$TURBO_ROOT$/pnpm-workspace.yaml",
+      "$TURBO_ROOT$/Cargo.toml",
+      "$TURBO_ROOT$/Cargo.lock",
+    ]);
+    const builtinPresetsTurbo = await readJson<TurboConfig>(
+      "packages/builtin-presets/turbo.json",
+    );
+    assert.deepStrictEqual(builtinPresetsTurbo.tasks.lint?.inputs, [
+      "$TURBO_EXTENDS$",
+      "$TURBO_ROOT$/oxlint.template-source.config.ts",
+    ]);
   });
 
   void it("exposes one public quality-gate runner and recursive light/heavy test scripts", async () => {
