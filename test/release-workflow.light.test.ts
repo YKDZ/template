@@ -15,7 +15,6 @@ const publishCommand =
   'npm publish "$archive_path" --access public --provenance --ignore-scripts';
 
 type ReleaseStep = {
-  readonly name?: string;
   readonly run?: string;
 };
 
@@ -29,9 +28,14 @@ type ReleaseWorkflow = {
 
 function getVerifiedPublicationScript(workflow: string): string {
   const release = parse(workflow) as ReleaseWorkflow;
-  const publishStep = release.jobs.publish.steps.find(
-    ({ name }) => name === "校验并发布已验证的归档",
+  const publishSteps = release.jobs.publish.steps.filter(
+    ({ run }) =>
+      run
+        ?.split("\n")
+        .some((line) => line.trimStart().startsWith("npm publish ")) ?? false,
   );
+  assert.strictEqual(publishSteps.length, 1);
+  const publishStep = publishSteps[0];
   assert.ok(publishStep?.run !== undefined);
   return publishStep.run;
 }
