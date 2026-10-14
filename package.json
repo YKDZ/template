@@ -14,9 +14,9 @@
     "fix": "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
     "format:check": "oxfmt --list-different --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
     "format:write": "oxfmt --write --config oxfmt.config.ts $(git ls-files -- ':!packages/**')",
-    "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test-support test",
-    "lint:fix": "oxlint --format=unix --config oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test-support test --fix",
-    "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
+    "lint": "oxlint --quiet --format=unix --config oxlint.config.ts oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test-support test",
+    "lint:fix": "oxlint --format=unix --config oxlint.config.ts oxlint.config.ts oxlint.template-source.config.ts oxfmt.config.ts scripts test-support test --fix",
+    "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types scripts/run-root-integration.ts",
     "test:packed-publication": "node --conditions=source --experimental-strip-types scripts/run-packed-publication-test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"

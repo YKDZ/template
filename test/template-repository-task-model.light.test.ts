@@ -20,12 +20,15 @@ type TurboTask = {
 };
 
 type TurboConfig = {
+  readonly concurrency?: string;
   readonly tags?: readonly string[];
   readonly tasks: Record<string, TurboTask>;
 };
 
 type WorkspaceConfig = {
+  readonly dedupeInjectedDeps?: boolean;
   readonly injectWorkspacePackages?: boolean;
+  readonly syncInjectedDepsAfterScripts?: readonly string[];
 };
 
 async function readJson<T>(file: string): Promise<T> {
@@ -50,6 +53,8 @@ void describe("Template Repository native task model", () => {
     const coreTurbo = await readJson<TurboConfig>("packages/core/turbo.json");
 
     assert.strictEqual(workspace.injectWorkspacePackages, false);
+    assert.strictEqual(workspace.dedupeInjectedDeps, false);
+    assert.ok(workspace.syncInjectedDepsAfterScripts?.includes("build"));
     assert.notStrictEqual(turbo.tasks.build?.cache, false);
     assert.deepStrictEqual(turbo.tasks.build?.inputs, [
       "$TURBO_DEFAULT$",
@@ -128,7 +133,7 @@ void describe("Template Repository native task model", () => {
     assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
     assert.strictEqual(
       scripts["test:integration"],
-      "node --conditions=source --experimental-strip-types --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/*.integration.test.ts'",
+      "node --conditions=source --experimental-strip-types scripts/run-root-integration.ts",
     );
     assert.strictEqual(
       scripts["test:packed-publication"],
@@ -139,6 +144,18 @@ void describe("Template Repository native task model", () => {
         "@ykdz/template-builtin-presets/node-test-count-reporter",
       ),
     );
+    assert.match(scripts.test ?? "", /--test-concurrency=2/u);
+
+    const builtinPresetsManifest = await readJson<Manifest>(
+      "packages/builtin-presets/package.json",
+    );
+    assert.match(
+      builtinPresetsManifest.scripts.test ?? "",
+      /--test-concurrency=2/u,
+    );
+
+    const cliManifest = await readJson<Manifest>("packages/cli/package.json");
+    assert.match(cliManifest.scripts.test ?? "", /--test-concurrency=2/u);
 
     for (const task of [
       "format:check",
@@ -182,6 +199,8 @@ void describe("Template Repository native task model", () => {
   void it("joins root and package leaf tasks in one Turbo action graph", async () => {
     const turbo = await readJson<TurboConfig>("turbo.json");
     const tasks = turbo.tasks;
+
+    assert.strictEqual(turbo.concurrency, "2");
 
     for (const task of [
       "format:check",
