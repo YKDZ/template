@@ -17,6 +17,7 @@
     "check:focused": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts focused",
     "check:deployment": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts deployment",
     "check:evidence-health": "node --conditions=source src/check-fixture-evidence-health.ts",
+    "prepare:rustfmt": "rustup component add rustfmt",
     "check:templates": "node --conditions=source src/check-template-source.ts && node --conditions=source src/check-registry-contract.ts && node --conditions=source src/check-publication-source.ts && node --conditions=source src/check-legacy-architecture-removal.ts --packed",
     "check:templates:boundary": "node --conditions=source src/check-template-boundary.ts",
     "check:templates:github-yaml": "node --conditions=source src/check-builtin-preset-github-yaml.ts",

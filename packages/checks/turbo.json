@@ -1,4 +1,22 @@
 {
   "extends": ["//"],
-  "tags": ["template-checks"]
+  "tags": ["template-checks"],
+  "tasks": {
+    "check:fixtures": {
+      "dependsOn": ["check:generated"]
+    },
+    "check:deployment": {
+      "dependsOn": ["check:fixtures"]
+    },
+    "prepare:rustfmt": {
+      "tags": ["work:preparation"],
+      "cache": false,
+      "outputs": [],
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "check:templates": {
+      "dependsOn": ["prepare:rustfmt"],
+      "env": ["RUSTUP_TOOLCHAIN"]
+    }
+  }
 }

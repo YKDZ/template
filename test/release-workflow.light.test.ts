@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { execa } from "execa";
+import { parse } from "yaml";
 
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -12,6 +13,28 @@ const repoRoot = path.resolve(
 );
 const publishCommand =
   'npm publish "$archive_path" --access public --provenance --ignore-scripts';
+
+type ReleaseStep = {
+  readonly name?: string;
+  readonly run?: string;
+};
+
+type ReleaseWorkflow = {
+  readonly jobs: {
+    readonly publish: {
+      readonly steps: readonly ReleaseStep[];
+    };
+  };
+};
+
+function getVerifiedPublicationScript(workflow: string): string {
+  const release = parse(workflow) as ReleaseWorkflow;
+  const publishStep = release.jobs.publish.steps.find(
+    ({ name }) => name === "校验并发布已验证的归档",
+  );
+  assert.ok(publishStep?.run !== undefined);
+  return publishStep.run;
+}
 
 function expectWorkflowUsesVersionedAction(
   workflow: string,
@@ -48,10 +71,13 @@ void describe("npm release workflow", () => {
     assert.ok(workflow.includes("id-token: write"));
     assert.ok(workflow.includes("contents: read"));
     assert.ok(workflow.includes("needs: check"));
-    assert.ok(workflow.includes(publishCommand));
     assert.ok(workflow.includes("publish_verified_candidate: true"));
     assert.ok(workflow.includes("actions/download-artifact@v8"));
-    assert.ok(workflow.includes("sha512sum --check --strict SHA512SUMS"));
+    assert.ok(
+      getVerifiedPublicationScript(workflow).includes(
+        "sha512sum --check --strict SHA512SUMS",
+      ),
+    );
     assert.ok(!workflow.includes("PNPM_CONFIG_NODE_LINKER"));
     assert.ok(!workflow.includes("NPM_TOKEN"));
     assert.ok(!workflow.includes("NODE_AUTH_TOKEN"));
@@ -62,18 +88,19 @@ void describe("npm release workflow", () => {
       path.join(repoRoot, ".github/workflows/release.yml"),
       "utf8",
     );
+    const publishScript = getVerifiedPublicationScript(workflow);
 
     expectWorkflowUsesVersionedAction(workflow, "actions/checkout");
     expectWorkflowUsesVersionedAction(workflow, "actions/setup-node");
     assert.ok(workflow.includes("node-version-file: package.json"));
-    assert.ok(workflow.includes('test "${#archive_paths[@]}" -eq 1'));
+    assert.ok(publishScript.includes('test "${#archive_paths[@]}" -eq 1'));
     assert.ok(
-      workflow.includes(
+      publishScript.includes(
         'test "$(wc -l < "$artifact_directory/SHA512SUMS")" -eq 1',
       ),
     );
-    assert.ok(workflow.includes(`          ${publishCommand}`));
-    assert.ok(workflow.includes("--ignore-scripts"));
+    assert.ok(publishScript.split("\n").includes(publishCommand));
+    assert.ok(publishScript.includes("--ignore-scripts"));
     assert.ok(
       workflow.includes(
         "verified-packed-publication-${{ github.run_id }}-${{ github.run_attempt }}",
