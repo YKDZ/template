@@ -1511,9 +1511,7 @@ type TurboTaskTruth = Readonly<{
 
 type TurboTaskTruthByName = Readonly<Record<string, TurboTaskTruth>>;
 
-function databasePreparationTurboTasks(
-  preparation: NormalizedDatabasePreparation,
-): TurboTaskTruthByName {
+function databasePreparationRootTurboTasks(): TurboTaskTruthByName {
   return {
     "//#database:prepare:dev": {
       cache: false,
@@ -1526,34 +1524,6 @@ function databasePreparationTurboTasks(
     "//#database:prepare:e2e": {
       cache: false,
       tags: ["work:preparation"],
-    },
-    [`${preparation.databasePackageName}#test`]: {
-      dependsOn: ["//#database:prepare:test"],
-      tags: ["quality:light"],
-    },
-    [`${preparation.migrationPackageName}#typecheck`]: {
-      dependsOn: [`${preparation.databasePackageName}#build`],
-      tags: ["quality:light"],
-    },
-    [`${preparation.consumers["application-dev"]}#typecheck`]: {
-      dependsOn: [`${preparation.databasePackageName}#build`],
-      tags: ["quality:light"],
-    },
-    [`${preparation.consumers["application-dev"]}#dev`]: {
-      dependsOn: [`${preparation.databasePackageName}#build`],
-      cache: false,
-      persistent: true,
-      tags: ["work:development"],
-    },
-    [`${preparation.consumers["application-e2e"]}#test:e2e`]: {
-      dependsOn: [
-        "//#database:prepare:e2e",
-        `${preparation.databasePackageName}#build`,
-        "build",
-        "browser:prepare",
-      ],
-      cache: false,
-      tags: ["quality:heavy"],
     },
   };
 }
@@ -2102,20 +2072,11 @@ function assertCapabilityPackageTurboInheritanceTruth(options: {
   }
 }
 
-function effectiveCapabilityTaskDependencies(options: {
+function localCapabilityTaskDependencies(options: {
   readonly localTask: unknown;
-  readonly inheritedTask: unknown;
   readonly label: string;
   readonly taskName: string;
 }): unknown {
-  if (options.localTask === undefined) {
-    if (!isRecord(options.inheritedTask)) {
-      throw new Error(
-        `${options.label} requires Turbo task ${options.taskName}`,
-      );
-    }
-    return options.inheritedTask.dependsOn;
-  }
   if (!isRecord(options.localTask)) {
     throw new Error(`${options.label} requires Turbo task ${options.taskName}`);
   }
@@ -2125,35 +2086,24 @@ function effectiveCapabilityTaskDependencies(options: {
       `${options.label} requires Turbo task ${options.taskName} extends truth`,
     );
   }
-  if (extendsValue === false || options.localTask.dependsOn !== undefined) {
-    return options.localTask.dependsOn;
-  }
-  if (!isRecord(options.inheritedTask)) {
-    throw new Error(`${options.label} requires Turbo task ${options.taskName}`);
-  }
-  return options.inheritedTask.dependsOn;
+  return options.localTask.dependsOn;
 }
 
 function assertCapabilityConsumerTurboTruth(options: {
   readonly repositoryRoot: string;
-  readonly rootTurbo: Readonly<Record<string, unknown>>;
-  readonly expectedTasks: TurboTaskTruthByName;
+  readonly preparation: NormalizedDatabasePreparation;
   readonly buildConsumerPackageNames: readonly string[];
-  readonly databasePackageName: string;
   readonly packageByName: ReadonlyMap<string, PackageContribution>;
 }): void {
   const turboByPackagePath = new Map<
     string,
     Readonly<Record<string, unknown>>
   >();
-  for (const [qualifiedTaskName, expectedTask] of Object.entries(
-    options.expectedTasks,
-  )) {
-    if (expectedTask.dependsOn === undefined) continue;
-    const separator = qualifiedTaskName.lastIndexOf("#");
-    if (separator <= 0) continue;
-    const packageName = qualifiedTaskName.slice(0, separator);
-    const taskName = qualifiedTaskName.slice(separator + 1);
+  const assertPackageTaskTruth = (
+    packageName: string,
+    taskName: string,
+    expectedTask: TurboTaskTruth,
+  ): void => {
     const contribution = requireContributionByName(
       options.packageByName,
       packageName,
@@ -2177,23 +2127,51 @@ function assertCapabilityConsumerTurboTruth(options: {
       label: `Package Addition ${contribution.definition.name} Turbo Truth`,
     });
     const localTask = packageTurbo.tasks[taskName];
-    const localDependencies = effectiveCapabilityTaskDependencies({
+    localCapabilityTaskDependencies({
       localTask,
-      inheritedTask: expectedTask,
       label: `Package Addition ${contribution.definition.name} Turbo Truth`,
       taskName,
     });
-    if (
-      !Array.isArray(localDependencies) ||
-      expectedTask.dependsOn.some(
-        (expectedDependency) => !localDependencies.includes(expectedDependency),
-      )
-    ) {
-      throw new Error(
-        `Package Addition ${contribution.definition.name} Turbo Truth requires Turbo task ${taskName} dependsOn`,
-      );
-    }
-  }
+    assertTurboTaskTruth({
+      config: packageTurbo,
+      expectedTasks: { [taskName]: expectedTask },
+      label: `Package Addition ${contribution.definition.name} Turbo Truth`,
+    });
+  };
+
+  const preparation = options.preparation;
+  assertPackageTaskTruth(preparation.databasePackageName, "test", {
+    dependsOn: ["//#database:prepare:test"],
+    tags: ["quality:light"],
+  });
+  assertPackageTaskTruth(preparation.migrationPackageName, "typecheck", {
+    dependsOn: [`${preparation.databasePackageName}#build`],
+    tags: ["quality:light"],
+  });
+  assertPackageTaskTruth(
+    preparation.consumers["application-dev"],
+    "typecheck",
+    {
+      dependsOn: [`${preparation.databasePackageName}#build`],
+      tags: ["quality:light"],
+    },
+  );
+  assertPackageTaskTruth(preparation.consumers["application-dev"], "dev", {
+    dependsOn: [`${preparation.databasePackageName}#build`],
+    cache: false,
+    persistent: true,
+    tags: ["work:development"],
+  });
+  assertPackageTaskTruth(preparation.consumers["application-e2e"], "test:e2e", {
+    dependsOn: [
+      "//#database:prepare:e2e",
+      `${preparation.databasePackageName}#build`,
+      "build",
+      "browser:prepare",
+    ],
+    cache: false,
+    tags: ["quality:heavy"],
+  });
 
   for (const packageName of options.buildConsumerPackageNames) {
     const contribution = requireContributionByName(
@@ -2219,16 +2197,8 @@ function assertCapabilityConsumerTurboTruth(options: {
       label: `Package Addition ${contribution.definition.name} Turbo Truth`,
     });
     const localBuild = packageTurbo.tasks.build;
-    const qualifiedBuild = isRecord(options.rootTurbo.tasks)
-      ? options.rootTurbo.tasks[`${packageName}#build`]
-      : undefined;
-    const genericBuild = isRecord(options.rootTurbo.tasks)
-      ? options.rootTurbo.tasks.build
-      : undefined;
-    const dependencies = effectiveCapabilityTaskDependencies({
+    const dependencies = localCapabilityTaskDependencies({
       localTask: localBuild,
-      inheritedTask:
-        qualifiedBuild === undefined ? genericBuild : qualifiedBuild,
       label: `Package Addition ${contribution.definition.name} Turbo Truth`,
       taskName: "build",
     });
@@ -2237,7 +2207,7 @@ function assertCapabilityConsumerTurboTruth(options: {
       !dependencies.some(
         (dependency) =>
           dependency === "^build" ||
-          dependency === `${options.databasePackageName}#build`,
+          dependency === `${options.preparation.databasePackageName}#build`,
       )
     ) {
       throw new Error(
@@ -2271,7 +2241,7 @@ function assertCapabilityTurboTruth(options: {
     expectedTasks: {
       ...(options.databasePreparation === undefined
         ? {}
-        : databasePreparationTurboTasks(options.databasePreparation)),
+        : databasePreparationRootTurboTasks()),
       ...(options.deploymentCheck === undefined
         ? {}
         : deploymentTurboTasks(options.deploymentCheck)),
@@ -2299,13 +2269,11 @@ function assertCapabilityTurboTruth(options: {
   });
   assertCapabilityConsumerTurboTruth({
     repositoryRoot: options.repositoryRoot,
-    rootTurbo,
-    expectedTasks: databasePreparationTurboTasks(options.databasePreparation),
+    preparation: options.databasePreparation,
     buildConsumerPackageNames: [
       options.databasePreparation.migrationPackageName,
       ...new Set(Object.values(options.databasePreparation.consumers)),
     ],
-    databasePackageName: options.databasePreparation.databasePackageName,
     packageByName: options.packageByName,
   });
 }
@@ -3565,20 +3533,6 @@ function foundationPlan(options: {
             source: templateSources.foundation,
             from: "turbo-projections/database-preparation.json",
             to: "turbo.json",
-            replacements: {
-              DATABASE_PACKAGE: databasePreparation.databasePackageName,
-              MIGRATION_PACKAGE: databasePreparation.migrationPackageName,
-              APPLICATION_DEV_PACKAGE:
-                databasePreparation.consumers["application-dev"],
-              APPLICATION_E2E_PACKAGE:
-                databasePreparation.consumers["application-e2e"],
-            },
-            multilineArrays: [
-              `tasks.${databasePreparation.migrationPackageName}#typecheck.dependsOn`,
-              `tasks.${databasePreparation.consumers["application-dev"]}#typecheck.dependsOn`,
-              `tasks.${databasePreparation.consumers["application-dev"]}#dev.dependsOn`,
-              `tasks.${databasePreparation.consumers["application-e2e"]}#test:e2e.dependsOn`,
-            ],
           },
         ]),
     ...(publicationCandidate === undefined
@@ -3603,11 +3557,6 @@ function foundationPlan(options: {
         ...(vueHonoJointE2e === undefined
           ? []
           : ["tasks.//#test:e2e.dependsOn"]),
-        ...(databasePreparation === undefined
-          ? []
-          : [
-              `tasks.${databasePreparation.consumers["application-e2e"]}#test:e2e.dependsOn`,
-            ]),
       ],
     })),
     {

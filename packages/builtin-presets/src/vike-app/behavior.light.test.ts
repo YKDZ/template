@@ -257,10 +257,10 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         "DATABASE_PROFILE=dev pnpm --filter @demo/schema-tool run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/data-store run db:seed:example",
       dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/frontend",
     });
-    const turboConfiguration = JSON.parse(
+    const rootTurboConfiguration = JSON.parse(
       await readFile(path.join(targetDir, "turbo.json"), "utf8"),
     );
-    assert.partialDeepStrictEqual(turboConfiguration, {
+    assert.partialDeepStrictEqual(rootTurboConfiguration, {
       tasks: {
         "//#deployment": {
           dependsOn: [
@@ -269,32 +269,42 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             "@demo/schema-tool#build",
           ],
         },
-        "@demo/frontend#test:e2e": {
-          dependsOn: [
-            "//#database:prepare:e2e",
-            "@demo/data-store#build",
-            "build",
-            "browser:prepare",
-          ],
-        },
       },
     });
     assert.deepStrictEqual(
-      turboConfiguration.tasks["//#deployment"].dependsOn,
+      rootTurboConfiguration.tasks["//#deployment"].dependsOn,
       [
         "@demo/frontend#build",
         "@demo/data-store#build",
         "@demo/schema-tool#build",
       ],
     );
+    assert.ok(
+      !Object.keys(rootTurboConfiguration.tasks).some((taskName) =>
+        taskName.startsWith("@demo/"),
+      ),
+    );
+    const webTurboConfiguration = JSON.parse(
+      await readFile(
+        path.join(targetDir, "services/frontend/turbo.json"),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(webTurboConfiguration.tasks["test:e2e"].dependsOn, [
+      "//#database:prepare:e2e",
+      "@demo/data-store#build",
+      "build",
+      "browser:prepare",
+    ]);
+    const migrationsTurboConfiguration = JSON.parse(
+      await readFile(
+        path.join(targetDir, "tooling/schema-tool/turbo.json"),
+        "utf8",
+      ),
+    );
     assert.deepStrictEqual(
-      turboConfiguration.tasks["@demo/frontend#test:e2e"].dependsOn,
-      [
-        "//#database:prepare:e2e",
-        "@demo/data-store#build",
-        "build",
-        "browser:prepare",
-      ],
+      migrationsTurboConfiguration.tasks.typecheck.dependsOn,
+      ["@demo/data-store#build"],
     );
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
@@ -350,11 +360,31 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         )
       ).includes('from "@demo/data-store"'),
     );
-    const addition = planGeneratedRepositoryPackageAddition({
-      definition: builtInPresetRegistry.require("ts-lib"),
-      localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+    const userEditedWebTurbo = {
+      ...webTurboConfiguration,
+      tasks: {
+        ...webTurboConfiguration.tasks,
+        build: {
+          ...webTurboConfiguration.tasks.build,
+          inputs: ["$TURBO_DEFAULT$", "user/**"],
+        },
+      },
+    };
+    const userEditedWebTurboText = `${JSON.stringify(userEditedWebTurbo, null, 2)}\n`;
+    const userEditedWebTurboPath = path.join(
+      targetDir,
+      "services/frontend/turbo.json",
+    );
+    await writeFile(userEditedWebTurboPath, userEditedWebTurboText);
+    const addition = prepareGeneratedRepositoryPackageAddition({
+      repositoryRoot: targetDir,
+      preset: "ts-lib",
       packageLeafName: "shared-probe",
     });
+    assert.strictEqual(addition.status, "ready");
+    if (addition.status !== "ready") {
+      throw new Error("Expected valid Vike package addition to be ready");
+    }
     for (const packagePath of [
       "services/frontend",
       "modules/data-store",
@@ -362,10 +392,78 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       "packages/shared-probe",
     ]) {
       assert.ok(
-        addition.blueprint.packages.some(
+        addition.plan.blueprint.packages.some(
           (package_) => package_.path === packagePath,
         ),
       );
+    }
+    const replayed = await reconcileAndApplyProjectProjections({
+      targetRoot: targetDir,
+      ...addition.plan.projectProjections,
+    });
+    if (!replayed.ok) throw new Error(JSON.stringify(replayed));
+    assert.ok(!replayed.changedPaths.includes("services/frontend/turbo.json"));
+    assert.strictEqual(
+      await readFile(userEditedWebTurboPath, "utf8"),
+      userEditedWebTurboText,
+    );
+  });
+  void it("拒绝失真的 Vike 任务真实性且新增包回放零写入", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vike-turbo-extends-replay-"),
+    );
+    try {
+      const targetDir = await initVikeRepository(workspace);
+      const webTurboPath = path.join(targetDir, "apps/web/turbo.json");
+      const webTurbo = JSON.parse(await readFile(webTurboPath, "utf8")) as {
+        tasks: Record<string, Record<string, unknown>>;
+      };
+      const assertReplayRejectedWithoutWrite = async (
+        source: string,
+        expectedError: RegExp,
+      ): Promise<void> => {
+        await writeFile(webTurboPath, source);
+        const before = await treeFingerprint(workspace);
+        assert.throws(
+          () =>
+            planGeneratedRepositoryPackageAddition({
+              definition: builtInPresetRegistry.require("ts-lib"),
+              localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+              packageLeafName: "utility",
+            }),
+          expectedError,
+        );
+        const preparation = prepareGeneratedRepositoryPackageAddition({
+          repositoryRoot: targetDir,
+          preset: "ts-lib",
+          packageLeafName: "utility",
+        });
+        assert.strictEqual(preparation.status, "operation-failure");
+        if (preparation.status !== "operation-failure") {
+          throw new Error(
+            "Expected invalid package Turbo truth to fail replay",
+          );
+        }
+        assert.strictEqual(preparation.phase, "planning");
+        assert.strictEqual(await treeFingerprint(workspace), before);
+        assert.strictEqual(await readFile(webTurboPath, "utf8"), source);
+      };
+      webTurbo.tasks.build!.extends = "invalid";
+      assert.deepStrictEqual(webTurbo.tasks.build!.dependsOn, ["^build"]);
+      await assertReplayRejectedWithoutWrite(
+        `${JSON.stringify(webTurbo, null, 2)}\n`,
+        /Package Addition @demo\/web Turbo Truth requires Turbo task build extends truth/u,
+      );
+
+      delete webTurbo.tasks.build!.extends;
+      webTurbo.tasks.dev!.persistent = false;
+      assert.deepStrictEqual(webTurbo.tasks.dev!.dependsOn, ["@demo/db#build"]);
+      await assertReplayRejectedWithoutWrite(
+        `${JSON.stringify(webTurbo, null, 2)}\n`,
+        /Package Addition @demo\/web Turbo Truth requires Turbo task dev persistent/u,
+      );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
     }
   });
 });
