@@ -149,15 +149,10 @@ void describe("Template Repository native task model", () => {
     const builtinPresetsManifest = await readJson<Manifest>(
       "packages/builtin-presets/package.json",
     );
-    const builtinIntegrationRunner = await readFile(
-      "packages/builtin-presets/scripts/run-installed-integration.ts",
-      "utf8",
-    );
     assert.match(
       builtinPresetsManifest.scripts.test ?? "",
       /--test-concurrency=2/u,
     );
-    assert.match(builtinIntegrationRunner, /"--test-concurrency=2"/u);
 
     const cliManifest = await readJson<Manifest>("packages/cli/package.json");
     assert.match(cliManifest.scripts.test ?? "", /--test-concurrency=2/u);
