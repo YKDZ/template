@@ -1,0 +1,104 @@
+name: 临时票14日志与诊断权限探针
+
+on:
+  push:
+    branches:
+      - codex/infra-14-observability-9c02
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: 验证正式记录日志与诊断权限隔离
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CI: "true"
+      SOURCE_SHA: 9c02bd60c7fac05270d98b120f267e5946ce2536
+    steps:
+      - name: 检出临时观测 harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: 准备声明版本的 Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0
+
+      - name: 启用 Corepack
+        run: corepack enable
+
+      - name: 安装 strace
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y strace
+
+      - name: 建立短探针记录目录
+        shell: bash
+        run: |
+          set -euo pipefail
+          measure_root="$RUNNER_TEMP/infra-14-observability"
+          mkdir -p "$measure_root/records/turbo" "$measure_root/pnpm-store"
+          cp .infra-14-harness/run-formal-command.sh "$measure_root/run-formal-command.sh"
+          chmod +x "$measure_root/run-formal-command.sh"
+          printf 'MEASURE_ROOT=%s\n' "$measure_root" >> "$GITHUB_ENV"
+          printf 'PNPM_CONFIG_STORE_DIR=%s/pnpm-store\n' "$measure_root" >> "$GITHUB_ENV"
+
+      - name: 执行正式 runner 受控故障
+        id: probe-runner
+        shell: bash
+        run: '"$MEASURE_ROOT/run-formal-command.sh" probe'
+
+      - name: 上传独立 runner 记录
+        id: records-upload
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-observability-records-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/infra-14-observability/records/**
+            ${{ runner.temp }}/infra-14-observability/run-formal-command.sh
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 上传 root-owned 诊断文件
+        id: diagnostics-upload
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: infra-14-observability-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .fixture-workspace/**
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 核对短探针 step 结果
+        if: always()
+        shell: bash
+        env:
+          PROBE_OUTCOME: ${{ steps.probe-runner.outcome }}
+          RECORDS_OUTCOME: ${{ steps.records-upload.outcome }}
+          DIAGNOSTICS_OUTCOME: ${{ steps.diagnostics-upload.outcome }}
+        run: |
+          set -euo pipefail
+          printf 'probe_step_outcome=%s\nrecords_upload_outcome=%s\ndiagnostics_upload_outcome=%s\n' \
+            "$PROBE_OUTCOME" "$RECORDS_OUTCOME" "$DIAGNOSTICS_OUTCOME"
+          grep -Fxq 'uid=0 gid=0 mode=600' \
+            "$MEASURE_ROOT/records/probe/controlled/diagnostics-permission-target.stat"
+          test "$PROBE_OUTCOME" = failure
+          test "$RECORDS_OUTCOME" = success
+          test "$DIAGNOSTICS_OUTCOME" = failure
+          command_records="$MEASURE_ROOT/records/probe/controlled/intentional-exit"
+          test "$(cat "$command_records.exit")" = 17
+          grep -Fxq 'controlled stdout' "$command_records.stdout.log"
+          grep -Fxq 'controlled stderr' "$command_records.stderr.log"
+          grep -Fq 'controlled stdout' "$command_records.log"
+          grep -Fq 'controlled stderr' "$command_records.log"
+          grep -Fq 'exit=17' "$command_records.time"
+          test -s "$command_records.execve.log"
