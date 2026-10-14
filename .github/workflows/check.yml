@@ -74,7 +74,7 @@ jobs:
           import assert from "node:assert/strict";
           import { test } from "node:test";
 
-          test("票14临时轻层失败探针", () => {
+          void test("票14临时轻层失败探针", () => {
             assert.equal("故意失败", "通过");
           });
           EOF

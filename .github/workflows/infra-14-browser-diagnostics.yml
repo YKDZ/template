@@ -49,28 +49,50 @@ jobs:
         working-directory: .fixture-workspace/demo
         run: pnpm install
 
+      - name: Build the generated app for the Playwright web server
+        id: generated-build
+        working-directory: .fixture-workspace/demo
+        run: pnpm --filter @demo/web build
+
       - name: Prove generated Node glob discovery
         id: node-discovery
         if: always() && steps.generated-install.outcome == 'success'
         working-directory: .fixture-workspace/demo
         run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/.fixture-workspace"
           node_test=apps/web/test/infra-14-node-discovery.node.test.ts
           cat > "$node_test" <<'EOF'
-          import assert from "node:assert/strict";
-          import { test } from "node:test";
+          import { expect, test } from "vitest";
 
           test("票14临时 Node glob 自动发现", () => {
-            assert.equal("已发现", "故意失败");
+            expect("已发现").toBe("故意失败");
           });
           EOF
-          set +e
-          pnpm --filter @demo/web test 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.log"
-          node_status=${PIPESTATUS[0]}
-          set -e
-          printf '%s\n' "$node_status" > "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.exit"
+          run_native_test() {
+            label=$1
+            expected_status=$2
+            set +e
+            pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-turbo-$label.log"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '%s\n' "$status" > "$evidence/node-turbo-$label.exit"
+            test "$status" -eq "$expected_status"
+            printf 'stage=%s exit=%s\n' "$label" "$status"
+          }
+
+          run_native_test baseline-miss 0
+          grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-turbo-baseline-miss.log"
+          run_native_test baseline-hit 0
+          grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-turbo-baseline-hit.log"
+
+          run_native_test added-file-miss 1
+          grep -Fq '票14临时 Node glob 自动发现' "$evidence/node-turbo-added-file-miss.log"
+          grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-turbo-added-file-miss.log"
           rm "$node_test"
-          test "$node_status" -ne 0
-          grep -Fq '票14临时 Node glob 自动发现' "$GITHUB_WORKSPACE/.fixture-workspace/node-discovery.log"
+
+          run_native_test restored-hit 0
+          grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-turbo-restored-hit.log"
 
       - name: Prove an empty generated Node project fails
         id: node-zero
@@ -78,27 +100,26 @@ jobs:
         working-directory: .fixture-workspace/demo
         run: |
           set -euo pipefail
-          stash="$GITHUB_WORKSPACE/.fixture-workspace/disabled-node-tests"
-          mapfile -d '' files < <(find apps/web/test -type f -name '*.node.test.ts' -print0)
-          test "${#files[@]}" -gt 0
-          for file in "${files[@]}"; do
-            relative=${file#apps/web/}
-            mkdir -p "$stash/$(dirname "$relative")"
-            mv "$file" "$stash/$relative"
-          done
+          evidence="$GITHUB_WORKSPACE/.fixture-workspace"
           set +e
-          pnpm --filter @demo/web test 2>&1 | tee "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.log"
+          cp apps/web/vitest.config.ts "$evidence/vitest.config.ts.for-zero"
+          sed -i 's|test/\*\*/\*\.node.test.ts|test/__infra14_empty__/**/*.node.test.ts|' apps/web/vitest.config.ts
+          pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-zero.log"
           node_status=${PIPESTATUS[0]}
           set -e
-          printf '%s\n' "$node_status" > "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.exit"
-          while IFS= read -r -d '' file; do
-            relative=${file#"$stash"/}
-            mkdir -p "apps/web/$(dirname "$relative")"
-            mv "$file" "apps/web/$relative"
-          done < <(find "$stash" -type f -name '*.node.test.ts' -print0)
-          rm -rf "$stash"
+          printf '%s\n' "$node_status" > "$evidence/node-zero.exit"
+          cp "$evidence/vitest.config.ts.for-zero" apps/web/vitest.config.ts
           test "$node_status" -ne 0
-          grep -Eiq 'no test files|no tests found|no tests' "$GITHUB_WORKSPACE/.fixture-workspace/node-zero.log"
+          grep -Eiq 'no test files found|no tests found|no test files' "$evidence/node-zero.log"
+          grep -Eiq 'cache miss|0 cached, [1-9][0-9]* total' "$evidence/node-zero.log"
+
+          set +e
+          pnpm exec turbo run test --filter=@demo/web --summarize 2>&1 | tee "$evidence/node-zero-restored.log"
+          restored_status=${PIPESTATUS[0]}
+          set -e
+          printf '%s\n' "$restored_status" > "$evidence/node-zero-restored.exit"
+          test "$restored_status" -eq 0
+          grep -Eiq 'cache hit|[1-9][0-9]* cached, [1-9][0-9]* total' "$evidence/node-zero-restored.log"
 
       - name: Prove an empty generated browser project fails
         id: browser-zero
@@ -130,7 +151,7 @@ jobs:
 
       - name: Prove an empty generated Playwright project fails
         id: playwright-zero
-        if: always() && steps.generated-install.outcome == 'success' && steps.browser-zero.outcome == 'success'
+        if: always() && steps.generated-install.outcome == 'success' && steps.generated-build.outcome == 'success' && steps.browser-zero.outcome == 'success'
         working-directory: .fixture-workspace/demo
         run: |
           set -euo pipefail
@@ -158,7 +179,7 @@ jobs:
 
       - name: Change only the generated counter label
         id: inject-browser-failures
-        if: always() && steps.generated-install.outcome == 'success' && steps.playwright-zero.outcome == 'success'
+        if: always() && steps.generated-install.outcome == 'success' && steps.generated-build.outcome == 'success' && steps.playwright-zero.outcome == 'success'
         run: |
           cat > .fixture-workspace/demo/apps/web/test/infra-14-browser-discovery.browser.test.ts <<'EOF'
           import { createPinia } from "pinia";
@@ -194,7 +215,7 @@ jobs:
 
       - name: Run the generated public full gate and retain its exit
         id: generated-full
-        if: always() && steps.generated-install.outcome == 'success' && steps.inject-browser-failures.outcome == 'success'
+        if: always() && steps.generated-install.outcome == 'success' && steps.generated-build.outcome == 'success' && steps.inject-browser-failures.outcome == 'success'
         working-directory: .fixture-workspace/demo
         run: |
           set +e
