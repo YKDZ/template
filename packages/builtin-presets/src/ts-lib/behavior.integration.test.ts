@@ -1,128 +1,111 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import fsPromises, {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it, mock } from "node:test";
 
 import {
   createGenerationContext,
   planGeneratedRepositoryInitialization,
-  loadLocalTemplateMetadata,
-  planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
+import {
+  installedIntegrationSignal,
+  throwIfInstalledIntegrationWasCancelled,
+} from "../../test-support/installed-integration-signal.ts";
+import {
+  cleanupSharedTsLibProviderRepository,
+  withSharedTsLibProviderRepository,
+} from "../../test-support/ts-lib-provider-behavior.ts";
 import { tsLibDefinition } from "./definition.ts";
 
 void describe("ts-lib Built-in Preset Definition behavior", () => {
+  after(async () => {
+    await cleanupSharedTsLibProviderRepository();
+  });
+
   void it(
     "observes linked provider source changes without a provider build",
     { timeout: 180_000 },
     async () => {
-      const workspace = await mkdtemp(
-        path.join(tmpdir(), "template-ts-lib-source-link-"),
-      );
-      const targetDir = path.join(workspace, "consumer");
-      const context = createGenerationContext({
-        targetDir,
-        defaultPackageScope: "demo",
-        toolchain: {
-          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-            0,
-            releaseToolchainSnapshot.nodeVersion.indexOf("."),
-          ),
-          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-        },
-      });
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: tsLibDefinition,
-        context,
-      });
-
-      try {
-        await renderNewProject({
-          targetRoot: targetDir,
-          operations: [...initialization.operations],
-        });
-        const consumerPackagePath = initialization.blueprint.packages[0]!.path;
-        const addition = planGeneratedRepositoryPackageAddition({
-          definition: tsLibDefinition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "provider",
-          linkFrom: [consumerPackagePath],
-        });
-        await reconcileAndApplyProjectProjections({
-          targetRoot: targetDir,
-          ...addition.projectProjections,
-        });
-        await execa("pnpm", ["install"], { cwd: targetDir });
-        const providerManifest = JSON.parse(
-          await readFile(
-            path.join(targetDir, "packages/provider/package.json"),
-            "utf8",
-          ),
-        ) as { exports: { ".": Record<string, string> } };
-        assert.deepStrictEqual(Object.keys(providerManifest.exports["."]), [
-          "source",
-          "types",
-          "default",
-        ]);
-        const consumerManifest = JSON.parse(
-          await readFile(
-            path.join(targetDir, consumerPackagePath, "package.json"),
-            "utf8",
-          ),
-        ) as Readonly<Record<string, unknown>>;
-        assert.partialDeepStrictEqual(consumerManifest, {
-          dependencies: { "@demo/provider": "workspace:*" },
-        });
-        assert.ok(!("dependenciesMeta" in (consumerManifest ?? {})));
-
-        const consumerRoot = path.join(targetDir, consumerPackagePath);
-        await writeFile(
-          path.join(consumerRoot, "src/observe-provider.ts"),
-          [
-            'import { greet } from "@demo/provider";',
-            "",
-            'console.log(greet("Ada").message);',
-            "",
-          ].join("\n"),
-        );
-        const sourceCommand = () =>
-          execa("node", ["--conditions=source", "src/observe-provider.ts"], {
-            cwd: consumerRoot,
+      await withSharedTsLibProviderRepository(
+        "source-link",
+        async ({ targetDir, consumerPackagePath }) => {
+          const providerManifest = JSON.parse(
+            await readFile(
+              path.join(targetDir, "packages/provider/package.json"),
+              "utf8",
+            ),
+          ) as { exports: { ".": Record<string, string> } };
+          assert.deepStrictEqual(Object.keys(providerManifest.exports["."]), [
+            "source",
+            "types",
+            "default",
+          ]);
+          const consumerManifest = JSON.parse(
+            await readFile(
+              path.join(targetDir, consumerPackagePath, "package.json"),
+              "utf8",
+            ),
+          ) as Readonly<Record<string, unknown>>;
+          assert.partialDeepStrictEqual(consumerManifest, {
+            dependencies: { "@demo/provider": "workspace:*" },
           });
+          assert.ok(!("dependenciesMeta" in (consumerManifest ?? {})));
 
-        assert.strictEqual(
-          await sourceCommand().then(({ stdout }) => stdout),
-          "Hello, Ada",
-        );
-        const providerEntry = path.join(
-          targetDir,
-          "packages/provider/src/index.ts",
-        );
-        await writeFile(
-          providerEntry,
-          (await readFile(providerEntry, "utf8")).replace(
-            "Hello,",
-            "Source changed:",
-          ),
-        );
-        assert.strictEqual(
-          await sourceCommand().then(({ stdout }) => stdout),
-          "Source changed: Ada",
-        );
-        await execa(
-          "pnpm",
-          ["--filter", `./${consumerPackagePath}`, "run", "typecheck"],
-          { cwd: targetDir },
-        );
-      } finally {
-        await rm(workspace, { recursive: true, force: true });
-      }
+          const consumerRoot = path.join(targetDir, consumerPackagePath);
+          await writeFile(
+            path.join(consumerRoot, "src/observe-provider.ts"),
+            [
+              'import { greet } from "@demo/provider";',
+              "",
+              'console.log(greet("Ada").message);',
+              "",
+            ].join("\n"),
+          );
+          const sourceCommand = () =>
+            execa("node", ["--conditions=source", "src/observe-provider.ts"], {
+              cwd: consumerRoot,
+            });
+
+          assert.strictEqual(
+            await sourceCommand().then(({ stdout }) => stdout),
+            "Hello, Ada",
+          );
+          const providerEntry = path.join(
+            targetDir,
+            "packages/provider/src/index.ts",
+          );
+          await writeFile(
+            providerEntry,
+            (await readFile(providerEntry, "utf8")).replace(
+              "Hello,",
+              "Source changed:",
+            ),
+          );
+          assert.strictEqual(
+            await sourceCommand().then(({ stdout }) => stdout),
+            "Source changed: Ada",
+          );
+          await execa(
+            "pnpm",
+            ["--filter", `./${consumerPackagePath}`, "run", "typecheck"],
+            { cwd: targetDir },
+          );
+        },
+      );
     },
   );
 
@@ -155,7 +138,11 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           targetRoot: targetDir,
           operations: [...plan.operations],
         });
-        await execa("pnpm", ["install"], { cwd: targetDir });
+        throwIfInstalledIntegrationWasCancelled();
+        await execa("pnpm", ["install"], {
+          cwd: targetDir,
+          cancelSignal: installedIntegrationSignal(),
+        });
         const packagePath = plan.blueprint.packages[0]!.path;
         await mkdir(path.join(targetDir, "scripts"), { recursive: true });
         await mkdir(path.join(targetDir, packagePath, "scripts"), {
@@ -287,150 +274,116 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
     "builds linked distributions in Turbo order and runs without source",
     { timeout: 180_000 },
     async () => {
-      const workspace = await mkdtemp(
-        path.join(tmpdir(), "template-ts-lib-dist-link-"),
-      );
-      const targetDir = path.join(workspace, "consumer");
-      const context = createGenerationContext({
-        targetDir,
-        defaultPackageScope: "demo",
-        toolchain: {
-          nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-            0,
-            releaseToolchainSnapshot.nodeVersion.indexOf("."),
-          ),
-          packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-        },
-      });
-      const initialization = planGeneratedRepositoryInitialization({
-        definition: tsLibDefinition,
-        context,
-      });
+      await withSharedTsLibProviderRepository(
+        "distribution-link",
+        async ({ targetDir, consumerPackagePath }) => {
+          const consumerRoot = path.join(targetDir, consumerPackagePath);
+          await writeFile(
+            path.join(consumerRoot, "src/decorate.ts"),
+            [
+              "export function decorate(message: string): string {",
+              "  return `[${message}]`;",
+              "}",
+              "",
+            ].join("\n"),
+          );
+          await writeFile(
+            path.join(consumerRoot, "src/observe-provider.ts"),
+            [
+              'import { greet } from "@demo/provider";',
+              "",
+              'import { decorate } from "#/decorate";',
+              "",
+              'console.log(decorate(greet("Ada").message));',
+              "",
+            ].join("\n"),
+          );
+          const providerEntry = path.join(
+            targetDir,
+            "packages/provider/src/index.ts",
+          );
+          await writeFile(
+            providerEntry,
+            (await readFile(providerEntry, "utf8")).replace(
+              "Hello,",
+              "Linked source:",
+            ),
+          );
+          const sourceOutput = await execa(
+            "node",
+            ["--conditions=source", "src/observe-provider.ts"],
+            { cwd: consumerRoot },
+          ).then(({ stdout }) => stdout);
+          assert.strictEqual(sourceOutput, "[Linked source: Ada]");
 
-      try {
-        await renderNewProject({
-          targetRoot: targetDir,
-          operations: [...initialization.operations],
-        });
-        const consumerPackagePath = initialization.blueprint.packages[0]!.path;
-        const addition = planGeneratedRepositoryPackageAddition({
-          definition: tsLibDefinition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
-          packageLeafName: "provider",
-          linkFrom: [consumerPackagePath],
-        });
-        await reconcileAndApplyProjectProjections({
-          targetRoot: targetDir,
-          ...addition.projectProjections,
-        });
-        await execa("pnpm", ["install"], { cwd: targetDir });
+          await assert.rejects(
+            execa(
+              "pnpm",
+              ["--filter", `./${consumerPackagePath}`, "run", "build"],
+              { cwd: targetDir },
+            ),
+          );
 
-        const consumerRoot = path.join(targetDir, consumerPackagePath);
-        await writeFile(
-          path.join(consumerRoot, "src/decorate.ts"),
-          [
-            "export function decorate(message: string): string {",
-            "  return `[${message}]`;",
-            "}",
-            "",
-          ].join("\n"),
-        );
-        await writeFile(
-          path.join(consumerRoot, "src/observe-provider.ts"),
-          [
-            'import { greet } from "@demo/provider";',
-            "",
-            'import { decorate } from "#/decorate";',
-            "",
-            'console.log(decorate(greet("Ada").message));',
-            "",
-          ].join("\n"),
-        );
-        const providerEntry = path.join(
-          targetDir,
-          "packages/provider/src/index.ts",
-        );
-        await writeFile(
-          providerEntry,
-          (await readFile(providerEntry, "utf8")).replace(
-            "Hello,",
-            "Linked source:",
-          ),
-        );
-        const sourceOutput = await execa(
-          "node",
-          ["--conditions=source", "src/observe-provider.ts"],
-          { cwd: consumerRoot },
-        ).then(({ stdout }) => stdout);
-        assert.strictEqual(sourceOutput, "[Linked source: Ada]");
-
-        await assert.rejects(
-          execa(
+          const dryRun = await execa(
             "pnpm",
-            ["--filter", `./${consumerPackagePath}`, "run", "build"],
+            ["exec", "turbo", "run", "typecheck", "build", "--dry-run=json"],
             { cwd: targetDir },
-          ),
-        );
+          );
+          const tasks = (
+            JSON.parse(dryRun.stdout) as {
+              tasks: readonly {
+                taskId: string;
+                command: string;
+                dependencies: readonly string[];
+              }[];
+            }
+          ).tasks;
+          const consumerBuild = tasks.find(
+            ({ taskId }) => taskId === "@demo/lib#build",
+          );
+          const consumerTypecheck = tasks.find(
+            ({ taskId }) => taskId === "@demo/lib#typecheck",
+          );
+          assert.ok(consumerBuild !== undefined);
+          assert.ok(consumerTypecheck !== undefined);
+          assert.ok(
+            consumerBuild.dependencies.includes("@demo/provider#build"),
+          );
+          assert.ok(
+            consumerTypecheck.dependencies.includes("@demo/provider#typecheck"),
+          );
+          assert.ok(
+            !consumerTypecheck.dependencies.includes("@demo/provider#build"),
+          );
+          assert.strictEqual(
+            consumerBuild?.command,
+            "tsc -p tsconfig.build.json --pretty false",
+          );
+          assert.doesNotMatch(consumerBuild?.command, /pnpm|turbo/u);
 
-        const dryRun = await execa(
-          "pnpm",
-          ["exec", "turbo", "run", "typecheck", "build", "--dry-run=json"],
-          { cwd: targetDir },
-        );
-        const tasks = (
-          JSON.parse(dryRun.stdout) as {
-            tasks: readonly {
-              taskId: string;
-              command: string;
-              dependencies: readonly string[];
-            }[];
-          }
-        ).tasks;
-        const consumerBuild = tasks.find(
-          ({ taskId }) => taskId === "@demo/lib#build",
-        );
-        const consumerTypecheck = tasks.find(
-          ({ taskId }) => taskId === "@demo/lib#typecheck",
-        );
-        assert.ok(consumerBuild !== undefined);
-        assert.ok(consumerTypecheck !== undefined);
-        assert.ok(consumerBuild.dependencies.includes("@demo/provider#build"));
-        assert.ok(
-          consumerTypecheck.dependencies.includes("@demo/provider#typecheck"),
-        );
-        assert.ok(
-          !consumerTypecheck.dependencies.includes("@demo/provider#build"),
-        );
-        assert.strictEqual(
-          consumerBuild?.command,
-          "tsc -p tsconfig.build.json --pretty false",
-        );
-        assert.doesNotMatch(consumerBuild?.command, /pnpm|turbo/u);
-
-        await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
-          cwd: targetDir,
-        });
-        await rm(path.join(targetDir, "packages/provider/src"), {
-          recursive: true,
-          force: true,
-        });
-        const distributionOutput = await execa(
-          "node",
-          ["dist/observe-provider.js"],
-          { cwd: consumerRoot },
-        ).then(({ stdout }) => stdout);
-        assert.strictEqual(distributionOutput, sourceOutput);
-        assert.ok(
-          (
-            await readFile(
-              path.join(targetDir, "packages/provider/dist/index.d.ts"),
-              "utf8",
-            )
-          ).includes("declare function greet"),
-        );
-      } finally {
-        await rm(workspace, { recursive: true, force: true });
-      }
+          await execa("pnpm", ["exec", "turbo", "run", "build", "--force"], {
+            cwd: targetDir,
+          });
+          await rm(path.join(targetDir, "packages/provider/src"), {
+            recursive: true,
+            force: true,
+          });
+          const distributionOutput = await execa(
+            "node",
+            ["dist/observe-provider.js"],
+            { cwd: consumerRoot },
+          ).then(({ stdout }) => stdout);
+          assert.strictEqual(distributionOutput, sourceOutput);
+          assert.ok(
+            (
+              await readFile(
+                path.join(targetDir, "packages/provider/dist/index.d.ts"),
+                "utf8",
+              )
+            ).includes("declare function greet"),
+          );
+        },
+      );
     },
   );
 
@@ -475,7 +428,11 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           },
         }),
       );
-      await execa("pnpm", ["install"], { cwd: targetDir });
+      throwIfInstalledIntegrationWasCancelled();
+      await execa("pnpm", ["install"], {
+        cwd: targetDir,
+        cancelSignal: installedIntegrationSignal(),
+      });
 
       const dryRun = await execa(
         "pnpm",
@@ -574,7 +531,11 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
           },
         }),
       );
-      await execa("pnpm", ["install"], { cwd: targetDir });
+      throwIfInstalledIntegrationWasCancelled();
+      await execa("pnpm", ["install"], {
+        cwd: targetDir,
+        cancelSignal: installedIntegrationSignal(),
+      });
 
       const dryRun = await execa(
         "pnpm",
@@ -617,6 +578,103 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         ),
         "lint-fixed",
       );
+    },
+  );
+
+  void it(
+    "retries cleanup of the shared installed provider repository after two failures",
+    { timeout: 120_000 },
+    async () => {
+      const diagnosticsRoot = await mkdtemp(
+        path.join(tmpdir(), "template-ts-lib-cleanup-diagnostics-"),
+      );
+      const diagnosticsVariable =
+        "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR" as const;
+      const priorDiagnosticsRoot = process.env[diagnosticsVariable];
+      await withSharedTsLibProviderRepository(
+        "cleanup-retry",
+        async () => undefined,
+      );
+
+      const originalRm = fsPromises.rm.bind(fsPromises);
+      let sharedWorkspace: string | undefined;
+      let failedRemovals = 0;
+      const rmMock = mock.method(
+        fsPromises,
+        "rm",
+        async (
+          target: Parameters<typeof fsPromises.rm>[0],
+          options?: Parameters<typeof fsPromises.rm>[1],
+        ) => {
+          const targetPath = path.resolve(String(target));
+          if (
+            path
+              .basename(targetPath)
+              .startsWith("template-ts-lib-provider-shared-")
+          ) {
+            sharedWorkspace = targetPath;
+            failedRemovals += 1;
+            throw new Error(
+              `shared provider removal attempt ${failedRemovals}`,
+            );
+          }
+          return await originalRm(target, options);
+        },
+      );
+      syncBuiltinESMExports();
+      process.env[diagnosticsVariable] = diagnosticsRoot;
+      let cleanupReport:
+        | {
+            readonly scenario: string;
+            readonly cause: {
+              readonly errors?: readonly { readonly message: string }[];
+            };
+          }
+        | undefined;
+      try {
+        await assert.rejects(cleanupSharedTsLibProviderRepository(), {
+          name: "AggregateError",
+        });
+        assert.strictEqual(failedRemovals, 2);
+        assert.ok(sharedWorkspace);
+        const reports = await Promise.all(
+          (await readdir(diagnosticsRoot)).map(
+            async (entry) =>
+              JSON.parse(
+                await readFile(
+                  path.join(diagnosticsRoot, entry, "failure.json"),
+                  "utf8",
+                ),
+              ) as {
+                readonly scenario: string;
+                readonly cause: {
+                  readonly errors?: readonly { readonly message: string }[];
+                };
+              },
+          ),
+        );
+        cleanupReport = reports.find(
+          (report) => report.scenario === "ts-lib-shared-provider-cleanup",
+        );
+      } finally {
+        rmMock.mock.restore();
+        syncBuiltinESMExports();
+        if (priorDiagnosticsRoot === undefined)
+          delete process.env[diagnosticsVariable];
+        else process.env[diagnosticsVariable] = priorDiagnosticsRoot;
+      }
+
+      await cleanupSharedTsLibProviderRepository();
+      await assert.rejects(stat(sharedWorkspace!), { code: "ENOENT" });
+      assert.ok(cleanupReport);
+      assert.deepStrictEqual(
+        cleanupReport.cause.errors?.map((error) => error.message),
+        [
+          "shared provider removal attempt 1",
+          "shared provider removal attempt 2",
+        ],
+      );
+      await rm(diagnosticsRoot, { recursive: true, force: true });
     },
   );
 });

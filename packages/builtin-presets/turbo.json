@@ -1,4 +1,14 @@
 {
   "extends": ["//"],
-  "tags": ["template-builtin-presets"]
+  "tags": ["template-builtin-presets"],
+  "tasks": {
+    "test:integration": {
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+        "RUSTUP_TOOLCHAIN",
+        "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR"
+      ]
+    }
+  }
 }
