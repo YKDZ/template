@@ -346,23 +346,44 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     const rootTurboConfig = JSON.parse(
       await readFile(path.join(targetDir, "turbo.json"), "utf8"),
     );
-    assert.partialDeepStrictEqual(rootTurboConfig, {
-      tasks: {
-        "@demo/web#test:e2e": {
-          dependsOn: [
-            "//#database:prepare:e2e",
-            "@demo/db#build",
-            "build",
-            "browser:prepare",
-          ],
-          cache: false,
-        },
-      },
-    });
-    assert.deepStrictEqual(
-      rootTurboConfig.tasks["@demo/web#test:e2e"].dependsOn,
-      ["//#database:prepare:e2e", "@demo/db#build", "build", "browser:prepare"],
+    assert.ok(
+      !Object.keys(rootTurboConfig.tasks).some((taskName) =>
+        taskName.startsWith("@demo/"),
+      ),
     );
+    const webTurboConfig = JSON.parse(
+      await readFile(path.join(targetDir, "apps/web/turbo.json"), "utf8"),
+    );
+    assert.deepStrictEqual(webTurboConfig.tags, ["app"]);
+    assert.partialDeepStrictEqual(webTurboConfig.tasks["test:e2e"], {
+      dependsOn: [
+        "//#database:prepare:e2e",
+        "@demo/db#build",
+        "build",
+        "browser:prepare",
+      ],
+      cache: false,
+      tags: ["quality:heavy"],
+    });
+    const databaseTurboConfig = JSON.parse(
+      await readFile(path.join(targetDir, "packages/db/turbo.json"), "utf8"),
+    );
+    assert.deepStrictEqual(databaseTurboConfig.tags, ["library"]);
+    assert.partialDeepStrictEqual(databaseTurboConfig.tasks.test, {
+      dependsOn: ["//#database:prepare:test"],
+      outputs: [],
+      tags: ["quality:light"],
+    });
+    const migrationsTurboConfig = JSON.parse(
+      await readFile(
+        path.join(targetDir, "packages/db-migrations/turbo.json"),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(migrationsTurboConfig.tags, ["library"]);
+    assert.deepStrictEqual(migrationsTurboConfig.tasks.typecheck.dependsOn, [
+      "@demo/db#build",
+    ]);
     const dockerfile = await readFile(
       path.join(targetDir, "Dockerfile"),
       "utf8",

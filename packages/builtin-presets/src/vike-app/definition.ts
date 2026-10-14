@@ -184,7 +184,6 @@ function webContribution(
     "web/test/playwright-teardown.ts",
     "web/test/e2e/app.spec.ts",
     "web/test/counter.browser.test.ts",
-    "web/turbo.json",
     "web/types/env.d.ts",
     "web/vitest.config.ts",
     "web/tsconfig.json",
@@ -200,6 +199,13 @@ function webContribution(
       multilineArrays: ["files"],
     },
     ...copyOperations(context, web.path, sourceFiles),
+    {
+      kind: "writeTextTemplate",
+      source: templateSources.vikeApp,
+      from: "web/turbo.json",
+      to: `${web.path}/turbo.json`,
+      replacements: { DATABASE_PACKAGE_NAME: db.name },
+    },
     {
       kind: "copyFile",
       source: templateSources.vue,
@@ -486,7 +492,6 @@ function migrationsContribution(
     "db-migrations/tsconfig.build.json",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/migration.sql",
     "db-migrations/drizzle/migrations/20260709120325_old_captain_flint/snapshot.json",
-    "db-migrations/turbo.json",
   ] as const;
   return {
     definition: migrations,
@@ -515,6 +520,13 @@ function migrationsContribution(
         multilineArrays: ["files"],
       },
       ...copyOperations(context, migrations.path, sourceFiles),
+      {
+        kind: "writeTextTemplate",
+        source: templateSources.vikeApp,
+        from: "db-migrations/turbo.json",
+        to: `${migrations.path}/turbo.json`,
+        replacements: { DATABASE_PACKAGE_NAME: db.name },
+      },
       {
         kind: "writeTextTemplate",
         source: templateSources.vikeApp,

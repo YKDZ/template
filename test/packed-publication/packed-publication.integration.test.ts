@@ -1103,6 +1103,7 @@ type NativeTurboTaskPlan = {
     readonly dependsOn: readonly string[];
     readonly inputs: readonly string[];
     readonly outputs: readonly string[];
+    readonly persistent?: boolean;
   };
 };
 
@@ -1162,6 +1163,7 @@ type ExpectedOwnedTask = {
   readonly dependsOn: readonly string[];
   readonly inputs: readonly string[];
   readonly outputs: readonly string[];
+  readonly persistent?: boolean;
 };
 
 type ExpectedOwnedPackage = {
@@ -1404,6 +1406,9 @@ async function expectOwnedPackageTaskContracts(
           dependsOn: expected.dependsOn,
           inputs: expected.inputs,
           outputs: expected.outputs,
+          ...(expected.persistent === undefined
+            ? {}
+            : { persistent: expected.persistent }),
         },
         `${manifest.name}#${name} 的 Turbo 有效执行定义`,
       );
@@ -1431,6 +1436,304 @@ async function expectOwnedPackageTaskContracts(
       );
     }
   }
+}
+
+async function expectVikePackageTaskContracts(
+  projectDir: string,
+  includeAddedPackage: boolean,
+): Promise<void> {
+  const packageNameAt = async (packagePath: string): Promise<string> => {
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(projectDir, packagePath, "package.json"),
+        "utf8",
+      ),
+    ) as { readonly name: string };
+    return manifest.name;
+  };
+  const webName = await packageNameAt("apps/web");
+  const databaseName = await packageNameAt("packages/db");
+  const migrationsName = await packageNameAt("packages/db-migrations");
+  const light = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: [],
+    outputs: [],
+  });
+  const repair = expectedOwnedTask("work:repair", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  });
+  const webBuild = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: ["dist/**"],
+  });
+  const webDevelopment = expectedOwnedTask("work:development", {
+    cache: false,
+    dependsOn: [`${databaseName}#build`],
+    outputs: [],
+    persistent: true,
+  });
+  const preparation = expectedOwnedTask("work:preparation", {
+    cache: false,
+    dependsOn: [],
+    outputs: [],
+  });
+  const databaseBuild = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: ["dist/**"],
+  });
+  const migrationBuild = expectedOwnedTask("quality:light", {
+    cache: true,
+    dependsOn: ["^build"],
+    outputs: [],
+  });
+  const webTasks = {
+    build: webBuild,
+    dev: webDevelopment,
+    "format:check": light,
+    "format:write": expectedOwnedTask("work:repair", {
+      cache: false,
+      dependsOn: ["lint:fix"],
+      outputs: [],
+    }),
+    lint: light,
+    "lint:fix": repair,
+    preview: expectedOwnedTask("work:development", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    start: expectedOwnedTask("work:development", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "browser:prepare": preparation,
+    test: light,
+    "test:browser": expectedOwnedTask("quality:heavy", {
+      cache: true,
+      dependsOn: ["browser:prepare"],
+      outputs: [],
+    }),
+    "test:e2e": expectedOwnedTask("quality:heavy", {
+      cache: false,
+      dependsOn: [
+        "//#database:prepare:e2e",
+        `${databaseName}#build`,
+        "browser:prepare",
+        "build",
+      ],
+      outputs: [],
+    }),
+    typecheck: expectedOwnedTask("quality:light", {
+      cache: true,
+      dependsOn: [`${databaseName}#build`],
+      outputs: [],
+    }),
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+  const databaseTasks = {
+    build: databaseBuild,
+    "db:seed:example": expectedOwnedTask("work:preparation", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "db:reset": expectedOwnedTask("work:preparation", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "format:check": light,
+    "format:write": expectedOwnedTask("work:repair", {
+      cache: false,
+      dependsOn: ["lint:fix"],
+      outputs: [],
+    }),
+    lint: light,
+    "lint:fix": repair,
+    test: expectedOwnedTask("quality:light", {
+      cache: true,
+      dependsOn: ["//#database:prepare:test"],
+      outputs: [],
+    }),
+    typecheck: expectedOwnedTask("quality:light", {
+      cache: true,
+      dependsOn: ["^typecheck"],
+      outputs: [],
+    }),
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+  const migrationsTasks = {
+    build: migrationBuild,
+    "db:generate": expectedOwnedTask("work:development", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "db:migrate": expectedOwnedTask("work:lifecycle", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "db:prepare:deploy": expectedOwnedTask("work:lifecycle", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "db:push": expectedOwnedTask("work:preparation", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "db:studio": expectedOwnedTask("work:development", {
+      cache: false,
+      dependsOn: [],
+      outputs: [],
+    }),
+    "format:check": light,
+    "format:write": expectedOwnedTask("work:repair", {
+      cache: false,
+      dependsOn: ["lint:fix"],
+      outputs: [],
+    }),
+    lint: light,
+    "lint:fix": repair,
+    typecheck: expectedOwnedTask("quality:light", {
+      cache: true,
+      dependsOn: [`${databaseName}#build`],
+      outputs: [],
+    }),
+  } satisfies Readonly<Record<string, ExpectedOwnedTask>>;
+  await expectOwnedPackageTaskContracts(projectDir, [
+    { path: "apps/web", tags: ["app"], tasks: webTasks },
+    { path: "packages/db", tags: ["library"], tasks: databaseTasks },
+    {
+      path: "packages/db-migrations",
+      tags: ["library"],
+      tasks: migrationsTasks,
+    },
+    ...(includeAddedPackage
+      ? [
+          {
+            path: "packages/archive-addition",
+            tags: ["library"],
+            tasks: tsLibOwnedTasks,
+          },
+        ]
+      : []),
+  ]);
+
+  if (!includeAddedPackage) return;
+  const taskReport = async (
+    tasks: readonly string[],
+    filter?: string,
+  ): Promise<NativeTurboDryRun> => {
+    const result = await execa(
+      "pnpm",
+      [
+        "exec",
+        "turbo",
+        "run",
+        ...tasks,
+        ...(filter === undefined ? [] : [`--filter=${filter}`]),
+        "--dry-run=json",
+      ],
+      { cwd: projectDir },
+    );
+    return JSON.parse(result.stdout) as NativeTurboDryRun;
+  };
+  const requirePlanTask = (
+    report: NativeTurboDryRun,
+    taskId: string,
+  ): NativeTurboTaskPlan => {
+    const task = report.tasks.find((candidate) => candidate.taskId === taskId);
+    assert.notStrictEqual(task, undefined, `Turbo 执行计划缺少 ${taskId}`);
+    return task!;
+  };
+  const [
+    preparationPlan,
+    databaseTestPlan,
+    webDevPlan,
+    webTypecheckPlan,
+    e2ePlan,
+    migrationTypecheckPlan,
+    deploymentPlan,
+  ] = await Promise.all([
+    taskReport([
+      "database:prepare:dev",
+      "database:prepare:test",
+      "database:prepare:e2e",
+    ]),
+    taskReport(["test"], databaseName),
+    taskReport(["dev"], webName),
+    taskReport(["typecheck"], webName),
+    taskReport(["test:e2e"], webName),
+    taskReport(["typecheck"], migrationsName),
+    taskReport(["deployment"]),
+  ]);
+  const expectedPreparationCommands = new Map([
+    [
+      "dev",
+      `DATABASE_PROFILE=dev pnpm --filter ${migrationsName} run db:push && DATABASE_PROFILE=dev pnpm --filter ${databaseName} run db:seed:example`,
+    ],
+    [
+      "test",
+      `DATABASE_PROFILE=test pnpm --filter ${databaseName} run db:reset && DATABASE_PROFILE=test pnpm --filter ${migrationsName} run db:push && DATABASE_PROFILE=test pnpm --filter ${databaseName} run db:seed:example`,
+    ],
+    [
+      "e2e",
+      `DATABASE_PROFILE=e2e pnpm --filter ${databaseName} run db:reset && DATABASE_PROFILE=e2e pnpm --filter ${migrationsName} run db:push && DATABASE_PROFILE=e2e pnpm --filter ${databaseName} run db:seed:example`,
+    ],
+  ]);
+  for (const [profile, command] of expectedPreparationCommands) {
+    const task = requirePlanTask(
+      preparationPlan,
+      `//#database:prepare:${profile}`,
+    );
+    assert.strictEqual(task.command, command);
+  }
+  assert.deepStrictEqual(
+    new Set(
+      requirePlanTask(databaseTestPlan, `${databaseName}#test`).dependencies,
+    ),
+    new Set(["//#database:prepare:test"]),
+  );
+  assert.ok(
+    requirePlanTask(webDevPlan, `${webName}#dev`).dependencies.includes(
+      `${databaseName}#build`,
+    ),
+  );
+  assert.ok(
+    requirePlanTask(
+      webTypecheckPlan,
+      `${webName}#typecheck`,
+    ).dependencies.includes(`${databaseName}#build`),
+  );
+  assert.deepStrictEqual(
+    new Set(requirePlanTask(e2ePlan, `${webName}#test:e2e`).dependencies),
+    new Set([
+      "//#database:prepare:e2e",
+      `${databaseName}#build`,
+      `${webName}#build`,
+      `${webName}#browser:prepare`,
+    ]),
+  );
+  assert.ok(
+    requirePlanTask(
+      migrationTypecheckPlan,
+      `${migrationsName}#typecheck`,
+    ).dependencies.includes(`${databaseName}#build`),
+  );
+  assert.deepStrictEqual(
+    new Set(requirePlanTask(deploymentPlan, "//#deployment").dependencies),
+    new Set([
+      `${webName}#build`,
+      `${databaseName}#build`,
+      `${migrationsName}#build`,
+    ]),
+  );
 }
 
 async function expectTypeScriptLibraryTaskOwnership(
@@ -2398,6 +2701,9 @@ void describe("packed public CLI consumer", () => {
                 passThroughEnv: rustPassThroughEnv,
               },
             ]);
+          } else if (definition.name === "vike-app") {
+            await execa("pnpm", ["install"], { cwd: generatedProject });
+            await expectVikePackageTaskContracts(generatedProject, false);
           }
           const requiresDiagnostics = initializationRequiresDiagnostics(
             definition.name,
@@ -2505,6 +2811,9 @@ void describe("packed public CLI consumer", () => {
                   passThroughEnv: rustPassThroughEnv,
                 },
               ]);
+            } else if (candidate.name === "vike-app") {
+              await execa("pnpm", ["install"], { cwd: generatedProject });
+              await expectVikePackageTaskContracts(generatedProject, true);
             }
             assert.notStrictEqual(additionPlan, undefined);
             const requiresDiagnostics =
