@@ -68,7 +68,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Inject temporary light failure
-        if: inputs.inject_light_failure
+        if: inputs.inject_light_failure || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/infra-14-measurement-harness')
         run: |
           cat > "test/infra-14-light-failure-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.light.test.ts" <<'EOF'
           import assert from "node:assert/strict";
@@ -265,3 +265,8 @@ jobs:
         with:
           path: .fixture-evidence
           key: fixture-verification-evidence-${{ runner.os }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  ticket14-browser-failures:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/codex/infra-14-measurement-harness'
+    name: Ticket 14 generated Vue diagnostics
+    uses: ./.github/workflows/infra-14-browser-diagnostics.yml

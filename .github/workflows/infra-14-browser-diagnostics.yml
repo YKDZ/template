@@ -1,18 +1,12 @@
 name: Ticket 14 browser diagnostics
 
 on:
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 jobs:
-  root-light-failure:
-    name: Final source workflow with temporary light failure
-    uses: ./.github/workflows/check.yml
-    with:
-      inject_light_failure: true
-
   vue-browser-failures:
     name: Generated Vue browser and E2E failures
     runs-on: ubuntu-24.04
