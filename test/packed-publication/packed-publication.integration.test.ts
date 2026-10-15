@@ -2132,7 +2132,9 @@ async function expectVuePackageOwnedTurboContracts(
     ],
     { cwd: vueProject },
   );
-  await execa("pnpm", ["install"], { cwd: vueProject });
+  await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+    cwd: vueProject,
+  });
   const vueLibraryName = await packageNameAt(
     vueProject,
     "packages/boundary-library",
@@ -2164,7 +2166,9 @@ async function expectVuePackageOwnedTurboContracts(
     libraryManifestPath,
     JSON.stringify(libraryManifest, null, 2) + "\n",
   );
-  await execa("pnpm", ["install"], { cwd: vueProject });
+  await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+    cwd: vueProject,
+  });
   const rejectedBoundaries = await execa("pnpm", ["run", "boundaries"], {
     cwd: vueProject,
     reject: false,
@@ -2183,7 +2187,9 @@ async function expectVuePackageOwnedTurboContracts(
     libraryManifestPath,
     JSON.stringify(libraryManifest, null, 2) + "\n",
   );
-  await execa("pnpm", ["install"], { cwd: vueProject });
+  await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+    cwd: vueProject,
+  });
   const restoredBoundaries = await execa("pnpm", ["run", "boundaries"], {
     cwd: vueProject,
     reject: false,
@@ -2797,7 +2803,7 @@ void describe("packed public CLI consumer", () => {
         const sharedLibraryAdditionPath = initialPackagePath(
           sharedLibraryAdditionDefinition,
         );
-        await execa("pnpm", ["install"], {
+        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
           cwd: sharedLibraryAdditionProject,
         });
         await expectTypeScriptLibraryTaskContracts(
@@ -2817,7 +2823,9 @@ void describe("packed public CLI consumer", () => {
           "generated",
           cliToolAdditionDefinition.metadata.name,
         );
-        await execa("pnpm", ["install"], { cwd: cliToolAdditionProject });
+        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+          cwd: cliToolAdditionProject,
+        });
         await expectOwnedPackageTaskContracts(cliToolAdditionProject, [
           {
             path: initialPackagePath(cliToolAdditionDefinition),
@@ -2841,7 +2849,7 @@ void describe("packed public CLI consumer", () => {
         const nativePackageAdditionPath = initialPackagePath(
           nativePackageAdditionDefinition,
         );
-        await execa("pnpm", ["install"], {
+        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
           cwd: nativePackageAdditionProject,
         });
         await expectOwnedPackageTaskContracts(nativePackageAdditionProject, [
@@ -3134,7 +3142,9 @@ void describe("packed public CLI consumer", () => {
           "node --conditions=source scripts/quality-gates.ts check:full",
         );
 
-        await execa("pnpm", ["install"], { cwd: rustAdditionTarget });
+        await execa("pnpm", ["install", "--no-frozen-lockfile"], {
+          cwd: rustAdditionTarget,
+        });
         await expectOwnedPackageTaskContracts(rustAdditionTarget, [
           {
             path: "packages/worker",
