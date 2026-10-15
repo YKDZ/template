@@ -3535,6 +3535,16 @@ function foundationPlan(options: {
             to: "turbo.json",
           },
         ]),
+    ...(rustToolchain === undefined
+      ? []
+      : [
+          {
+            kind: "mergeJsonTemplate" as const,
+            source: templateSources.foundation,
+            from: "turbo-projections/rust-toolchain.json",
+            to: "turbo.json",
+          },
+        ]),
     ...(publicationCandidate === undefined
       ? []
       : [

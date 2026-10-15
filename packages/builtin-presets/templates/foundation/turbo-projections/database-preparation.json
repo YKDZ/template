@@ -1,5 +1,6 @@
 {
   "tasks": {
+    "//#dev": { "tags": ["work:development"] },
     "//#database:prepare:dev": {
       "cache": false,
       "tags": ["work:preparation"]

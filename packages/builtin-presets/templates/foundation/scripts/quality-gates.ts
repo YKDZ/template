@@ -303,6 +303,12 @@ function readTaskDirectory(cwd: string): {
         executable,
       };
       if (!executable) {
+        const roles = roleTags(tags);
+        if (roles.length > 0) {
+          diagnostics.push(
+            `${fullName} 声明职责标签但没有 script 或 command：${roles.join("、")}`,
+          );
+        }
         tasks.push(taskWithoutRole);
         continue;
       }

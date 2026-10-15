@@ -284,21 +284,135 @@ void it("check runs light tasks and their native preparation dependencies", asyn
   }
 });
 
-void it("ignores a native task placeholder that has no script or command", async () => {
+void it("rejects role-tagged native task placeholders without commands", async () => {
   const root = await createWorkspace();
   try {
     const turboPath = path.join(root, "turbo.json");
     const turboConfig = JSON.parse(await readFile(turboPath, "utf8")) as {
       tasks: Record<string, unknown>;
     };
-    turboConfig.tasks["verify:placeholder"] = { tags: ["quality:unknown"] };
+    turboConfig.tasks["//#orphan-root"] = {
+      tags: ["work:preparation"],
+    };
     await writeFile(turboPath, JSON.stringify(turboConfig, null, 2));
+
+    const appTurboPath = path.join(root, "packages", "app", "turbo.json");
+    const appTurboConfig = JSON.parse(await readFile(appTurboPath, "utf8")) as {
+      tasks: Record<string, unknown>;
+    };
+    appTurboConfig.tasks["verify:placeholder"] = {
+      tags: ["quality:unknown", "work:repair"],
+    };
+    await writeFile(appTurboPath, JSON.stringify(appTurboConfig, null, 2));
 
     const result = await execa("pnpm", ["run", "check"], {
       cwd: root,
       reject: false,
     });
-    assert.equal(result.exitCode, 0, result.stderr);
+    assert.notEqual(result.exitCode, 0, result.stdout);
+    assert.match(result.stderr, /#orphan-root/u);
+    assert.match(result.stderr, /work:preparation/u);
+    assert.match(result.stderr, /@quality-gates\/app#verify:placeholder/u);
+    assert.match(result.stderr, /quality:unknown/u);
+    assert.match(result.stderr, /work:repair/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("keeps untagged task providers in the native dependency graph", async () => {
+  const root = await createWorkspace();
+  try {
+    await mkdir(path.join(root, "packages", "provider"), { recursive: true });
+    await mkdir(path.join(root, "packages", "upstream"), { recursive: true });
+
+    const appManifestPath = path.join(root, "packages", "app", "package.json");
+    const appManifest = JSON.parse(await readFile(appManifestPath, "utf8")) as {
+      dependencies?: Record<string, string>;
+    };
+    appManifest.dependencies = { "@quality-gates/provider": "workspace:*" };
+    await writeFile(appManifestPath, JSON.stringify(appManifest, null, 2));
+
+    const appTurboPath = path.join(root, "packages", "app", "turbo.json");
+    const appTurboConfig = JSON.parse(await readFile(appTurboPath, "utf8")) as {
+      tasks: Record<
+        string,
+        {
+          readonly dependsOn?: readonly string[];
+          readonly tags?: readonly string[];
+        }
+      >;
+    };
+    appTurboConfig.tasks["verify:generated"] = {
+      ...appTurboConfig.tasks["verify:generated"],
+      dependsOn: ["@quality-gates/provider#build"],
+    };
+    await writeFile(appTurboPath, JSON.stringify(appTurboConfig, null, 2));
+
+    await writeFile(
+      path.join(root, "packages", "provider", "package.json"),
+      JSON.stringify(
+        {
+          name: "@quality-gates/provider",
+          private: true,
+          dependencies: { "@quality-gates/upstream": "workspace:*" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      path.join(root, "packages", "provider", "turbo.json"),
+      JSON.stringify(
+        {
+          extends: ["//"],
+          tags: ["quality-gates-provider"],
+          tasks: { build: { dependsOn: ["^build"] } },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      path.join(root, "packages", "upstream", "package.json"),
+      JSON.stringify(
+        {
+          name: "@quality-gates/upstream",
+          private: true,
+          scripts: { build: "node ../../record.cjs provider-upstream-build" },
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      path.join(root, "packages", "upstream", "turbo.json"),
+      JSON.stringify(
+        {
+          extends: ["//"],
+          tags: ["quality-gates-upstream"],
+          tasks: {
+            build: { dependsOn: [], tags: ["work:preparation"] },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = await execa("pnpm", ["run", "check"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`);
+
+    const runs = await readRuns(root);
+    assert.ok(runs.includes("provider-upstream-build"), result.stdout);
+    assert.ok(
+      runs.indexOf("provider-upstream-build") <
+        runs.indexOf("package-custom-light"),
+      `${result.stdout}\n${result.stderr}`,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
