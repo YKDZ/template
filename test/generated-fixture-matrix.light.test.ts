@@ -65,7 +65,13 @@ void describe("registry-derived Package Addition Fixture Matrix", () => {
     );
     const projectDir = path.join(workspace, "project");
     try {
-      const definition = builtInPresetRegistry.require("ts-lib");
+      const definition = builtInPresetRegistry
+        .all()
+        .find(
+          (candidate) =>
+            candidate.initialPrimaryPackage?.role === "shared-library",
+        );
+      assert.ok(definition, "必须存在带共享库主包能力的预设");
       const nodeVersion = releaseToolchainSnapshot.nodeVersion;
       const plan = planGeneratedRepositoryInitialization({
         definition,
