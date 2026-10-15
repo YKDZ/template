@@ -39,6 +39,17 @@ function taskScript(gate: string): string {
   return `node record.cjs ${gate}`;
 }
 
+function workspaceProcessOptions(root: string) {
+  return {
+    cwd: root,
+    env: {
+      ...process.env,
+      TURBO_CACHE_DIR: path.join(root, ".turbo", "cache"),
+      TURBO_CACHE: "local:rw",
+    },
+  };
+}
+
 async function readRuns(root: string): Promise<string[]> {
   try {
     return (await readFile(path.join(root, "runs.log"), "utf8"))
@@ -285,7 +296,7 @@ for (const entry of gateEntries) {
         const result = await execa(
           "node",
           ["--conditions=source", entry.scriptPath, ...args],
-          { cwd: root, reject: false },
+          { ...workspaceProcessOptions(root), reject: false },
         );
         assert.equal(result.exitCode, 2, result.stderr);
         assert.equal(
@@ -308,7 +319,7 @@ for (const entry of gateEntries) {
       const light = await execa(
         "node",
         ["--conditions=source", entry.scriptPath, "check"],
-        { cwd: root, reject: false },
+        { ...workspaceProcessOptions(root), reject: false },
       );
       assert.equal(light.exitCode, 0, light.stderr);
       assert.ok((await readRuns(root)).includes("root-light"));
@@ -317,7 +328,7 @@ for (const entry of gateEntries) {
       const heavy = await execa(
         "node",
         ["--conditions=source", entry.scriptPath, "check:heavy"],
-        { cwd: root, reject: false },
+        { ...workspaceProcessOptions(root), reject: false },
       );
       assert.equal(heavy.exitCode, 1, heavy.stderr);
       assert.ok((await readRuns(root)).includes("root-heavy-failure"));
@@ -331,7 +342,7 @@ void it("check runs light tasks and their native preparation dependencies", asyn
   const root = await createWorkspace();
   try {
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -377,7 +388,7 @@ void it("拒绝无命令节点上的悬空职责标签", async () => {
     await writeFile(appTurboPath, JSON.stringify(appTurboConfig, null, 2));
 
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0, result.stdout);
@@ -471,7 +482,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
     );
 
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, `${result.stdout}\n${result.stderr}`);
@@ -492,7 +503,7 @@ void it("check:heavy runs heavy verification tasks without light tasks", async (
   const root = await createWorkspace();
   try {
     const result = await execa("pnpm", ["run", "check:heavy"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -512,7 +523,7 @@ void it("check:full runs the light layer before the heavy layer", async () => {
   const root = await createWorkspace();
   try {
     const result = await execa("pnpm", ["run", "check:full"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -548,7 +559,7 @@ void it("does not start the heavy layer after a light task fails", async () => {
   const root = await createWorkspace({ failRootLight: true });
   try {
     const result = await execa("pnpm", ["run", "check:full"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -570,7 +581,7 @@ async function verifyFullGateCancellation(
   const child = spawn(
     "node",
     ["--experimental-strip-types", taskGatesPath, "check:full"],
-    { cwd: root, stdio: "pipe" },
+    { ...workspaceProcessOptions(root), stdio: "pipe" },
   );
   const childOutput: string[] = [];
   child.stdout?.on("data", (chunk: Buffer) =>
@@ -664,7 +675,7 @@ void it("continues independent heavy tasks after one task fails", async () => {
   const root = await createWorkspace({ failRootHeavy: true });
   try {
     const result = await execa("pnpm", ["run", "check:heavy"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -690,7 +701,7 @@ void it("rejects a light task whose native dependency closure includes heavy ver
     await writeFile(packageTurboPath, JSON.stringify(packageTurbo, null, 2));
 
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -707,7 +718,7 @@ void it("preflights with closures and does not run light work when heavy include
   const root = await createWorkspace({ withConditionalHeavyTask: true });
   try {
     const result = await execa("pnpm", ["run", "check:full"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -724,7 +735,7 @@ void it("reports conditional tasks as unexecuted when ordinary checks exclude th
   const root = await createWorkspace({ reportConditionalTask: true });
   try {
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -744,7 +755,7 @@ void it("runs quality-tagged native command tasks without package scripts", asyn
   const root = await createWorkspace({ commandOnlyTask: true });
   try {
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -763,7 +774,7 @@ void it("rejects custom check-family tasks assigned to a work role before execut
   const root = await createWorkspace({ invalidCheckCustom: true });
   try {
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -781,7 +792,7 @@ void it("rejects custom test-family tasks assigned to a work role before executi
   try {
     await addRootTask(root, "test:custom", ["work:repair"]);
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -800,7 +811,7 @@ for (const name of ["lint", "typecheck", "format:check"]) {
     try {
       await addRootTask(root, name, ["work:repair"]);
       const result = await execa("pnpm", ["run", "check"], {
-        cwd: root,
+        ...workspaceProcessOptions(root),
         reject: false,
       });
 
@@ -824,7 +835,7 @@ void it("拒绝仅新增在根 manifest 中的无职责 script", async () => {
     manifest.scripts["verify:unclassified"] = taskScript("unclassified");
     await writeFile(manifestPath, JSON.stringify(manifest));
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -842,7 +853,7 @@ void it("rejects an executable root task with an unknown role", async () => {
   try {
     await addRootTask(root, "verify:unknown", ["quality:unknown"]);
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -866,7 +877,7 @@ void it("rejects an executable root task with conflicting roles", async () => {
       "work:repair",
     ]);
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -891,7 +902,7 @@ void it("拒绝清除所属任务职责的包任务", async () => {
     packageTurbo.tasks["verify:generated"] = { ...generatedTask, tags: [] };
     await writeFile(packageTurboPath, JSON.stringify(packageTurbo, null, 2));
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -912,7 +923,7 @@ void it("limits quality:entry to the three public root gate tasks", async () => 
   try {
     await addRootTask(root, "verify:entry", ["quality:entry"]);
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
 
@@ -959,7 +970,7 @@ void it("fix 按职责发现异名修复任务，并保留必要轻检查与准�
     await writeFile(packageTurboPath, JSON.stringify(packageTurbo));
 
     const result = await execa("pnpm", ["run", "fix"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -1000,7 +1011,7 @@ void it("fix 拒绝仅新增在 manifest 的无职责 script，包标签不能�
     await writeFile(turboPath, JSON.stringify(turbo));
 
     const result = await execa("pnpm", ["run", "fix"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -1028,7 +1039,7 @@ void it("允许任意附加标签和显式按需任务，叶任务仍可直接�
       "custom-label",
     ]);
     const check = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(check.exitCode, 0, check.stderr);
@@ -1037,7 +1048,7 @@ void it("允许任意附加标签和显式按需任务，叶任务仍可直接�
     assert.ok(!runs.includes("inspect:cache"));
 
     const direct = await execa("pnpm", ["run", "inspect:cache"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(direct.exitCode, 0, direct.stderr);
@@ -1060,7 +1071,7 @@ void it("有职责的无命令聚合节点可以通过原生图承载实际工�
     };
     await writeFile(turboPath, JSON.stringify(turbo));
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.equal(result.exitCode, 0, result.stderr);
@@ -1084,7 +1095,7 @@ void it("无命令聚合节点的职责也必须符合入口闭包", async () =>
     turbo.tasks["//#format:check"]!.dependsOn = ["release:aggregate"];
     await writeFile(turboPath, JSON.stringify(turbo));
     const result = await execa("pnpm", ["run", "check"], {
-      cwd: root,
+      ...workspaceProcessOptions(root),
       reject: false,
     });
     assert.notEqual(result.exitCode, 0);
@@ -1122,7 +1133,7 @@ for (const [gate, role] of [
       turbo.tasks["//#entry:custom"]!.dependsOn = ["dependency:custom"];
       await writeFile(turboPath, JSON.stringify(turbo));
       const result = await execa("pnpm", ["run", gate], {
-        cwd: root,
+        ...workspaceProcessOptions(root),
         reject: false,
       });
       assert.notEqual(result.exitCode, 0);
@@ -1145,7 +1156,7 @@ for (const entry of ["check", "fix"]) {
       turbo.tasks["//#format:check"]!.dependsOn = [entry];
       await writeFile(turboPath, JSON.stringify(turbo));
       const result = await execa("pnpm", ["run", "check"], {
-        cwd: root,
+        ...workspaceProcessOptions(root),
         reject: false,
       });
       assert.notEqual(result.exitCode, 0);
@@ -1186,7 +1197,7 @@ for (const mutation of ["missing", "script", "command", "role"] as const) {
       await writeFile(manifestPath, JSON.stringify(manifest));
       await writeFile(turboPath, JSON.stringify(turbo));
       const result = await execa("node", ["scripts/task-gates.ts", "fix"], {
-        cwd: root,
+        ...workspaceProcessOptions(root),
         reject: false,
       });
       assert.notEqual(result.exitCode, 0);
@@ -1225,7 +1236,7 @@ void it("轻检查为空失败，重验收和修复为空则明确跳过", async
     }
     for (const gate of ["check", "check:full", "check:heavy", "fix"]) {
       const result = await execa("pnpm", ["run", gate], {
-        cwd: root,
+        ...workspaceProcessOptions(root),
         reject: false,
       });
       if (gate === "check" || gate === "check:full") {
