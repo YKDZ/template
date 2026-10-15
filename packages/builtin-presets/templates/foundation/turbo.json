@@ -5,17 +5,8 @@
     "//#check": { "tags": ["quality:entry"] },
     "//#check:heavy": { "tags": ["quality:entry"] },
     "//#check:full": { "tags": ["quality:entry"] },
-    "//#deployment": { "tags": ["quality:heavy"] },
     "//#boundaries": { "tags": ["quality:light"] },
     "//#fix": { "tags": ["work:repair"] },
-    "//#test:e2e": { "tags": ["quality:heavy"] },
-    "//#dev": { "tags": ["work:development"] },
-    "//#database:prepare:dev": { "cache": false, "tags": ["work:preparation"] },
-    "//#database:prepare:test": {
-      "cache": false,
-      "tags": ["work:preparation"]
-    },
-    "//#database:prepare:e2e": { "cache": false, "tags": ["work:preparation"] },
     "//#format:check": { "outputs": [], "tags": ["quality:light"] },
     "//#lint": { "outputs": [], "tags": ["quality:light"] },
     "//#format:write": {
@@ -24,7 +15,6 @@
       "tags": ["work:repair"]
     },
     "//#lint:fix": { "cache": false, "tags": ["work:repair"] },
-    "//#toolchain:prepare": { "cache": false, "tags": ["work:preparation"] },
     "//#typecheck": { "outputs": [], "tags": ["quality:light"] }
   }
 }

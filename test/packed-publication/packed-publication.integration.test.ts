@@ -25,7 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   builtInPresetRegistry,
@@ -46,6 +46,7 @@ import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
 const publicCliPackageName = ["@ykdz", "template"].join("/");
+const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 const journeyDiagnosticsRoot =
   process.env.TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR ?? tmpdir();
 const packedDiagnosticExclusions = new Set([
@@ -1030,11 +1031,12 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   const manifest = JSON.parse(
     await readFile(path.join(projectDir, "package.json"), "utf8"),
   ) as { readonly scripts: Record<string, string> };
+  const rootTurbo = JSON.parse(
+    await readFile(path.join(projectDir, "turbo.json"), "utf8"),
+  ) as { readonly tasks: Readonly<Record<string, unknown>> };
   const taskModel = JSON.stringify({
     scripts: manifest.scripts,
-    turbo: JSON.parse(
-      await readFile(path.join(projectDir, "turbo.json"), "utf8"),
-    ),
+    turbo: rootTurbo,
   });
   const checkCommand = manifest.scripts.check;
   if (checkCommand === undefined) {
@@ -1063,6 +1065,53 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   assert.doesNotMatch(taskModel, /Deployment Check Component/u);
   assert.doesNotMatch(taskModel, /deployment[\s-]*(?:task[\s-]*)?owner/iu);
 
+  const rootTaskNames = Object.keys(rootTurbo.tasks)
+    .filter((name) => name.startsWith("//#"))
+    .map((name) => name.slice(3))
+    .toSorted();
+  assert.ok(rootTaskNames.length > 0, "生成根包应拥有自己的 Turbo 任务");
+  assert.deepStrictEqual(
+    rootTaskNames,
+    Object.keys(manifest.scripts).toSorted(),
+    "生成根 Turbo 任务应与根 manifest 命令闭合",
+  );
+
+  const nativeDirectory = await runExeca(
+    turboExecutablePath,
+    ["query", packageOwnedTaskQuery],
+    { cwd: projectDir },
+  );
+  const nativePackages = (
+    JSON.parse(nativeDirectory.stdout) as {
+      readonly data: {
+        readonly packages: { readonly items: readonly NativeTurboPackage[] };
+      };
+    }
+  ).data.packages.items;
+  const rootPackage = nativePackages.find((pkg) => pkg.name === "//");
+  assert.notStrictEqual(rootPackage, undefined, "Turbo 应发现生成根包");
+  for (const nativePackage of nativePackages) {
+    if (nativePackage.name !== "//") {
+      assert.ok(
+        nativePackage.tags.length > 0,
+        `${nativePackage.name} 应保留包边界标签归属`,
+      );
+    }
+    for (const task of nativePackage.tasks.items) {
+      const roles = task.tags.filter(
+        (tag) => tag.startsWith("quality:") || tag.startsWith("work:"),
+      );
+      const executable =
+        (task.script !== null && task.script.trim().length > 0) ||
+        (task.command !== null && task.command.trim().length > 0);
+      assert.equal(
+        roles.length,
+        executable ? 1 : 0,
+        `${task.fullName} 应仅在有命令时声明唯一职责标签`,
+      );
+    }
+  }
+
   const fullTree = await generatedTextFiles(projectDir);
   for (const file of fullTree) {
     assert.doesNotMatch(file.source, /\b[\p{L}\p{N}_-]+:(?:run|root)\b/iu);
@@ -1090,6 +1139,7 @@ type NativeTurboPackage = {
       readonly fullName: string;
       readonly tags: readonly string[];
       readonly script: string | null;
+      readonly command: string | null;
     }[];
   };
 };
@@ -1121,7 +1171,7 @@ type NativeTurboDryRun = {
 };
 
 const packageOwnedTaskQuery =
-  "{ packages { items { name tags tasks { items { name fullName tags script } } } } }";
+  "{ packages { items { name tags tasks { items { name fullName tags script command } } } } }";
 
 async function expectTypeScriptLibraryTaskContracts(
   projectDir: string,

@@ -5,8 +5,7 @@
     "build": {
       "dependsOn": ["^build"],
       "inputs": [],
-      "outputs": [],
-      "tags": ["quality:light"]
+      "outputs": []
     },
     "format:check": {
       "inputs": [],
@@ -23,14 +22,12 @@
     "lint:fix": {
       "inputs": [],
       "outputs": [],
-      "cache": false,
-      "tags": ["work:repair"]
+      "cache": false
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": [],
-      "outputs": [],
-      "tags": ["quality:light"]
+      "outputs": []
     }
   }
 }
