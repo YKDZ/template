@@ -70,6 +70,14 @@ export function normalizedGeneratedRootQualityPlan(
     readonly deploymentContractIdentity?: string;
   } = {},
 ): unknown {
+  const qualityTaskIds = expectedTaskIds({
+    plan,
+    taskNames: qualityTaskNames,
+  }).toSorted();
+  const fixTaskIds =
+    options.includeFix === true
+      ? expectedTaskIds({ plan, taskNames: fixTaskNames }).toSorted()
+      : [];
   return {
     gate: "generated-root-quality",
     ...(options.deploymentContractIdentity === undefined
@@ -79,10 +87,8 @@ export function normalizedGeneratedRootQualityPlan(
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     taskDiscovery: {
       command: "pnpm",
-      args: ["exec", "turbo", "run", ...qualityTaskNames, "--dry-run=json"],
-      expectedTaskIds: [
-        ...expectedTaskIds({ plan, taskNames: qualityTaskNames }),
-      ].sort(),
+      args: ["exec", "turbo", "run", ...qualityTaskIds, "--dry-run=json"],
+      expectedTaskIds: [...qualityTaskIds],
     },
     developmentContainer: {
       lockfileWrites: false,
@@ -98,10 +104,8 @@ export function normalizedGeneratedRootQualityPlan(
         ? {
             taskDiscovery: {
               command: "pnpm",
-              args: ["exec", "turbo", "run", ...fixTaskNames, "--dry-run=json"],
-              expectedTaskIds: [
-                ...expectedTaskIds({ plan, taskNames: fixTaskNames }),
-              ].sort(),
+              args: ["exec", "turbo", "run", ...fixTaskIds, "--dry-run=json"],
+              expectedTaskIds: [...fixTaskIds],
             },
             command: "pnpm",
             args: ["run", "fix"],
@@ -150,9 +154,10 @@ export async function assertGeneratedTaskDiscovery(options: {
   readonly taskNames: readonly string[];
   readonly run: FixtureCommandRunner;
 }): Promise<void> {
+  const expected = expectedTaskIds(options).toSorted();
   const result = await options.run(
     "pnpm",
-    ["exec", "turbo", "run", ...options.taskNames, "--dry-run=json"],
+    ["exec", "turbo", "run", ...expected, "--dry-run=json"],
     { cwd: options.projectDir },
   );
   let taskIds: Set<string>;
@@ -172,9 +177,7 @@ export async function assertGeneratedTaskDiscovery(options: {
       { cause: error },
     );
   }
-  const missing = expectedTaskIds(options).filter(
-    (taskId) => !taskIds.has(taskId),
-  );
+  const missing = expected.filter((taskId) => !taskIds.has(taskId));
   if (missing.length > 0) {
     throw new Error(
       `Turbo dry-run omitted generated task(s): ${missing.join(", ")}`,
