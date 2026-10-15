@@ -284,7 +284,7 @@ void it("check runs light tasks and their native preparation dependencies", asyn
   }
 });
 
-void it("rejects role-tagged native task placeholders without commands", async () => {
+void it("拒绝无命令节点上的悬空职责标签", async () => {
   const root = await createWorkspace();
   try {
     const turboPath = path.join(root, "turbo.json");
@@ -320,7 +320,7 @@ void it("rejects role-tagged native task placeholders without commands", async (
   }
 });
 
-void it("keeps untagged task providers in the native dependency graph", async () => {
+void it("保留无职责中转节点的原生依赖遍历", async () => {
   const root = await createWorkspace();
   try {
     await mkdir(path.join(root, "packages", "provider"), { recursive: true });
