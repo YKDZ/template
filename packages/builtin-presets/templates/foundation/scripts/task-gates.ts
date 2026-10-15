@@ -60,6 +60,7 @@ const publicGateNames = new Set<TaskGate>([
   "fix",
 ]);
 
+const defaultEntryCommand = "node --conditions=source scripts/task-gates.ts";
 const maxTurboOutputBytes = 16 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -461,7 +462,7 @@ function layersFor(gate: TaskGate): readonly GateLayer[] {
 export async function runTaskGate(
   gate: TaskGate,
   cwd = process.cwd(),
-  entryCommand = "node --conditions=source scripts/task-gates.ts",
+  entryCommand = defaultEntryCommand,
 ): Promise<number> {
   if (!publicGateNames.has(gate)) {
     report(`未知公共任务入口：${String(gate)}`);
@@ -558,32 +559,38 @@ export async function runTaskGate(
   return 0;
 }
 
+export async function runTaskGateCli(
+  entryCommand = defaultEntryCommand,
+): Promise<void> {
+  const [gate, ...extraArguments] = process.argv.slice(2);
+  if (
+    gate === undefined ||
+    !publicGateNames.has(gate as TaskGate) ||
+    extraArguments.length > 0
+  ) {
+    report(`用法：${entryCommand} <check|check:heavy|check:full|fix>`);
+    process.exitCode = 2;
+    return;
+  }
+
+  try {
+    process.exitCode = await runTaskGate(
+      gate as TaskGate,
+      process.cwd(),
+      entryCommand,
+    );
+  } catch (error) {
+    report(
+      `公共任务入口失败：${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 const mainFile = process.argv[1];
 if (
   mainFile !== undefined &&
   pathToFileURL(resolve(mainFile)).href === import.meta.url
 ) {
-  const gate = process.argv[2];
-  if (
-    gate !== "check" &&
-    gate !== "check:heavy" &&
-    gate !== "check:full" &&
-    gate !== "fix"
-  ) {
-    report(
-      "用法：node scripts/task-gates.ts <check|check:heavy|check:full|fix>",
-    );
-    process.exitCode = 2;
-  } else {
-    void runTaskGate(gate)
-      .then((status) => {
-        process.exitCode = status;
-      })
-      .catch((error: unknown) => {
-        report(
-          `公共任务入口失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-        process.exitCode = 1;
-      });
-  }
+  void runTaskGateCli();
 }

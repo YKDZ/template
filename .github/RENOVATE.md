@@ -10,7 +10,7 @@
 - `rust-toolchain`：根 `rust-toolchain.toml`
 - `cargo`：`Cargo.toml` / `Cargo.lock`
 - `github-actions`：仓库自身 `.github/workflows/`、Foundation 嵌套工作流模板，以及 `packages/builtin-presets/templates/ts-cli/publication/release.yml` 发布模板
-- `dockerfile`：`FROM` 镜像；其中 `.devcontainer/Dockerfile` 的 node 镜像是根 `engines.node` 的静态投影，禁止机器人单独更新，由 `scripts/check-template-toolchain-versions.ts` 漂移门约束
+- `dockerfile`：`FROM` 镜像；其中 `.devcontainer/Dockerfile` 的 node 镜像是根 `engines.node` 的静态投影，禁止机器人单独更新，由 `check:repository:config` 漂移门约束
 
 ## 审核语义
 
@@ -19,7 +19,7 @@
 
 ## 工具链更新顺序
 
-根 Node、pnpm、Rust 原生声明更新后，维护者在同一更新 PR 中执行 `pnpm run sync:toolchain`，同步 CLI 的 Node 范围、开发容器 Node 镜像与发版工具链静态快照。也可用当前兼容 Node 直接执行 `node scripts/sync-template-toolchain.ts`，无需先安装目标 pnpm 或 Rust。
+根 Node、pnpm、Rust 原生声明更新后，维护者在同一更新 PR 中执行 `pnpm run sync:repository`，统一同步 CLI 的 Node 范围、发版工具链静态快照、自用开发容器和编辑器配置。也可用当前兼容 Node 直接执行 `node --conditions=source scripts/sync-repository-config.ts`，无需先安装目标 pnpm 或 Rust。
 
 同步完成后再准备目标工具链与依赖，运行根 `pnpm check` 并审阅变更。同步命令只处理本地已知副本，检查继续只读报告漂移与实际运行版本不符。
 

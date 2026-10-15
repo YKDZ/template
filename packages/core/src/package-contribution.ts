@@ -44,7 +44,6 @@ export type FoundationContribution = {
       readonly controlScript: FoundationTemplateAssetSource;
       readonly dockerfile: FoundationTemplateAssetSource;
       readonly dockerIgnore: FoundationTemplateAssetSource;
-      readonly shellCheckDockerfile: FoundationTemplateAssetSource;
     };
   };
   /** Closed publication capability consumed only by coordinated root policy. */

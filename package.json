@@ -8,7 +8,6 @@
     "check": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
     "check:heavy": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
     "check:full": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:full",
-    "sync:toolchain": "node --conditions=source scripts/sync-template-toolchain.ts",
     "boundaries": "node --conditions=source --experimental-strip-types scripts/run-turbo-boundaries.ts",
     "check:toolchain:versions": "node --conditions=source scripts/check-template-toolchain-versions.ts",
     "fix": "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts fix",
@@ -19,9 +18,13 @@
     "test": "node --conditions=source --experimental-strip-types --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types scripts/run-root-integration.ts",
     "test:packed-publication": "node --conditions=source --experimental-strip-types scripts/run-packed-publication-test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "sync:repository": "node --conditions=source scripts/sync-repository-config.ts",
+    "check:repository:config": "node --conditions=source scripts/sync-repository-config.ts --check",
+    "check:development-container": "node --conditions=source scripts/check-repository-development-container.ts"
   },
   "devDependencies": {
+    "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
     "@ykdz/template-builtin-presets": "workspace:*",
     "@ykdz/template-checks": "workspace:*",

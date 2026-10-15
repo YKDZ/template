@@ -1,30 +1,22 @@
 {
-  "editor.defaultFormatter": "oxc.oxc-vscode",
-  "oxc.fmt.configPath": "oxfmt.config.ts",
-  "oxc.trace.server": "messages",
-  "oxc.enable.oxfmt": true,
-  "oxc.enable.oxlint": true,
-  "editor.formatOnSave": true,
-  "editor.formatOnPaste": true,
   "editor.codeActionsOnSave": {
     "source.format.oxc": "always",
-    "source.fixAll": "always"
+    "source.fixAll.oxc": "always"
   },
-  "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "editor.formatOnPaste": true,
+  "editor.formatOnSave": true,
+  "editor.formatOnSaveMode": "file",
+  "oxc.configPath": "./oxlint.config.ts",
+  "oxc.enable": true,
+  "oxc.fmt.configPath": "./oxfmt.config.ts",
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.procMacro.enable": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
-  "[vue]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[markdown]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "chat.disableAIFeatures": false,
-  "markdown.validate.enabled": false
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml"
+  }
 }

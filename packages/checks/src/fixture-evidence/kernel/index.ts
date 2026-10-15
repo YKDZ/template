@@ -436,6 +436,12 @@ export async function deriveDevelopmentContainerBuildIdentity(options: {
 export function createDevelopmentContainerFixtureSession(options: {
   readonly projectDir: string;
   readonly probes: readonly DevelopmentContainerFixtureProbe[];
+  readonly dependencyPreparation?: "generated-lockfile" | "existing-lockfile";
+  readonly workspaceMount?: {
+    readonly source: string;
+    readonly target: string;
+  };
+  readonly ownedVolumePrefix?: string;
   readonly cancelSignal?: AbortSignal;
   readonly commandTimeoutMilliseconds?: number;
   readonly cleanupTimeoutMilliseconds?: number;
@@ -668,6 +674,7 @@ export function createDevelopmentContainerFixtureSession(options: {
       }
     }
   };
+  const sessionOwnedVolumes = new Set<string>();
   const createDependencyCacheOverride = async (): Promise<
     | {
         readonly path: string;
@@ -697,7 +704,12 @@ export function createDevelopmentContainerFixtureSession(options: {
             },
           ]),
     ];
-    if (configuredMounts.length === 0) return undefined;
+    if (
+      configuredMounts.length === 0 &&
+      options.ownedVolumePrefix === undefined &&
+      options.workspaceMount === undefined
+    )
+      return undefined;
 
     const generatedConfig = JSON.parse(
       await readFile(config, "utf8"),
@@ -718,7 +730,12 @@ export function createDevelopmentContainerFixtureSession(options: {
     const mounts = configuredMounts
       .filter(({ target }) => generatedTargets.has(target))
       .map(({ source, target }) => ({ type: "bind", source, target }));
-    if (mounts.length === 0) return undefined;
+    if (
+      mounts.length === 0 &&
+      options.ownedVolumePrefix === undefined &&
+      options.workspaceMount === undefined
+    )
+      return undefined;
     const caches = [
       ...(mounts.some(
         ({ target }) => target === developmentContainerSharedPnpmStore,
@@ -748,17 +765,49 @@ export function createDevelopmentContainerFixtureSession(options: {
     const mountsByTarget = new Map(
       mounts.map((mount) => [mount.target, mount] as const),
     );
-    const mergedMounts = generatedMounts.map((mount) =>
-      typeof mount === "object" &&
-      mount !== null &&
-      "target" in mount &&
-      typeof mount.target === "string"
-        ? (mountsByTarget.get(mount.target) ?? mount)
-        : mount,
-    );
+    const mergedMounts = generatedMounts.map((mount) => {
+      if (
+        typeof mount !== "object" ||
+        mount === null ||
+        !("target" in mount) ||
+        typeof mount.target !== "string"
+      )
+        return mount;
+      const replacement = mountsByTarget.get(mount.target);
+      if (replacement !== undefined) return replacement;
+      if (
+        options.ownedVolumePrefix !== undefined &&
+        "type" in mount &&
+        mount.type === "volume" &&
+        "source" in mount &&
+        typeof mount.source === "string" &&
+        mount.source.includes("${devcontainerId}")
+      ) {
+        const source = mount.source.replaceAll(
+          "${devcontainerId}",
+          options.ownedVolumePrefix,
+        );
+        sessionOwnedVolumes.add(source);
+        return { ...mount, source };
+      }
+      return mount;
+    });
     await writeFile(
       overridePath,
-      `${JSON.stringify({ ...generatedConfig, mounts: mergedMounts }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          ...generatedConfig,
+          mounts: mergedMounts,
+          ...(options.workspaceMount === undefined
+            ? {}
+            : {
+                workspaceMount: `type=bind,source=${options.workspaceMount.source},target=${options.workspaceMount.target}`,
+                workspaceFolder: options.workspaceMount.target,
+              }),
+        },
+        null,
+        2,
+      )}\n`,
       { flag: "wx" },
     );
     return { path: overridePath, caches };
@@ -904,6 +953,9 @@ export function createDevelopmentContainerFixtureSession(options: {
               ? []
               : ["--override-config", dependencyCacheOverridePath]),
             "--no-lockfile",
+            ...(options.dependencyPreparation === "existing-lockfile"
+              ? ["--skip-post-create"]
+              : []),
             ...identityArgs,
             ...buildCacheArgs,
           ],
@@ -967,8 +1019,19 @@ export function createDevelopmentContainerFixtureSession(options: {
     let dependencyFailureClassification: FixtureExternalFailureClassification =
       "not-retryable";
     try {
+      if (options.dependencyPreparation === "existing-lockfile") {
+        await exec("git", [
+          "config",
+          "--global",
+          "--add",
+          "safe.directory",
+          options.workspaceMount?.target ??
+            `/workspaces/${path.basename(options.projectDir)}`,
+        ]);
+      }
       for (const command of fixtureDependencyInstallationPlan(
         developmentContainerSharedPnpmStore,
+        options.dependencyPreparation,
       ).commands) {
         try {
           const install = async () => await exec(command.command, command.args);
@@ -1125,7 +1188,42 @@ export function createDevelopmentContainerFixtureSession(options: {
         cleanupErrors.push(error);
       }
     }
-    for (const volume of options.ownedVolumes ?? []) {
+    const ownedVolumes = new Set(options.ownedVolumes ?? []);
+    if (sessionOwnedVolumes.size > 0) {
+      try {
+        const result = await run(
+          "docker",
+          [
+            "volume",
+            "ls",
+            "--filter",
+            `name=${options.ownedVolumePrefix}`,
+            "--format",
+            "{{.Name}}",
+          ],
+          {
+            cwd: options.projectDir,
+            cancelSignal: cleanupSignal,
+            timeout:
+              options.cleanupTimeoutMilliseconds ??
+              fixtureCleanupTimeoutMilliseconds,
+          },
+        );
+        if (
+          typeof result === "object" &&
+          result !== null &&
+          "stdout" in result &&
+          typeof result.stdout === "string"
+        ) {
+          for (const volume of result.stdout.trim().split(/\s+/u)) {
+            if (sessionOwnedVolumes.has(volume)) ownedVolumes.add(volume);
+          }
+        }
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    for (const volume of ownedVolumes) {
       if (removedOwnedVolumes.has(volume)) continue;
       try {
         await run("docker", ["volume", "rm", volume], {
@@ -1811,7 +1909,21 @@ export type FixtureDependencyInstallationPlan = {
 
 export function fixtureDependencyInstallationPlan(
   storeDir: string,
+  preparation:
+    | "generated-lockfile"
+    | "existing-lockfile" = "generated-lockfile",
 ): FixtureDependencyInstallationPlan {
+  if (preparation === "existing-lockfile") {
+    return {
+      storeDir,
+      commands: [
+        {
+          command: "pnpm",
+          args: ["install", "--frozen-lockfile", "--store-dir", storeDir],
+        },
+      ],
+    };
+  }
   return {
     storeDir,
     commands: [

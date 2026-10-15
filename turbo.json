@@ -135,10 +135,6 @@
       "cache": false,
       "outputs": []
     },
-    "//#sync:toolchain": {
-      "tags": ["work:preparation"],
-      "cache": false
-    },
     "//#boundaries": {
       "tags": ["quality:light"],
       "cache": false,
@@ -151,6 +147,20 @@
     "//#build": {
       "tags": ["work:preparation"],
       "cache": false
+    },
+    "//#sync:repository": {
+      "tags": ["work:preparation"],
+      "cache": false
+    },
+    "//#check:repository:config": {
+      "tags": ["quality:light"],
+      "cache": false,
+      "outputs": []
+    },
+    "//#check:development-container": {
+      "tags": ["quality:heavy"],
+      "cache": false,
+      "outputs": []
     }
   }
 }

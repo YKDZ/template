@@ -55,6 +55,155 @@ function nestedDevcontainerCommand(args: readonly string[]): {
 }
 
 void describe("Development Container Fixture Executor", () => {
+  void it("用测试卷与宿主工作区挂载启动，并仅清理本次创建的卷", async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), "source-mounts-"));
+    const calls: Command[] = [];
+    let actualConfig: unknown;
+    await mkdir(path.join(projectDir, ".devcontainer"));
+    const config = {
+      mounts: [
+        {
+          type: "volume",
+          source: "${devcontainerId}-pnpm-store",
+          target: "/pnpm/store",
+        },
+        { type: "volume", source: "developer-cache", target: "/shared" },
+      ],
+    };
+    await writeFile(
+      path.join(projectDir, ".devcontainer/devcontainer.json"),
+      JSON.stringify(config),
+    );
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      ownedVolumePrefix: "source-test-owned",
+      workspaceMount: {
+        source: "/host/source-test",
+        target: "/workspaces/source-test",
+      },
+      run: async (command, args, options) => {
+        calls.push({ command, args, cwd: options.cwd });
+        if (command === "devcontainer" && args[0] === "up") {
+          actualConfig = JSON.parse(
+            await readFile(
+              args[args.indexOf("--override-config") + 1]!,
+              "utf8",
+            ),
+          );
+        }
+        if (command === "docker" && args[0] === "volume" && args[1] === "ls") {
+          return {
+            stdout:
+              "source-test-owned-pnpm-store\nsource-test-owned-other-run\ndeveloper-cache\n",
+          };
+        }
+        return {};
+      },
+    });
+    try {
+      await session.execute(async () => await session.prepare());
+      assert.deepStrictEqual(actualConfig, {
+        workspaceMount:
+          "type=bind,source=/host/source-test,target=/workspaces/source-test",
+        workspaceFolder: "/workspaces/source-test",
+        mounts: [
+          {
+            type: "volume",
+            source: "source-test-owned-pnpm-store",
+            target: "/pnpm/store",
+          },
+          { type: "volume", source: "developer-cache", target: "/shared" },
+        ],
+      });
+      assert.deepStrictEqual(
+        JSON.parse(
+          await readFile(
+            path.join(projectDir, ".devcontainer/devcontainer.json"),
+            "utf8",
+          ),
+        ),
+        config,
+      );
+      assert.deepStrictEqual(
+        calls
+          .filter(
+            ({ command, args }) =>
+              command === "docker" && args[0] === "volume" && args[1] === "rm",
+          )
+          .map(({ args }) => args),
+        [["volume", "rm", "source-test-owned-pnpm-store"]],
+      );
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  void it("冻结现有源码锁文件并在失败后清理自己的容器", async () => {
+    const projectDir = "/fixture/source-repository";
+    const calls: Command[] = [];
+    const session = createDevelopmentContainerFixtureSession({
+      projectDir,
+      probes: [],
+      dependencyPreparation: "existing-lockfile",
+      run: async (command, args, options) => {
+        calls.push({ command, args, cwd: options.cwd });
+        if (command === "docker" && args[0] === "ps") {
+          return { stdout: "owned-source-container\n" };
+        }
+        if (command === "devcontainer" && args[0] === "exec") {
+          const nested = nestedDevcontainerCommand(args);
+          if (nested.command === "pnpm" && nested.args[0] === "install") {
+            assert.ok(
+              calls.some((call) => {
+                if (call.command !== "devcontainer" || call.args[0] !== "exec")
+                  return false;
+                const preparation = nestedDevcontainerCommand(call.args);
+                return (
+                  preparation.command === "git" &&
+                  preparation.args.join(" ") ===
+                    "config --global --add safe.directory /workspaces/source-repository"
+                );
+              }),
+              "冻结安装前应让容器内 Git 信任宿主属主的精确源码工作区",
+            );
+            assert.deepStrictEqual(nested.args, [
+              "install",
+              "--frozen-lockfile",
+              "--store-dir",
+              "/pnpm/store",
+            ]);
+            throw new Error("锁文件与 manifest 不一致");
+          }
+        }
+        return {};
+      },
+    });
+
+    await assert.rejects(
+      session.execute(
+        async (run) => await run("pnpm", ["run", "check"], { cwd: projectDir }),
+      ),
+      /Dependency preparation failed.*锁文件与 manifest 不一致/u,
+    );
+    assert.ok(
+      calls.some(
+        ({ command, args }) =>
+          command === "devcontainer" &&
+          args[0] === "up" &&
+          args.includes("--skip-post-create"),
+      ),
+    );
+    assert.ok(
+      calls.some(
+        ({ command, args }) =>
+          command === "docker" &&
+          args.join(" ") === "rm -f owned-source-container",
+      ),
+    );
+    assert.ok(!calls.some(({ args }) => args.includes("check")));
+  });
+
   void it("normalizes equivalent final Development Container build inputs", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "fixture-build-identity-"));
     const first = path.join(root, "first");

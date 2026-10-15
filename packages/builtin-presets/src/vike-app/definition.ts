@@ -357,10 +357,6 @@ function webContribution(
             source: templateSources.vikeApp,
             from: "web/Dockerfile.dockerignore",
           },
-          shellCheckDockerfile: {
-            source: templateSources.vikeApp,
-            from: "devcontainer/shellcheck.Dockerfile",
-          },
         },
       },
       developmentContainerToolLayers: [

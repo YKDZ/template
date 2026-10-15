@@ -114,9 +114,6 @@ jobs:
       - name: Prepare shell checks
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: Prepare browser checks
-        run: pnpm --filter @ykdz/template-builtin-presets exec playwright install --with-deps chromium
-
       - name: Check heavy gate
         if: always() && steps.package-check.outcome == 'success'
         run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy

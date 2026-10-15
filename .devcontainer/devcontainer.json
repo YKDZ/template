@@ -2,7 +2,11 @@
   "name": "Template",
   "build": {
     "dockerfile": "Dockerfile",
-    "context": ".."
+    "args": {
+      "NODE_VERSION": "24.21.0",
+      "RUST_TOOLCHAIN": "1.99.0",
+      "PACKAGE_MANAGER_PIN": "pnpm@12.9.1"
+    }
   },
   "features": {
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
@@ -10,17 +14,25 @@
   "customizations": {
     "vscode": {
       "extensions": [
+        "oxc.oxc-vscode",
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "fill-labs.dependi",
-        "oxc.oxc-vscode",
-        "vitest.explorer"
+        "fill-labs.dependi"
       ],
       "settings": {
+        "editor.codeActionsOnSave": {
+          "source.format.oxc": "always",
+          "source.fixAll.oxc": "always"
+        },
+        "editor.defaultFormatter": "oxc.oxc-vscode",
+        "editor.formatOnPaste": true,
         "editor.formatOnSave": true,
         "editor.formatOnSaveMode": "file",
-        "rust-analyzer.check.command": "clippy",
+        "oxc.configPath": "./oxlint.config.ts",
+        "oxc.enable": true,
+        "oxc.fmt.configPath": "./oxfmt.config.ts",
         "rust-analyzer.cargo.features": "all",
+        "rust-analyzer.check.command": "clippy",
         "rust-analyzer.procMacro.enable": true,
         "[rust]": {
           "editor.defaultFormatter": "rust-lang.rust-analyzer"
@@ -41,12 +53,29 @@
     "RUST_BACKTRACE": "1"
   },
   "postCreateCommand": {
-    "installNodeDependencies": "pnpm install"
+    "installNodeDependencies": "pnpm install --frozen-lockfile"
   },
   "remoteUser": "root",
   "mounts": [
-    "source=agen-cargo-registry,target=/usr/local/cargo/registry,type=volume",
-    "source=agen-cargo-git,target=/usr/local/cargo/git,type=volume",
-    "source=agen-target,target=${containerWorkspaceFolder}/target,type=volume"
+    {
+      "type": "volume",
+      "source": "${devcontainerId}-pnpm-store",
+      "target": "/pnpm/store"
+    },
+    {
+      "type": "volume",
+      "source": "${devcontainerId}-cargo-git",
+      "target": "/usr/local/cargo/git"
+    },
+    {
+      "type": "volume",
+      "source": "${devcontainerId}-cargo-registry",
+      "target": "/usr/local/cargo/registry"
+    },
+    {
+      "type": "volume",
+      "source": "${devcontainerId}-target",
+      "target": "${containerWorkspaceFolder}/target"
+    }
   ]
 }

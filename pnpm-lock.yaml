@@ -303,6 +303,9 @@ importers:
 
   .:
     devDependencies:
+      '@devcontainers/cli':
+        specifier: 'catalog:'
+        version: 0.89.0
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.1

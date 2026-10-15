@@ -107,7 +107,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
       path.resolve(
         import.meta.dirname,
-        "../../templates/vike-app/devcontainer/shellcheck.Dockerfile",
+        "../../templates/shared/devcontainer/shellcheck.Dockerfile",
       ),
     );
   });
@@ -137,8 +137,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             (fragment) => fragment.from === "browser-test.Dockerfile",
           ) &&
           operation.fragments.some(
-            (fragment) =>
-              fragment.from === "devcontainer/shellcheck.Dockerfile",
+            (fragment) => fragment.from === "shellcheck.Dockerfile",
           ),
       ),
     );

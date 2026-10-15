@@ -318,14 +318,6 @@ void describe("Foundation Development Container composition", () => {
         }
         if (contribution.foundation.deploymentCheck !== undefined) {
           assert.ok(!layerIdentities.has("shellcheck"));
-          assert.partialDeepStrictEqual(
-            contribution.foundation.deploymentCheck.sources,
-            {
-              shellCheckDockerfile: {
-                from: "devcontainer/shellcheck.Dockerfile",
-              },
-            },
-          );
         }
       }
     }

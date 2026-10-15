@@ -10,6 +10,7 @@ import {
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 
+import { rustDevelopmentContainerToolLayer } from "../shared/development-container.ts";
 import { templateSources } from "../template-sources.ts";
 
 function packagePathForLeaf(packageLeafName: string): string {
@@ -143,33 +144,7 @@ function rustContribution(options: {
         interval: "weekly",
       },
       developmentContainerToolLayers: [
-        {
-          identity: "rust",
-          dockerfile: {
-            source: templateSources.rustBin,
-            from: "devcontainer/rust.Dockerfile",
-          },
-          requires: ["node-pnpm"],
-          buildArguments: [{ name: "RUST_TOOLCHAIN", value: rustChannel }],
-          mounts: [
-            {
-              identity: "cargo-registry",
-              type: "volume",
-              source: "${devcontainerId}-cargo-registry",
-              target: "/usr/local/cargo/registry",
-            },
-            {
-              identity: "cargo-git",
-              type: "volume",
-              source: "${devcontainerId}-cargo-git",
-              target: "/usr/local/cargo/git",
-            },
-          ],
-          probes: [
-            { identity: "cargo", command: "cargo", args: ["--version"] },
-            { identity: "rustc", command: "rustc", args: ["--version"] },
-          ],
-        },
+        rustDevelopmentContainerToolLayer(rustChannel),
       ],
     },
   };

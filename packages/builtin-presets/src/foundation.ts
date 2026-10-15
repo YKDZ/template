@@ -11,17 +11,12 @@ import {
   selectTemplateDependencyCatalogEntries,
 } from "@ykdz/template-core/dependency-catalog";
 import {
-  planDevelopmentContainerToolLayersSync,
   type DevelopmentContainerToolLayer,
   type DevelopmentContainerToolLayerBuildArgument,
   type DevelopmentContainerToolLayerMount,
   type DevelopmentContainerToolLayerProbe,
   type PlannedDevelopmentContainerToolLayer,
 } from "@ykdz/template-core/development-container-tool-layer";
-import {
-  editorCustomizationForCapabilities,
-  loadEditorCustomizationDeclarations,
-} from "@ykdz/template-core/editor-customization";
 import type {
   CheckEnvironmentNeed,
   DeploymentEnvironmentNeed,
@@ -94,7 +89,11 @@ import {
   type GenerationRecord,
 } from "./generation-record.ts";
 import { rustBinDefinition } from "./rust-bin/definition.ts";
-import { githubCliDevelopmentContainerToolLayer } from "./shared/development-container.ts";
+import {
+  builtInEditorCustomization,
+  planBuiltInDevelopmentContainer,
+  shellCheckDevelopmentContainerToolLayer,
+} from "./shared/development-container.ts";
 import {
   typescriptConfigContribution,
   typescriptConfigPackageDefinition,
@@ -1246,65 +1245,9 @@ function contributedDevcontainerComposition(options: {
   readonly mounts: readonly DevelopmentContainerToolLayerMount[];
   readonly probes: readonly DevelopmentContainerToolLayerProbe[];
 } {
-  const layerPlan = planDevelopmentContainerToolLayersSync({
-    baseLayer: {
-      identity: "node-pnpm",
-      dockerfile: {
-        source: templateSources.foundation,
-        from: "devcontainer/base.Dockerfile",
-      },
-      buildArguments: [
-        {
-          name: "NODE_VERSION",
-          // 根 Node 声明原文是 M1 槽位唯一来源；major 与快照字段不得另作真源。
-          value: options.rootNodeDeclaration,
-        },
-      ],
-      probes: [
-        { identity: "procps", command: "ps", args: ["--version"] },
-        { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
-        {
-          identity: "awk",
-          command: "awk",
-          args: ["BEGIN { exit (6 * 7 != 42) }"],
-        },
-        { identity: "ripgrep", command: "rg", args: ["--version"] },
-        {
-          identity: "jq",
-          command: "jq",
-          args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
-        },
-        {
-          identity: "python3",
-          command: "python3",
-          args: [
-            "-c",
-            'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
-          ],
-        },
-        {
-          identity: "python",
-          command: "python",
-          args: [
-            "-c",
-            'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
-          ],
-        },
-        { identity: "openssh-client", command: "ssh", args: ["-V"] },
-        { identity: "unzip", command: "unzip", args: ["-v"] },
-        { identity: "file", command: "file", args: ["--version"] },
-        { identity: "iproute2", command: "ss", args: ["--version"] },
-      ],
-      mounts: [
-        {
-          identity: "pnpm-store",
-          type: "volume",
-          source: "${devcontainerId}-pnpm-store",
-          target: "/pnpm/store",
-        },
-      ],
-    },
-    layers: [githubCliDevelopmentContainerToolLayer(), ...options.layers],
+  const layerPlan = planBuiltInDevelopmentContainer({
+    nodeVersion: options.rootNodeDeclaration,
+    layers: options.layers,
   });
 
   return {
@@ -1340,12 +1283,7 @@ function contributedDevcontainerComposition(options: {
               }),
         },
       },
-      {
-        kind: "writeTextFromFragments",
-        to: ".devcontainer/Dockerfile",
-        validation: "development-container-dockerfile",
-        fragments: layerPlan.layers.map((layer) => layer.dockerfile),
-      },
+      layerPlan.dockerfileOperation,
     ],
     mountIdentitySet: {
       location: "/mounts",
@@ -1371,30 +1309,7 @@ function contributedDevcontainerComposition(options: {
     toolLayers: layerPlan.layers,
     buildArguments: layerPlan.buildArguments,
     mounts: layerPlan.mounts,
-    probes: [
-      ...layerPlan.probes,
-      {
-        identity: "docker-daemon",
-        command: "docker",
-        args: ["version"],
-        failureMessage:
-          "无法连接宿主 Docker；请检查宿主 daemon 是否运行，以及开发容器 Feature 的连接配置与权限。",
-      },
-      {
-        identity: "docker-buildx",
-        command: "docker",
-        args: ["buildx", "version"],
-        failureMessage:
-          "Buildx 不可用；请重建开发容器以完成官方 Feature 安装。",
-      },
-      {
-        identity: "docker-compose",
-        command: "docker",
-        args: ["compose", "version"],
-        failureMessage:
-          "Compose 不可用；请重建开发容器以完成官方 Feature 安装。",
-      },
-    ],
+    probes: layerPlan.probes,
   };
 }
 
@@ -2707,20 +2622,7 @@ function deploymentCheckDevelopmentContainerToolLayers(
   deploymentCheck: DeploymentCheck | undefined,
 ): readonly DevelopmentContainerToolLayer[] {
   if (deploymentCheck === undefined) return [];
-  return [
-    {
-      identity: "shellcheck",
-      dockerfile: deploymentCheck.sources.shellCheckDockerfile,
-      requires: ["node-pnpm"],
-      probes: [
-        {
-          identity: "shellcheck",
-          command: "shellcheck",
-          args: ["--version"],
-        },
-      ],
-    },
-  ];
+  return [shellCheckDevelopmentContainerToolLayer()];
 }
 
 type RustToolchain = NonNullable<
@@ -3206,15 +3108,9 @@ function foundationPlan(options: {
         .filter((glob) => glob !== "apps/*" && glob !== "packages/*"),
     ]),
   ];
-  const editorCustomization = editorCustomizationForCapabilities(
+  const editorCustomization = builtInEditorCustomization(
     contributions.flatMap(
       (contribution) => contribution.foundation.editorCapabilities,
-    ),
-    loadEditorCustomizationDeclarations(
-      resolveTemplateSource(
-        templateSources.editorCustomization,
-        "capabilities.json",
-      ),
     ),
   );
   const dependencyMaintenancePolicy = composeDependencyMaintenancePolicy(

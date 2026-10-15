@@ -19,6 +19,21 @@ const taskGatesPath = fileURLToPath(
   import.meta.resolve("@ykdz/template-builtin-presets/task-gates"),
 );
 const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
+const gateEntries = [
+  {
+    label: "模板直接入口",
+    scriptPath: taskGatesPath,
+    command: "node --conditions=source scripts/task-gates.ts",
+  },
+  {
+    label: "源码包装入口",
+    scriptPath: fileURLToPath(
+      new URL("../scripts/run-task-gate.ts", import.meta.url),
+    ),
+    command:
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts",
+  },
+];
 
 function taskScript(gate: string): string {
   return `node record.cjs ${gate}`;
@@ -45,6 +60,7 @@ async function readRuns(root: string): Promise<string[]> {
 
 async function createWorkspace(
   options: {
+    readonly entryCommand?: string;
     readonly invalidCheckCustom?: boolean;
     readonly commandOnlyTask?: boolean;
     readonly failRootLight?: boolean;
@@ -54,6 +70,8 @@ async function createWorkspace(
     readonly reportConditionalTask?: boolean;
   } = {},
 ): Promise<string> {
+  const entryCommand =
+    options.entryCommand ?? "node --conditions=source scripts/task-gates.ts";
   const root = await mkdtemp(path.join(os.tmpdir(), "template-task-gates-"));
   await mkdir(path.join(root, "packages", "app"), { recursive: true });
   await mkdir(path.join(root, "scripts"));
@@ -70,11 +88,9 @@ async function createWorkspace(
         type: "module",
         packageManager: "pnpm@12.9.1",
         scripts: {
-          check: "node --conditions=source scripts/task-gates.ts check",
-          "check:heavy":
-            "node --conditions=source scripts/task-gates.ts check:heavy",
-          "check:full":
-            "node --conditions=source scripts/task-gates.ts check:full",
+          check: `${entryCommand} check`,
+          "check:heavy": `${entryCommand} check:heavy`,
+          "check:full": `${entryCommand} check:full`,
           "format:check": taskScript(
             options.failRootLight === true
               ? "root-light-failure"
@@ -90,7 +106,7 @@ async function createWorkspace(
               : "root-heavy",
           ),
           "verify:generated": taskScript("root-custom-light"),
-          fix: "node --conditions=source scripts/task-gates.ts fix",
+          fix: `${entryCommand} fix`,
           dev: taskScript("root-dev"),
           publish: taskScript("root-release"),
           ...(options.invalidCheckCustom === true
@@ -259,6 +275,56 @@ async function addRootTask(
   };
   turboConfig.tasks[`//#${name}`] = { tags };
   await writeFile(turboPath, JSON.stringify(turboConfig, null, 2));
+}
+
+for (const entry of gateEntries) {
+  void it(`${entry.label} 拒绝缺失、未知及多余参数且不执行任务`, async () => {
+    const root = await createWorkspace({ entryCommand: entry.command });
+    try {
+      for (const args of [[], ["unknown"], ["check", "unexpected"]]) {
+        const result = await execa(
+          "node",
+          ["--conditions=source", entry.scriptPath, ...args],
+          { cwd: root, reject: false },
+        );
+        assert.equal(result.exitCode, 2, result.stderr);
+        assert.equal(
+          result.stderr,
+          `用法：${entry.command} <check|check:heavy|check:full|fix>`,
+        );
+        assert.deepEqual(await readRuns(root), []);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  void it(`${entry.label} 按公共范围执行并传递任务退出状态`, async () => {
+    const root = await createWorkspace({
+      entryCommand: entry.command,
+      failRootHeavy: true,
+    });
+    try {
+      const light = await execa(
+        "node",
+        ["--conditions=source", entry.scriptPath, "check"],
+        { cwd: root, reject: false },
+      );
+      assert.equal(light.exitCode, 0, light.stderr);
+      assert.ok((await readRuns(root)).includes("root-light"));
+      assert.ok(!(await readRuns(root)).includes("root-heavy-failure"));
+
+      const heavy = await execa(
+        "node",
+        ["--conditions=source", entry.scriptPath, "check:heavy"],
+        { cwd: root, reject: false },
+      );
+      assert.equal(heavy.exitCode, 1, heavy.stderr);
+      assert.ok((await readRuns(root)).includes("root-heavy-failure"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 }
 
 void it("check runs light tasks and their native preparation dependencies", async () => {

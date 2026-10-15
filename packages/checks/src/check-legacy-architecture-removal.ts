@@ -56,8 +56,6 @@ const retiredDevelopmentContainerPaths = [
   "packages/core/src/devcontainer.ts",
   "packages/builtin-presets/templates/foundation/rust",
   "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
-  "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
-  "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
 ] as const;
 
 const retiredDevelopmentContainerSymbols = new Set([

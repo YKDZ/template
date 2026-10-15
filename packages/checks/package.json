@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./development-container-session": {
+      "source": "./src/development-container-session.ts",
+      "types": "./dist/development-container-session.d.ts",
+      "default": "./dist/development-container-session.js"
+    },
     "./check-generated-registry": null,
     "./workflow-contract": {
       "source": "./src/workflow-contract.ts",

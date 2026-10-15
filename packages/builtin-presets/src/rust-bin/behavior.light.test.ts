@@ -289,14 +289,14 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     assert.strictEqual(layer?.requires?.length, 1);
     assert.strictEqual(layer?.buildArguments?.length, 1);
     assert.strictEqual(layer?.mounts?.length, 2);
-    assert.strictEqual(layer?.probes?.length, 2);
+    assert.strictEqual(layer?.probes?.length, 4);
     assert.strictEqual(layer?.probes?.[0]?.args?.length, 1);
     assert.strictEqual(layer?.probes?.[1]?.args?.length, 1);
     assert.strictEqual(
       resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
       path.resolve(
         import.meta.dirname,
-        "../../templates/rust-bin/devcontainer/rust.Dockerfile",
+        "../../templates/shared/devcontainer/rust.Dockerfile",
       ),
     );
   });

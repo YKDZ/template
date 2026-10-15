@@ -16,6 +16,11 @@
       "types": "./dist/src/index.d.ts",
       "default": "./dist/src/index.js"
     },
+    "./development-environment": {
+      "source": "./src/shared/development-container.ts",
+      "types": "./dist/src/shared/development-container.d.ts",
+      "default": "./dist/src/shared/development-container.js"
+    },
     "./task-gates": {
       "source": "./templates/foundation/scripts/task-gates.ts",
       "types": "./templates/foundation/scripts/task-gates.ts",

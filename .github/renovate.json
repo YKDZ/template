@@ -26,7 +26,7 @@
       "dependencyDashboardApproval": true
     },
     {
-      "description": "`.devcontainer/Dockerfile` 的 node 基础镜像是根 engines.node 的静态投影，由 scripts/check-template-toolchain-versions.ts 漂移门约束，禁止机器人单独更新造成第二真源。",
+      "description": "`.devcontainer/Dockerfile` 的 node 基础镜像是根 engines.node 的静态投影，由 check:repository:config 漂移门约束，禁止机器人单独更新造成第二真源。",
       "matchManagers": ["dockerfile"],
       "matchPackageNames": ["node"],
       "enabled": false

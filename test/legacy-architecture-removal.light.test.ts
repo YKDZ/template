@@ -509,13 +509,6 @@ void describe("Legacy Architecture Removal Check", () => {
           ),
           { recursive: true },
         ),
-        mkdir(
-          path.join(
-            root,
-            "packages/builtin-presets/templates/shared/devcontainer",
-          ),
-          { recursive: true },
-        ),
         mkdir(path.join(root, "packages/checks/src"), { recursive: true }),
       ]);
       await Promise.all([
@@ -547,20 +540,6 @@ void describe("Legacy Architecture Removal Check", () => {
             "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
           ),
           "{}\n",
-        ),
-        writeFile(
-          path.join(
-            root,
-            "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
-          ),
-          "RUN apt-get update && apt-get install -y shellcheck\n",
-        ),
-        writeFile(
-          path.join(
-            root,
-            "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
-          ),
-          "RUN rustup toolchain install stable\n",
         ),
         writeFile(
           path.join(root, "packages/checks/src/check-generated-registry.ts"),
@@ -598,14 +577,6 @@ void describe("Legacy Architecture Removal Check", () => {
         [
           "retired-development-container-path",
           "packages/builtin-presets/templates/rust-bin/devcontainer/devcontainer.json",
-        ],
-        [
-          "retired-development-container-path",
-          "packages/builtin-presets/templates/shared/devcontainer/shellcheck.Dockerfile",
-        ],
-        [
-          "retired-development-container-path",
-          "packages/builtin-presets/templates/shared/devcontainer/rust.Dockerfile",
         ],
         [
           "host-prepared-fixture-execution",
