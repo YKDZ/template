@@ -550,11 +550,11 @@ void describe("vue-hono-app Built-in Preset Definition behavior", () => {
           "check:full": replayedRootManifest.scripts["check:full"],
         },
         {
-          check: "node --conditions=source scripts/quality-gates.ts check",
+          check: "node --conditions=source scripts/task-gates.ts check",
           "check:heavy":
-            "node --conditions=source scripts/quality-gates.ts check:heavy",
+            "node --conditions=source scripts/task-gates.ts check:heavy",
           "check:full":
-            "node --conditions=source scripts/quality-gates.ts check:full",
+            "node --conditions=source scripts/task-gates.ts check:full",
         },
       );
       const replayedTurbo = JSON.parse(await readFile(turboPath, "utf8")) as {

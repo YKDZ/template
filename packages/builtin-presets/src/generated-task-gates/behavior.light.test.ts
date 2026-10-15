@@ -74,8 +74,8 @@ async function assertProcessExited(pid: number): Promise<void> {
   assert.fail(`进程 ${pid} 未退出`);
 }
 
-void describe("generated quality gate entrypoints", () => {
-  void it("projects all three public gates for every initialization preset", async () => {
+void describe("生成任务公共入口", () => {
+  void it("为每个初始化预设投影四个公共入口", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "template-gates-"));
 
     try {
@@ -112,13 +112,15 @@ void describe("generated quality gate entrypoints", () => {
             check: rootManifest.scripts.check,
             "check:heavy": rootManifest.scripts["check:heavy"],
             "check:full": rootManifest.scripts["check:full"],
+            fix: rootManifest.scripts.fix,
           },
           {
-            check: "node --conditions=source scripts/quality-gates.ts check",
+            check: "node --conditions=source scripts/task-gates.ts check",
             "check:heavy":
-              "node --conditions=source scripts/quality-gates.ts check:heavy",
+              "node --conditions=source scripts/task-gates.ts check:heavy",
             "check:full":
-              "node --conditions=source scripts/quality-gates.ts check:full",
+              "node --conditions=source scripts/task-gates.ts check:full",
+            fix: "node --conditions=source scripts/task-gates.ts fix",
           },
         );
 
@@ -127,6 +129,7 @@ void describe("generated quality gate entrypoints", () => {
             "quality:entry",
           ]);
         }
+        assert.deepStrictEqual(turbo.tasks["//#fix"]?.tags, ["work:repair"]);
       }
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -169,13 +172,15 @@ void describe("generated quality gate entrypoints", () => {
           check: rootManifest.scripts.check,
           "check:heavy": rootManifest.scripts["check:heavy"],
           "check:full": rootManifest.scripts["check:full"],
+          fix: rootManifest.scripts.fix,
         },
         {
-          check: "node --conditions=source scripts/quality-gates.ts check",
+          check: "node --conditions=source scripts/task-gates.ts check",
           "check:heavy":
-            "node --conditions=source scripts/quality-gates.ts check:heavy",
+            "node --conditions=source scripts/task-gates.ts check:heavy",
           "check:full":
-            "node --conditions=source scripts/quality-gates.ts check:full",
+            "node --conditions=source scripts/task-gates.ts check:full",
+          fix: "node --conditions=source scripts/task-gates.ts fix",
         },
       );
       await writeFile(

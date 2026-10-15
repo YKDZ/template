@@ -245,36 +245,6 @@ export function dockerEngineEnvironmentNeed(): DockerEngineEnvironmentNeed {
   return { kind: "docker-engine" };
 }
 
-export function renderTurboRunCommand(
-  taskNames: readonly string[],
-  args: readonly string[] = [],
-  options: {
-    readonly outputLogs?: "errors-only" | "full";
-    readonly continueAfterFailure?: boolean;
-    readonly taskPrefix?: boolean;
-  } = {},
-): string {
-  return [
-    "turbo run",
-    ...taskNames,
-    ...args,
-    ...(options.continueAfterFailure
-      ? ["--continue=dependencies-successful"]
-      : []),
-    `--output-logs=${options.outputLogs ?? "errors-only"}`,
-    "--log-order=grouped",
-    ...(options.taskPrefix ? ["--log-prefix=task"] : []),
-  ].join(" ");
-}
-
-export function renderFixCommand(): string {
-  return renderTurboRunCommand(["lint:fix", "format:write"], [], {
-    continueAfterFailure: true,
-    outputLogs: "full",
-    taskPrefix: true,
-  });
-}
-
 export function playwrightBrowserAssetsEnvironmentNeed(options: {
   readonly browser: "chromium";
   readonly owner: ComponentOwner;

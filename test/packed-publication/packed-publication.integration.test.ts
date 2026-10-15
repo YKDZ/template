@@ -1044,15 +1044,20 @@ async function expectNativeTaskModel(projectDir: string): Promise<void> {
   }
   assert.strictEqual(
     checkCommand,
-    "node --conditions=source scripts/quality-gates.ts check",
+    "node --conditions=source scripts/task-gates.ts check",
   );
   assert.strictEqual(
     manifest.scripts["check:heavy"],
-    "node --conditions=source scripts/quality-gates.ts check:heavy",
+    "node --conditions=source scripts/task-gates.ts check:heavy",
   );
   assert.strictEqual(
     manifest.scripts["check:full"],
-    "node --conditions=source scripts/quality-gates.ts check:full",
+    "node --conditions=source scripts/task-gates.ts check:full",
+  );
+
+  assert.strictEqual(
+    manifest.scripts.fix,
+    "node --conditions=source scripts/task-gates.ts fix",
   );
 
   const scriptNames = Object.keys(manifest.scripts);
@@ -3181,15 +3186,15 @@ void describe("packed public CLI consumer", () => {
         const rootCheckScript = rootManifestAfterRust.scripts.check;
         assert.strictEqual(
           rootCheckScript,
-          "node --conditions=source scripts/quality-gates.ts check",
+          "node --conditions=source scripts/task-gates.ts check",
         );
         assert.strictEqual(
           rootManifestAfterRust.scripts["check:heavy"],
-          "node --conditions=source scripts/quality-gates.ts check:heavy",
+          "node --conditions=source scripts/task-gates.ts check:heavy",
         );
         assert.strictEqual(
           rootManifestAfterRust.scripts["check:full"],
-          "node --conditions=source scripts/quality-gates.ts check:full",
+          "node --conditions=source scripts/task-gates.ts check:full",
         );
 
         await execa("pnpm", ["install", "--no-frozen-lockfile"], {

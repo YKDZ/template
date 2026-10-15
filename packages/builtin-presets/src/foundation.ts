@@ -31,7 +31,6 @@ import {
   normalizeEnvironmentNeeds,
   parseEnvironmentNeedsMetadata,
   playwrightBrowserAssetsEnvironmentNeed,
-  renderFixCommand,
   shellCheckEnvironmentNeed,
 } from "@ykdz/template-core/module-graph";
 import {
@@ -3236,11 +3235,10 @@ function foundationPlan(options: {
           },
         }),
     scripts: {
-      check: "node --conditions=source scripts/quality-gates.ts check",
+      check: "node --conditions=source scripts/task-gates.ts check",
       "check:heavy":
-        "node --conditions=source scripts/quality-gates.ts check:heavy",
-      "check:full":
-        "node --conditions=source scripts/quality-gates.ts check:full",
+        "node --conditions=source scripts/task-gates.ts check:heavy",
+      "check:full": "node --conditions=source scripts/task-gates.ts check:full",
       // Cargo 会在首次代理调用时按根 rust-toolchain.toml 安装版本与组件；先经唯一根任务完成解析，再并行运行各 Rust 包的 Cargo 检查。
       ...(rustToolchain === undefined
         ? {}
@@ -3265,7 +3263,7 @@ function foundationPlan(options: {
               "node --conditions=source scripts/check-standalone-deployment.ts",
           }),
       ...(rootOwnedE2e ? { "test:e2e": "playwright test" } : {}),
-      fix: renderFixCommand(),
+      fix: "node --conditions=source scripts/task-gates.ts fix",
       "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
       "format:write": `oxfmt --write --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
       lint:
@@ -3581,8 +3579,8 @@ function foundationPlan(options: {
     {
       kind: "copyFile",
       source: templateSources.foundation,
-      from: "scripts/quality-gates.ts",
-      to: "scripts/quality-gates.ts",
+      from: "scripts/task-gates.ts",
+      to: "scripts/task-gates.ts",
     },
     {
       kind: "copyFile",

@@ -23,7 +23,7 @@ const runtimeToolchain = {
   nodeVersion: releaseToolchainSnapshot.nodeVersion,
 };
 
-void describe("generated quality gate entrypoints", () => {
+void describe("生成任务公共入口", () => {
   void it(
     "rejects a native Cargo zero-test result when build warnings contain test-summary text",
     { timeout: 180_000 },

@@ -11,137 +11,18 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
-import {
-  assertGeneratedTaskDiscovery,
-  runGeneratedScenarioSet,
-} from "../packages/checks/src/check-generated-registry.ts";
+import { runGeneratedScenarioSet } from "../packages/checks/src/check-generated-registry.ts";
 import { executeFocusedPackageLink } from "../packages/checks/src/fixture-evidence/gates/focused-package-link/index.ts";
 import { fixtureDependencyInstallationPlan } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 void describe("registry-derived Package Addition Fixture Matrix", () => {
   type GeneratedDevelopmentContainerConfig = {
     build: { args: Record<string, string> };
     mounts: Record<string, unknown>[];
   };
-
-  const definition = builtInPresetRegistry.all()[0]!;
-  const plan = planGeneratedRepositoryInitialization({
-    definition,
-    context: createGenerationContext({
-      targetDir: path.join("generated-repository", "fixture-dry-run"),
-      defaultPackageScope: "fixture",
-      toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-    }),
-  });
-
-  void it("fails the matrix when Turbo dry-run omits a generated task despite a successful command", async () => {
-    await assert.rejects(
-      assertGeneratedTaskDiscovery({
-        plan,
-        projectDir: "/tmp/generated-fixture-matrix",
-        taskNames: ["lint", "typecheck"],
-        run: async () => ({ stdout: JSON.stringify({ tasks: [] }) }),
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes("Turbo dry-run omitted generated task(s)"),
-    );
-  });
-
-  void it("只预检生成预设实际拥有的质量与修复任务", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "generated-task-discovery-native-"),
-    );
-    const projectDir = path.join(workspace, "project");
-    try {
-      const definition = builtInPresetRegistry
-        .all()
-        .find(
-          (candidate) =>
-            candidate.initialPrimaryPackage?.role === "shared-library",
-        );
-      assert.ok(definition, "必须存在带共享库主包能力的预设");
-      const nodeVersion = releaseToolchainSnapshot.nodeVersion;
-      const plan = planGeneratedRepositoryInitialization({
-        definition,
-        context: createGenerationContext({
-          targetDir: projectDir,
-          defaultPackageScope: "fixture",
-          toolchain: {
-            nodeLtsMajor: nodeVersion.slice(0, nodeVersion.indexOf(".")),
-            packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-            nodeVersion,
-            rustVersion: releaseToolchainSnapshot.rustVersion,
-          },
-        }),
-      });
-      await renderNewProject({
-        targetRoot: projectDir,
-        operations: [...plan.operations],
-      });
-
-      const run: Parameters<
-        typeof assertGeneratedTaskDiscovery
-      >[0]["run"] = async (
-        command: string,
-        args: readonly string[],
-        options: { readonly cwd: string },
-      ) => {
-        assert.equal(command, "pnpm");
-        assert.deepStrictEqual(args.slice(0, 2), ["exec", "turbo"]);
-        return await execa(turboExecutablePath, args.slice(2), {
-          cwd: options.cwd,
-        });
-      };
-      await assertGeneratedTaskDiscovery({
-        plan,
-        projectDir,
-        taskNames: [
-          "format:check",
-          "lint",
-          "typecheck",
-          "build",
-          "test",
-          "test:e2e",
-          "deployment",
-        ],
-        run,
-      });
-      await assertGeneratedTaskDiscovery({
-        plan,
-        projectDir,
-        taskNames: ["lint:fix", "format:write"],
-        run,
-      });
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-
-  void it("fails the matrix when a successful command does not produce Turbo dry-run JSON", async () => {
-    await assert.rejects(
-      assertGeneratedTaskDiscovery({
-        plan,
-        projectDir: "/tmp/generated-fixture-matrix",
-        taskNames: ["lint", "typecheck"],
-        run: async () => ({ stdout: "completed successfully" }),
-      }),
-      (error) =>
-        error instanceof Error &&
-        error.message.includes("Turbo dry-run did not return a task graph"),
-    );
-  });
 
   void it("isolates generated installs from the repository pnpm store", () => {
     assert.deepStrictEqual(fixtureDependencyInstallationPlan("/pnpm/store"), {

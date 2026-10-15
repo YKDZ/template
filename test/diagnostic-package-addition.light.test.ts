@@ -351,8 +351,8 @@ void describe("diagnostic Package Addition", () => {
       await writeFile(
         workflowPath,
         (await readFile(workflowPath, "utf8")).replace(
-          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n",
-          "      - name: Run Heavy Check\n        run: pnpm run check:heavy\n      - name: Upload User-owned diagnostics\n        run: echo user-owned\n",
+          "      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n",
+          "      - name: Run Heavy Check\n        run: node --conditions=source scripts/task-gates.ts check:heavy\n      - name: Upload User-owned diagnostics\n        run: echo user-owned\n",
         ),
       );
       const before = await snapshot(targetDir);
@@ -447,8 +447,14 @@ void describe("diagnostic Package Addition", () => {
       assert.ok(lightCheckIndex >= 0);
       assert.ok(buildxSetupIndex > lightCheckIndex);
       assert.ok(heavyCheckIndex > buildxSetupIndex);
-      assert.strictEqual(steps[lightCheckIndex]?.run, "pnpm run check");
-      assert.strictEqual(steps[heavyCheckIndex]?.run, "pnpm run check:heavy");
+      assert.strictEqual(
+        steps[lightCheckIndex]?.run,
+        "node --conditions=source scripts/task-gates.ts check",
+      );
+      assert.strictEqual(
+        steps[heavyCheckIndex]?.run,
+        "node --conditions=source scripts/task-gates.ts check:heavy",
+      );
       const diagnosticStaging = steps.find(
         (step) => step.name === "Stage Check diagnostics",
       );

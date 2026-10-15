@@ -3246,7 +3246,7 @@ void describe("Generated Repository toolchain checker projection", () => {
     );
     assert.strictEqual(
       checkScript,
-      "node --conditions=source scripts/quality-gates.ts check",
+      "node --conditions=source scripts/task-gates.ts check",
     );
     assert.strictEqual("toolchain:prepare" in scripts, false);
   });

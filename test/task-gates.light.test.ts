@@ -13,11 +13,10 @@ import path from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { runQualityGate } from "@ykdz/template-builtin-presets/quality-gates";
 import { execa } from "execa";
 
-const qualityGatesPath = fileURLToPath(
-  import.meta.resolve("@ykdz/template-builtin-presets/quality-gates"),
+const taskGatesPath = fileURLToPath(
+  import.meta.resolve("@ykdz/template-builtin-presets/task-gates"),
 );
 const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 
@@ -55,19 +54,27 @@ async function createWorkspace(
     readonly reportConditionalTask?: boolean;
   } = {},
 ): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), "template-quality-gates-"));
+  const root = await mkdtemp(path.join(os.tmpdir(), "template-task-gates-"));
   await mkdir(path.join(root, "packages", "app"), { recursive: true });
+  await mkdir(path.join(root, "scripts"));
+  await writeFile(
+    path.join(root, "scripts", "task-gates.ts"),
+    await readFile(taskGatesPath),
+  );
   await writeFile(
     path.join(root, "package.json"),
     JSON.stringify(
       {
-        name: "quality-gates-fixture",
+        name: "task-gates-fixture",
         private: true,
+        type: "module",
         packageManager: "pnpm@12.9.1",
         scripts: {
-          check: `node --experimental-strip-types ${qualityGatesPath} check`,
-          "check:heavy": `node --experimental-strip-types ${qualityGatesPath} check:heavy`,
-          "check:full": `node --experimental-strip-types ${qualityGatesPath} check:full`,
+          check: "node --conditions=source scripts/task-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/task-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/task-gates.ts check:full",
           "format:check": taskScript(
             options.failRootLight === true
               ? "root-light-failure"
@@ -83,7 +90,7 @@ async function createWorkspace(
               : "root-heavy",
           ),
           "verify:generated": taskScript("root-custom-light"),
-          fix: taskScript("root-fix"),
+          fix: "node --conditions=source scripts/task-gates.ts fix",
           dev: taskScript("root-dev"),
           publish: taskScript("root-release"),
           ...(options.invalidCheckCustom === true
@@ -98,13 +105,13 @@ async function createWorkspace(
   );
   await writeFile(
     path.join(root, "pnpm-workspace.yaml"),
-    'packages: ["packages/*"]\n',
+    'packages: ["packages/*"]\nverifyDepsBeforeRun: false\n',
   );
   await writeFile(
     path.join(root, "packages", "app", "package.json"),
     JSON.stringify(
       {
-        name: "@quality-gates/app",
+        name: "@task-gates/app",
         private: true,
         scripts: {
           build: "node ../../record.cjs package-build",
@@ -130,7 +137,7 @@ async function createWorkspace(
     JSON.stringify(
       {
         extends: ["//"],
-        tags: ["quality-gates-app"],
+        tags: ["task-gates-app"],
         tasks: {
           build: { dependsOn: [], tags: ["work:preparation"] },
           "format:check": {
@@ -177,7 +184,7 @@ async function createWorkspace(
     JSON.stringify(
       {
         futureFlags: { experimentalTaskCommand: true },
-        tags: ["quality-gates-root"],
+        tags: ["task-gates-root"],
         tasks: {
           "//#check": { tags: ["quality:entry"] },
           "//#check:heavy": { tags: ["quality:entry"] },
@@ -254,8 +261,6 @@ async function addRootTask(
   await writeFile(turboPath, JSON.stringify(turboConfig, null, 2));
 }
 
-void runQualityGate;
-
 void it("check runs light tasks and their native preparation dependencies", async () => {
   const root = await createWorkspace();
   try {
@@ -301,7 +306,7 @@ void it("拒绝无命令节点上的悬空职责标签", async () => {
       tasks: Record<string, unknown>;
     };
     appTurboConfig.tasks["verify:placeholder"] = {
-      tags: ["quality:unknown", "work:repair"],
+      tags: ["work:repair"],
     };
     await writeFile(appTurboPath, JSON.stringify(appTurboConfig, null, 2));
 
@@ -312,8 +317,7 @@ void it("拒绝无命令节点上的悬空职责标签", async () => {
     assert.notEqual(result.exitCode, 0, result.stdout);
     assert.match(result.stderr, /#orphan-root/u);
     assert.match(result.stderr, /work:preparation/u);
-    assert.match(result.stderr, /@quality-gates\/app#verify:placeholder/u);
-    assert.match(result.stderr, /quality:unknown/u);
+    assert.match(result.stderr, /@task-gates\/app#verify:placeholder/u);
     assert.match(result.stderr, /work:repair/u);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -330,7 +334,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
     const appManifest = JSON.parse(await readFile(appManifestPath, "utf8")) as {
       dependencies?: Record<string, string>;
     };
-    appManifest.dependencies = { "@quality-gates/provider": "workspace:*" };
+    appManifest.dependencies = { "@task-gates/provider": "workspace:*" };
     await writeFile(appManifestPath, JSON.stringify(appManifest, null, 2));
 
     const appTurboPath = path.join(root, "packages", "app", "turbo.json");
@@ -345,7 +349,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
     };
     appTurboConfig.tasks["verify:generated"] = {
       ...appTurboConfig.tasks["verify:generated"],
-      dependsOn: ["@quality-gates/provider#build"],
+      dependsOn: ["@task-gates/provider#build"],
     };
     await writeFile(appTurboPath, JSON.stringify(appTurboConfig, null, 2));
 
@@ -353,9 +357,9 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
       path.join(root, "packages", "provider", "package.json"),
       JSON.stringify(
         {
-          name: "@quality-gates/provider",
+          name: "@task-gates/provider",
           private: true,
-          dependencies: { "@quality-gates/upstream": "workspace:*" },
+          dependencies: { "@task-gates/upstream": "workspace:*" },
         },
         null,
         2,
@@ -366,7 +370,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
       JSON.stringify(
         {
           extends: ["//"],
-          tags: ["quality-gates-provider"],
+          tags: ["task-gates-provider"],
           tasks: { build: { dependsOn: ["^build"] } },
         },
         null,
@@ -377,7 +381,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
       path.join(root, "packages", "upstream", "package.json"),
       JSON.stringify(
         {
-          name: "@quality-gates/upstream",
+          name: "@task-gates/upstream",
           private: true,
           scripts: { build: "node ../../record.cjs provider-upstream-build" },
         },
@@ -390,7 +394,7 @@ void it("保留无职责中转节点的原生依赖遍历", async () => {
       JSON.stringify(
         {
           extends: ["//"],
-          tags: ["quality-gates-upstream"],
+          tags: ["task-gates-upstream"],
           tasks: {
             build: { dependsOn: [], tags: ["work:preparation"] },
           },
@@ -499,7 +503,7 @@ async function verifyFullGateCancellation(
   const root = await createWorkspace({ waitRootLight: true });
   const child = spawn(
     "node",
-    ["--experimental-strip-types", qualityGatesPath, "check:full"],
+    ["--experimental-strip-types", taskGatesPath, "check:full"],
     { cwd: root, stdio: "pipe" },
   );
   const childOutput: string[] = [];
@@ -660,7 +664,7 @@ void it("reports conditional tasks as unexecuted when ordinary checks exclude th
     assert.equal(result.exitCode, 0, result.stderr);
     assert.match(
       result.stderr,
-      /条件验收未执行：@quality-gates\/app#verify:conditional/,
+      /条件验收未执行：@task-gates\/app#verify:conditional/,
     );
 
     const runs = await readRuns(root);
@@ -744,10 +748,15 @@ for (const name of ["lint", "typecheck", "format:check"]) {
   });
 }
 
-void it("rejects an executable root task with no quality or work role", async () => {
+void it("拒绝仅新增在根 manifest 中的无职责 script", async () => {
   const root = await createWorkspace();
   try {
-    await addRootTask(root, "verify:unclassified");
+    const manifestPath = path.join(root, "package.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts["verify:unclassified"] = taskScript("unclassified");
+    await writeFile(manifestPath, JSON.stringify(manifest));
     const result = await execa("pnpm", ["run", "check"], {
       cwd: root,
       reject: false,
@@ -823,7 +832,7 @@ void it("拒绝清除所属任务职责的包任务", async () => {
     assert.notEqual(result.exitCode, 0);
     assert.match(
       result.stderr,
-      /@quality-gates\/app#verify:generated 缺少唯一职责标签/,
+      /@task-gates\/app#verify:generated 缺少唯一职责标签/,
     );
     const runs = await readRuns(root);
     assert.deepEqual(runs, []);
@@ -845,6 +854,323 @@ void it("limits quality:entry to the three public root gate tasks", async () => 
     assert.match(result.stderr, /\/\/#verify:entry 不能使用 quality:entry/);
     const runs = await readRuns(root);
     assert.deepEqual(runs, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("fix 按职责发现异名修复任务，并保留必要轻检查与准备", async () => {
+  const root = await createWorkspace();
+  try {
+    await addRootTask(root, "rewrite:generated", [
+      "work:repair",
+      "area:generated",
+    ]);
+    const turboPath = path.join(root, "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      tasks: Record<string, { dependsOn?: string[] }>;
+    };
+    turbo.tasks["//#rewrite:generated"]!.dependsOn = ["typecheck", "build"];
+    await writeFile(turboPath, JSON.stringify(turbo));
+
+    const packagePath = path.join(root, "packages", "app", "package.json");
+    const manifest = JSON.parse(await readFile(packagePath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts["normalize:assets"] =
+      "node ../../record.cjs package-repair";
+    await writeFile(packagePath, JSON.stringify(manifest));
+    const packageTurboPath = path.join(root, "packages", "app", "turbo.json");
+    const packageTurbo = JSON.parse(
+      await readFile(packageTurboPath, "utf8"),
+    ) as {
+      tasks: Record<string, unknown>;
+    };
+    packageTurbo.tasks["normalize:assets"] = {
+      tags: ["work:repair"],
+      dependsOn: ["build"],
+    };
+    await writeFile(packageTurboPath, JSON.stringify(packageTurbo));
+
+    const result = await execa("pnpm", ["run", "fix"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    const runs = await readRuns(root);
+    assert.deepEqual(
+      new Set(runs),
+      new Set([
+        "rewrite:generated",
+        "root-typecheck",
+        "root-build",
+        "package-repair",
+        "package-build",
+      ]),
+    );
+    assert.ok(
+      runs.indexOf("root-typecheck") < runs.indexOf("rewrite:generated"),
+    );
+    assert.ok(runs.indexOf("package-build") < runs.indexOf("package-repair"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("fix 拒绝仅新增在 manifest 的无职责 script，包标签不能代替任务职责", async () => {
+  const root = await createWorkspace();
+  try {
+    const packagePath = path.join(root, "packages", "app", "package.json");
+    const manifest = JSON.parse(await readFile(packagePath, "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    manifest.scripts["unclassified"] = "node ../../record.cjs unclassified";
+    await writeFile(packagePath, JSON.stringify(manifest));
+    const turboPath = path.join(root, "packages", "app", "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      tags: string[];
+    };
+    turbo.tags.push("quality:light");
+    await writeFile(turboPath, JSON.stringify(turbo));
+
+    const result = await execa("pnpm", ["run", "fix"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.notEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /@task-gates\/app#unclassified 缺少唯一职责标签/u,
+    );
+    assert.deepEqual(await readRuns(root), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("允许任意附加标签和显式按需任务，叶任务仍可直接调用", async () => {
+  const root = await createWorkspace();
+  try {
+    await addRootTask(root, "inspect:cache", [
+      "work:on-demand",
+      "area:local",
+      "custom-label",
+    ]);
+    await addRootTask(root, "verify:custom", [
+      "quality:light",
+      "area:local",
+      "custom-label",
+    ]);
+    const check = await execa("pnpm", ["run", "check"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.equal(check.exitCode, 0, check.stderr);
+    const runs = await readRuns(root);
+    assert.ok(runs.includes("verify:custom"));
+    assert.ok(!runs.includes("inspect:cache"));
+
+    const direct = await execa("pnpm", ["run", "inspect:cache"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.equal(direct.exitCode, 0, direct.stderr);
+    assert.ok((await readRuns(root)).includes("inspect:cache"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("有职责的无命令聚合节点可以通过原生图承载实际工作", async () => {
+  const root = await createWorkspace();
+  try {
+    const turboPath = path.join(root, "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      tasks: Record<string, unknown>;
+    };
+    turbo.tasks["//#verify:aggregate"] = {
+      tags: ["quality:light"],
+      dependsOn: ["build"],
+    };
+    await writeFile(turboPath, JSON.stringify(turbo));
+    const result = await execa("pnpm", ["run", "check"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.ok((await readRuns(root)).includes("root-build"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void it("无命令聚合节点的职责也必须符合入口闭包", async () => {
+  const root = await createWorkspace();
+  try {
+    const turboPath = path.join(root, "turbo.json");
+    const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+      tasks: Record<string, { tags?: string[]; dependsOn?: string[] }>;
+    };
+    turbo.tasks["//#release:aggregate"] = {
+      tags: ["work:release"],
+      dependsOn: ["build"],
+    };
+    turbo.tasks["//#format:check"]!.dependsOn = ["release:aggregate"];
+    await writeFile(turboPath, JSON.stringify(turbo));
+    const result = await execa("pnpm", ["run", "check"], {
+      cwd: root,
+      reject: false,
+    });
+    assert.notEqual(result.exitCode, 0);
+    assert.match(
+      result.stderr,
+      /release:aggregate.*不允许间接启动职责 work:release/u,
+    );
+    assert.deepEqual(await readRuns(root), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const [gate, role] of [
+  ["check", "work:repair"],
+  ["check:heavy", "work:development"],
+  ["fix", "quality:heavy"],
+  ["fix", "work:on-demand"],
+] as const) {
+  void it(`${gate} 拒绝从原生依赖图间接运行 ${role}`, async () => {
+    const root = await createWorkspace();
+    try {
+      await addRootTask(root, "dependency:custom", [role]);
+      await addRootTask(root, "entry:custom", [
+        gate === "fix"
+          ? "work:repair"
+          : gate === "check"
+            ? "quality:light"
+            : "quality:heavy",
+      ]);
+      const turboPath = path.join(root, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<string, { dependsOn?: string[] }>;
+      };
+      turbo.tasks["//#entry:custom"]!.dependsOn = ["dependency:custom"];
+      await writeFile(turboPath, JSON.stringify(turbo));
+      const result = await execa("pnpm", ["run", gate], {
+        cwd: root,
+        reject: false,
+      });
+      assert.notEqual(result.exitCode, 0);
+      assert.match(result.stderr, /dependency:custom.*不允许间接启动职责/u);
+      assert.deepEqual(await readRuns(root), []);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const entry of ["check", "fix"]) {
+  void it(`拒绝依赖回流公共入口 ${entry}`, async () => {
+    const root = await createWorkspace();
+    try {
+      const turboPath = path.join(root, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<string, { dependsOn?: string[] }>;
+      };
+      turbo.tasks["//#format:check"]!.dependsOn = [entry];
+      await writeFile(turboPath, JSON.stringify(turbo));
+      const result = await execa("pnpm", ["run", "check"], {
+        cwd: root,
+        reject: false,
+      });
+      assert.notEqual(result.exitCode, 0);
+      assert.match(result.stderr, /叶任务不能依赖公共聚合入口/u);
+      assert.deepEqual(await readRuns(root), []);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const mutation of ["missing", "script", "command", "role"] as const) {
+  void it(`直接调用共享实现仍发现公共入口接线错误：${mutation}`, async () => {
+    const root = await createWorkspace();
+    try {
+      const manifestPath = path.join(root, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        scripts: Record<string, string>;
+      };
+      const turboPath = path.join(root, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<string, { tags?: string[]; command?: string[] }>;
+      };
+      if (mutation === "missing") {
+        delete manifest.scripts["check"];
+        delete turbo.tasks["//#check"];
+      } else if (mutation === "script") {
+        manifest.scripts["check"] = taskScript("bypassed-check");
+      } else if (mutation === "command") {
+        turbo.tasks["//#check"]!.command = [
+          "node",
+          "record.cjs",
+          "bypassed-check",
+        ];
+      } else {
+        turbo.tasks["//#check"]!.tags = ["quality:light"];
+      }
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      await writeFile(turboPath, JSON.stringify(turbo));
+      const result = await execa("node", ["scripts/task-gates.ts", "fix"], {
+        cwd: root,
+        reject: false,
+      });
+      assert.notEqual(result.exitCode, 0);
+      assert.match(result.stderr, /公共.*入口/u);
+      assert.deepEqual(await readRuns(root), []);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+void it("轻检查为空失败，重验收和修复为空则明确跳过", async () => {
+  const root = await createWorkspace();
+  try {
+    for (const directory of [root, path.join(root, "packages", "app")]) {
+      const manifestPath = path.join(directory, "package.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+        scripts: Record<string, string>;
+      };
+      const turboPath = path.join(directory, "turbo.json");
+      const turbo = JSON.parse(await readFile(turboPath, "utf8")) as {
+        tasks: Record<string, { tags?: string[] }>;
+      };
+      for (const [name, task] of Object.entries(turbo.tasks)) {
+        if (
+          task.tags?.some(
+            (tag) => tag === "quality:light" || tag === "quality:heavy",
+          ) === true
+        ) {
+          delete turbo.tasks[name];
+          delete manifest.scripts[name.replace(/^\/\/#/u, "")];
+        }
+      }
+      await writeFile(manifestPath, JSON.stringify(manifest));
+      await writeFile(turboPath, JSON.stringify(turbo));
+    }
+    for (const gate of ["check", "check:full", "check:heavy", "fix"]) {
+      const result = await execa("pnpm", ["run", gate], {
+        cwd: root,
+        reject: false,
+      });
+      if (gate === "check" || gate === "check:full") {
+        assert.notEqual(result.exitCode, 0);
+        assert.match(result.stderr, /轻检查没有选中有效任务/u);
+      } else {
+        assert.equal(result.exitCode, 0, result.stderr);
+        assert.match(result.stderr, /没有选中任务，跳过执行/u);
+      }
+    }
+    assert.deepEqual(await readRuns(root), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

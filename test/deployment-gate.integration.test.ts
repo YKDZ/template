@@ -23,31 +23,6 @@ import {
   FileFixtureEvidenceStorage,
   type FixtureEvidenceLifecycleEvent,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-async function generatedTaskIds(root: string): Promise<readonly string[]> {
-  const taskIds: string[] = [];
-  async function visit(directory: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(entryPath);
-      } else if (entry.name === "package.json") {
-        const manifest = JSON.parse(await readFile(entryPath, "utf8")) as {
-          readonly name: string;
-          readonly scripts?: Record<string, string>;
-        };
-        for (const taskName of Object.keys(manifest.scripts ?? {})) {
-          taskIds.push(
-            `${manifest.name.startsWith("@") ? manifest.name : "//"}#${taskName}`,
-          );
-        }
-      }
-    }
-  }
-  await visit(root);
-  return taskIds;
-}
-
 function fixtureExecutorTestRunner(
   run: GeneratedCommandRunner,
 ): GeneratedCommandRunner {
@@ -83,6 +58,7 @@ function fixtureExecutorTestRunner(
     }
     const isQualityCommand =
       nestedCommand === "git" ||
+      (nestedCommand === "node" && nestedArgs[1] === "scripts/task-gates.ts") ||
       (nestedCommand === "pnpm" &&
         (nestedArgs[0] === "run" ||
           (nestedArgs[0] === "exec" && nestedArgs[1] === "turbo")));
@@ -136,7 +112,7 @@ void describe("deployment quality gate", () => {
             );
             return {};
           }
-          if (command === "pnpm") {
+          if (command === "pnpm" || command === "node") {
             try {
               await access(path.join(options.cwd, "node_modules"));
             } catch {
@@ -144,15 +120,6 @@ void describe("deployment quality gate", () => {
                 "Local package.json exists, but node_modules missing",
               );
             }
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
           }
           return {};
         };
@@ -226,7 +193,9 @@ void describe("deployment quality gate", () => {
         assert.deepStrictEqual(standaloneDeploymentCommands, []);
         const rootFullCommands = coldCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+            command === "node" &&
+            args[1] === "scripts/task-gates.ts" &&
+            args[2] === "check:full",
         );
         const coldRootExecutions = coldEvents.filter(
           (event) =>
@@ -373,15 +342,6 @@ void describe("deployment quality gate", () => {
           run: async (command, args, options) => {
             if (command === "git") {
               return await execa(command, [...args], options);
-            }
-            if (args.includes("--dry-run=json")) {
-              return {
-                stdout: JSON.stringify({
-                  tasks: (await generatedTaskIds(options.cwd)).map(
-                    (taskId) => ({ taskId }),
-                  ),
-                }),
-              };
             }
             if (command === "docker") {
               throw new Error("docker executable unavailable");

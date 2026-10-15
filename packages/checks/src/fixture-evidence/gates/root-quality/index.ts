@@ -10,49 +10,6 @@ import {
   type FixtureEvidenceExecutionResource,
 } from "../../kernel/index.ts";
 
-const qualityTaskNames = [
-  "format:check",
-  "lint",
-  "typecheck",
-  "build",
-  "test",
-  "test:e2e",
-  "deployment",
-] as const;
-
-const fixTaskNames = ["lint:fix", "format:write"] as const;
-
-function expectedTaskIds(options: {
-  readonly plan: GeneratedRepositoryPlan;
-  readonly taskNames: readonly string[];
-}): readonly string[] {
-  return options.plan.manifests.flatMap((manifest) => {
-    const name = manifest.name;
-    const scripts = manifest.scripts;
-    if (
-      typeof name !== "string" ||
-      typeof scripts !== "object" ||
-      scripts === null
-    ) {
-      return [];
-    }
-    return options.taskNames.flatMap((taskName) =>
-      typeof (scripts as Record<string, unknown>)[taskName] !== "string"
-        ? []
-        : [`${name.startsWith("@") ? name : "//"}#${taskName}`],
-    );
-  });
-}
-
-function commandStdout(result: unknown): string {
-  return typeof result === "object" &&
-    result !== null &&
-    "stdout" in result &&
-    typeof result.stdout === "string"
-    ? result.stdout
-    : "";
-}
-
 export function generatedRootQualityExecutionResources(
   plan: GeneratedRepositoryPlan,
 ): readonly FixtureEvidenceExecutionResource[] {
@@ -70,14 +27,6 @@ export function normalizedGeneratedRootQualityPlan(
     readonly deploymentContractIdentity?: string;
   } = {},
 ): unknown {
-  const qualityTaskIds = expectedTaskIds({
-    plan,
-    taskNames: qualityTaskNames,
-  }).toSorted();
-  const fixTaskIds =
-    options.includeFix === true
-      ? expectedTaskIds({ plan, taskNames: fixTaskNames }).toSorted()
-      : [];
   return {
     gate: "generated-root-quality",
     ...(options.deploymentContractIdentity === undefined
@@ -85,11 +34,6 @@ export function normalizedGeneratedRootQualityPlan(
       : { deploymentContractIdentity: options.deploymentContractIdentity }),
     executionResources: generatedRootQualityExecutionResources(plan),
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
-    taskDiscovery: {
-      command: "pnpm",
-      args: ["exec", "turbo", "run", ...qualityTaskIds, "--dry-run=json"],
-      expectedTaskIds: [...qualityTaskIds],
-    },
     developmentContainer: {
       lockfileWrites: false,
       probes: plan.developmentContainer.probes.map((probe) => ({
@@ -102,13 +46,8 @@ export function normalizedGeneratedRootQualityPlan(
     normalization:
       options.includeFix === true
         ? {
-            taskDiscovery: {
-              command: "pnpm",
-              args: ["exec", "turbo", "run", ...fixTaskIds, "--dry-run=json"],
-              expectedTaskIds: [...fixTaskIds],
-            },
-            command: "pnpm",
-            args: ["run", "fix"],
+            command: "node",
+            args: ["--conditions=source", "scripts/task-gates.ts", "fix"],
           }
         : null,
     gitSafety:
@@ -116,8 +55,8 @@ export function normalizedGeneratedRootQualityPlan(
         ? { safeDirectory: "generated-container-workspace" }
         : null,
     rootCheck: {
-      command: "pnpm",
-      args: ["run", "check:full"],
+      command: "node",
+      args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
     },
   };
 }
@@ -144,73 +83,20 @@ export async function deriveGeneratedRootQualityContractIdentity(
   });
 }
 
-/**
- * Validates the real Turbo action graph instead of accepting command launch
- * alone as proof that every generated Package Boundary was selected.
- */
-export async function assertGeneratedTaskDiscovery(options: {
-  readonly plan: GeneratedRepositoryPlan;
-  readonly projectDir: string;
-  readonly taskNames: readonly string[];
-  readonly run: FixtureCommandRunner;
-}): Promise<void> {
-  const expected = expectedTaskIds(options).toSorted();
-  const result = await options.run(
-    "pnpm",
-    ["exec", "turbo", "run", ...expected, "--dry-run=json"],
-    { cwd: options.projectDir },
-  );
-  let taskIds: Set<string>;
-  try {
-    const dryRun = JSON.parse(commandStdout(result)) as {
-      tasks?: readonly { taskId?: unknown }[];
-    };
-    if (!Array.isArray(dryRun.tasks)) throw new Error("tasks is missing");
-    taskIds = new Set(
-      dryRun.tasks.flatMap((task) =>
-        typeof task.taskId === "string" ? [task.taskId] : [],
-      ),
-    );
-  } catch (error) {
-    throw new Error(
-      `Turbo dry-run did not return a task graph for ${options.taskNames.join(", ")}: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
-  }
-  const missing = expected.filter((taskId) => !taskIds.has(taskId));
-  if (missing.length > 0) {
-    throw new Error(
-      `Turbo dry-run omitted generated task(s): ${missing.join(", ")}`,
-    );
-  }
-}
-
 export async function executeGeneratedRootQuality(options: {
-  readonly plan: GeneratedRepositoryPlan;
   readonly projectDir: string;
-  readonly fixtureWorkspace: string;
   readonly gitSafeDirectory?: string;
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
 }): Promise<void> {
-  await assertGeneratedTaskDiscovery({
-    plan: options.plan,
-    projectDir: options.projectDir,
-    taskNames: qualityTaskNames,
-    run: options.run,
-  });
-  if (options.includeFix === true) {
-    await assertGeneratedTaskDiscovery({
-      plan: options.plan,
-      projectDir: options.projectDir,
-      taskNames: fixTaskNames,
-      run: options.run,
-    });
-  }
-  await options.run("pnpm", ["run", "check:full"], {
-    cwd: options.projectDir,
-    stdio: "inherit",
-  });
+  await options.run(
+    "node",
+    ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+    {
+      cwd: options.projectDir,
+      stdio: "inherit",
+    },
+  );
   if (options.includeFix === true) {
     const beforeFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
@@ -219,10 +105,14 @@ export async function executeGeneratedRootQuality(options: {
         ? {}
         : { gitSafeDirectory: options.gitSafeDirectory }),
     });
-    await options.run("pnpm", ["run", "fix"], {
-      cwd: options.projectDir,
-      stdio: "inherit",
-    });
+    await options.run(
+      "node",
+      ["--conditions=source", "scripts/task-gates.ts", "fix"],
+      {
+        cwd: options.projectDir,
+        stdio: "inherit",
+      },
+    );
     const afterFix = await writeGeneratedRepositoryTree({
       repositoryRoot: options.projectDir,
       run: options.run,
@@ -235,9 +125,13 @@ export async function executeGeneratedRootQuality(options: {
         `Generated Repository Fix Command changed the working-tree identity from ${beforeFix} to ${afterFix}`,
       );
     }
-    await options.run("pnpm", ["run", "check:full"], {
-      cwd: options.projectDir,
-      stdio: "inherit",
-    });
+    await options.run(
+      "node",
+      ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+      {
+        cwd: options.projectDir,
+        stdio: "inherit",
+      },
+    );
   }
 }

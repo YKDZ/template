@@ -202,19 +202,19 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
           );
           assert.strictEqual(
             rootManifest.scripts.check,
-            "node --conditions=source scripts/quality-gates.ts check",
+            "node --conditions=source scripts/task-gates.ts check",
           );
           assert.strictEqual(
             rootManifest.scripts["check:heavy"],
-            "node --conditions=source scripts/quality-gates.ts check:heavy",
+            "node --conditions=source scripts/task-gates.ts check:heavy",
           );
           assert.strictEqual(
             rootManifest.scripts["check:full"],
-            "node --conditions=source scripts/quality-gates.ts check:full",
+            "node --conditions=source scripts/task-gates.ts check:full",
           );
           assert.strictEqual(
             rootManifest.scripts.fix,
-            "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+            "node --conditions=source scripts/task-gates.ts fix",
           );
           assert.strictEqual(
             rootManifest.scripts["toolchain:prepare"],

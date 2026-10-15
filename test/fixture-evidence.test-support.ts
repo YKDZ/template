@@ -295,33 +295,6 @@ async function successfulRootEvidence(
   });
 }
 
-async function generatedTaskIds(root: string): Promise<readonly string[]> {
-  const taskIds: string[] = [];
-
-  async function visit(directory: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(entryPath);
-      } else if (entry.name === "package.json") {
-        const manifest = JSON.parse(await readFile(entryPath, "utf8")) as {
-          readonly name: string;
-          readonly scripts?: Record<string, string>;
-        };
-        for (const taskName of Object.keys(manifest.scripts ?? {})) {
-          taskIds.push(
-            `${manifest.name.startsWith("@") ? manifest.name : "//"}#${taskName}`,
-          );
-        }
-      }
-    }
-  }
-
-  await visit(root);
-  return taskIds;
-}
-
 async function materializeFocusedProviderBuild(root: string): Promise<void> {
   async function visit(directory: string): Promise<void> {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -644,7 +617,6 @@ export {
   formatFixtureEvidenceHealthReport,
   generatedRootQualityExecutionResources,
   generatedScenariosFor,
-  generatedTaskIds,
   initializeFixtureGitRepository,
   isDeepStrictEqual,
   isolatedFixtureEnvironment,

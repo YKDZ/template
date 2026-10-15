@@ -77,8 +77,6 @@ import {
   type GeneratedScenario,
 } from "./registry-checks.ts";
 
-export { assertGeneratedTaskDiscovery } from "./fixture-evidence/gates/root-quality/index.ts";
-
 type GeneratedScenarioSet =
   | "init"
   | "package-addition-matrix"
@@ -886,9 +884,7 @@ async function runScenario(
         resources: generatedRootQualityExecutionResources(finalPlan),
         execute: async () => {
           await executeGeneratedRootQuality({
-            plan: finalPlan,
             projectDir,
-            fixtureWorkspace: options.workspace,
             gitSafeDirectory: path.posix.join(
               "/workspaces",
               path.basename(projectDir),

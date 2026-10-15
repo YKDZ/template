@@ -386,7 +386,7 @@ function isTaskRenderBoundary(node: ts.Node): boolean {
       : ts.isVariableDeclaration(node)
         ? declarationName(node)
         : undefined;
-  return /^(?:renderRootCheckCommand|renderFixCommand|renderDeploymentCheckCommand)$/u.test(
+  return /^(?:renderRootCheckCommand|renderDeploymentCheckCommand)$/u.test(
     name ?? "",
   );
 }

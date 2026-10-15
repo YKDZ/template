@@ -46,7 +46,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/npm-publication-artifact"
           test -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"
       - name: Run Full Check once
-        run: pnpm run check:full
+        run: node --conditions=source scripts/task-gates.ts check:full
       - name: Verify publication artifact
         run: pnpm run publication:artifact
         env:

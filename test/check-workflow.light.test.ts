@@ -201,10 +201,14 @@ void describe("Fixture Verification Evidence check workflow", () => {
   void it("runs the heavy gate only after the light gate and its prerequisites", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
     const lightGateIndex = steps.findIndex(
-      (step) => step.run === "pnpm run check",
+      (step) =>
+        step.run ===
+        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
     );
     const heavyGateIndex = steps.findIndex(
-      (step) => step.run === "pnpm run check:heavy",
+      (step) =>
+        step.run ===
+        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
     );
     const dockerSetupIndex = steps.findIndex(
       (step) => step.uses === "docker/setup-buildx-action@v4",
@@ -214,16 +218,6 @@ void describe("Fixture Verification Evidence check workflow", () => {
     assert.ok(heavyGateIndex > lightGateIndex);
     assert.ok(dockerSetupIndex > lightGateIndex);
     assert.strictEqual(steps[lightGateIndex]?.id, "package-check");
-    assert.strictEqual(
-      steps.some((step) =>
-        [
-          "pnpm run check:fixtures",
-          "pnpm run check:focused",
-          "pnpm run check:deployment",
-        ].includes(step.run ?? ""),
-      ),
-      false,
-    );
   });
 
   void it("validates fixture prerequisites before running container-backed gates", async () => {
@@ -258,14 +252,21 @@ void describe("Fixture Verification Evidence check workflow", () => {
       ].join("\n"),
     });
 
-    const heavyGate = steps.find((step) => step.run === "pnpm run check:heavy");
+    const heavyGate = steps.find(
+      (step) =>
+        step.run ===
+        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+    );
     assert.strictEqual(
       heavyGate?.if,
       "always() && steps.package-check.outcome == 'success'",
     );
     assert.ok(
-      steps.findIndex((step) => step.run === "pnpm run check:heavy") >
-        steps.findIndex((step) => step.id === "fixture-prerequisites"),
+      steps.findIndex(
+        (step) =>
+          step.run ===
+          "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      ) > steps.findIndex((step) => step.id === "fixture-prerequisites"),
     );
     assert.strictEqual(
       steps.find((step) => step.id === "fixture-evidence-health")?.if,
@@ -301,8 +302,8 @@ void describe("Fixture Verification Evidence check workflow", () => {
     });
 
     const scenarioCommands = new Set([
-      "pnpm run check",
-      "pnpm run check:heavy",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
     ]);
     const scenarioSteps = job.steps.filter(
       (step) => step.run !== undefined && scenarioCommands.has(step.run),
@@ -330,7 +331,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
     const checkWorkflowDocument = await checkWorkflow();
     const check = checkWorkflowDocument.jobs.check;
     const packageCheck = check.steps.find(
-      (step) => step.run === "pnpm run check",
+      (step) =>
+        step.run ===
+        "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
     );
     const release = parse(
       await readFile(".github/workflows/release.yml", "utf8"),
@@ -359,7 +362,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
       ),
       true,
     );
-    for (const command of ["pnpm run check:heavy"]) {
+    for (const command of [
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+    ]) {
       assert.deepStrictEqual(
         check.steps.find((step) => step.run === command)?.env,
         {
@@ -420,7 +425,9 @@ void describe("Fixture Verification Evidence check workflow", () => {
 
   void it("runs every later scenario stage and Evidence Health after an earlier gate fails", async () => {
     const steps = (await checkWorkflow()).jobs.check.steps;
-    for (const command of ["pnpm run check:heavy"]) {
+    for (const command of [
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+    ]) {
       assert.ok(
         steps.find((step) => step.run === command)?.if?.includes("always()"),
       );
@@ -436,7 +443,11 @@ void describe("Fixture Verification Evidence check workflow", () => {
     );
 
     assert.strictEqual(
-      steps.find((step) => step.run === "pnpm run check:heavy")?.if,
+      steps.find(
+        (step) =>
+          step.run ===
+          "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      )?.if,
       steps.find((step) => step.id === "fixture-evidence-health")?.if,
     );
   });
@@ -696,10 +707,16 @@ void describe("Fixture Verification Evidence check workflow", () => {
     });
     assert.strictEqual(release.jobs.publish.needs, "check");
     assert.notStrictEqual(
-      check.find((step) => step.run === "pnpm run check"),
+      check.find(
+        (step) =>
+          step.run ===
+          "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
+      ),
       undefined,
     );
-    for (const command of ["pnpm run check:heavy"]) {
+    for (const command of [
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+    ]) {
       assert.strictEqual(
         check.find((step) => step.run === command)?.if,
         "always() && steps.package-check.outcome == 'success'",

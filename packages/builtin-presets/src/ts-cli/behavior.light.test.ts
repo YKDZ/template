@@ -315,7 +315,7 @@ void describe("ts-cli Preset Definition behavior", () => {
     const rootCheck = rootScripts.check;
     assert.strictEqual(
       rootCheck,
-      "node --conditions=source scripts/quality-gates.ts check",
+      "node --conditions=source scripts/task-gates.ts check",
     );
     assert.ok(
       plan.operations.some(

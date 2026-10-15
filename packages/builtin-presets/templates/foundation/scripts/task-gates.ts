@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export type QualityGate = "check" | "check:heavy" | "check:full";
+export type TaskGate = "check" | "check:heavy" | "check:full" | "fix";
 
 type ScriptRole =
   | "quality:light"
@@ -13,7 +13,8 @@ type ScriptRole =
   | "work:repair"
   | "work:release"
   | "work:preparation"
-  | "work:lifecycle";
+  | "work:lifecycle"
+  | "work:on-demand";
 
 type TurboTask = {
   readonly name: string;
@@ -25,7 +26,7 @@ type TurboTask = {
 };
 
 type GateLayer = {
-  readonly role: "quality:light" | "quality:heavy";
+  readonly role: "quality:light" | "quality:heavy" | "work:repair";
   readonly label: string;
 };
 
@@ -49,12 +50,14 @@ const validRoles = new Set<ScriptRole>([
   "work:release",
   "work:preparation",
   "work:lifecycle",
+  "work:on-demand",
 ]);
 
-const publicGateNames = new Set<QualityGate>([
+const publicGateNames = new Set<TaskGate>([
   "check",
   "check:heavy",
   "check:full",
+  "fix",
 ]);
 
 const maxTurboOutputBytes = 16 * 1024 * 1024;
@@ -163,7 +166,7 @@ function publicGateTask(task: {
   readonly packageName: string;
 }): boolean {
   return (
-    task.packageName === "//" && publicGateNames.has(task.name as QualityGate)
+    task.packageName === "//" && publicGateNames.has(task.name as TaskGate)
   );
 }
 
@@ -204,9 +207,10 @@ function assignRole(
     return undefined;
   }
   const scriptRole = role as ScriptRole;
-  if (isPublicGate && scriptRole !== "quality:entry") {
+  const publicRole = task.name === "fix" ? "work:repair" : "quality:entry";
+  if (isPublicGate && scriptRole !== publicRole) {
     diagnostics.push(
-      `${task.fullName} 是公共验收入口，职责必须为 quality:entry，当前为 ${scriptRole}`,
+      `${task.fullName} 是公共任务入口，职责必须为 ${publicRole}，当前为 ${scriptRole}`,
     );
     return undefined;
   }
@@ -226,7 +230,10 @@ function assignRole(
   return scriptRole;
 }
 
-function readTaskDirectory(cwd: string): {
+function readTaskDirectory(
+  cwd: string,
+  entryCommand: string,
+): {
   readonly tasks: readonly TurboTask[];
   readonly diagnostics: readonly string[];
 } {
@@ -302,13 +309,15 @@ function readTaskDirectory(cwd: string): {
         tags,
         executable,
       };
-      if (!executable) {
-        const roles = roleTags(tags);
-        if (roles.length > 0) {
+      if (publicGateTask(taskWithoutRole)) {
+        const expectedCommand = `${entryCommand} ${name}`;
+        if (script !== expectedCommand || command !== expectedCommand) {
           diagnostics.push(
-            `${fullName} 声明职责标签但没有 script 或 command：${roles.join("、")}`,
+            `${fullName} 公共入口接线错误；package.json script 和有效 command 必须为 ${expectedCommand}`,
           );
         }
+      }
+      if (!executable && roleTags(tags).length === 0) {
         tasks.push(taskWithoutRole);
         continue;
       }
@@ -317,6 +326,14 @@ function readTaskDirectory(cwd: string): {
       tasks.push(
         role === undefined ? taskWithoutRole : { ...taskWithoutRole, role },
       );
+    }
+  }
+
+  for (const name of publicGateNames) {
+    if (
+      !tasks.some((task) => task.packageName === "//" && task.name === name)
+    ) {
+      diagnostics.push(`缺少根公共任务入口 ${name}`);
     }
   }
 
@@ -390,20 +407,22 @@ function validateLayerClosure(
       );
       continue;
     }
-    if (!dependency.executable) {
-      continue;
-    }
-    if (
-      dependency.role === "quality:entry" ||
-      dependency.role === "quality:conditional" ||
-      (layer.role === "quality:light" && dependency.role === "quality:heavy")
+    if (publicGateTask(dependency)) {
+      diagnostics.push(
+        `${layer.label} 执行图包含 ${dependency.fullName}：叶任务不能依赖公共聚合入口`,
+      );
+    } else if (
+      dependency.role !== undefined &&
+      dependency.role !== layer.role &&
+      dependency.role !== "work:preparation" &&
+      !(layer.role !== "quality:light" && dependency.role === "quality:light")
     ) {
       const scope =
         layer.role === "quality:light" && dependency.role === "quality:heavy"
           ? "轻检查不能间接启动重验收"
           : dependency.role === "quality:conditional"
             ? "常规验收不能间接启动条件验收"
-            : "验收叶任务不能依赖公共聚合入口";
+            : `不允许间接启动职责 ${dependency.role}`;
       diagnostics.push(
         `${layer.label} 执行图包含 ${dependency.fullName}：${scope}`,
       );
@@ -416,31 +435,40 @@ function validateLayerClosure(
 function layerFor(role: GateLayer["role"]): GateLayer {
   return {
     role,
-    label: role === "quality:light" ? "轻检查" : "重验收",
+    label:
+      role === "quality:light"
+        ? "轻检查"
+        : role === "quality:heavy"
+          ? "重验收"
+          : "修复",
   };
 }
 
-function layersFor(gate: QualityGate): readonly GateLayer[] {
+function layersFor(gate: TaskGate): readonly GateLayer[] {
   if (gate === "check") {
     return [layerFor("quality:light")];
   }
   if (gate === "check:heavy") {
     return [layerFor("quality:heavy")];
   }
+  if (gate === "fix") {
+    return [layerFor("work:repair")];
+  }
 
   return [layerFor("quality:light"), layerFor("quality:heavy")];
 }
 
-export async function runQualityGate(
-  gate: QualityGate,
+export async function runTaskGate(
+  gate: TaskGate,
   cwd = process.cwd(),
+  entryCommand = "node --conditions=source scripts/task-gates.ts",
 ): Promise<number> {
   if (!publicGateNames.has(gate)) {
-    report(`未知公共验收入口：${String(gate)}`);
+    report(`未知公共任务入口：${String(gate)}`);
     return 1;
   }
 
-  const directory = readTaskDirectory(cwd);
+  const directory = readTaskDirectory(cwd, entryCommand);
   if (directory.diagnostics.length > 0) {
     report(directory.diagnostics.join("\n"));
     return 1;
@@ -455,13 +483,43 @@ export async function runQualityGate(
   }[] = [];
   const diagnostics: string[] = [];
 
+  for (const task of directory.tasks) {
+    if (task.executable || task.role === undefined) {
+      continue;
+    }
+    const dryRun = parseDryRun(cwd, [task]);
+    diagnostics.push(...dryRun.diagnostics);
+    if (
+      dryRun.diagnostics.length === 0 &&
+      !dryRun.taskIds.some(
+        (taskId) => tasksByName.get(taskId)?.executable === true,
+      )
+    ) {
+      diagnostics.push(
+        `${task.fullName} 声明悬空职责标签 ${task.role}：无命令节点的原生执行图没有可执行工作`,
+      );
+    }
+  }
+
   for (const layer of layers) {
-    const selected = directory.tasks.filter((task) => task.role === layer.role);
+    const selected = directory.tasks.filter(
+      (task) => task.role === layer.role && !publicGateTask(task),
+    );
     const dryRun = parseDryRun(cwd, selected);
     diagnostics.push(...dryRun.diagnostics);
     diagnostics.push(
       ...validateLayerClosure(layer, dryRun.taskIds, tasksByName),
     );
+    if (
+      layer.role === "quality:light" &&
+      !dryRun.taskIds.some(
+        (taskId) => tasksByName.get(taskId)?.executable === true,
+      )
+    ) {
+      diagnostics.push(
+        "轻检查没有选中有效任务；请为实际验收任务声明 quality:light",
+      );
+    }
     plans.push({ layer, tasks: selected });
   }
 
@@ -473,7 +531,7 @@ export async function runQualityGate(
   const conditionalTasks = directory.tasks.filter(
     (task) => task.role === "quality:conditional",
   );
-  if (conditionalTasks.length > 0) {
+  if (gate !== "fix" && conditionalTasks.length > 0) {
     report(
       `条件验收未执行：${conditionalTasks.map((task) => task.fullName).join("、")}`,
     );
@@ -481,14 +539,16 @@ export async function runQualityGate(
 
   for (const plan of plans) {
     if (plan.tasks.length === 0) {
+      report(`${plan.layer.label}没有选中任务，跳过执行`);
       continue;
     }
     const status = await runVisible(cwd, [
       "run",
       ...plan.tasks.map((task) => task.fullName),
       "--continue=dependencies-successful",
-      "--output-logs=errors-only",
+      gate === "fix" ? "--output-logs=full" : "--output-logs=errors-only",
       "--log-order=grouped",
+      "--log-prefix=task",
     ]);
     if (status !== 0) {
       return status;
@@ -504,17 +564,24 @@ if (
   pathToFileURL(resolve(mainFile)).href === import.meta.url
 ) {
   const gate = process.argv[2];
-  if (gate !== "check" && gate !== "check:heavy" && gate !== "check:full") {
-    report("用法：node quality-gates.ts <check|check:heavy|check:full>");
+  if (
+    gate !== "check" &&
+    gate !== "check:heavy" &&
+    gate !== "check:full" &&
+    gate !== "fix"
+  ) {
+    report(
+      "用法：node scripts/task-gates.ts <check|check:heavy|check:full|fix>",
+    );
     process.exitCode = 2;
   } else {
-    void runQualityGate(gate)
+    void runTaskGate(gate)
       .then((status) => {
         process.exitCode = status;
       })
       .catch((error: unknown) => {
         report(
-          `公共验收入口失败：${error instanceof Error ? error.message : String(error)}`,
+          `公共任务入口失败：${error instanceof Error ? error.message : String(error)}`,
         );
         process.exitCode = 1;
       });

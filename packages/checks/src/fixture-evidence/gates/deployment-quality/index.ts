@@ -16,25 +16,6 @@ export type DeploymentQualityPlanInput = {
   };
 };
 
-function expectedDeploymentTaskIds(
-  plan: GeneratedRepositoryPlan,
-): readonly string[] {
-  return plan.manifests.flatMap((manifest) => {
-    if (
-      typeof manifest.name !== "string" ||
-      typeof manifest.scripts !== "object" ||
-      manifest.scripts === null ||
-      typeof (manifest.scripts as Record<string, unknown>).deployment !==
-        "string"
-    ) {
-      return [];
-    }
-    return [
-      `${manifest.name.startsWith("@") ? manifest.name : "//"}#deployment`,
-    ];
-  });
-}
-
 export function deriveDeploymentQualityPlanInput(
   plan: GeneratedRepositoryPlan,
 ): DeploymentQualityPlanInput | undefined {
@@ -65,14 +46,9 @@ export function normalizedDeploymentQualityPlan(
     gate: "deployment-quality",
     executionResources: deploymentQualityExecutionResources(deployment),
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
-    taskDiscovery: {
-      command: "pnpm",
-      args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-      expectedTaskIds: [...expectedDeploymentTaskIds(deployment.plan)].sort(),
-    },
     generatedDeployment: {
-      command: "pnpm",
-      args: ["run", "check:full"],
+      command: "node",
+      args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
     },
   };
 }

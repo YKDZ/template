@@ -564,7 +564,7 @@ void describe("manual npm publication capability", () => {
     assert.strictEqual(verifySteps.length, 9);
     assert.deepStrictEqual(verifySteps[6], {
       name: "Run Full Check once",
-      run: "pnpm run check:full",
+      run: "node --conditions=source scripts/task-gates.ts check:full",
     });
     assert.deepStrictEqual(verifySteps[7], {
       name: "Verify publication artifact",
@@ -1127,7 +1127,7 @@ void describe("manual npm publication capability", () => {
             steps: Record<string, unknown>[];
           }
         ).steps[6]!;
-        fullCheck.run = "pnpm run check";
+        fullCheck.run = "node --conditions=source scripts/task-gates.ts check";
       },
       (workflow: Record<string, unknown>) => {
         const artifact = (
@@ -1166,7 +1166,7 @@ void describe("manual npm publication capability", () => {
             steps: Record<string, unknown>[];
           }
         ).steps[3]!;
-        caller.run = "pnpm run check";
+        caller.run = "node --conditions=source scripts/task-gates.ts check";
       },
       (workflow: Record<string, unknown>) => {
         const release = (workflow.jobs as Record<string, unknown>)

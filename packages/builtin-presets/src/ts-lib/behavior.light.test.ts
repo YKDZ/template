@@ -123,12 +123,12 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
     assert.partialDeepStrictEqual(rootManifest, {
       value: {
         scripts: {
-          check: "node --conditions=source scripts/quality-gates.ts check",
+          check: "node --conditions=source scripts/task-gates.ts check",
           "check:heavy":
-            "node --conditions=source scripts/quality-gates.ts check:heavy",
+            "node --conditions=source scripts/task-gates.ts check:heavy",
           "check:full":
-            "node --conditions=source scripts/quality-gates.ts check:full",
-          fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+            "node --conditions=source scripts/task-gates.ts check:full",
+          fix: "node --conditions=source scripts/task-gates.ts fix",
         },
       },
     });

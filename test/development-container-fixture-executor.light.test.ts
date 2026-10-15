@@ -5,11 +5,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  builtInPresetRegistry,
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-} from "@ykdz/template-builtin-presets";
 import { execa } from "execa";
 
 import { runGeneratedScenarioSet } from "../packages/checks/src/check-generated-registry.ts";
@@ -548,8 +543,18 @@ void describe("Development Container Fixture Executor", () => {
       });
 
       await session.execute(async (run) => {
-        await run("pnpm", ["run", "check"], { cwd: projectDir });
-        await run("pnpm", ["run", "check:full"], { cwd: projectDir });
+        await run("node", ["--version"], { cwd: projectDir });
+        assert.ok(cacheActivity.every((event) => event.cache !== "turbo"));
+        await run(
+          "node",
+          ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+          { cwd: projectDir },
+        );
+        await run(
+          "node",
+          ["--conditions=source", "scripts/task-gates.ts", "fix"],
+          { cwd: projectDir },
+        );
       });
 
       for (const expected of [
@@ -1502,39 +1507,13 @@ void describe("Development Container Fixture Executor", () => {
 
   void it("runs full checks before and after Fix with no tree delta", async () => {
     const projectDir = path.resolve("/fixture/root-order");
-    const plan = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry.all()[0]!,
-      context: createGenerationContext({
-        targetDir: projectDir,
-        defaultPackageScope: "fixture",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
-      }),
-    });
     const calls: Command[] = [];
-    const taskIds = plan.manifests.flatMap((manifest) => {
-      const name = manifest.name;
-      return typeof name === "string" &&
-        typeof manifest.scripts === "object" &&
-        manifest.scripts !== null
-        ? Object.keys(manifest.scripts).map((taskName) => ({
-            taskId: `${name.startsWith("@") ? name : "//"}#${taskName}`,
-          }))
-        : [];
-    });
 
     await executeGeneratedRootQuality({
-      plan,
       projectDir,
-      fixtureWorkspace: path.dirname(projectDir),
       includeFix: true,
       run: async (command, args, options) => {
         calls.push({ command, args, cwd: options.cwd });
-        if (args.includes("--dry-run=json")) {
-          return { stdout: JSON.stringify({ tasks: taskIds }) };
-        }
         if (command === "git" && args[0] === "write-tree") {
           return { stdout: "a".repeat(40) };
         }
@@ -1546,63 +1525,35 @@ void describe("Development Container Fixture Executor", () => {
       calls
         .filter(
           ({ command, args }) =>
-            (command === "pnpm" &&
-              args[0] === "run" &&
-              (args[1] === "check:full" || args[1] === "fix")) ||
+            (command === "node" && args[1] === "scripts/task-gates.ts") ||
             (command === "git" && args[0] === "write-tree"),
         )
         .map(({ command, args }) => [command, ...args]),
       [
-        ["pnpm", "run", "check:full"],
+        ["node", "--conditions=source", "scripts/task-gates.ts", "check:full"],
         ["git", "write-tree"],
-        ["pnpm", "run", "fix"],
+        ["node", "--conditions=source", "scripts/task-gates.ts", "fix"],
         ["git", "write-tree"],
-        ["pnpm", "run", "check:full"],
+        ["node", "--conditions=source", "scripts/task-gates.ts", "check:full"],
       ],
     );
   });
 
   void it("rejects a Fix delta before the repeated Root Check", async () => {
     const projectDir = path.resolve("/fixture/fix-delta");
-    const plan = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry.all()[0]!,
-      context: createGenerationContext({
-        targetDir: projectDir,
-        defaultPackageScope: "fixture",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.11.0",
-        },
-      }),
-    });
-    const taskIds = plan.manifests.flatMap((manifest) => {
-      const name = manifest.name;
-      return typeof name === "string" &&
-        typeof manifest.scripts === "object" &&
-        manifest.scripts !== null
-        ? Object.keys(manifest.scripts).map((taskName) => ({
-            taskId: `${name.startsWith("@") ? name : "//"}#${taskName}`,
-          }))
-        : [];
-    });
     let treeWrites = 0;
     let rootChecks = 0;
 
     await assert.rejects(
       executeGeneratedRootQuality({
-        plan,
         projectDir,
-        fixtureWorkspace: path.dirname(projectDir),
         includeFix: true,
         run: async (command, args) => {
-          if (args.includes("--dry-run=json")) {
-            return { stdout: JSON.stringify({ tasks: taskIds }) };
-          }
           if (command === "git" && args[0] === "write-tree") {
             treeWrites += 1;
             return { stdout: `${treeWrites}`.repeat(40) };
           }
-          if (command === "pnpm" && args[1] === "check:full") rootChecks += 1;
+          if (command === "node" && args[2] === "check:full") rootChecks += 1;
           return {};
         },
       }),

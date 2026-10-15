@@ -574,11 +574,18 @@ function isForwardingCommandRunnerCall(
 }
 
 function rootQualityCommand(command: string, args: readonly string[]): boolean {
+  if (command === "node") {
+    return (
+      args[0] === "--conditions=source" &&
+      args[1] === "scripts/task-gates.ts" &&
+      ["check", "check:heavy", "check:full", "fix"].includes(args[2] ?? "")
+    );
+  }
   if (command !== "pnpm") return false;
   if (args[0] === "install") return true;
   if (
     args[0] === "run" &&
-    (args[1] === "check" || args[1] === "check:full" || args[1] === "fix")
+    ["check", "check:heavy", "check:full", "fix"].includes(args[1] ?? "")
   ) {
     return true;
   }

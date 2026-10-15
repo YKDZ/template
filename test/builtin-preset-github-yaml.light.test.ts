@@ -333,7 +333,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       source.replace("pnpm install --frozen-lockfile", "pnpm install"),
       source.replace(
         "run: pnpm install --frozen-lockfile",
-        "run: pnpm run check",
+        "run: node --conditions=source scripts/task-gates.ts check",
       ),
     ])
       await expectRootOnlyWorkflowRejected(mutated);
@@ -345,7 +345,10 @@ void describe("Built-in Preset GitHub YAML checker", () => {
       source.replace("timeout-minutes: 45", "timeout-minutes: 30"),
     );
     await expectDeploymentWorkflowRejected(
-      source.replace("run: pnpm run check:heavy", "run: pnpm run check"),
+      source.replace(
+        "run: node --conditions=source scripts/task-gates.ts check:heavy",
+        "run: node --conditions=source scripts/task-gates.ts check",
+      ),
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
@@ -355,7 +358,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
-        /(?<light>      - name: Run Light Check\n        run: pnpm run check\n)(?<buildx>      - name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
+        /(?<light>      - name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check\n)(?<buildx>      - name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
         "$2$1",
       ),
     );

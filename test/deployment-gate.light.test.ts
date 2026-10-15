@@ -64,10 +64,6 @@ void describe("deployment quality gate", () => {
     assert.notStrictEqual(deployment, undefined);
     const normalized = normalizedDeploymentQualityPlan(deployment!) as {
       readonly executionResources: readonly unknown[];
-      readonly taskDiscovery: {
-        readonly args: readonly unknown[];
-        readonly expectedTaskIds: readonly unknown[];
-      };
       readonly dependencyInstallation: {
         readonly commands: readonly {
           readonly args: readonly unknown[];
@@ -102,18 +98,13 @@ void describe("deployment quality gate", () => {
         ],
       },
       generatedDeployment: {
-        command: "pnpm",
-        args: ["run", "check:full"],
-      },
-      taskDiscovery: {
-        command: "pnpm",
-        args: ["exec", "turbo", "run", "deployment", "--dry-run=json"],
-        expectedTaskIds: ["//#deployment"],
+        command: "node",
+        args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
       },
     });
     assert.strictEqual(normalized.executionResources.length, 1);
     assert.strictEqual(normalized.dependencyInstallation.commands.length, 3);
-    assert.strictEqual(normalized.generatedDeployment.args.length, 2);
+    assert.strictEqual(normalized.generatedDeployment.args.length, 3);
     assert.match(
       await deriveDeploymentQualityContractIdentity(deployment!),
       /^[0-9a-f]{64}$/u,

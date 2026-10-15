@@ -817,13 +817,18 @@ export function createDevelopmentContainerFixtureSession(options: {
             ...args,
           ];
     if (
-      command === "pnpm" &&
-      ((args[0] === "run" &&
-        (args[1] === "check" ||
-          args[1] === "check:full" ||
-          args[1] === "fix" ||
-          args[1] === "check:deployment")) ||
-        (args[0] === "exec" && args[1] === "turbo"))
+      (command === "node" &&
+        args[0] === "--conditions=source" &&
+        args[1] === "scripts/task-gates.ts" &&
+        ["check", "check:heavy", "check:full", "fix"].includes(
+          args[2] ?? "",
+        )) ||
+      (command === "pnpm" &&
+        ((args[0] === "run" &&
+          ["check", "check:heavy", "check:full", "fix"].includes(
+            args[1] ?? "",
+          )) ||
+          (args[0] === "exec" && args[1] === "turbo")))
     ) {
       await recordCacheActivity({ cache: "turbo", outcome: "configured" });
     }

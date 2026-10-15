@@ -62,7 +62,7 @@ jobs:
 
       - name: Check package
         id: package-check
-        run: pnpm run check
+        run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -119,7 +119,7 @@ jobs:
 
       - name: Check heavy gate
         if: always() && steps.package-check.outcome == 'success'
-        run: pnpm run check:heavy
+        run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy
         env:
           TEMPLATE_FIXTURE_TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TEMPLATE_FIXTURE_TURBO_TOKEN: ${{ (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref || github.event_name == 'release') && secrets.TURBO_TOKEN || '' }}

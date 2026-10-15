@@ -129,7 +129,9 @@ void describe("Template Repository native task model", () => {
     for (const task of nativeTaskByName(directory).values()) {
       if (task.command !== null) {
         assert.strictEqual(
-          task.tags.length,
+          task.tags.filter(
+            (tag) => tag.startsWith("quality:") || tag.startsWith("work:"),
+          ).length,
           1,
           `${task.fullName} 应恰有一个任务职责`,
         );
@@ -194,25 +196,25 @@ void describe("Template Repository native task model", () => {
     );
   });
 
-  void it("exposes one public quality-gate runner and recursive light/heavy test scripts", async () => {
+  void it("公共检查和修复复用同一执行器，轻重测试按目录递归发现", async () => {
     const manifest = await readJson<Manifest>("package.json");
     const scripts = manifest.scripts;
 
     assert.strictEqual(
       scripts.check,
-      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check",
     );
     assert.strictEqual(
       scripts["check:heavy"],
-      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check:heavy",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
     );
     assert.strictEqual(
       scripts["check:full"],
-      "node --conditions=source --experimental-strip-types scripts/run-quality-gate.ts check:full",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:full",
     );
     assert.strictEqual(
       scripts.fix,
-      "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+      "node --conditions=source --experimental-strip-types scripts/run-task-gate.ts fix",
     );
     assert.strictEqual(
       scripts.build,

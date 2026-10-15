@@ -30,7 +30,6 @@ import {
   type FixtureCommandRunner,
   type FixtureEvidenceStorage,
 } from "../packages/checks/src/fixture-evidence/kernel/index.ts";
-import { generatedTaskIds } from "./fixture-evidence.test-support.ts";
 
 function hasCause(error: unknown, expected: unknown): boolean {
   if (error === expected) return true;
@@ -666,21 +665,14 @@ void it(
             : secondSessionQueuedPromise;
         return release.then(() => result);
       }
-      if (args.includes("--dry-run=json")) {
-        assert.ok(options.cwd);
-        return generatedTaskIds(options.cwd).then((taskIds) => ({
-          stdout: JSON.stringify({
-            tasks: taskIds.map((taskId) => ({ taskId })),
-          }),
-        }));
-      }
-      const pnpmIndex = args.indexOf("pnpm");
+      const nodeIndex = args.indexOf("node");
       if (
         command === "devcontainer" &&
         args[0] === "exec" &&
-        pnpmIndex >= 0 &&
-        args[pnpmIndex + 1] === "run" &&
-        args[pnpmIndex + 2] === "check:full" &&
+        nodeIndex >= 0 &&
+        args[nodeIndex + 1] === "--conditions=source" &&
+        args[nodeIndex + 2] === "scripts/task-gates.ts" &&
+        args[nodeIndex + 3] === "check:full" &&
         scenarioIndex === 1
       ) {
         const activeCommand = execa(

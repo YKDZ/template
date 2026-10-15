@@ -3921,68 +3921,25 @@ void describe("Fixture Verification Evidence", () => {
       }),
     });
     const calls: Array<{ command: string; args: readonly string[] }> = [];
-    const expectedTasks = plan.manifests.flatMap((manifest) => {
-      if (
-        typeof manifest.name !== "string" ||
-        typeof manifest.scripts !== "object" ||
-        manifest.scripts === null
-      ) {
-        return [];
-      }
-      const packageName = manifest.name;
-      return Object.keys(manifest.scripts).map((taskName) => ({
-        taskId: `${packageName.startsWith("@") ? packageName : "//"}#${taskName}`,
-      }));
-    });
-    const expectedQualityTaskIds = expectedTasks
-      .map(({ taskId }) => taskId)
-      .filter((taskId) =>
-        [
-          "format:check",
-          "lint",
-          "typecheck",
-          "build",
-          "test",
-          "test:e2e",
-          "deployment",
-        ].includes(taskId.slice(taskId.lastIndexOf("#") + 1)),
-      )
-      .toSorted();
-
     try {
       const contractIdentity =
         await deriveGeneratedRootQualityContractIdentity(plan);
       assert.match(contractIdentity, /^[0-9a-f]{64}$/u);
 
       await executeGeneratedRootQuality({
-        plan,
         projectDir: path.join(root, "project"),
-        fixtureWorkspace: root,
         run: async (command, args) => {
           calls.push({ command, args });
-          return args.includes("--dry-run=json")
-            ? { stdout: JSON.stringify({ tasks: expectedTasks }) }
-            : {};
+          return {};
         },
       });
 
-      assert.deepStrictEqual(calls[0], {
-        command: "pnpm",
-        args: [
-          "exec",
-          "turbo",
-          "run",
-          ...expectedQualityTaskIds,
-          "--dry-run=json",
-        ],
-      });
-      assert.deepStrictEqual(
-        calls.find(
-          ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
-        ),
-        { command: "pnpm", args: ["run", "check:full"] },
-      );
+      assert.deepStrictEqual(calls, [
+        {
+          command: "node",
+          args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+        },
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -4356,6 +4313,8 @@ void describe("Fixture Verification Evidence", () => {
       'const invoke = run;\ninvoke("pnpm", ["run", "check"], { cwd: "." });\n',
       'options.run("pnpm", ["install"], { cwd: "." });\n',
       'execa("pnpm", ["run", "fix"], { cwd: "." });\n',
+      'execa("node", ["--conditions=source", "scripts/task-gates.ts", "check:full"], { cwd: "." });\n',
+      'run("node", ["--conditions=source", "scripts/task-gates.ts", "fix"], { cwd: "." });\n',
       'const invoke = (command, args) => processRunner(command, args);\ninvoke("pnpm", ["run", "check"]);\n',
       'const args = ["run", "check"];\nrun("pnpm", args, { cwd: "." });\n',
       'run("p" + "npm", ["r" + "un", `ch${"eck"}`], { cwd: "." });\n',

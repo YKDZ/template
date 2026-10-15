@@ -122,8 +122,11 @@ void describe("npm release workflow", () => {
 
     assert.ok(workflow.includes("uses: ./.github/workflows/check.yml"));
     assert.ok(workflow.includes("needs: check"));
-    assert.ok(!workflow.includes("run: pnpm run check\n"));
-    assert.ok(!workflow.includes("run: pnpm run check:fixtures"));
+    assert.ok(
+      !workflow.includes(
+        "run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check\n",
+      ),
+    );
   });
 
   void it("keeps the public heavy quality gate in reusable CI", async () => {
@@ -132,7 +135,11 @@ void describe("npm release workflow", () => {
       "utf8",
     );
 
-    assert.ok(workflow.includes("run: pnpm run check:heavy"));
+    assert.ok(
+      workflow.includes(
+        "run: node --conditions=source --experimental-strip-types scripts/run-task-gate.ts check:heavy",
+      ),
+    );
     assert.ok(workflow.includes("run: pnpm install --frozen-lockfile"));
   });
 });

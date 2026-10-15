@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -36,31 +36,6 @@ function nestedDevcontainerCommand(args: readonly string[]): {
     command: args[commandIndex],
     args: args.slice(commandIndex + 1),
   };
-}
-
-async function generatedTaskIds(root: string): Promise<readonly string[]> {
-  const taskIds: string[] = [];
-  async function visit(directory: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === "node_modules") continue;
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await visit(entryPath);
-      } else if (entry.name === "package.json") {
-        const manifest = JSON.parse(await readFile(entryPath, "utf8")) as {
-          readonly name: string;
-          readonly scripts?: Readonly<Record<string, string>>;
-        };
-        for (const taskName of Object.keys(manifest.scripts ?? {})) {
-          taskIds.push(
-            `${manifest.name.startsWith("@") ? manifest.name : "//"}#${taskName}`,
-          );
-        }
-      }
-    }
-  }
-  await visit(root);
-  return taskIds;
 }
 
 void describe("Development Container Fixture Executor", () => {
@@ -102,15 +77,6 @@ void describe("Development Container Fixture Executor", () => {
               );
             }
             return await execa(command, [...args], options);
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
           }
           if (command === "docker" && args[0] === "ps") {
             return {
@@ -290,15 +256,6 @@ void describe("Development Container Fixture Executor", () => {
           if (command === "git") {
             return await execa(command, [...args], options);
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           if (command === "docker" && args[0] === "ps") {
             return {
               stdout: `${createHash("sha256").update(options.cwd).digest("hex").slice(0, 12)}\n`,
@@ -342,9 +299,9 @@ void describe("Development Container Fixture Executor", () => {
         if (command !== "devcontainer" || args[0] !== "exec") return false;
         const nested = nestedDevcontainerCommand(args);
         return (
-          nested.command === "pnpm" &&
-          nested.args[0] === "run" &&
-          nested.args[1] === "check:full"
+          nested.command === "node" &&
+          nested.args[1] === "scripts/task-gates.ts" &&
+          nested.args[2] === "check:full"
         );
       });
       assert.strictEqual(fullCommands.length, rootStarts.length * 2);

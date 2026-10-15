@@ -21,7 +21,6 @@ import {
   focusedMarker,
   generatedRootQualityExecutionResources,
   generatedScenariosFor,
-  generatedTaskIds,
   isDeepStrictEqual,
   isolatedFixtureEnvironment,
   materializeFocusedProviderBuild,
@@ -156,16 +155,11 @@ void describe("Fixture Verification Evidence", () => {
           if (command === "git") {
             return await execa(command, [...args], options);
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
-          if (args[0] === "run" && args[1] === "check:full") {
+          if (
+            command === "node" &&
+            args[1] === "scripts/task-gates.ts" &&
+            args[2] === "check:full"
+          ) {
             rootChecks += 1;
           }
           return {};
@@ -215,15 +209,6 @@ void describe("Fixture Verification Evidence", () => {
         run: async (command, args, options) => {
           if (command === "git") {
             return await execa(command, [...args], options);
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
           }
           return {};
         },
@@ -293,15 +278,6 @@ void describe("Fixture Verification Evidence", () => {
           if (command === "git") {
             return await execa(command, [...args], options);
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           if (
             command === "pnpm" &&
             args.includes("build") &&
@@ -309,7 +285,7 @@ void describe("Fixture Verification Evidence", () => {
           ) {
             await materializeFocusedProviderBuild(options.cwd);
           }
-          if (command === "node") {
+          if (command === "node" && args[1] !== "scripts/task-gates.ts") {
             return {
               stdout: await focusedMarker(
                 path.dirname(path.dirname(options.cwd)),
@@ -456,15 +432,6 @@ void describe("Fixture Verification Evidence", () => {
               "fixture-created: true\n",
             );
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           return {};
         },
       });
@@ -502,15 +469,6 @@ void describe("Fixture Verification Evidence", () => {
           if (args[0] === "install") {
             await installs.enter();
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           if (
             command === "pnpm" &&
             args.includes("build") &&
@@ -518,7 +476,7 @@ void describe("Fixture Verification Evidence", () => {
           ) {
             await materializeFocusedProviderBuild(options.cwd);
           }
-          if (command === "node") {
+          if (command === "node" && args[1] !== "scripts/task-gates.ts") {
             return {
               stdout: await focusedMarker(
                 path.dirname(path.dirname(options.cwd)),
@@ -558,15 +516,6 @@ void describe("Fixture Verification Evidence", () => {
           if (args[0] === "install") {
             await installs.enter();
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           return {};
         },
       });
@@ -594,17 +543,7 @@ void describe("Fixture Verification Evidence", () => {
         if (command === "git") {
           return await execa(command, [...args], options);
         }
-        if (args.includes("--dry-run=json")) {
-          observedProjectDirectories.add(options.cwd);
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
-            }),
-          };
-        }
-        if (command === "pnpm" && args[0] === "run") {
+        if (command === "node" && args[1] === "scripts/task-gates.ts") {
           observedProjectDirectories.add(options.cwd);
         }
         return {};
@@ -670,15 +609,6 @@ void describe("Fixture Verification Evidence", () => {
           if (args[0] === "install") {
             await installs.enter();
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           return {};
         },
       });
@@ -729,15 +659,6 @@ void describe("Fixture Verification Evidence", () => {
               if (args[0] === "install") {
                 await installs.enter();
               }
-              if (args.includes("--dry-run=json")) {
-                return {
-                  stdout: JSON.stringify({
-                    tasks: (await generatedTaskIds(options.cwd)).map(
-                      (taskId) => ({ taskId }),
-                    ),
-                  }),
-                };
-              }
               if (
                 command === "pnpm" &&
                 args.includes("build") &&
@@ -745,7 +666,7 @@ void describe("Fixture Verification Evidence", () => {
               ) {
                 await materializeFocusedProviderBuild(options.cwd);
               }
-              if (command === "node") {
+              if (command === "node" && args[1] !== "scripts/task-gates.ts") {
                 return {
                   stdout: await focusedMarker(
                     path.dirname(path.dirname(options.cwd)),
@@ -980,15 +901,6 @@ void describe("Fixture Verification Evidence", () => {
             "fixture-created: true\n",
           );
         }
-        if (args.includes("--dry-run=json")) {
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
-            }),
-          };
-        }
         return {};
       };
 
@@ -1057,7 +969,9 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         coldCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+            command === "node" &&
+            args[1] === "scripts/task-gates.ts" &&
+            args[2] === "check:full",
         ).length,
         scenarioCount * 2,
       );
@@ -1153,15 +1067,6 @@ void describe("Fixture Verification Evidence", () => {
             "fixture-created: true\n",
           );
         }
-        if (args.includes("--dry-run=json")) {
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
-            }),
-          };
-        }
         if (
           command === "pnpm" &&
           args.includes("build") &&
@@ -1169,7 +1074,7 @@ void describe("Fixture Verification Evidence", () => {
         ) {
           await materializeFocusedProviderBuild(options.cwd);
         }
-        if (command === "node") {
+        if (command === "node" && args[1] !== "scripts/task-gates.ts") {
           const sourceProbe = args.includes("--conditions=source");
           if (sourceProbe) {
             await focusedMisses.enter();
@@ -1299,7 +1204,9 @@ void describe("Fixture Verification Evidence", () => {
       );
       for (const command of coldCommands.filter(
         ({ command, args }) =>
-          command === "node" && args.includes("--conditions=source"),
+          command === "node" &&
+          args[1] !== "scripts/task-gates.ts" &&
+          args.includes("--conditions=source"),
       )) {
         const projectDir = path.dirname(path.dirname(command.cwd));
         const scenarioCommands = coldCommands.filter(({ cwd }) =>
@@ -1308,7 +1215,9 @@ void describe("Fixture Verification Evidence", () => {
         assert.ok(
           scenarioCommands.findIndex(
             ({ command: name, args }) =>
-              name === "pnpm" && args[0] === "run" && args[1] === "check:full",
+              name === "node" &&
+              args[1] === "scripts/task-gates.ts" &&
+              args[2] === "check:full",
           ) < scenarioCommands.indexOf(command),
         );
       }
@@ -1342,12 +1251,17 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         rootChangedCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+            command === "node" &&
+            args[1] === "scripts/task-gates.ts" &&
+            args[2] === "check:full",
         ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
-        rootChangedCommands.filter(({ command }) => command === "node"),
+        rootChangedCommands.filter(
+          ({ command, args }) =>
+            command === "node" && args[1] !== "scripts/task-gates.ts",
+        ),
         [],
       );
       assert.strictEqual(
@@ -1378,12 +1292,17 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         rootExpiredCommands.filter(
           ({ command, args }) =>
-            command === "pnpm" && args[0] === "run" && args[1] === "check:full",
+            command === "node" &&
+            args[1] === "scripts/task-gates.ts" &&
+            args[2] === "check:full",
         ).length,
         scenarioCount * 2,
       );
       assert.deepStrictEqual(
-        rootExpiredCommands.filter(({ command }) => command === "node"),
+        rootExpiredCommands.filter(
+          ({ command, args }) =>
+            command === "node" && args[1] !== "scripts/task-gates.ts",
+        ),
         [],
       );
       assert.strictEqual(
@@ -1440,7 +1359,7 @@ void describe("Fixture Verification Evidence", () => {
         }
         if (command === "pnpm" || command === "node") {
           const dependencyRoot =
-            command === "node"
+            command === "node" && args[1] !== "scripts/task-gates.ts"
               ? path.dirname(path.dirname(options.cwd))
               : options.cwd;
           try {
@@ -1451,15 +1370,6 @@ void describe("Fixture Verification Evidence", () => {
             );
           }
         }
-        if (args.includes("--dry-run=json")) {
-          return {
-            stdout: JSON.stringify({
-              tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                taskId,
-              })),
-            }),
-          };
-        }
         if (
           command === "pnpm" &&
           args.includes("build") &&
@@ -1467,7 +1377,7 @@ void describe("Fixture Verification Evidence", () => {
         ) {
           await materializeFocusedProviderBuild(options.cwd);
         }
-        if (command === "node") {
+        if (command === "node" && args[1] !== "scripts/task-gates.ts") {
           return {
             stdout: await focusedMarker(
               path.dirname(path.dirname(options.cwd)),
@@ -1557,7 +1467,9 @@ void describe("Fixture Verification Evidence", () => {
       assert.strictEqual(
         partialWarmCommands.filter(
           ({ command, args }) =>
-            command === "node" && args.includes("--conditions=source"),
+            command === "node" &&
+            args[1] !== "scripts/task-gates.ts" &&
+            args.includes("--conditions=source"),
         ).length,
         scenarioCount,
       );
@@ -1593,19 +1505,10 @@ void describe("Fixture Verification Evidence", () => {
             if (command === "git") {
               return await execa(command, [...args], options);
             }
-            if (args.includes("--dry-run=json")) {
-              return {
-                stdout: JSON.stringify({
-                  tasks: (await generatedTaskIds(options.cwd)).map(
-                    (taskId) => ({ taskId }),
-                  ),
-                }),
-              };
-            }
             if (
-              command === "pnpm" &&
-              args[0] === "run" &&
-              args[1] === "check:full"
+              command === "node" &&
+              args[1] === "scripts/task-gates.ts" &&
+              args[2] === "check:full"
             ) {
               throw new Error("Root Quality failed");
             }
@@ -1695,15 +1598,6 @@ void describe("Fixture Verification Evidence", () => {
               "fixture-created: true\n",
             );
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           return {};
         };
 
@@ -1765,7 +1659,9 @@ void describe("Fixture Verification Evidence", () => {
         assert.strictEqual(
           coldCommands.filter(
             ({ command, args }) =>
-              command === "pnpm" && args[0] === "run" && args[1] === "fix",
+              command === "node" &&
+              args[1] === "scripts/task-gates.ts" &&
+              args[2] === "fix",
           ).length,
           scenarioCount,
         );
@@ -1926,15 +1822,6 @@ void describe("Fixture Verification Evidence", () => {
           if (command === "git") {
             return await execa(command, [...args], options);
           }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
-          }
           return {};
         },
         evidence: {
@@ -2017,15 +1904,6 @@ void describe("Fixture Verification Evidence", () => {
             } else {
               ordinaryScenarios.add(scenarioId);
             }
-          }
-          if (args.includes("--dry-run=json")) {
-            return {
-              stdout: JSON.stringify({
-                tasks: (await generatedTaskIds(options.cwd)).map((taskId) => ({
-                  taskId,
-                })),
-              }),
-            };
           }
           return {};
         },
@@ -2348,7 +2226,7 @@ void describe("Fixture Verification Evidence", () => {
         await writeFile(
           pnpmPath,
           `#!${process.execPath}
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 const commandArgs = process.argv.slice(2);
@@ -2371,18 +2249,6 @@ const visit = (directory) => {
 };
 visit(process.cwd());
 
-if (commandArgs.includes("--dry-run=json")) {
-  const tasks = [];
-  for (const { value: manifest } of manifests) {
-        for (const taskName of Object.keys(manifest.scripts ?? {})) {
-          tasks.push({
-            taskId: (manifest.name.startsWith("@") ? manifest.name : "//") + "#" + taskName,
-          });
-        }
-  }
-  writeSync(1, JSON.stringify({ tasks }));
-}
-
 if (commandArgs.includes("build") && commandArgs.includes("--force")) {
   for (const { root, value: manifest } of manifests) {
     const source = manifest.exports?.["."]?.source;
@@ -2404,6 +2270,7 @@ import { appendFileSync, readFileSync, readdirSync, writeSync } from "node:fs";
 import path from "node:path";
 
 appendFileSync(process.env.FIXTURE_COMMAND_LOG, JSON.stringify(["node", ...process.argv.slice(2)]) + "\\n");
+if (process.argv[3] === "scripts/task-gates.ts") process.exit(0);
 let marker;
 const visit = (directory) => {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -2517,8 +2384,11 @@ process.exitCode = result.status ?? 1;
         );
         assert.notStrictEqual(
           coldCommands.filter(
-            ([binary, command, task]) =>
-              binary === "pnpm" && command === "run" && task === "check:full",
+            ([binary, condition, script, task]) =>
+              binary === "node" &&
+              condition === "--conditions=source" &&
+              script === "scripts/task-gates.ts" &&
+              task === "check:full",
           ).length,
           0,
         );
@@ -2656,7 +2526,7 @@ process.exitCode = result.status ?? 1;
         ),
         writeFile(
           path.join(root, "packages/checks/src/check-generated-registry.ts"),
-          'async function scenario() { await run("pnpm", ["run", "check"], { cwd: "." }); await run("node", ["--conditions=source", "probe.mjs"], { cwd: "." }); await run("docker", ["version"], { cwd: "." }); await run("pnpm", ["run", "check:deployment"], { cwd: "." }); }\n',
+          'async function scenario() { await run("node", ["--conditions=source", "scripts/task-gates.ts", "check:full"], { cwd: "." }); await run("node", ["--conditions=source", "probe.mjs"], { cwd: "." }); await run("docker", ["version"], { cwd: "." }); }\n',
         ),
       ]);
 

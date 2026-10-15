@@ -552,8 +552,14 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     assert.ok(lightCheckIndex >= 0);
     assert.ok(buildxSetupIndex > lightCheckIndex);
     assert.ok(heavyCheckIndex > buildxSetupIndex);
-    assert.strictEqual(steps[lightCheckIndex]?.run, "pnpm run check");
-    assert.strictEqual(steps[heavyCheckIndex]?.run, "pnpm run check:heavy");
+    assert.strictEqual(
+      steps[lightCheckIndex]?.run,
+      "node --conditions=source scripts/task-gates.ts check",
+    );
+    assert.strictEqual(
+      steps[heavyCheckIndex]?.run,
+      "node --conditions=source scripts/task-gates.ts check:heavy",
+    );
     assert.match(
       buildxSetup?.uses ?? "",
       /^docker\/setup-buildx-action@[a-f0-9]{40}$/u,
@@ -587,11 +593,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         scripts: {
           deployment:
             "node --conditions=source scripts/check-standalone-deployment.ts",
-          check: "node --conditions=source scripts/quality-gates.ts check",
+          check: "node --conditions=source scripts/task-gates.ts check",
           "check:heavy":
-            "node --conditions=source scripts/quality-gates.ts check:heavy",
+            "node --conditions=source scripts/task-gates.ts check:heavy",
           "check:full":
-            "node --conditions=source scripts/quality-gates.ts check:full",
+            "node --conditions=source scripts/task-gates.ts check:full",
           "database:prepare:dev":
             "DATABASE_PROFILE=dev pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=dev pnpm --filter @demo/db run db:seed:example",
           "database:prepare:test":
@@ -600,7 +606,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
             "DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:reset && DATABASE_PROFILE=e2e pnpm --filter @demo/db-migrations run db:push && DATABASE_PROFILE=e2e pnpm --filter @demo/db run db:seed:example",
           dev: "pnpm run database:prepare:dev && turbo watch dev --filter=@demo/web",
           lint: "shellcheck scripts/container-entrypoint.sh && oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
-          fix: "turbo run lint:fix format:write --continue=dependencies-successful --output-logs=full --log-order=grouped --log-prefix=task",
+          fix: "node --conditions=source scripts/task-gates.ts fix",
         },
       },
     );

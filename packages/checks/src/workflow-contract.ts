@@ -324,7 +324,7 @@ function assertPublicationVerifySteps(
       'mkdir -p "$RUNNER_TEMP/npm-publication-artifact"\ntest -z "$(find "$RUNNER_TEMP/npm-publication-artifact" -mindepth 1 -print -quit)"\n' ||
     !hasExactKeys(check, ["name", "run"]) ||
     !isWorkflowStepName(check.name) ||
-    check.run !== "pnpm run check:full" ||
+    check.run !== "node --conditions=source scripts/task-gates.ts check:full" ||
     !hasExactKeys(artifact, ["name", "run", "env"]) ||
     !isWorkflowStepName(artifact.name) ||
     artifact.run !== "pnpm run publication:artifact" ||
@@ -487,11 +487,11 @@ const workflowPolicy = {
   },
   lightCheckStep: {
     name: "Run Light Check",
-    command: "pnpm run check",
+    command: "node --conditions=source scripts/task-gates.ts check",
   },
   heavyCheckStep: {
     name: "Run Heavy Check",
-    command: "pnpm run check:heavy",
+    command: "node --conditions=source scripts/task-gates.ts check:heavy",
   },
 } as const;
 
