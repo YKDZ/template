@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { it } from "node:test";
@@ -12,6 +19,7 @@ import { execa } from "execa";
 const qualityGatesPath = fileURLToPath(
   import.meta.resolve("@ykdz/template-builtin-presets/quality-gates"),
 );
+const turboExecutablePath = fileURLToPath(import.meta.resolve("turbo"));
 
 function taskScript(gate: string): string {
   return `node record.cjs ${gate}`;
@@ -212,20 +220,11 @@ async function createWorkspace(
   );
 
   try {
-    const lockfile = await execa(
-      "pnpm",
-      ["install", "--offline", "--lockfile-only"],
-      { cwd: root, reject: false },
+    await mkdir(path.join(root, "node_modules", ".bin"), { recursive: true });
+    await symlink(
+      turboExecutablePath,
+      path.join(root, "node_modules", ".bin", "turbo"),
     );
-    assert.equal(lockfile.exitCode, 0, lockfile.stderr);
-
-    const install = await execa(
-      "pnpm",
-      ["install", "--offline", "--frozen-lockfile"],
-      { cwd: root, reject: false },
-    );
-    assert.equal(install.exitCode, 0, install.stderr);
-
     await writeFile(path.join(root, "runs.log"), "");
   } catch (error) {
     await rm(root, { recursive: true, force: true });
