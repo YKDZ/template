@@ -3934,6 +3934,20 @@ void describe("Fixture Verification Evidence", () => {
         taskId: `${packageName.startsWith("@") ? packageName : "//"}#${taskName}`,
       }));
     });
+    const expectedQualityTaskIds = expectedTasks
+      .map(({ taskId }) => taskId)
+      .filter((taskId) =>
+        [
+          "format:check",
+          "lint",
+          "typecheck",
+          "build",
+          "test",
+          "test:e2e",
+          "deployment",
+        ].includes(taskId.slice(taskId.lastIndexOf("#") + 1)),
+      )
+      .toSorted();
 
     try {
       const contractIdentity =
@@ -3958,13 +3972,7 @@ void describe("Fixture Verification Evidence", () => {
           "exec",
           "turbo",
           "run",
-          "format:check",
-          "lint",
-          "typecheck",
-          "build",
-          "test",
-          "test:e2e",
-          "deployment",
+          ...expectedQualityTaskIds,
           "--dry-run=json",
         ],
       });
