@@ -92,9 +92,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-
+            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-
             fixture-cargo-downloads-${{ runner.os }}-
 
       - name: Restore Fixture Verification Evidence
@@ -242,7 +242,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save Fixture Verification Evidence
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'

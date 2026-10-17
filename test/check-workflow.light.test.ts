@@ -635,7 +635,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         name: "Cargo downloads",
         path: ".fixture-native-cache/cargo",
         keyInput:
-          "hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml')",
+          "hashFiles('references/rust-bin/Cargo.lock', 'rust-toolchain.toml')",
       },
     ] as const;
 

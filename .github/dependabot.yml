@@ -44,7 +44,7 @@ updates:
         update-types:
           - version-update:semver-major
   - package-ecosystem: cargo
-    directory: /reference/rust-bin
+    directory: /references/rust-bin
     schedule:
       interval: weekly
   - package-ecosystem: rust-toolchain

@@ -1,14 +1,14 @@
 {
   "application": {
     "name": "@ykdz/reference-vike-web",
-    "path": "reference/vike-web"
+    "path": "references/vike-web"
   },
   "database": {
     "name": "@ykdz/reference-vike-db",
-    "path": "reference/vike-db"
+    "path": "references/vike-db"
   },
   "migrations": {
     "name": "@ykdz/reference-vike-migrations",
-    "path": "reference/vike-migrations"
+    "path": "references/vike-migrations"
   }
 }

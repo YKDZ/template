@@ -150,9 +150,9 @@ export async function planRepositoryConfiguration(
     throw new Error(derived.diagnostics.join("\n"));
   const partialFiles = [
     "packages/cli/package.json",
-    "reference/ts-cli/package.json",
+    "references/ts-cli/package.json",
     "packages/core/src/release-toolchain-snapshot.ts",
-    "reference/rust-bin/template/rust-toolchain.toml",
+    "references/rust-bin/template/rust-toolchain.toml",
   ];
   const contents = await Promise.all(
     partialFiles.map((file) =>
