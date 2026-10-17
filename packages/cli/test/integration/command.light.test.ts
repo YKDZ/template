@@ -211,7 +211,7 @@ void describe("template CLI command control", () => {
       assert.ok(!output.stdout().includes("TypeScript command-line package."));
       assert.equal(output.stderr(), "");
       assertPartialDeepStrictEqual(JSON.parse(jsonOutput.stdout()), {
-        schemaVersion: "1",
+        schemaVersion: "2",
         command: "presets",
         kind: "data",
         variant: "listed",
@@ -268,7 +268,7 @@ void describe("template CLI command control", () => {
       assert.ok(output.stdout().includes("蓝图有效。"));
       assert.equal(output.stderr(), "");
       assert.deepEqual(JSON.parse(jsonOutput.stdout()), {
-        schemaVersion: "1",
+        schemaVersion: "2",
         command: "validateBlueprint",
         kind: "data",
         variant: "valid",
@@ -307,7 +307,7 @@ void describe("template CLI command control", () => {
       assert.ok(human.stderr().includes("蓝图无效"));
       assert.ok(human.stderr().includes(".schemaVersion"));
       assertPartialDeepStrictEqual(JSON.parse(json.stderr()), {
-        schemaVersion: "1",
+        schemaVersion: "2",
         command: "validateBlueprint",
         kind: "failure",
         variant: "invalid",
@@ -399,7 +399,7 @@ void describe("template CLI command control", () => {
       assert.equal(output.stdout(), "");
       const failure = JSON.parse(output.stderr());
       assertPartialDeepStrictEqual(failure, {
-        schemaVersion: "1",
+        schemaVersion: "2",
         kind: "usageFailure",
       });
       assert.ok(Array.isArray(failure.issues));
@@ -617,12 +617,26 @@ void describe("template CLI command control", () => {
       for (const args of [
         ["init", "unknown", "--preset", "missing-preset"],
         ["init", "fixed", "--preset", fixed.metadata.name, "--name", "renamed"],
+        [
+          "init",
+          "fixed",
+          "--preset",
+          fixed.metadata.name,
+          "--path",
+          "apps/renamed",
+        ],
       ]) {
         const output = testRuntime(args);
         assert.equal(await runCli({ ...output.runtime, cwd: workspace }), 2);
         assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
           kind: "usageFailure",
         });
+        if (args[3] === fixed.metadata.name) {
+          assertPartialDeepStrictEqual(JSON.parse(output.stderr()), {
+            helpArgv: ["template", "init", "--help"],
+            issues: [{ code: "conditionalConstraintViolation" }],
+          });
+        }
         assert.equal(output.stdout(), "");
       }
       assert.deepEqual(await readdir(workspace), []);
@@ -664,7 +678,7 @@ void describe("template CLI command control", () => {
     assert.equal(output.stderr(), "");
     const result = JSON.parse(output.stdout());
     assertPartialDeepStrictEqual(result, {
-      schemaVersion: "1",
+      schemaVersion: "2",
       command: "schema",
       kind: "data",
       variant: "exported",
@@ -675,6 +689,7 @@ void describe("template CLI command control", () => {
     assert.ok(humanSchema.stdout().includes('"commands"'));
     const manifest = result.data.manifest;
     assertPartialDeepStrictEqual(manifest, {
+      schemaVersion: "4",
       root: "template",
       commands: {
         init: {

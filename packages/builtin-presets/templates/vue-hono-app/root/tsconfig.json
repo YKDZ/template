@@ -1,3 +1,0 @@
-{
-  "include": ["*.config.ts", "scripts/**/*.ts", "test/**/*.ts"]
-}

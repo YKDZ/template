@@ -1,27 +1,23 @@
 packages:
+  - reference/*
   - packages/*
-
 nodeLinker: isolated
-
+preferSymlinkedExecutables: true
+shellEmulator: true
 autoInstallPeers: false
-
 injectWorkspacePackages: false
-
 dedupeInjectedDeps: false
-
 syncInjectedDepsAfterScripts:
   - build
-
 minimumReleaseAge: 1440
-
 minimumReleaseAgeStrict: true
-
-overrides:
-  "pinia>typescript": "-"
-  "vue>typescript": "-"
-
+minimumReleaseAgeExclude:
+  - "@ykdz/template"
+allowBuilds:
+  esbuild: true
 catalog:
-  "@ykdz/cli-contract": 0.2.1
+  "@types/eslint": ^9.6.1
+  "@ykdz/cli-contract": 0.3.0
   "@valibot/to-json-schema": ^1.8.0
   "@devcontainers/cli": 0.89.0
   "@hono/node-server": ^2.0.12
@@ -46,6 +42,7 @@ catalog:
   semver: ^7.8.5
   "@types/semver": ^7.7.1
   smol-toml: ^1.8.0
+  toml-eslint-parser: ^1.0.3
   spdx-expression-parse: ^5.0.0
   "@types/spdx-expression-parse": ^4.0.0
   pinia: ^4.0.2
@@ -66,10 +63,20 @@ catalog:
   vue: ^3.5.40
   vue-tsc: ^3.3.9
   yaml: ^2.9.0
-
+  ignore: ^7.0.5
+  jsonc-parser: ^3.3.1
+  npm-package-arg: ^14.0.0
+  picomatch: ^4.0.7
+  unbash: 5.0.0
+  "@types/npm-package-arg": ^6.1.4
+  "@types/picomatch": ^4.0.3
+  hosted-git-info: ^10.0.0
+  lru-cache: ^11.5.3
+  proc-log: ^7.0.0
+  validate-npm-package-name: ^8.0.0
 catalogs:
   public-cli-runtime:
     typescript: npm:typescript@^6.0.3
-
-allowBuilds:
-  esbuild: true
+overrides:
+  pinia>typescript: "-"
+  vue>typescript: "-"

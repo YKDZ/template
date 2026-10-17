@@ -1,0 +1,8 @@
+{
+  "extends": "@ykdz/reference-typescript-config/node.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts", "*.config.ts", "template/**/*.ts"]
+}

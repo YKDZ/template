@@ -1,0 +1,100 @@
+{
+  "boundaries": {
+    "tags": {
+      "app": {
+        "dependencies": {
+          "allow": ["app", "library"]
+        }
+      },
+      "library": {
+        "dependencies": {
+          "allow": ["library"]
+        }
+      }
+    }
+  },
+  "globalPassThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
+  "tasks": {
+    "//#boundaries": {
+      "tags": ["quality:light"]
+    },
+    "//#check": {
+      "tags": ["quality:entry"]
+    },
+    "//#check:full": {
+      "tags": ["quality:entry"]
+    },
+    "//#check:heavy": {
+      "tags": ["quality:entry"]
+    },
+    "//#database:prepare:dev": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#database:prepare:e2e": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#database:prepare:test": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#deployment": {
+      "cache": false,
+      "dependsOn": [
+        "@ykdz/reference-vike-web#build",
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/reference-vike-migrations#build"
+      ],
+      "tags": ["quality:heavy"]
+    },
+    "//#dev": {
+      "tags": ["work:development"]
+    },
+    "//#fix": {
+      "tags": ["work:repair"]
+    },
+    "//#format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#format:write": {
+      "cache": false,
+      "dependsOn": ["//#lint:fix"],
+      "tags": ["work:repair"]
+    },
+    "//#lint": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#lint:fix": {
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "//#publication:artifact": {
+      "cache": false,
+      "tags": ["quality:conditional"]
+    },
+    "//#publication:readiness": {
+      "cache": false,
+      "tags": ["work:release"]
+    },
+    "//#test:e2e": {
+      "cache": false,
+      "dependsOn": [
+        "@ykdz/reference-hono-api#build",
+        "@ykdz/reference-vue-hono-web#build",
+        "@ykdz/reference-vue-hono-web#browser:prepare"
+      ],
+      "tags": ["quality:heavy"]
+    },
+    "//#toolchain:prepare": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#typecheck": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

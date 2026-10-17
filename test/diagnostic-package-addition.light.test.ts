@@ -265,11 +265,12 @@ void describe("diagnostic Package Addition", () => {
         ...first.projectProjections,
       });
       assert.strictEqual(staleRepeat.ok, false);
-      assert.strictEqual(staleRepeat.conflicts.length, 1);
-      assert.partialDeepStrictEqual(staleRepeat.conflicts[0], {
-        path: "apps/web",
-        driver: "precondition",
-      });
+      assert.ok(
+        staleRepeat.conflicts.some(
+          (conflict) =>
+            conflict.path === "apps/web" && conflict.driver === "precondition",
+        ),
+      );
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

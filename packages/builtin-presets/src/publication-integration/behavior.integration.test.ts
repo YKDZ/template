@@ -30,7 +30,7 @@ import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
 
 type ArtifactModule =
-  typeof import("../../templates/ts-cli/publication/artifact.ts");
+  typeof import("@ykdz/template-workspace/publication/artifact");
 
 const mitLicense = `MIT License
 
@@ -90,6 +90,7 @@ async function configurePublicOwnerFacts(options: {
     bin: { ship: "./dist/cli.js" },
     files: ["dist", "README.md", "LICENSE", "CHANGELOG.md"],
     type: unpublishedManifest.type,
+    imports: unpublishedManifest.imports,
     publishConfig: {
       access: "public",
       registry: "https://registry.npmjs.org/",
@@ -533,7 +534,6 @@ void describe("ts-cli publication owner-fact integration", () => {
               { path: "package/dist/cli-command-identity.js" },
               { path: "package/dist/cli.js" },
               { path: "package/dist/main.js" },
-              { path: "package/dist/standard-schema.js" },
               { path: "package/package.json" },
             ],
             bin: {
@@ -542,7 +542,7 @@ void describe("ts-cli publication owner-fact integration", () => {
             },
           },
         });
-        assert.strictEqual(verified.receipt.files.length, 8);
+        assert.strictEqual(verified.receipt.files.length, 7);
         assert.strictEqual(verified.receipt.smokes.length, 5);
         assert.deepStrictEqual(
           verified.receipt.smokes.map(({ name }) => name),

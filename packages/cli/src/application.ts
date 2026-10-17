@@ -6,7 +6,6 @@ import {
   prepareGeneratedRepositoryPackageAddition,
   validateGeneratedRepositoryInitializationInput,
   prepareGeneratedRepositoryInitialization,
-  templateSources,
   type GeneratedRepositoryPlan,
   type InitializationInputIssue,
   type PackageAdditionInputIssue,
@@ -24,6 +23,7 @@ import {
 } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { projectNextStepsDocument } from "@ykdz/template-workspace/project-github";
 
 export type ApplicationRuntime = {
   readonly cwd: string;
@@ -378,18 +378,9 @@ export async function runInit(
     ...(options.todo
       ? [
           {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.foundation,
-            from: "TODO.md.template",
+            kind: "writeText" as const,
             to: "TODO.md",
-            replacements: {
-              NEXT_STEPS: plan.nextStepInstructions
-                .map(
-                  (instruction, index) =>
-                    `${index + 1}. \`${instruction.display}\``,
-                )
-                .join("\n"),
-            },
+            text: projectNextStepsDocument(plan.nextStepInstructions),
           },
         ]
       : []),

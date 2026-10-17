@@ -1,0 +1,80 @@
+import {
+  dockerEngineEnvironmentNeed,
+  playwrightBrowserAssetsEnvironmentNeed,
+} from "@ykdz/template-core/module-graph";
+import type { PackageContribution } from "@ykdz/template-core/package-contribution";
+import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
+import { defineReferencePackage } from "@ykdz/template-core/reference-package";
+import { browserTestDevelopmentContainerToolLayer } from "@ykdz/template-environment/development-environment";
+
+export const referencePackage = defineReferencePackage({
+  packageName: "@ykdz/reference-vike-web",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  identity: "vike-web",
+  instance: "independent",
+  defaultLeafName: "web",
+  defaultPath: "apps/web",
+  role: "runtime-service",
+  resources: ["."],
+  authoring: {
+    resources: ["template", "template-dist", "tsconfig.template.json"],
+    dependencies: [
+      "@ykdz/template-core",
+      "@ykdz/template-environment",
+      "typescript-7",
+    ],
+    scripts: ["build:template", "typecheck:template"],
+  },
+  foundation: ({ definition }) => ({
+    toolchains: {},
+    editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
+    dependencyMaintenance: {
+      ecosystems: ["npm", "github-actions", "docker"],
+      interval: "weekly",
+    },
+    workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
+    developmentContainerToolLayers: [
+      browserTestDevelopmentContainerToolLayer(),
+    ],
+  }),
+  environmentNeeds: ({ definition }) => [
+    playwrightBrowserAssetsEnvironmentNeed({
+      browser: "chromium",
+      owner: { kind: "package-boundary", path: definition.path },
+    }),
+  ],
+  project: (contribution, { definition }) => ({
+    ...contribution,
+    ciDiagnosticArtifacts: [
+      {
+        kind: "playwright",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+      {
+        kind: "vitest-browser",
+        owner: { kind: "package-boundary", path: definition.path },
+      },
+    ],
+  }),
+});
+
+type DeploymentCheck = NonNullable<
+  PackageContribution["foundation"]["deploymentCheck"]
+>;
+
+/** 部署资源由根共同能力提供，应用仅声明参与部署的公开包身份。 */
+export function deploymentCheck(options: {
+  readonly web: PackageDefinition;
+  readonly database: PackageDefinition;
+  readonly migrations: PackageDefinition;
+  readonly sources: DeploymentCheck["sources"];
+}): DeploymentCheck {
+  return {
+    kind: "application-container-with-database-migrations",
+    applicationPackageName: options.web.name,
+    databasePackageName: options.database.name,
+    migrationPackageName: options.migrations.name,
+    environmentNeeds: [dockerEngineEnvironmentNeed()],
+    sources: options.sources,
+  };
+}

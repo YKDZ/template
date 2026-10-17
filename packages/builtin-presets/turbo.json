@@ -3,14 +3,25 @@
   "tags": ["template-builtin-presets"],
   "tasks": {
     "build": {
-      "dependsOn": ["^build"],
+      "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build",
+        "@ykdz/template-workspace#build",
+        "@ykdz/reference-hono-api#build:template",
+        "@ykdz/reference-rust-bin#build:template",
+        "@ykdz/reference-ts-cli#build:template",
+        "@ykdz/reference-ts-lib#build:template",
+        "@ykdz/reference-typescript-config#build:template",
+        "@ykdz/reference-vike-db#build:template",
+        "@ykdz/reference-vike-migrations#build:template",
+        "@ykdz/reference-vike-web#build:template",
+        "@ykdz/reference-vue-app#build:template",
+        "@ykdz/reference-vue-hono-web#build:template",
+        "@ykdz/reference-vue-shared#build:template"
+      ],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
       "persistent": false
     },
@@ -18,7 +29,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxfmt.config.ts"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -34,11 +45,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/oxlint.config.ts",
-        "$TURBO_ROOT$/oxlint.template-source.config.ts"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -54,11 +61,7 @@
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },

@@ -1,0 +1,9 @@
+{
+  "extends": "./node.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "declarationMap": false
+  },
+  "include": ["*.config.ts", "scripts/**/*.ts", "template/**/*.ts"]
+}

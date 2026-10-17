@@ -23,6 +23,7 @@ import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import { parse } from "yaml";
 
 import { rootInstalledIntegrationSignal } from "../test-support/root-installed-integration-signal.ts";
 import { preserveRootIntegrationFailure } from "../test-support/root-integration-failure.ts";
@@ -222,56 +223,36 @@ void describe("Built-in Preset Package Addition universality", () => {
           targetRoot: context.targetDir,
           operations: [...initialization.operations],
         });
+        const rootManifestPath = path.join(context.targetDir, "package.json");
+        const initialManifest = JSON.parse(
+          await readFile(rootManifestPath, "utf8"),
+        ) as { readonly scripts: Readonly<Record<string, string>> };
         const addition = planGeneratedRepositoryPackageAddition({
           definition: base,
           localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
           packageLeafName: "custom",
           packagePath: "services/custom",
         });
-        const workspaceRefresh = addition.operations.find(
-          (operation) =>
-            operation.kind === "writeTextTemplate" &&
-            operation.to === "pnpm-workspace.yaml",
-        );
-
-        assert.ok(workspaceRefresh?.kind === "writeTextTemplate");
-        assert.ok(Object.hasOwn(workspaceRefresh, "replacements"));
-        assert.ok(
-          Object.hasOwn(
-            workspaceRefresh.replacements,
-            "WORKSPACE_PACKAGE_GLOBS",
-          ),
-        );
-        const packageGlobs =
-          workspaceRefresh.replacements.WORKSPACE_PACKAGE_GLOBS;
-        assert.ok(typeof packageGlobs === "string");
-        assert.ok(packageGlobs.includes("  - services/*"));
-        assert.ok(
-          addition.operations.some((operation) => {
-            if (
-              operation.kind !== "writeJson" ||
-              operation.to !== "package.json" ||
-              !Object.hasOwn(operation, "value") ||
-              typeof operation.value !== "object" ||
-              operation.value === null ||
-              !Object.hasOwn(operation.value, "scripts")
-            ) {
-              return false;
-            }
-            const scripts = (operation.value as Record<string, unknown>)
-              .scripts as Record<string, unknown>;
-            return (
-              Object.hasOwn(scripts, "check") &&
-              scripts.check === rootScripts(initialization) &&
-              Object.hasOwn(scripts, "fix") &&
-              scripts.fix === rootFix(initialization)
-            );
-          }),
-        );
-        await reconcileAndApplyProjectProjections({
+        const result = await reconcileAndApplyProjectProjections({
           targetRoot: context.targetDir,
           ...addition.projectProjections,
         });
+        assert.equal(result.ok, true);
+        const workspaceConfig = parse(
+          await readFile(
+            path.join(context.targetDir, "pnpm-workspace.yaml"),
+            "utf8",
+          ),
+        ) as { readonly packages: readonly string[] };
+        assert.ok(workspaceConfig.packages.includes("services/*"));
+        const addedManifest = JSON.parse(
+          await readFile(rootManifestPath, "utf8"),
+        ) as { readonly scripts: Readonly<Record<string, string>> };
+        for (const task of ["check", "fix"])
+          assert.equal(
+            addedManifest.scripts[task],
+            initialManifest.scripts[task],
+          );
         await execa("pnpm", ["install"], {
           cwd: context.targetDir,
           cancelSignal: signal,
@@ -285,6 +266,27 @@ void describe("Built-in Preset Package Addition universality", () => {
           readonly name: string;
           readonly scripts: Readonly<Record<string, string>>;
         };
+        const members = await execa(
+          "pnpm",
+          ["list", "-r", "--depth=-1", "--json"],
+          {
+            cwd: context.targetDir,
+            cancelSignal: signal,
+          },
+        ).then(
+          ({ stdout }) =>
+            JSON.parse(stdout) as readonly {
+              readonly name: string;
+              readonly path: string;
+            }[],
+        );
+        assert.ok(
+          members.some(
+            (member) =>
+              member.name === customManifest.name &&
+              member.path === path.join(context.targetDir, "services/custom"),
+          ),
+        );
         const customTurbo = JSON.parse(
           await readFile(
             path.join(context.targetDir, "services/custom/turbo.json"),
@@ -335,30 +337,3 @@ void describe("Built-in Preset Package Addition universality", () => {
     },
   );
 });
-
-function rootScripts(
-  plan: ReturnType<typeof planGeneratedRepositoryInitialization>,
-): string {
-  return rootManifestScripts(plan).check!;
-}
-
-function rootFix(
-  plan: ReturnType<typeof planGeneratedRepositoryInitialization>,
-): string {
-  return rootManifestScripts(plan).fix!;
-}
-
-function rootManifestScripts(
-  plan: ReturnType<typeof planGeneratedRepositoryInitialization>,
-): Record<string, string | undefined> {
-  const operation = plan.operations.find(
-    (item) => item.kind === "writeJson" && item.to === "package.json",
-  );
-  if (operation?.kind !== "writeJson") {
-    throw new Error("Generated Repository Plan is missing the root manifest");
-  }
-  const manifest = operation.value as {
-    scripts: Record<string, string | undefined>;
-  };
-  return manifest.scripts;
-}

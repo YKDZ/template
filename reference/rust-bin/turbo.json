@@ -1,0 +1,58 @@
+{
+  "extends": ["//"],
+  "tags": ["native"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "inputs": [],
+      "outputs": ["target/debug/**"],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build"
+      ],
+      "inputs": [],
+      "outputs": ["template-dist/**"],
+      "tags": ["quality:light"]
+    },
+    "format:check": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["//#toolchain:prepare", "lint:fix"],
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "test": {
+      "dependsOn": ["//#toolchain:prepare"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

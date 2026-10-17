@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
-const defaultRepositoryRoot = path.resolve(
+const defaultChecksPackageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../../..",
+  "..",
 );
 
 export type FixtureEvidenceArchitectureFinding = {
@@ -706,20 +706,17 @@ function orchestratorDependencyInstallationContracts(
 }
 
 export async function findFixtureEvidenceArchitectureFindings(
-  repositoryRoot: string = defaultRepositoryRoot,
+  checksPackageRoot: string = defaultChecksPackageRoot,
 ): Promise<readonly FixtureEvidenceArchitectureFinding[]> {
   const findings: FixtureEvidenceArchitectureFinding[] = [];
-  const evidenceRoot = path.join(
-    repositoryRoot,
-    "packages/checks/src/fixture-evidence",
-  );
+  const evidenceRoot = path.join(checksPackageRoot, "src/fixture-evidence");
   const gatesRoot = path.join(evidenceRoot, "gates");
   const kernelRoot = path.join(evidenceRoot, "kernel");
   const productionFiles = await sourceFiles(evidenceRoot);
 
   for (const file of productionFiles) {
     const relativeFile = path
-      .relative(repositoryRoot, file)
+      .relative(checksPackageRoot, file)
       .split(path.sep)
       .join("/");
     if (/(?:^|\/)[^/]+\.test\.[cm]?tsx?$/u.test(relativeFile)) {
@@ -823,8 +820,8 @@ export async function findFixtureEvidenceArchitectureFindings(
   }
 
   const orchestrator = path.join(
-    repositoryRoot,
-    "packages/checks/src/check-generated-registry.ts",
+    checksPackageRoot,
+    "src/check-generated-registry.ts",
   );
   try {
     const source = await readFile(orchestrator, "utf8");
@@ -843,7 +840,7 @@ export async function findFixtureEvidenceArchitectureFindings(
       findings.push({
         rule: "orchestrator-dependency-install-contract",
         file: path
-          .relative(repositoryRoot, orchestrator)
+          .relative(checksPackageRoot, orchestrator)
           .split(path.sep)
           .join("/"),
         detail: `scenario orchestrator owns dependency installation contract ${contract.name} at ${position.line + 1}:${position.character + 1}`,
@@ -857,7 +854,7 @@ export async function findFixtureEvidenceArchitectureFindings(
         findings.push({
           rule: "unassigned-orchestrator-command",
           file: path
-            .relative(repositoryRoot, orchestrator)
+            .relative(checksPackageRoot, orchestrator)
             .split(path.sep)
             .join("/"),
           detail: `scenario orchestrator invokes a command runner with a command or argument list that cannot be assigned to a semantic gate at ${position.line + 1}:${position.character + 1}`,
@@ -872,7 +869,7 @@ export async function findFixtureEvidenceArchitectureFindings(
               ? "hidden-focused-package-link-command"
               : "hidden-deployment-quality-command",
         file: path
-          .relative(repositoryRoot, orchestrator)
+          .relative(checksPackageRoot, orchestrator)
           .split(path.sep)
           .join("/"),
         detail: `scenario orchestrator owns ${command.owner === "root" ? "Root Quality" : command.owner === "focused" ? "Focused Package Link" : "Deployment Quality"} command ${JSON.stringify([command.command, ...command.args])} at ${position.line + 1}:${position.character + 1}`,
@@ -893,10 +890,10 @@ export async function findFixtureEvidenceArchitectureFindings(
 }
 
 export async function checkFixtureEvidenceArchitecture(
-  repositoryRoot: string = defaultRepositoryRoot,
+  checksPackageRoot: string = defaultChecksPackageRoot,
 ): Promise<void> {
   const findings =
-    await findFixtureEvidenceArchitectureFindings(repositoryRoot);
+    await findFixtureEvidenceArchitectureFindings(checksPackageRoot);
   if (findings.length > 0) {
     throw new Error(
       findings

@@ -10,6 +10,7 @@ import {
   versionCapability,
 } from "@ykdz/cli-contract";
 import { isNodeBrokenPipe } from "@ykdz/cli-contract/node";
+import { builtInPresetRegistry } from "@ykdz/template-builtin-presets";
 import * as v from "valibot";
 
 import {
@@ -71,6 +72,9 @@ function createCliContract(runtime: CliRuntime) {
         commandPlaceholder: "命令",
         choices: "候选：{choices}",
         default: "默认：{value}",
+        whenOnMatch: "当 {facts} 时，{onMatch}",
+        forbid: "禁止提供 {fields}",
+        equals: "{field} 为 {value}",
       },
     }),
     version: versionCapability({
@@ -91,6 +95,25 @@ function createCliContract(runtime: CliRuntime) {
         name: "init",
         description: "初始化项目仓库。",
         input: initializationInputSchema(runtime.cwd),
+        usageConstraints: builtInPresetRegistry
+          .all()
+          .filter(
+            (definition) => definition.initialPrimaryPackage === undefined,
+          )
+          .map(
+            (definition) =>
+              ({
+                kind: "when",
+                all: [
+                  {
+                    kind: "equals",
+                    field: "preset",
+                    value: definition.metadata.name,
+                  },
+                ],
+                onMatch: { forbid: ["name", "path"] },
+              }) as const,
+          ),
         fields: {
           dir: { kind: "positional", description: "目标目录" },
           preset: {

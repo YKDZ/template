@@ -1,0 +1,10 @@
+[
+  {
+    "id": "node-version-build-arg",
+    "path": ".devcontainer/devcontainer.json",
+    "location": {
+      "kind": "json-pointer",
+      "pointer": "/build/args/NODE_VERSION"
+    }
+  }
+]

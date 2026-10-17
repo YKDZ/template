@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -12,8 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { pathToFileURL } from "node:url";
 
+import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { parseDocument } from "yaml";
 
@@ -22,102 +21,6 @@ import {
   planGeneratedRepositoryInitialization,
 } from "../foundation.ts";
 import { tsCliDefinition } from "../ts-cli/definition.ts";
-
-type PublishModule =
-  typeof import("../../templates/ts-cli/publication/publish.ts");
-
-type ReleaseModule =
-  typeof import("../../templates/ts-cli/publication/release.ts");
-
-type PublicationYamlChecker = {
-  readonly assertPublicationWorkflowContract: (
-    plan: ReturnType<typeof planGeneratedRepositoryInitialization>,
-    source: string,
-    workflow: Record<string, unknown>,
-  ) => void;
-};
-
-async function loadPublicationYamlChecker(): Promise<PublicationYamlChecker> {
-  return (await import(
-    `${pathToFileURL(path.resolve(import.meta.dirname, "../../../checks/src/check-builtin-preset-github-yaml.ts")).href}?test=${crypto.randomUUID()}`
-  )) as PublicationYamlChecker;
-}
-
-async function loadPublishModule(workspace: string): Promise<PublishModule> {
-  const moduleRoot = path.join(workspace, "module");
-  await mkdir(moduleRoot);
-  await Promise.all([
-    cp(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/publish.ts",
-      ),
-      path.join(moduleRoot, "publish.ts"),
-    ),
-    cp(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/handoff.ts",
-      ),
-      path.join(moduleRoot, "handoff.ts"),
-    ),
-  ]);
-  const publishPath = path.join(moduleRoot, "publish.ts");
-  await writeFile(
-    publishPath,
-    (await readFile(publishPath, "utf8")).replace(
-      "{{PUBLIC_CLI_PACKAGE_PATH}}",
-      "packages/cli",
-    ),
-  );
-  await writeFile(path.join(workspace, "package.json"), '{"type":"module"}\n');
-  await symlink(
-    path.resolve(import.meta.dirname, "../../node_modules"),
-    path.join(workspace, "node_modules"),
-    "dir",
-  );
-  return (await import(
-    `${pathToFileURL(publishPath).href}?test=${crypto.randomUUID()}`
-  )) as PublishModule;
-}
-
-async function loadReleaseModule(workspace: string): Promise<ReleaseModule> {
-  const moduleRoot = path.join(workspace, "release-module");
-  await mkdir(moduleRoot);
-  await Promise.all([
-    cp(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/release.ts",
-      ),
-      path.join(moduleRoot, "release.ts"),
-    ),
-    cp(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/handoff.ts",
-      ),
-      path.join(moduleRoot, "handoff.ts"),
-    ),
-  ]);
-  const releasePath = path.join(moduleRoot, "release.ts");
-  await writeFile(
-    releasePath,
-    (await readFile(releasePath, "utf8")).replace(
-      "{{PUBLIC_CLI_PACKAGE_PATH}}",
-      "packages/cli",
-    ),
-  );
-  await writeFile(path.join(workspace, "package.json"), '{"type":"module"}\n');
-  await symlink(
-    path.resolve(import.meta.dirname, "../../node_modules"),
-    path.join(workspace, "node_modules"),
-    "dir",
-  );
-  return (await import(
-    `${pathToFileURL(releasePath).href}?test=${crypto.randomUUID()}`
-  )) as ReleaseModule;
-}
 
 async function writeVerifiedArtifact(
   workspace: string,
@@ -180,7 +83,6 @@ async function writeVerifiedArtifact(
         },
         { path: "package/dist/cli.js", mode: 493, size: 1 },
         { path: "package/dist/main.js", mode: 420, size: 1 },
-        { path: "package/dist/standard-schema.js", mode: 420, size: 1 },
         { path: "package/package.json", mode: 420, size: 1 },
       ],
       bin: {
@@ -191,17 +93,17 @@ async function writeVerifiedArtifact(
       },
       smokes: [
         { name: "runtime-import", args: [], stdout: "" },
-        { name: "help", args: ["--help"], stdout: `${"ship"} lookup schema\n` },
+        { name: "help", args: ["--help"], stdout: `ship lookup schema\n` },
         {
           name: "version",
           args: ["--version"],
-          stdout: `${"ship"} ${version}\n`,
+          stdout: `ship ${version}\n`,
         },
         {
           name: "lookup",
           args: ["lookup", "ada"],
           stdout: JSON.stringify({
-            schemaVersion: "1",
+            schemaVersion: "2",
             command: "lookup",
             kind: "data",
             variant: "found",
@@ -212,12 +114,13 @@ async function writeVerifiedArtifact(
           name: "schema",
           args: ["schema"],
           stdout: JSON.stringify({
-            schemaVersion: "1",
+            schemaVersion: "2",
             command: "schema",
             kind: "data",
             variant: "exported",
             data: {
               manifest: {
+                schemaVersion: "4",
                 root: "cli",
                 commands: {
                   cli: { name: "ship" },
@@ -287,7 +190,8 @@ async function executeFakePublication(
     scenario.mutateSourceManifest(manifest);
     await writeFile(manifestPath, JSON.stringify(manifest));
   }
-  const { runDirectOidcPublication } = await loadPublishModule(workspace);
+  const { runDirectOidcPublication } =
+    await import("@ykdz/template-workspace/publication/publish");
   const exact = scenario.exact ?? "absent";
   const latest = "latest" in scenario ? scenario.latest : "1.0.0";
   const audit = scenario.audit ?? {
@@ -497,64 +401,19 @@ void describe("manual npm publication capability", () => {
       }),
     });
 
-    const releaseWorkflow = plan.operations.find(
-      (operation) =>
-        Object.hasOwn(operation, "kind") &&
-        operation.kind === "copyFile" &&
-        Object.hasOwn(operation, "from") &&
-        operation.from === "publication/release.yml" &&
-        Object.hasOwn(operation, "to") &&
-        operation.to === ".github/workflows/release.yml",
-    );
-    assert.ok(releaseWorkflow);
-    const publishScript = plan.operations.find(
-      (operation) =>
-        Object.hasOwn(operation, "kind") &&
-        operation.kind === "writeTextTemplate" &&
-        Object.hasOwn(operation, "from") &&
-        operation.from === "publication/publish.ts" &&
-        Object.hasOwn(operation, "to") &&
-        operation.to === "scripts/npm-publication/publish.ts",
-    );
-    assert.ok(publishScript);
-    assert.ok(publishScript.kind === "writeTextTemplate");
-    assert.ok(Object.hasOwn(publishScript, "replacements"));
-    assert.deepStrictEqual(publishScript.replacements, {
-      PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
+    const projection = await materializeProjectProjection({
+      operations: plan.operations,
+      reconciliation: plan.reconciliation,
     });
-    const releaseScript = plan.operations.find(
-      (operation) =>
-        Object.hasOwn(operation, "kind") &&
-        operation.kind === "writeTextTemplate" &&
-        Object.hasOwn(operation, "from") &&
-        operation.from === "publication/release.ts" &&
-        Object.hasOwn(operation, "to") &&
-        operation.to === "scripts/npm-publication/release.ts",
+    const output = (file: string) =>
+      Buffer.from(
+        projection.entries.find((entry) => entry.path === file)!.content,
+      ).toString("utf8");
+    assert.deepStrictEqual(
+      JSON.parse(output("scripts/npm-publication/publication.config.json")),
+      { packagePath: "packages/cli" },
     );
-    assert.ok(releaseScript);
-    assert.ok(releaseScript.kind === "writeTextTemplate");
-    assert.ok(Object.hasOwn(releaseScript, "replacements"));
-    assert.deepStrictEqual(releaseScript.replacements, {
-      PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-    });
-    const handoffScript = plan.operations.find(
-      (operation) =>
-        Object.hasOwn(operation, "kind") &&
-        operation.kind === "copyFile" &&
-        Object.hasOwn(operation, "from") &&
-        operation.from === "publication/handoff.ts" &&
-        Object.hasOwn(operation, "to") &&
-        operation.to === "scripts/npm-publication/handoff.ts",
-    );
-    assert.ok(handoffScript);
-
-    const releaseSource = await readFile(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/release.yml",
-      ),
-      "utf8",
-    );
+    const releaseSource = output(".github/workflows/release.yml");
     const workflow = parseDocument(releaseSource).toJS() as {
       readonly jobs: {
         readonly verify: { readonly steps: readonly Record<string, unknown>[] };
@@ -584,7 +443,8 @@ void describe("manual npm publication capability", () => {
     );
     try {
       const artifact = await writeVerifiedArtifact(workspace);
-      const { runImmutableGithubRelease } = await loadReleaseModule(workspace);
+      const { runImmutableGithubRelease } =
+        await import("@ykdz/template-workspace/publication/release");
       const tag = "v1.0.1";
       const targetCommit = "a".repeat(40);
       const annotation = `npm artifact SHA-512: ${createHash("sha512").update("verified-tgz-bytes").digest("hex")}`;
@@ -873,7 +733,7 @@ void describe("manual npm publication capability", () => {
       try {
         const artifact = await writeVerifiedArtifact(workspace);
         const { runImmutableGithubRelease } =
-          await loadReleaseModule(workspace);
+          await import("@ykdz/template-workspace/publication/release");
         const tag = "v1.0.1";
         const targetCommit = "a".repeat(40);
         const annotation = `npm artifact SHA-512: ${createHash("sha512").update("verified-tgz-bytes").digest("hex")}`;
@@ -1036,196 +896,13 @@ void describe("manual npm publication capability", () => {
     });
   }
 
-  void it("rejects semantic release mutations at their parsed YAML location", async () => {
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsCliDefinition,
-      context: createGenerationContext({
-        targetDir: path.join("generated", "cli"),
-        defaultPackageScope: "demo",
-        toolchain: {
-          nodeLtsMajor: "24",
-          packageManagerPin: "pnpm@11.21.0",
-          nodeVersion: releaseToolchainSnapshot.nodeVersion,
-        },
-      }),
-    });
-    const source = await readFile(
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/ts-cli/publication/release.yml",
-      ),
-      "utf8",
-    );
-    const { assertPublicationWorkflowContract } =
-      await loadPublicationYamlChecker();
-    for (const mutate of [
-      (workflow: Record<string, unknown>) => {
-        const verify = (workflow.jobs as Record<string, unknown>)
-          .verify as Record<string, unknown>;
-        verify["timeout-minutes"] = 29;
-      },
-      (workflow: Record<string, unknown>) => {
-        (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: unknown[];
-          }
-        ).steps[1] = {
-          ...(
-            (workflow.jobs as Record<string, unknown>).verify as {
-              steps: Record<string, unknown>[];
-            }
-          ).steps[1]!,
-          with: { ref: "main", "persist-credentials": false, "fetch-depth": 1 },
-        };
-      },
-      (workflow: Record<string, unknown>) => {
-        const upload = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[8]!;
-        upload.with = {
-          ...(upload.with as Record<string, unknown>),
-          path: "wrong.tgz",
-        };
-      },
-      (workflow: Record<string, unknown>) => {
-        const caller = (
-          (workflow.jobs as Record<string, unknown>).publish as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[3]!;
-        caller.env = {};
-      },
-      (workflow: Record<string, unknown>) => {
-        const node = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[2]!;
-        node.if = "false";
-      },
-      (workflow: Record<string, unknown>) => {
-        const staging = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[5]!;
-        staging.run = "true";
-      },
-      (workflow: Record<string, unknown>) => {
-        const fullCheck = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[6]!;
-        fullCheck.env = { PUBLICATION_ARTIFACT_OUTPUT_DIRECTORY: "wrong" };
-      },
-      (workflow: Record<string, unknown>) => {
-        const fullCheck = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[6]!;
-        fullCheck.run = "node --conditions=source scripts/task-gates.ts check";
-      },
-      (workflow: Record<string, unknown>) => {
-        const artifact = (
-          (workflow.jobs as Record<string, unknown>).verify as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[7]!;
-        artifact.env = {
-          ...(artifact.env as Record<string, unknown>),
-          PUBLICATION_ARTIFACT_REQUIRED: "false",
-        };
-      },
-      (workflow: Record<string, unknown>) => {
-        (workflow.jobs as Record<string, unknown>).release = {
-          ...((workflow.jobs as Record<string, unknown>).release as Record<
-            string,
-            unknown
-          >),
-          needs: "verify",
-        };
-      },
-      (workflow: Record<string, unknown>) => {
-        const download = (
-          (workflow.jobs as Record<string, unknown>).release as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[2]!;
-        download.with = {
-          ...(download.with as Record<string, unknown>),
-          name: "different-artifact",
-        };
-      },
-      (workflow: Record<string, unknown>) => {
-        const caller = (
-          (workflow.jobs as Record<string, unknown>).release as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[3]!;
-        caller.run = "node --conditions=source scripts/task-gates.ts check";
-      },
-      (workflow: Record<string, unknown>) => {
-        const release = (workflow.jobs as Record<string, unknown>)
-          .release as Record<string, unknown>;
-        release.permissions = { contents: "write", "id-token": "write" };
-      },
-      (workflow: Record<string, unknown>) => {
-        const caller = (
-          (workflow.jobs as Record<string, unknown>).release as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[3]!;
-        caller.run = "gh release create v1.0.1 --draft=false";
-      },
-      (workflow: Record<string, unknown>) => {
-        const caller = (
-          (workflow.jobs as Record<string, unknown>).release as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[3]!;
-        caller.run = "gh release create v1.0.1 --generate-notes";
-      },
-      (workflow: Record<string, unknown>) => {
-        const caller = (
-          (workflow.jobs as Record<string, unknown>).release as {
-            steps: Record<string, unknown>[];
-          }
-        ).steps[3]!;
-        caller.run = "gh release upload v1.0.1 artifact.tgz --clobber";
-      },
-      (workflow: Record<string, unknown>) => {
-        const release = (workflow.jobs as Record<string, unknown>).release as {
-          steps: Record<string, unknown>[];
-        };
-        release.steps.push({
-          name: "Upload assets after public release",
-          run: "gh release upload v1.0.1 artifact.tgz",
-        });
-      },
-    ]) {
-      const workflow = parseDocument(source).toJS() as Record<string, unknown>;
-      mutate(workflow);
-      assert.throws(
-        () => assertPublicationWorkflowContract(plan, source, workflow),
-        (error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          return message.includes("publication workflow");
-        },
-      );
-    }
-  });
-
   void it("rejects an ambient npm credential before spawning a package manager", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-caller-"),
     );
     try {
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       const spawns: string[] = [];
       await assert.rejects(
         runDirectOidcPublication({
@@ -1266,7 +943,8 @@ void describe("manual npm publication capability", () => {
         path.join(workspace, ".npmrc"),
         "registry=https://registry.npmjs.org/\n",
       );
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       const spawns: string[] = [];
       await assert.rejects(
         runDirectOidcPublication({
@@ -1303,7 +981,8 @@ void describe("manual npm publication capability", () => {
     );
     try {
       await symlink("missing-npmrc", path.join(workspace, ".npmrc"));
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       const spawns: string[] = [];
       await assert.rejects(
         runDirectOidcPublication({
@@ -1343,7 +1022,8 @@ void describe("manual npm publication capability", () => {
     try {
       const artifactDirectory = (await writeVerifiedArtifact(workspace))
         .directory;
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       const spawns: string[] = [];
       await assert.rejects(
         runDirectOidcPublication({
@@ -1392,7 +1072,8 @@ void describe("manual npm publication capability", () => {
       >;
       receipt.schemaVersion = 2;
       await writeFile(receiptPath, JSON.stringify(receipt));
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       const spawns: string[] = [];
       await assert.rejects(
         runDirectOidcPublication({
@@ -1658,7 +1339,8 @@ void describe("manual npm publication capability", () => {
       try {
         const artifact = await writeVerifiedArtifact(workspace);
         await mutate(workspace, artifact.directory);
-        const { runDirectOidcPublication } = await loadPublishModule(workspace);
+        const { runDirectOidcPublication } =
+          await import("@ykdz/template-workspace/publication/publish");
         const spawns: string[] = [];
         await assert.rejects(
           runDirectOidcPublication({
@@ -1696,7 +1378,8 @@ void describe("manual npm publication capability", () => {
     try {
       const artifactDirectory = (await writeVerifiedArtifact(workspace))
         .directory;
-      const { runDirectOidcPublication } = await loadPublishModule(workspace);
+      const { runDirectOidcPublication } =
+        await import("@ykdz/template-workspace/publication/publish");
       let writes = 0;
       let exactReads = 0;
       await runDirectOidcPublication({

@@ -1,0 +1,58 @@
+{
+  "name": "@ykdz/template-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist",
+    "assets",
+    "scripts",
+    "publication",
+    "publication-setup",
+    "deployment",
+    "joint-e2e"
+  ],
+  "type": "module",
+  "imports": {
+    "#npm-publication/*": "./publication/*.ts"
+  },
+  "exports": {
+    "./assets/*": "./*",
+    "./publication/*": "./publication/*.ts",
+    "./task-gates": "./scripts/task-gates.ts",
+    "./turbo-boundaries": "./scripts/run-turbo-boundaries.ts",
+    "./project-github": {
+      "source": "./src/project-github.ts",
+      "types": "./dist/project-github.d.ts",
+      "default": "./dist/project-github.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@types/node": "catalog:",
+    "@types/semver": "catalog:",
+    "@types/spdx-expression-parse": "catalog:",
+    "@ykdz/reference-ts-cli": "workspace:*",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "semver": "catalog:",
+    "smol-toml": "catalog:",
+    "spdx-expression-parse": "catalog:",
+    "tar": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}

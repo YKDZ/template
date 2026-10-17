@@ -293,13 +293,15 @@ void describe("Non-Destructive Package Addition", () => {
         ),
       ) as { schemaVersion: number; packages: { path: string }[] };
       assert.strictEqual(generation.schemaVersion, 2);
-      assert.strictEqual(generation.packages.length, 3);
-      assert.strictEqual(generation.packages[0]?.path, consumerPath);
-      assert.strictEqual(
-        generation.packages[1]?.path,
-        "packages/typescript-config",
+      assert.deepEqual(
+        generation.packages.map((item) => item.path).sort(),
+        [
+          consumerPath,
+          "packages/typescript-config",
+          "packages/vue-shared",
+          "services/dashboard",
+        ].sort(),
       );
-      assert.strictEqual(generation.packages[2]?.path, "services/dashboard");
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

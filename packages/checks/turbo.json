@@ -6,11 +6,7 @@
       "dependsOn": ["^build"],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
       "persistent": false
     },
@@ -18,7 +14,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxfmt.config.ts"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -34,7 +30,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxlint.config.ts"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -50,16 +46,12 @@
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
     "check:deployment": {
-      "dependsOn": ["check:fixtures"],
+      "dependsOn": [],
       "tags": ["quality:heavy"],
       "cache": false,
       "inputs": [],
@@ -81,7 +73,8 @@
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
         "TEMPLATE_FIXTURE_TURBO_TEAM",
-        "TEMPLATE_FIXTURE_TURBO_TOKEN"
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
+        "NODE_USE_ENV_PROXY"
       ]
     },
     "check:evidence-health": {
@@ -92,34 +85,8 @@
       "outputs": [],
       "persistent": false
     },
-    "check:fixtures": {
-      "dependsOn": ["check:focused"],
-      "tags": ["quality:heavy"],
-      "cache": false,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false,
-      "passThroughEnv": [
-        "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
-        "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
-        "TEMPLATE_FIXTURE_CONCURRENCY",
-        "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
-        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
-        "TEMPLATE_FIXTURE_EVIDENCE_READ",
-        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
-        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
-        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
-        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
-        "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
-        "TEMPLATE_FIXTURE_WORKSPACE_DIR",
-        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
-        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
-        "TEMPLATE_FIXTURE_TURBO_TEAM",
-        "TEMPLATE_FIXTURE_TURBO_TOKEN"
-      ]
-    },
     "check:focused": {
-      "dependsOn": ["check:generated"],
+      "dependsOn": [],
       "tags": ["quality:heavy"],
       "cache": false,
       "inputs": [],
@@ -141,7 +108,8 @@
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
         "TEMPLATE_FIXTURE_TURBO_TEAM",
-        "TEMPLATE_FIXTURE_TURBO_TOKEN"
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
+        "NODE_USE_ENV_PROXY"
       ]
     },
     "check:generated": {
@@ -167,43 +135,110 @@
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
         "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
         "TEMPLATE_FIXTURE_TURBO_TEAM",
-        "TEMPLATE_FIXTURE_TURBO_TOKEN"
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
+        "NODE_USE_ENV_PROXY"
       ]
     },
     "check:templates": {
-      "dependsOn": ["prepare:rustfmt"],
-      "tags": ["quality:heavy"],
-      "cache": true,
-      "inputs": [],
-      "outputs": [],
-      "persistent": false,
-      "env": ["RUSTUP_TOOLCHAIN"],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
-    },
-    "check:templates:boundary": {
-      "dependsOn": [],
+      "dependsOn": [
+        "@ykdz/template-builtin-presets#build",
+        "@ykdz/template-core#build"
+      ],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
     "check:templates:github-yaml": {
-      "dependsOn": [],
+      "dependsOn": [
+        "@ykdz/template-builtin-presets#build",
+        "@ykdz/template-core#build"
+      ],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
-    "prepare:rustfmt": {
+    "test": {
       "dependsOn": [],
-      "tags": ["work:preparation"],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "test:integration": {
+      "dependsOn": [],
+      "tags": ["quality:heavy"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+    },
+    "check:generated:output": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "cache": false
+    },
+    "check:capabilities": {
+      "dependsOn": [],
+      "tags": ["quality:heavy"],
       "cache": false,
       "inputs": [],
       "outputs": [],
       "persistent": false,
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
+        "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+        "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+        "TEMPLATE_FIXTURE_WORKSPACE_DIR",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+        "TEMPLATE_FIXTURE_TURBO_TEAM",
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
+        "NODE_USE_ENV_PROXY"
+      ]
+    },
+    "diagnose:matrix": {
+      "dependsOn": [],
+      "tags": ["work:on-demand"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false,
+      "passThroughEnv": [
+        "TEMPLATE_FIXTURE_BUILDKIT_CACHE_DIR",
+        "TEMPLATE_FIXTURE_CARGO_CACHE_DIR",
+        "TEMPLATE_FIXTURE_CONCURRENCY",
+        "TEMPLATE_FIXTURE_DEVELOPMENT_CONTAINER_SESSIONS",
+        "TEMPLATE_FIXTURE_EVIDENCE_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_READ",
+        "TEMPLATE_FIXTURE_EVIDENCE_WRITE",
+        "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
+        "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+        "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
+        "TEMPLATE_FIXTURE_WORKSPACE_DIR",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_READ_ONLY",
+        "TEMPLATE_FIXTURE_TURBO_REMOTE_CACHE_SIGNATURE_KEY",
+        "TEMPLATE_FIXTURE_TURBO_TEAM",
+        "TEMPLATE_FIXTURE_TURBO_TOKEN",
+        "NODE_USE_ENV_PROXY"
+      ]
     }
   }
 }

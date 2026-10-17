@@ -1,7 +1,7 @@
 import { toStandardJsonSchema } from "@valibot/to-json-schema";
 import type * as v from "valibot";
 
-/** 上游执行器要求失败结果不带 value；保留 Valibot 的验证及官方 JSON Schema 投影。 */
+/** 为领域 rawCheck 指定官方 JSON Schema 投影策略。 */
 export function standardSchema<
   T extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>,
 >(schema: T, ignoreActions: string[] = []) {
@@ -20,16 +20,6 @@ export function standardSchema<
             ...options,
             libraryOptions: { ...options.libraryOptions, ignoreActions },
           }),
-      },
-      validate(value) {
-        const result = converted["~standard"].validate(value);
-        if (result instanceof Promise)
-          return result.then((resolved) =>
-            resolved.issues === undefined
-              ? resolved
-              : { issues: resolved.issues },
-          );
-        return result.issues === undefined ? result : { issues: result.issues };
       },
     },
   };

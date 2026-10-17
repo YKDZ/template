@@ -1,9 +1,12 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "@ykdz/reference-typescript-config/node.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "../..",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "test-support/**/*.ts"
+  ]
 }

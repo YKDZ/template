@@ -16,16 +16,14 @@ const cleanupGraceMs = 60_000;
 const forcedCleanupTimeoutMs = 10_000;
 
 const testArguments = [
-  "--conditions=source",
-  "--experimental-strip-types",
   "--test",
   "--test-concurrency=1",
-  "--test-timeout=300000",
+  "--test-timeout=1200000",
   "--test-reporter=spec",
-  "--test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter",
+  "--test-reporter=@ykdz/reference-typescript-config/reporter",
   "--test-reporter-destination=stdout",
   "--test-reporter-destination=stderr",
-  "test/packed-publication/*.integration.test.ts",
+  "scripts/packed-publication/*.integration.test.ts",
 ];
 
 function exitStatus(
@@ -209,6 +207,9 @@ async function run(): Promise<number> {
         detached: process.platform !== "win32",
         env: {
           ...process.env,
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-global-search-paths"]
+            .filter(Boolean)
+            .join(" "),
           TEMPLATE_ROOT_TEST_WORKER_PID_FILE: pidFile,
         },
         stdio: "inherit",

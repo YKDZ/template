@@ -118,6 +118,17 @@ void it("源码容器冻结检查当前工作树，成功后移除快照、失�
       [
         ["pnpm", "install", "--frozen-lockfile", "--store-dir", "/pnpm/store"],
         ["pnpm", "run", "check"],
+        [
+          "pnpm",
+          "exec",
+          "turbo",
+          "run",
+          "test:browser",
+          "@ykdz/reference-vue-app#test:e2e",
+          "@ykdz/reference-vike-web#test:e2e",
+          "//#test:e2e:vue-hono",
+          "--output-logs=errors-only",
+        ],
       ],
     );
     await assert.rejects(access(snapshot));

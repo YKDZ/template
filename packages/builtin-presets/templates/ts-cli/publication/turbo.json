@@ -1,9 +1,0 @@
-{
-  "tasks": {
-    "//#publication:artifact": {
-      "cache": false,
-      "tags": ["quality:conditional"]
-    },
-    "//#publication:readiness": { "cache": false, "tags": ["work:release"] }
-  }
-}

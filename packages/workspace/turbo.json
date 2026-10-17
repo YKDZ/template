@@ -1,0 +1,54 @@
+{
+  "extends": ["//"],
+  "tags": ["template-workspace"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["@ykdz/template-core#build"],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": ["dist/**"],
+      "persistent": false
+    },
+    "format:check": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "lint": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
+    "lint:fix": {
+      "dependsOn": [],
+      "tags": ["work:repair"],
+      "cache": false,
+      "inputs": [],
+      "outputs": [],
+      "persistent": false
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    }
+  }
+}

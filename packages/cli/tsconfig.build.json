@@ -3,7 +3,8 @@
   "compilerOptions": {
     "customConditions": [],
     "declarationMap": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    "outDir": "dist"
   },
   "include": ["src/**/*.ts"]
 }

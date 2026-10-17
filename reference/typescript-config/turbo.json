@@ -1,0 +1,46 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [],
+      "outputs": []
+    },
+    "format:check": {
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint:fix": {
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint": {
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "tags": ["work:preparation"],
+      "dependsOn": [],
+      "outputs": ["template-dist/**"]
+    }
+  }
+}

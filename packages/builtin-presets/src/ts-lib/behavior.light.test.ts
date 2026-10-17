@@ -9,19 +9,14 @@ import {
   planGeneratedRepositoryInitialization,
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
-  resolveBuiltInTemplateSource,
-  templateSources,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import {
-  renderNewProject,
-  type CopyFileOperation,
-} from "@ykdz/template-core/renderer";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 
 import { tsLibDefinition } from "./definition.ts";
 
 void describe("ts-lib Built-in Preset Definition behavior", () => {
-  void it("owns conventional task scripts without a package check registration", () => {
+  void it("提供标准任务与库导出合同", () => {
     assert.strictEqual(
       tsLibDefinition.initialPrimaryPackage.defaultLeafName,
       "lib",
@@ -48,10 +43,6 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         },
       });
 
-    assert.match(
-      resolveBuiltInTemplateSource(tsLibDefinition.source, "."),
-      /templates[\\/]ts-lib$/,
-    );
     assert.deepStrictEqual(contribution.definition, {
       name: "@demo/lib",
       path: "packages/lib",
@@ -82,92 +73,9 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
-    assert.ok(!("checks" in (contribution ?? {})));
-    assert.ok(!("fixes" in (contribution ?? {})));
-    assert.partialDeepStrictEqual(contribution.manifest, {
-      scripts: {
-        "format:write": "oxfmt --write .",
-        "lint:fix": "oxlint --format=unix . --fix",
-      },
-    });
-    const turboCopy = contribution.operations.find(
-      (operation) =>
-        operation.kind === "copyFile" && operation.from === "turbo.json",
-    );
-    assert.deepStrictEqual(turboCopy, {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "turbo.json",
-      to: "packages/lib/turbo.json",
-    });
-    const buildConfigCopy = contribution.operations.find(
-      (operation) =>
-        operation.kind === "copyFile" &&
-        operation.from === "tsconfig.build.json",
-    );
-    assert.deepStrictEqual(buildConfigCopy, {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "tsconfig.build.json",
-      to: "packages/lib/tsconfig.build.json",
-    });
-
-    const plan = planGeneratedRepositoryInitialization({
-      definition: tsLibDefinition,
-      context,
-    });
-    const rootManifest = plan.operations.find(
-      (operation) =>
-        operation.kind === "writeJson" && operation.to === "package.json",
-    );
-    assert.partialDeepStrictEqual(rootManifest, {
-      value: {
-        scripts: {
-          check: "node --conditions=source scripts/task-gates.ts check",
-          "check:heavy":
-            "node --conditions=source scripts/task-gates.ts check:heavy",
-          "check:full":
-            "node --conditions=source scripts/task-gates.ts check:full",
-          fix: "node --conditions=source scripts/task-gates.ts fix",
-        },
-      },
-    });
-    assert.ok(!("checks" in (plan ?? {})));
-    assert.ok(!("fixes" in (plan ?? {})));
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          operation.to === "pnpm-workspace.yaml" &&
-          operation.replacements.WORKSPACE_PACKAGE_GLOBS ===
-            "  - apps/*\n  - packages/*",
-      ),
-    );
   });
 
-  void it("renders its owned source through opaque handles and persists durable addition facts", async () => {
-    type SourceHandle = NonNullable<CopyFileOperation["source"]>;
-    type IsEqual<Left, Right> =
-      (<Value>() => Value extends Left ? 1 : 2) extends <
-        Value,
-      >() => Value extends Right ? 1 : 2
-        ? (<Value>() => Value extends Right ? 1 : 2) extends <
-            Value,
-          >() => Value extends Left ? 1 : 2
-          ? true
-          : false
-        : false;
-    type IsOpaqueSourceHandle =
-      IsEqual<SourceHandle, string> extends false ? true : false;
-    const isOpaqueSourceHandle: IsOpaqueSourceHandle = true;
-    assert.strictEqual(isOpaqueSourceHandle, true);
-    assert.throws(
-      () => resolveBuiltInTemplateSource("vue" as never, "src/main.ts"),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message.includes("unknown Template Source handle"),
-    );
-
+  void it("持久化增包所需信息，并在连续增包时保留定制", async () => {
     const targetDir = path.join(
       await mkdtemp(path.join(tmpdir(), "template-ts-lib-definition-")),
       "demo-lib",
@@ -181,26 +89,29 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       definition: tsLibDefinition,
       context,
     });
-    assert.ok(
-      initialization.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.source === templateSources.tsLib &&
-          operation.from === "src/index.ts",
-      ),
-    );
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...initialization.operations],
     });
-    assert.ok(
-      (
-        await readFile(
-          path.join(targetDir, "packages/lib/src/index.ts"),
-          "utf8",
-        )
-      ).includes("export"),
+    assert.partialDeepStrictEqual(
+      JSON.parse(await readFile(path.join(targetDir, "package.json"), "utf8")),
+      {
+        scripts: {
+          check: "node --conditions=source scripts/task-gates.ts check",
+          "check:heavy":
+            "node --conditions=source scripts/task-gates.ts check:heavy",
+          "check:full":
+            "node --conditions=source scripts/task-gates.ts check:full",
+          fix: "node --conditions=source scripts/task-gates.ts fix",
+        },
+      },
     );
+    const workspace = await readFile(
+      path.join(targetDir, "pnpm-workspace.yaml"),
+      "utf8",
+    );
+    assert.match(workspace, /^  - apps\/\*$/mu);
+    assert.match(workspace, /^  - packages\/\*$/mu);
     const devcontainerDockerfile = await readFile(
       path.join(targetDir, ".devcontainer/Dockerfile"),
       "utf8",
@@ -238,28 +149,6 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
       packageLeafName: "utilities",
     });
-    assert.ok(
-      addition.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.to === ".gitignore" &&
-          operation.provenance?.planningContribution === "foundationPlan",
-      ),
-    );
-    assert.deepStrictEqual(
-      addition.operations.filter(
-        (operation) => "overwrite" in operation && operation.overwrite,
-      ),
-      [],
-    );
-    assert.ok(
-      addition.operations.some(
-        (operation) =>
-          operation.kind === "mergeJsonTemplate" &&
-          operation.to === "turbo.json" &&
-          operation.provenance?.planningContribution === "foundationPlan",
-      ),
-    );
     await reconcileAndApplyProjectProjections({
       targetRoot: targetDir,
       ...addition.projectProjections,

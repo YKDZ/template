@@ -1,5 +1,0 @@
-{
-  "tasks": {
-    "//#toolchain:prepare": { "cache": false, "tags": ["work:preparation"] }
-  }
-}

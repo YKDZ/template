@@ -13,24 +13,31 @@
       "source": "./src/workflow-contract.ts",
       "types": "./dist/workflow-contract.d.ts",
       "default": "./dist/workflow-contract.js"
+    },
+    "./publication-source": {
+      "source": "./src/check-publication-source.ts",
+      "types": "./dist/check-publication-source.d.ts",
+      "default": "./dist/check-publication-source.js"
     }
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "check:fixtures": "node --conditions=source src/check-generated-registry.ts package-addition-matrix",
     "check:generated": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts init",
     "check:focused": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts focused",
     "check:deployment": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts deployment",
     "check:evidence-health": "node --conditions=source src/check-fixture-evidence-health.ts",
-    "prepare:rustfmt": "rustup component add rustfmt",
-    "check:templates": "node --conditions=source src/check-template-source.ts && node --conditions=source src/check-registry-contract.ts && node --conditions=source src/check-publication-source.ts && node --conditions=source src/check-legacy-architecture-removal.ts --packed",
-    "check:templates:boundary": "node --conditions=source src/check-template-boundary.ts",
-    "check:templates:github-yaml": "node --conditions=source src/check-builtin-preset-github-yaml.ts",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+    "check:templates": "node --conditions=source src/check-registry-contract.ts",
+    "check:templates:github-yaml": "node --conditions=source scripts/check-builtin-preset-github-yaml.ts",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "node --conditions=source --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
+    "test:integration": "node --conditions=source --test --test-concurrency=1 --test-timeout=300000 --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.integration.test.ts'",
+    "check:generated:output": "node --conditions=source scripts/check-generated-output.ts",
+    "diagnose:matrix": "node --conditions=source src/check-generated-registry.ts package-addition-matrix",
+    "check:capabilities": "node --conditions=source src/check-fixture-evidence-architecture.ts && node --conditions=source src/check-generated-registry.ts capabilities"
   },
   "dependencies": {
     "@ykdz/template-builtin-presets": "workspace:*",
@@ -41,9 +48,13 @@
   "devDependencies": {
     "@devcontainers/cli": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
+    "turbo": "catalog:",
     "typescript": "catalog:",
     "typescript-7": "catalog:"
   }

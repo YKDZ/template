@@ -131,7 +131,11 @@ const journey: CliJourney = {
     });
 
     assert.equal(results[1]?.exitCode, 2);
-    assert.match(results[1]?.stderr ?? "", /固定拓扑预设/u);
+    assert.partialDeepStrictEqual(JSON.parse(results[1]?.stderr ?? ""), {
+      schemaVersion: "2",
+      helpArgv: ["template", "init", "--help"],
+      issues: [{ code: "conditionalConstraintViolation" }],
+    });
     await assert.rejects(stat(path.join(context.workDir, "fixed-rejected")), {
       code: "ENOENT",
     });

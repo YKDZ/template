@@ -563,6 +563,7 @@ function diagnosticStepContracts(
   const upload = workflowPolicy.actions.upload;
   return {
     stage: {
+      id: "stage-diagnostics",
       name: `Stage ${checkName} diagnostics`,
       if: condition,
       env: {
@@ -599,6 +600,7 @@ function diagnosticStepContracts(
       ].join("\n"),
     },
     upload: {
+      id: "upload-diagnostics",
       name: `Upload ${checkName} diagnostics`,
       if: condition,
       uses: upload.action,
@@ -624,7 +626,8 @@ function assertDiagnosticSteps(
   if (contract === undefined) return;
   if (
     !isParsedObject(stageStep) ||
-    !hasExactKeys(stageStep, ["name", "if", "env", "run"]) ||
+    !hasExactKeys(stageStep, ["id", "name", "if", "env", "run"]) ||
+    stageStep.id !== contract.stage.id ||
     stageStep.if !== contract.stage.if ||
     stableJson(stageStep.env) !== stableJson(contract.stage.env) ||
     stageStep.run !== contract.stage.run
@@ -636,7 +639,8 @@ function assertDiagnosticSteps(
   const withValues = isParsedObject(uploadStep) ? uploadStep.with : undefined;
   if (
     !isParsedObject(uploadStep) ||
-    !hasExactKeys(uploadStep, ["name", "if", "uses", "with"]) ||
+    !hasExactKeys(uploadStep, ["id", "name", "if", "uses", "with"]) ||
+    uploadStep.id !== contract.upload.id ||
     uploadStep.if !== contract.upload.if ||
     !matchesAction(uploadStep.uses, String(contract.upload.uses)) ||
     !isParsedObject(withValues) ||
@@ -749,7 +753,8 @@ function assertGeneratedCheckWorkflowContract(
     const contract = workflowPolicy.actions.buildx;
     if (
       !isParsedObject(buildx) ||
-      !hasExactKeys(buildx, ["name", "uses"]) ||
+      !hasExactKeys(buildx, ["id", "name", "uses"]) ||
+      buildx.id !== "prepare-deployment" ||
       !isWorkflowStepName(buildx.name) ||
       !matchesAction(buildx.uses, contract.action)
     ) {
@@ -888,6 +893,7 @@ function dependabotOracle(
   return ecosystems.flatMap((ecosystem) => {
     const declaredDirectories = [
       ...new Set([
+        ...(ecosystem === "docker" ? (["/.devcontainer"] as const) : []),
         ...declarations.flatMap((declaration) => {
           const primary = declaration.directories?.[ecosystem];
           return [

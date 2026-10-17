@@ -1,0 +1,55 @@
+{
+  "name": "@ykdz/reference-hono-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#/*": {
+      "source": "./src/*.ts",
+      "types": "./src/*.ts",
+      "default": "./dist/*.js"
+    },
+    "#tooling/*": "@ykdz/reference-typescript-config/*"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --conditions=source --watch src/server.ts",
+    "start": "node dist/server.js",
+    "test": "node --conditions=source --test --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@hono/node-server": "catalog:",
+    "@ykdz/template-core": "workspace:*",
+    "hono": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

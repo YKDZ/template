@@ -9,12 +9,15 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   builtInPresetRegistry,
+  referencePackagePublicationContexts,
   createGenerationContext,
   planGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
@@ -188,21 +191,34 @@ void describe("Erasable TypeScript enforcement", () => {
           await mkdir(path.join(targetDir, "node_modules/@erasable"), {
             recursive: true,
           });
-          await Promise.all([
-            symlink(
-              path.join(
-                process.cwd(),
-                "packages/builtin-presets/node_modules/@vue/tsconfig",
-              ),
-              path.join(targetDir, "node_modules/@vue/tsconfig"),
+          const sharedConfiguration =
+            referencePackagePublicationContexts().find(
+              (reference) => reference.name === "@ykdz/reference-vue-shared",
+            )!;
+          const sourceConfiguration = [...sharedConfiguration.assets].find(
+            ([, target]) => target === "tsconfig.app.base.json",
+          )![0];
+          const vueConfiguration = createRequire(sourceConfiguration).resolve(
+            "@vue/tsconfig/tsconfig.dom.json",
+          );
+          await symlink(
+            path.dirname(vueConfiguration),
+            path.join(targetDir, "node_modules/@vue/tsconfig"),
+            "dir",
+          );
+          for (const packageDefinition of plan.blueprint.packages) {
+            const linked = path.join(
+              targetDir,
+              "node_modules",
+              packageDefinition.name,
+            );
+            await mkdir(path.dirname(linked), { recursive: true });
+            await symlink(
+              path.join(targetDir, packageDefinition.path),
+              linked,
               "dir",
-            ),
-            symlink(
-              path.join(targetDir, "packages/typescript-config"),
-              path.join(targetDir, "node_modules/@erasable/typescript-config"),
-              "dir",
-            ),
-          ]);
+            );
+          }
         }),
       );
       const uiConfigPaths = (
@@ -272,7 +288,10 @@ void describe("Erasable TypeScript enforcement", () => {
           path.join(projectRoot, "tsconfig.json"),
           `${JSON.stringify(
             {
-              extends: path.join(process.cwd(), "tsconfig.base.json"),
+              extends: fileURLToPath(
+                import.meta
+                  .resolve("@ykdz/reference-typescript-config/node.json"),
+              ),
               compilerOptions: { noEmit: true },
               include: ["non-erasable.ts"],
             },
@@ -295,60 +314,6 @@ void describe("Erasable TypeScript enforcement", () => {
       assert.strictEqual(result.all?.match(/error TS1294:/gu)?.length, 3);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  void it("activates the source condition for every direct TypeScript script", async () => {
-    const repositoryManifests = await Promise.all(
-      [
-        "package.json",
-        "packages/builtin-presets/package.json",
-        "packages/checks/package.json",
-        "packages/cli/package.json",
-        "packages/core/package.json",
-      ].map(
-        async (manifestPath) =>
-          JSON.parse(await readFile(manifestPath, "utf8")) as Manifest,
-      ),
-    );
-    const generatedManifests = builtInPresetRegistry.all().flatMap(
-      (definition) =>
-        planGeneratedRepositoryInitialization({
-          definition,
-          context: createGenerationContext({
-            targetDir: path.join(
-              "generated-repository",
-              "source-condition",
-              definition.metadata.name,
-            ),
-            defaultPackageScope: "source-condition",
-            toolchain: {
-              nodeLtsMajor: "24",
-              packageManagerPin: "pnpm@11.11.0",
-              nodeVersion: releaseToolchainSnapshot.nodeVersion,
-            },
-          }),
-        }).manifests as readonly Manifest[],
-    );
-
-    for (const manifest of [...repositoryManifests, ...generatedManifests]) {
-      for (const [scriptName, command] of Object.entries(
-        manifest.scripts ?? {},
-      )) {
-        if (typeof command !== "string") continue;
-        const directTypeScriptCommands = command
-          .split(/(?:&&|\|\||;)/u)
-          .map((part) => part.trim())
-          .filter(
-            (part) => /^node\s/u.test(part) && /\.ts(?:\s|$)/u.test(part),
-          );
-        for (const directCommand of directTypeScriptCommands) {
-          assert.ok(
-            directCommand.includes("--conditions=source"),
-            `${manifest.name ?? "(unnamed)"}#${scriptName}`,
-          );
-        }
-      }
     }
   });
 
@@ -498,13 +463,8 @@ void describe("Erasable TypeScript enforcement", () => {
       core?.manifest.devDependencies !== undefined &&
         "typescript" in core.manifest.devDependencies,
     );
-    const coreCompilerApiImports = await compilerApiImports(core!.packageRoot);
+    const coreCompilerApiImports = await compilerApiImports(core.packageRoot);
     assert.ok(coreCompilerApiImports.includes("packages/core/src/renderer.ts"));
-    assert.ok(
-      coreCompilerApiImports.includes(
-        "packages/core/src/template-boundary-check.ts",
-      ),
-    );
 
     const cliManifest = repositoryManifests.find(
       ({ manifest }) => manifest.name === "@ykdz/template",

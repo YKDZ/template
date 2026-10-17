@@ -1,14 +1,15 @@
 import path from "node:path";
 
-import {
-  builtInEditorCustomization,
-  planBuiltInDevelopmentContainer,
-  rustDevelopmentContainerToolLayer,
-  shellCheckDevelopmentContainerToolLayer,
-} from "@ykdz/template-builtin-presets/development-environment";
 import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-core/development-container-tool-layer";
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
+import {
+  builtInEditorCustomization,
+  browserTestDevelopmentContainerToolLayer,
+  planBuiltInDevelopmentContainer,
+  rustDevelopmentContainerToolLayer,
+  shellCheckDevelopmentContainerToolLayer,
+} from "@ykdz/template-environment/development-environment";
 import { format } from "oxfmt";
 
 import formatterConfig from "../oxfmt.config.ts";
@@ -24,6 +25,7 @@ export async function repositoryDevelopmentEnvironment(
   const container = planBuiltInDevelopmentContainer({
     nodeVersion: declarations.rootNodeEngine.trim(),
     layers: [
+      browserTestDevelopmentContainerToolLayer(),
       rustDevelopmentContainerToolLayer(
         declarations.rustToolchainChannel.trim(),
       ),
@@ -59,6 +61,7 @@ export async function repositoryDevelopmentEnvironment(
   });
   const editor = builtInEditorCustomization([
     "oxc-format-lint",
+    "vue",
     "rust-tooling",
   ]);
   const extensions = [...editor.extensions, "fill-labs.dependi"];

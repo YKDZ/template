@@ -519,7 +519,7 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assert.ok(result.ok === false);
+    assert.ok(!result.ok);
     assert.strictEqual(Reflect.ownKeys(result).length, 2);
     assert.ok(Object.hasOwn(result, "ok"));
     assert.ok(Object.hasOwn(result, "conflicts"));
@@ -572,7 +572,7 @@ void describe("Project Projection materialization", () => {
         },
       });
 
-      assert.ok(result.ok === false);
+      assert.ok(!result.ok);
       assert.strictEqual(Reflect.ownKeys(result).length, 2);
       assert.ok(Object.hasOwn(result, "ok"));
       assert.ok(Object.hasOwn(result, "conflicts"));
@@ -625,7 +625,7 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assert.ok(result.ok === false);
+    assert.ok(!result.ok);
     assert.strictEqual(Reflect.ownKeys(result).length, 2);
     assert.ok(Object.hasOwn(result, "ok"));
     assert.ok(Object.hasOwn(result, "conflicts"));
@@ -650,7 +650,7 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assert.ok(result.ok === false);
+    assert.ok(!result.ok);
     assert.strictEqual(Reflect.ownKeys(result).length, 2);
     assert.ok(Object.hasOwn(result, "ok"));
     assert.ok(Object.hasOwn(result, "conflicts"));
@@ -677,7 +677,7 @@ void describe("Project Projection materialization", () => {
       },
     });
 
-    assert.ok(result.ok === false);
+    assert.ok(!result.ok);
     assert.strictEqual(Reflect.ownKeys(result).length, 2);
     assert.ok(Object.hasOwn(result, "ok"));
     assert.ok(Object.hasOwn(result, "conflicts"));

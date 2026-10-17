@@ -1,0 +1,74 @@
+{
+  "extends": ["//"],
+  "tags": ["app"],
+  "tasks": {
+    "browser:prepare": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["work:preparation"]
+    },
+    "build": {
+      "cache": true,
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "tags": ["quality:light"]
+    },
+    "dev": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["work:development"]
+    },
+    "format:check": {
+      "cache": true,
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "cache": false,
+      "dependsOn": ["lint:fix"],
+      "outputs": [],
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "cache": true,
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["work:repair"]
+    },
+    "preview": {
+      "cache": false,
+      "outputs": [],
+      "tags": ["work:development"]
+    },
+    "test:browser": {
+      "cache": true,
+      "dependsOn": ["browser:prepare"],
+      "outputs": [],
+      "tags": ["quality:heavy"]
+    },
+    "test:e2e": {
+      "cache": false,
+      "dependsOn": ["build", "browser:prepare"],
+      "outputs": [],
+      "tags": ["quality:heavy"]
+    },
+    "typecheck": {
+      "cache": true,
+      "dependsOn": ["@ykdz/reference-vue-shared#build", "^typecheck"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "dependsOn": [
+        "@ykdz/reference-vue-shared#build",
+        "@ykdz/template-core#build"
+      ],
+      "outputs": ["template-dist/**"],
+      "tags": ["work:preparation"]
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@ykdz/reference-typescript-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./base.json": "./base.json",
+    "./oxlint": "./oxlint.config.ts",
+    "./oxfmt": "./oxfmt.config.ts",
+    "./reporter": "./scripts/node-test-count-reporter.ts",
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    },
+    "./node.json": "./node.json"
+  },
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "build:template": "tsc -p tsconfig.template.json --pretty false"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

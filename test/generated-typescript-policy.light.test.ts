@@ -59,6 +59,7 @@ async function readTsconfig(configPath: string): Promise<Tsconfig> {
 
 async function localExtendsChain(
   configPath: string,
+  packageDirectories: ReadonlyMap<string, string>,
   seen = new Set<string>(),
 ): Promise<ReadonlySet<string>> {
   const resolvedPath = path.resolve(configPath);
@@ -73,10 +74,27 @@ async function localExtendsChain(
   for (const reference of inherited) {
     if (!reference.startsWith(".")) {
       seen.add(reference);
+      const owner = [...packageDirectories].find(([name]) =>
+        reference.startsWith(`${name}/`),
+      );
+      if (owner !== undefined) {
+        const [name, directory] = owner;
+        const manifest = JSON.parse(
+          await readFile(path.join(directory, "package.json"), "utf8"),
+        ) as { exports: Record<string, string> };
+        const publicPath =
+          manifest.exports[`./${reference.slice(name.length + 1)}`];
+        assert.equal(typeof publicPath, "string", reference);
+        await localExtendsChain(
+          path.join(directory, publicPath!),
+          packageDirectories,
+          seen,
+        );
+      }
       continue;
     }
     const parentPath = path.resolve(path.dirname(resolvedPath), reference);
-    await localExtendsChain(parentPath, seen);
+    await localExtendsChain(parentPath, packageDirectories, seen);
   }
   return seen;
 }
@@ -133,8 +151,16 @@ void describe("Generated Repository TypeScript policy", () => {
               config.compilerOptions === undefined &&
               config.files?.length === 0 &&
               config.references !== undefined;
+            const chain = await localExtendsChain(
+              configPath,
+              new Map(
+                plan.blueprint.packages.map((pkg) => [
+                  pkg.name,
+                  path.join(targetDir, pkg.path),
+                ]),
+              ),
+            );
             if (!isSolutionConfig) {
-              const chain = await localExtendsChain(configPath);
               assert.deepStrictEqual(
                 {
                   inheritsPolicy:
@@ -154,13 +180,21 @@ void describe("Generated Repository TypeScript policy", () => {
               : config.extends === undefined
                 ? []
                 : [config.extends];
+            const inheritedConfigs = await Promise.all(
+              [...chain]
+                .filter((entry) => path.isAbsolute(entry))
+                .map(readTsconfig),
+            );
             const allowedOverrides = [
               ...(config.compilerOptions?.exactOptionalPropertyTypes ===
                 false && inherited.includes("@vue/tsconfig/tsconfig.dom.json")
                 ? ["exactOptionalPropertyTypes"]
                 : []),
               ...(config.compilerOptions?.skipLibCheck === true &&
-              config.compilerOptions.moduleResolution === "bundler"
+              inheritedConfigs.some(
+                (candidate) =>
+                  candidate.compilerOptions?.moduleResolution === "bundler",
+              )
                 ? ["skipLibCheck"]
                 : []),
             ];

@@ -10,6 +10,8 @@ export type GeneratedPackagePlanningRecord = {
     | "planInitialization"
     | "planPackageAddition";
   readonly contributionIdentity: string;
+  readonly referenceSource?: string;
+  readonly dependencyBindings?: Readonly<Record<string, PackageDefinitionId>>;
 };
 
 /**
@@ -66,6 +68,8 @@ const packagePlanningRecordSchema = v.strictObject(
       ["foundationPlan", "planInitialization", "planPackageAddition"],
       "planningContribution is unsupported",
     ),
+    referenceSource: v.optional(v.string()),
+    dependencyBindings: v.optional(v.record(v.string(), v.string())),
     contributionIdentity: v.string(
       "contributionIdentity must be a non-empty string",
     ),
@@ -225,6 +229,24 @@ export function parseGenerationRecord(value: unknown): GenerationRecord {
     );
   }
   for (const [index, item] of record.packages.entries()) {
+    if (
+      item.referenceSource !== undefined &&
+      item.referenceSource.trim().length === 0
+    )
+      issues.push(`packages[${index}].referenceSource must be non-empty`);
+    if (
+      item.dependencyBindings !== undefined &&
+      item.referenceSource === undefined
+    )
+      issues.push(
+        `packages[${index}].dependencyBindings requires referenceSource`,
+      );
+    for (const id of Object.values(item.dependencyBindings ?? {})) {
+      if (!/^package-[a-f0-9]{64}$/.test(id))
+        issues.push(
+          `packages[${index}].dependencyBindings must use persisted package IDs`,
+        );
+    }
     if (!/^package-[a-f0-9]{64}$/.test(item.packageDefinitionId)) {
       issues.push(
         `packages[${index}].packageDefinitionId must use the package-<sha256> format`,

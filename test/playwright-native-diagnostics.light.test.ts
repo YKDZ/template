@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
+import { referencePackagePublicationContexts } from "@ykdz/template-builtin-presets";
 import ts from "typescript";
 
 function property(
@@ -26,7 +27,7 @@ async function loadMaintainedConfig(
 ): Promise<ts.ObjectLiteralExpression> {
   const source = ts.createSourceFile(
     relativePath,
-    await readFile(path.join(process.cwd(), relativePath), "utf8"),
+    await readFile(relativePath, "utf8"),
     ts.ScriptTarget.Latest,
     true,
   );
@@ -50,10 +51,18 @@ async function loadMaintainedConfig(
 }
 
 void describe("maintained Playwright diagnostic configuration", () => {
+  const resources = referencePackagePublicationContexts();
+  const playwrightConfiguration = (name: string) =>
+    [...resources.find((item) => item.name === name)!.assets].find(
+      ([, target]) => target === "playwright.config.ts",
+    )![0];
   for (const relativePath of [
-    "packages/builtin-presets/templates/vue-app/playwright.config.ts",
-    "packages/builtin-presets/templates/vue-hono-app/root/playwright.config.ts",
-    "packages/builtin-presets/templates/vike-app/web/playwright.config.ts",
+    playwrightConfiguration("@ykdz/reference-vue-app"),
+    fileURLToPath(
+      import.meta
+        .resolve("@ykdz/template-workspace/assets/joint-e2e/playwright.config.ts"),
+    ),
+    playwrightConfiguration("@ykdz/reference-vike-web"),
   ]) {
     void it(`uses native failure diagnostics in ${relativePath}`, async () => {
       const config = await loadMaintainedConfig(relativePath);

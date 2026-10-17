@@ -353,6 +353,7 @@ export async function driveGeneratedTerminal(
         if (processList.exitCode !== 0)
           throw new Error(
             `Could not inspect owned PTY process groups: ${processList.stderr}`,
+            { cause: cause },
           );
         const activeGroups = new Set<number>();
         for (const line of processList.stdout.split("\n")) {
@@ -453,7 +454,6 @@ export async function writeAcceptedFirstReleaseArtifact(options: {
           "package/dist/cli-command-identity.js",
           "package/dist/cli.js",
           "package/dist/main.js",
-          "package/dist/standard-schema.js",
           "package/package.json",
         ].map((entry, index) => ({
           path: entry,
@@ -482,7 +482,7 @@ export async function writeAcceptedFirstReleaseArtifact(options: {
             name: "lookup",
             args: ["lookup", "ada"],
             stdout: JSON.stringify({
-              schemaVersion: "1",
+              schemaVersion: "2",
               command: "lookup",
               kind: "data",
               variant: "found",
@@ -493,12 +493,13 @@ export async function writeAcceptedFirstReleaseArtifact(options: {
             name: "schema",
             args: ["schema"],
             stdout: JSON.stringify({
-              schemaVersion: "1",
+              schemaVersion: "2",
               command: "schema",
               kind: "data",
               variant: "exported",
               data: {
                 manifest: {
+                  schemaVersion: "4",
                   root: "cli",
                   commands: {
                     cli: { name: options.commandName },

@@ -358,7 +358,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     );
     await expectDeploymentWorkflowRejected(
       source.replace(
-        /(?<light>      - name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check\n)(?<buildx>      - name: Set up Docker Buildx\n        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
+        /(?<light>      - name: Run Light Check\n        run: node --conditions=source scripts\/task-gates\.ts check\n)(?<buildx>      - name: Set up Docker Buildx\n(?:        id: [^\n]+\n)?        uses: docker\/setup-buildx-action@[^\n]+\n)/u,
         "$2$1",
       ),
     );
@@ -368,8 +368,8 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     const source = await deploymentWorkflowSource();
     await expectDeploymentWorkflowRejected(
       source.replace(
-        "      - name: Stage Check diagnostics\n        if: failure()",
-        "      - name: Stage Check diagnostics\n        if: success()",
+        /(?<stage>      - name: Stage Check diagnostics\n(?:        id: [^\n]+\n)?        if: )failure\(\)/u,
+        "$1success()",
       ),
     );
     await expectDeploymentWorkflowRejected(
@@ -476,17 +476,10 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     const plan = deploymentPlan();
     const baseline = await renderedWorkflow(plan);
     const declarations = [
+      ...plan.ciDiagnosticArtifacts,
       {
         kind: "playwright" as const,
         owner: { kind: "package-boundary" as const, path: "apps/admin" },
-      },
-      {
-        kind: "playwright" as const,
-        owner: { kind: "package-boundary" as const, path: "apps/web" },
-      },
-      {
-        kind: "vitest-browser" as const,
-        owner: { kind: "package-boundary" as const, path: "apps/web" },
       },
     ];
     const source = baseline.source.replace(
@@ -546,7 +539,7 @@ void describe("Built-in Preset GitHub YAML checker", () => {
     );
     assert.deepStrictEqual(steps.at(-2)?.env, {
       PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS: "apps/admin\napps/web",
-      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web",
+      VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS: "apps/web\npackages/vue-shared",
     });
   });
 });

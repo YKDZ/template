@@ -1,0 +1,14 @@
+{
+  "extends": "@ykdz/reference-typescript-config/node.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "declarationMap": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "*.config.ts",
+    "template/**/*.ts"
+  ]
+}

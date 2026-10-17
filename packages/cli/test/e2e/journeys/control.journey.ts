@@ -39,11 +39,16 @@ const journey: CliJourney = {
 
     assert.equal(results[4]?.exitCode, 2);
     assert.equal(results[4]?.stdout, "");
-    assert.equal(JSON.parse(results[4]?.stderr ?? "").kind, "usageFailure");
+    assert.partialDeepStrictEqual(JSON.parse(results[4]?.stderr ?? ""), {
+      schemaVersion: "2",
+      kind: "usageFailure",
+      helpArgv: ["template", "--help"],
+    });
     assert.equal(results[5]?.exitCode, 0);
     const schema = JSON.parse(results[5]?.stdout ?? "");
     assert.equal(schema.command, "schema");
     assert.equal(schema.kind, "data");
+    assert.equal(schema.data.manifest.schemaVersion, "4");
     assert.equal(schema.data.manifest.root, "template");
     for (const command of [
       "init",

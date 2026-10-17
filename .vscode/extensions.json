@@ -1,6 +1,7 @@
 {
   "recommendations": [
     "oxc.oxc-vscode",
+    "Vue.volar",
     "rust-lang.rust-analyzer",
     "tamasfe.even-better-toml",
     "fill-labs.dependi"

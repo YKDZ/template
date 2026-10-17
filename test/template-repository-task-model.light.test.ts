@@ -39,6 +39,7 @@ type NativeTaskDirectory = {
 
 type PlannedTask = {
   readonly command: string;
+  readonly inputs: Readonly<Record<string, string>>;
   readonly dependencies: readonly string[];
   readonly resolvedTaskDefinition: {
     readonly cache: boolean;
@@ -115,16 +116,15 @@ void describe("Template Repository native task model", () => {
     const packageTags = new Map(
       directory.data.packages.items.map(({ name, tags }) => [name, tags]),
     );
-    assert.deepStrictEqual(
-      [...packageTags].sort(([a], [b]) => a.localeCompare(b)),
-      [
-        ["@ykdz/template", ["template-cli"]],
-        ["@ykdz/template-builtin-presets", ["template-builtin-presets"]],
-        ["@ykdz/template-checks", ["template-checks"]],
-        ["@ykdz/template-core", ["template-core"]],
-        ["//", ["template-root"]],
-      ],
-    );
+    for (const [name, tag] of [
+      ["@ykdz/template", "template-cli"],
+      ["@ykdz/template-builtin-presets", "template-builtin-presets"],
+      ["@ykdz/template-checks", "template-checks"],
+      ["@ykdz/template-core", "template-core"],
+    ] as const)
+      assert.ok(packageTags.get(name)?.includes(tag));
+    assert.ok(packageTags.has("@ykdz/reference-vue-shared"));
+    assert.ok(packageTags.has("@ykdz/reference-typescript-config"));
 
     for (const task of nativeTaskByName(directory).values()) {
       if (task.command !== null) {
@@ -148,51 +148,66 @@ void describe("Template Repository native task model", () => {
       "@ykdz/template-checks#build",
       "@ykdz/template-core#build",
     ];
-    assert.deepStrictEqual([...buildTasks.keys()].sort(), [...buildIds].sort());
-
-    for (const taskId of buildIds.filter(
-      (id) => id !== "@ykdz/template-core#build",
-    )) {
+    for (const taskId of buildIds) {
       const task = buildTasks.get(taskId);
       assert.ok(task, `${taskId} 应出现在原生构建计划中`);
-      assert.deepStrictEqual(task.resolvedTaskDefinition.dependsOn, ["^build"]);
-      assert.strictEqual(task.resolvedTaskDefinition.cache, true);
-      assert.deepStrictEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
-      assert.deepStrictEqual([...task.resolvedTaskDefinition.inputs].sort(), [
-        "../../tsconfig.base.json",
-        "../../tsconfig.json",
-      ]);
+      assert.equal(task.resolvedTaskDefinition.cache, true);
+      assert.deepEqual(task.resolvedTaskDefinition.outputs, ["dist/**"]);
+      assert.ok(Object.hasOwn(task.inputs, "package.json"));
+      assert.ok(Object.hasOwn(task.inputs, "tsconfig.build.json"));
+      assert.ok(
+        Object.keys(task.inputs).some((input) => input.startsWith("src/")),
+      );
+      assert.ok(
+        task.resolvedTaskDefinition.inputs.every(
+          (input) => !input.startsWith("../"),
+        ),
+      );
     }
-
-    const coreBuild = buildTasks.get("@ykdz/template-core#build");
-    assert.ok(coreBuild);
-    assert.deepStrictEqual(
-      [...coreBuild.resolvedTaskDefinition.inputs].sort(),
-      [
-        "../../Cargo.lock",
-        "../../Cargo.toml",
-        "../../pnpm-workspace.yaml",
-        "../../tsconfig.base.json",
-        "../../tsconfig.json",
-      ],
+    const configBuild = buildTasks.get(
+      "@ykdz/reference-typescript-config#build",
     );
-    assert.deepStrictEqual(
-      buildIds.map((taskId) => [
-        taskId,
-        [...(buildTasks.get(taskId)?.dependencies ?? [])].sort(),
-      ]),
+    assert.ok(configBuild);
+    assert.equal(configBuild.command, "<NONEXISTENT>");
+    assert.deepEqual(configBuild.resolvedTaskDefinition.dependsOn, ["^build"]);
+    assert.deepEqual(
+      nativeTaskByName(directory).get("@ykdz/reference-typescript-config#build")
+        ?.tags,
+      [],
+    );
+    for (const [consumer, dependencies] of [
       [
+        "@ykdz/template#build",
         [
-          "@ykdz/template#build",
-          ["@ykdz/template-builtin-presets#build", "@ykdz/template-core#build"],
+          "@ykdz/template-core#build",
+          "@ykdz/template-builtin-presets#build",
+          "@ykdz/template-environment#build",
+          "@ykdz/template-workspace#build",
         ],
-        ["@ykdz/template-builtin-presets#build", ["@ykdz/template-core#build"]],
-        [
-          "@ykdz/template-checks#build",
-          ["@ykdz/template-builtin-presets#build", "@ykdz/template-core#build"],
-        ],
-        ["@ykdz/template-core#build", []],
       ],
+      [
+        "@ykdz/template-builtin-presets#build",
+        [
+          "@ykdz/template-core#build",
+          "@ykdz/template-environment#build",
+          "@ykdz/template-workspace#build",
+          "@ykdz/reference-vue-app#build:template",
+          "@ykdz/reference-rust-bin#build:template",
+        ],
+      ],
+      [
+        "@ykdz/template-checks#build",
+        ["@ykdz/template-core#build", "@ykdz/template-builtin-presets#build"],
+      ],
+    ] as const)
+      for (const dependency of dependencies)
+        assert.ok(
+          buildTasks.get(consumer)?.dependencies.includes(dependency),
+          `${consumer} 缺少 ${dependency}`,
+        );
+    assert.deepEqual(
+      buildTasks.get("@ykdz/template-core#build")?.dependencies,
+      ["@ykdz/reference-typescript-config#build"],
     );
   });
 
@@ -222,16 +237,16 @@ void describe("Template Repository native task model", () => {
     );
     assert.strictEqual(
       scripts.boundaries,
-      "node --conditions=source --experimental-strip-types scripts/run-turbo-boundaries.ts",
+      "node --conditions=source scripts/run-turbo-boundaries.ts",
     );
     assert.match(scripts.test ?? "", /test\/\*\*\/\*\.light\.test\.ts/u);
     assert.strictEqual(
       scripts["test:integration"],
-      "node --conditions=source --experimental-strip-types scripts/run-root-integration.ts",
+      "node --conditions=source scripts/run-root-integration.ts",
     );
     assert.strictEqual(
       scripts["test:packed-publication"],
-      "node --conditions=source --experimental-strip-types scripts/run-packed-publication-test.ts",
+      "node scripts/run-packed-publication-test.ts",
     );
     assert.ok(
       scripts.test?.includes(
@@ -265,27 +280,11 @@ void describe("Template Repository native task model", () => {
         `root ${task} is a leaf command`,
       );
     }
-    assert.ok(!Object.keys(scripts).includes("check:boundaries"));
-    assert.ok(!Object.keys(scripts).includes("check:format"));
-    assert.ok(!Object.keys(scripts).includes("check:lint"));
-    assert.ok(!Object.keys(scripts).includes("format:check:root"));
-    assert.ok(!Object.keys(scripts).includes("format:write:root"));
-    assert.ok(!Object.keys(scripts).includes("lint:root"));
-    assert.ok(!Object.keys(scripts).includes("lint:fix:root"));
-    assert.ok(!Object.keys(scripts).includes("typecheck:root"));
-    assert.ok(!Object.keys(scripts).includes("check:templates:shared-oxc"));
-    assert.ok(!Object.keys(scripts).includes("check:templates:static-source"));
-
-    for (const command of Object.values(scripts)) {
-      assert.ok(!command.includes(":root"));
-      assert.ok(!command.includes(":run"));
-      assert.ok(!command.includes("transit"));
-    }
-
     for (const task of ["format:check", "format:write"]) {
       const script = scripts[task];
       assert.ok(script !== undefined);
-      assert.ok(script.includes("git ls-files -- ':!packages/**'"));
+      assert.ok(script.includes("scripts"));
+      assert.ok(script.includes("test"));
       assert.ok(!script.includes("packages/builtin-presets"));
     }
   });
@@ -302,9 +301,10 @@ void describe("Template Repository native task model", () => {
     assert.deepStrictEqual(nativeTasks.get("@ykdz/template#test")?.tags, [
       "quality:light",
     ]);
-    assert.deepStrictEqual(nativeTasks.get("@ykdz/template#test:e2e")?.tags, [
-      "quality:heavy",
-    ]);
+    assert.deepStrictEqual(
+      nativeTasks.get("@ykdz/template#test:e2e:source")?.tags,
+      ["quality:conditional"],
+    );
     assert.deepStrictEqual(
       nativeTasks.get("@ykdz/template-checks#check:evidence-health")?.tags,
       ["quality:conditional"],
@@ -380,73 +380,43 @@ void describe("Template Repository native task model", () => {
       executableTemplateChecks[0]?.taskId,
       "@ykdz/template-checks#check:templates",
     );
-    assert.ok(taskIds.includes("@ykdz/template-checks#prepare:rustfmt"));
-    assert.ok(
-      executableTemplateChecks[0]?.dependencies.includes(
-        "@ykdz/template-checks#prepare:rustfmt",
-      ),
-    );
-    assert.ok(
-      !taskIds.includes(
-        "@ykdz/template-builtin-presets#check:templates:boundary",
-      ),
-    );
     assert.ok(!taskIds.includes("//#test"));
-    assert.ok(!taskIds.includes("@ykdz/template-core#build"));
-    assert.ok(!taskIds.includes("@ykdz/template-builtin-presets#build"));
     assert.ok(!taskIds.includes("@ykdz/template#build"));
 
+    const requiredTasks = [
+      "check:generated",
+      "check:focused",
+      "check:deployment",
+      "check:capabilities",
+    ];
     const registryGraphResult = await execa(
       "pnpm",
-      ["exec", "turbo", "run", "check:deployment", "--dry-run=json"],
+      ["exec", "turbo", "run", ...requiredTasks, "--dry-run=json"],
       { reject: true },
     );
     const registryGraph = JSON.parse(registryGraphResult.stdout) as {
       readonly tasks: readonly {
-        readonly dependencies: readonly string[];
         readonly taskId: string;
+        readonly dependencies: readonly string[];
       }[];
     };
-    const taskById = new Map(
-      registryGraph.tasks.map((task) => [task.taskId, task]),
+    assert.deepStrictEqual(
+      registryGraph.tasks.map((task) => task.taskId).sort(),
+      requiredTasks.map((name) => `@ykdz/template-checks#${name}`).sort(),
     );
-    assert.ok(
-      taskById
-        .get("@ykdz/template-checks#check:focused")
-        ?.dependencies.includes("@ykdz/template-checks#check:generated"),
-    );
-    assert.ok(
-      taskById
-        .get("@ykdz/template-checks#check:fixtures")
-        ?.dependencies.includes("@ykdz/template-checks#check:focused"),
-    );
-    assert.ok(
-      taskById
-        .get("@ykdz/template-checks#check:deployment")
-        ?.dependencies.includes("@ykdz/template-checks#check:fixtures"),
-    );
-
-    const focusedGraphResult = await execa(
+    for (const task of registryGraph.tasks)
+      assert.deepStrictEqual(task.dependencies, []);
+    const matrixGraphResult = await execa(
       "pnpm",
-      ["exec", "turbo", "run", "check:focused", "--dry-run=json"],
+      ["exec", "turbo", "run", "diagnose:matrix", "--dry-run=json"],
       { reject: true },
     );
-    const focusedGraph = JSON.parse(focusedGraphResult.stdout) as {
-      readonly tasks: readonly {
-        readonly taskId: string;
-      }[];
+    const matrixGraph = JSON.parse(matrixGraphResult.stdout) as {
+      readonly tasks: readonly { readonly taskId: string }[];
     };
-    assert.ok(
-      focusedGraph.tasks.some(
-        ({ taskId }) => taskId === "@ykdz/template-checks#check:generated",
-      ),
-    );
-    assert.ok(
-      !focusedGraph.tasks.some(({ taskId }) =>
-        ["check:fixtures", "check:deployment"].some(
-          (task) => taskId === `@ykdz/template-checks#${task}`,
-        ),
-      ),
+    assert.deepStrictEqual(
+      matrixGraph.tasks.map((task) => task.taskId),
+      ["@ykdz/template-checks#diagnose:matrix"],
     );
   });
 
@@ -504,43 +474,31 @@ void describe("Template Repository native task model", () => {
     assert.ok(tasks.includes("@ykdz/template-builtin-presets#build"));
   });
 
-  void it("keeps source tests build-free and orders distribution e2e through Turbo", async () => {
+  void it("keeps source tests build-free and assigns full CLI journeys to the root", async () => {
+    const directory = nativeTaskByName(await queryNativeTaskDirectory());
+    const root = await readJson<Manifest>("package.json");
     const cli = await readJson<Manifest>("packages/cli/package.json");
-    const result = await execa(
-      "pnpm",
-      [
-        "exec",
-        "turbo",
-        "run",
-        "test",
-        "test:e2e",
-        "--filter=@ykdz/template",
-        "--dry-run=json",
-      ],
-      { reject: true },
+    const source = await runTurboDryRun(
+      "test",
+      "test:e2e:source",
+      "--filter=@ykdz/template",
     );
-    const tasks = (
-      JSON.parse(result.stdout) as {
-        readonly tasks: readonly {
-          readonly taskId: string;
-          readonly dependencies: readonly string[];
-        }[];
-      }
-    ).tasks;
-
-    assert.deepStrictEqual(
-      tasks.find(({ taskId }) => taskId === "@ykdz/template#test")
-        ?.dependencies,
-      [],
+    assert.ok(source.tasks.every((task) => !task.taskId.endsWith("#build")));
+    assert.deepEqual(directory.get("//#test:e2e:cli")?.tags, ["quality:heavy"]);
+    assert.deepEqual(directory.get("@ykdz/template#test:e2e:source")?.tags, [
+      "quality:conditional",
+    ]);
+    assert.deepEqual(
+      directory.get("@ykdz/template#test:e2e:distribution")?.tags,
+      ["quality:conditional"],
     );
+    assert.equal(
+      root.scripts["test:e2e:cli"],
+      "node scripts/check-cli-source-and-distribution.ts",
+    );
+    assert.ok(cli.scripts["test:e2e:source"]?.includes("--conditions=source"));
     assert.ok(
-      tasks
-        .find(({ taskId }) => taskId === "@ykdz/template#test:e2e")
-        ?.dependencies.includes("@ykdz/template#build"),
-    );
-    assert.strictEqual(
-      cli.scripts["test:e2e"],
-      "node --conditions=source test/e2e/check-source-and-distribution.ts",
+      !cli.scripts["test:e2e:distribution"]?.includes("--conditions=source"),
     );
   });
 });

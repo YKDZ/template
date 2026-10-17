@@ -12,7 +12,7 @@ export {
   resolveBuiltInTemplateSource,
   validateProjectBlueprint,
 } from "./foundation.ts";
-export { templateSources } from "./template-sources.ts";
+export { referencePackagePublicationContexts } from "./shared/reference-packages.ts";
 export { generationRecordSchema } from "./generation-record.ts";
 export type {
   BuiltInPresetDefinition,

@@ -1,0 +1,16 @@
+{
+  "extends": "@ykdz/reference-typescript-config/base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": true,
+    "erasableSyntaxOnly": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "rewriteRelativeImportExtensions": true,
+    "target": "es2024",
+    "types": ["node"],
+    "outDir": "template-dist",
+    "rootDir": "template"
+  },
+  "include": ["template/**/*.ts"]
+}

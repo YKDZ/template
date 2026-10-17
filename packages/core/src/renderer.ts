@@ -16,6 +16,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import { generatedJsonPrintWidth } from "./workspace-policy-snapshot.ts";
+
 export type RenderOperationProvenance = {
   readonly definitionName: string;
   readonly plannerSourceFile: string;
@@ -63,6 +65,8 @@ export type CopyFileOperation = {
   from: string;
   to: string;
   source: TemplateSourceHandle;
+  /** 仅重映射原生 TypeScript 的静态公开模块引用。 */
+  moduleSpecifiers?: Readonly<Record<string, string>>;
   overwrite?: boolean;
   provenance?: RenderOperationProvenance;
 };
@@ -188,7 +192,52 @@ async function renderCopyFile(
   const sourceMode = (await stat(from)).mode;
 
   await mkdir(path.dirname(to), { recursive: true });
-  await copyGeneratedFile(from, to, operation.overwrite ?? false);
+  if (operation.moduleSpecifiers === undefined) {
+    await copyGeneratedFile(from, to, operation.overwrite ?? false);
+  } else {
+    const ts = await import("typescript");
+    const original = await readFile(from, "utf8");
+    const parsed = ts.createSourceFile(
+      from,
+      original,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const replacements = parsed.statements.flatMap((statement) => {
+      if (
+        !ts.isImportDeclaration(statement) &&
+        !ts.isExportDeclaration(statement)
+      )
+        return [];
+      const specifier = statement.moduleSpecifier;
+      if (specifier === undefined || !ts.isStringLiteral(specifier)) return [];
+      const prefix = Object.entries(operation.moduleSpecifiers ?? {}).find(
+        ([name]) => specifier.text.startsWith(`${name}/`),
+      );
+      const replacement =
+        operation.moduleSpecifiers?.[specifier.text] ??
+        (prefix === undefined
+          ? undefined
+          : prefix[1] + specifier.text.slice(prefix[0].length));
+      return replacement === undefined
+        ? []
+        : [
+            {
+              start: specifier.getStart(parsed),
+              end: specifier.end,
+              text: JSON.stringify(replacement),
+            },
+          ];
+    });
+    let mapped = original;
+    for (const replacement of replacements.toReversed()) {
+      mapped =
+        mapped.slice(0, replacement.start) +
+        replacement.text +
+        mapped.slice(replacement.end);
+    }
+    await writeGeneratedFile(to, mapped, operation.overwrite ?? false);
+  }
   await chmod(to, sourceMode & 0o777);
 }
 
@@ -209,13 +258,16 @@ function serializeJsonValue(
   multilineArrays: Set<string>,
   rootKeyOrder?: Map<string, number>,
   nestedKeyOrder?: Map<string, number>,
+  currentColumn = indentation,
+  trailingComma = false,
 ): string {
   if (Array.isArray(value)) {
     const compact = `[${value.map((item) => JSON.stringify(item)).join(", ")}]`;
     const shouldCompact =
       value.every(isScalarJsonValue) &&
       !multilineArrays.has(pathSegments.join(".")) &&
-      indentation + compact.length <= 100;
+      currentColumn + compact.length + (trailingComma ? 1 : 0) <=
+        generatedJsonPrintWidth;
 
     if (shouldCompact) {
       return compact;
@@ -230,6 +282,8 @@ function serializeJsonValue(
           multilineArrays,
           rootKeyOrder,
           nestedKeyOrder,
+          indentation + 2,
+          index < value.length - 1,
         )}`,
     );
     return `[\n${items.join(",\n")}\n${" ".repeat(indentation)}]`;
@@ -251,7 +305,7 @@ function serializeJsonValue(
     "{\n" +
     entries
       .map(
-        ([key, entryValue]) =>
+        ([key, entryValue], index) =>
           `${" ".repeat(indentation + 2)}${JSON.stringify(key)}: ${serializeJsonValue(
             entryValue,
             indentation + 2,
@@ -259,6 +313,8 @@ function serializeJsonValue(
             multilineArrays,
             rootKeyOrder,
             nestedKeyOrder,
+            indentation + 2 + JSON.stringify(key).length + 2,
+            index < entries.length - 1,
           )}`,
       )
       .join(",\n") +

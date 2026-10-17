@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   check:
-    name: Check package and fixture matrix
+    name: 检查源码与独立能力
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -72,9 +72,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/.devcontainer/devcontainer.json', 'packages/workspace/deployment/Dockerfile', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-
+            fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/.devcontainer/devcontainer.json', 'packages/workspace/deployment/Dockerfile', 'packages/core/src/development-container-tool-layer.ts') }}-
             fixture-buildkit-${{ runner.os }}-
 
       - name: Restore pnpm downloads cache
@@ -92,9 +92,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-
+            fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-
             fixture-cargo-downloads-${{ runner.os }}-
 
       - name: Restore Fixture Verification Evidence
@@ -228,7 +228,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/buildkit
-          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-buildkit-${{ runner.os }}-${{ hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/.devcontainer/devcontainer.json', 'packages/workspace/deployment/Dockerfile', 'packages/core/src/development-container-tool-layer.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save pnpm downloads cache
         if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'
@@ -242,7 +242,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .fixture-native-cache/cargo
-          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fixture-cargo-downloads-${{ runner.os }}-${{ hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Save Fixture Verification Evidence
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && job.workflow_ref == github.workflow_ref && steps.fixture-evidence-health.outcome == 'success'

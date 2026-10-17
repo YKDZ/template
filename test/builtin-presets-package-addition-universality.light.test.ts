@@ -19,6 +19,8 @@ import {
 } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
+import { parse as parseToml } from "smol-toml";
+import { parse as parseYaml } from "yaml";
 
 void describe("Built-in Preset Package Addition universality", () => {
   type FixedTopologyDefinition = Exclude<
@@ -59,7 +61,7 @@ void describe("Built-in Preset Package Addition universality", () => {
     return definition;
   }
 
-  void it("initializes every Project Shape with both Standard Package Roots", () => {
+  void it("initializes every Project Shape with both Standard Package Roots", async () => {
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
         definition,
@@ -72,20 +74,16 @@ void describe("Built-in Preset Package Addition universality", () => {
           toolchain: initializationToolchain,
         }),
       });
-      const workspace = plan.operations.find(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          operation.to === "pnpm-workspace.yaml",
+      const projection = await materializeProjectProjection({
+        operations: plan.operations,
+      });
+      const workspace = projection.entries.find(
+        (entry) => entry.path === "pnpm-workspace.yaml",
+      )!;
+      const declaration = parseYaml(
+        new TextDecoder().decode(workspace.content),
       );
-
-      assert.ok(workspace?.kind === "writeTextTemplate");
-      assert.ok(Object.hasOwn(workspace, "replacements"));
-      assert.ok(
-        Object.hasOwn(workspace.replacements, "WORKSPACE_PACKAGE_GLOBS"),
-      );
-      const packageGlobs = workspace.replacements.WORKSPACE_PACKAGE_GLOBS;
-      assert.ok(typeof packageGlobs === "string");
-      assert.ok(packageGlobs.includes("  - apps/*\n  - packages/*"));
+      assert.deepEqual(declaration.packages, ["apps/*", "packages/*"]);
     }
   });
 
@@ -503,8 +501,18 @@ void describe("Built-in Preset Package Addition universality", () => {
       const initialRustPackagePath = initialization.blueprint.packages.find(
         (definition) => definition.role === "native-package",
       )!.path;
-      assert.ok(dependabot.includes(`directory: "/${initialRustPackagePath}"`));
-      assert.ok(dependabot.includes('directory: "/packages/worker"'));
+      const cargoUpdates = (
+        parseYaml(dependabot).updates as {
+          "package-ecosystem": string;
+          directory?: string;
+          directories?: string[];
+        }[]
+      ).filter((entry) => entry["package-ecosystem"] === "cargo");
+      const directories = cargoUpdates.flatMap(
+        (entry) => entry.directories ?? [entry.directory!],
+      );
+      assert.ok(directories.includes(`/${initialRustPackagePath}`));
+      assert.ok(directories.includes("/packages/worker"));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
@@ -631,18 +639,16 @@ void describe("Built-in Preset Package Addition universality", () => {
           "to" in operation && operation.to === "rust-toolchain.toml",
       );
 
-      assert.partialDeepStrictEqual(rootDeclarationOperation, {
-        kind: "writeTextTemplate",
-        replacements: { RUST_TOOLCHAIN: "stable" },
-      });
+      assert.ok(rootDeclarationOperation !== undefined);
       await reconcileAndApplyProjectProjections({
         targetRoot: targetDir,
         ...addition.projectProjections,
       });
-      assert.strictEqual(
+      const declaration = parseToml(
         await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-        '[toolchain]\nchannel = "stable"\ncomponents = ["rustfmt", "clippy"]\n',
-      );
+      ).toolchain as { channel: string; components: string[] };
+      assert.equal(declaration.channel, "stable");
+      assert.deepEqual(declaration.components, ["rustfmt", "clippy"]);
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

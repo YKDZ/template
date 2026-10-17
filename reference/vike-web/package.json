@@ -1,0 +1,84 @@
+{
+  "name": "@ykdz/reference-vike-web",
+  "private": true,
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#/assets/*": {
+      "types": "./assets/*",
+      "default": "./assets/*"
+    },
+    "#/components/*": {
+      "types": "./components/*",
+      "default": "./components/*"
+    },
+    "#/server/*": {
+      "types": "./server/*.ts",
+      "default": "./server/*.ts"
+    },
+    "#tooling/*": "@ykdz/reference-typescript-config/*"
+  },
+  "exports": {
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "browser:prepare": "playwright install chromium",
+    "build": "vike build",
+    "dev": "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source vike dev",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --type-aware .",
+    "lint:fix": "oxlint --type-aware --format=unix . --fix",
+    "preview": "DATABASE_PROFILE=dev vike preview",
+    "start": "node ./dist/server/index.mjs",
+    "test": "vitest run --project=node --reporter=agent --silent=passed-only --passWithNoTests",
+    "test:browser": "vitest run --project=browser --reporter=agent --silent=passed-only",
+    "test:e2e": "DATABASE_PROFILE=e2e playwright test",
+    "typecheck": "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "typecheck:template": "tsc -p tsconfig.template.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@vikejs/hono": "catalog:",
+    "@ykdz/reference-vike-db": "workspace:*",
+    "hono": "catalog:",
+    "srvx": "catalog:",
+    "telefunc": "catalog:",
+    "vike": "catalog:",
+    "vike-vue": "catalog:",
+    "vue": "catalog:"
+  },
+  "devDependencies": {
+    "@playwright/test": "catalog:",
+    "@tailwindcss/vite": "catalog:",
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue": "catalog:",
+    "@vitest/browser-playwright": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-vue-shared": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "playwright": "catalog:",
+    "tailwindcss": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "typescript-7": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:",
+    "vitest-browser-vue": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

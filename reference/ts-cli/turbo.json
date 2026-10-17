@@ -1,0 +1,70 @@
+{
+  "extends": ["//"],
+  "tags": ["app"],
+  "tasks": {
+    "build:template": {
+      "dependsOn": ["@ykdz/template-core#build"],
+      "inputs": [],
+      "outputs": ["template-dist/**"],
+      "tags": ["quality:light"]
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": [],
+      "outputs": ["dist/**"],
+      "tags": ["quality:light"]
+    },
+    "format:check": {
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "postbuild": {
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:lifecycle"]
+    },
+    "prepack": {
+      "inputs": [],
+      "outputs": [],
+      "tags": ["work:release"]
+    },
+    "test": {
+      "dependsOn": [],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "inputs": [],
+      "outputs": [],
+      "cache": false,
+      "tags": ["quality:heavy"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

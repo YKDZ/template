@@ -1,27 +1,17 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  createGenerationContext,
-  planGeneratedRepositoryInitialization,
-  prepareGeneratedRepositoryPackageAddition,
-  type GeneratedRepositoryPlan,
-} from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
+import {
+  customizeSharedVue,
+  verifySharedVueCombination,
+  type SharedVueCustomization,
+} from "../scripts/capability-customization.ts";
+import { materializeGeneratedScenario } from "../scripts/generated-scenario.ts";
 import {
   deploymentQualityExecutionResources,
   deriveDeploymentQualityContractIdentity,
@@ -71,9 +61,6 @@ import {
   deriveFixtureMatrix,
   deriveFocusedProjectLinkScenarios,
   deriveInitializationScenarios,
-  validateGeneratedDevelopmentContainerProjection,
-  validatePlanDependencyCatalog,
-  validatePlanSources,
   type GeneratedScenario,
 } from "./registry-checks.ts";
 
@@ -81,27 +68,28 @@ type GeneratedScenarioSet =
   | "init"
   | "package-addition-matrix"
   | "focused"
-  | "deployment";
+  | "deployment"
+  | "capabilities";
 
 const scenarioSetReproductionCommands: Record<GeneratedScenarioSet, string> = {
   init: "pnpm --filter @ykdz/template-checks check:generated",
   "package-addition-matrix":
-    "pnpm --filter @ykdz/template-checks check:fixtures",
+    "pnpm --filter @ykdz/template-checks diagnose:matrix",
   focused: "pnpm --filter @ykdz/template-checks check:focused",
   deployment: "pnpm --filter @ykdz/template-checks check:deployment",
+  capabilities: "pnpm --filter @ykdz/template-checks check:capabilities",
 };
 
 const fixtureFailureReportName = "fixture-failure.json";
 
-const defaultRepositoryRoot = path.resolve(
+const checksPackageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
   "..",
 );
 
 export type GeneratedScenarioRunOptions = {
   readonly workspace: string;
+  readonly scenarioIds?: readonly string[];
   readonly reporter?: { readonly info?: (message: string) => void };
   readonly run?: GeneratedCommandRunner;
   readonly cancelSignal?: AbortSignal;
@@ -156,6 +144,7 @@ const fixtureEnvironment = {
   activityDirectory: "TEMPLATE_FIXTURE_EVIDENCE_ACTIVITY_DIR",
   runId: "TEMPLATE_FIXTURE_EVIDENCE_RUN_ID",
   runAttempt: "TEMPLATE_FIXTURE_EVIDENCE_RUN_ATTEMPT",
+  scenarios: "TEMPLATE_FIXTURE_SCENARIOS",
   pnpmCacheDirectory: "TEMPLATE_FIXTURE_PNPM_CACHE_DIR",
   workspaceDirectory: "TEMPLATE_FIXTURE_WORKSPACE_DIR",
 } as const;
@@ -169,6 +158,7 @@ const fixtureFailureEnvironmentNames = [
   fixtureEnvironment.activityDirectory,
   fixtureEnvironment.runId,
   fixtureEnvironment.runAttempt,
+  fixtureEnvironment.scenarios,
   fixtureEnvironment.buildKitCacheDirectory,
   fixtureEnvironment.pnpmCacheDirectory,
   fixtureEnvironment.cargoCacheDirectory,
@@ -176,11 +166,12 @@ const fixtureFailureEnvironmentNames = [
 ] as const;
 
 const defaultFixtureWorkspaceDirectory = path.join(
-  defaultRepositoryRoot,
+  checksPackageRoot,
   ".fixture-workspace",
 );
 
-const fixtureTurboEnvironment = [
+const fixtureContainerEnvironmentVariables = [
+  ["NODE_USE_ENV_PROXY", "NODE_USE_ENV_PROXY"],
   ["TURBO_TEAM", "TEMPLATE_FIXTURE_TURBO_TEAM"],
   ["TURBO_TOKEN", "TEMPLATE_FIXTURE_TURBO_TOKEN"],
   [
@@ -197,12 +188,14 @@ export function fixtureContainerEnvironmentFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    fixtureTurboEnvironment.flatMap(([containerName, fixtureName]) => {
-      const value = environment[fixtureName] ?? environment[containerName];
-      return value === undefined || value.length === 0
-        ? []
-        : [[containerName, value]];
-    }),
+    fixtureContainerEnvironmentVariables.flatMap(
+      ([containerName, fixtureName]) => {
+        const value = environment[fixtureName] ?? environment[containerName];
+        return value === undefined || value.length === 0
+          ? []
+          : [[containerName, value]];
+      },
+    ),
   );
 }
 
@@ -403,7 +396,7 @@ async function persistFixtureFailureReport(options: {
     schema: "template-fixture-failure/v1",
     scenarioSet: options.scenarioSet,
     reproductionCommand: scenarioSetReproductionCommands[options.scenarioSet],
-    repositoryDirectory: defaultRepositoryRoot,
+    repositoryDirectory: checksPackageRoot,
     generatedWorkspace: options.workspace,
     generatedArtifactDirectory: options.workspace,
     failureReport: reportPath,
@@ -517,7 +510,24 @@ export async function generatedScenariosFor(
     case "focused":
       return deriveFocusedProjectLinkScenarios();
     case "deployment":
-      return deriveFixtureMatrix();
+      return deriveInitializationScenarios().filter(
+        (scenario) => scenario.base.metadata.name === "vike-app",
+      );
+    case "capabilities":
+      return [
+        ...deriveInitializationScenarios().filter(
+          (scenario) => scenario.base.metadata.name === "vue-hono-app",
+        ),
+        ...deriveFixtureMatrix().filter(
+          ({ base, addition }) =>
+            (base.metadata.name === "ts-lib" &&
+              ["rust-bin", "vue-app"].includes(
+                addition?.metadata.name ?? "",
+              )) ||
+            (base.metadata.name === "vue-app" &&
+              addition?.metadata.name === "vue-app"),
+        ),
+      ];
   }
 }
 
@@ -600,101 +610,39 @@ async function runScenario(
       );
     }
   };
-  const projectDir = path.join(options.workspace, scenario.id);
-  const context = createGenerationContext({
-    targetDir: projectDir,
-    defaultPackageScope: "fixture",
-    toolchain: {
-      nodeLtsMajor: releaseToolchainSnapshot.nodeVersion.slice(
-        0,
-        releaseToolchainSnapshot.nodeVersion.indexOf("."),
-      ),
-      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-      nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      rustVersion: releaseToolchainSnapshot.rustVersion,
+  let customization: SharedVueCustomization | undefined;
+  const {
+    projectDir,
+    plan: finalPlan,
+    initialPlan: initialization,
+  } = await materializeGeneratedScenario({
+    scenario,
+    workspace: options.workspace,
+    ...(options.cancelSignal === undefined
+      ? {}
+      : { cancelSignal: options.cancelSignal }),
+    afterInitialization: async (initialPlan, projectDir) => {
+      await prepareGeneratedRepositoryForContainerWrites(projectDir);
+      await initializeFixtureGitRepository({ repositoryRoot: projectDir, run });
+      if (mode === "capabilities" && scenario.base.metadata.name === "vue-app")
+        customization = await customizeSharedVue(initialPlan, projectDir);
+      if (mode !== "init")
+        await stageFixtureGitRepository({ repositoryRoot: projectDir, run });
     },
   });
-  options.cancelSignal?.throwIfAborted();
-  const initialization = planGeneratedRepositoryInitialization({
-    definition: scenario.base,
-    context,
-  });
-  await validatePlanSources({
-    definition: scenario.base,
-    plan: initialization,
-  });
-  await validatePlanDependencyCatalog(initialization);
-  await renderNewProject({
-    targetRoot: projectDir,
-    operations: [...initialization.operations],
-  });
-  await prepareGeneratedRepositoryForContainerWrites(projectDir);
-  options.cancelSignal?.throwIfAborted();
-  if (
-    mode === "init" ||
-    mode === "package-addition-matrix" ||
-    mode === "focused" ||
-    mode === "deployment"
-  ) {
-    await initializeFixtureGitRepository({
-      repositoryRoot: projectDir,
-      run,
+  if (mode === "capabilities" && scenario.addition?.metadata.name === "vue-app")
+    await verifySharedVueCombination({
+      initialPlan: initialization,
+      finalPlan,
+      projectDir,
+      ...(customization === undefined ? {} : { customization }),
     });
-    if (
-      mode === "package-addition-matrix" ||
-      mode === "focused" ||
-      mode === "deployment"
-    ) {
-      await stageFixtureGitRepository({
-        repositoryRoot: projectDir,
-        run,
-      });
-    }
-  }
-
-  let finalPlan: GeneratedRepositoryPlan = initialization;
-  if (scenario.addition !== undefined) {
-    const preparation = prepareGeneratedRepositoryPackageAddition({
-      repositoryRoot: context.targetDir,
-      preset: scenario.addition.metadata.name,
-      packageLeafName: `fixture-${scenario.addition.metadata.name}`,
-      ...(scenario.linkFrom === undefined
-        ? {}
-        : { linkFrom: scenario.linkFrom }),
-    });
-    if (preparation.status !== "ready") {
-      // 加包验证现消费公开 CLI 的 prepare 接缝；非 ready 一律令场景失败，不回落旧 plan 或忽略错误。
-      throw new Error(
-        `Generated Package Addition prepare did not yield a plan (${preparation.status}): ${JSON.stringify(preparation)}`,
-      );
-    }
-    finalPlan = preparation.plan;
-    await validatePlanSources({
-      definition: scenario.addition,
-      plan: preparation.plan,
-    });
-    await validatePlanDependencyCatalog(preparation.plan);
-    const result = await reconcileAndApplyProjectProjections({
-      targetRoot: projectDir,
-      ...preparation.plan.projectProjections,
-    });
-    if (!result.ok) {
-      throw new Error(
-        `Generated Package Addition reconciliation conflicted: ${JSON.stringify(result.conflicts)}`,
-      );
-    }
-  }
-
-  await assertGeneratedManifestPublicationPolicy({
-    plan: finalPlan,
-    projectDir,
-  });
-
-  await validateGeneratedDevelopmentContainerProjection({
-    plan: finalPlan,
-    projectDir,
-  });
-  const deployment = deriveDeploymentQualityPlanInput(finalPlan);
+  const fullQuality = mode !== "init" && mode !== "focused";
+  const rootGate = fullQuality ? "check:full" : "check";
+  const includeFix = fullQuality;
+  const deployment = fullQuality
+    ? deriveDeploymentQualityPlanInput(finalPlan)
+    : undefined;
   if (mode === "deployment" && deployment === undefined) {
     return "not-applicable";
   }
@@ -766,7 +714,7 @@ async function runScenario(
     [
       ...new Set<FixtureEvidenceExecutionResource>([
         "development-container-session",
-        ...generatedRootQualityExecutionResources(finalPlan),
+        ...generatedRootQualityExecutionResources(finalPlan, { rootGate }),
         ...(deployment === undefined
           ? []
           : deploymentQualityExecutionResources(deployment)),
@@ -832,7 +780,6 @@ async function runScenario(
     if (options.evidence?.activity === undefined) {
       options.reporter?.info?.(`Checking generated scenario ${scenario.label}`);
     }
-    const includeFix = true;
     const executeSemanticGate = async (gateOptions: {
       readonly gate: FixtureEvidenceGate;
       readonly resources: Parameters<FixtureEvidenceScheduler["run"]>[0];
@@ -881,7 +828,9 @@ async function runScenario(
     const executeRootQuality = async () => {
       await executeSemanticGate({
         gate: "generated-root-quality",
-        resources: generatedRootQualityExecutionResources(finalPlan),
+        resources: generatedRootQualityExecutionResources(finalPlan, {
+          rootGate,
+        }),
         execute: async () => {
           await executeGeneratedRootQuality({
             projectDir,
@@ -889,6 +838,7 @@ async function runScenario(
               "/workspaces",
               path.basename(projectDir),
             ),
+            rootGate,
             includeFix,
             run: containerSession.run,
           });
@@ -927,7 +877,8 @@ async function runScenario(
       mode === "init" ||
       mode === "package-addition-matrix" ||
       mode === "focused" ||
-      mode === "deployment"
+      mode === "deployment" ||
+      mode === "capabilities"
     ) {
       const generatedContentIdentity = await writeGeneratedRepositoryTree({
         repositoryRoot: projectDir,
@@ -936,6 +887,7 @@ async function runScenario(
       const contractIdentity = await deriveGeneratedRootQualityContractIdentity(
         finalPlan,
         {
+          rootGate,
           includeFix,
           ...(deploymentContractIdentity === undefined
             ? {}
@@ -1009,34 +961,6 @@ async function runScenario(
   });
 }
 
-async function assertGeneratedManifestPublicationPolicy(options: {
-  readonly plan: GeneratedRepositoryPlan;
-  readonly projectDir: string;
-}): Promise<void> {
-  const manifestPaths = [
-    "package.json",
-    ...options.plan.blueprint.packages.map(
-      (definition) => `${definition.path}/package.json`,
-    ),
-  ];
-  for (const manifestPath of manifestPaths) {
-    const manifest = JSON.parse(
-      await readFile(path.join(options.projectDir, manifestPath), "utf8"),
-    ) as unknown;
-    if (
-      typeof manifest === "object" &&
-      manifest !== null &&
-      !Array.isArray(manifest) &&
-      (manifest as Record<string, unknown>).private === true &&
-      Object.hasOwn(manifest, "version")
-    ) {
-      throw new Error(
-        `Generated Repository private Node manifest ${manifestPath} must not declare version`,
-      );
-    }
-  }
-}
-
 async function prepareGeneratedRepositoryForContainerWrites(
   projectDir: string,
 ): Promise<void> {
@@ -1051,7 +975,28 @@ export async function runGeneratedScenarioSet(
   options: GeneratedScenarioRunOptions,
 ): Promise<void> {
   options.cancelSignal?.throwIfAborted();
-  const scenarios = await generatedScenariosFor(set);
+  const availableScenarios = await generatedScenariosFor(set);
+  const selectedIds = options.scenarioIds;
+  if (selectedIds !== undefined) {
+    if (selectedIds.length === 0 || selectedIds.some((id) => id.length === 0)) {
+      throw new Error(`${fixtureEnvironment.scenarios} 不得为空或包含空 ID`);
+    }
+    const availableIds = new Set(availableScenarios.map(({ id }) => id));
+    const unknownIds = selectedIds.filter((id) => !availableIds.has(id));
+    if (unknownIds.length > 0) {
+      throw new Error(
+        `${fixtureEnvironment.scenarios} 包含不属于 ${set} 的场景 ID: ${unknownIds.join(", ")}`,
+      );
+    }
+  }
+  const scenarios =
+    selectedIds === undefined
+      ? availableScenarios
+      : availableScenarios.filter(({ id }) => selectedIds.includes(id));
+  const reproductionCommand =
+    selectedIds === undefined
+      ? scenarioSetReproductionCommands[set]
+      : `${fixtureEnvironment.scenarios}=${scenarios.map(({ id }) => id).join(",")} ${scenarioSetReproductionCommands[set]}`;
   const failureSecrets = fixtureFailureSecretValues({
     ...process.env,
     ...options.containerEnvironment,
@@ -1145,7 +1090,7 @@ export async function runGeneratedScenarioSet(
       );
       reportFixtureFailure(
         options.reporter,
-        `[Fixture Evidence] ${set} ${scenario.label} (${scenario.id}) failed: ${diagnostic}. Reproduce the scenario set with ${scenarioSetReproductionCommands[set]}; generated artifact: ${path.join(options.workspace, scenario.id)}`,
+        `[Fixture Evidence] ${set} ${scenario.label} (${scenario.id}) failed: ${diagnostic}. Reproduce the scenario set with ${reproductionCommand}; generated artifact: ${path.join(options.workspace, scenario.id)}`,
       );
       await recordActivity({
         type: "scenario",
@@ -1269,10 +1214,11 @@ export async function runGeneratedRegistryCli(options: {
     set !== "init" &&
     set !== "package-addition-matrix" &&
     set !== "focused" &&
-    set !== "deployment"
+    set !== "deployment" &&
+    set !== "capabilities"
   ) {
     throw new Error(
-      "Expected generated scenario set: init, package-addition-matrix, focused, or deployment",
+      "生成场景集必须为 init、package-addition-matrix、focused、deployment 或 capabilities",
     );
   }
   const scheduling = {
@@ -1306,6 +1252,7 @@ export async function runGeneratedRegistryCli(options: {
   const managesWorkspace = options.workspace === undefined;
   const configuredWorkspace =
     options.environment[fixtureEnvironment.workspaceDirectory];
+  const configuredScenarios = options.environment[fixtureEnvironment.scenarios];
   if (configuredWorkspace !== undefined && configuredWorkspace.length === 0) {
     throw new Error(
       `${fixtureEnvironment.workspaceDirectory} must not be empty`,
@@ -1332,6 +1279,11 @@ export async function runGeneratedRegistryCli(options: {
   try {
     await runGeneratedScenarioSet(set, {
       workspace,
+      ...(configuredScenarios === undefined
+        ? {}
+        : {
+            scenarioIds: configuredScenarios.split(",").map((id) => id.trim()),
+          }),
       reporter: options.reporter ?? console,
       ...(options.run === undefined ? {} : { run: options.run }),
       ...(options.cancelSignal === undefined
@@ -1341,7 +1293,7 @@ export async function runGeneratedRegistryCli(options: {
         ? {}
         : { schedulerFactory: options.schedulerFactory }),
       scheduling,
-      buildKitCacheDirectory: path.resolve(buildKitCacheDirectory),
+      buildKitCacheDirectory: path.resolve(buildKitCacheDirectory, set),
       containerEnvironment: fixtureContainerEnvironmentFromEnvironment(
         options.environment,
       ),

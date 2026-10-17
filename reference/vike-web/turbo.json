@@ -1,0 +1,92 @@
+{
+  "extends": ["//"],
+  "tags": ["app"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "tags": ["quality:light"]
+    },
+    "dev": {
+      "dependsOn": ["@ykdz/reference-vike-db#build"],
+      "cache": false,
+      "persistent": true,
+      "tags": ["work:development"]
+    },
+    "format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "preview": {
+      "cache": false,
+      "tags": ["work:development"]
+    },
+    "start": {
+      "cache": false,
+      "tags": ["work:development"]
+    },
+    "browser:prepare": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "test": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "test:browser": {
+      "dependsOn": ["browser:prepare"],
+      "tags": ["quality:heavy"]
+    },
+    "test:e2e": {
+      "dependsOn": [
+        "//#database:prepare:e2e",
+        "@ykdz/reference-vike-db#build",
+        "build",
+        "browser:prepare"
+      ],
+      "cache": false,
+      "tags": ["quality:heavy"]
+    },
+    "typecheck": {
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/reference-vue-shared#build"
+      ],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/reference-vue-shared#build",
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build"
+      ],
+      "outputs": ["template-dist/**"],
+      "tags": ["quality:light"]
+    },
+    "typecheck:template": {
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/reference-vue-shared#build",
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build"
+      ],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

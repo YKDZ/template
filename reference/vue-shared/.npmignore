@@ -1,0 +1,5 @@
+.turbo/
+playwright-report/
+test-results/
+coverage/
+.vitest/

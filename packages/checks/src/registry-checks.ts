@@ -1,4 +1,4 @@
-import { access, glob, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,10 +10,8 @@ import {
   planGeneratedRepositoryPackageAddition,
   readRustToolchainChannelFromToml,
   resolveBuiltInTemplateSource,
-  templateSources,
   type BuiltInPresetDefinition,
   type GeneratedRepositoryPlan,
-  type PackageContribution,
 } from "@ykdz/template-builtin-presets";
 import {
   loadTemplateDependencyCatalog,
@@ -36,7 +34,6 @@ import {
   renderNewProject,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
-import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 
 /** A real registry Definition and optional Package Addition planner scenario. */
@@ -47,70 +44,6 @@ export type GeneratedScenario = {
   readonly addition?: BuiltInPresetDefinition;
   readonly linkFrom?: readonly string[];
 };
-
-export type BuiltInPresetTemplateSourceCheckContext = {
-  readonly definition: BuiltInPresetDefinition;
-  readonly contribution: PackageContribution;
-  readonly plan: GeneratedRepositoryPlan;
-};
-
-/** Registry-derived Template Source roots checked independently of plans. */
-export function builtInPresetTemplateSourceContexts(): readonly {
-  readonly name: string;
-  readonly root: string;
-}[] {
-  return [
-    ...builtInPresetRegistry.all().map((definition) => ({
-      name: definition.metadata.name,
-      root: resolveBuiltInTemplateSource(definition.source, "."),
-    })),
-    {
-      name: "foundation",
-      root: resolveBuiltInTemplateSource(templateSources.foundation, "."),
-    },
-    {
-      name: "shared-devcontainer",
-      root: resolveBuiltInTemplateSource(
-        templateSources.sharedDevcontainer,
-        ".",
-      ),
-    },
-    {
-      name: "shared-oxc",
-      root: resolveBuiltInTemplateSource(templateSources.sharedOxc, "."),
-    },
-    {
-      name: "shared-vue",
-      root: resolveBuiltInTemplateSource(templateSources.vue, "."),
-    },
-  ];
-}
-
-/** Derives direct Template Source checks from real initial contributions. */
-export function builtInPresetTemplateSourceCheckContexts(): readonly BuiltInPresetTemplateSourceCheckContext[] {
-  return builtInPresetRegistry.all().flatMap((definition) => {
-    const context = createGenerationContext({
-      targetDir: path.join(
-        "generated-repository",
-        "template-source",
-        definition.metadata.name,
-      ),
-      toolchain: {
-        nodeLtsMajor: "24",
-        packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
-        nodeVersion: releaseToolchainSnapshot.nodeVersion,
-      },
-    });
-    const plan = planGeneratedRepositoryInitialization({ definition, context });
-    const contributions = plan.packageContributions;
-
-    return contributions.map((contribution) => ({
-      definition,
-      contribution,
-      plan,
-    }));
-  });
-}
 
 function scenarioId(...parts: readonly string[]): string {
   return parts.join("--");
@@ -135,8 +68,9 @@ export function deriveInitializationScenarios(): readonly GeneratedScenario[] {
  * Every initialization plus every registered Package Addition planner applied
  * to every base Definition. No Preset identity list is maintained here.
  */
-export function deriveFixtureMatrix(): readonly GeneratedScenario[] {
-  const definitions = builtInPresetRegistry.all();
+export function deriveFixtureMatrix(
+  definitions: readonly BuiltInPresetDefinition[] = builtInPresetRegistry.all(),
+): readonly GeneratedScenario[] {
   const addable = definitions.filter(
     (definition) => definition.planPackageAddition !== undefined,
   );
@@ -235,59 +169,6 @@ export function deriveFocusedProjectLinkScenarios(): readonly GeneratedScenario[
   });
 }
 
-/** 返回 Definition 对应的源码目录，行为层由原生测试后缀自动发现。 */
-function presetLocalBehaviorTestRoot(
-  definition: BuiltInPresetDefinition,
-): string {
-  // Template Source is owned at templates/<definition>; its sibling source
-  // directory is the convention-bearing Behavior Test location. This remains
-  // stable when planners are executed from compiled dist/ output.
-  const templateRoot = resolveBuiltInTemplateSource(definition.source, ".");
-  return path.resolve(
-    templateRoot,
-    "..",
-    "..",
-    "src",
-    path.basename(templateRoot),
-  );
-}
-
-export type PresetLocalBehaviorTest = {
-  readonly definition: BuiltInPresetDefinition;
-  readonly filePath: string;
-};
-
-/** Discovers every layer-owned behavior file colocated with each Definition. */
-export async function discoverPresetLocalBehaviorTests(): Promise<
-  readonly PresetLocalBehaviorTest[]
-> {
-  const discovered: PresetLocalBehaviorTest[] = [];
-  for (const definition of builtInPresetRegistry.all()) {
-    const root = presetLocalBehaviorTestRoot(definition);
-    const filePaths: string[] = [];
-    for await (const entry of glob("behavior.*.test.ts", { cwd: root })) {
-      if (
-        !entry.endsWith(".light.test.ts") &&
-        !entry.endsWith(".integration.test.ts")
-      ) {
-        continue;
-      }
-      const filePath = path.join(root, entry);
-      const details = await stat(filePath);
-      if (details.isFile()) filePaths.push(filePath);
-    }
-    if (filePaths.length === 0) {
-      throw new Error(
-        `${definition.metadata.name}: missing Preset-Local Behavior Test under ${root}`,
-      );
-    }
-    discovered.push(
-      ...filePaths.sort().map((filePath) => ({ definition, filePath })),
-    );
-  }
-  return discovered;
-}
-
 type SourceBackedOperation = Extract<
   RenderOperation,
   { kind: "copyFile" | "writeTextTemplate" | "writeTextFromFragments" }
@@ -302,20 +183,18 @@ export type PlanSourceReference = {
 
 function operationReferences(
   operation: SourceBackedOperation,
+  resolveSource: typeof resolveBuiltInTemplateSource,
 ): readonly { readonly generatedPath: string; readonly sourceFile: string }[] {
   if (operation.kind === "writeTextFromFragments") {
     return operation.fragments.map((fragment) => ({
       generatedPath: operation.to,
-      sourceFile: resolveBuiltInTemplateSource(fragment.source, fragment.from),
+      sourceFile: resolveSource(fragment.source, fragment.from),
     }));
   }
   return [
     {
       generatedPath: operation.to,
-      sourceFile: resolveBuiltInTemplateSource(
-        operation.source,
-        operation.from,
-      ),
+      sourceFile: resolveSource(operation.source, operation.from),
     },
   ];
 }
@@ -324,6 +203,7 @@ function operationReferences(
 export function planSourceReferences(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly plan: GeneratedRepositoryPlan;
+  readonly resolveSource?: typeof resolveBuiltInTemplateSource;
 }): readonly PlanSourceReference[] {
   return options.plan.operations.flatMap((operation) => {
     if (
@@ -334,7 +214,10 @@ export function planSourceReferences(options: {
       return [];
     }
     try {
-      return operationReferences(operation).map((reference) => ({
+      return operationReferences(
+        operation,
+        options.resolveSource ?? resolveBuiltInTemplateSource,
+      ).map((reference) => ({
         definitionName: options.definition.metadata.name,
         plannerSourceFile: options.definition.plannerSourceFile,
         ...reference,
@@ -477,12 +360,29 @@ export async function validatePlanDependencyCatalog(
       readonly after: MaterializeProjectProjectionOptions;
     };
   },
+  projectDir?: string,
 ): Promise<void> {
-  const projection = await materializeProjectProjection(
-    plan.projectProjections?.after ?? {
-      operations: plan.operations,
-    },
-  );
+  const projection =
+    projectDir === undefined
+      ? await materializeProjectProjection(
+          plan.projectProjections?.after ?? {
+            operations: plan.operations,
+          },
+        )
+      : {
+          entries: await Promise.all(
+            [
+              "package.json",
+              "pnpm-workspace.yaml",
+              ...plan.blueprint.packages.map(
+                (item) => `${item.path}/package.json`,
+              ),
+            ].map(async (file) => ({
+              path: file,
+              content: await readFile(path.join(projectDir, file)),
+            })),
+          ),
+        };
   const decoder = new TextDecoder();
   const manifests = new Map(
     projection.entries
@@ -511,17 +411,6 @@ export async function validatePlanDependencyCatalog(
     blueprint: plan.blueprint,
     contributions: plan.packageContributions,
   });
-  const configurationRecord = plan.generationRecord.packages.find(
-    (record) =>
-      record.definitionName === "foundation" &&
-      record.planningContribution === "foundationPlan",
-  );
-  const configuration = plan.blueprint.packages.find(
-    (definition) =>
-      definition.packageDefinitionId ===
-        configurationRecord?.packageDefinitionId &&
-      definition.path === configurationRecord.path,
-  );
   const templateCatalog = loadTemplateDependencyCatalog();
   const references = new Set<string>();
   for (const [manifestPath, manifest] of manifests) {
@@ -551,17 +440,21 @@ export async function validatePlanDependencyCatalog(
           links.manifestPatchesByPackagePath.get(packagePath)?.dependencies[
             dependency
           ] === "workspace:*";
-        const configurationLink =
-          contribution?.foundation.typescriptConfigurationPackage !==
-            undefined &&
-          configuration?.name === dependency &&
-          (field === "dependencies" || field === "devDependencies");
+        const referenceBinding = Object.values(
+          contribution?.referenceBindings ?? {},
+        ).some(
+          (binding) =>
+            binding.name === dependency && binding.path === provider?.path,
+        );
+        // 根协调工具直接消费 Blueprint 中的共享包；根本身不属于叶包贡献。
+        const rootToolingDependency =
+          manifestPath === "package.json" && field === "devDependencies";
         const internalWorkspace =
           specifier === "workspace:*" &&
           provider !== undefined &&
-          (explicitLink || configurationLink);
+          (explicitLink || referenceBinding || rootToolingDependency);
         const internalConfiguration =
-          configurationLink &&
+          referenceBinding &&
           provider !== undefined &&
           field === "devDependencies" &&
           specifier ===
@@ -760,8 +653,8 @@ export async function validatePlanMirrorSlotProjections(options: {
   }
 }
 
-/** 生成仓库工具链检查器在真实投影中的路径，与 Foundation 的投影形状一一对应。 */
-const generatedToolchainCheckerPath = "scripts/check-toolchain-versions.ts";
+/** 生成仓库工具链检查器读取的槽位清单路径。 */
+const generatedToolchainMirrorManifestPath = "scripts/toolchain-mirrors.json";
 
 /** 槽位身份的可比较形：路径、槽位 id 与位置形制三者共同决定集合成员。 */
 type ComparableMirrorSlot = {
@@ -800,46 +693,12 @@ function planMirrorSlotKeys(plan: GeneratedRepositoryPlan): readonly string[] {
     .toSorted();
 }
 
-function collectJsonParseTemplateLiterals(
-  node: ts.Node,
-  literals: string[],
-): void {
-  if (
-    ts.isCallExpression(node) &&
-    ts.isPropertyAccessExpression(node.expression) &&
-    node.expression.name.text === "parse" &&
-    ts.isIdentifier(node.expression.expression) &&
-    node.expression.expression.text === "JSON" &&
-    node.arguments.length === 1 &&
-    ts.isNoSubstitutionTemplateLiteral(node.arguments[0]!)
-  ) {
-    literals.push(node.arguments[0].text);
-  }
-  node.forEachChild((child) => {
-    collectJsonParseTemplateLiterals(child, literals);
-  });
-}
-
-/** 从检查器正文的 TypeScript 结构里读出携带槽位清单，不做整文件文本匹配。 */
+/** 读取同源检查器实际消费的结构化槽位清单。 */
 function checkerMirrorSlotKeys(
   sourceText: string,
   owner: string,
 ): readonly string[] {
-  const sourceFile = ts.createSourceFile(
-    generatedToolchainCheckerPath,
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const literals: string[] = [];
-  collectJsonParseTemplateLiterals(sourceFile, literals);
-  if (literals.length !== 1) {
-    throw new Error(
-      `${owner}: 生成检查器必须恰好以一份 JSON.parse(模板字面量) 携带槽位清单，实际找到 ${literals.length} 份`,
-    );
-  }
-  const carried: unknown = JSON.parse(literals[0]!);
+  const carried: unknown = JSON.parse(sourceText);
   if (!Array.isArray(carried)) {
     throw new Error(`${owner}: 生成检查器携带的槽位清单不是数组`);
   }
@@ -894,7 +753,7 @@ function checkerMirrorSlotKeys(
 
 /**
  * T26-3 清单单源门：生成检查器携带的槽位清单必须是同一 plan 声明集合的投影。
- * 期望值来自 plan.reconciliation，观测值来自真实投影里的检查器正文结构。
+ * 期望值来自 plan.reconciliation，观测值来自真实投影里的 JSON 清单。
  */
 export async function validatePlanCheckerMirrorSlotManifest(options: {
   readonly definition: BuiltInPresetDefinition;
@@ -906,11 +765,11 @@ export async function validatePlanCheckerMirrorSlotManifest(options: {
     operations: plan.operations,
   });
   const checker = projection.entries.find(
-    (entry) => entry.path === generatedToolchainCheckerPath,
+    (entry) => entry.path === generatedToolchainMirrorManifestPath,
   );
   if (checker === undefined) {
     throw new Error(
-      `${owner}: 真实投影缺少生成仓库工具链检查器 ${generatedToolchainCheckerPath}`,
+      `${owner}: 真实投影缺少生成仓库工具链槽位清单 ${generatedToolchainMirrorManifestPath}`,
     );
   }
   const expected = planMirrorSlotKeys(plan);
@@ -954,20 +813,44 @@ export type VerificationPlan = {
 };
 
 /**
- * The plan set consumed by source, dependency, boundary, and publication
+ * The plan set consumed by source, dependency, mirror, and publication
  * checks. Addition plans retain real base Contributions for link planning but
  * render only their own operations.
  */
-export async function deriveVerificationPlans(): Promise<
-  readonly VerificationPlan[]
-> {
+export type VerificationRuntime = {
+  readonly builtin: Pick<
+    typeof import("@ykdz/template-builtin-presets"),
+    | "builtInPresetRegistry"
+    | "createGenerationContext"
+    | "planGeneratedRepositoryInitialization"
+    | "loadLocalTemplateMetadata"
+    | "planGeneratedRepositoryPackageAddition"
+  >;
+  readonly renderNewProject: typeof renderNewProject;
+};
+
+export async function deriveVerificationPlans(
+  runtime: VerificationRuntime = {
+    builtin: {
+      builtInPresetRegistry,
+      createGenerationContext,
+      planGeneratedRepositoryInitialization,
+      loadLocalTemplateMetadata,
+      planGeneratedRepositoryPackageAddition,
+    },
+    renderNewProject,
+  },
+): Promise<readonly VerificationPlan[]> {
   const plans: VerificationPlan[] = [];
-  for (const scenario of deriveFixtureMatrix()) {
+  const builtin = runtime.builtin;
+  for (const scenario of deriveFixtureMatrix(
+    builtin.builtInPresetRegistry.all(),
+  )) {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-verification-plan-"),
     );
     try {
-      const context = createGenerationContext({
+      const context = builtin.createGenerationContext({
         targetDir: path.join(workspace, scenario.id),
         toolchain: {
           nodeLtsMajor: "24",
@@ -975,7 +858,7 @@ export async function deriveVerificationPlans(): Promise<
           nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });
-      const initialization = planGeneratedRepositoryInitialization({
+      const initialization = builtin.planGeneratedRepositoryInitialization({
         definition: scenario.base,
         context,
       });
@@ -985,7 +868,7 @@ export async function deriveVerificationPlans(): Promise<
         diagnosticArtifactDeclarations: initialization.ciDiagnosticArtifacts,
       });
       if (scenario.addition) {
-        await renderNewProject({
+        await runtime.renderNewProject({
           targetRoot: context.targetDir,
           operations: [...initialization.operations],
         });
@@ -1004,9 +887,11 @@ export async function deriveVerificationPlans(): Promise<
             `Package Addition Definition ${scenario.addition.metadata.name} must provide a Package Addition planner`,
           );
         }
-        const plan = planGeneratedRepositoryPackageAddition({
+        const plan = builtin.planGeneratedRepositoryPackageAddition({
           definition: scenario.addition,
-          localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),
+          localTemplateMetadata: builtin.loadLocalTemplateMetadata(
+            context.targetDir,
+          ),
           packageLeafName,
           packagePath,
         });
@@ -1021,59 +906,4 @@ export async function deriveVerificationPlans(): Promise<
     }
   }
   return plans;
-}
-
-/**
- * Verifies a packed artifact contains every Template Source file referenced by
- * the complete registry plan set, rather than a parallel source inventory.
- */
-export async function validatePlanPublicationSources(options: {
-  readonly packageRoot: string;
-  readonly packedPaths: readonly string[];
-  readonly verificationPlans?: readonly VerificationPlan[];
-}): Promise<void> {
-  const packageRoot = path.resolve(options.packageRoot);
-  const packedPaths = new Set(options.packedPaths);
-  for (const packedPath of packedPaths) {
-    if (
-      packedPath === "package/node_modules" ||
-      packedPath.startsWith("package/node_modules/")
-    ) {
-      // 根级 node_modules 载荷来自包自己声明的 bundleDependencies，
-      // 由 pnpm 以嵌套布局投递，本检查从不生成它。
-      continue;
-    }
-    if (
-      packedPath.startsWith("package/templates/.template-") ||
-      /^package\/dist\/src\/.*\.test\.(?:[cm]?js|d\.ts)$/u.test(packedPath) ||
-      /(?:^|\/)\.turbo(?:\/|$)/u.test(packedPath) ||
-      /(?:^|\/)node_modules(?:\/|$)/u.test(packedPath)
-    ) {
-      throw new Error(
-        `packed Built-in Presets artifact contains generated or test artifact ${packedPath}`,
-      );
-    }
-  }
-  const plans = options.verificationPlans ?? (await deriveVerificationPlans());
-  for (const { definition, plan } of plans) {
-    for (const reference of planSourceReferences({ definition, plan })) {
-      const relativePath = path.relative(packageRoot, reference.sourceFile);
-      if (
-        relativePath.length === 0 ||
-        relativePath === ".." ||
-        relativePath.startsWith(`..${path.sep}`) ||
-        path.isAbsolute(relativePath)
-      ) {
-        throw new Error(
-          `${reference.definitionName}: ${reference.plannerSourceFile} references Template Source outside the Built-in Presets package for generated ${reference.generatedPath}`,
-        );
-      }
-      const packedPath = `package/${relativePath.split(path.sep).join("/")}`;
-      if (!packedPaths.has(packedPath)) {
-        throw new Error(
-          `${reference.definitionName}: packed Built-in Presets artifact omits ${packedPath}, referenced for generated ${reference.generatedPath}`,
-        );
-      }
-    }
-  }
 }

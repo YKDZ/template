@@ -541,7 +541,10 @@ export function createDevelopmentContainerFixtureSession(options: {
       throw diagnostic;
     }
   };
-  const remoteEnvironmentArgs = turboCacheEnvironmentNames.flatMap((name) => {
+  const remoteEnvironmentArgs = [
+    ...turboCacheEnvironmentNames,
+    "NODE_USE_ENV_PROXY",
+  ].flatMap((name) => {
     const value =
       environment[name] ??
       (name === "TURBO_CACHE_DIR"
@@ -3088,16 +3091,16 @@ export async function checkFixtureEvidenceHealth(options: {
           deploymentLookups.length === 1 &&
           deploymentLookup?.outcome === "miss" &&
           deploymentExecutions.length === 0 &&
-          eventIndex(deploymentLookup!) < eventIndex(derivation) &&
+          eventIndex(deploymentLookup) < eventIndex(derivation) &&
           rootLookups.length === 1 &&
           rootLookup?.identity === derivation.rootEvidence.identity &&
           rootLookup.scenario.id === derivation.scenario.id &&
-          eventIndex(rootLookup) < eventIndex(deploymentLookup!) &&
+          eventIndex(rootLookup) < eventIndex(deploymentLookup) &&
           (rootHit ||
             (rootCold &&
               rootExecutionTerminal !== undefined &&
               eventIndex(rootExecutionTerminal) <
-                eventIndex(deploymentLookup!))) &&
+                eventIndex(deploymentLookup))) &&
           rootIssuanceIsValid &&
           deploymentIssuanceIsValid &&
           derivation.rootEvidence.coversDeploymentContractIdentity ===

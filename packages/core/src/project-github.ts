@@ -15,7 +15,7 @@ export type DependencyEcosystem =
 export type DependabotDirectory = `/${string}`;
 
 export type DependencyMaintenancePolicy = {
-  readonly ecosystems: DependencyEcosystem[];
+  readonly ecosystems: readonly DependencyEcosystem[];
   readonly directories?: Partial<
     Record<DependencyEcosystem, DependabotDirectory>
   >;

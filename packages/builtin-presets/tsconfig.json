@@ -1,17 +1,12 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "@ykdz/reference-typescript-config/node.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": true,
-    "outDir": "dist",
-    "rootDir": "../..",
     "types": ["node"]
   },
   "include": [
     "src/**/*.ts",
+    "test/**/*.ts",
     "scripts/**/*.ts",
-    "test-support/**/*.ts",
-    "templates/ts-cli/publication-setup/bridge.ts",
-    "templates/foundation/.pnpmfile.mjs"
+    "test-support/**/*.ts"
   ]
 }

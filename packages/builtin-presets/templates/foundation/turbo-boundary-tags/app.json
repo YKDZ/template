@@ -1,7 +1,0 @@
-{
-  "boundaries": {
-    "tags": {
-      "app": { "dependencies": { "allow": ["app", "library"] } }
-    }
-  }
-}

@@ -17,8 +17,8 @@ import {
   renderNewProject,
   type RenderOperation,
   type WriteJsonOperation,
-  type WriteTextTemplateOperation,
 } from "@ykdz/template-core/renderer";
+import { parse as parseToml } from "smol-toml";
 
 import {
   builtInPresetRegistry,
@@ -33,6 +33,7 @@ import {
   type PackageAdditionPreparation,
 } from "../foundation.ts";
 import { rustBinDefinition } from "../rust-bin/definition.ts";
+import { tsCliDefinition } from "../ts-cli/definition.ts";
 import { tsLibDefinition } from "../ts-lib/definition.ts";
 
 const toolchain = {
@@ -115,7 +116,7 @@ void describe("Generated Repository initialization preparation", () => {
           role: capability.role,
         },
       });
-      const resolvedIdentity = preparation.resolvedPackageIdentity!;
+      const resolvedIdentity = preparation.resolvedPackageIdentity;
       assert.ok(
         preparation.plan.blueprint.packages.some(
           (candidate) =>
@@ -684,23 +685,14 @@ void describe("Generated Repository initialization preparation", () => {
           checkJs: true,
           noEmit: true,
         });
-        assert.deepStrictEqual(tsconfig.files, [".pnpmfile.mjs"]);
         assert.deepStrictEqual(tsconfig.include, [
           "*.config.ts",
           "scripts/**/*.ts",
+          ".pnpmfile.mjs",
         ]);
-        assert.ok(
-          preparation.plan.operations.some(
-            (operation) =>
-              operation.kind === "writeTextTemplate" &&
-              Object.hasOwn(operation, "kind") &&
-              Object.hasOwn(operation, "to") &&
-              operation.to === "scripts/npm-publication/check-readiness.ts" &&
-              Object.hasOwn(operation, "replacements") &&
-              isDeepStrictEqual(operation.replacements, {
-                PUBLIC_CLI_PACKAGE_PATH: "tools/release",
-              }),
-          ),
+        assert.deepStrictEqual(
+          readJson("scripts/npm-publication/publication.config.json"),
+          { packagePath: "tools/release" },
         );
       }
     });
@@ -774,17 +766,22 @@ void describe("Generated Repository initialization preparation", () => {
     }
     const baseContributions = (context: BuiltInGenerationContext) =>
       base.planInitializationContributions!(context);
-    const markCandidate = <
-      T extends ReturnType<typeof baseContributions>[number],
-    >(
-      contribution: T,
-    ): T => ({
-      ...contribution,
-      foundation: {
-        ...contribution.foundation,
-        npmPublication: { kind: "public-cli-candidate" as const },
-      },
-    });
+    const markCandidate = (
+      contribution: ReturnType<typeof baseContributions>[number],
+    ): ReturnType<typeof baseContributions>[number] => {
+      const {
+        referenceSource: _source,
+        referenceBindings: _bindings,
+        ...plainContribution
+      } = contribution;
+      return {
+        ...plainContribution,
+        foundation: {
+          ...contribution.foundation,
+          npmPublication: { kind: "public-cli-candidate" as const },
+        },
+      };
+    };
     const definition = {
       ...base,
       metadata: { ...base.metadata, name: "two-public-cli-candidates" },
@@ -816,17 +813,17 @@ void describe("Generated Repository initialization preparation", () => {
 
   void it("rejects a known projection collision during preparation", () => {
     const definition = {
-      ...tsLibDefinition,
-      metadata: { ...tsLibDefinition.metadata, name: "collision-test" },
+      ...tsCliDefinition,
+      metadata: { ...tsCliDefinition.metadata, name: "collision-test" },
       initialPrimaryPackage: {
-        ...tsLibDefinition.initialPrimaryPackage,
+        ...tsCliDefinition.initialPrimaryPackage,
         planInitialContribution(
           options: Parameters<
-            typeof tsLibDefinition.initialPrimaryPackage.planInitialContribution
+            typeof tsCliDefinition.initialPrimaryPackage.planInitialContribution
           >[0],
         ) {
           const contribution =
-            tsLibDefinition.initialPrimaryPackage.planInitialContribution(
+            tsCliDefinition.initialPrimaryPackage.planInitialContribution(
               options,
             );
           return {
@@ -1060,7 +1057,7 @@ void describe("Generated Repository initialization consumes the release toolchai
   }
 
   for (const definition of builtInPresetRegistry.all()) {
-    void it(`projects rust-toolchain.toml for ${definition.metadata.name} only from Rust Environment Needs`, () => {
+    void it(`projects rust-toolchain.toml for ${definition.metadata.name} only from Rust Environment Needs`, async () => {
       const preparation = requireReadyInitialization({
         definition,
         targetDir: "/tmp/customer-repository",
@@ -1071,18 +1068,22 @@ void describe("Generated Repository initialization consumes the release toolchai
             (need) => need.kind === "rust-toolchain",
           ),
       );
-      const rootToolchainOperation = preparation.plan.operations.find(
-        (operation): operation is WriteTextTemplateOperation =>
-          operation.kind === "writeTextTemplate" &&
-          operation.to === "rust-toolchain.toml",
+      const projection = await materializeProjectProjection({
+        operations: preparation.plan.operations,
+        reconciliation: preparation.plan.reconciliation,
+      });
+      const declaration = projection.entries.find(
+        (entry) => entry.path === "rust-toolchain.toml",
       );
-
-      assert.strictEqual(
-        rootToolchainOperation?.replacements.RUST_TOOLCHAIN,
-        requiresRustToolchain
-          ? releaseToolchainSnapshot.rustVersion
-          : undefined,
-      );
+      assert.equal(declaration !== undefined, requiresRustToolchain);
+      if (declaration !== undefined)
+        assert.match(
+          Buffer.from(declaration.content).toString("utf8"),
+          new RegExp(
+            `channel = "${releaseToolchainSnapshot.rustVersion.replaceAll(".", "\\.")}"`,
+            "u",
+          ),
+        );
     });
   }
 
@@ -1675,19 +1676,12 @@ void describe("Package Addition follows the target root Rust declaration", () =>
         metadata.context.toolchain.rustVersion,
         initialization.context.toolchain.rustVersion,
       );
-      assert.strictEqual(
-        preparation.plan.operations.some(
-          (operation) =>
-            operation.kind === "writeTextTemplate" &&
-            Object.hasOwn(operation, "kind") &&
-            Object.hasOwn(operation, "to") &&
-            operation.to === rootRustDeclarationPath &&
-            Object.hasOwn(operation, "replacements") &&
-            isDeepStrictEqual(operation.replacements, {
-              RUST_TOOLCHAIN: "stable",
-            }),
-        ),
-        true,
+      const rootDeclaration = after.entries.find(
+        (entry) => entry.path === rootRustDeclarationPath,
+      )!;
+      assert.match(
+        Buffer.from(rootDeclaration.content).toString("utf8"),
+        /channel = "stable"/u,
       );
       assert.strictEqual(
         preparation.plan.developmentContainer.buildArguments.some((argument) =>
@@ -1698,9 +1692,9 @@ void describe("Package Addition follows the target root Rust declaration", () =>
         ),
         true,
       );
-      assert.strictEqual(
-        projectedRootRustDeclaration(before),
-        rootRustDeclaration("stable"),
+      assert.deepStrictEqual(
+        parseToml(projectedRootRustDeclaration(before)),
+        parseToml(rootRustDeclaration("stable")),
       );
       assert.strictEqual(
         projectedRootRustDeclaration(after),
@@ -3143,7 +3137,6 @@ void describe("Package Addition builds the first Rust root from the current CLI 
 });
 
 void describe("Generated Repository toolchain checker projection", () => {
-  const checkerPath = "scripts/check-toolchain-versions.ts";
   type InitializationPlan = ReturnType<
     typeof planGeneratedRepositoryInitialization
   >;
@@ -3179,41 +3172,41 @@ void describe("Generated Repository toolchain checker projection", () => {
       )
       .toSorted();
 
-  const carriedSlotKeys = (plan: InitializationPlan): readonly string[] => {
-    const operation = plan.operations.find(
-      (candidate) =>
-        candidate.kind === "writeTextTemplate" && candidate.to === checkerPath,
-    );
-    if (operation === undefined || operation.kind !== "writeTextTemplate") {
-      throw new Error(`初始化 plan 未以文本模板投影生成检查器 ${checkerPath}`);
-    }
-    const manifestText =
-      operation.replacements["TOOLCHAIN_MIRROR_SLOT_MANIFEST"];
-    if (typeof manifestText !== "string") {
-      throw new Error(`生成检查器模板未携带槽位清单模板变量`);
-    }
-    const carried = JSON.parse(
-      manifestText.replaceAll(String.raw`\$`, "$"),
-    ) as {
+  const carriedSlotKeys = async (
+    plan: InitializationPlan,
+  ): Promise<readonly string[]> => {
+    const projection = await materializeProjectProjection({
+      operations: plan.operations,
+      reconciliation: plan.reconciliation,
+    });
+    const entry = projection.entries.find(
+      (entry) => entry.path === "scripts/toolchain-mirrors.json",
+    )!;
+    const carried = JSON.parse(Buffer.from(entry.content).toString("utf8")) as {
       readonly id: string;
       readonly location: Record<string, unknown>;
       readonly path: string;
     }[];
-
     return carried
       .map((slot) => slotKey(slot.path, slot.id, slot.location))
       .toSorted();
   };
 
-  void it("carries exactly the mirror slots its own plan declares", () => {
+  void it("carries exactly the mirror slots its own plan declares", async () => {
     let largestCarried = 0;
     for (const definition of builtInPresetRegistry.all()) {
       const plan = planGeneratedRepositoryInitialization({
         definition,
         context,
       });
-      assert.deepStrictEqual(carriedSlotKeys(plan), declaredSlotKeys(plan));
-      largestCarried = Math.max(largestCarried, carriedSlotKeys(plan).length);
+      assert.deepStrictEqual(
+        await carriedSlotKeys(plan),
+        declaredSlotKeys(plan),
+      );
+      largestCarried = Math.max(
+        largestCarried,
+        (await carriedSlotKeys(plan)).length,
+      );
     }
     // 非空转：至少一个 Preset 同时携带结构化与文本锚点槽位。
     assert.ok(largestCarried >= 2);

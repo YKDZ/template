@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-import { inspectPackageReleaseChangelog } from "../../templates/ts-cli/publication/changelog.ts";
+import { inspectPackageReleaseChangelog } from "@ykdz/template-workspace/publication/changelog";
 
 const standardCategories = [
   "Added",
@@ -14,60 +13,6 @@ const standardCategories = [
 ] as const;
 
 void describe("package release changelog", () => {
-  void it("keeps the checked template on the fixed English KAC 2.0.0 profile", async () => {
-    const template = await readFile(
-      new URL(
-        "../../templates/ts-cli/publication/CHANGELOG.md.template",
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const preamble = `# Changelog
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-`;
-    assert.strictEqual(template.startsWith(preamble), true);
-    const renderedCategories = [...template.matchAll(/^### (.+)$/gmu)].map(
-      (match) => match[1],
-    );
-    assert.deepStrictEqual(renderedCategories, ["Added"]);
-    assert.strictEqual(
-      renderedCategories.every((category) =>
-        standardCategories.includes(
-          category as (typeof standardCategories)[number],
-        ),
-      ),
-      true,
-    );
-    assert.ok(
-      template.includes(
-        "[Unreleased]: {{REPOSITORY_URL}}/compare/v{{PACKAGE_VERSION}}...HEAD",
-      ),
-    );
-    assert.ok(
-      template.includes(
-        "[{{PACKAGE_VERSION}}]: {{REPOSITORY_URL}}/releases/tag/v{{PACKAGE_VERSION}}",
-      ),
-    );
-    assert.deepStrictEqual(
-      inspectPackageReleaseChangelog(
-        template
-          .replaceAll("{{PACKAGE_VERSION}}", "1.0.0")
-          .replaceAll("{{RELEASE_DATE}}", "2026-08-26")
-          .replaceAll("{{REPOSITORY_URL}}", "https://github.com/example/tool"),
-        "1.0.0",
-      ),
-      {
-        blockers: [],
-        releaseDate: "2026-08-26",
-        releaseNotes: "### Added\n\n- Publish the first stable release.\n",
-      },
-    );
-  });
-
   void it("projects the exact target release body without its heading or footer links", () => {
     const source = `# Changelog
 

@@ -1,0 +1,38 @@
+{
+  "name": "@ykdz/template-environment",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "type": "module",
+  "exports": {
+    "./development-environment": {
+      "source": "./src/development-environment.ts",
+      "types": "./dist/development-environment.d.ts",
+      "default": "./dist/development-environment.js"
+    },
+    "./assets/*": "./assets/*",
+    "./assets": "./assets"
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/template-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  }
+}

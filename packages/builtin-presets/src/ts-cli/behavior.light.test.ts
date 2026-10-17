@@ -11,7 +11,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -19,9 +18,11 @@ import {
   loadLocalTemplateMetadata,
   planGeneratedRepositoryPackageAddition,
   planGeneratedRepositoryInitialization,
-  resolveBuiltInTemplateSource,
 } from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import {
+  materializeProjectProjection,
+  reconcileAndApplyProjectProjections,
+} from "@ykdz/template-core/project-projection";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
 
@@ -33,53 +34,6 @@ import {
 import { tsCliDefinition } from "./definition.ts";
 
 void describe("ts-cli Preset Definition behavior", () => {
-  void it("keeps the checked bridge in the direct source task inputs", async () => {
-    const packageRoot = path.resolve(import.meta.dirname, "../..");
-    const shown = await execa(
-      "pnpm",
-      ["exec", "tsc", "-p", "tsconfig.json", "--showConfig"],
-      { cwd: packageRoot },
-    );
-    const config = JSON.parse(shown.stdout) as {
-      readonly compilerOptions: Record<string, unknown>;
-      readonly files: readonly string[];
-    };
-    assert.strictEqual(config.compilerOptions.erasableSyntaxOnly, true);
-    assert.strictEqual(config.compilerOptions.module, "nodenext");
-    assert.strictEqual(config.compilerOptions.moduleResolution, "nodenext");
-    assert.ok(
-      config.files.includes("./templates/ts-cli/publication-setup/bridge.ts"),
-    );
-    const bridge = await readFile(
-      path.join(packageRoot, "templates/ts-cli/publication-setup/bridge.ts"),
-      "utf8",
-    );
-    const sourceManifest = JSON.parse(
-      await readFile(path.join(packageRoot, "package.json"), "utf8"),
-    ) as { readonly scripts: Record<string, string> };
-    const formatCheck = sourceManifest.scripts["format:check"];
-    assert.ok(typeof formatCheck === "string" && formatCheck.includes(" ."));
-    assert.ok(
-      typeof sourceManifest.scripts.lint === "string" &&
-        sourceManifest.scripts.lint.includes(
-          "templates/ts-cli/publication-setup/bridge.ts",
-        ),
-    );
-    assert.strictEqual(
-      sourceManifest.scripts.typecheck,
-      "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false",
-    );
-    const publicationSpecifiers = [
-      ...bridge.matchAll(/from "([^"]*(?:npm-)?publication[^"]*)"/gu),
-    ].map((match) => match[1]);
-    assert.deepStrictEqual(publicationSpecifiers, [
-      "#npm-publication/artifact",
-      "#npm-publication/handoff",
-      "#npm-publication/readiness",
-    ]);
-    assert.doesNotMatch(bridge, /from "\.\.\/(?:npm-)?publication\//u);
-  });
-
   void it("plans the registered unpublished CLI Tool Package boundary", () => {
     assert.strictEqual(
       tsCliDefinition.initialPrimaryPackage.defaultLeafName,
@@ -107,10 +61,6 @@ void describe("ts-cli Preset Definition behavior", () => {
         },
       });
 
-    assert.match(
-      resolveBuiltInTemplateSource(tsCliDefinition.source, "."),
-      /templates[\\/]ts-cli$/,
-    );
     assert.deepStrictEqual(contribution.definition, {
       name: "@demo/cli",
       path: "packages/cli",
@@ -128,7 +78,7 @@ void describe("ts-cli Preset Definition behavior", () => {
       },
       engines: { node: "^24.16.0" },
       scripts: {
-        build: "tsc -p tsconfig.build.json --pretty false",
+        build: "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
         prepack: "pnpm exec turbo run build --filter=.",
         typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
@@ -153,7 +103,7 @@ void describe("ts-cli Preset Definition behavior", () => {
         typeof postbuild === "string" &&
         postbuild.includes("chmodSync('dist/cli.js', 0o755)"),
     );
-    assert.deepStrictEqual(contribution.exposure, { exports: {}, imports: {} });
+    assert.deepStrictEqual(contribution.exposure.exports, {});
     assert.strictEqual(
       contribution.planningIdentity,
       "cli-publication-candidate",
@@ -165,7 +115,6 @@ void describe("ts-cli Preset Definition behavior", () => {
       "main",
       "types",
       "exports",
-      "imports",
       "publishConfig",
       "version",
     ]) {
@@ -174,42 +123,6 @@ void describe("ts-cli Preset Definition behavior", () => {
         false,
       );
     }
-    const expectedCopiedFiles = [
-      {
-        kind: "copyFile",
-        source: tsCliDefinition.source,
-        from: "src/cli.ts",
-        to: "packages/cli/src/cli.ts",
-      },
-      {
-        kind: "copyFile",
-        source: tsCliDefinition.source,
-        from: "src/cli-command-identity.ts",
-        to: "packages/cli/src/cli-command-identity.ts",
-      },
-      {
-        kind: "copyFile",
-        source: tsCliDefinition.source,
-        from: "src/main.ts",
-        to: "packages/cli/src/main.ts",
-      },
-    ] as const;
-    for (const expectedOperation of expectedCopiedFiles) {
-      assert.ok(
-        contribution.operations.some((operation) =>
-          isDeepStrictEqual(operation, expectedOperation),
-        ),
-      );
-    }
-    assert.strictEqual(
-      contribution.operations.some(
-        (operation) =>
-          Object.hasOwn(operation, "kind") &&
-          operation.kind === "replaceAnchors",
-      ),
-      false,
-    );
-
     assert.strictEqual(
       builtInPresetRegistry
         .all()
@@ -255,7 +168,7 @@ void describe("ts-cli Preset Definition behavior", () => {
     assert.deepStrictEqual(addition?.manifest.engines, { node: ">=24" });
   });
 
-  void it("projects publication readiness only for the initial CLI candidate", () => {
+  void it("projects publication readiness only for the initial CLI candidate", async () => {
     const plan = planGeneratedRepositoryInitialization({
       definition: tsCliDefinition,
       context: createGenerationContext({
@@ -317,123 +230,34 @@ void describe("ts-cli Preset Definition behavior", () => {
       rootCheck,
       "node --conditions=source scripts/task-gates.ts check",
     );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          "to" in operation &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === ".pnpmfile.mjs",
-      ),
+    const projection = await materializeProjectProjection({
+      operations: plan.operations,
+      reconciliation: plan.reconciliation,
+    });
+    const output = (file: string) =>
+      Buffer.from(
+        projection.entries.find((entry) => entry.path === file)!.content,
+      ).toString("utf8");
+    assert.deepStrictEqual(
+      JSON.parse(output("scripts/npm-publication/publication.config.json")),
+      { packagePath: "packages/cli" },
     );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          Object.hasOwn(operation, "kind") &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication/check-readiness.ts" &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/check-readiness.ts" &&
-          Object.hasOwn(operation, "replacements") &&
-          isDeepStrictEqual(operation.replacements, {
-            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          }),
-      ),
+    const { hooks } = (await import(
+      `data:text/javascript;base64,${Buffer.from(output(".pnpmfile.mjs")).toString("base64")}`
+    )) as {
+      hooks: {
+        beforePacking(
+          manifest: Record<string, unknown>,
+        ): Record<string, unknown>;
+      };
+    };
+    const packed = hooks.beforePacking(
+      JSON.parse(output("packages/cli/package.json")),
     );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          "from" in operation &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication/readiness.ts" &&
-          "to" in operation &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/readiness.ts",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          "from" in operation &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication/artifact.ts" &&
-          "to" in operation &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/artifact.ts",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          Object.hasOwn(operation, "kind") &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication/check-artifact.ts" &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/check-artifact.ts" &&
-          Object.hasOwn(operation, "replacements") &&
-          isDeepStrictEqual(operation.replacements, {
-            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          }),
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          "from" in operation &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication/changelog.ts" &&
-          "to" in operation &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/changelog.ts",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          "from" in operation &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "src/cli-command-identity.ts" &&
-          "to" in operation &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication/cli-command-identity.ts",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          Object.hasOwn(operation, "kind") &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication-setup/setup.sh" &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication-setup/setup.sh",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          Object.hasOwn(operation, "kind") &&
-          Object.hasOwn(operation, "from") &&
-          operation.from === "publication-setup/bridge.ts" &&
-          Object.hasOwn(operation, "to") &&
-          operation.to === "scripts/npm-publication-setup/bridge.ts" &&
-          Object.hasOwn(operation, "replacements") &&
-          isDeepStrictEqual(operation.replacements, {
-            PUBLIC_CLI_PACKAGE_PATH: "packages/cli",
-          }),
-      ),
-    );
-    assert.strictEqual(
-      plan.operations.some(
-        (operation) =>
-          "from" in operation &&
-          typeof operation.from === "string" &&
-          operation.from.includes("bridge.mjs"),
-      ),
-      false,
-    );
+    assert.equal(packed.imports, undefined);
+    assert.equal(packed.devDependencies, undefined);
+    assert.equal(packed.scripts, undefined);
+    assert.deepStrictEqual(packed.bin, { cli: "./dist/cli.js" });
   });
 
   void it("keeps the one-time publication setup handoff outside the generated plan", () => {
@@ -1553,7 +1377,6 @@ syncBuiltinESMExports();
   void it("appears in the public CLI Preset Catalog without exporting planner internals", async () => {
     const publicApi = await import("../index.ts");
     assert.strictEqual("tsCliDefinition" in publicApi, false);
-    assert.strictEqual("tsCli" in publicApi.templateSources, true);
 
     const repositoryRoot = path.resolve(process.cwd(), "..", "..");
     const result = await execa(

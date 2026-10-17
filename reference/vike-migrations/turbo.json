@@ -1,0 +1,69 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "db:generate": {
+      "cache": false,
+      "tags": ["work:development"]
+    },
+    "db:migrate": {
+      "cache": false,
+      "tags": ["work:lifecycle"]
+    },
+    "db:prepare:deploy": {
+      "cache": false,
+      "tags": ["work:lifecycle"]
+    },
+    "db:push": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "db:studio": {
+      "cache": false,
+      "tags": ["work:development"]
+    },
+    "format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "typecheck": {
+      "dependsOn": ["@ykdz/reference-vike-db#build"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/template-core#build"
+      ],
+      "outputs": ["template-dist/**"],
+      "tags": ["quality:light"]
+    },
+    "typecheck:template": {
+      "dependsOn": [
+        "@ykdz/reference-vike-db#build",
+        "@ykdz/template-core#build"
+      ],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

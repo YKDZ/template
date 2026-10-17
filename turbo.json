@@ -1,36 +1,31 @@
 {
-  "$schema": "https://turborepo.com/schema.json",
-  "tags": ["template-root"],
-  "remoteCache": {
-    "signature": true
-  },
   "boundaries": {
     "tags": {
-      "template-checks": {
+      "app": {
         "dependencies": {
           "allow": [
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-builtin-presets",
             "template-checks",
-            "template-core",
-            "template-builtin-presets"
+            "template-environment",
+            "template-workspace"
           ]
         }
       },
-      "template-builtin-presets": {
+      "library": {
         "dependencies": {
           "allow": [
-            "template-builtin-presets",
+            "library",
+            "app",
+            "native",
             "template-core",
-            "template-checks"
-          ]
-        }
-      },
-      "template-cli": {
-        "dependencies": {
-          "allow": [
-            "template-cli",
             "template-builtin-presets",
-            "template-core",
-            "template-checks"
+            "template-checks",
+            "template-environment",
+            "template-workspace"
           ]
         }
       },
@@ -38,8 +33,84 @@
         "dependencies": {
           "allow": [
             "template-core",
+            "app",
+            "native",
+            "library",
             "template-builtin-presets",
-            "template-checks"
+            "template-checks",
+            "template-environment",
+            "template-workspace"
+          ]
+        }
+      },
+      "template-environment": {
+        "dependencies": {
+          "allow": [
+            "template-environment",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-builtin-presets",
+            "template-checks",
+            "template-workspace"
+          ]
+        }
+      },
+      "template-workspace": {
+        "dependencies": {
+          "allow": [
+            "template-workspace",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-builtin-presets",
+            "template-checks",
+            "template-environment"
+          ]
+        }
+      },
+      "template-builtin-presets": {
+        "dependencies": {
+          "allow": [
+            "template-builtin-presets",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-checks",
+            "template-environment",
+            "template-workspace"
+          ]
+        }
+      },
+      "template-cli": {
+        "dependencies": {
+          "allow": [
+            "template-cli",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-builtin-presets",
+            "template-checks",
+            "template-environment",
+            "template-workspace"
+          ]
+        }
+      },
+      "template-checks": {
+        "dependencies": {
+          "allow": [
+            "template-checks",
+            "app",
+            "native",
+            "library",
+            "template-core",
+            "template-builtin-presets",
+            "template-environment",
+            "template-workspace"
           ]
         }
       },
@@ -47,120 +118,175 @@
         "dependencies": {
           "allow": [
             "template-root",
-            "template-checks",
-            "template-cli",
+            "app",
+            "native",
+            "library",
+            "template-core",
             "template-builtin-presets",
-            "template-core"
+            "template-checks",
+            "template-environment",
+            "template-workspace",
+            "template-cli"
+          ]
+        }
+      },
+      "native": {
+        "dependencies": {
+          "allow": [
+            "native",
+            "app",
+            "library",
+            "template-core",
+            "template-builtin-presets",
+            "template-checks",
+            "template-environment",
+            "template-workspace"
           ]
         }
       }
     }
   },
   "globalPassThroughEnv": [
+    "CARGO_HOME",
+    "RUSTUP_HOME",
+    "RUSTUP_TOOLCHAIN",
     "TMPDIR",
     "DOCKER_CONFIG",
     "BUILDX_CONFIG",
     "BUILDX_BUILDER",
     "PNPM_CONFIG_STORE_DIR",
-    "PNPM_CONFIG_CACHE_DIR"
+    "PNPM_CONFIG_CACHE_DIR",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "NO_PROXY",
+    "no_proxy"
   ],
-  "concurrency": "2",
   "tasks": {
-    "//#format:check": {
-      "tags": ["quality:light"],
-      "outputs": []
-    },
-    "//#format:write": {
-      "dependsOn": ["lint:fix"],
-      "tags": ["work:repair"],
-      "cache": false
-    },
-    "//#lint": {
-      "tags": ["quality:light"],
-      "outputs": []
-    },
-    "//#lint:fix": {
-      "tags": ["work:repair"],
-      "cache": false
-    },
-    "//#typecheck": {
-      "dependsOn": ["^typecheck"],
-      "tags": ["quality:light"],
-      "outputs": []
-    },
-    "//#test": {
-      "dependsOn": ["@ykdz/template#build"],
-      "tags": ["quality:light"],
-      "outputs": [],
-      "passThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"]
-    },
-    "//#test:integration": {
-      "dependsOn": ["@ykdz/template#build"],
-      "tags": ["quality:heavy"],
-      "outputs": [],
-      "passThroughEnv": [
-        "CARGO_HOME",
-        "RUSTUP_HOME",
-        "RUSTUP_TOOLCHAIN",
-        "TEMPLATE_BUILTIN_PRESET_DIAGNOSTICS_DIR"
-      ]
-    },
-    "//#test:packed-publication": {
-      "dependsOn": ["@ykdz/template#build"],
-      "tags": ["quality:heavy"],
-      "cache": false,
-      "outputs": [".verified-packed-publication/**"],
-      "passThroughEnv": [
-        "CARGO_HOME",
-        "RUSTUP_HOME",
-        "RUSTUP_TOOLCHAIN",
-        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR",
-        "TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR"
-      ]
+    "//#boundaries": {
+      "tags": ["quality:light"]
     },
     "//#check": {
-      "tags": ["quality:entry"],
-      "cache": false
-    },
-    "//#check:heavy": {
-      "tags": ["quality:entry"],
-      "cache": false
+      "tags": ["quality:entry"]
     },
     "//#check:full": {
-      "tags": ["quality:entry"],
-      "cache": false
+      "tags": ["quality:entry"]
     },
-    "//#check:toolchain:versions": {
-      "tags": ["quality:light"],
-      "cache": false,
-      "outputs": []
-    },
-    "//#boundaries": {
-      "tags": ["quality:light"],
-      "cache": false,
-      "outputs": []
+    "//#check:heavy": {
+      "tags": ["quality:entry"]
     },
     "//#fix": {
-      "tags": ["work:repair"],
-      "cache": false
+      "tags": ["work:repair"]
+    },
+    "//#format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#format:write": {
+      "cache": false,
+      "dependsOn": ["//#lint:fix"],
+      "tags": ["work:repair"]
+    },
+    "//#lint": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#lint:fix": {
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "//#typecheck": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#sync:workspace-policy": {
+      "cache": false,
+      "tags": ["work:on-demand"]
+    },
+    "//#check:workspace-policy": {
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "//#build": {
-      "tags": ["work:preparation"],
-      "cache": false
+      "tags": ["work:preparation"]
+    },
+    "//#check:toolchain:versions": {
+      "cache": false,
+      "tags": ["quality:light"]
     },
     "//#sync:repository": {
-      "tags": ["work:preparation"],
-      "cache": false
+      "cache": false,
+      "tags": ["work:on-demand"]
     },
     "//#check:repository:config": {
-      "tags": ["quality:light"],
-      "cache": false,
-      "outputs": []
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "//#check:development-container": {
-      "tags": ["quality:heavy"],
       "cache": false,
-      "outputs": []
+      "tags": ["quality:heavy"],
+      "passThroughEnv": ["NODE_USE_ENV_PROXY"]
+    },
+    "//#test": {
+      "outputs": [],
+      "tags": ["quality:light"],
+      "dependsOn": ["@ykdz/template#build"]
+    },
+    "//#test:integration": {
+      "cache": false,
+      "tags": ["quality:heavy"],
+      "dependsOn": ["@ykdz/template#build"]
+    },
+    "//#test:packed-publication": {
+      "cache": false,
+      "tags": ["quality:heavy"],
+      "dependsOn": ["@ykdz/template-checks#build", "@ykdz/template#build"],
+      "passThroughEnv": [
+        "TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR",
+        "TEMPLATE_VERIFIED_PACKED_ARTIFACT_DIR"
+      ],
+      "outputs": [".verified-packed-publication/**"]
+    },
+    "//#test:e2e:cli": {
+      "cache": false,
+      "tags": ["quality:heavy"],
+      "passThroughEnv": ["TEMPLATE_CLI_JOURNEY_DIAGNOSTICS_DIR"]
+    },
+    "//#database:prepare:dev": {
+      "cache": false,
+      "tags": ["work:preparation"],
+      "dependsOn": ["@ykdz/reference-vike-db#build"]
+    },
+    "//#database:prepare:e2e": {
+      "cache": false,
+      "tags": ["work:preparation"],
+      "dependsOn": ["@ykdz/reference-vike-db#build"]
+    },
+    "//#database:prepare:test": {
+      "cache": false,
+      "tags": ["work:preparation"],
+      "dependsOn": ["@ykdz/reference-vike-db#build"]
+    },
+    "//#test:e2e:vue-hono": {
+      "cache": false,
+      "tags": ["quality:heavy"],
+      "dependsOn": [
+        "@ykdz/reference-hono-api#build",
+        "@ykdz/reference-vue-hono-web#build",
+        "@ykdz/reference-vue-hono-web#browser:prepare"
+      ]
+    },
+    "//#toolchain:prepare": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "//#sync": {
+      "cache": false,
+      "tags": ["work:on-demand"]
     }
-  }
+  },
+  "tags": ["template-root"],
+  "remoteCache": {
+    "signature": true
+  },
+  "concurrency": "2"
 }

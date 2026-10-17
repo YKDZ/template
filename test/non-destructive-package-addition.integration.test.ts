@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   builtInPresetRegistry,
@@ -129,26 +137,6 @@ void describe("Non-Destructive Package Addition", () => {
             return true;
           },
         );
-        const initialTsconfig = JSON.parse(
-          await readFile(path.join(targetDir, "tsconfig.json"), "utf8"),
-        ) as Record<string, unknown>;
-        const initialCompilerOptions = initialTsconfig.compilerOptions;
-        const initialIncludes = initialTsconfig.include;
-        const alreadyIncludesPnpmfile =
-          typeof initialCompilerOptions === "object" &&
-          initialCompilerOptions !== null &&
-          Object.hasOwn(initialTsconfig, "compilerOptions") &&
-          Object.hasOwn(initialCompilerOptions, "allowJs") &&
-          (initialCompilerOptions as Record<string, unknown>).allowJs ===
-            true &&
-          Object.hasOwn(initialCompilerOptions, "checkJs") &&
-          (initialCompilerOptions as Record<string, unknown>).checkJs ===
-            true &&
-          Object.hasOwn(initialTsconfig, "include") &&
-          Array.isArray(initialIncludes) &&
-          initialIncludes.includes(".pnpmfile.mjs");
-        assert.ok(!alreadyIncludesPnpmfile);
-
         const addition = planGeneratedRepositoryPackageAddition({
           definition: publicDefinition,
           localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
@@ -161,16 +149,12 @@ void describe("Non-Destructive Package Addition", () => {
 
         assert.strictEqual(result.ok, true);
         if (!result.ok) return;
-        for (const expectedAction of [
-          { path: ".pnpmfile.mjs", driver: "text", action: "create" },
-          { path: "tsconfig.json", driver: "structured", action: "update" },
-        ]) {
-          assert.ok(
-            result.actions.some((action) =>
-              isDeepStrictEqual(action, expectedAction),
-            ),
-          );
-        }
+        assert.ok(
+          result.actions.some(
+            (action) =>
+              action.path === ".pnpmfile.mjs" && action.action === "create",
+          ),
+        );
         const addedPackage = addition.blueprint.packages.find(
           (definition) => definition.path === "packages/release",
         );
@@ -181,38 +165,59 @@ void describe("Non-Destructive Package Addition", () => {
             "utf8",
           ),
         ) as Record<string, unknown>;
+        assert.equal(sourceManifest.private, undefined);
+        assert.equal(sourceManifest.version, "1.0.0");
         const localDevelopmentDependency = Object.entries(
           (sourceManifest.devDependencies ?? {}) as Record<string, unknown>,
         ).find(([, specifier]) =>
-          typeof specifier === "string" ? specifier.startsWith("link:") : false,
+          typeof specifier === "string"
+            ? specifier.startsWith("workspace:")
+            : false,
         );
         assert.notStrictEqual(localDevelopmentDependency, undefined);
         const provider = addition.blueprint.packages.find(
           (definition) => definition.name === localDevelopmentDependency![0],
         );
         assert.notStrictEqual(provider, undefined);
-        assert.strictEqual(
-          path.posix.normalize(
-            path.posix.join(
-              addedPackage!.path,
-              (localDevelopmentDependency![1] as string).slice("link:".length),
-            ),
-          ),
-          provider!.path,
-        );
-        const addedTsconfig = JSON.parse(
-          await readFile(path.join(targetDir, "tsconfig.json"), "utf8"),
-        ) as Record<string, unknown>;
-        assert.partialDeepStrictEqual(addedTsconfig, {
-          compilerOptions: { allowJs: true, checkJs: true },
-        });
-        assert.deepStrictEqual(addedTsconfig.files, [".pnpmfile.mjs"]);
-        assert.deepStrictEqual(addedTsconfig.include, [
-          "*.config.ts",
-          "scripts/**/*.ts",
-        ]);
+        assert.equal(localDevelopmentDependency![1], "workspace:*");
 
         await execa("pnpm", ["install"], {
+          cwd: targetDir,
+          cancelSignal: signal,
+        });
+        assert.equal(
+          await realpath(
+            path.join(
+              targetDir,
+              addedPackage!.path,
+              "node_modules",
+              provider!.name,
+            ),
+          ),
+          await realpath(path.join(targetDir, provider!.path)),
+        );
+        await execa("pnpm", ["run", "typecheck"], {
+          cwd: targetDir,
+          cancelSignal: signal,
+        });
+        const hookPath = path.join(targetDir, ".pnpmfile.mjs");
+        const hookSource = await readFile(hookPath, "utf8");
+        await writeFile(
+          hookPath,
+          `${hookSource}\n/** @type {number} */\nconst packingHookTypeProbe = "invalid";\n`,
+        );
+        const faultyHookCheck = await execa("pnpm", ["run", "typecheck"], {
+          cwd: targetDir,
+          cancelSignal: signal,
+          reject: false,
+        });
+        assert.notEqual(faultyHookCheck.exitCode, 0);
+        assert.match(
+          faultyHookCheck.stdout + faultyHookCheck.stderr,
+          /\.pnpmfile\.mjs.*TS2322/u,
+        );
+        await writeFile(hookPath, hookSource);
+        await execa("pnpm", ["run", "typecheck"], {
           cwd: targetDir,
           cancelSignal: signal,
         });

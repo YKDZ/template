@@ -1,20 +1,11 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { pathToFileURL } from "node:url";
 
+import type { NpmPublicationReadiness } from "@ykdz/template-workspace/publication/readiness";
 import { create } from "tar";
-
-import type { NpmPublicationReadiness } from "../../templates/ts-cli/publication/readiness.ts";
-type ArtifactModule =
-  typeof import("../../templates/ts-cli/publication/artifact.ts");
-
-const templateRoot = path.resolve(
-  import.meta.dirname,
-  "../../templates/ts-cli",
-);
 
 const workspaces: string[] = [];
 
@@ -26,52 +17,14 @@ afterEach(async () => {
   );
 });
 
-async function loadArtifactModule(workspace: string): Promise<ArtifactModule> {
-  const moduleRoot = path.join(workspace, "module");
-  await mkdir(moduleRoot);
-  await Promise.all([
-    cp(
-      path.join(templateRoot, "publication/handoff.ts"),
-      path.join(moduleRoot, "handoff.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "publication/artifact.ts"),
-      path.join(moduleRoot, "artifact.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "publication/readiness.ts"),
-      path.join(moduleRoot, "readiness.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "publication/changelog.ts"),
-      path.join(moduleRoot, "changelog.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "src/cli-command-identity.ts"),
-      path.join(moduleRoot, "cli-command-identity.ts"),
-    ),
-  ]);
-  await writeFile(
-    path.join(workspace, "package.json"),
-    '{"private":true,"type":"module"}\n',
-  );
-  await symlink(
-    path.resolve(import.meta.dirname, "../../node_modules"),
-    path.join(workspace, "node_modules"),
-    "dir",
-  );
-  return (await import(
-    `${pathToFileURL(path.join(moduleRoot, "artifact.ts")).href}?test=${crypto.randomUUID()}`
-  )) as ArtifactModule;
-}
-
 void describe("verified publication artifact contracts", () => {
   void it("rejects traversal, symbolic-link, and duplicate tar entries", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-publication-archive-contract-"),
     );
     workspaces.push(workspace);
-    const { inspectPublicationArchive } = await loadArtifactModule(workspace);
+    const { inspectPublicationArchive } =
+      await import("@ykdz/template-workspace/publication/artifact");
     const sourceRoot = path.join(workspace, "source");
     await mkdir(sourceRoot);
     await writeFile(path.join(sourceRoot, "entry"), "content\n");
@@ -112,7 +65,7 @@ void describe("verified publication artifact contracts", () => {
     );
     workspaces.push(workspace);
     const { inspectPackedManifestContract } =
-      await loadArtifactModule(workspace);
+      await import("@ykdz/template-workspace/publication/artifact");
     const repository = {
       type: "git",
       url: "git+https://github.com/publisher/tool.git",
@@ -187,7 +140,7 @@ void describe("verified publication artifact contracts", () => {
     );
     workspaces.push(workspace);
     const { planInstalledBinCommand, planPnpmPackCommand } =
-      await loadArtifactModule(workspace);
+      await import("@ykdz/template-workspace/publication/artifact");
     const environment = { ComSpec: String.raw`C:\Windows\System32\cmd.exe` };
     const binPath = String.raw`C:\consumer\node_modules\.bin\ship.cmd`;
 

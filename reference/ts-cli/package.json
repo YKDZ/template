@@ -1,0 +1,53 @@
+{
+  "name": "@ykdz/reference-ts-cli",
+  "private": true,
+  "bin": {
+    "reference-cli": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "imports": {
+    "#tooling/*": "@ykdz/reference-typescript-config/*"
+  },
+  "exports": {
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "postbuild": "node -e \"if (process.platform !== 'win32') require('node:fs').chmodSync('dist/cli.js', 0o755)\"",
+    "prepack": "pnpm exec turbo run build --filter=.",
+    "test": "node --conditions=source --test --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/unit/**/*.test.ts' 'test/integration/**/*.test.ts'",
+    "test:e2e": "node --conditions=source --test --test-timeout=180000 --test-reporter=spec --test-reporter='#tooling/reporter' --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/e2e/**/*.test.ts'",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@valibot/to-json-schema": "catalog:",
+    "@ykdz/cli-contract": "catalog:",
+    "valibot": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "link:../typescript-config",
+    "@ykdz/template-core": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "^24.21.0"
+  }
+}

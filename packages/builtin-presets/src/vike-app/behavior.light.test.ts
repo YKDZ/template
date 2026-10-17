@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
@@ -14,42 +21,13 @@ import {
   prepareGeneratedRepositoryPackageAddition,
   type PackageAdditionPreparation,
 } from "@ykdz/template-builtin-presets";
-import {
-  reconcileAndApplyProjectProjections,
-  type ProjectProjectionAction,
-} from "@ykdz/template-core/project-projection";
-import {
-  renderNewProject,
-  resolveTemplateSource,
-} from "@ykdz/template-core/renderer";
+import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import { renderNewProject } from "@ykdz/template-core/renderer";
+import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
 
+import { writeExecutable } from "../../test-support/ts-cli-behavior.ts";
 import { createVikeAppDefinition, vikeAppDefinition } from "./definition.ts";
-function prunerManifestCopyInputs(dockerfile: string): string[] {
-  const lines = dockerfile.split("\n");
-  const stageStart = lines.indexOf("FROM base AS pruner");
-  if (stageStart === -1) {
-    throw new Error("部署 Dockerfile 缺少 pruner 阶段");
-  }
-  const stageEnd = lines.findIndex(
-    (line, index) => index > stageStart && line.startsWith("FROM "),
-  );
-  return lines
-    .slice(stageStart, stageEnd === -1 ? lines.length : stageEnd)
-    .filter((line) => line.startsWith("COPY ") && !line.includes("--from="))
-    .map((line) => line.trim().split(/\s+/u)[1] ?? "")
-    .filter((input) => input.endsWith("/package.json"));
-}
-// 冻结安装按 lockfile 的 importer 逐项校验，pruner 声明的包 manifest 集合必须恰好覆盖全部 workspace 成员。
-function expectPrunerWorkspaceManifests(
-  dockerfile: string,
-  packagePaths: readonly string[],
-): void {
-  assert.deepStrictEqual(
-    new Set(prunerManifestCopyInputs(dockerfile)),
-    new Set(packagePaths.map((packagePath) => `${packagePath}/package.json`)),
-  );
-}
 /**
  * 运行夹具：真正渲染并执行生成仓库自身检查的现场必须携带发版快照的精确 Node 事实，
  * 因为该检查要求根 engines.node 是精确三段版本。发版快照是固定副本里的既有真源，
@@ -76,17 +54,9 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     });
     const layers = plan.developmentContainer.toolLayers;
     const byIdentity = new Map(layers.map((layer) => [layer.identity, layer]));
-    const browser = byIdentity.get("browser-test")!;
     const shellCheck = byIdentity.get("shellcheck")!;
     assert.ok(byIdentity.has("browser-test"));
     assert.ok(byIdentity.has("shellcheck"));
-    assert.strictEqual(
-      resolveTemplateSource(browser.dockerfile.source, browser.dockerfile.from),
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/shared/devcontainer/browser-test.Dockerfile",
-      ),
-    );
     assert.partialDeepStrictEqual(shellCheck, {
       requires: ["node-pnpm"],
       probes: [
@@ -100,47 +70,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     assert.deepStrictEqual(shellCheck.requires, ["node-pnpm"]);
     assert.strictEqual(shellCheck.probes?.length, 1);
     assert.deepStrictEqual(shellCheck.probes?.[0]?.args, ["--version"]);
-    assert.strictEqual(
-      resolveTemplateSource(
-        shellCheck.dockerfile.source,
-        shellCheck.dockerfile.from,
-      ),
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/shared/devcontainer/shellcheck.Dockerfile",
-      ),
-    );
-  });
-  void it("owns its Vike Template Source and deployment fragments through real handles", () => {
-    const plan = planGeneratedRepositoryInitialization({
-      definition: builtInPresetRegistry.require("vike-app"),
-      context: createGenerationContext({
-        targetDir: "/tmp/vike-template-source",
-        defaultPackageScope: "demo",
-        toolchain: { nodeLtsMajor: "24", packageManagerPin: "pnpm@11.11.0" },
-      }),
-    });
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextTemplate" &&
-          operation.from === "web/Dockerfile" &&
-          operation.to === "Dockerfile",
-      ),
-    );
-    assert.ok(
-      plan.operations.some(
-        (operation) =>
-          operation.kind === "writeTextFromFragments" &&
-          operation.to === ".devcontainer/Dockerfile" &&
-          operation.fragments.some(
-            (fragment) => fragment.from === "browser-test.Dockerfile",
-          ) &&
-          operation.fragments.some(
-            (fragment) => fragment.from === "shellcheck.Dockerfile",
-          ),
-      ),
-    );
   });
   void it("keeps source-linked workspaces, isolated browser artifacts, and deploy closures", async () => {
     const targetDir = path.join(
@@ -165,12 +94,12 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     ]);
     assert.ok(
       dockerfile.includes(
-        "pnpm --config.inject-workspace-packages=true --filter @demo/web deploy --prod /runtime-deploy",
+        'pnpm --config.inject-workspace-packages=true --filter "$APPLICATION_PACKAGE_NAME" deploy --prod /runtime-deploy',
       ),
     );
     assert.ok(
       dockerfile.includes(
-        "pnpm --config.inject-workspace-packages=true --filter @demo/db-migrations deploy --prod /migration-deploy",
+        'pnpm --config.inject-workspace-packages=true --filter "$MIGRATION_PACKAGE_NAME" deploy --prod /migration-deploy',
       ),
     );
     assert.ok(!dockerfile.includes("--legacy"));
@@ -309,31 +238,33 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       path.join(targetDir, "Dockerfile"),
       "utf8",
     );
-    assert.ok(
-      dockerfile.includes(
-        "COPY services/frontend/package.json services/frontend/package.json",
+    assert.ok(dockerfile.includes("COPY . ."));
+    assert.deepStrictEqual(
+      JSON.parse(
+        await readFile(path.join(targetDir, "deployment.json"), "utf8"),
+      ),
+      {
+        application: { name: "@demo/frontend", path: "services/frontend" },
+        database: { name: "@demo/data-store", path: "modules/data-store" },
+        migrations: { name: "@demo/schema-tool", path: "tooling/schema-tool" },
+      },
+    );
+    const webManifest = JSON.parse(
+      await readFile(
+        path.join(targetDir, "services/frontend/package.json"),
+        "utf8",
       ),
     );
-    assert.ok(
-      dockerfile.includes(
-        "COPY modules/data-store/package.json modules/data-store/package.json",
+    const migrationsManifest = JSON.parse(
+      await readFile(
+        path.join(targetDir, "tooling/schema-tool/package.json"),
+        "utf8",
       ),
     );
-    assert.ok(
-      dockerfile.includes(
-        "COPY tooling/schema-tool/package.json tooling/schema-tool/package.json",
-      ),
-    );
-    assert.ok(
-      dockerfile.includes(
-        "pnpm exec turbo prune @demo/frontend @demo/schema-tool --docker",
-      ),
-    );
-    assert.ok(!dockerfile.includes("apps/web"));
-    assert.ok(!dockerfile.includes("packages/db"));
-    expectPrunerWorkspaceManifests(
-      dockerfile,
-      plan.blueprint.packages.map((package_) => package_.path),
+    assert.equal(webManifest.dependencies["@demo/data-store"], "workspace:*");
+    assert.equal(
+      migrationsManifest.dependencies["@demo/data-store"],
+      "workspace:*",
     );
     assert.ok(
       (
@@ -341,7 +272,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           path.join(targetDir, "services/frontend/vite.config.ts"),
           "utf8",
         )
-      ).includes('external: ["@demo/data-store"]'),
+      ).includes('from "@demo/data-store/package.json"'),
     );
     assert.ok(
       (
@@ -350,14 +281,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           "utf8",
         )
       ).includes('from "@demo/data-store/storage"'),
-    );
-    assert.ok(
-      (
-        await readFile(
-          path.join(targetDir, "services/frontend/server/app.ts"),
-          "utf8",
-        )
-      ).includes('from "@demo/data-store"'),
     );
     const userEditedWebTurbo = {
       ...webTurboConfiguration,
@@ -409,6 +332,40 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       userEditedWebTurboText,
     );
   });
+  void it("SSR 只接受数据库公开 JSON 身份且拒绝错误配置时零写入", async () => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vike-ssr-identity-"),
+    );
+    try {
+      const targetDir = await initVikeRepository(workspace);
+      const vitePath = path.join(targetDir, "apps/web/vite.config.ts");
+      const nativeConfig = await readFile(vitePath, "utf8");
+      const addPackage = () =>
+        planGeneratedRepositoryPackageAddition({
+          definition: builtInPresetRegistry.require("ts-lib"),
+          localTemplateMetadata: loadLocalTemplateMetadata(targetDir),
+          packageLeafName: "utility",
+        });
+      assert.doesNotThrow(addPackage);
+      for (const [original, replacement] of [
+        ["@demo/db/package.json", "@demo/other/package.json"],
+        ['type: "json"', 'type: "text"'],
+        ["databaseManifest.name", "databaseManifest.version"],
+      ] as const) {
+        const changed = nativeConfig.replace(original, replacement);
+        assert.notEqual(changed, nativeConfig);
+        await writeFile(vitePath, changed);
+        const before = await treeFingerprint(workspace);
+        assert.throws(
+          addPackage,
+          /requires apps\/web\/vite.config.ts to externalize @demo\/db through Vite SSR/u,
+        );
+        assert.strictEqual(await treeFingerprint(workspace), before);
+      }
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
   void it("拒绝失真的 Vike 任务真实性且新增包回放零写入", async () => {
     const workspace = await mkdtemp(
       path.join(tmpdir(), "template-vike-turbo-extends-replay-"),
@@ -448,7 +405,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         assert.strictEqual(await readFile(webTurboPath, "utf8"), source);
       };
       webTurbo.tasks.build!.extends = "invalid";
-      assert.deepStrictEqual(webTurbo.tasks.build!.dependsOn, ["^build"]);
       await assertReplayRejectedWithoutWrite(
         `${JSON.stringify(webTurbo, null, 2)}\n`,
         /Package Addition @demo\/web Turbo Truth requires Turbo task build extends truth/u,
@@ -467,8 +423,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
   });
 });
 const deploymentPath = "Dockerfile";
-const mirrorStartMarker = "# @template-mirror NODE_VERSION";
-const mirrorEndMarker = "# @end-template-mirror";
 const additionTargetNode = "22.2.2";
 const additionTargetPnpm = "pnpm@10.9.0";
 async function initVikeRepository(
@@ -489,40 +443,6 @@ async function initVikeRepository(
     operations: [...plan.operations],
   });
   return targetDir;
-}
-function mirrorRegionContent(text: string): readonly string[] {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => line.trim() === mirrorStartMarker);
-  if (start === -1) return [];
-  const end = lines.findIndex(
-    (line, index) => index > start && line.trim() === mirrorEndMarker,
-  );
-  if (end === -1) return [];
-  return lines.slice(start + 1, end);
-}
-function anchoredArgValue(text: string): string | undefined {
-  const [line] = mirrorRegionContent(text);
-  const match =
-    line === undefined ? undefined : /^ARG NODE_VERSION="([^"]*)"$/.exec(line);
-  return match?.[1];
-}
-function maskAnchoredArg(text: string, value: string): string {
-  return text.replace(
-    `ARG NODE_VERSION="${value}"`,
-    'ARG NODE_VERSION="«masked»"',
-  );
-}
-function baseStageRunBlock(text: string): string {
-  const baseIndex = text.indexOf("AS base");
-  const runIndex = text.indexOf("RUN ", baseIndex);
-  const nextFrom = text.indexOf("\nFROM ", runIndex);
-  return text.slice(runIndex, nextFrom === -1 ? undefined : nextFrom);
-}
-function actionsFor(
-  actions: readonly ProjectProjectionAction[],
-  targetPath: string,
-): readonly ProjectProjectionAction[] {
-  return actions.filter((action) => action.path === targetPath);
 }
 async function treeFingerprint(root: string): Promise<string> {
   const hash = createHash("sha256");
@@ -587,286 +507,88 @@ async function prepareVikeAddition(targetDir: string): Promise<
   }
   return preparation;
 }
-void describe("Package Addition 协调部署 Dockerfile 根工具链静态镜像槽位", () => {
-  void it("初始化的 M2 由锚定 ARG 驱动两处 FROM，取根 engines.node 原文且无烘焙副本", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-init-"),
+void it("部署检查每次读取根 Node 声明，改根与加包保留原生 Dockerfile 定制", async () => {
+  const workspace = await mkdtemp(
+    path.join(tmpdir(), "template-native-deployment-"),
+  );
+  try {
+    const targetDir = await initVikeRepository(workspace);
+    const bin = path.join(workspace, "bin");
+    const calls = path.join(workspace, "docker-calls.jsonl");
+    await mkdir(bin);
+    await writeExecutable(
+      path.join(bin, "docker"),
+      `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+appendFileSync(process.env.DOCKER_CALLS, JSON.stringify(process.argv.slice(2)) + "\\n");
+process.exit(process.argv[2] === "build" ? 1 : 0);
+`,
     );
-    try {
-      const targetDir = await initVikeRepository(workspace);
-      const dockerfile = await readFile(
-        path.join(targetDir, deploymentPath),
-        "utf8",
-      );
-      const rootManifest = JSON.parse(
-        await readFile(path.join(targetDir, "package.json"), "utf8"),
-      ) as {
-        engines?: {
-          node?: string;
-        };
-      };
-      const rootDeclaration = rootManifest.engines?.node;
-      assert.notStrictEqual(rootDeclaration, undefined);
-      // M2 与根声明取同一 rootNodeDeclaration，不另作真源。
-      assert.strictEqual(anchoredArgValue(dockerfile), rootDeclaration);
-      assert.deepStrictEqual(mirrorRegionContent(dockerfile), [
-        `ARG NODE_VERSION="${rootDeclaration}"`,
-      ]);
-      assert.strictEqual(dockerfile.match(/@template-mirror/gu)?.length, 1);
-      assert.strictEqual(dockerfile.match(/@end-template-mirror/gu)?.length, 1);
-      // 两处 FROM 都由同一个锚定 ARG 驱动。
-      const fromLines = dockerfile
+    const dockerfilePath = path.join(targetDir, deploymentPath);
+    const original = await readFile(dockerfilePath, "utf8");
+    assert.match(original, /^ARG NODE_VERSION$/mu);
+    assert.equal(
+      original
         .split("\n")
-        .filter((line) => line.startsWith("FROM node:"));
-      assert.strictEqual(fromLines.length, 2);
-      for (const fromLine of fromLines) {
-        assert.ok(fromLine.includes("${NODE_VERSION}"));
-      }
-      assert.ok(!dockerfile.includes("PACKAGE_MANAGER_PIN"));
-      // base stage 首次 pnpm 调用之前把根 manifest 复制到 workspace 外固定位置。
-      assert.ok(dockerfile.includes("COPY package.json /root-manifest.json"));
-      const baseRun = baseStageRunBlock(dockerfile);
-      // 原生读取 packageManager 交给现有 prepare 重试，并在同条 RUN 内删除复制文件。
-      assert.ok(baseRun.includes("corepack enable --install-directory"));
-      assert.ok(
-        baseRun.includes("require('/root-manifest.json').packageManager"),
-      );
-      assert.ok(baseRun.includes("rm /root-manifest.json"));
-      assert.ok(baseRun.includes('corepack prepare "$package_manager"'));
-      assert.ok(!baseRun.includes("PACKAGE_MANAGER_PIN"));
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-  void it("改根后加包把漂移的锚点协调回根原文，区域外用户字节保留且 dry-run 与执行一致", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-reconcile-"),
+        .filter((line) => line.startsWith("FROM node:${NODE_VERSION}")).length,
+      2,
     );
-    try {
-      const targetDir = await initVikeRepository(workspace);
+    const customized = `${original}\n# 用户的部署配置说明\n`;
+    await writeFile(dockerfilePath, customized);
+    for (const version of ["24", additionTargetNode]) {
       await writeVikeRootManifest(targetDir, (manifest) => {
-        manifest.engines = { node: additionTargetNode };
+        manifest.engines = { node: version };
         manifest.packageManager = additionTargetPnpm;
       });
-      const dockerfilePath = path.join(targetDir, deploymentPath);
-      const initial = await readFile(dockerfilePath, "utf8");
-      const rootDeclaration = anchoredArgValue(initial);
-      if (rootDeclaration === undefined) {
-        throw new Error("Expected an anchored ARG value");
-      }
-      // 用户把锚点漂移到无关值，并在区域外加入自己的注释与 ENV。
-      const drifted = initial
-        .replace(
-          mirrorStartMarker,
-          `# 用户在区域外留下的注释\n${mirrorStartMarker}`,
-        )
-        .replace(
-          `ARG NODE_VERSION="${rootDeclaration}"`,
-          'ARG NODE_VERSION="999"',
-        )
-        .replace(
-          "WORKDIR /repo",
-          'WORKDIR /repo\nENV USER_EXTRA_ENV="keep-me"',
-        );
-      await writeFile(dockerfilePath, drifted);
-      const addition = await prepareVikeAddition(targetDir);
-      const treeBeforeDryRun = await treeFingerprint(workspace);
-      const dryRun = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.plan.projectProjections,
-        dryRun: true,
-      });
-      if (!dryRun.ok) throw new Error(JSON.stringify(dryRun));
-      assert.strictEqual(dryRun.ok, true);
-      assert.deepStrictEqual(actionsFor(dryRun.actions, deploymentPath), [
-        { path: deploymentPath, driver: "text", action: "update" },
-      ]);
-      assert.strictEqual(await treeFingerprint(workspace), treeBeforeDryRun);
-      assert.strictEqual(await readFile(dockerfilePath, "utf8"), drifted);
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...addition.plan.projectProjections,
-      });
-      if (!applied.ok) throw new Error(JSON.stringify(applied));
-      assert.strictEqual(applied.ok, true);
-      assert.deepStrictEqual(applied.actions, dryRun.actions);
-      assert.deepStrictEqual(applied.changedPaths, dryRun.changedPaths);
-      const reconciled = await readFile(dockerfilePath, "utf8");
-      // 锚点协调回根 engines.node 原文，而不是用户漂移值。
-      assert.strictEqual(anchoredArgValue(reconciled), additionTargetNode);
-      assert.deepStrictEqual(mirrorRegionContent(reconciled), [
-        `ARG NODE_VERSION="${additionTargetNode}"`,
-      ]);
-      // 区域外的用户字节逐行保留。
-      assert.strictEqual(
-        maskAnchoredArg(reconciled, additionTargetNode),
-        maskAnchoredArg(drifted, "999"),
+      await writeFile(calls, "");
+      const result = await execa(
+        "node",
+        ["scripts/check-standalone-deployment.ts"],
+        {
+          cwd: targetDir,
+          env: {
+            PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+            DOCKER_CALLS: calls,
+          },
+          reject: false,
+        },
       );
-      // 重复加包不再触碰已对齐的锚点。
-      const replayed = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
-      });
-      if (!replayed.ok) throw new Error(JSON.stringify(replayed));
-      assert.strictEqual(replayed.ok, true);
-      assert.deepStrictEqual(actionsFor(replayed.actions, deploymentPath), []);
-      assert.ok(!replayed.changedPaths.includes(deploymentPath));
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-  void it("锚点已等于根原文时加包对部署 Dockerfile 零写入", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-noop-"),
-    );
-    try {
-      const targetDir = await initVikeRepository(workspace);
-      await writeVikeRootManifest(targetDir, (manifest) => {
-        manifest.engines = { node: additionTargetNode };
-        manifest.packageManager = additionTargetPnpm;
-      });
-      const dockerfilePath = path.join(targetDir, deploymentPath);
-      const initial = await readFile(dockerfilePath, "utf8");
-      const rootDeclaration = anchoredArgValue(initial);
-      if (rootDeclaration === undefined) {
-        throw new Error("Expected an anchored ARG value");
-      }
-      // 用户已把锚点手动对齐到根原文，此后应与 After 逐字相等。
-      await writeFile(
-        dockerfilePath,
-        initial.replace(
-          `ARG NODE_VERSION="${rootDeclaration}"`,
-          `ARG NODE_VERSION="${additionTargetNode}"`,
-        ),
-      );
-      const aligned = await readFile(dockerfilePath, "utf8");
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
-      });
-      if (!applied.ok) throw new Error(JSON.stringify(applied));
-      assert.strictEqual(applied.ok, true);
-      assert.deepStrictEqual(actionsFor(applied.actions, deploymentPath), []);
-      assert.ok(!applied.changedPaths.includes(deploymentPath));
-      assert.strictEqual(await readFile(dockerfilePath, "utf8"), aligned);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-  void it("只删成对标记保留承载 ARG 时整次加包在写入前原子失败且零半成品", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-atomic-"),
-    );
-    try {
-      const targetDir = await initVikeRepository(workspace);
-      await writeVikeRootManifest(targetDir, (manifest) => {
-        manifest.engines = { node: additionTargetNode };
-        manifest.packageManager = additionTargetPnpm;
-      });
-      const dockerfilePath = path.join(targetDir, deploymentPath);
-      const corrupted = (await readFile(dockerfilePath, "utf8"))
+      assert.equal(result.exitCode, 1);
+      assert.match(result.stderr, /Standalone|standalone/u);
+      const build = (await readFile(calls, "utf8"))
+        .trim()
         .split("\n")
-        .filter(
-          (line) =>
-            line.trim() !== mirrorStartMarker &&
-            line.trim() !== mirrorEndMarker,
-        )
-        .join("\n");
-      await writeFile(dockerfilePath, corrupted);
-      const before = await treeFingerprint(workspace);
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
-      });
-      assert.strictEqual(applied.ok, false);
-      if (applied.ok) throw new Error("unreachable");
-      const conflict = applied.conflicts.find(
-        (candidate) => candidate.path === deploymentPath,
-      );
-      if (conflict === undefined)
-        throw new Error(JSON.stringify(applied.conflicts));
-      assert.notStrictEqual(conflict, undefined);
-      assert.strictEqual(conflict?.driver, "text");
-      assert.match(
-        conflict?.reason,
-        /anchor could not be located while the "NODE_VERSION" carrier or reference remains/u,
-      );
-      assert.strictEqual(await treeFingerprint(workspace), before);
-      assert.strictEqual(await readFile(dockerfilePath, "utf8"), corrupted);
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
-  });
-  void it("连标记、承载 ARG 与引用一并删除时加包成功且绝不重新加回", async () => {
-    const workspace = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-carrier-gone-"),
-    );
-    try {
-      const targetDir = await initVikeRepository(workspace);
-      const dockerfilePath = path.join(targetDir, deploymentPath);
-      const initial = await readFile(dockerfilePath, "utf8");
-      const rootDeclaration = anchoredArgValue(initial);
-      if (rootDeclaration === undefined) {
-        throw new Error("Expected an anchored ARG value");
+        .map((line) => JSON.parse(line) as string[])
+        .find((args) => args[0] === "build")!;
+      for (const argument of [
+        `NODE_VERSION=${version}`,
+        "APPLICATION_PACKAGE_NAME=@demo/web",
+        "APPLICATION_PACKAGE_PATH=apps/web",
+        "DATABASE_PACKAGE_NAME=@demo/db",
+        "MIGRATION_PACKAGE_NAME=@demo/db-migrations",
+      ]) {
+        assert.ok(build.includes(argument));
+        assert.equal(build[build.indexOf(argument) - 1], "--build-arg");
       }
-      const removed = initial
-        .split("\n")
-        .filter(
-          (line) =>
-            line.trim() !== mirrorStartMarker &&
-            line.trim() !== mirrorEndMarker &&
-            line.trim() !== `ARG NODE_VERSION="${rootDeclaration}"`,
-        )
-        .join("\n")
-        .replaceAll("${NODE_VERSION}", "20-slim");
-      await writeFile(dockerfilePath, removed);
-      const applied = await reconcileAndApplyProjectProjections({
-        targetRoot: targetDir,
-        ...(await prepareVikeAddition(targetDir)).plan.projectProjections,
-      });
-      if (!applied.ok) throw new Error(JSON.stringify(applied));
-      assert.strictEqual(applied.ok, true);
-      assert.deepStrictEqual(actionsFor(applied.actions, deploymentPath), []);
-      assert.ok(!applied.changedPaths.includes(deploymentPath));
-      const after = await readFile(dockerfilePath, "utf8");
-      assert.strictEqual(after, removed);
-      assert.ok(!after.includes("@template-mirror"));
-      assert.ok(!after.includes("ARG NODE_VERSION"));
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
     }
-  });
-  void it("改变根声明只影响部署 Dockerfile，生成的 dependabot.yml 逐字不变", async () => {
-    const workspaceA = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-dep-a-"),
-    );
-    const workspaceB = await mkdtemp(
-      path.join(tmpdir(), "template-mirror2-dep-b-"),
-    );
-    try {
-      const targetDirA = await initVikeRepository(workspaceA, "24");
-      const targetDirB = await initVikeRepository(workspaceB, "22");
-      const [dependabotA, dependabotB] = await Promise.all([
-        readFile(path.join(targetDirA, ".github/dependabot.yml"), "utf8"),
-        readFile(path.join(targetDirB, ".github/dependabot.yml"), "utf8"),
-      ]);
-      const [dockerfileA, dockerfileB] = await Promise.all([
-        readFile(path.join(targetDirA, deploymentPath), "utf8"),
-        readFile(path.join(targetDirB, deploymentPath), "utf8"),
-      ]);
-      // 静态镜像输入（根 Node 声明）改变会驱动 Dockerfile 锚点，但绝不进入 Dependabot 投影。
-      assert.strictEqual(anchoredArgValue(dockerfileA), "24");
-      assert.strictEqual(anchoredArgValue(dockerfileB), "22");
-      assert.strictEqual(dependabotA, dependabotB);
-      assert.doesNotMatch(
-        dependabotA,
-        /NODE_VERSION|PACKAGE_MANAGER_PIN|corepack/u,
-      );
-    } finally {
-      await Promise.all([
-        rm(workspaceA, { recursive: true, force: true }),
-        rm(workspaceB, { recursive: true, force: true }),
-      ]);
-    }
-  });
+    const addition = await prepareVikeAddition(targetDir);
+    const before = await treeFingerprint(workspace);
+    const preview = await reconcileAndApplyProjectProjections({
+      targetRoot: targetDir,
+      ...addition.plan.projectProjections,
+      dryRun: true,
+    });
+    assert.equal(preview.ok, true);
+    assert.equal(await treeFingerprint(workspace), before);
+    const applied = await reconcileAndApplyProjectProjections({
+      targetRoot: targetDir,
+      ...addition.plan.projectProjections,
+    });
+    assert.equal(applied.ok, true);
+    if (!applied.ok) throw new Error(JSON.stringify(applied));
+    assert.ok(!applied.changedPaths.includes(deploymentPath));
+    assert.equal(await readFile(dockerfilePath, "utf8"), customized);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
 });

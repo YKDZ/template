@@ -19,6 +19,7 @@ const fixtureEvidenceScenarioSets = [
   "package-addition-matrix",
   "focused",
   "deployment",
+  "capabilities",
 ] as const;
 
 type FixtureEvidenceScenarioSet = (typeof fixtureEvidenceScenarioSets)[number];
@@ -35,7 +36,11 @@ function enabledScenarioSets(
   arguments_: readonly string[],
 ): readonly FixtureEvidenceScenarioSet[] {
   const configured =
-    arguments_.length === 0 ? fixtureEvidenceScenarioSets : arguments_;
+    arguments_.length === 0
+      ? fixtureEvidenceScenarioSets.filter(
+          (set) => set !== "package-addition-matrix",
+        )
+      : arguments_;
   for (const scenarioSet of configured) {
     if (
       !fixtureEvidenceScenarioSets.some(
@@ -43,7 +48,7 @@ function enabledScenarioSets(
       )
     ) {
       throw new Error(
-        "Expected enabled scenario set: init, package-addition-matrix, focused, or deployment",
+        "启用场景集必须为 init、package-addition-matrix、focused、deployment 或 capabilities",
       );
     }
   }

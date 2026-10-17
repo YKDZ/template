@@ -34,6 +34,7 @@ import {
   type FoundationContribution,
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
+import { mapPackageNamesInJson } from "@ykdz/template-core/package-name-projection";
 import type {
   BuiltInPresetDefinition,
   GenerationContext,
@@ -55,11 +56,6 @@ import {
 } from "@ykdz/template-core/project-blueprint";
 import type { DependencyMaintenancePolicy } from "@ykdz/template-core/project-github";
 import {
-  projectCheckWorkflowTemplateSource,
-  projectCheckWorkflowTemplateReplacements,
-  projectDependabotTemplateReplacements,
-} from "@ykdz/template-core/project-github";
-import {
   canConsumeNodePackageNameImport,
   canLinkNodePackageRoles,
   canProvideSourceConditionPackageNameImport,
@@ -79,8 +75,15 @@ import {
   resolveTemplateSource,
   type TemplateSourceHandle,
 } from "@ykdz/template-core/renderer";
+import { projectTomlStringValues } from "@ykdz/template-core/toml";
+import { workspaceInstallPolicySnapshot } from "@ykdz/template-core/workspace-policy-snapshot";
+import {
+  projectCheckWorkflow,
+  projectDependabotConfig,
+} from "@ykdz/template-workspace/project-github";
 import { parse as parseToml } from "smol-toml";
 import ts from "typescript";
+import { stringify as stringifyYaml } from "yaml";
 
 import {
   isValidDefaultPackageScope,
@@ -88,24 +91,36 @@ import {
   type GeneratedPackagePlanningRecord,
   type GenerationRecord,
 } from "./generation-record.ts";
+import {
+  composeReferenceContributions,
+  ReferenceCompositionFailure,
+  referenceDependencyNames,
+  requireReferencePackage,
+} from "./reference-composition.ts";
 import { rustBinDefinition } from "./rust-bin/definition.ts";
 import {
   builtInEditorCustomization,
+  browserTestDevelopmentContainerToolLayer,
   planBuiltInDevelopmentContainer,
   shellCheckDevelopmentContainerToolLayer,
 } from "./shared/development-container.ts";
 import {
+  typescriptReferencePackage,
   typescriptConfigContribution,
   typescriptConfigPackageDefinition,
   typescriptConfigReplayAdapter,
 } from "./shared/typescript.ts";
 import { vuePnpmDependencyOverrides } from "./shared/vue.ts";
-import { templateSources } from "./template-sources.ts";
 import { tsCliDefinition } from "./ts-cli/definition.ts";
 import { tsLibDefinition } from "./ts-lib/definition.ts";
 import { vikeAppDefinition } from "./vike-app/definition.ts";
 import { vueAppDefinition } from "./vue-app/definition.ts";
 import { vueHonoAppDefinition } from "./vue-hono-app/definition.ts";
+import {
+  copyWorkspaceResource,
+  copyWorkspaceDirectory,
+  readWorkspaceJson,
+} from "./workspace-resources.ts";
 
 export type {
   PackageDefinition,
@@ -216,7 +231,7 @@ export type PackageAdditionPreparation =
   | {
       readonly status: "operation-failure";
       readonly phase: "metadata" | "default" | "planning";
-      /** 仅目标根 Node/pnpm 声明错误携带的字段级诊断；其他操作失败保持通用提示。 */
+      /** 目标声明或共享配置接口不满足加包要求时，提供可操作的诊断。 */
       readonly diagnostic?: {
         readonly message: string;
         readonly suggestion: string;
@@ -725,7 +740,9 @@ function preflightLocalTemplateMetadata(options: {
     );
   }
   const initialRecords = options.generationRecord.packages.filter(
-    (candidate) => candidate.planningContribution === "planInitialization",
+    (candidate) =>
+      candidate.planningContribution === "planInitialization" &&
+      candidate.definitionName !== "reference",
   );
   if (initialRecords.length === 0) {
     throw new Error(
@@ -741,7 +758,124 @@ function preflightLocalTemplateMetadata(options: {
     );
   }
 
+  const sharedSources = joinedPackages
+    .filter(
+      (candidate) =>
+        candidate.record.referenceSource !== undefined &&
+        requireReferencePackage(candidate.record.referenceSource).instance ===
+          "shared",
+    )
+    .map((candidate) => candidate.record.referenceSource);
+  if (new Set(sharedSources).size !== sharedSources.length) {
+    throw new ReferenceCompositionFailure(
+      "无法唯一选择共同包的持久实例：同一参考来源记录了多个共同实例。",
+    );
+  }
   const preparedWithoutInitialLookup = joinedPackages.map((candidate) => {
+    if (candidate.record.referenceSource !== undefined) {
+      const reference = requireReferencePackage(
+        candidate.record.referenceSource,
+      );
+      let ownerAdapter: PackageContributionReplayAdapter | undefined;
+      if (candidate.record === record) {
+        if (
+          candidate.record.referenceSource !==
+          typescriptReferencePackage.manifest.name
+        )
+          throw new ReferenceCompositionFailure(
+            "共同配置来源与已记录的根配置身份不匹配。",
+          );
+      } else if (candidate.record.definitionName === "reference") {
+        if (
+          reference.instance !== "shared" ||
+          candidate.record.contributionIdentity !== reference.manifest.name
+        )
+          throw new ReferenceCompositionFailure(
+            "共同包来源身份与生成记录不匹配。",
+          );
+      } else {
+        const owner = builtInPresetRegistry.require(
+          candidate.record.definitionName,
+        );
+        ownerAdapter = requireRecordReplayAdapter({
+          owner: owner.metadata.name,
+          adapters: owner.packageContributionReplayAdapters,
+          record: candidate.record,
+        });
+        if (
+          candidate.record.planningContribution === "planPackageAddition" &&
+          owner.planPackageAddition === undefined
+        )
+          throw new ReferenceCompositionFailure(
+            `预设 ${owner.metadata.name} 不支持已记录的新增操作。`,
+          );
+      }
+      const bindings = new Map<string, PackageDefinition>();
+      const dependencyNames = referenceDependencyNames(reference.manifest.name);
+      if (
+        !isDeepStrictEqual(
+          Object.keys(candidate.record.dependencyBindings ?? {}).toSorted(),
+          [...dependencyNames].toSorted(),
+        )
+      ) {
+        throw new ReferenceCompositionFailure(
+          `参考包 ${reference.identity} 的依赖记录与当前来源不兼容，请先显式迁移。`,
+        );
+      }
+      for (const dependencyName of dependencyNames) {
+        const id = candidate.record.dependencyBindings?.[dependencyName];
+        const provider = joinedPackages.find(
+          (item) => item.record.packageDefinitionId === id,
+        );
+        if (
+          provider === undefined ||
+          provider.record.referenceSource !== dependencyName
+        ) {
+          throw new ReferenceCompositionFailure(
+            `参考包 ${reference.identity} 缺少已记录的依赖实例 ${dependencyName}。`,
+          );
+        }
+        bindings.set(dependencyName, provider.definition);
+      }
+      const adapter: PackageContributionReplayAdapter = {
+        identity: candidate.record.contributionIdentity,
+        identify: (contribution) => ({
+          ...contribution,
+          planningIdentity: candidate.record.contributionIdentity,
+        }),
+        replay: (input) => {
+          const replayed = ownerAdapter?.replay(input);
+          if (
+            replayed !== undefined &&
+            replayed.referenceSource !== reference.manifest.name
+          ) {
+            throw new ReferenceCompositionFailure(
+              `记录的来源 ${reference.manifest.name} 与所属预设 ${candidate.record.definitionName} 的 ${candidate.record.contributionIdentity} 贡献不一致。`,
+            );
+          }
+          const contribution = reference.contribute({
+            context: input.context,
+            definition: input.packageDefinition,
+            bindings,
+            planningIdentity: candidate.record.contributionIdentity,
+            creationOrigin: "replay",
+          });
+          return {
+            ...contribution,
+            foundation: { ...contribution.foundation, ...replayed?.foundation },
+          };
+        },
+      };
+      return {
+        ...candidate,
+        owner: candidate.record.definitionName,
+        adapter,
+        kind:
+          candidate.record === record
+            ? ("foundation" as const)
+            : ("package" as const),
+      };
+    }
     if (candidate.record === record) {
       return {
         ...candidate,
@@ -970,9 +1104,18 @@ function replayPersistedPackageContribution(options: {
       initialPackages: options.initialPackages,
     });
   } catch (error) {
+    if (error instanceof ReferenceCompositionFailure) throw error;
     throw new Error(
       `Package Planning Provenance ${options.owner}:${options.record.contributionIdentity} (${options.record.planningContribution}) at ${options.record.path} failed: ${error instanceof Error ? error.message : String(error)}`,
       { cause: error },
+    );
+  }
+  if (
+    contribution.referenceSource !== undefined &&
+    options.record.referenceSource === undefined
+  ) {
+    throw new ReferenceCompositionFailure(
+      "现有生成记录缺少原生参考包的来源与依赖身份；请先显式迁移，新增操作不会推测或接管旧拓扑。",
     );
   }
   if (
@@ -1253,13 +1396,19 @@ function contributedDevcontainerComposition(options: {
   return {
     operations: [
       {
-        kind: "writeTextTemplate",
-        source: templateSources.foundation,
-        from: "devcontainer.json",
+        kind: "writeJson",
         to: ".devcontainer/devcontainer.json",
-        replacements: {
-          PROJECT_NAME: options.context.repositoryName,
-          NODE_VERSION: options.rootNodeDeclaration,
+        value: {
+          ...(JSON.parse(
+            readFileSync(
+              fileURLToPath(
+                import.meta
+                  .resolve("@ykdz/template-environment/assets/.devcontainer/devcontainer.json"),
+              ),
+              "utf8",
+            ),
+          ) as Record<string, unknown>),
+          name: options.context.repositoryName,
         },
       },
       {
@@ -2118,11 +2267,12 @@ function assertCapabilityConsumerTurboTruth(options: {
     });
     if (
       !Array.isArray(dependencies) ||
-      !dependencies.some(
-        (dependency) =>
-          dependency === "^build" ||
-          dependency === `${options.preparation.databasePackageName}#build`,
-      )
+      (packageName !== options.preparation.databasePackageName &&
+        !dependencies.some(
+          (dependency) =>
+            dependency === "^build" ||
+            dependency === `${options.preparation.databasePackageName}#build`,
+        ))
     ) {
       throw new Error(
         `Package Addition ${contribution.definition.name} Turbo Truth requires Turbo task build dependsOn`,
@@ -2306,19 +2456,109 @@ function assertDatabaseViteRuntimeTruth(options: {
       ? undefined
       : unwrapTypeScriptExpression(externalValue);
   const expectedPackageName = options.deploymentCheck.databasePackageName;
+  const externalPackageName = (element: ts.Expression): string | undefined => {
+    const expression = unwrapTypeScriptExpression(element);
+    if (ts.isStringLiteralLike(expression)) return expression.text;
+    if (
+      !ts.isPropertyAccessExpression(expression) ||
+      expression.name.text !== "name" ||
+      !ts.isIdentifier(expression.expression)
+    )
+      return undefined;
+    const manifestVariable = expression.expression.text;
+    const declaration = sourceFile.statements
+      .filter(ts.isImportDeclaration)
+      .find(
+        (entry) =>
+          !entry.importClause?.isTypeOnly &&
+          entry.importClause?.name?.text === manifestVariable &&
+          ts.isStringLiteralLike(entry.moduleSpecifier) &&
+          entry.moduleSpecifier.text ===
+            `${expectedPackageName}/package.json` &&
+          entry.attributes?.elements.some(
+            (attribute) =>
+              attribute.name.text === "type" &&
+              ts.isStringLiteralLike(attribute.value) &&
+              attribute.value.text === "json",
+          ),
+      );
+    if (declaration === undefined) return undefined;
+    const database = requireContributionByName(
+      options.packageByName,
+      expectedPackageName,
+      "Deployment Check",
+    );
+    // 只检查公开 JSON 导入及包身份，不执行用户的 Vite 配置。
+    const manifest = readRepositoryJsonRecord({
+      repositoryRoot: options.repositoryRoot,
+      relativePath: `${database.definition.path}/package.json`,
+      label: `${expectedPackageName} Vite runtime identity`,
+    });
+    return isRecord(manifest.exports) &&
+      manifest.exports["./package.json"] === "./package.json" &&
+      typeof manifest.name === "string"
+      ? manifest.name
+      : undefined;
+  };
   const externalPackageNames =
     external !== undefined && ts.isArrayLiteralExpression(external)
-      ? external.elements.flatMap((element) =>
-          ts.isStringLiteralLike(element) ? [element.text] : [],
-        )
-      : external !== undefined && ts.isStringLiteralLike(external)
-        ? [external.text]
+      ? external.elements.map(externalPackageName)
+      : external !== undefined
+        ? [externalPackageName(external)]
         : [];
   if (!externalPackageNames.includes(expectedPackageName)) {
     throw new Error(
       `Package Addition requires ${configPath} to externalize ${expectedPackageName} through Vite SSR`,
     );
   }
+}
+
+function isWorkspaceJsonRead(
+  expression: ts.Expression | undefined,
+  file: string,
+): boolean {
+  if (
+    expression === undefined ||
+    !ts.isCallExpression(expression) ||
+    expression.arguments.length !== 1 ||
+    !ts.isPropertyAccessExpression(expression.expression) ||
+    !ts.isIdentifier(expression.expression.expression) ||
+    expression.expression.expression.text !== "JSON" ||
+    expression.expression.name.text !== "parse"
+  )
+    return false;
+  const read = expression.arguments[0]!;
+  if (
+    !ts.isCallExpression(read) ||
+    !ts.isIdentifier(read.expression) ||
+    read.expression.text !== "readFileSync" ||
+    read.arguments.length !== 2
+  )
+    return false;
+  const [url, encoding] = read.arguments;
+  if (
+    url === undefined ||
+    !ts.isNewExpression(url) ||
+    !ts.isIdentifier(url.expression) ||
+    url.expression.text !== "URL" ||
+    url.arguments?.length !== 2 ||
+    encoding === undefined ||
+    !ts.isStringLiteralLike(encoding) ||
+    encoding.text !== "utf8"
+  )
+    return false;
+  const [relative, base] = url.arguments;
+  return (
+    relative !== undefined &&
+    ts.isStringLiteralLike(relative) &&
+    relative.text === file &&
+    base !== undefined &&
+    ts.isPropertyAccessExpression(base) &&
+    base.name.text === "url" &&
+    ts.isMetaProperty(base.expression) &&
+    base.expression.keywordToken === ts.SyntaxKind.ImportKeyword &&
+    base.expression.name.text === "meta"
+  );
 }
 
 function assertVueHonoJointE2ePlaywrightTruth(options: {
@@ -2391,6 +2631,7 @@ function assertVueHonoJointE2ePlaywrightTruth(options: {
   const expectedServers = [
     {
       command: `pnpm --filter ${options.e2e.apiPackageName} --fail-if-no-match run start`,
+      packageVariable: "apiPackageName",
       portEnvironment: "PORT",
       portVariable: "apiPort",
       portInput: "PLAYWRIGHT_API_PORT",
@@ -2399,6 +2640,7 @@ function assertVueHonoJointE2ePlaywrightTruth(options: {
     },
     {
       command: `pnpm --filter ${options.e2e.webPackageName} --fail-if-no-match run preview --host 127.0.0.1 --strictPort`,
+      packageVariable: "webPackageName",
       portEnvironment: "PLAYWRIGHT_WEB_PORT",
       portVariable: "webPort",
       portInput: "PLAYWRIGHT_WEB_PORT",
@@ -2414,11 +2656,54 @@ function assertVueHonoJointE2ePlaywrightTruth(options: {
       );
     }
     const command = finalObjectLiteralPropertyValue(server, "command");
+    let commandText =
+      command !== undefined && ts.isStringLiteralLike(command)
+        ? command.text
+        : undefined;
     if (
-      command === undefined ||
-      !ts.isStringLiteralLike(command) ||
-      command.text !== expected.command
+      command !== undefined &&
+      ts.isTemplateExpression(command) &&
+      command.templateSpans.length === 1
     ) {
+      const span = command.templateSpans[0]!;
+      if (
+        ts.isIdentifier(span.expression) &&
+        span.expression.text === expected.packageVariable
+      ) {
+        const declaration = sourceFile.statements
+          .filter(ts.isVariableStatement)
+          .flatMap((statement) =>
+            (statement.declarationList.flags & ts.NodeFlags.Const) === 0
+              ? []
+              : [...statement.declarationList.declarations],
+          )
+          .find(
+            (entry) =>
+              ts.isObjectBindingPattern(entry.name) &&
+              entry.name.elements.some(
+                (element) =>
+                  ts.isIdentifier(element.name) &&
+                  element.name.text === expected.packageVariable,
+              ),
+          );
+        const expression =
+          declaration?.initializer === undefined
+            ? undefined
+            : unwrapTypeScriptExpression(declaration.initializer);
+        // 固定原生读取表达式使包身份来自受检查的 JSON，而不是执行用户配置。
+        if (isWorkspaceJsonRead(expression, "./joint-e2e.json")) {
+          const identities = readRepositoryJsonRecord({
+            repositoryRoot: options.repositoryRoot,
+            relativePath: "joint-e2e.json",
+            label: "Vue-Hono joint E2E package identities",
+          });
+          const name = identities[expected.packageVariable];
+          if (name === options.e2e[expected.packageVariable])
+            commandText = command.head.text + name + span.literal.text;
+        }
+      }
+    }
+    if (commandText !== expected.command) {
       throw new Error(
         `Package Addition requires exact Vue-Hono joint E2E web server ${index + 1} command in ${configPath}`,
       );
@@ -2682,6 +2967,7 @@ function composeDependencyMaintenancePolicy(
   for (const ecosystem of ecosystems) {
     const candidates = [
       ...new Set([
+        ...(ecosystem === "docker" ? (["/.devcontainer"] as const) : []),
         ...contributions.flatMap((contribution) => {
           const policy = contribution.foundation.dependencyMaintenance;
           const primary = policy.directories?.[ecosystem];
@@ -2708,22 +2994,6 @@ function composeDependencyMaintenancePolicy(
   };
 }
 
-function localTypescriptConfigurationSpecifier(options: {
-  readonly consumerPackagePath: string;
-  readonly configurationPackagePath: string;
-}): string {
-  const relativePackagePath = path.posix.relative(
-    options.consumerPackagePath,
-    options.configurationPackagePath,
-  );
-  if (relativePackagePath.length === 0) {
-    throw new Error(
-      "TypeScript Configuration Package must have a distinct Package Path",
-    );
-  }
-  return `link:${relativePackagePath}`;
-}
-
 function publicCliCandidate(
   contributions: readonly PackageContribution[],
 ): PackageContribution | undefined {
@@ -2745,14 +3015,10 @@ function publicCliCandidate(
   return candidate;
 }
 
-/**
- * 票 26 清单单源：把 plan 声明的镜像槽位集合投影成生成检查器携带的清单文本。
- * 转义 `$` 是必要的：清单文本注入模板字面量，未转义的 `$` 会被当成 TypeScript 插值。
- */
-function renderToolchainMirrorSlotManifest(
+function toolchainMirrorSlots(
   reconciliation: readonly ProjectProjectionReconciliation[],
-): string {
-  const slots = reconciliation.flatMap((policy) =>
+) {
+  return reconciliation.flatMap((policy) =>
     policy.driver === "canonical"
       ? []
       : (policy.mirrorSlots ?? []).map((slot) => ({
@@ -2761,8 +3027,6 @@ function renderToolchainMirrorSlotManifest(
           location: slot.location,
         })),
   );
-
-  return JSON.stringify(slots, null, 2).replaceAll("$", String.raw`\$`);
 }
 
 function foundationPlan(options: {
@@ -2779,7 +3043,7 @@ function foundationPlan(options: {
     string,
     Readonly<Record<string, unknown>>
   >;
-  readonly generationRecord?: GenerationRecord;
+  readonly generationRecord: GenerationRecord;
   readonly mode: "initialization" | "addition";
   /**
    * 生成仓库私有根 package.json 的 engines.node 声明：初始化投影 CLI 发版快照的精确
@@ -2825,41 +3089,44 @@ function foundationPlan(options: {
   }
   const publicationCandidate = publicCliCandidate(options.contributions);
   const packageContributions = options.contributions.map((contribution) => {
-    if (contribution.foundation.typescriptConfigurationPackage === undefined) {
-      return contribution;
+    if (contribution.referenceSource !== undefined) {
+      if (!injectedProviderNames.has(contribution.definition.name))
+        return contribution;
+      const devDependencies = {
+        ...(isRecord(contribution.manifest.devDependencies)
+          ? contribution.manifest.devDependencies
+          : {}),
+      };
+      const dependencies = {
+        ...(isRecord(contribution.manifest.dependencies)
+          ? contribution.manifest.dependencies
+          : {}),
+      };
+      for (const definition of Object.values(
+        contribution.referenceBindings ?? {},
+      )) {
+        if (devDependencies[definition.name] === undefined) continue;
+        dependencies[definition.name] = "workspace:*";
+        delete devDependencies[definition.name];
+      }
+      return {
+        ...contribution,
+        manifest: { ...contribution.manifest, dependencies, devDependencies },
+      };
     }
-    const dependencyField = injectedProviderNames.has(
-      contribution.definition.name,
-    )
-      ? "dependencies"
-      : "devDependencies";
-    const dependencySpecifier =
-      dependencyField === "devDependencies" &&
-      (contribution.manifest.private !== true ||
-        publicationCandidate?.definition.path === contribution.definition.path)
-        ? localTypescriptConfigurationSpecifier({
-            consumerPackagePath: contribution.definition.path,
-            configurationPackagePath: configDefinition.path,
-          })
-        : "workspace:*";
-    const existingDependencies = contribution.manifest[dependencyField];
-    return {
-      ...contribution,
-      manifest: {
-        ...contribution.manifest,
-        [dependencyField]: {
-          ...(isRecord(existingDependencies) ? existingDependencies : {}),
-          [configPackageName]: dependencySpecifier,
-        },
-      },
-    };
+    return contribution;
   });
   const requiresPackingHook = packageContributions.some((contribution) => {
     const developmentDependencies = contribution.manifest.devDependencies;
     return (
       isRecord(developmentDependencies) &&
-      typeof developmentDependencies[configPackageName] === "string" &&
-      developmentDependencies[configPackageName].startsWith("link:")
+      Object.values(developmentDependencies).some(
+        (specifier) =>
+          typeof specifier === "string" &&
+          (specifier.startsWith("link:") ||
+            (contribution.manifest.private !== true &&
+              specifier.startsWith("workspace:"))),
+      )
     );
   });
   const contributions = [configContribution, ...packageContributions];
@@ -2873,53 +3140,7 @@ function foundationPlan(options: {
         : { ...contribution, manifest };
     }),
   );
-  const candidateRecord: GenerationRecord = options.generationRecord ?? {
-    schemaVersion: 2,
-    repositoryName: options.context.repositoryName,
-    defaultPackageScope: options.context.defaultPackageScope,
-    preset: options.definition.metadata.name,
-    templateVersion: "0.0.0",
-    // 显式只投影 v2 的两个历史字段，上下文里的精确 Node 事实不得进入持久记录。
-    toolchain: {
-      nodeLtsMajor: options.context.toolchain.nodeLtsMajor,
-      packageManagerPin: options.context.toolchain.packageManagerPin,
-    },
-    packages: [
-      ...options.contributions.map(
-        (contribution): GeneratedPackagePlanningRecord => {
-          const planningContribution =
-            options.mode === "initialization"
-              ? "planInitialization"
-              : "planPackageAddition";
-          return {
-            packageDefinitionId: requirePersistedPackageDefinition(
-              options.blueprint,
-              contribution.definition,
-            ).packageDefinitionId,
-            path: contribution.definition.path,
-            definitionName: options.definition.metadata.name,
-            planningContribution,
-            contributionIdentity: requireReplayAdapter({
-              owner: options.definition.metadata.name,
-              adapters: options.definition.packageContributionReplayAdapters,
-              identity: contribution.planningIdentity,
-            }).identity,
-          };
-        },
-      ),
-      {
-        packageDefinitionId: requirePersistedPackageDefinition(
-          options.blueprint,
-          configDefinition,
-        ).packageDefinitionId,
-        path: configDefinition.path,
-        definitionName: "foundation",
-        planningContribution: "foundationPlan",
-        contributionIdentity: typescriptConfigReplayAdapter.identity,
-      },
-    ],
-  };
-  const generationRecord = parseGenerationRecord(candidateRecord);
+  const generationRecord = parseGenerationRecord(options.generationRecord);
   const deploymentCheck = normalizeDeploymentCheck(contributions);
   const vueHonoJointE2e = normalizeVueHonoJointE2e(contributions);
   const databasePreparation = normalizeDatabasePreparation(contributions);
@@ -3091,6 +3312,14 @@ function foundationPlan(options: {
     rootNodeDeclaration: options.rootNodeDeclaration,
     layers: [
       ...contributedToolLayers,
+      ...(contributions.some((contribution) =>
+        contribution.environmentNeeds.some(
+          (need) => need.kind === "playwright-browser-assets",
+        ),
+      ) &&
+      !contributedToolLayers.some((layer) => layer.identity === "browser-test")
+        ? [browserTestDevelopmentContainerToolLayer()]
+        : []),
       ...deploymentCheckDevelopmentContainerToolLayers(deploymentCheck),
     ],
   });
@@ -3160,8 +3389,8 @@ function foundationPlan(options: {
           }),
       ...(rootOwnedE2e ? { "test:e2e": "playwright test" } : {}),
       fix: "node --conditions=source scripts/task-gates.ts fix",
-      "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
-      "format:write": `oxfmt --write --no-error-on-unmatched-pattern package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
+      "format:check": `oxfmt --list-different --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
+      "format:write": `oxfmt --write --no-error-on-unmatched-pattern *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer ${rootAutomationPaths}`,
       lint:
         deploymentCheck === undefined
           ? `oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs ${rootAutomationPaths}`
@@ -3170,6 +3399,7 @@ function foundationPlan(options: {
       typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
     },
     devDependencies: {
+      [configDefinition.name]: "workspace:*",
       "@types/node": "catalog:",
       ...(rootOwnedE2e ? { "@playwright/test": "catalog:" } : {}),
       ...(publicationCandidate === undefined
@@ -3209,80 +3439,38 @@ function foundationPlan(options: {
       : {}),
   };
   const workspaceOperation: RenderOperation = {
-    kind: "writeTextTemplate",
-    source: templateSources.foundation,
-    from: "pnpm-workspace.dynamic.txt",
+    kind: "writeText",
     to: "pnpm-workspace.yaml",
-    replacements: {
-      WORKSPACE_PACKAGE_GLOBS: workspacePackageGlobs
-        .map((glob) => `  - ${glob}`)
-        .join("\n"),
-      DEPENDENCY_CATALOG: Object.entries(dependencyCatalog)
-        .toSorted(([left], [right]) => left.localeCompare(right))
-        .map(
-          ([name, version]) => `  ${JSON.stringify(name)}: ${String(version)}`,
-        )
-        .join("\n"),
-      DEPENDENCY_OVERRIDES_SECTION:
-        Object.keys(dependencyOverrides).length === 0
-          ? ""
-          : [
-              "",
-              "overrides:",
-              ...Object.entries(dependencyOverrides)
-                .toSorted(([left], [right]) => left.localeCompare(right))
-                .map(
-                  ([dependency, version]) =>
-                    `  ${JSON.stringify(dependency)}: ${JSON.stringify(version)}`,
-                ),
-              "",
-            ].join("\n"),
-    },
+    text: stringifyYaml({
+      ...workspaceInstallPolicySnapshot,
+      packages: workspacePackageGlobs,
+      overrides: dependencyOverrides,
+      catalog: dependencyCatalog,
+    }),
   };
-  const workflowTemplateSource = projectCheckWorkflowTemplateSource({
-    packagePaths: blueprintPackagePaths,
-    deploymentCheck,
-    diagnosticArtifacts: ciDiagnosticArtifacts,
-  });
-  const workflowOperation: RenderOperation =
-    ciDiagnosticArtifacts.length === 0
-      ? {
-          kind: "copyFile",
-          source: templateSources.foundation,
-          from: workflowTemplateSource,
-          to: ".github/workflows/check.yml",
-        }
-      : {
-          kind: "writeTextTemplate",
-          source: templateSources.foundation,
-          from: workflowTemplateSource,
-          to: ".github/workflows/check.yml",
-          replacements: projectCheckWorkflowTemplateReplacements({
-            packagePaths: blueprintPackagePaths,
-            diagnosticArtifacts: ciDiagnosticArtifacts,
-          }),
-        };
   const workflowOperations: RenderOperation[] = [
-    workflowOperation,
+    {
+      kind: "writeText",
+      to: ".github/workflows/check.yml",
+      text: projectCheckWorkflow({
+        packagePaths: blueprintPackagePaths,
+        deploymentCheck,
+        diagnosticArtifacts: ciDiagnosticArtifacts,
+      }),
+    },
+    {
+      kind: "writeText",
+      to: ".github/dependabot.yml",
+      text: projectDependabotConfig(dependencyMaintenancePolicy),
+    },
     ...(publicationCandidate === undefined
       ? []
       : [
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/release.yml",
-            to: ".github/workflows/release.yml",
-          },
+          copyWorkspaceResource(
+            "publication/release.yml",
+            ".github/workflows/release.yml",
+          ),
         ]),
-    {
-      kind: "writeTextTemplate" as const,
-      source: templateSources.foundation,
-      from: ".github/dependabot.dynamic.template",
-      to: ".github/dependabot.yml",
-      replacements: projectDependabotTemplateReplacements(
-        dependencyMaintenancePolicy,
-      ),
-    },
   ];
   const projectLinkPlan = initialProjectLinkPlan;
   const turboBoundaryTags = turboBoundaryTagsForContributions(contributions);
@@ -3319,21 +3507,6 @@ function foundationPlan(options: {
             ]),
       ],
     },
-    ...(deploymentCheck === undefined || deploymentPackages === undefined
-      ? []
-      : [
-          {
-            path: "Dockerfile",
-            driver: "text" as const,
-            // M2：同一 rootNodeDeclaration 投影的锚定 ARG 默认值。
-            mirrorSlots: [
-              {
-                id: "node-version-deployment-arg",
-                location: { kind: "text-anchor", name: "NODE_VERSION" },
-              } satisfies ProjectProjectionMirrorSlot,
-            ],
-          },
-        ]),
     {
       path: ".vscode/extensions.json",
       driver: "structured",
@@ -3349,8 +3522,52 @@ function foundationPlan(options: {
     { path: ".template/generation.json", driver: "canonical" },
   ];
   // 票 26 清单单源：生成检查器携带的槽位清单是上面声明的投影，不是第二份真源。
-  const toolchainMirrorSlotManifest =
-    renderToolchainMirrorSlotManifest(reconciliation);
+  const toolchainMirrorSlotManifest = toolchainMirrorSlots(reconciliation);
+  const referenceNames = new Map(
+    contributions.flatMap((contribution) =>
+      contribution.referenceSource === undefined
+        ? []
+        : [
+            [
+              contribution.referenceSource,
+              contribution.definition.name,
+            ] as const,
+          ],
+    ),
+  );
+  const rootTurbo = mapPackageNamesInJson(
+    readWorkspaceJson("assets/turbo.json"),
+    referenceNames,
+  ) as {
+    tasks: Record<string, unknown>;
+    boundaries?: { tags: Record<string, unknown> };
+  };
+  rootTurbo.tasks = Object.fromEntries(
+    Object.entries(rootTurbo.tasks).filter(
+      ([task]) =>
+        task.startsWith("//#") &&
+        Object.hasOwn(rootManifest.scripts, task.slice(3)),
+    ),
+  );
+  if (rootTurbo.boundaries !== undefined)
+    rootTurbo.boundaries.tags = Object.fromEntries(
+      Object.entries(rootTurbo.boundaries.tags).filter(([tag]) =>
+        turboBoundaryTags.includes(tag as "app" | "library"),
+      ),
+    );
+  const rootTsconfig = readWorkspaceJson("assets/tsconfig.json");
+  rootTsconfig.compilerOptions = {
+    ...(rootTsconfig.compilerOptions as Record<string, unknown>),
+    ...(requiresPackingHook ? { allowJs: true, checkJs: true } : {}),
+    rewriteRelativeImportExtensions: false,
+    allowImportingTsExtensions: true,
+  };
+  rootTsconfig.include = [
+    "*.config.ts",
+    "scripts/**/*.ts",
+    ...(vueHonoJointE2e === undefined ? [] : ["test/**/*.ts"]),
+    ...(requiresPackingHook ? [".pnpmfile.mjs"] : []),
+  ];
   const initializationFoundationOperations: RenderOperation[] = [
     {
       kind: "writeJson",
@@ -3361,332 +3578,98 @@ function foundationPlan(options: {
     },
     workspaceOperation,
     ...(requiresPackingHook
-      ? [
-          {
-            kind: "copyFile" as const,
-            source: templateSources.foundation,
-            from: ".pnpmfile.mjs",
-            to: ".pnpmfile.mjs",
-          },
-        ]
+      ? [copyWorkspaceResource("assets/.pnpmfile.mjs", ".pnpmfile.mjs")]
       : []),
+    copyWorkspaceResource("assets/gitignore", ".gitignore"),
+    copyWorkspaceResource("assets/agent-instructions.md", "AGENTS.md"),
+    { kind: "writeJson", to: "turbo.json", value: rootTurbo },
+    copyWorkspaceResource(
+      "scripts/check-toolchain-versions.ts",
+      "scripts/check-toolchain-versions.ts",
+    ),
     {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "gitignore",
-      to: ".gitignore",
+      kind: "writeJson",
+      to: "scripts/toolchain-mirrors.json",
+      value: toolchainMirrorSlotManifest,
     },
+    copyWorkspaceResource("scripts/task-gates.ts", "scripts/task-gates.ts"),
+    copyWorkspaceResource(
+      "scripts/run-turbo-boundaries.ts",
+      "scripts/run-turbo-boundaries.ts",
+    ),
+    { kind: "writeJson", to: "tsconfig.json", value: rootTsconfig },
     {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "AGENTS.md.template",
-      to: "AGENTS.md",
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "turbo.json",
-      to: "turbo.json",
-    },
-    ...(vueHonoJointE2e === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.foundation,
-            from: "turbo-projections/vue-hono-joint-e2e.json",
-            to: "turbo.json",
-            replacements: {
-              API_PACKAGE: vueHonoJointE2e.apiPackageName,
-              WEB_PACKAGE: vueHonoJointE2e.webPackageName,
-            },
-            multilineArrays: ["tasks.//#test:e2e.dependsOn"],
-          },
-        ]),
-    ...(deploymentCheck === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.foundation,
-            from: "turbo-projections/deployment.json",
-            to: "turbo.json",
-            replacements: {
-              APPLICATION_PACKAGE: deploymentCheck.applicationPackageName,
-              DATABASE_PACKAGE: deploymentCheck.databasePackageName,
-              MIGRATION_PACKAGE: deploymentCheck.migrationPackageName,
-            },
-            multilineArrays: ["tasks.//#deployment.dependsOn"],
-          },
-        ]),
-    ...(databasePreparation === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.foundation,
-            from: "turbo-projections/database-preparation.json",
-            to: "turbo.json",
-          },
-        ]),
-    ...(rustToolchain === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.foundation,
-            from: "turbo-projections/rust-toolchain.json",
-            to: "turbo.json",
-          },
-        ]),
-    ...(publicationCandidate === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/turbo.json",
-            to: "turbo.json",
-          },
-        ]),
-    ...turboBoundaryTags.map((tag): RenderOperation => ({
-      kind: "mergeJsonTemplate",
-      source: templateSources.foundation,
-      from: `turbo-boundary-tags/${tag}.json`,
-      to: "turbo.json",
-      multilineArrays: [
-        ...(deploymentCheck === undefined
-          ? []
-          : ["tasks.//#deployment.dependsOn"]),
-        ...(vueHonoJointE2e === undefined
-          ? []
-          : ["tasks.//#test:e2e.dependsOn"]),
-      ],
-    })),
-    {
-      kind: "writeTextTemplate",
-      source: templateSources.foundation,
-      from: "scripts/check-toolchain-versions.ts",
-      to: "scripts/check-toolchain-versions.ts",
-      replacements: {
-        TOOLCHAIN_MIRROR_SLOT_MANIFEST: toolchainMirrorSlotManifest,
-      },
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "scripts/task-gates.ts",
-      to: "scripts/task-gates.ts",
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "scripts/run-turbo-boundaries.ts",
-      to: "scripts/run-turbo-boundaries.ts",
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.foundation,
-      from: "tsconfig.json",
-      to: "tsconfig.json",
-    },
-    ...(vueHonoJointE2e === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.vueHonoApp,
-            from: "root/tsconfig.json",
-            to: "tsconfig.json",
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.vueHonoApp,
-            from: "root/playwright.config.ts",
-            to: "playwright.config.ts",
-            replacements: {
-              API_PACKAGE_NAME: vueHonoJointE2e.apiPackageName,
-              WEB_PACKAGE_NAME: vueHonoJointE2e.webPackageName,
-            },
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.vueHonoApp,
-            from: "root/test/e2e/fixtures.ts",
-            to: "test/e2e/fixtures.ts",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.vueHonoApp,
-            from: "root/test/e2e/app.spec.ts",
-            to: "test/e2e/app.spec.ts",
-          },
-        ]),
-    ...(publicationCandidate === undefined
-      ? []
-      : [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/root-tsconfig.json",
-            to: "tsconfig.json",
-          },
-        ]),
-    ...(requiresPackingHook && publicationCandidate === undefined
-      ? [
-          {
-            kind: "mergeJsonTemplate" as const,
-            source: templateSources.foundation,
-            from: "tsconfig.packing-hook.json",
-            to: "tsconfig.json",
-          },
-        ]
-      : []),
-    {
-      kind: "copyFile",
-      source: templateSources.sharedOxc,
-      from: "tsconfig.config.json",
+      kind: "writeJson",
       to: "tsconfig.config.json",
+      value: mapPackageNamesInJson(
+        readWorkspaceJson("assets/tsconfig.config.json"),
+        referenceNames,
+      ) as Record<string, unknown>,
     },
     {
-      kind: "copyFile",
-      source: templateSources.sharedOxc,
-      from: "node/oxlint.config.ts",
+      kind: "writeText",
       to: "oxlint.config.ts",
+      text: `export { default } from ${JSON.stringify(configDefinition.name + "/oxlint")};\n`,
     },
     {
-      kind: "copyFile",
-      source: templateSources.sharedOxc,
-      from: "oxfmt.config.ts",
+      kind: "writeText",
       to: "oxfmt.config.ts",
+      text: `export { default } from ${JSON.stringify(configDefinition.name + "/oxfmt")};\n`,
     },
+    ...(vueHonoJointE2e === undefined
+      ? []
+      : [
+          copyWorkspaceResource(
+            "joint-e2e/playwright.config.ts",
+            "playwright.config.ts",
+          ),
+          {
+            kind: "writeJson" as const,
+            to: "joint-e2e.json",
+            value: {
+              apiPackageName: vueHonoJointE2e.apiPackageName,
+              webPackageName: vueHonoJointE2e.webPackageName,
+            },
+          },
+          ...copyWorkspaceDirectory("joint-e2e/test", "test"),
+        ]),
     ...(publicationCandidate === undefined
       ? []
       : [
+          ...copyWorkspaceDirectory(
+            "publication",
+            "scripts/npm-publication",
+          ).filter(
+            (operation) =>
+              ![
+                "release.yml",
+                "RELEASING.md",
+                "publication.config.json",
+                "cli-command-identity.ts",
+              ].includes(path.posix.basename(operation.to)),
+          ),
+          ...copyWorkspaceDirectory(
+            "publication-setup",
+            "scripts/npm-publication-setup",
+          ),
+          copyWorkspaceResource("publication/RELEASING.md", "RELEASING.md"),
           {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/readiness.ts",
-            to: "scripts/npm-publication/readiness.ts",
+            kind: "writeJson" as const,
+            to: "scripts/npm-publication/publication.config.json",
+            value: { packagePath: publicationCandidate.definition.path },
           },
           {
             kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/artifact.ts",
-            to: "scripts/npm-publication/artifact.ts",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/handoff.ts",
-            to: "scripts/npm-publication/handoff.ts",
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/check-artifact.ts",
-            to: "scripts/npm-publication/check-artifact.ts",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/publish.ts",
-            to: "scripts/npm-publication/publish.ts",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/release.ts",
-            to: "scripts/npm-publication/release.ts",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication/check-readiness.ts",
-            to: "scripts/npm-publication/check-readiness.ts",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/changelog.ts",
-            to: "scripts/npm-publication/changelog.ts",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication/RELEASING.md",
-            to: "RELEASING.md",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "src/cli-command-identity.ts",
+            source: requireReferencePackage("@ykdz/reference-ts-cli").source(
+              "src/cli-command-identity.ts",
+            ),
+            from: ".",
             to: "scripts/npm-publication/cli-command-identity.ts",
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/setup.sh",
-            to: "scripts/npm-publication-setup/setup.sh",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
           },
           {
             kind: "setExecutable" as const,
             path: "scripts/npm-publication-setup/setup.sh",
             executable: true,
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/README.md",
-            to: "scripts/npm-publication-setup/README.md",
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/bridge.ts",
-            to: "scripts/npm-publication-setup/bridge.ts",
-            replacements: {
-              PUBLIC_CLI_PACKAGE_PATH: publicationCandidate.definition.path,
-            },
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/assets/LICENSE-MIT.txt",
-            to: "scripts/npm-publication-setup/assets/LICENSE-MIT.txt",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/assets/LICENSE-APACHE-2.0.txt",
-            to: "scripts/npm-publication-setup/assets/LICENSE-APACHE-2.0.txt",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/assets/README.md.template",
-            to: "scripts/npm-publication-setup/assets/README.md.template",
-          },
-          {
-            kind: "copyFile" as const,
-            source: templateSources.tsCli,
-            from: "publication-setup/assets/CHANGELOG.md.template",
-            to: "scripts/npm-publication-setup/assets/CHANGELOG.md.template",
           },
         ]),
     {
@@ -3707,65 +3690,59 @@ function foundationPlan(options: {
       ? []
       : [
           {
-            kind: "writeTextTemplate" as const,
-            source: rustToolchain.configurationSource.source,
-            from: rustToolchain.configurationSource.from,
+            kind: "writeText" as const,
             to: "rust-toolchain.toml",
-            replacements: { RUST_TOOLCHAIN: rustToolchain.toolchain },
+            text: projectTomlStringValues(
+              readFileSync(
+                resolveTemplateSource(
+                  rustToolchain.configurationSource.source,
+                  rustToolchain.configurationSource.from,
+                ),
+                "utf8",
+              ),
+              [
+                {
+                  path: ["toolchain", "channel"],
+                  value: rustToolchain.toolchain,
+                },
+              ],
+            ),
           },
         ]),
     ...(deploymentCheck === undefined || deploymentPackages === undefined
       ? []
       : [
+          ...(
+            [
+              [deploymentCheck.sources.dockerfile, "Dockerfile"],
+              [deploymentCheck.sources.dockerIgnore, ".dockerignore"],
+              [
+                deploymentCheck.sources.checker,
+                "scripts/check-standalone-deployment.ts",
+              ],
+              [
+                deploymentCheck.sources.controlScript,
+                "scripts/container-entrypoint.sh",
+              ],
+            ] as const
+          ).map(([asset, to]) => ({ kind: "copyFile" as const, ...asset, to })),
           {
-            kind: "writeTextTemplate" as const,
-            source: deploymentCheck.sources.dockerfile.source,
-            from: deploymentCheck.sources.dockerfile.from,
-            to: "Dockerfile",
-            replacements: {
-              NODE_VERSION: options.rootNodeDeclaration,
-              APPLICATION_PACKAGE_NAME:
-                deploymentPackages.application.definition.name,
-              APPLICATION_PACKAGE_PATH:
-                deploymentPackages.application.definition.path,
-              DATABASE_PACKAGE_NAME:
-                deploymentPackages.database.definition.name,
-              DATABASE_PACKAGE_PATH:
-                deploymentPackages.database.definition.path,
-              MIGRATION_PACKAGE_NAME:
-                deploymentPackages.migration.definition.name,
-              MIGRATION_PACKAGE_PATH:
-                deploymentPackages.migration.definition.path,
-              TYPESCRIPT_CONFIG_PACKAGE_PATH: configDefinition.path,
+            kind: "writeJson" as const,
+            to: "deployment.json",
+            value: {
+              application: {
+                name: deploymentPackages.application.definition.name,
+                path: deploymentPackages.application.definition.path,
+              },
+              database: {
+                name: deploymentPackages.database.definition.name,
+                path: deploymentPackages.database.definition.path,
+              },
+              migrations: {
+                name: deploymentPackages.migration.definition.name,
+                path: deploymentPackages.migration.definition.path,
+              },
             },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: deploymentCheck.sources.dockerIgnore.source,
-            from: deploymentCheck.sources.dockerIgnore.from,
-            to: ".dockerignore",
-            replacements: {
-              APPLICATION_PACKAGE_PATH:
-                deploymentPackages.application.definition.path,
-              DATABASE_PACKAGE_PATH:
-                deploymentPackages.database.definition.path,
-            },
-          },
-          {
-            kind: "writeTextTemplate" as const,
-            source: deploymentCheck.sources.checker.source,
-            from: deploymentCheck.sources.checker.from,
-            to: "scripts/check-standalone-deployment.ts",
-            replacements: {
-              APPLICATION_PACKAGE_NAME:
-                deploymentPackages.application.definition.name,
-            },
-          },
-          {
-            kind: "copyFile" as const,
-            source: deploymentCheck.sources.controlScript.source,
-            from: deploymentCheck.sources.controlScript.from,
-            to: "scripts/container-entrypoint.sh",
           },
           {
             kind: "setExecutable" as const,
@@ -3853,6 +3830,7 @@ function foundationPlan(options: {
             ? {
                 ...operation,
                 value: item.manifest,
+                multilineArrays: ["files"],
                 keyOrder: packageManifestKeyOrder,
                 nestedKeyOrder: packageConditionKeyOrder,
               }
@@ -4236,6 +4214,28 @@ function preparePresetInitialization(options: {
   };
 }
 
+function referencePlanningFacts(
+  contribution: PlannedPackageContribution,
+  blueprint: ProjectBlueprint,
+): Pick<
+  GeneratedPackagePlanningRecord,
+  "referenceSource" | "dependencyBindings"
+> {
+  if (contribution.referenceSource === undefined) return {};
+  return {
+    referenceSource: contribution.referenceSource,
+    dependencyBindings: Object.fromEntries(
+      Object.entries(contribution.referenceBindings ?? {}).map(
+        ([source, definition]) => [
+          source,
+          requirePersistedPackageDefinition(blueprint, definition)
+            .packageDefinitionId,
+        ],
+      ),
+    ),
+  };
+}
+
 function planPreparedRepositoryInitialization(options: {
   readonly definition: BuiltInPresetDefinition;
   readonly context: BuiltInGenerationContext;
@@ -4243,71 +4243,75 @@ function planPreparedRepositoryInitialization(options: {
   readonly contributions: readonly PlannedPackageContribution[];
   readonly rootNodeDeclaration: string;
 }): GeneratedRepositoryPlan {
-  const { presetBlueprint, contributions } = options;
   const configDefinition = typescriptConfigPackageDefinition(options.context);
-  const foundationIdentityDiagnostics = presetBlueprint.packages.flatMap(
-    (definition) => [
-      ...(definition.name === configDefinition.name
-        ? [
-            `Initial package name ${definition.name} conflicts with Foundation package ${configDefinition.name}`,
-          ]
-        : []),
-      ...(definition.path === configDefinition.path
-        ? [
-            `Initial Package Path ${definition.path} conflicts with Foundation Package Path ${configDefinition.path}`,
-          ]
-        : []),
-    ],
+  const configSeed = typescriptConfigReplayAdapter.identify(
+    typescriptConfigContribution(options.context, configDefinition),
   );
-  if (foundationIdentityDiagnostics.length > 0) {
-    throw new Error(foundationIdentityDiagnostics.join("\n"));
-  }
+  const allContributions = composeReferenceContributions({
+    context: options.context,
+    requested: [...options.contributions, configSeed],
+  });
+  const foundationContribution = allContributions.find(
+    (item) => item.definition.path === configDefinition.path,
+  )!;
+  const contributions = allContributions.filter(
+    (item) => item !== foundationContribution,
+  );
   const occupiedIds = new Set<PackageDefinitionId>();
+  const provenance = (contribution: PlannedPackageContribution) => {
+    const isFoundation = contribution === foundationContribution;
+    const isRequested = options.contributions.some(
+      (item) => item.definition.path === contribution.definition.path,
+    );
+    return {
+      definitionName: isFoundation
+        ? "foundation"
+        : isRequested
+          ? options.definition.metadata.name
+          : "reference",
+      planningContribution: isFoundation
+        ? ("foundationPlan" as const)
+        : ("planInitialization" as const),
+      contributionIdentity: contribution.planningIdentity,
+    };
+  };
   const blueprint: ProjectBlueprint = {
-    ...presetBlueprint,
-    packages: [
-      ...presetBlueprint.packages.map((definition) => {
-        const contribution = contributions.find((candidate) =>
-          packageDefinitionsEqual(candidate.definition, definition),
-        );
-        if (contribution === undefined) {
-          throw new Error(
-            `Preset Blueprint Package Definition ${definition.path} has no initialization Package Contribution`,
-          );
-        }
-        return persistPackageDefinition({
-          definition,
-          provenance: {
-            definitionName: options.definition.metadata.name,
-            planningContribution: "planInitialization",
-            contributionIdentity: requireReplayAdapter({
-              owner: options.definition.metadata.name,
-              adapters: options.definition.packageContributionReplayAdapters,
-              identity: contribution.planningIdentity,
-            }).identity,
-          },
-          occupiedIds,
-        });
-      }),
+    ...options.presetBlueprint,
+    packages: allContributions.map((contribution) =>
       persistPackageDefinition({
-        definition: configDefinition,
-        provenance: {
-          definitionName: "foundation",
-          planningContribution: "foundationPlan",
-          contributionIdentity: typescriptConfigReplayAdapter.identity,
-        },
+        definition: contribution.definition,
+        provenance: provenance(contribution),
         occupiedIds,
       }),
-    ],
+    ),
+  };
+  const generationRecord: GenerationRecord = {
+    schemaVersion: 2,
+    repositoryName: options.context.repositoryName,
+    defaultPackageScope: options.context.defaultPackageScope,
+    preset: options.definition.metadata.name,
+    templateVersion: "0.0.0",
+    toolchain: {
+      nodeLtsMajor: options.context.toolchain.nodeLtsMajor,
+      packageManagerPin: options.context.toolchain.packageManagerPin,
+    },
+    packages: allContributions.map((contribution) => ({
+      ...provenance(contribution),
+      packageDefinitionId: requirePersistedPackageDefinition(
+        blueprint,
+        contribution.definition,
+      ).packageDefinitionId,
+      path: contribution.definition.path,
+      ...referencePlanningFacts(contribution, blueprint),
+    })),
   };
   return foundationPlan({
     definition: options.definition,
     context: options.context,
     blueprint,
-    foundationContribution: typescriptConfigReplayAdapter.identify(
-      typescriptConfigContribution(options.context, configDefinition),
-    ),
+    foundationContribution,
     contributions,
+    generationRecord,
     mode: "initialization",
     rootNodeDeclaration: options.rootNodeDeclaration,
   });
@@ -4552,10 +4556,17 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
       existing.path === contribution.definition.path,
   );
   if (conflictingPackage !== undefined) {
-    const isExactPackageDefinition = packageDefinitionsEqual(
-      conflictingPackage,
-      contribution.definition,
+    const recorded = options.localTemplateMetadata[
+      localTemplateMetadataStateKey
+    ].generationRecord.packages.find(
+      (item) =>
+        item.packageDefinitionId === conflictingPackage.packageDefinitionId,
     );
+    const isExactPackageDefinition =
+      packageDefinitionsEqual(conflictingPackage, contribution.definition) &&
+      recorded?.definitionName === options.definition.metadata.name &&
+      recorded.contributionIdentity === contribution.planningIdentity &&
+      recorded.referenceSource === contribution.referenceSource;
     const existingPackageLinkIntents =
       persistedBlueprint.packageLinkIntents ?? [];
     const missingPackageLinkIntent = requestedPackageLinkIntents.find(
@@ -4623,22 +4634,43 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
     adapters: options.definition.packageContributionReplayAdapters,
     identity: contribution.planningIdentity,
   }).identity;
-  const persistedContributionDefinition = persistPackageDefinition({
-    definition: contribution.definition,
-    provenance: {
-      definitionName: options.definition.metadata.name,
-      planningContribution: "planPackageAddition",
-      contributionIdentity,
-    },
-    occupiedIds: new Set(
-      persistedBlueprint.packages.map(
-        (definition) => definition.packageDefinitionId,
-      ),
+  const existing = readExistingPackageAdditionState({
+    localTemplateMetadata: options.localTemplateMetadata,
+    requiredManifestTruthPackagePaths: requestedPackageLinkIntents.flatMap(
+      (intent) => [intent.consumerPackagePath],
     ),
   });
+  const additions = composeReferenceContributions({
+    context,
+    requested: [contribution],
+    existing: [existing.foundationContribution, ...existing.contributions],
+  });
+  const occupiedIds = new Set(
+    persistedBlueprint.packages.map(
+      (definition) => definition.packageDefinitionId,
+    ),
+  );
+  const provenance = (item: PlannedPackageContribution) => ({
+    definitionName:
+      item.definition.path === contribution.definition.path
+        ? options.definition.metadata.name
+        : "reference",
+    planningContribution: "planPackageAddition" as const,
+    contributionIdentity:
+      item.definition.path === contribution.definition.path
+        ? contributionIdentity
+        : item.planningIdentity,
+  });
+  const addedDefinitions = additions.map((item) =>
+    persistPackageDefinition({
+      definition: item.definition,
+      provenance: provenance(item),
+      occupiedIds,
+    }),
+  );
   const blueprint: ProjectBlueprint = {
     ...persistedBlueprint,
-    packages: [...persistedBlueprint.packages, persistedContributionDefinition],
+    packages: [...persistedBlueprint.packages, ...addedDefinitions],
     ...(requestedPackageLinkIntents.length > 0
       ? {
           packageLinkIntents: [
@@ -4649,34 +4681,63 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
       : {}),
   };
   assertProjectBlueprint(blueprint);
-  const requiredManifestTruthPackagePaths =
-    requestedPackageLinkIntents.length === 0
-      ? []
-      : [
-          ...(persistedBlueprint.packageLinkIntents ?? []).flatMap((intent) => [
-            intent.consumerPackagePath,
-            intent.providerPackagePath,
-          ]),
-          ...requestedPackageLinkIntents.map(
-            (intent) => intent.consumerPackagePath,
-          ),
-        ];
-  const existing = readExistingPackageAdditionState({
-    localTemplateMetadata: options.localTemplateMetadata,
-    requiredManifestTruthPackagePaths,
-  });
+  for (const item of additions) {
+    for (const provider of Object.values(item.referenceBindings ?? {})) {
+      if (
+        !persistedBlueprint.packages.some(
+          (definition) => definition.path === provider.path,
+        )
+      )
+        continue;
+      const baseline = [
+        existing.foundationContribution,
+        ...existing.contributions,
+      ].find((candidate) => candidate.definition.path === provider.path)!;
+      const actual = existing.manifestTruthByPackagePath.get(provider.path);
+      if (actual === undefined)
+        throw new ReferenceCompositionFailure(
+          `共同包 ${provider.path} 缺少有效 manifest，不能复用。`,
+        );
+      for (const exportName of Object.keys(baseline.exposure.exports)) {
+        const target = isRecord(actual.exports)
+          ? actual.exports[exportName]
+          : undefined;
+        // 明确缺失、禁用或非法标量可以在写入前拒绝；条件和回退数组仍由 Node 解释。
+        if (
+          typeof target !== "string" &&
+          !isRecord(target) &&
+          !Array.isArray(target)
+        )
+          throw new ReferenceCompositionFailure(
+            `共同包 ${provider.path} 缺少可用的公开接口 ${exportName}。`,
+          );
+        if (typeof target === "string") {
+          try {
+            if (!target.startsWith("./"))
+              throw new Error("公开资源必须属于该包");
+            readFileSync(path.join(context.targetDir, provider.path, target));
+          } catch {
+            throw new ReferenceCompositionFailure(
+              `共同包 ${provider.path} 的公开接口 ${exportName} 不可读取。`,
+            );
+          }
+        }
+      }
+    }
+  }
   const generationRecord: GenerationRecord = {
     ...existing.generationRecord,
     packages: [
       ...existing.generationRecord.packages,
-      {
-        packageDefinitionId:
-          persistedContributionDefinition.packageDefinitionId,
-        path: contribution.definition.path,
-        definitionName: options.definition.metadata.name,
-        planningContribution: "planPackageAddition",
-        contributionIdentity,
-      },
+      ...additions.map((item) => ({
+        ...provenance(item),
+        packageDefinitionId: requirePersistedPackageDefinition(
+          blueprint,
+          item.definition,
+        ).packageDefinitionId,
+        path: item.definition.path,
+        ...referencePlanningFacts(item, blueprint),
+      })),
     ],
   };
   const beforeProjection = foundationPlan({
@@ -4694,7 +4755,7 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
     context,
     blueprint,
     foundationContribution: existing.foundationContribution,
-    contributions: [...existing.contributions, contribution],
+    contributions: [...existing.contributions, ...additions],
     manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
     generationRecord,
     mode: "initialization",
@@ -4705,8 +4766,8 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
     context,
     blueprint,
     foundationContribution: existing.foundationContribution,
-    contributions: [...existing.contributions, contribution],
-    renderContributions: [contribution],
+    contributions: [...existing.contributions, ...additions],
+    renderContributions: additions,
     manifestTruthByPackagePath: existing.manifestTruthByPackagePath,
     generationRecord,
     mode: "addition",
@@ -4722,9 +4783,7 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
     };
     beforeOperations = [...beforeProjection.operations, preserveOperation];
     afterOperations = afterProjection.operations.map((operation) =>
-      operation.kind === "writeTextTemplate" &&
-      "to" in operation &&
-      operation.to === rootRustDeclarationFileName
+      "to" in operation && operation.to === rootRustDeclarationFileName
         ? preserveOperation
         : operation,
     );
@@ -4740,13 +4799,11 @@ function planGeneratedRepositoryPackageAdditionFromPreparedContribution(options:
         operations: afterOperations,
         reconciliation: afterProjection.reconciliation,
       },
-      preconditions: [
-        {
-          path: contribution.definition.path,
-          kind: "must-not-exist",
-          reason: `Package Path ${contribution.definition.path} already exists and cannot be used for a new Package Addition`,
-        },
-      ],
+      preconditions: additions.map((item) => ({
+        path: item.definition.path,
+        kind: "must-not-exist" as const,
+        reason: `Package Path ${item.definition.path} already exists and cannot be used for a new Package Addition`,
+      })),
     },
   };
 }
@@ -4865,7 +4922,10 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
   try {
     localTemplateMetadata = loadLocalTemplateMetadata(options.repositoryRoot);
   } catch (error) {
-    if (error instanceof PackageAdditionTargetDeclarationFailure) {
+    if (
+      error instanceof PackageAdditionTargetDeclarationFailure ||
+      error instanceof ReferenceCompositionFailure
+    ) {
       return {
         status: "operation-failure",
         phase: "metadata",
@@ -4949,7 +5009,10 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
         preservedRootRustDeclaration = existingDeclaration;
       }
     } catch (error) {
-      if (error instanceof PackageAdditionTargetDeclarationFailure) {
+      if (
+        error instanceof PackageAdditionTargetDeclarationFailure ||
+        error instanceof ReferenceCompositionFailure
+      ) {
         return {
           status: "operation-failure",
           phase: "metadata",
@@ -5022,6 +5085,13 @@ export function prepareGeneratedRepositoryPackageAddition(options: {
   } catch (error) {
     if (error instanceof PackageAdditionBusinessConflict) {
       return { status: "conflict", conflict: error };
+    }
+    if (error instanceof ReferenceCompositionFailure) {
+      return {
+        status: "operation-failure",
+        phase: "planning",
+        diagnostic: { message: error.message, suggestion: error.suggestion },
+      };
     }
     return { status: "operation-failure", phase: "planning" };
   }

@@ -1,15 +1,17 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "./tsconfig.config.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "types": ["node"]
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true
   },
   "include": [
-    "oxfmt.config.ts",
-    "oxlint.config.ts",
-    "oxlint.template-source.config.ts",
+    "*.config.ts",
+    ".pnpmfile.mjs",
     "scripts/**/*.ts",
-    "test-support/**/*.ts",
-    "test/**/*.ts"
+    "test/**/*.ts",
+    "test-support/**/*.ts"
   ]
 }

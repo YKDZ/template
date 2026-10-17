@@ -11,18 +11,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { pathToFileURL } from "node:url";
 
+import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { execa } from "execa";
 
-const templateRoot = path.resolve(
-  import.meta.dirname,
-  "../../templates/ts-cli",
-);
 const workspaces: string[] = [];
-
-type ReadinessModule =
-  typeof import("../../templates/ts-cli/publication/readiness.ts");
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -49,7 +42,8 @@ async function generatedRepository(
     private: true,
     type: "module",
     engines: { node: options.rootNode ?? "26" },
-    packageManager: "pnpm@11.11.0",
+    packageManager: releaseToolchainSnapshot.packageManagerPin,
+    imports: { "#npm-publication/*": "./scripts/npm-publication/*.ts" },
     scripts: {
       "publication:readiness":
         "node --conditions=source scripts/npm-publication/check-readiness.ts",
@@ -189,7 +183,7 @@ async function writeLocalTemplateMetadata(
     templateVersion: "0.0.0",
     toolchain: {
       nodeLtsMajor: "26",
-      packageManagerPin: "pnpm@11.11.0",
+      packageManagerPin: releaseToolchainSnapshot.packageManagerPin,
     },
     packages: [
       {
@@ -203,46 +197,40 @@ async function writeLocalTemplateMetadata(
   });
 }
 
-async function loadReadinessModule(
-  repositoryRoot: string,
-): Promise<ReadinessModule> {
-  const moduleRoot = path.join(repositoryRoot, "scripts/npm-publication");
-  await mkdir(moduleRoot, { recursive: true });
-  await Promise.all([
-    cp(
-      path.join(templateRoot, "publication/readiness.ts"),
-      path.join(moduleRoot, "readiness.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "publication/changelog.ts"),
-      path.join(moduleRoot, "changelog.ts"),
-    ),
-    cp(
-      path.join(templateRoot, "src/cli-command-identity.ts"),
-      path.join(moduleRoot, "cli-command-identity.ts"),
-    ),
-  ]);
-  return (await import(
-    `${pathToFileURL(path.join(moduleRoot, "readiness.ts")).href}?test=${crypto.randomUUID()}`
-  )) as ReadinessModule;
-}
-
 async function runReadinessCaller(
   repositoryRoot: string,
   args: readonly string[] = [],
 ) {
-  await loadReadinessModule(repositoryRoot);
-  const source = await readFile(
-    path.join(templateRoot, "publication/check-readiness.ts"),
-    "utf8",
-  );
+  const moduleRoot = path.join(repositoryRoot, "scripts/npm-publication");
+  await mkdir(moduleRoot, { recursive: true });
+  await Promise.all([
+    ...["readiness", "changelog", "check-readiness", "configuration"].map(
+      (name) =>
+        cp(
+          new URL(
+            import.meta.resolve(`@ykdz/template-workspace/publication/${name}`),
+          ),
+          path.join(moduleRoot, `${name}.ts`),
+        ),
+    ),
+    cp(
+      new URL(
+        import.meta
+          .resolve("@ykdz/reference-ts-cli/assets/src/cli-command-identity.ts"),
+      ),
+      path.join(moduleRoot, "cli-command-identity.ts"),
+    ),
+    cp(
+      new URL(
+        import.meta
+          .resolve("@ykdz/template-workspace/assets/publication/publication.config.json"),
+      ),
+      path.join(moduleRoot, "publication.config.json"),
+    ),
+  ]);
   const callerPath = path.join(
     repositoryRoot,
     "scripts/npm-publication/check-readiness.ts",
-  );
-  await writeFile(
-    callerPath,
-    source.replaceAll("{{PUBLIC_CLI_PACKAGE_PATH}}", "packages/cli"),
   );
   return await execa("node", [callerPath, ...args], {
     cwd: repositoryRoot,
@@ -276,7 +264,7 @@ void describe("Generated Repository npm publication readiness", () => {
   void it("reports the initial private versionless candidate as safely unconfigured", async () => {
     const repositoryRoot = await generatedRepository();
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -314,7 +302,7 @@ void describe("Generated Repository npm publication readiness", () => {
       const repositoryRoot = await generatedRepository();
       await writeReadyFacts(repositoryRoot, packageName);
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -350,7 +338,7 @@ void describe("Generated Repository npm publication readiness", () => {
         dependencies,
       });
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -377,7 +365,7 @@ void describe("Generated Repository npm publication readiness", () => {
         engines: { node: nodeRange },
       });
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -397,7 +385,7 @@ void describe("Generated Repository npm publication readiness", () => {
         engines: { node: nodeRange },
       });
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -418,7 +406,7 @@ void describe("Generated Repository npm publication readiness", () => {
       const repositoryRoot = await generatedRepository({ rootNode: root });
       await writeReadyFacts(repositoryRoot, "@demo/cli");
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -472,7 +460,7 @@ void describe("Generated Repository npm publication readiness", () => {
       "--require-ready",
     ]);
     assert.strictEqual(throughPnpm.exitCode, 1);
-    assert.ok(throughPnpm.stdout.includes("BLOCKER version"));
+    assert.ok(throughPnpm.stdout.includes("BLOCKER version"), throughPnpm.all);
 
     for (const args of [
       ["--require-ready", "--require-ready"],
@@ -489,7 +477,7 @@ void describe("Generated Repository npm publication readiness", () => {
     const repositoryRoot = await generatedRepository();
     await writeReadyFacts(repositoryRoot, "demo-cli");
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     await mkdir(path.join(repositoryRoot, ".template"));
     const partial = await inspectNpmPublicationReadiness({
@@ -627,7 +615,7 @@ void describe("Generated Repository npm publication readiness", () => {
       readonly packages: readonly Record<string, unknown>[];
     };
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     await writeJson(blueprintPath, {
       ...blueprint,
@@ -687,7 +675,7 @@ void describe("Generated Repository npm publication readiness", () => {
     await writeReadyFacts(repositoryRoot, "@demo/cli");
     await rm(path.join(repositoryRoot, "pnpm-workspace.yaml"));
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -714,7 +702,7 @@ void describe("Generated Repository npm publication readiness", () => {
     );
     await writeFile(path.join(repositoryRoot, "apps"), "not a directory\n");
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -741,7 +729,7 @@ void describe("Generated Repository npm publication readiness", () => {
       reviewedOwnerFact,
     );
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const ownerReady = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -774,7 +762,7 @@ void describe("Generated Repository npm publication readiness", () => {
       "# CLI\n\nPress <kbd>Enter</kbd> to render `Hello {{name}}`.\n",
     );
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -821,7 +809,7 @@ void describe("Generated Repository npm publication readiness", () => {
         source,
       );
       const { inspectNpmPublicationReadiness } =
-        await loadReadinessModule(repositoryRoot);
+        await import("@ykdz/template-workspace/publication/readiness");
 
       const result = await inspectNpmPublicationReadiness({
         repositoryRoot,
@@ -853,7 +841,7 @@ void describe("Generated Repository npm publication readiness", () => {
       private: true,
     });
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const blocked = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -905,7 +893,7 @@ void describe("Generated Repository npm publication readiness", () => {
       { name: "@demo/runtime", version: "1.0.0" },
     );
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -953,7 +941,7 @@ void describe("Generated Repository npm publication readiness", () => {
       "TODO: choose a license.",
     );
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -994,7 +982,7 @@ void describe("Generated Repository npm publication readiness", () => {
       },
     });
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,
@@ -1016,7 +1004,7 @@ void describe("Generated Repository npm publication readiness", () => {
       "# Changelog\n\nNo release sections yet.\n",
     );
     const { inspectNpmPublicationReadiness } =
-      await loadReadinessModule(repositoryRoot);
+      await import("@ykdz/template-workspace/publication/readiness");
 
     const result = await inspectNpmPublicationReadiness({
       repositoryRoot,

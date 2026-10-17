@@ -1,0 +1,14 @@
+{
+  "extends": "@ykdz/reference-typescript-config/base.json",
+  "compilerOptions": {
+    "composite": true,
+    "customConditions": ["source"],
+    "erasableSyntaxOnly": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "rewriteRelativeImportExtensions": true,
+    "target": "es2024",
+    "types": ["node"]
+  }
+}

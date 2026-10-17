@@ -1,0 +1,12 @@
+{
+  "extends": "@ykdz/reference-vue-shared/tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+  },
+  "include": [
+    "*.config.ts",
+    "scripts/**/*.ts",
+    "tooling/**/*.ts",
+    "template/**/*.ts"
+  ]
+}

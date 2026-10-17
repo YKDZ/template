@@ -1,0 +1,15 @@
+{
+  "extends": "@ykdz/reference-typescript-config/node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
+    "composite": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    "*.config.ts",
+    "template/**/*.ts"
+  ]
+}

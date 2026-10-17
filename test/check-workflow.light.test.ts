@@ -624,7 +624,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         name: "BuildKit",
         path: ".fixture-native-cache/buildkit",
         keyInput:
-          "hashFiles('packages/builtin-presets/templates/**/*.Dockerfile', 'packages/builtin-presets/templates/foundation/devcontainer.json', 'packages/core/src/development-container-tool-layer.ts')",
+          "hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/.devcontainer/devcontainer.json', 'packages/workspace/deployment/Dockerfile', 'packages/core/src/development-container-tool-layer.ts')",
       },
       {
         name: "pnpm downloads",
@@ -635,7 +635,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         name: "Cargo downloads",
         path: ".fixture-native-cache/cargo",
         keyInput:
-          "hashFiles('Cargo.lock', 'packages/builtin-presets/templates/**/Cargo.lock', 'packages/builtin-presets/templates/**/rust-toolchain.toml')",
+          "hashFiles('reference/rust-bin/Cargo.lock', 'rust-toolchain.toml')",
       },
     ] as const;
 

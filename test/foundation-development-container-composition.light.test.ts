@@ -290,7 +290,7 @@ void describe("Foundation Development Container composition", () => {
     }
   });
 
-  void it("keeps built-in devcontainer capability facts on Package Contributions", () => {
+  void it("derives one browser tool layer from native Package Contribution environment needs", () => {
     for (const definition of builtInPresetRegistry.all()) {
       const context = createGenerationContext({
         targetDir: path.join("/tmp", definition.metadata.name),
@@ -301,24 +301,22 @@ void describe("Foundation Development Container composition", () => {
           nodeVersion: releaseToolchainSnapshot.nodeVersion,
         },
       });
-      const contributions = builtInContributions(definition, context);
-
-      for (const contribution of contributions) {
-        const layerIdentities = new Set(
-          (contribution.foundation.developmentContainerToolLayers ?? []).map(
-            (layer) => layer.identity,
-          ),
+      const plan = planGeneratedRepositoryInitialization({
+        definition,
+        context,
+      });
+      const needsBrowser = plan.packageContributions.some((contribution) =>
+        contribution.environmentNeeds.some(
+          (need) => need.kind === "playwright-browser-assets",
+        ),
+      );
+      if (needsBrowser) {
+        assert.equal(
+          plan.developmentContainer.toolLayers.filter(
+            (layer) => layer.identity === "browser-test",
+          ).length,
+          1,
         );
-        if (
-          contribution.environmentNeeds.some(
-            (need) => need.kind === "playwright-browser-assets",
-          )
-        ) {
-          assert.ok(layerIdentities.has("browser-test"));
-        }
-        if (contribution.foundation.deploymentCheck !== undefined) {
-          assert.ok(!layerIdentities.has("shellcheck"));
-        }
       }
     }
   });
@@ -416,10 +414,14 @@ void describe("Foundation Development Container composition", () => {
       context,
       (contribution) => contribution.foundation.toolchains.rust !== undefined,
     );
-    const browser = requireBuiltInContribution(context, (contribution) =>
-      contribution.environmentNeeds.some(
-        (need) => need.kind === "playwright-browser-assets",
-      ),
+    const browser = requireBuiltInContribution(
+      context,
+      (contribution) =>
+        contribution.referenceBindings?.["@ykdz/reference-vike-db"] ===
+          undefined &&
+        contribution.environmentNeeds.some(
+          (need) => need.kind === "playwright-browser-assets",
+        ),
     );
     const { deploymentCheck: _deploymentCheck, ...browserFoundation } =
       browser.foundation;

@@ -697,7 +697,7 @@ void describe("ts-lib Built-in Preset Definition behavior", () => {
       }
 
       await cleanupSharedTsLibProviderRepository();
-      await assert.rejects(stat(sharedWorkspace!), { code: "ENOENT" });
+      await assert.rejects(stat(sharedWorkspace), { code: "ENOENT" });
       assert.ok(cleanupReport);
       assert.deepStrictEqual(
         cleanupReport.cause.errors?.map((error) => error.message),

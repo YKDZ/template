@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { projectTomlStringValues } from "@ykdz/template-core/toml";
 import ts from "typescript";
 
 import { repositoryDevelopmentEnvironment } from "./repository-environment.ts";
@@ -55,8 +56,8 @@ function replaceStrings(
   return contents;
 }
 
-function projectCli(contents: string, value: string): string {
-  const source = ts.parseJsonText("packages/cli/package.json", contents);
+function projectCli(file: string, contents: string, value: string): string {
+  const source = ts.parseJsonText(file, contents);
   JSON.parse(contents);
   const statement = source.statements[0];
   const object =
@@ -77,7 +78,7 @@ function projectCli(contents: string, value: string): string {
     initializer === undefined ||
     !ts.isObjectLiteralExpression(initializer)
   )
-    throw new Error("packages/cli/package.json: 无法识别 engines");
+    throw new Error(`${file}: 无法识别 engines`);
   return replaceStrings(source, initializer, { node: value });
 }
 
@@ -149,7 +150,9 @@ export async function planRepositoryConfiguration(
     throw new Error(derived.diagnostics.join("\n"));
   const partialFiles = [
     "packages/cli/package.json",
+    "reference/ts-cli/package.json",
     "packages/core/src/release-toolchain-snapshot.ts",
+    "reference/rust-bin/template/rust-toolchain.toml",
   ];
   const contents = await Promise.all(
     partialFiles.map((file) =>
@@ -157,12 +160,22 @@ export async function planRepositoryConfiguration(
     ),
   );
   const partialOutputs = [
-    projectCli(contents[0]!, derived.cliNodeEngine),
-    projectSnapshot(contents[1]!, {
+    ...partialFiles
+      .slice(0, 2)
+      .map((file, index) =>
+        projectCli(file, contents[index]!, derived.cliNodeEngine),
+      ),
+    projectSnapshot(contents[2]!, {
       nodeVersion: declarations.rootNodeEngine.trim(),
       packageManagerPin: declarations.packageManagerDeclaration.trim(),
       rustVersion: declarations.rustToolchainChannel.trim(),
     }),
+    projectTomlStringValues(contents[3]!, [
+      {
+        path: ["toolchain", "channel"],
+        value: declarations.rustToolchainChannel.trim(),
+      },
+    ]),
   ];
   const environment = await repositoryDevelopmentEnvironment(declarations);
   const targets: Target[] = partialFiles.map((file, index) => ({
@@ -191,7 +204,7 @@ export async function checkRepositoryConfiguration(
     .filter(({ before, after }) => before !== after)
     .map(
       ({ file, before }) =>
-        `${file} ${before === undefined ? "缺失受管投影" : "配置投影漂移"}；请运行 pnpm run sync:repository`,
+        `${file} ${before === undefined ? "缺失受管投影" : "配置投影漂移"}；请运行 pnpm run sync`,
     );
 }
 

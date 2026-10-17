@@ -92,7 +92,7 @@ const journey: CliJourney = {
     }
     assert.match(results[0]?.stdout ?? "", /内置预设/u);
     const catalog = JSON.parse(results[1]?.stdout ?? "");
-    assert.equal(catalog.schemaVersion, "1");
+    assert.equal(catalog.schemaVersion, "2");
     assert.equal(catalog.kind, "data");
     assert.equal(catalog.variant, "listed");
     const names: string[] = catalog.data.presets.map(
@@ -104,7 +104,7 @@ const journey: CliJourney = {
       assert.ok(results[0]?.stdout.includes(`${name}:`));
     assert.match(results[2]?.stdout ?? "", /蓝图有效/u);
     assert.deepEqual(JSON.parse(results[3]?.stdout ?? ""), {
-      schemaVersion: "1",
+      schemaVersion: "2",
       command: "validateBlueprint",
       kind: "data",
       variant: "valid",

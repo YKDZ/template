@@ -62,10 +62,6 @@ export type FoundationContribution = {
   readonly editorCapabilities: readonly EditorCustomizationCapability[];
   /** Ecosystems and paths whose maintenance belongs in the coordinated root policy. */
   readonly dependencyMaintenance: DependencyMaintenancePolicy;
-  /** Explicit dependency on the Foundation-owned TypeScript policy Package. */
-  readonly typescriptConfigurationPackage?: {
-    readonly dependency: "required";
-  };
   /** Workspace membership patterns contributed by package boundaries. */
   readonly workspacePackageGlobs?: readonly string[];
   /** Dependency Catalog entries required by package-owned manifests. */
@@ -83,6 +79,9 @@ export type FoundationTemplateAssetSource = {
 
 /** A preset-agnostic package-sized part of a Generated Repository Plan. */
 export type PackageContribution = {
+  /** 原生来源身份及已选择的目标实例；原生依赖仍由来源 manifest 拥有。 */
+  readonly referenceSource?: string;
+  readonly referenceBindings?: Readonly<Record<string, PackageDefinition>>;
   readonly definition: PackageDefinition;
   readonly manifest: Readonly<Record<string, unknown>>;
   readonly exposure: {

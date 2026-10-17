@@ -1,8 +1,0 @@
-{
-  "compilerOptions": {
-    "allowJs": true,
-    "allowImportingTsExtensions": true,
-    "checkJs": true
-  },
-  "files": [".pnpmfile.mjs"]
-}

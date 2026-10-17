@@ -2,18 +2,19 @@
   "extends": ["//"],
   "tags": ["template-core"],
   "tasks": {
+    "test": {
+      "dependsOn": [],
+      "tags": ["quality:light"],
+      "cache": true,
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [],
+      "persistent": false
+    },
     "build": {
       "dependsOn": ["^build"],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json",
-        "$TURBO_ROOT$/pnpm-workspace.yaml",
-        "$TURBO_ROOT$/Cargo.toml",
-        "$TURBO_ROOT$/Cargo.lock"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": ["dist/**"],
       "persistent": false
     },
@@ -21,7 +22,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxfmt.config.ts"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -37,7 +38,7 @@
       "dependsOn": [],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/oxlint.config.ts"],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     },
@@ -53,11 +54,7 @@
       "dependsOn": ["^typecheck"],
       "tags": ["quality:light"],
       "cache": true,
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/tsconfig.json",
-        "$TURBO_ROOT$/tsconfig.base.json"
-      ],
+      "inputs": ["$TURBO_DEFAULT$"],
       "outputs": [],
       "persistent": false
     }

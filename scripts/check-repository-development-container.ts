@@ -24,6 +24,7 @@ const localContextNames = new Set([
 const runtimeDirectoryNames = new Set([
   "node_modules",
   "dist",
+  "template-dist",
   "target",
   "coverage",
   ".turbo",
@@ -199,6 +200,20 @@ export async function checkRepositoryDevelopmentContainer(
         cwd: projectDir,
         stdio: "inherit",
       });
+      await execute(
+        "pnpm",
+        [
+          "exec",
+          "turbo",
+          "run",
+          "test:browser",
+          "@ykdz/reference-vue-app#test:e2e",
+          "@ykdz/reference-vike-web#test:e2e",
+          "//#test:e2e:vue-hono",
+          "--output-logs=errors-only",
+        ],
+        { cwd: projectDir, stdio: "inherit" },
+      );
     });
   } catch (error) {
     preserveWorkspace = true;

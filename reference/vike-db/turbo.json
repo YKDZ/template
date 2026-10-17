@@ -1,0 +1,56 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"],
+      "tags": ["quality:light"]
+    },
+    "db:seed:example": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "db:reset": {
+      "cache": false,
+      "tags": ["work:preparation"]
+    },
+    "format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "test": {
+      "dependsOn": ["//#database:prepare:test"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "build:template": {
+      "dependsOn": ["@ykdz/template-core#build"],
+      "outputs": ["template-dist/**"],
+      "tags": ["quality:light"]
+    },
+    "typecheck:template": {
+      "dependsOn": ["@ykdz/template-core#build"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    }
+  }
+}

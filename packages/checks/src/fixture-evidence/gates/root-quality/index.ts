@@ -12,7 +12,9 @@ import {
 
 export function generatedRootQualityExecutionResources(
   plan: GeneratedRepositoryPlan,
+  options: { readonly rootGate?: "check" | "check:full" } = {},
 ): readonly FixtureEvidenceExecutionResource[] {
+  if (options.rootGate === "check") return [];
   return plan.environmentNeeds.some(
     (need) => need.kind === "playwright-browser-assets",
   )
@@ -23,6 +25,7 @@ export function generatedRootQualityExecutionResources(
 export function normalizedGeneratedRootQualityPlan(
   plan: GeneratedRepositoryPlan,
   options: {
+    readonly rootGate?: "check" | "check:full";
     readonly includeFix?: boolean;
     readonly deploymentContractIdentity?: string;
   } = {},
@@ -32,7 +35,7 @@ export function normalizedGeneratedRootQualityPlan(
     ...(options.deploymentContractIdentity === undefined
       ? {}
       : { deploymentContractIdentity: options.deploymentContractIdentity }),
-    executionResources: generatedRootQualityExecutionResources(plan),
+    executionResources: generatedRootQualityExecutionResources(plan, options),
     dependencyInstallation: normalizedFixtureDependencyInstallationPlan(),
     developmentContainer: {
       lockfileWrites: false,
@@ -56,7 +59,11 @@ export function normalizedGeneratedRootQualityPlan(
         : null,
     rootCheck: {
       command: "node",
-      args: ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+      args: [
+        "--conditions=source",
+        "scripts/task-gates.ts",
+        options.rootGate ?? "check:full",
+      ],
     },
   };
 }
@@ -64,6 +71,7 @@ export function normalizedGeneratedRootQualityPlan(
 export async function deriveGeneratedRootQualityContractIdentity(
   plan: GeneratedRepositoryPlan,
   options: {
+    readonly rootGate?: "check" | "check:full";
     readonly includeFix?: boolean;
     readonly deploymentContractIdentity?: string;
   } = {},
@@ -86,12 +94,17 @@ export async function deriveGeneratedRootQualityContractIdentity(
 export async function executeGeneratedRootQuality(options: {
   readonly projectDir: string;
   readonly gitSafeDirectory?: string;
+  readonly rootGate?: "check" | "check:full";
   readonly includeFix?: boolean;
   readonly run: FixtureCommandRunner;
 }): Promise<void> {
   await options.run(
     "node",
-    ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+    [
+      "--conditions=source",
+      "scripts/task-gates.ts",
+      options.rootGate ?? "check:full",
+    ],
     {
       cwd: options.projectDir,
       stdio: "inherit",
@@ -127,7 +140,11 @@ export async function executeGeneratedRootQuality(options: {
     }
     await options.run(
       "node",
-      ["--conditions=source", "scripts/task-gates.ts", "check:full"],
+      [
+        "--conditions=source",
+        "scripts/task-gates.ts",
+        options.rootGate ?? "check:full",
+      ],
       {
         cwd: options.projectDir,
         stdio: "inherit",

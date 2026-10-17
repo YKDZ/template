@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 import type { PackageContribution } from "@ykdz/template-core/package-contribution";
 import {
   definePackageContributionReplayAdapter,
@@ -5,101 +7,26 @@ import {
   type GenerationContext,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
 
-import {
-  sharedVueSourceOperations,
-  vueApplicationDevelopmentContainerToolLayers,
-  vueApplicationEnvironmentNeeds,
-  vueApplicationExposure,
-  vueApplicationManifest,
-  vueApplicationScripts,
-} from "../shared/vue.ts";
-import { templateSources } from "../template-sources.ts";
+import { requireReferencePackage } from "../reference-composition.ts";
 
-function packageScripts(): Record<string, string> {
-  return {
-    ...vueApplicationScripts(),
-    typecheck:
-      "node --conditions=source scripts/run-vue-tsc.ts --build --noEmit --pretty false",
-  };
-}
+const referencePackage = requireReferencePackage("@ykdz/reference-vue-app");
 
-function appContribution(options: {
-  readonly context: GenerationContext;
-  readonly packageLeafName: string;
-  readonly packagePath: string;
-  readonly packageDefinition?: PackageDefinition;
-}): PackageContribution {
-  const definition: PackageDefinition = options.packageDefinition ?? {
-    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
-    path: options.packagePath,
-    role: "runtime-service",
-  };
-  const exposure = vueApplicationExposure;
-  const sourceFiles = [
-    "env.d.ts",
-    "index.html",
-    "playwright.config.ts",
-    "vite.config.ts",
-    "turbo.json",
-    "src/App.vue",
-    "test/e2e/app.spec.ts",
-  ] as const;
-  const operations: RenderOperation[] = [
-    { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
-    ...sourceFiles.map((from) => ({
-      kind: "copyFile" as const,
-      source: templateSources.vueApp,
-      from,
-      to: `${definition.path}/${from.replace("typescript/", "scripts/")}`,
-    })),
-    ...sharedVueSourceOperations(options.context, definition.path),
-  ];
-  return {
-    definition,
-    exposure,
-    manifest: vueApplicationManifest({
-      context: options.context,
-      definition,
-      scripts: packageScripts(),
-    }),
-    operations,
-    environmentNeeds: vueApplicationEnvironmentNeeds(definition.path),
-    ciDiagnosticArtifacts: [
-      {
-        kind: "playwright",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-      {
-        kind: "vitest-browser",
-        owner: { kind: "package-boundary", path: definition.path },
-      },
-    ],
-    foundation: {
-      toolchains: {},
-      editorCapabilities: ["oxc-format-lint", "vue", "tailwind", "vitest"],
-      typescriptConfigurationPackage: { dependency: "required" },
-      dependencyMaintenance: {
-        ecosystems: ["npm", "github-actions", "docker"],
-        interval: "weekly",
-      },
-      workspacePackageGlobs: [`${definition.path.split("/")[0]}/*`],
-      developmentContainerToolLayers:
-        vueApplicationDevelopmentContainerToolLayers(),
-    },
-  };
+function appContribution(
+  context: GenerationContext,
+  definition: PackageDefinition = {
+    name: `@${context.defaultPackageScope}/web`,
+    path: "apps/web",
+    role: referencePackage.role,
+  },
+): PackageContribution {
+  return referencePackage.contribute({ context, definition });
 }
 
 const appReplayAdapter = definePackageContributionReplayAdapter({
   identity: "app",
-  replay: ({ context, packageDefinition, packageLeafName }) =>
-    appContribution({
-      context,
-      packageLeafName,
-      packagePath: packageDefinition.path,
-      packageDefinition,
-    }),
+  replay: ({ context, packageDefinition }) =>
+    appContribution(context, packageDefinition),
 });
 
 export const vueAppDefinition = {
@@ -108,37 +35,28 @@ export const vueAppDefinition = {
     title: "Vue 应用",
     description: "使用 Vite、Tailwind、Pinia 和测试工具的 Vue 应用工作区。",
   },
-  source: templateSources.vueApp,
+  source: referencePackage.source("src"),
   plannerSourceFile: fileURLToPath(import.meta.url),
   packageContributionReplayAdapters: [appReplayAdapter],
   blueprint(context) {
     return {
       schemaVersion: 3,
-      packages: [
-        appContribution({
-          context,
-          packageLeafName: "web",
-          packagePath: "apps/web",
-        }).definition,
-      ],
+      packages: [appContribution(context).definition],
     };
   },
   planInitialization(context) {
-    return appReplayAdapter.identify(
-      appContribution({
-        context,
-        packageLeafName: "web",
-        packagePath: "apps/web",
-      }),
-    );
+    return appReplayAdapter.identify(appContribution(context));
   },
   defaultPackagePath({ packageLeafName }) {
     return `apps/${packageLeafName}`;
   },
   planPackageAddition({ context, packageLeafName, packagePath }) {
     return appReplayAdapter.identify(
-      appContribution({ context, packageLeafName, packagePath }),
+      appContribution(context, {
+        name: `@${context.defaultPackageScope}/${packageLeafName}`,
+        path: packagePath,
+        role: referencePackage.role,
+      }),
     );
   },
 } satisfies BuiltInPresetDefinition;
-import { fileURLToPath } from "node:url";

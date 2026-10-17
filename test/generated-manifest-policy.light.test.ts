@@ -48,7 +48,16 @@ void describe("Generated Repository Node manifest publication policy", () => {
     }
   });
 
-  void it("omits versions from every initially private package", () => {
+  void it("preserves private package isolation and the native shared provider version", async () => {
+    const nativeConfigurationManifest = JSON.parse(
+      await readFile(
+        new URL(
+          import.meta
+            .resolve("@ykdz/reference-typescript-config/assets/package.json"),
+        ),
+        "utf8",
+      ),
+    ) as { readonly version: string };
     const publicManifestNames = new Set<string>();
     for (const definition of builtInPresetRegistry.all()) {
       const repositoryName = `manifest-policy-${definition.metadata.name}`;
@@ -69,7 +78,13 @@ void describe("Generated Repository Node manifest publication policy", () => {
       assert.strictEqual(rootManifest.private, true);
       for (const manifest of plan.manifests) {
         if (manifest.private === true) {
-          assert.ok(!("version" in manifest));
+          if (manifest.version !== undefined) {
+            assert.equal(typeof manifest.version, "string");
+            assert.match(
+              manifest.version as string,
+              /^\d+\.\d+\.\d+(?:[-+].+)?$/u,
+            );
+          }
           continue;
         }
         const publicName = manifest.name;
@@ -88,24 +103,15 @@ void describe("Generated Repository Node manifest publication policy", () => {
           foundationRecord?.packageDefinitionId,
       );
       assert.notStrictEqual(configurationDefinition, undefined);
-      const publicCandidateDefinitionIds = new Set(
-        plan.packageContributions.flatMap((contribution) => {
-          if (
-            contribution.foundation.npmPublication?.kind !==
-            "public-cli-candidate"
-          ) {
-            return [];
-          }
-          const packageDefinition = plan.blueprint.packages.find(
-            (candidate) => candidate.path === contribution.definition.path,
-          );
-          return packageDefinition === undefined
-            ? []
-            : [packageDefinition.packageDefinitionId];
-        }),
+      const configurationManifest = plan.manifests.find(
+        (manifest) => manifest.name === configurationDefinition!.name,
+      )!;
+      assert.equal(configurationManifest.private, true);
+      assert.equal(
+        configurationManifest.version,
+        nativeConfigurationManifest.version,
       );
       let requiresPackingHook = false;
-      let requiresPackingHookTsconfig = false;
 
       for (const packageDefinition of plan.blueprint.packages) {
         const manifest = plan.manifests.find(
@@ -130,26 +136,28 @@ void describe("Generated Repository Node manifest publication policy", () => {
         ].find((entry) => entry.name === configurationDefinition!.name);
         if (dependencyEntry === undefined) continue;
 
-        const isCandidateDevelopmentEdge =
-          publicCandidateDefinitionIds.has(
-            packageDefinition.packageDefinitionId,
-          ) && dependencyEntry.field === "devDependencies";
         const isPublicDevelopmentEdge =
-          (manifest?.private !== true || isCandidateDevelopmentEdge) &&
-          dependencyEntry.field === "devDependencies";
-        requiresPackingHook ||= isPublicDevelopmentEdge;
-        requiresPackingHookTsconfig ||=
           manifest?.private !== true &&
           dependencyEntry.field === "devDependencies";
-        assert.strictEqual(
-          dependencyEntry.specifier,
-          isPublicDevelopmentEdge
-            ? `link:${path.posix.relative(
+        const isNativeLink =
+          typeof dependencyEntry.specifier === "string" &&
+          dependencyEntry.specifier.startsWith("link:");
+        requiresPackingHook ||=
+          isPublicDevelopmentEdge ||
+          (isNativeLink && dependencyEntry.field === "devDependencies");
+        if (isNativeLink) {
+          assert.equal(
+            path.posix.normalize(
+              path.posix.join(
                 packageDefinition.path,
-                configurationDefinition!.path,
-              )}`
-            : "workspace:*",
-        );
+                (dependencyEntry.specifier as string).slice("link:".length),
+              ),
+            ),
+            configurationDefinition!.path,
+          );
+        } else {
+          assert.equal(dependencyEntry.specifier, "workspace:*");
+        }
       }
       const packingHookOperations = plan.operations.filter(
         (operation) =>
@@ -159,21 +167,23 @@ void describe("Generated Repository Node manifest publication policy", () => {
         packingHookOperations.length,
         requiresPackingHook ? 1 : 0,
       );
-      const tsconfigCopy = plan.operations.find(
-        (operation) =>
-          operation.kind === "copyFile" && operation.to === "tsconfig.json",
-      );
-      assert.ok(tsconfigCopy !== undefined && tsconfigCopy.kind === "copyFile");
-      assert.ok(Object.hasOwn(tsconfigCopy, "from"));
-      assert.strictEqual(tsconfigCopy.from, "tsconfig.json");
-      assert.strictEqual(
-        plan.operations.filter(
-          (operation) =>
-            operation.kind === "mergeJsonTemplate" &&
-            operation.to === "tsconfig.json" &&
-            operation.from === "tsconfig.packing-hook.json",
-        ).length,
-        requiresPackingHookTsconfig ? 1 : 0,
+      const projection = await materializeProjectProjection({
+        operations: plan.operations,
+      });
+      const tsconfigEntry = projection.entries.find(
+        (entry) => entry.path === "tsconfig.json",
+      )!;
+      const tsconfig = JSON.parse(
+        new TextDecoder().decode(tsconfigEntry.content),
+      ) as {
+        include: string[];
+        allowJs?: boolean;
+        compilerOptions?: { allowJs?: boolean };
+      };
+      assert.ok(tsconfig.include.includes("scripts/**/*.ts"));
+      assert.equal(
+        tsconfig.compilerOptions?.allowJs,
+        requiresPackingHook ? true : undefined,
       );
       assert.ok(
         plan.reconciliation.some((entry) =>
@@ -182,13 +192,6 @@ void describe("Generated Repository Node manifest publication policy", () => {
             driver: "structured",
           }),
         ),
-      );
-      assert.strictEqual(
-        plan.operations.filter(
-          (operation) => "to" in operation && operation.to === "tsconfig.json",
-        ).length,
-        (requiresPackingHook ? 2 : 1) +
-          (plan.vueHonoJointE2e === undefined ? 0 : 1),
       );
       assert.strictEqual(plan.generationRecord.templateVersion, "0.0.0");
     }
@@ -280,28 +283,17 @@ void describe("Generated Repository Node manifest publication policy", () => {
             const manifest = JSON.parse(
               new TextDecoder().decode(entry!.content),
             ) as Record<string, unknown>;
-            if (manifest.private === true) {
-              assert.deepStrictEqual(
-                {
-                  manifestPath,
-                  hasVersion: Object.hasOwn(manifest, "version"),
-                },
-                { manifestPath, hasVersion: false },
-              );
-              assert.deepStrictEqual(
-                {
-                  manifestPath,
-                  leadingKeys: Object.keys(manifest).slice(0, 2),
-                },
-                { manifestPath, leadingKeys: ["name", "private"] },
-              );
-            } else {
-              assert.deepStrictEqual(
-                {
-                  manifestPath,
-                  leadingKeys: Object.keys(manifest).slice(0, 2),
-                },
-                { manifestPath, leadingKeys: ["name", "version"] },
+            const plannedManifest = addition.manifests.find(
+              (candidate) => candidate.name === manifest.name,
+            );
+            assert.ok(plannedManifest);
+            assert.equal(manifest.private, plannedManifest.private);
+            assert.equal(manifest.version, plannedManifest.version);
+            if (manifest.private !== true) {
+              assert.equal(typeof manifest.version, "string");
+              assert.match(
+                manifest.version as string,
+                /^\d+\.\d+\.\d+(?:[-+].+)?$/u,
               );
             }
           }

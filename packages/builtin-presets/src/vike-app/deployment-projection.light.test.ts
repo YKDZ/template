@@ -13,31 +13,6 @@ import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { parse as parseYaml } from "yaml";
 
-function prunerManifestCopyInputs(dockerfile: string): string[] {
-  const lines = dockerfile.split("\n");
-  const stageStart = lines.indexOf("FROM base AS pruner");
-  if (stageStart === -1) {
-    throw new Error("部署 Dockerfile 缺少 pruner 阶段");
-  }
-  const stageEnd = lines.findIndex(
-    (line, index) => index > stageStart && line.startsWith("FROM "),
-  );
-  return lines
-    .slice(stageStart, stageEnd === -1 ? lines.length : stageEnd)
-    .filter((line) => line.startsWith("COPY ") && !line.includes("--from="))
-    .map((line) => line.trim().split(/\s+/u)[1] ?? "")
-    .filter((input) => input.endsWith("/package.json"));
-}
-// pruner 声明的包 manifest 集合必须恰好覆盖全部 workspace 成员。
-function expectPrunerWorkspaceManifests(
-  dockerfile: string,
-  packagePaths: readonly string[],
-): void {
-  assert.deepStrictEqual(
-    new Set(prunerManifestCopyInputs(dockerfile)),
-    new Set(packagePaths.map((packagePath) => `${packagePath}/package.json`)),
-  );
-}
 /**
  * 运行夹具：真正渲染并执行生成仓库自身检查的现场必须携带发版快照的精确 Node 事实，
  * 因为该检查要求根 engines.node 是精确三段版本。发版快照是固定副本里的既有真源，
@@ -87,6 +62,11 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           path: "packages/typescript-config",
           role: "shared-library",
         },
+        {
+          name: "@demo/vue-shared",
+          path: "packages/vue-shared",
+          role: "shared-library",
+        },
       ],
     );
     assert.deepStrictEqual(plan.blueprint.packageLinkIntents, [
@@ -128,7 +108,6 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       ),
       {
         dependencies: { "@demo/db": "workspace:*" },
-        imports: { "#db/*": { default: "@demo/db/*", types: "@demo/db/*" } },
       },
     );
     assert.ok(
@@ -177,7 +156,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     };
     assert.strictEqual(
       dbManifest.scripts.test,
-      "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
+      "DATABASE_PROFILE=test node --conditions=source --test --test-reporter=spec --test-reporter=#tooling/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
     );
     assert.strictEqual(
       dbManifest.scripts["db:reset"],
@@ -217,7 +196,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       "utf8",
     );
     assert.ok(viteConfig.includes("vike"));
-    assert.ok(viteConfig.includes('external: ["@demo/db"]'));
+    assert.ok(viteConfig.includes('from "@demo/db/package.json"'));
     assert.ok(!viteConfig.includes("externalConditions"));
     const drizzleConfig = await readFile(
       path.join(targetDir, "packages/db-migrations/drizzle.config.ts"),
@@ -230,7 +209,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
           path.join(targetDir, "apps/web/pages/index/+Page.vue"),
           "utf8",
         )
-      ).includes('import type { Todo } from "#db/types";'),
+      ).includes("ref<Awaited<ReturnType<typeof onLoadTodos>>>([])"),
     );
     assert.ok(
       !(
@@ -249,10 +228,8 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
       readonly compilerOptions?: Readonly<Record<string, unknown>>;
     };
     assert.ok(!("paths" in (webNodeConfig.compilerOptions ?? {})));
-    assert.ok(!("customConditions" in (webNodeConfig.compilerOptions ?? {})));
-    assert.partialDeepStrictEqual(webNodeConfig.compilerOptions, {
-      erasableSyntaxOnly: true,
-    });
+    assert.deepStrictEqual(webNodeConfig.compilerOptions?.customConditions, []);
+
     const databaseConfig = JSON.parse(
       await readFile(path.join(targetDir, "packages/db/tsconfig.json"), "utf8"),
     ) as {
@@ -286,12 +263,10 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
         readonly extends?: string;
       };
       assert.ok(!("paths" in (config.compilerOptions ?? {})));
-      assert.ok(!("customConditions" in (config.compilerOptions ?? {})));
       assert.ok(!("erasableSyntaxOnly" in (config.compilerOptions ?? {})));
       if (configPath.endsWith("tsconfig.app.json")) {
-        assert.partialDeepStrictEqual(config.compilerOptions, {
-          exactOptionalPropertyTypes: false,
-        });
+        assert.equal(config.extends, "@demo/vue-shared/tsconfig.app.json");
+        assert.deepStrictEqual(config.compilerOptions?.customConditions, []);
       } else {
         assert.strictEqual(config.extends, "./tsconfig.app.json");
       }
@@ -390,20 +365,16 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     );
     assert.ok(
       dockerfile.includes(
-        "pnpm exec turbo prune @demo/web @demo/db-migrations --docker",
+        'pnpm exec turbo prune "$APPLICATION_PACKAGE_NAME" "$MIGRATION_PACKAGE_NAME" --docker',
       ),
     );
-    expectPrunerWorkspaceManifests(
-      dockerfile,
-      plan.blueprint.packages.map((package_) => package_.path),
-    );
+    assert.ok(dockerfile.includes("COPY . ."));
     assert.ok(
       dockerfile.includes(
         "COPY --from=pruner /repo/scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh",
       ),
     );
     assert.ok(!dockerfile.includes(".pnpmfile.cts"));
-    assert.ok(!dockerfile.includes("DATABASE_PACKAGE_NAME"));
     assert.ok(dockerfile.includes("for attempt in 1 2 3; do"));
     assert.ok(
       dockerfile.includes('ENV PATH="$PNPM_HOME/bin:$PNPM_HOME:$PATH"'),
@@ -573,7 +544,7 @@ void describe("vike-app Built-in Preset Definition behavior", () => {
     );
     assert.strictEqual(
       diagnosticStaging?.env?.VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS,
-      "apps/web",
+      "apps/web\npackages/vue-shared",
     );
     assert.ok(
       (diagnosticStaging?.run ?? "").includes(

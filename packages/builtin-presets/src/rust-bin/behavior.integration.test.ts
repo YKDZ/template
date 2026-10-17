@@ -11,6 +11,7 @@ import {
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import { parse as parseYaml } from "yaml";
 
 import {
   preserveInstalledGeneratedRepositoryFailure,
@@ -189,14 +190,17 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
               await readFile(path.join(targetDir, ".gitignore"), "utf8")
             ).includes(".pnpm-store/"),
           );
-          assert.ok(
-            (
-              await readFile(
-                path.join(targetDir, ".github/dependabot.yml"),
-                "utf8",
-              )
-            ).includes('directory: "/packages/app"'),
+          const dependabot = parseYaml(
+            await readFile(
+              path.join(targetDir, ".github/dependabot.yml"),
+              "utf8",
+            ),
           );
+          assert.partialDeepStrictEqual(dependabot, {
+            updates: [
+              { "package-ecosystem": "cargo", directory: "/packages/app" },
+            ],
+          });
           const rootManifest = JSON.parse(
             await readFile(path.join(targetDir, "package.json"), "utf8"),
           );
@@ -373,7 +377,13 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
           );
           assert.ok(formatWrite !== undefined);
           assert.ok(formatWrite.dependencies.includes("//#lint:fix"));
-          assert.ok(!taskIds.includes("@demo/app#lint:fix"));
+          const packageFormatWrite = tasks.find(
+            (task) => task.taskId === "@demo/app#format:write",
+          );
+          assert.ok(packageFormatWrite !== undefined);
+          assert.ok(
+            packageFormatWrite.dependencies.includes("@demo/app#lint:fix"),
+          );
           const cargoHome = path.join(workspace, "cargo-home");
           const rustupHome = path.join(workspace, "rustup-home");
           const fakeBin = path.join(workspace, "fake-bin");
@@ -399,8 +409,8 @@ if [ ! -e "$prepared" ]; then
   printf '%s\\n' 'Cargo task ran before toolchain preparation' >&2
   exit 90
 fi
-printf '%s\\n' "${"$"}*" >> "${"$"}state"
-if [ "${"$"}1" = "test" ]; then
+printf '%s\\n' "$*" >> "$state"
+if [ "$1" = "test" ]; then
   printf '%s\\n' 'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s'
 fi
 `,

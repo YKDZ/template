@@ -12,10 +12,7 @@ import {
   planGeneratedRepositoryPackageAddition,
 } from "@ykdz/template-builtin-presets";
 import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
-import {
-  renderNewProject,
-  resolveTemplateSource,
-} from "@ykdz/template-core/renderer";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 import semver from "semver";
 
 import { vueAppDefinition } from "./definition.ts";
@@ -29,104 +26,58 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
    * 这里不另立版本常量。
    */
 
-  void it("owns a browser application contribution with explicit exposure and preparation", () => {
-    assert.deepStrictEqual(
-      builtInPresetRegistry.require("vue-app").metadata,
-      vueAppDefinition.metadata,
+  void it("通过原生依赖生成完整应用和共同配置", async (testContext) => {
+    const workspace = await mkdtemp(
+      path.join(tmpdir(), "template-vue-native-"),
     );
-    const contribution = vueAppDefinition.planInitialization({
-      targetDir: "/tmp/demo-vue",
-      repositoryName: "demo-vue",
+    testContext.after(async () =>
+      rm(workspace, { recursive: true, force: true }),
+    );
+    const context = createGenerationContext({
+      targetDir: path.join(workspace, "project"),
       defaultPackageScope: "demo",
-      foundationPackages: {
-        typescriptConfiguration: { name: "@demo/typescript-config" },
-      },
       toolchain,
     });
-
-    assert.deepStrictEqual(vueAppDefinition.metadata, {
-      name: "vue-app",
-      title: "Vue 应用",
-      description: "使用 Vite、Tailwind、Pinia 和测试工具的 Vue 应用工作区。",
+    const plan = planGeneratedRepositoryInitialization({
+      definition: vueAppDefinition,
+      context,
     });
-    assert.deepStrictEqual(contribution.definition, {
-      name: "@demo/web",
-      path: "apps/web",
-      role: "runtime-service",
+    await renderNewProject({
+      targetRoot: context.targetDir,
+      operations: [...plan.operations],
     });
-    assert.deepStrictEqual(contribution.exposure, {
-      exports: { ".": { default: "./src/main.ts", types: "./src/main.ts" } },
-      imports: { "#/*": { default: "./src/*.ts", types: "./src/*.ts" } },
-    });
-    assert.deepStrictEqual(contribution.manifest.dependencies, {
-      "@vue/devtools-api": "catalog:",
-      pinia: "catalog:",
-      vue: "catalog:",
-    });
-    assert.ok(!("checks" in contribution));
-    assert.strictEqual(contribution.environmentNeeds.length, 1);
-    assert.partialDeepStrictEqual(contribution.environmentNeeds[0], {
-      kind: "playwright-browser-assets",
-      browser: "chromium",
-    });
-    assert.deepStrictEqual(contribution.foundation.workspacePackageGlobs, [
-      "apps/*",
-    ]);
-  });
-
-  void it("declares the shared source-backed browser-test Tool Layer", () => {
-    const contribution = vueAppDefinition.planInitialization({
-      targetDir: "/tmp/demo-vue",
-      repositoryName: "demo-vue",
-      defaultPackageScope: "demo",
-      foundationPackages: {
-        typescriptConfiguration: { name: "@demo/typescript-config" },
-      },
-      toolchain,
-    });
-    const [layer] =
-      contribution.foundation.developmentContainerToolLayers ?? [];
-    const playwrightCliPackage =
-      layer?.buildArguments?.find(
-        (argument) => argument.name === "PLAYWRIGHT_CLI_PACKAGE",
-      )?.value ?? "";
-    const playwrightVersion = playwrightCliPackage.replace(
-      /^@playwright\/test@/u,
-      "",
-    );
-
-    assert.strictEqual(semver.valid(playwrightVersion), playwrightVersion);
-    assert.ok(layer !== undefined);
-    assert.strictEqual(layer.identity, "browser-test");
-    assert.deepStrictEqual(layer.requires, ["node-pnpm"]);
-    assert.strictEqual(layer.buildArguments?.length, 1);
-    assert.strictEqual(
-      layer.buildArguments?.[0]?.name,
-      "PLAYWRIGHT_CLI_PACKAGE",
-    );
-    assert.match(
-      layer.buildArguments?.[0]?.value ?? "",
-      /^@playwright\/test@/u,
-    );
-    assert.strictEqual(layer.probes?.length, 1);
-    assert.partialDeepStrictEqual(layer.probes?.[0], {
-      identity: "playwright",
-      command: "npx",
-    });
-    assert.deepStrictEqual(layer.probes?.[0]?.args, [
-      "--yes",
-      "--package",
-      playwrightCliPackage,
-      "playwright",
-      "--version",
-    ]);
-    assert.strictEqual(
-      resolveTemplateSource(layer.dockerfile.source, layer.dockerfile.from),
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/shared/devcontainer/browser-test.Dockerfile",
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(context.targetDir, "apps/web/package.json"),
+        "utf8",
       ),
     );
+    assert.partialDeepStrictEqual(manifest, {
+      name: "@demo/web",
+      dependencies: {
+        "@demo/vue-shared": "workspace:*",
+        vue: "catalog:",
+        pinia: "catalog:",
+      },
+      devDependencies: { "@demo/typescript-config": "workspace:*" },
+      exports: { ".": { default: "./src/main.ts", types: "./src/main.ts" } },
+    });
+    assert.ok(
+      plan.environmentNeeds.some(
+        (need) =>
+          need.kind === "playwright-browser-assets" &&
+          need.owner.path === "apps/web",
+      ),
+    );
+    const container = JSON.parse(
+      await readFile(
+        path.join(context.targetDir, ".devcontainer/devcontainer.json"),
+        "utf8",
+      ),
+    );
+    const browserPackage = container.build.args
+      .PLAYWRIGHT_CLI_PACKAGE as string;
+    assert.ok(semver.valid(browserPackage.replace(/^@playwright\/test@/u, "")));
   });
 
   void it("reconciles Foundation structured customization and reruns idempotently", async () => {

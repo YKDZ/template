@@ -47,82 +47,10 @@ void describe("vue-app Built-in Preset Definition behavior", () => {
       initialization.nextStepInstructions.map((step) => step.display),
       ["pnpm install", "pnpm run fix", "pnpm run check"],
     );
-    assert.ok(
-      initialization.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.from === "src/App.vue" &&
-          operation.to === "apps/web/src/App.vue",
-      ),
-    );
-
     await renderNewProject({
       targetRoot: targetDir,
       operations: [...initialization.operations],
     });
-    const viteConfig = await readFile(
-      path.join(targetDir, "apps/web/vite.config.ts"),
-      "utf8",
-    );
-    assert.ok(
-      (
-        await readFile(path.join(targetDir, ".devcontainer/Dockerfile"), "utf8")
-      ).includes("playwright install --with-deps chromium"),
-    );
-    const devcontainer = JSON.parse(
-      await readFile(
-        path.join(targetDir, ".devcontainer/devcontainer.json"),
-        "utf8",
-      ),
-    ) as {
-      readonly build?: {
-        readonly args?: Readonly<Record<string, unknown>>;
-      };
-    };
-    const playwrightPackage = devcontainer.build?.args?.PLAYWRIGHT_CLI_PACKAGE;
-    assert.ok(typeof playwrightPackage === "string");
-    assert.match(playwrightPackage, /^@playwright\/test@/u);
-    assert.ok(viteConfig.includes("@tailwindcss/vite"));
-    assert.ok(!viteConfig.includes("alias:"));
-    const vitestConfig = await readFile(
-      path.join(targetDir, "apps/web/vitest.config.ts"),
-      "utf8",
-    );
-    assert.ok(!vitestConfig.includes("alias:"));
-    for (const configPath of ["tsconfig.app.json", "tsconfig.test.json"]) {
-      const config = JSON.parse(
-        await readFile(path.join(targetDir, "apps/web", configPath), "utf8"),
-      ) as {
-        readonly compilerOptions?: Readonly<Record<string, unknown>>;
-        readonly extends?: string;
-      };
-      assert.deepStrictEqual(config.compilerOptions?.customConditions, [
-        "source",
-      ]);
-      assert.ok(
-        config.compilerOptions === undefined ||
-          !("erasableSyntaxOnly" in config.compilerOptions),
-      );
-      if (configPath === "tsconfig.app.json") {
-        assert.strictEqual(
-          config.compilerOptions?.exactOptionalPropertyTypes,
-          false,
-        );
-      } else {
-        assert.strictEqual(config.extends, "./tsconfig.app.json");
-      }
-    }
-    const nodeConfig = JSON.parse(
-      await readFile(
-        path.join(targetDir, "apps/web/tsconfig.node.json"),
-        "utf8",
-      ),
-    );
-    assert.strictEqual(nodeConfig.compilerOptions.erasableSyntaxOnly, true);
-    assert.deepStrictEqual(nodeConfig.compilerOptions.customConditions, [
-      "source",
-    ]);
-
     const defaultAddition = planGeneratedRepositoryPackageAddition({
       definition: vueAppDefinition,
       localTemplateMetadata: loadLocalTemplateMetadata(context.targetDir),

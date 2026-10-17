@@ -9,12 +9,11 @@ import {
   planGeneratedRepositoryInitialization,
   prepareGeneratedRepositoryInitialization,
 } from "@ykdz/template-builtin-presets";
+import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
-import {
-  renderNewProject,
-  resolveTemplateSource,
-} from "@ykdz/template-core/renderer";
+import { renderNewProject } from "@ykdz/template-core/renderer";
 import { execa } from "execa";
+import { parse as parseToml } from "smol-toml";
 
 import { rustBinDefinition } from "./definition.ts";
 
@@ -57,7 +56,7 @@ function requireReadyInitialization(
 }
 
 void describe("rust-bin Built-in Preset Definition behavior", () => {
-  void it("adds worker as @scope/worker with matching Cargo name and default path", () => {
+  void it("adds worker as @scope/worker with matching Cargo name and default path", async () => {
     assert.strictEqual(
       rustBinDefinition.initialPrimaryPackage.defaultLeafName,
       "app",
@@ -87,19 +86,21 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       path: "packages/worker",
       role: "native-package",
     });
-    const cargoManifestOperation = contribution?.operations.find(
-      (operation) =>
-        operation.kind === "writeTextTemplate" &&
-        operation.from === "Cargo.toml",
-    );
-    assert.ok(
-      cargoManifestOperation !== undefined &&
-        cargoManifestOperation.kind === "writeTextTemplate",
-    );
-    assert.strictEqual(cargoManifestOperation.to, "packages/worker/Cargo.toml");
-    assert.deepStrictEqual(cargoManifestOperation.replacements, {
-      CARGO_PACKAGE_NAME: "worker",
+    assert.ok(contribution);
+    const projection = await materializeProjectProjection({
+      operations: contribution.operations,
     });
+    const cargo = projection.entries.find(
+      (entry) => entry.path === "packages/worker/Cargo.toml",
+    )!;
+    assert.equal(
+      (
+        parseToml(Buffer.from(cargo.content).toString("utf8")).package as {
+          name: string;
+        }
+      ).name,
+      "worker",
+    );
   });
 
   void it("keeps initialization and Package Addition Rust contributions aligned", () => {
@@ -172,36 +173,12 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
       name: "@demo/app",
       scripts: {
         "format:check":
-          "cargo fmt --all -- --check && oxfmt --list-different --no-error-on-unmatched-pattern package.json tsconfig.scripts.json turbo.json scripts",
-        lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix scripts",
+          "cargo fmt --all -- --check && oxfmt --list-different .",
+        lint: "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",
         test: "node --conditions=source scripts/run-rust-tests.ts",
-        typecheck: "tsc -p tsconfig.scripts.json --noEmit --pretty false",
+        typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
       },
     });
-    assert.ok(
-      contribution.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.from === "src/main.rs" &&
-          operation.to === "packages/app/src/main.rs",
-      ),
-    );
-    assert.ok(
-      contribution.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.from === "scripts/run-rust-tests.ts" &&
-          operation.to === "packages/app/scripts/run-rust-tests.ts",
-      ),
-    );
-    assert.ok(
-      contribution.operations.some(
-        (operation) =>
-          operation.kind === "copyFile" &&
-          operation.from === "rustfmt.toml" &&
-          operation.to === "packages/app/rustfmt.toml",
-      ),
-    );
     assert.ok(!("checks" in contribution));
     assert.ok(!("fixes" in contribution));
     assert.ok(!("foundationOperations" in contribution));
@@ -292,13 +269,6 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
     assert.strictEqual(layer?.probes?.length, 4);
     assert.strictEqual(layer?.probes?.[0]?.args?.length, 1);
     assert.strictEqual(layer?.probes?.[1]?.args?.length, 1);
-    assert.strictEqual(
-      resolveTemplateSource(layer!.dockerfile.source, layer!.dockerfile.from),
-      path.resolve(
-        import.meta.dirname,
-        "../../templates/shared/devcontainer/rust.Dockerfile",
-      ),
-    );
   });
 
   void it("ignores package-local Cargo target output in generated repositories", async () => {
@@ -349,31 +319,20 @@ void describe("rust-bin Built-in Preset Definition behavior", () => {
         }),
       );
       const snapshotRustVersion = releaseToolchainSnapshot.rustVersion;
-      const rootToolchainOperation = preparation.plan.operations.find(
-        (operation) =>
-          "to" in operation && operation.to === "rust-toolchain.toml",
-      );
-
       assert.strictEqual(
         preparation.context.toolchain.rustVersion,
         snapshotRustVersion,
       );
-      assert.partialDeepStrictEqual(rootToolchainOperation, {
-        kind: "writeTextTemplate",
-        source: rustBinDefinition.source,
-        from: "rust-toolchain.toml",
-        replacements: { RUST_TOOLCHAIN: snapshotRustVersion },
-      });
-
       await renderNewProject({
         targetRoot: targetDir,
         operations: [...preparation.plan.operations],
       });
 
-      assert.strictEqual(
+      const declaration = parseToml(
         await readFile(path.join(targetDir, "rust-toolchain.toml"), "utf8"),
-        `[toolchain]\nchannel = "${snapshotRustVersion}"\ncomponents = ["rustfmt", "clippy"]\n`,
-      );
+      ).toolchain as { channel: string; components: string[] };
+      assert.equal(declaration.channel, snapshotRustVersion);
+      assert.deepStrictEqual(declaration.components, ["rustfmt", "clippy"]);
       assert.strictEqual(
         JSON.parse(
           await readFile(

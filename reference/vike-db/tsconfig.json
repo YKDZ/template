@@ -1,0 +1,25 @@
+{
+  "extends": "@ykdz/reference-typescript-config/base.json",
+  "compilerOptions": {
+    "composite": true,
+    "customConditions": ["source"],
+    "declaration": true,
+    "declarationMap": true,
+    "erasableSyntaxOnly": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "target": "es2024",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts",
+    "oxlint.config.ts",
+    "oxfmt.config.ts"
+  ]
+}

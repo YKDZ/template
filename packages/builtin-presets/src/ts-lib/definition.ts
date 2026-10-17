@@ -7,25 +7,13 @@ import {
   type GenerationContext,
 } from "@ykdz/template-core/preset-definition";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
-import type { RenderOperation } from "@ykdz/template-core/renderer";
 
-import { typescriptConfigSourceOperation } from "../shared/typescript.ts";
-import { templateSources } from "../template-sources.ts";
+import { requireReferencePackage } from "../reference-composition.ts";
+
+const referencePackage = requireReferencePackage("@ykdz/reference-ts-lib");
 
 function packagePathForLeaf(packageLeafName: string): string {
   return `packages/${packageLeafName}`;
-}
-
-function packageScripts(): Record<string, string> {
-  return {
-    "format:check": "oxfmt --list-different .",
-    "format:write": "oxfmt --write .",
-    lint: "oxlint --quiet --format=unix --ignore-pattern node_modules .",
-    "lint:fix": "oxlint --format=unix . --fix",
-    build: "tsc -p tsconfig.build.json --pretty false",
-    test: "node --conditions=source --test --test-reporter=spec --test-reporter=./scripts/node-test-count-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.test.ts'",
-    typecheck: "tsc -p tsconfig.json --noEmit --pretty false",
-  };
 }
 
 function libraryContribution(options: {
@@ -34,103 +22,14 @@ function libraryContribution(options: {
   readonly packagePath: string;
   readonly packageDefinition?: PackageDefinition;
 }): PackageContribution {
-  const definition: PackageDefinition = options.packageDefinition ?? {
-    name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
-    path: options.packagePath,
-    role: "shared-library",
-  };
-  const exposure = {
-    exports: {
-      ".": {
-        source: "./src/index.ts",
-        types: "./dist/index.d.ts",
-        default: "./dist/index.js",
-      },
+  return referencePackage.contribute({
+    context: options.context,
+    definition: options.packageDefinition ?? {
+      name: `@${options.context.defaultPackageScope}/${options.packageLeafName}`,
+      path: options.packagePath,
+      role: referencePackage.role,
     },
-    imports: {
-      "#/*": {
-        source: "./src/*.ts",
-        types: "./src/*.ts",
-        default: "./dist/*.js",
-      },
-    },
-  };
-  const operations: RenderOperation[] = [
-    { kind: "writeJson", to: `${definition.path}/package.json`, value: {} },
-    typescriptConfigSourceOperation({
-      context: options.context,
-      source: templateSources.tsLib,
-      from: "tsconfig.json",
-      to: `${definition.path}/tsconfig.json`,
-    }),
-    {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "tsconfig.build.json",
-      to: `${definition.path}/tsconfig.build.json`,
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "src/index.ts",
-      to: `${definition.path}/src/index.ts`,
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "src/name-schema.ts",
-      to: `${definition.path}/src/name-schema.ts`,
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "turbo.json",
-      to: `${definition.path}/turbo.json`,
-    },
-    {
-      kind: "copyFile",
-      source: templateSources.tsLib,
-      from: "test/greet.test.ts",
-      to: `${definition.path}/test/greet.test.ts`,
-    },
-    ...["node-test-count-reporter.ts"].map((name) => ({
-      kind: "copyFile" as const,
-      source: templateSources.foundation,
-      from: `scripts/${name}`,
-      to: `${definition.path}/scripts/${name}`,
-    })),
-  ];
-  return {
-    definition,
-    exposure,
-    manifest: {
-      name: definition.name,
-      private: true,
-      type: "module",
-      ...exposure,
-      dependencies: { valibot: "catalog:" },
-      devDependencies: {
-        "@types/node": "catalog:",
-        oxfmt: "catalog:",
-        oxlint: "catalog:",
-        "oxlint-tsgolint": "catalog:",
-        "typescript-7": "catalog:",
-      },
-      engines: { node: options.context.toolchain.nodeLtsMajor },
-      scripts: packageScripts(),
-    },
-    operations,
-    environmentNeeds: [],
-    foundation: {
-      toolchains: {},
-      editorCapabilities: ["oxc-format-lint"],
-      typescriptConfigurationPackage: { dependency: "required" },
-      dependencyMaintenance: {
-        ecosystems: ["npm", "github-actions", "docker"],
-        interval: "weekly",
-      },
-    },
-  };
+  });
 }
 
 const libraryReplayAdapter = definePackageContributionReplayAdapter({
@@ -150,7 +49,7 @@ export const tsLibDefinition = {
     title: "TypeScript 库",
     description: "采用 pnpm catalog 工具配置的严格 TypeScript 包。",
   },
-  source: templateSources.tsLib,
+  source: referencePackage.source("src"),
   plannerSourceFile: fileURLToPath(import.meta.url),
   packageContributionReplayAdapters: [libraryReplayAdapter],
   initialPrimaryPackage: {

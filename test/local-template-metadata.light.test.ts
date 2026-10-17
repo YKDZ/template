@@ -19,7 +19,10 @@ import {
   type BuiltInGenerationContext,
   type BuiltInPresetDefinition,
 } from "@ykdz/template-builtin-presets";
-import { reconcileAndApplyProjectProjections } from "@ykdz/template-core/project-projection";
+import {
+  materializeProjectProjection,
+  reconcileAndApplyProjectProjections,
+} from "@ykdz/template-core/project-projection";
 import { releaseToolchainSnapshot } from "@ykdz/template-core/release-toolchain-snapshot";
 import { renderNewProject } from "@ykdz/template-core/renderer";
 
@@ -491,8 +494,7 @@ void describe("Local Template Metadata", () => {
         assert.strictEqual(replaySpy.mock.callCount(), 1);
         assert.ok(
           !Object.hasOwn(
-            (replaySpy.mock.calls[0]!.arguments[0]!.packageDefinition ??
-              {}) as object,
+            replaySpy.mock.calls[0]!.arguments[0].packageDefinition ?? {},
             "packageDefinitionId",
           ),
         );
@@ -584,22 +586,18 @@ void describe("Local Template Metadata", () => {
           definition.name === "@future-scope/after-foundation-default-change",
       ),
     );
-    const typescriptConfigReplacementValues = addition.operations.flatMap(
-      (operation) =>
-        operation.kind === "writeTextTemplate" &&
-        Object.hasOwn(operation.replacements, "TYPESCRIPT_CONFIG_PACKAGE")
-          ? [operation.replacements.TYPESCRIPT_CONFIG_PACKAGE]
-          : [],
+    const projection = await materializeProjectProjection(
+      addition.projectProjections.after,
     );
-    assert.ok(
-      !typescriptConfigReplacementValues.includes(
-        "@future-scope/typescript-config",
-      ),
-    );
-    assert.ok(
-      typescriptConfigReplacementValues.includes(
-        "@recorded-scope/typescript-config",
-      ),
+    const created = projection.entries.find((entry) =>
+      entry.path.endsWith("after-foundation-default-change/tsconfig.json"),
+    )!;
+    const configuration = JSON.parse(
+      new TextDecoder().decode(created.content),
+    ) as { extends: string };
+    assert.equal(
+      configuration.extends,
+      "@recorded-scope/typescript-config/node.json",
     );
   });
 
@@ -634,46 +632,32 @@ void describe("Local Template Metadata", () => {
       )}\n`,
     );
 
-    const replayAdapter =
-      initialized.definition.packageContributionReplayAdapters[0]!;
-    const replay = replayAdapter.replay.bind(replayAdapter);
-    let replayedReplacement: string | undefined;
-    const replaySpy = mock.method(
-      replayAdapter,
-      "replay",
-      (options: Parameters<typeof replayAdapter.replay>[0]) => {
-        const contribution = replay(options);
-        replayedReplacement = contribution.operations.flatMap((operation) =>
-          operation.kind === "writeTextTemplate" &&
-          typeof operation.replacements.TYPESCRIPT_CONFIG_PACKAGE === "string"
-            ? [operation.replacements.TYPESCRIPT_CONFIG_PACKAGE]
-            : [],
-        )[0];
-        return contribution;
-      },
+    const metadata = loadLocalTemplateMetadata(initialized.repositoryRoot);
+    const addition = planGeneratedRepositoryPackageAddition({
+      definition: requireSharedLibraryAdditionDefinition(metadata.context),
+      localTemplateMetadata: metadata,
+      packageLeafName: "after-foundation-rename",
+    });
+    const originalPackage = addition.manifests.find(
+      (manifest) =>
+        manifest.name === initialized.plan.blueprint.packages[0]!.name,
+    )!;
+    assert.deepStrictEqual(metadata.context.foundationPackages, {
+      typescriptConfiguration: { name: persistedPackageName },
+    });
+    assert.partialDeepStrictEqual(originalPackage.devDependencies, {
+      [persistedPackageName]: "workspace:*",
+    });
+    const projection = await materializeProjectProjection(
+      addition.projectProjections.after,
     );
-    try {
-      const metadata = loadLocalTemplateMetadata(initialized.repositoryRoot);
-      const addition = planGeneratedRepositoryPackageAddition({
-        definition: requireSharedLibraryAdditionDefinition(metadata.context),
-        localTemplateMetadata: metadata,
-        packageLeafName: "after-foundation-rename",
-      });
-      const originalPackage = addition.manifests.find(
-        (manifest) =>
-          manifest.name === initialized.plan.blueprint.packages[0]!.name,
-      )!;
-
-      assert.strictEqual(replayedReplacement, persistedPackageName);
-      assert.deepStrictEqual(metadata.context.foundationPackages, {
-        typescriptConfiguration: { name: persistedPackageName },
-      });
-      assert.partialDeepStrictEqual(originalPackage.devDependencies, {
-        [persistedPackageName]: "workspace:*",
-      });
-    } finally {
-      replaySpy.mock.restore();
-    }
+    const configuration = projection.entries.find((entry) =>
+      entry.path.endsWith("after-foundation-rename/tsconfig.json"),
+    )!;
+    assert.equal(
+      JSON.parse(new TextDecoder().decode(configuration.content)).extends,
+      `${persistedPackageName}/node.json`,
+    );
   });
 
   void it("rejects missing Foundation package-name facts before replay", async () => {
@@ -762,18 +746,22 @@ void describe("Local Template Metadata", () => {
       name: "a late unknown Definition name",
       mutate: (packages: Record<string, unknown>[]) => {
         const record = packages.findLast(
-          (candidate) => candidate.planningContribution !== "foundationPlan",
+          (candidate) =>
+            candidate.planningContribution !== "foundationPlan" &&
+            candidate.definitionName !== "reference",
         )!;
         record.planningContribution = "planPackageAddition";
         record.definitionName = "future-preset";
       },
-      message: "references unknown Built-in Preset future-preset",
+      message: "Unknown Built-in Preset: future-preset",
     },
     {
       name: "a late unknown contribution identity",
       mutate: (packages: Record<string, unknown>[]) => {
         const record = packages.findLast(
-          (candidate) => candidate.planningContribution !== "foundationPlan",
+          (candidate) =>
+            candidate.planningContribution !== "foundationPlan" &&
+            candidate.definitionName !== "reference",
         )!;
         record.contributionIdentity = "future-contribution";
       },
@@ -815,7 +803,7 @@ void describe("Local Template Metadata", () => {
           assert.strictEqual(replaySpy.mock.callCount(), 0);
         }
         assert.ok(caught instanceof Error);
-        assert.ok((caught as Error).message.includes(message));
+        assert.ok(caught.message.includes(message), caught.message);
         assert.deepStrictEqual(
           await workspaceByteSnapshot(initialized.repositoryRoot),
           before,

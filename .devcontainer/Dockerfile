@@ -26,6 +26,9 @@ RUN apt-get update \
     && corepack enable --install-directory "$PNPM_HOME" \
     && chmod -R a+rX "$PNPM_HOME"
 
+ARG PLAYWRIGHT_CLI_PACKAGE
+RUN npx --yes --package "${PLAYWRIGHT_CLI_PACKAGE}" playwright install --with-deps chromium
+
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \

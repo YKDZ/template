@@ -6,7 +6,7 @@ import {
   isValidNewNpmPackageName,
   validateNewPackagePath,
   validateProjectBlueprint,
-} from "../packages/core/src/project-blueprint.ts";
+} from "@ykdz/template-core/project-blueprint";
 
 const packageDefinitionId = `package-${"1".repeat(64)}` as const;
 

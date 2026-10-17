@@ -1,0 +1,16 @@
+{
+  "extends": [
+    "@vue/tsconfig/tsconfig.dom.json",
+    "@ykdz/reference-typescript-config/base.json"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "customConditions": ["source"],
+    "exactOptionalPropertyTypes": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "rewriteRelativeImportExtensions": false,
+    "target": "es2024",
+    "types": ["web-bluetooth"]
+  }
+}

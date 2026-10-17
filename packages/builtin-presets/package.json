@@ -4,12 +4,9 @@
   "private": true,
   "files": [
     "dist",
-    "templates"
+    "scripts/node-test-count-reporter.ts"
   ],
   "type": "module",
-  "imports": {
-    "#npm-publication/*": "./templates/ts-cli/publication/*.ts"
-  },
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -21,81 +18,63 @@
       "types": "./dist/src/shared/development-container.d.ts",
       "default": "./dist/src/shared/development-container.js"
     },
-    "./task-gates": {
-      "source": "./templates/foundation/scripts/task-gates.ts",
-      "types": "./templates/foundation/scripts/task-gates.ts",
-      "default": "./templates/foundation/scripts/task-gates.ts"
-    },
     "./node-test-count-reporter": {
-      "source": "./templates/foundation/scripts/node-test-count-reporter.ts",
-      "types": "./templates/foundation/scripts/node-test-count-reporter.ts",
-      "default": "./templates/foundation/scripts/node-test-count-reporter.ts"
-    },
-    "./turbo-boundaries": {
-      "source": "./templates/foundation/scripts/run-turbo-boundaries.ts",
-      "types": "./templates/foundation/scripts/run-turbo-boundaries.ts",
-      "default": "./templates/foundation/scripts/run-turbo-boundaries.ts"
+      "source": "./scripts/node-test-count-reporter.ts",
+      "types": "./scripts/node-test-count-reporter.ts",
+      "default": "./scripts/node-test-count-reporter.ts"
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . && oxlint --quiet --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts && oxlint --quiet --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts/task-gates.ts templates/foundation/scripts/node-test-count-reporter.ts templates/foundation/scripts/run-turbo-boundaries.ts",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist --ignore-pattern templates . --fix && oxlint --format=unix --config ../../oxlint.config.ts templates/ts-cli/publication-setup/bridge.ts --fix && oxlint --format=unix --config ../../oxlint.template-source.config.ts templates/foundation/scripts/task-gates.ts templates/foundation/scripts/node-test-count-reporter.ts templates/foundation/scripts/run-turbo-boundaries.ts --fix",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && node --conditions=source scripts/build-reference-payload.ts",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
     "test": "node --conditions=source --experimental-strip-types --import=./test-support/setup.ts --test --test-concurrency=2 --test-timeout=60000 --test-reporter=spec --test-reporter=@ykdz/template-builtin-presets/node-test-count-reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'src/**/*.light.test.ts'",
     "test:integration": "node --conditions=source --experimental-strip-types scripts/run-installed-integration.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false && tsc -p tsconfig.template-scripts.json --noEmit --pretty false"
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
     "@ykdz/template-core": "workspace:*",
-    "jsonc-parser": "^3.3.1",
-    "npm-package-arg": "^14.0.0",
-    "picomatch": "^4.0.7",
+    "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-workspace": "workspace:*",
+    "jsonc-parser": "catalog:",
+    "npm-package-arg": "catalog:",
+    "picomatch": "catalog:",
     "semver": "catalog:",
-    "smol-toml": "^1.8.0",
-    "unbash": "5.0.0",
+    "smol-toml": "catalog:",
+    "unbash": "catalog:",
     "valibot": "catalog:",
     "yaml": "catalog:"
   },
   "devDependencies": {
-    "@hono/node-server": "catalog:",
     "@playwright/test": "catalog:",
-    "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
-    "@types/npm-package-arg": "^6.1.4",
-    "@types/picomatch": "^4.0.3",
+    "@types/npm-package-arg": "catalog:",
+    "@types/picomatch": "catalog:",
     "@types/semver": "catalog:",
     "@types/spdx-expression-parse": "catalog:",
-    "@types/web-bluetooth": "catalog:",
     "@valibot/to-json-schema": "catalog:",
-    "@vikejs/hono": "catalog:",
-    "@vitejs/plugin-vue": "catalog:",
-    "@vitest/browser-playwright": "catalog:",
-    "@vue/devtools-api": "catalog:",
-    "@vue/tsconfig": "catalog:",
     "@ykdz/cli-contract": "catalog:",
-    "drizzle-kit": "catalog:",
-    "drizzle-orm": "catalog:",
+    "@ykdz/reference-hono-api": "workspace:*",
+    "@ykdz/reference-rust-bin": "workspace:*",
+    "@ykdz/reference-ts-cli": "workspace:*",
+    "@ykdz/reference-ts-lib": "workspace:*",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-vike-db": "workspace:*",
+    "@ykdz/reference-vike-migrations": "workspace:*",
+    "@ykdz/reference-vike-web": "workspace:*",
+    "@ykdz/reference-vue-app": "workspace:*",
+    "@ykdz/reference-vue-hono-web": "workspace:*",
+    "@ykdz/reference-vue-shared": "workspace:*",
     "execa": "catalog:",
-    "hono": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "pinia": "catalog:",
     "spdx-expression-parse": "catalog:",
-    "tailwindcss": "catalog:",
     "tar": "catalog:",
-    "telefunc": "catalog:",
     "typescript": "catalog:",
-    "typescript-7": "catalog:",
-    "vike": "catalog:",
-    "vike-vue": "catalog:",
-    "vite": "catalog:",
-    "vitest": "catalog:",
-    "vitest-browser-vue": "catalog:",
-    "vue": "catalog:",
-    "vue-tsc": "catalog:"
+    "typescript-7": "catalog:"
   },
   "peerDependencies": {
     "typescript": ">=6 <7"

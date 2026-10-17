@@ -1,0 +1,38 @@
+{
+  "name": "@ykdz/reference-rust-bin",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build": "cargo build --workspace",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "format:check": "cargo fmt --all -- --check && oxfmt --list-different .",
+    "format:write": "cargo fmt --all && oxfmt --write .",
+    "lint": "cargo clippy --workspace --all-targets -- -D warnings && oxlint --quiet --format=unix --ignore-pattern node_modules --ignore-pattern target .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern node_modules --ignore-pattern target . --fix",
+    "test": "node --conditions=source scripts/run-rust-tests.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "@ykdz/template-environment": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "smol-toml": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

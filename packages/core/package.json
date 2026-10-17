@@ -14,19 +14,25 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../pnpm-workspace.yaml dist/pnpm-workspace.yaml && cp ../../Cargo.toml dist/Cargo.toml && cp ../../Cargo.lock dist/Cargo.lock",
-    "format:check": "oxfmt --list-different --config ../../oxfmt.config.ts .",
-    "format:write": "oxfmt --write --config ../../oxfmt.config.ts .",
-    "lint": "oxlint --quiet --format=unix --config ../../oxlint.config.ts --ignore-pattern dist .",
-    "lint:fix": "oxlint --format=unix --config ../../oxlint.config.ts --ignore-pattern dist . --fix",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern dist .",
+    "lint:fix": "oxlint --format=unix --ignore-pattern dist . --fix",
+    "test": "node --conditions=source --test --test-reporter=spec --test-reporter=@ykdz/reference-typescript-config/reporter --test-reporter-destination=stdout --test-reporter-destination=stderr 'test/**/*.light.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "ignore": "catalog:",
+    "jsonc-parser": "catalog:",
     "node-diff3": "catalog:",
+    "toml-eslint-parser": "catalog:",
     "valibot": "catalog:"
   },
   "devDependencies": {
+    "@types/eslint": "catalog:",
     "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
     "execa": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

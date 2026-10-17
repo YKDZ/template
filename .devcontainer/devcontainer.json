@@ -4,6 +4,7 @@
     "dockerfile": "Dockerfile",
     "args": {
       "NODE_VERSION": "24.21.0",
+      "PLAYWRIGHT_CLI_PACKAGE": "@playwright/test@1.64.0",
       "RUST_TOOLCHAIN": "1.99.0",
       "PACKAGE_MANAGER_PIN": "pnpm@12.9.1"
     }
@@ -15,6 +16,7 @@
     "vscode": {
       "extensions": [
         "oxc.oxc-vscode",
+        "Vue.volar",
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
         "fill-labs.dependi"

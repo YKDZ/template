@@ -437,7 +437,7 @@ void describe("ts-cli Preset Definition integration behavior", () => {
         }
 
         await cleanupSharedInstalledTsCliRepository();
-        await assert.rejects(stat(sharedWorkspace!), { code: "ENOENT" });
+        await assert.rejects(stat(sharedWorkspace), { code: "ENOENT" });
         assert.ok(cleanupReport);
         assert.deepStrictEqual(
           cleanupReport.cause.errors?.map((error) => error.message),
@@ -1512,22 +1512,6 @@ exit 19
           });
           assert.notStrictEqual(wrongImports.exitCode, 0);
           await writeFile(generatedManifestPath, generatedManifestBytes);
-          assert.deepStrictEqual(
-            [
-              ...projectedBridge.matchAll(
-                /from "([^"]*(?:npm-)?publication[^"]*)"/gu,
-              ),
-            ].map((match) => match[1]),
-            [
-              "#npm-publication/artifact",
-              "#npm-publication/handoff",
-              "#npm-publication/readiness",
-            ],
-          );
-          assert.doesNotMatch(
-            projectedBridge,
-            /from "\.\.\/(?:npm-)?publication\//u,
-          );
           const mappingRestored = await execa("pnpm", ["run", "typecheck"], {
             cwd: targetDir,
             reject: false,
@@ -2942,7 +2926,6 @@ exec ${JSON.stringify(process.execPath)} "$@"
             "main",
             "types",
             "exports",
-            "imports",
             "publishConfig",
           ]) {
             assert.strictEqual(absentField in sourceManifest, false);

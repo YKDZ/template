@@ -1,0 +1,53 @@
+{
+  "name": "@ykdz/reference-vike-migrations",
+  "private": true,
+  "files": [
+    "drizzle.config.ts",
+    "drizzle/migrations"
+  ],
+  "type": "module",
+  "imports": {
+    "#tooling/*": "@ykdz/reference-typescript-config/*"
+  },
+  "exports": {
+    "./reference": "./package.json",
+    "./assets/*": "./*",
+    "./template": {
+      "source": "./template/definition.ts",
+      "types": "./template-dist/definition.d.ts",
+      "default": "./template-dist/definition.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json --noEmit",
+    "db:generate": "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:prepare:deploy": "pnpm run db:migrate",
+    "db:push": "NODE_OPTIONS=--conditions=source drizzle-kit push",
+    "db:studio": "DATABASE_PROFILE=dev NODE_OPTIONS=--conditions=source drizzle-kit studio",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "build:template": "tsc -p tsconfig.template.json --pretty false",
+    "typecheck:template": "tsc -p tsconfig.template.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@ykdz/reference-vike-db": "workspace:*",
+    "drizzle-kit": "catalog:",
+    "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/template-core": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}

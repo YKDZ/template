@@ -1,3 +1,3 @@
-import { runTurboBoundaries } from "@ykdz/template-builtin-presets/turbo-boundaries";
+import { runTurboBoundaries } from "@ykdz/template-workspace/turbo-boundaries";
 
 process.exitCode = await runTurboBoundaries();

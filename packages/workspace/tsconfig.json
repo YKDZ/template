@@ -1,0 +1,21 @@
+{
+  "extends": "@ykdz/reference-typescript-config/node.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "rewriteRelativeImportExtensions": false,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "assets/.pnpmfile.mjs",
+    "scripts/**/*.ts",
+    "publication/**/*.ts",
+    "publication-setup/**/*.ts",
+    "deployment/**/*.ts",
+    "joint-e2e/**/*.ts",
+    "*.config.ts"
+  ]
+}

@@ -3,7 +3,9 @@
   "compilerOptions": {
     "customConditions": [],
     "declarationMap": false,
-    "rootDir": "src"
+    "rootDir": "src",
+    "outDir": "dist"
   },
-  "exclude": ["src/check-generated-registry.ts"]
+  "exclude": ["src/check-generated-registry.ts", "test"],
+  "include": ["src/**/*.ts"]
 }
