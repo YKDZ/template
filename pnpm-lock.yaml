@@ -192,8 +192,8 @@ catalogs:
       specifier: ^1.8.0
       version: 1.8.0
     '@vikejs/hono':
-      specifier: ^0.2.1
-      version: 0.2.1
+      specifier: ^0.4.0
+      version: 0.4.1
     '@vitejs/plugin-vue':
       specifier: ^6.0.8
       version: 6.0.9
@@ -408,7 +408,7 @@ importers:
         version: 1.8.0(valibot@1.5.0(@typescript/typescript6@6.0.2))
       '@vikejs/hono':
         specifier: 'catalog:'
-        version: 0.2.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))
+        version: 0.4.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))
       '@vitejs/plugin-vue':
         specifier: 'catalog:'
         version: 6.0.9(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))(vue@3.5.43)
@@ -2003,11 +2003,47 @@ packages:
       srvx:
         optional: true
 
+  '@universal-middleware/core@0.7.1':
+    resolution: {integrity: sha512-SVxKEjycCfibZnVnr9voo9AMTeAOVBt0V/T2QaiDQVzBVFlgfwMBtz74jrr8CABmc1hVOUCwzTFkpa+OqbC95A==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4 || ^5
+      '@hattip/core': ^0.0.49
+      '@types/express': ^4 || ^5
+      '@webroute/route': ^0.8
+      elysia: ^1
+      fastify: ^5
+      h3: ^1 || ^2
+      hono: ^4
+      srvx: '>=0.8'
+    peerDependenciesMeta:
+      '@cloudflare/workers-types':
+        optional: true
+      '@hattip/core':
+        optional: true
+      '@types/express':
+        optional: true
+      '@webroute/route':
+        optional: true
+      elysia:
+        optional: true
+      fastify:
+        optional: true
+      h3:
+        optional: true
+      hono:
+        optional: true
+      srvx:
+        optional: true
+
   '@universal-middleware/express@0.4.31':
     resolution: {integrity: sha512-GOgisGh88KE+J4FGHBSI7pYFkrux3KWy1pVw5WfiWWgraM6lwlfV2Bu6NlaobfVmPGAhU/ZVz0XO1mV76UldSQ==}
 
-  '@universal-middleware/hono@0.4.21':
-    resolution: {integrity: sha512-HvzvJ/4DIbj8z/OWzirZZGBhWbv/w/UTNUMLKt35U3wVUJRPDZVRm3SzJR55jQfoN4MBD6DvAT5jKFjdZzsPQg==}
+  '@universal-middleware/hono@0.6.0':
+    resolution: {integrity: sha512-ZFcpELQdOeRXRWh/3pjBqZ3pHmFwS2c5xeCfX/bd8A2J0YLsuqtNkIey8xwAkliwbGGIkgcGzCRueOtMT4YIuQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      hono: ^4
 
   '@universal-middleware/node@0.2.3':
     resolution: {integrity: sha512-eh0HuiLr81Jpe58NHLixLTm42GDeWuL/BW1hGM+yuudOAc19To+zrHnQDipVWmc2D+iIExr0wfuI71ruQ77hxg==}
@@ -2017,11 +2053,11 @@ packages:
     peerDependencies:
       valibot: ^1.5.0
 
-  '@vikejs/hono@0.2.1':
-    resolution: {integrity: sha512-p63PBM88spYeMe3nl8YKbgirsxlGptrBDrXb1SxqnOjXRsb7GWsmRbuGC8axDBguxHHLM8q8Zgi4pMSQPe3t2A==}
+  '@vikejs/hono@0.4.1':
+    resolution: {integrity: sha512-ggWMEj6+OPivPveC6A1wkpT210VWP5W+paEBv1JXYGQPZoY/027vLWIT0IyXWhDzz8mKBl76xL/LTqcgkoXAsA==}
     peerDependencies:
-      hono: ^4.0.0
-      vike: ^0.4.255
+      hono: ^4.13.13
+      vike: ^0.4.268
 
   '@vitejs/plugin-vue@6.0.9':
     resolution: {integrity: sha512-rD/MORlhaZMlXWW0rEn4FB4wMinWC0z/D7Ye160S5+Rs1mC8ZDAdcDp4SjKfUhG5t8q1ktcPVw4xuTkPRlzrSA==}
@@ -4169,6 +4205,14 @@ snapshots:
       hono: 4.13.12
       srvx: 0.11.21
 
+  '@universal-middleware/core@0.7.1(hono@4.13.12)(srvx@0.11.21)':
+    dependencies:
+      regexparam: 3.0.0
+      tough-cookie: 6.0.2
+    optionalDependencies:
+      hono: 4.13.12
+      srvx: 0.11.21
+
   '@universal-middleware/express@0.4.31(hono@4.13.12)(srvx@0.11.21)':
     dependencies:
       '@universal-middleware/core': 0.4.18(hono@4.13.12)(srvx@0.11.21)
@@ -4184,9 +4228,10 @@ snapshots:
       - hono
       - srvx
 
-  '@universal-middleware/hono@0.4.21(hono@4.13.12)(srvx@0.11.21)':
+  '@universal-middleware/hono@0.6.0(hono@4.13.12)(srvx@0.11.21)':
     dependencies:
-      '@universal-middleware/core': 0.4.18(hono@4.13.12)(srvx@0.11.21)
+      '@universal-middleware/core': 0.7.1(hono@4.13.12)(srvx@0.11.21)
+      hono: 4.13.12
     transitivePeerDependencies:
       - '@cloudflare/workers-types'
       - '@hattip/core'
@@ -4195,7 +4240,6 @@ snapshots:
       - elysia
       - fastify
       - h3
-      - hono
       - srvx
 
   '@universal-middleware/node@0.2.3(hono@4.13.12)(srvx@0.11.21)':
@@ -4220,9 +4264,9 @@ snapshots:
     dependencies:
       valibot: 1.5.0(typescript@6.0.3)
 
-  '@vikejs/hono@0.2.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))':
+  '@vikejs/hono@0.4.1(hono@4.13.12)(srvx@0.11.21)(vike@0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1)))':
     dependencies:
-      '@universal-middleware/hono': 0.4.21(hono@4.13.12)(srvx@0.11.21)
+      '@universal-middleware/hono': 0.6.0(hono@4.13.12)(srvx@0.11.21)
       hono: 4.13.12
       vike: 0.4.267(hono@4.13.12)(srvx@0.11.21)(vite@8.3.2(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.1))
     transitivePeerDependencies:
