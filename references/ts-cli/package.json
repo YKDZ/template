@@ -28,7 +28,7 @@
     }
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false && tsc -p tsconfig.command-identity-types.json --pretty false",
     "build:template": "tsc -p tsconfig.template.json --pretty false",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
