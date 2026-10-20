@@ -61,7 +61,8 @@
     "typecheck:template": {
       "dependsOn": [
         "@ykdz/reference-vike-db#build",
-        "@ykdz/template-core#build"
+        "@ykdz/template-core#build",
+        "@ykdz/template-workspace-authoring#build"
       ],
       "outputs": [],
       "tags": ["quality:light"]

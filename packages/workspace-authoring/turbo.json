@@ -3,7 +3,10 @@
   "tags": ["template-workspace-authoring"],
   "tasks": {
     "build": {
-      "dependsOn": ["@ykdz/template-core#build"],
+      "dependsOn": [
+        "@ykdz/template-core#build",
+        "@ykdz/template-environment#build"
+      ],
       "tags": ["quality:light"],
       "cache": true,
       "inputs": ["$TURBO_DEFAULT$"],
