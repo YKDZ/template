@@ -4,6 +4,15 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  assertContentIdentity,
+  contentIdentityKey,
+  contentIdentityLabel,
+  createContentIndex,
+  type ContentIdentity,
+  type ContentSelector,
+  type LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
+import {
   assertPackageContribution,
   type PackageContribution,
 } from "@ykdz/template-core/package-contribution";
@@ -157,15 +166,17 @@ export type Generator<
       readonly creationInput?: CreationInput;
       readonly dryRun?: boolean;
     } & (
-      | { readonly contentIdentity: string }
+      | { readonly contentIdentity: ContentSelector }
       | {
-          readonly preset: PresetDefinition<
-            Reference,
-            NodeLayout,
-            CreationInput,
-            PresetProjectOptions<Context, Contribution>,
-            PresetProjectContribution
-          >;
+          readonly preset:
+            | ContentSelector
+            | PresetDefinition<
+                Reference,
+                NodeLayout,
+                CreationInput,
+                PresetProjectOptions<Context, Contribution>,
+                PresetProjectContribution
+              >;
         }
     ),
   ): Promise<GeneratorResult<CreationInput, OwnerFacts>>;
@@ -181,13 +192,15 @@ type GeneratorSelectionInput<
 > =
   | GeneratorSelectionRoot<CreationInput, NodeLayout>
   | {
-      readonly preset: PresetDefinition<
-        Reference,
-        NodeLayout,
-        CreationInput,
-        PresetProjectOptions<Context, Contribution>,
-        PresetProjectContribution
-      >;
+      readonly preset:
+        | ContentSelector
+        | PresetDefinition<
+            Reference,
+            NodeLayout,
+            CreationInput,
+            PresetProjectOptions<Context, Contribution>,
+            PresetProjectContribution
+          >;
       readonly creationInput?: CreationInput;
     };
 
@@ -211,6 +224,17 @@ function isPresetDefinition<
   ProjectContribution
 > {
   return isRecord(value) && value.kind === "preset" && isRecord(value.nodes);
+}
+
+function isLoadedPreset(
+  value: unknown,
+): value is LoadedContentMember<unknown, "preset"> {
+  return (
+    isRecord(value) &&
+    value.kind === "preset" &&
+    isRecord(value.definition) &&
+    isPresetDefinition(value.definition)
+  );
 }
 
 function mergeCreationInput<CreationInput extends PackageCreationInput>(
@@ -250,30 +274,22 @@ function readJson(value: unknown, label: string): Record<string, unknown> {
 }
 
 function presetOwnerKey(owner: PresetOwnerSelection): string {
-  return JSON.stringify([owner.packageName, owner.exportPath]);
+  return contentIdentityKey(owner);
 }
 
 function parsePresetSelections(value: unknown): PresetOwnerSelection[] {
   if (!Array.isArray(value)) throw new Error("生成记录的预设选择无效");
   const seen = new Set<string>();
   return value.map((item) => {
-    const owner = readJson(item, "生成记录预设选择");
-    if (
-      typeof owner.packageName !== "string" ||
-      owner.packageName.length === 0 ||
-      typeof owner.exportPath !== "string" ||
-      (owner.exportPath !== "." && !owner.exportPath.startsWith("./"))
-    ) {
-      throw new Error("生成记录的预设选择无效");
-    }
-    const selection = {
-      packageName: owner.packageName,
-      exportPath: owner.exportPath,
-    };
+    const selection = readJson(
+      item,
+      "生成记录预设选择",
+    ) as unknown as ContentIdentity;
+    assertContentIdentity(selection);
     const key = presetOwnerKey(selection);
     if (seen.has(key)) throw new Error("生成记录的预设选择重复");
     seen.add(key);
-    return selection;
+    return { ...selection };
   });
 }
 
@@ -282,6 +298,9 @@ export function parseGenerationRecord<
 >(value: unknown): GenerationRecord<CreationInput> {
   const record = parseGenerationRecordStructure<CreationInput>(value);
   const nodeInstances = record.nodeInstances;
+  for (const packageRecord of record.packages) {
+    assertContentIdentity(packageRecord.contentIdentity);
+  }
   for (const [nodeIdentity, packageDefinitionId] of Object.entries(
     nodeInstances,
   )) {
@@ -307,7 +326,7 @@ export function parseGenerationRecord<
 }
 
 function packageId(options: {
-  readonly contentIdentity: string;
+  readonly contentIdentity: ContentIdentity;
   readonly createdBy: GeneratorPackageRecord["createdBy"];
   readonly definition: PackageDefinition;
   readonly occupied: ReadonlySet<PackageDefinitionId>;
@@ -345,16 +364,7 @@ export function createGenerator<
   PresetProjectContribution = unknown,
   OwnerFacts = unknown,
 >(options: {
-  readonly content: readonly (
-    | Content
-    | PresetDefinition<
-        Content,
-        NoInfer<NodeLayout>,
-        NoInfer<CreationInput>,
-        PresetProjectOptions<Context, Contribution>,
-        NoInfer<PresetProjectContribution>
-      >
-  )[];
+  readonly content: readonly LoadedContentMember[];
   readonly strategy: WorkspaceStrategy<
     Context,
     Input,
@@ -369,111 +379,80 @@ export function createGenerator<
 }): Generator<
   Input,
   CreationInput,
-  Content,
+  Content["definition"] & PresetReference,
   NodeLayout,
   Context,
   Contribution,
   PresetProjectContribution,
   OwnerFacts
 > {
-  const contentMembers = options.content.filter(
-    (content): content is Content =>
-      !isPresetDefinition<
-        Content,
-        NodeLayout,
-        CreationInput,
-        PresetProjectOptions<Context, Contribution>,
-        PresetProjectContribution
-      >(content),
-  );
-  const presetMembers = options.content.filter(
-    (
-      content,
-    ): content is PresetDefinition<
-      Content,
-      NodeLayout,
-      CreationInput,
-      PresetProjectOptions<Context, Contribution>,
-      PresetProjectContribution
-    > =>
-      isPresetDefinition<
-        Content,
-        NodeLayout,
-        CreationInput,
-        PresetProjectOptions<Context, Contribution>,
-        PresetProjectContribution
-      >(content),
-  );
+  const contentIndex = createContentIndex(options.content);
+  const contentMembers = contentIndex.members.filter(
+    (member) => member.kind === "reference",
+  ) as Content[];
+  const presetMembers = contentIndex.members.filter(isLoadedPreset);
   const contentByIdentity = new Map(
-    contentMembers.map((content) => [content.identity, content]),
+    contentMembers.map((content) => [
+      contentIdentityKey(content.identity),
+      content,
+    ]),
   );
-  if (contentByIdentity.size !== contentMembers.length) {
-    throw new Error("显式内容身份必须唯一");
-  }
-  const presets = new Set(presetMembers);
-  if (presets.size !== presetMembers.length) {
-    throw new Error("显式预设成员不能重复");
-  }
-  const projectPresetsByOwner = new Map<
-    string,
+  type LoadedPreset = LoadedContentMember<
     PresetDefinition<
-      Content,
+      Content["definition"],
       NodeLayout,
       CreationInput,
       PresetProjectOptions<Context, Contribution>,
       PresetProjectContribution
-    >
-  >();
-  for (const preset of presets) {
+    >,
+    "preset"
+  >;
+  const projectPresetsByOwner = new Map<string, LoadedPreset>();
+  for (const presetMember of presetMembers) {
+    const preset = presetMember.definition as LoadedPreset["definition"];
     if (preset.project !== undefined) {
-      const owner = preset.owner;
-      if (owner === undefined) {
-        throw new Error("项目预设缺少所属包公开导出身份");
-      }
-      const ownerKey = JSON.stringify([owner.packageName, owner.exportPath]);
+      const ownerKey = contentIdentityKey(presetMember.identity);
       if (projectPresetsByOwner.has(ownerKey)) {
-        throw new Error("项目预设所属包导出身份重复");
+        throw new Error(
+          `项目预设规范身份重复：${contentIdentityLabel(presetMember.identity)}`,
+        );
       }
-      projectPresetsByOwner.set(ownerKey, preset);
+      projectPresetsByOwner.set(ownerKey, presetMember as LoadedPreset);
     }
     for (const node of Object.values(preset.nodes)) {
-      const reference = contentByIdentity.get(node.reference.identity);
-      if (reference !== node.reference) {
+      try {
+        contentIndex.fromDefinition(node.reference, "reference");
+      } catch (error) {
         throw new Error(
-          `显式内容集合缺少预设参考成员：${node.reference.identity}`,
+          `预设${contentIdentityLabel(presetMember.identity)}引用未装载的来源定义：${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
   }
 
-  function requireContent(identity: string): Content {
-    const content = contentByIdentity.get(identity);
-    if (content === undefined) {
-      throw new Error("显式内容中不存在：" + identity);
-    }
-    return content;
+  function requireContent(selector: ContentSelector): Content {
+    return contentIndex.resolve(selector, "reference") as Content;
+  }
+
+  function resolvePreset(selector: unknown): LoadedPreset {
+    const member = isPresetDefinition(selector)
+      ? contentIndex.fromDefinition(selector, "preset")
+      : contentIndex.resolve(selector as ContentSelector, "preset");
+    return member as LoadedPreset;
   }
 
   function expandPreset(options_: {
-    readonly preset: PresetDefinition<
-      Content,
-      NodeLayout,
-      CreationInput,
-      PresetProjectOptions<Context, Contribution>,
-      PresetProjectContribution
-    >;
+    readonly preset: LoadedPreset;
     readonly operation: "init" | "add";
     readonly creationInput?: CreationInput;
   }): GeneratorSelectionRoot<CreationInput, NodeLayout>[] {
-    if (!presets.has(options_.preset)) {
-      throw new Error("所选预设未由显式内容集合提供");
-    }
-    if (!options_.preset.operations.includes(options_.operation)) {
+    const preset = options_.preset.definition;
+    if (!preset.operations.includes(options_.operation)) {
       throw new Error(`预设不支持${options_.operation}操作`);
     }
-    const nodes = Object.entries(options_.preset.nodes) as [
+    const nodes = Object.entries(preset.nodes) as [
       string,
-      PresetNode<Content, NodeLayout, CreationInput>,
+      PresetNode<Content["definition"], NodeLayout, CreationInput>,
     ][];
     if (options_.creationInput !== undefined && nodes.length !== 1) {
       throw new Error("多节点预设不能接收单一包创建输入");
@@ -483,9 +462,13 @@ export function createGenerator<
         node.creationInput?.[options_.operation],
         options_.creationInput,
       );
+      const reference = contentIndex.fromDefinition(
+        node.reference,
+        "reference",
+      ) as Content;
       return {
         nodeIdentity,
-        contentIdentity: node.reference.identity,
+        contentIdentity: reference.identity,
         ...(node.layout === undefined ? {} : { layout: node.layout }),
         ...(creationInput === undefined ? {} : { creationInput }),
       };
@@ -582,7 +565,8 @@ export function createGenerator<
         ? {}
         : { creationInput: node.creationInput }),
     };
-    const contribution = node.content.contribute(contributionOptions);
+    const contribution =
+      node.content.definition.contribute(contributionOptions);
     const contributionDefinition = contribution.definition;
     if (
       contributionDefinition.name !== node.definition.name ||
@@ -593,7 +577,7 @@ export function createGenerator<
           node.record?.definition.packageDefinitionId)
     ) {
       throw new Error(
-        `内容 ${node.content.identity} 返回的包定义与已分配实例不一致：${node.definition.path}`,
+        `内容 ${contentIdentityLabel(node.content.identity)} 返回的包定义与已分配实例不一致：${node.definition.path}`,
       );
     }
     assertPackageContribution(
@@ -601,7 +585,10 @@ export function createGenerator<
         definition: node.definition,
         operations: contribution.operations,
       },
-      { definitionName: node.content.identity, planner: "内容贡献" },
+      {
+        definitionName: contentIdentityLabel(node.content.identity),
+        planner: "内容贡献",
+      },
     );
     node.contribution = contribution;
     return node.contribution;
@@ -624,19 +611,11 @@ export function createGenerator<
   }
 
   function projectOwner(
-    preset: PresetDefinition<
-      Content,
-      NodeLayout,
-      CreationInput,
-      PresetProjectOptions<Context, Contribution>,
-      PresetProjectContribution
-    >,
+    preset: LoadedPreset,
   ): PresetOwnerSelection | undefined {
-    if (preset.project === undefined) return undefined;
-    if (preset.owner === undefined) {
-      throw new Error("项目预设缺少所属包公开导出身份");
-    }
-    return preset.owner;
+    return preset.definition.project === undefined
+      ? undefined
+      : preset.identity;
   }
 
   function mergePresetSelections(
@@ -657,13 +636,17 @@ export function createGenerator<
     presetSelections: readonly PresetOwnerSelection[],
   ): PresetProjectContribution[] {
     return presetSelections.map((selection) => {
-      const preset = projectPresetsByOwner.get(presetOwnerKey(selection));
-      if (preset?.project === undefined) {
+      const presetMember = projectPresetsByOwner.get(presetOwnerKey(selection));
+      if (presetMember?.definition.project === undefined) {
         throw new Error(
-          `生成记录所选预设不可用：${selection.packageName}${selection.exportPath}`,
+          `生成记录所选预设不可用：${contentIdentityLabel(selection)}`,
         );
       }
-      return preset.project({ context, contributions, nodeInstances });
+      return presetMember.definition.project({
+        context,
+        contributions,
+        nodeInstances,
+      });
     });
   }
 
@@ -771,10 +754,14 @@ export function createGenerator<
     const visit = (
       node: PackageNode<Context, Contribution, CreationInput, Content>,
     ): void => {
-      const key = node.content.identity + "\u0000" + node.definition.path;
+      const identity = contentIdentityKey(node.content.identity);
+      const key = identity + "\u0000" + node.definition.path;
       if (node.record !== undefined) return;
       if (visiting.has(key)) {
-        throw new Error("显式内容依赖形成循环：" + node.content.identity);
+        throw new Error(
+          "显式内容依赖形成循环：" +
+            contentIdentityLabel(node.content.identity),
+        );
       }
       if (expanded.has(key)) return;
       visiting.add(key);
@@ -783,18 +770,26 @@ export function createGenerator<
         content: node.content,
         contentByIdentity,
       });
-      for (const identity of dependencies) {
-        const dependency = requireContent(identity);
+      for (const dependencyIdentity of dependencies) {
+        const dependencyKey = contentIdentityKey(dependencyIdentity);
+        const dependency = requireContent(dependencyIdentity);
         const candidates = [...options_.existing, ...newNodes.values()].filter(
-          (candidate) => candidate.content.identity === identity,
+          (candidate) =>
+            contentIdentityKey(candidate.content.identity) === dependencyKey,
         );
         if (candidates.length > 1) {
-          throw new Error("依赖内容有多个持久实例，无法唯一绑定：" + identity);
+          throw new Error(
+            "依赖内容有多个持久实例，无法唯一绑定：" +
+              contentIdentityLabel(dependencyIdentity),
+          );
         }
         let provider = candidates[0];
         if (provider === undefined) {
-          if (dependency.instance !== "shared") {
-            throw new Error("缺少明确的独立依赖实例：" + identity);
+          if (dependency.definition.instance !== "shared") {
+            throw new Error(
+              "缺少明确的独立依赖实例：" +
+                contentIdentityLabel(dependencyIdentity),
+            );
           }
           const definition = options.strategy.createDefinition({
             context: options_.context,
@@ -814,9 +809,9 @@ export function createGenerator<
             createdBy: "shared-dependency",
             providers: new Map(),
           };
-          newNodes.set(identity + "\u0000" + definition.path, provider);
+          newNodes.set(dependencyKey + "\u0000" + definition.path, provider);
         }
-        node.providers.set(identity, provider);
+        node.providers.set(dependencyKey, provider);
         visit(provider);
       }
       visiting.delete(key);
@@ -827,20 +822,22 @@ export function createGenerator<
     const explicitByPath = new Set<string>();
     const explicitByNode = new Set<string>();
     for (const root of options_.roots) {
-      const key = root.content.identity + "\u0000" + root.definition.path;
+      const identity = contentIdentityKey(root.content.identity);
+      const key = identity + "\u0000" + root.definition.path;
       if (explicitByNode.has(root.nodeIdentity ?? "")) {
         throw new Error("显式初始化节点身份重复：" + root.nodeIdentity);
       }
       explicitByNode.add(root.nodeIdentity ?? "");
       if (
-        root.content.instance === "independent" &&
-        explicitByContent.has(root.content.identity)
+        root.content.definition.instance === "independent" &&
+        explicitByContent.has(identity)
       ) {
         throw new Error(
-          "同一独立内容不能重复作为显式根：" + root.content.identity,
+          "同一独立内容不能重复作为显式根：" +
+            contentIdentityLabel(root.content.identity),
         );
       }
-      explicitByContent.add(root.content.identity);
+      explicitByContent.add(identity);
       if (explicitByPath.has(root.definition.path)) {
         throw new Error("显式初始化根路径重复：" + root.definition.path);
       }
@@ -906,7 +903,7 @@ export function createGenerator<
     readonly targetRoot: string;
     readonly selection: {
       readonly roots: readonly GeneratorSelectionInput<
-        Content,
+        Content["definition"] & PresetReference,
         CreationInput,
         NodeLayout,
         Context,
@@ -921,7 +918,7 @@ export function createGenerator<
       const selectedProjectPresets: PresetOwnerSelection[] = [];
       for (const root of initOptions.selection.roots) {
         if (!("preset" in root)) continue;
-        const owner = projectOwner(root.preset);
+        const owner = projectOwner(resolvePreset(root.preset));
         if (owner !== undefined) selectedProjectPresets.push(owner);
       }
       const presetSelections = mergePresetSelections(
@@ -931,13 +928,18 @@ export function createGenerator<
       const selectionRoots = initOptions.selection.roots.flatMap((root) =>
         "preset" in root
           ? expandPreset({
-              preset: root.preset,
+              preset: resolvePreset(root.preset),
               operation: "init",
               ...(root.creationInput === undefined
                 ? {}
                 : { creationInput: root.creationInput }),
             })
-          : [root],
+          : [
+              {
+                ...root,
+                contentIdentity: requireContent(root.contentIdentity).identity,
+              },
+            ],
       );
       if (selectionRoots.length === 0) {
         throw new Error("初始化至少需要一个显式内容根");
@@ -957,6 +959,7 @@ export function createGenerator<
         targetRoot: initOptions.targetRoot,
         input: initOptions.strategyInput,
         selection: selectionRoots,
+        contentByIdentity,
       });
       const roots: PackageNode<
         Context,
@@ -1059,15 +1062,17 @@ export function createGenerator<
       readonly creationInput?: CreationInput;
       readonly dryRun?: boolean;
     } & (
-      | { readonly contentIdentity: string }
+      | { readonly contentIdentity: ContentSelector }
       | {
-          readonly preset: PresetDefinition<
-            Content,
-            NodeLayout,
-            CreationInput,
-            PresetProjectOptions<Context, Contribution>,
-            PresetProjectContribution
-          >;
+          readonly preset:
+            | PresetDefinition<
+                Content["definition"] & PresetReference,
+                NodeLayout,
+                CreationInput,
+                PresetProjectOptions<Context, Contribution>,
+                PresetProjectContribution
+              >
+            | ContentSelector;
         }
     ),
   ): Promise<GeneratorResult<CreationInput, OwnerFacts>> {
@@ -1095,7 +1100,7 @@ export function createGenerator<
       const additionRoots =
         "preset" in addOptions
           ? expandPreset({
-              preset: addOptions.preset,
+              preset: resolvePreset(addOptions.preset),
               operation: "add",
               ...(addOptions.creationInput === undefined
                 ? {}
@@ -1120,7 +1125,9 @@ export function createGenerator<
       const selected = requireContent(selectionRoot.contentIdentity);
       const creationInput = selectionRoot.creationInput;
       const addedProjectPreset =
-        "preset" in addOptions ? projectOwner(addOptions.preset) : undefined;
+        "preset" in addOptions
+          ? projectOwner(resolvePreset(addOptions.preset))
+          : undefined;
       const existingNodes = addRecordNodes(record.packages, blueprint);
       const currentNodeInstances = resolveNodeInstances(
         record.packages,
@@ -1282,7 +1289,9 @@ export function createGenerator<
             conflicting.packageDefinitionId,
         );
         if (
-          prior?.contentIdentity === selected.identity &&
+          prior !== undefined &&
+          contentIdentityKey(prior.contentIdentity) ===
+            contentIdentityKey(selected.identity) &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path &&
           isDeepStrictEqual(prior.creationInput, selectionRoot.creationInput)
@@ -1297,7 +1306,9 @@ export function createGenerator<
           };
         }
         const samePackageIdentity =
-          prior?.contentIdentity === selected.identity &&
+          prior !== undefined &&
+          contentIdentityKey(prior.contentIdentity) ===
+            contentIdentityKey(selected.identity) &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path;
         return {

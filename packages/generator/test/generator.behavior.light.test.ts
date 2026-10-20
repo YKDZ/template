@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import {
+  contentIdentityKey,
+  isContentIdentity,
+  type ContentIdentity,
+} from "@ykdz/template-core/content-identity";
 import type { PackageDefinition } from "@ykdz/template-core/project-blueprint";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type {
@@ -45,8 +50,18 @@ type DocumentationContent = GeneratorContent<
   PackageCreationInput
 >;
 
-const guideIdentity = "test-docs:guide";
-const glossaryIdentity = "test-docs:glossary";
+const guideIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-guide",
+  exportPath: "./template",
+} satisfies ContentIdentity;
+const glossaryIdentity = {
+  namespace: "test-docs",
+  packageName: "@fixture/docs-glossary",
+  exportPath: "./template",
+} satisfies ContentIdentity;
+const guideIdentityKey = contentIdentityKey(guideIdentity);
+const glossaryIdentityKey = contentIdentityKey(glossaryIdentity);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -76,44 +91,64 @@ function createDocumentationEngine(options: {
 }) {
   const glossary: DocumentationContent = {
     identity: glossaryIdentity,
-    instance: "shared",
-    defaultLeafName: "glossary",
-    defaultPath: "docs/glossary",
-    role: "documentation",
-    contribute({ context, definition }) {
-      return {
-        definition,
-        operations: [
-          {
-            kind: "writeText",
-            to: `${definition.path}/README.md`,
-            text: `${context.collection}/${context.edition} glossary by ${options.author}\n`,
-          },
-        ],
-      };
+    kind: "reference",
+    alias: "glossary",
+    source: {
+      specifier: "@fixture/docs-glossary/template",
+      moduleURL: "file:///fixture/docs-glossary/template.js",
+      manifestURL: "file:///fixture/docs-glossary/package.json",
+    },
+    definition: {
+      alias: "glossary",
+      instance: "shared",
+      defaultLeafName: "glossary",
+      defaultPath: "docs/glossary",
+      role: "documentation",
+      contribute({ context, definition }) {
+        return {
+          definition,
+          operations: [
+            {
+              kind: "writeText",
+              to: `${definition.path}/README.md`,
+              text: `${context.collection}/${context.edition} glossary by ${options.author}\n`,
+            },
+          ],
+        };
+      },
     },
   };
   const guide: DocumentationContent = {
     identity: guideIdentity,
-    instance: "independent",
-    defaultLeafName: "overview",
-    defaultPath: "docs/overview",
-    role: "documentation",
-    contribute({ context, definition, bindings }) {
-      const glossaryDefinition = bindings?.get(glossaryIdentity);
-      if (glossaryDefinition === undefined) {
-        throw new Error("文档内容缺少术语表绑定");
-      }
-      return {
-        definition,
-        operations: [
-          {
-            kind: "writeText",
-            to: `${definition.path}/README.md`,
-            text: `${context.collection}/${context.edition} by ${options.author}: ${definition.name} uses ${glossaryDefinition.path}\n`,
-          },
-        ],
-      };
+    kind: "reference",
+    alias: "guide",
+    source: {
+      specifier: "@fixture/docs-guide/template",
+      moduleURL: "file:///fixture/docs-guide/template.js",
+      manifestURL: "file:///fixture/docs-guide/package.json",
+    },
+    definition: {
+      alias: "guide",
+      instance: "independent",
+      defaultLeafName: "overview",
+      defaultPath: "docs/overview",
+      role: "documentation",
+      contribute({ context, definition, bindings }) {
+        const glossaryDefinition = bindings?.get(glossaryIdentityKey);
+        if (glossaryDefinition === undefined) {
+          throw new Error("文档内容缺少术语表绑定");
+        }
+        return {
+          definition,
+          operations: [
+            {
+              kind: "writeText",
+              to: `${definition.path}/README.md`,
+              text: `${context.collection}/${context.edition} by ${options.author}: ${definition.name} uses ${glossaryDefinition.path}\n`,
+            },
+          ],
+        };
+      },
     },
   };
   const content =
@@ -131,7 +166,8 @@ function createDocumentationEngine(options: {
     initialize({ targetRoot, input, selection }) {
       if (
         selection.length !== 1 ||
-        selection[0]?.contentIdentity !== guideIdentity
+        !isContentIdentity(selection[0]?.contentIdentity) ||
+        contentIdentityKey(selection[0].contentIdentity) !== guideIdentityKey
       ) {
         throw new Error("文档策略只接受明确选择的指南内容");
       }
@@ -143,20 +179,25 @@ function createDocumentationEngine(options: {
     },
     parseState: parseDocumentationState,
     dependencies({ content: selected }) {
-      return selected.identity === guideIdentity ? [glossaryIdentity] : [];
+      return contentIdentityKey(selected.identity) === guideIdentityKey
+        ? [glossaryIdentity]
+        : [];
     },
     bindings({ providers }) {
       return new Map(providers);
     },
     createDefinition({ context, content: selected, creationInput }) {
+      const selectedDefinition = selected.definition;
       const leafName = creationInput?.leafName;
-      const leaf = leafName ?? selected.defaultLeafName;
+      const leaf = leafName ?? selectedDefinition.defaultLeafName;
       return {
         name: `${context.collection}:${leaf}`,
         path:
           creationInput?.packagePath ??
-          (leafName === undefined ? selected.defaultPath : `docs/${leafName}`),
-        role: selected.role,
+          (leafName === undefined
+            ? selectedDefinition.defaultPath
+            : `docs/${leafName}`),
+        role: selectedDefinition.role,
       };
     },
     project({ context, state, blueprint, contributions }) {
@@ -271,7 +312,7 @@ async function pathExists(filePath: string): Promise<boolean> {
 function packageRecords(value: unknown): {
   readonly strategyIdentity: string;
   readonly packages: readonly {
-    readonly contentIdentity: string;
+    readonly contentIdentity: ContentIdentity;
     readonly createdBy: string;
     readonly definition: PackageDefinition & {
       readonly packageDefinitionId: string;
@@ -541,10 +582,12 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       ) as unknown,
     );
     const sharedRecords = firstRecord.packages.filter(
-      (record) => record.contentIdentity === glossaryIdentity,
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === glossaryIdentityKey,
     );
     const guideRecords = firstRecord.packages.filter(
-      (record) => record.contentIdentity === guideIdentity,
+      (record) =>
+        contentIdentityKey(record.contentIdentity) === guideIdentityKey,
     );
     assert.strictEqual(firstRecord.strategyIdentity, "test-policy:first");
     assert.strictEqual(sharedRecords.length, 1);
@@ -552,7 +595,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
     assert.ok(
       guideRecords.every(
         (record) =>
-          record.bindings[glossaryIdentity] ===
+          record.bindings[glossaryIdentityKey] ===
           sharedRecords[0]!.definition.packageDefinitionId,
       ),
     );

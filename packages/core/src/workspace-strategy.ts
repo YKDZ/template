@@ -1,3 +1,8 @@
+import type {
+  ContentIdentity,
+  ContentSelector,
+  LoadedContentMember,
+} from "./content-identity.ts";
 import type { PackageContribution } from "./package-contribution.ts";
 import type { PresetOwnerSelection } from "./preset-definition.ts";
 import type {
@@ -29,7 +34,7 @@ export type GeneratorSelectionRoot<
 > = {
   /** 在本次组合中稳定的节点身份，用于把策略计算连到持久包实例。 */
   readonly nodeIdentity: string;
-  readonly contentIdentity: string;
+  readonly contentIdentity: ContentSelector;
   readonly creationInput?: CreationInput;
   /** 仅由拥有策略解释；通用生成器不解析布局内容。 */
   readonly layout?: NodeLayout;
@@ -40,12 +45,12 @@ export type GeneratorPackageCreatedBy =
   | "addition"
   | "shared-dependency";
 
-export type GeneratorContent<
+export type GeneratorContentDefinition<
   Context,
   Contribution extends PackageContribution,
   CreationInput = PackageCreationInput,
 > = {
-  readonly identity: string;
+  readonly alias: string;
   readonly instance: "shared" | "independent";
   readonly defaultLeafName: string;
   readonly defaultPath: string;
@@ -62,8 +67,18 @@ export type GeneratorContent<
   }): Contribution;
 };
 
+/** 本次实际公开入口装载的参考包；definition保留拥有者原对象。 */
+export type GeneratorContent<
+  Context,
+  Contribution extends PackageContribution,
+  CreationInput = PackageCreationInput,
+> = LoadedContentMember<
+  GeneratorContentDefinition<Context, Contribution, CreationInput>,
+  "reference"
+>;
+
 export type GeneratorPackageRecord<CreationInput = PackageCreationInput> = {
-  readonly contentIdentity: string;
+  readonly contentIdentity: ContentIdentity;
   readonly createdBy: GeneratorPackageCreatedBy;
   readonly definition: PersistedPackageDefinition;
   /** 原始创建语义由内容消费；包定义仍只保存在蓝图中。 */
@@ -146,6 +161,8 @@ export type WorkspaceStrategy<
       CreationInput,
       NodeLayout
     >[];
+    /** 实际登记且已解析的参考内容，键为规范三元组编码。 */
+    readonly contentByIdentity: ReadonlyMap<string, Content>;
   }): { readonly context: Context; readonly state: StrategyState };
   prepareAddition(options: {
     readonly targetRoot: string;
@@ -185,7 +202,7 @@ export type WorkspaceStrategy<
   dependencies(options: {
     readonly content: Content;
     readonly contentByIdentity: ReadonlyMap<string, Content>;
-  }): readonly string[];
+  }): readonly ContentIdentity[];
   /** 策略把已选依赖实例映射为内容原生的绑定键。 */
   bindings(options: {
     readonly content: Content;

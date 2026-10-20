@@ -24,7 +24,7 @@ function readCargoFile(file: string): { source: string; data: TomlTable } {
 export const referencePackage: ReferencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-rust-bin",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "binary",
+  alias: "binary",
   instance: "independent",
   defaultLeafName: "app",
   role: "native-package",

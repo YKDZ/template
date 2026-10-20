@@ -3,7 +3,7 @@ import { defineReferencePackage } from "@ykdz/template-workspace-authoring/refer
 export const referencePackage = defineReferencePackage({
   packageName: "@ykdz/reference-ts-lib",
   resolve: (specifier) => import.meta.resolve(specifier),
-  identity: "library",
+  alias: "library",
   instance: "independent",
   defaultLeafName: "lib",
   role: "shared-library",

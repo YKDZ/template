@@ -1,7 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { referencePackage as rustReferencePackage } from "@ykdz/reference-rust-bin/template";
+import {
+  contentIdentityKey,
+  isContentIdentity,
+} from "@ykdz/template-core/content-identity";
+import type {
+  ContentIdentity,
+  LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
 import type { RenderOperation } from "@ykdz/template-core/renderer";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
 import { projectTomlStringValues } from "@ykdz/template-core/toml";
@@ -22,12 +29,25 @@ type RustToolchain = NonNullable<
   PackageContribution["foundation"]["toolchains"]["rust"]
 >;
 
+type RustContent = LoadedContentMember;
+
+const rustModuleURL = import.meta.resolve("@ykdz/reference-rust-bin/template");
+
+function isRustContent(content: RustContent | undefined): boolean {
+  return content?.source.moduleURL === rustModuleURL;
+}
+
 /** 默认策略从被选中的原生 Rust 内容初始化其根工具链版本。 */
 export function initialRustVersion(
   selection: readonly GeneratorSelectionRoot[],
+  contentByIdentity: ReadonlyMap<string, RustContent>,
 ): string | undefined {
   return selection.some(
-    (root) => root.contentIdentity === rustReferencePackage.identity,
+    (root) =>
+      isContentIdentity(root.contentIdentity) &&
+      isRustContent(
+        contentByIdentity.get(contentIdentityKey(root.contentIdentity)),
+      ),
   )
     ? releaseToolchainSnapshot.rustVersion
     : undefined;
@@ -37,13 +57,17 @@ export function initialRustVersion(
 export function rustVersionForAddition(options: {
   readonly targetRoot: string;
   readonly packages: readonly GeneratorPackageRecord[];
-  readonly contentIdentity: string;
+  readonly contentIdentity: ContentIdentity;
+  readonly contentByIdentity: ReadonlyMap<string, RustContent>;
 }): string | undefined {
-  const hasRustPackage = options.packages.some(
-    (record) => record.contentIdentity === rustReferencePackage.identity,
+  const hasRustPackage = options.packages.some((record) =>
+    isRustContent(
+      options.contentByIdentity.get(contentIdentityKey(record.contentIdentity)),
+    ),
   );
-  const addsRustPackage =
-    options.contentIdentity === rustReferencePackage.identity;
+  const addsRustPackage = isRustContent(
+    options.contentByIdentity.get(contentIdentityKey(options.contentIdentity)),
+  );
   if (!hasRustPackage && !addsRustPackage) return undefined;
 
   const declarationPath = path.join(
