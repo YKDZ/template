@@ -5,6 +5,9 @@ export const referenceDefinition = {
   alias: "typescript-config",
   instance: "shared",
   defaultLeafName: "typescript-config",
+  workspaceConfiguration: {
+    kind: "typescript-workspace-configuration",
+  },
   role: "shared-library",
   resources: ["."],
   template: {

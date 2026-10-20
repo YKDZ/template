@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { templateReferencePackages } from "@ykdz/template-content";
 import { resolveTemplateSource } from "@ykdz/template-core/renderer";
+import { jointE2eWorkspaceResources } from "@ykdz/template-workspace/joint-e2e";
 import ts from "typescript";
 
 function property(
@@ -64,10 +65,7 @@ void describe("maintained Playwright diagnostic configuration", () => {
   };
   for (const relativePath of [
     playwrightConfiguration("@ykdz/reference-vue-app"),
-    fileURLToPath(
-      import.meta
-        .resolve("@ykdz/template-workspace/assets/joint-e2e/playwright.config.ts"),
-    ),
+    fileURLToPath(jointE2eWorkspaceResources.configuration),
     playwrightConfiguration("@ykdz/reference-vike-web"),
   ]) {
     void it(`uses native failure diagnostics in ${relativePath}`, async () => {

@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import {
   cliCommandIdentity,
   validateCliCommandName,
-} from "../../src/cli-command-identity.ts";
+} from "../../src/publication/cli-command-identity.ts";
 
 void describe("CLI command identity", () => {
   for (const { name, command, message } of [

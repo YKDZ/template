@@ -520,9 +520,9 @@ void describe("ts-cli publication owner-fact integration", () => {
               { path: "package/CHANGELOG.md" },
               { path: "package/LICENSE" },
               { path: "package/README.md" },
-              { path: "package/dist/cli-command-identity.js" },
               { path: "package/dist/cli.js" },
               { path: "package/dist/main.js" },
+              { path: "package/dist/publication/cli-command-identity.js" },
               { path: "package/package.json" },
             ],
             bin: {

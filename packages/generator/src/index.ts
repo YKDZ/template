@@ -559,15 +559,42 @@ export function createGenerator<
     });
   }
 
-  function validateRequiredBindings(
+  function requiredDependencyIdentities(
     records: readonly GeneratorPackageState<CreationInput>[],
-  ): void {
+  ): ReadonlyMap<string, readonly ContentIdentity[]> {
+    const dependenciesByPackageId = new Map<
+      string,
+      readonly ContentIdentity[]
+    >();
     for (const record of records) {
       const content = requireContent(record.contentIdentity);
-      for (const dependency of options.strategy.dependencies({
-        content,
-        contentByIdentity,
-      })) {
+      dependenciesByPackageId.set(
+        record.definition.packageDefinitionId,
+        options.strategy.dependencies({ content, contentByIdentity }),
+      );
+    }
+    return dependenciesByPackageId;
+  }
+
+  function validateRequiredBindings(
+    records: readonly GeneratorPackageState<CreationInput>[],
+    dependenciesByPackageId: ReadonlyMap<
+      string,
+      readonly ContentIdentity[]
+    > = requiredDependencyIdentities(records),
+    providers: readonly GeneratorPackageState<CreationInput>[] = records,
+  ): void {
+    for (const record of records) {
+      const dependencies = dependenciesByPackageId.get(
+        record.definition.packageDefinitionId,
+      );
+      if (dependencies === undefined) {
+        throw new Error(
+          "生成记录缺少已准备的内容依赖：" +
+            contentIdentityLabel(record.contentIdentity),
+        );
+      }
+      for (const dependency of dependencies) {
         const dependencyKey = contentIdentityKey(dependency);
         const packageDefinitionId = record.bindings[dependencyKey];
         if (packageDefinitionId === undefined) {
@@ -575,7 +602,7 @@ export function createGenerator<
             `生成记录中的内容 ${contentIdentityLabel(record.contentIdentity)} 缺少必要实例绑定：${contentIdentityLabel(dependency)}`,
           );
         }
-        const provider = findByPackageId(records, packageDefinitionId);
+        const provider = findByPackageId(providers, packageDefinitionId);
         if (contentIdentityKey(provider.contentIdentity) !== dependencyKey) {
           throw new Error(
             `生成记录中的内容 ${contentIdentityLabel(record.contentIdentity)} 将依赖绑定到错误实例：${contentIdentityLabel(dependency)}`,
@@ -1211,9 +1238,26 @@ export function createGenerator<
         }
         state = options.strategy.parseState(record.strategyState);
         packageStates = resolvePackageStates(record.packages, blueprint);
-        validateRequiredBindings(packageStates);
         validateNodeInstances(packageStates, record.nodeInstances);
         validatePresetSelections(record.presetSelections);
+      } catch (error) {
+        return fail(
+          "metadata",
+          error,
+          options.strategy.diagnoseFailure?.(error),
+        );
+      }
+      let requiredDependencies: ReadonlyMap<string, readonly ContentIdentity[]>;
+      try {
+        for (const packageRecord of packageStates) {
+          prepareContent(requireContent(packageRecord.contentIdentity));
+        }
+        requiredDependencies = requiredDependencyIdentities(packageStates);
+      } catch (error) {
+        return fail("planning", error);
+      }
+      try {
+        validateRequiredBindings(packageStates, requiredDependencies);
       } catch (error) {
         return fail(
           "metadata",
@@ -1265,8 +1309,10 @@ export function createGenerator<
       );
       try {
         for (const node of existingNodes) {
-          node.preparation = prepareContent(node.content);
-          node.preparationComplete = true;
+          node.preparation = preparations.get(node.content.definition);
+          node.preparationComplete = preparedDefinitions.has(
+            node.content.definition,
+          );
         }
         prepareContent(selected);
       } catch (error) {
@@ -1356,7 +1402,17 @@ export function createGenerator<
             ],
           };
           const packages = resolvePackageStates(allRecords, afterBlueprint);
-          validateRequiredBindings(packages);
+          const addedPackageIds = new Set(
+            records.map((item) => item.packageDefinitionId),
+          );
+          const addedPackages = packages.filter((item) =>
+            addedPackageIds.has(item.packageDefinitionId),
+          );
+          validateRequiredBindings(
+            addedPackages,
+            requiredDependencyIdentities(addedPackages),
+            packages,
+          );
           const nodeInstanceIds: Record<string, PackageDefinitionId> = {
             ...record.nodeInstances,
           };

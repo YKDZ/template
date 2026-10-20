@@ -24,6 +24,10 @@ import type {
 } from "./project-requirements.ts";
 
 export type FoundationContribution = {
+  /** 由实际选中的配置包拥有的根 TypeScript 配置身份。 */
+  readonly workspaceConfiguration?: {
+    readonly kind: "typescript-workspace-configuration";
+  };
   /** 由根策略拥有的封闭式 Vue-Hono 页面/API 浏览器验收能力。 */
   readonly vueHonoJointE2e?: {
     readonly kind: "vue-hono-joint-e2e";
@@ -54,13 +58,15 @@ export type FoundationContribution = {
   /** 仅由协同根策略消费的封闭式发布能力。 */
   readonly npmPublication?: {
     readonly kind: "public-cli-candidate";
+    readonly commandIdentitySource: FoundationTemplateAssetSource;
+    readonly creationInputSource: FoundationTemplateAssetSource;
   };
   /** Foundation 必须安装并投影到协同根文件中的工具链。 */
   readonly toolchains: {
     readonly rust?: {
       readonly toolchain: string;
       readonly components: readonly ("rustfmt" | "clippy")[];
-      readonly configurationSource: FoundationTemplateAssetSource;
+      readonly configurationText?: string;
     };
   };
   /** Foundation 必须投影到协同编辑器文件中的编辑器能力。 */

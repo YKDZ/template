@@ -6,8 +6,8 @@ import {
 } from "@ykdz/template-core/renderer";
 
 import {
-  prepareDevelopmentContainerDockerfile,
-  planDevelopmentContainerToolLayersSync,
+  developmentContainerDockerfileFromText,
+  planDevelopmentContainerToolLayersFromTexts,
   type DevelopmentContainerToolLayer,
   type DevelopmentContainerToolLayerPlan,
 } from "./development-container-tool-layer.ts";
@@ -69,92 +69,142 @@ export function browserTestDevelopmentContainerToolLayer(
   };
 }
 
-/** 共享基础层由内置仓库基础能力拥有，调用者仅追加其实际需要的工具层。 */
-export function planBuiltInDevelopmentContainer(options: {
+export type PreparedBuiltInDevelopmentContainerResources = {
+  readonly configuration: Readonly<Record<string, unknown>> & {
+    readonly features: Readonly<Record<string, Record<string, unknown>>>;
+  };
+  readonly dockerfileFragments: Readonly<Record<string, string>>;
+};
+
+const builtInDockerfileResources = [
+  "base.Dockerfile",
+  "github-cli.Dockerfile",
+  "rust.Dockerfile",
+  "browser-test.Dockerfile",
+  "shellcheck.Dockerfile",
+] as const;
+
+/** 环境 owner 在工作区策略准备阶段读取其有限配置与 Dockerfile 资源。 */
+export function prepareBuiltInDevelopmentContainerResources(): PreparedBuiltInDevelopmentContainerResources {
+  const read = (source: typeof environmentSources.base, file: string) => {
+    try {
+      return readFileSync(resolveTemplateSource(source, file), "utf8");
+    } catch (cause) {
+      throw new Error(
+        `环境资源 @ykdz/template-environment#./development-environment prepare 阶段无法读取 ${file}`,
+        { cause },
+      );
+    }
+  };
+  const dockerfileFragments = Object.fromEntries(
+    builtInDockerfileResources.map((file) => [
+      file,
+      read(
+        file === "base.Dockerfile"
+          ? environmentSources.base
+          : environmentSources.devcontainer,
+        file,
+      ),
+    ]),
+  );
+  let configuration: PreparedBuiltInDevelopmentContainerResources["configuration"];
+  try {
+    configuration = JSON.parse(
+      readFileSync(
+        resolveTemplateSource(
+          environmentSources.devcontainer,
+          "workspace-template.json",
+        ),
+        "utf8",
+      ),
+    ) as PreparedBuiltInDevelopmentContainerResources["configuration"];
+  } catch (cause) {
+    throw new Error(
+      "环境资源 @ykdz/template-environment#./development-environment prepare 阶段无法读取 workspace-template.json",
+      { cause },
+    );
+  }
+  return { configuration, dockerfileFragments };
+}
+
+function baseDevelopmentContainerToolLayer(
+  nodeVersion: string,
+): DevelopmentContainerToolLayer {
+  return {
+    identity: "node-pnpm",
+    dockerfile: { source: environmentSources.base, from: "base.Dockerfile" },
+    buildArguments: [{ name: "NODE_VERSION", value: nodeVersion }],
+    probes: [
+      { identity: "procps", command: "ps", args: ["--version"] },
+      { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
+      {
+        identity: "awk",
+        command: "awk",
+        args: ["BEGIN { exit (6 * 7 != 42) }"],
+      },
+      { identity: "ripgrep", command: "rg", args: ["--version"] },
+      {
+        identity: "jq",
+        command: "jq",
+        args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
+      },
+      {
+        identity: "python3",
+        command: "python3",
+        args: [
+          "-c",
+          'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
+        ],
+      },
+      {
+        identity: "python",
+        command: "python",
+        args: [
+          "-c",
+          'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
+        ],
+      },
+      { identity: "openssh-client", command: "ssh", args: ["-V"] },
+      { identity: "unzip", command: "unzip", args: ["-v"] },
+      { identity: "file", command: "file", args: ["--version"] },
+      { identity: "iproute2", command: "ss", args: ["--version"] },
+    ],
+    mounts: [
+      {
+        identity: "pnpm-store",
+        type: "volume",
+        source: "${devcontainerId}-pnpm-store",
+        target: "/pnpm/store",
+      },
+    ],
+  };
+}
+
+function completeBuiltInDevelopmentContainer(options: {
   readonly nodeVersion: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
+  readonly resources: PreparedBuiltInDevelopmentContainerResources;
 }): DevelopmentContainerToolLayerPlan & {
+  readonly configuration: PreparedBuiltInDevelopmentContainerResources["configuration"];
   readonly features: Readonly<Record<string, Record<string, unknown>>>;
   readonly dockerfileOperation: WriteTextOperation;
 } {
-  const plan = planDevelopmentContainerToolLayersSync({
-    baseLayer: {
-      identity: "node-pnpm",
-      dockerfile: {
-        source: environmentSources.base,
-        from: "base.Dockerfile",
-      },
-      buildArguments: [
-        {
-          name: "NODE_VERSION",
-          // 根 Node 声明原文是 M1 槽位唯一来源；major 与快照字段不得另作真源。
-          value: options.nodeVersion,
-        },
-      ],
-      probes: [
-        { identity: "procps", command: "ps", args: ["--version"] },
-        { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
-        {
-          identity: "awk",
-          command: "awk",
-          args: ["BEGIN { exit (6 * 7 != 42) }"],
-        },
-        { identity: "ripgrep", command: "rg", args: ["--version"] },
-        {
-          identity: "jq",
-          command: "jq",
-          args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
-        },
-        {
-          identity: "python3",
-          command: "python3",
-          args: [
-            "-c",
-            'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
-          ],
-        },
-        {
-          identity: "python",
-          command: "python",
-          args: [
-            "-c",
-            'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
-          ],
-        },
-        { identity: "openssh-client", command: "ssh", args: ["-V"] },
-        { identity: "unzip", command: "unzip", args: ["-v"] },
-        { identity: "file", command: "file", args: ["--version"] },
-        { identity: "iproute2", command: "ss", args: ["--version"] },
-      ],
-      mounts: [
-        {
-          identity: "pnpm-store",
-          type: "volume",
-          source: "${devcontainerId}-pnpm-store",
-          target: "/pnpm/store",
-        },
-      ],
-    },
-    layers: [
-      githubCliDevelopmentContainerToolLayer(),
-      ...(options.layers ?? []),
-    ],
+  const layers = [
+    githubCliDevelopmentContainerToolLayer(),
+    ...(options.layers ?? []),
+  ];
+  const plan = planDevelopmentContainerToolLayersFromTexts({
+    baseLayer: baseDevelopmentContainerToolLayer(options.nodeVersion),
+    layers,
+    fragmentTexts: options.resources.dockerfileFragments,
   });
   return {
     ...plan,
-    features: (
-      JSON.parse(
-        readFileSync(
-          resolveTemplateSource(
-            environmentSources.base,
-            ".devcontainer/devcontainer.json",
-          ),
-          "utf8",
-        ),
-      ) as { features: Record<string, Record<string, unknown>> }
-    ).features,
-    dockerfileOperation: prepareDevelopmentContainerDockerfile({
+    configuration: options.resources.configuration,
+    features: options.resources.configuration.features,
+    dockerfileOperation: developmentContainerDockerfileFromText({
       layers: plan.layers,
+      fragmentTexts: options.resources.dockerfileFragments,
     }),
     probes: [
       ...plan.probes,
@@ -183,6 +233,16 @@ export function planBuiltInDevelopmentContainer(options: {
   };
 }
 
+/** 只消费所属环境准备事实并投影所选开发容器能力。 */
+export function projectBuiltInDevelopmentContainer(options: {
+  readonly nodeVersion: string;
+  readonly layers?: readonly DevelopmentContainerToolLayer[];
+  readonly resources: PreparedBuiltInDevelopmentContainerResources;
+}): ReturnType<typeof completeBuiltInDevelopmentContainer> {
+  return completeBuiltInDevelopmentContainer(options);
+}
+
+/** 非生成策略消费者的便利入口；生成策略应先准备再调用纯 project。 */
 export function rustDevelopmentContainerToolLayer(
   rustVersion: string,
 ): DevelopmentContainerToolLayer {
@@ -231,15 +291,29 @@ export function shellCheckDevelopmentContainerToolLayer(): DevelopmentContainerT
   };
 }
 
-export function builtInEditorCustomization(
+/** 环境 owner 在策略准备阶段读取并验证编辑器能力声明。 */
+export function prepareBuiltInEditorCustomizationDeclarations() {
+  try {
+    return loadEditorCustomizationDeclarations(
+      resolveTemplateSource(
+        environmentSources.editorCustomization,
+        "capabilities.json",
+      ),
+    );
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `环境资源 @ykdz/template-environment#./development-environment prepare 阶段失败：${detail}`,
+      { cause },
+    );
+  }
+}
+
+/** 只组合已准备的编辑器声明与实际能力。 */
+export function projectBuiltInEditorCustomization(
   capabilities: readonly EditorCustomizationCapability[],
+  declarations: ReturnType<typeof loadEditorCustomizationDeclarations>,
 ): EditorCustomization {
-  const declarations = loadEditorCustomizationDeclarations(
-    resolveTemplateSource(
-      environmentSources.editorCustomization,
-      "capabilities.json",
-    ),
-  );
   const unknownCapability = capabilities.find(
     (capability) => !declarations.capabilityOrder.includes(capability),
   );

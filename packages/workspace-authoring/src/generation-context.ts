@@ -3,11 +3,6 @@ export type GenerationContext = {
   readonly targetDir: string;
   readonly repositoryName: string;
   readonly defaultPackageScope: string;
-  readonly foundationPackages: {
-    readonly typescriptConfiguration: {
-      readonly name: string;
-    };
-  };
   readonly toolchain: {
     readonly nodeLtsMajor: string;
     readonly packageManagerPin: string;

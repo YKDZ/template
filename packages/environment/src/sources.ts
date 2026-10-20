@@ -5,10 +5,9 @@ import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
 const source = (name: string) =>
   createTemplateSourceHandle(
     fileURLToPath(
-      import.meta.resolve(
-        name === "."
-          ? "@ykdz/template-environment/assets"
-          : "@ykdz/template-environment/assets/" + name,
+      new URL(
+        name === "." ? "../assets/" : `../assets/${name}`,
+        import.meta.url,
       ),
     ),
   );

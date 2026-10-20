@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
@@ -25,7 +26,6 @@ import {
 } from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
-  defaultWorkspaceConfigurationIdentity,
   type DefaultWorkspaceCreationInput,
 } from "@ykdz/template-workspace/default-workspace-strategy";
 
@@ -103,14 +103,6 @@ after(async () => {
 });
 
 void describe("公开模板内容集合", () => {
-  void it("从真实配置参考声明导出默认包身份供CLI校验", () => {
-    assert.deepStrictEqual(defaultWorkspaceConfigurationIdentity("demo"), {
-      name: "@demo/typescript-config",
-      path: "packages/typescript-config",
-      role: "shared-library",
-    });
-  });
-
   void it("按路径顺序聚合诊断制品并原子拒绝用户覆盖", async () => {
     const generator = createGenerator({
       content: templateContent,
@@ -777,7 +769,9 @@ void describe("公开模板内容集合", () => {
     );
     assert.strictEqual(cliManifest.exports?.["./creation-input"], undefined);
     await assert.rejects(
-      readFile(path.join(cliRoot, "packages/cli/template/creation-input.ts")),
+      readFile(
+        path.join(cliRoot, "packages/cli/template/authoring/creation-input.ts"),
+      ),
       { code: "ENOENT" },
     );
     const publicationConfigPath = path.join(
@@ -797,6 +791,49 @@ void describe("公开模板内容集合", () => {
     assert.deepStrictEqual(
       publicationConfig.creationInput,
       expectedCreationInput,
+    );
+    const candidateSelection = (await import(
+      pathToFileURL(
+        path.join(
+          cliRoot,
+          "scripts/npm-publication/cli-candidate-selection.ts",
+        ),
+      ).href
+    )) as {
+      readonly tsCliPublicCandidateCreationInput: TsCliCreationInput;
+      isTsCliPublicCandidateCreationInput(value: unknown): boolean;
+    };
+    assert.deepStrictEqual(
+      candidateSelection.tsCliPublicCandidateCreationInput,
+      expectedCreationInput,
+    );
+    assert.strictEqual(
+      candidateSelection.isTsCliPublicCandidateCreationInput(
+        expectedCreationInput,
+      ),
+      true,
+    );
+    assert.strictEqual(
+      candidateSelection.isTsCliPublicCandidateCreationInput({
+        variant: "private",
+      }),
+      false,
+    );
+    const commandIdentity = (await import(
+      pathToFileURL(
+        path.join(cliRoot, "scripts/npm-publication/cli-command-identity.ts"),
+      ).href
+    )) as {
+      cliCommandIdentity(manifest: unknown): {
+        readonly commandName: string;
+        readonly version: string;
+      };
+    };
+    assert.deepStrictEqual(
+      commandIdentity.cliCommandIdentity({
+        bin: { ship: "./dist/cli.js" },
+      }),
+      { commandName: "ship", version: "unpublished" },
     );
     const blueprint = JSON.parse(
       await readFile(path.join(cliRoot, ".template/blueprint.json"), "utf8"),

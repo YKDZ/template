@@ -72,13 +72,13 @@ async function writeVerifiedArtifact(
         { path: "package/CHANGELOG.md", mode: 420, size: 1 },
         { path: "package/LICENSE", mode: 420, size: 1 },
         { path: "package/README.md", mode: 420, size: 1 },
+        { path: "package/dist/cli.js", mode: 493, size: 1 },
+        { path: "package/dist/main.js", mode: 420, size: 1 },
         {
-          path: "package/dist/cli-command-identity.js",
+          path: "package/dist/publication/cli-command-identity.js",
           mode: 420,
           size: 1,
         },
-        { path: "package/dist/cli.js", mode: 493, size: 1 },
-        { path: "package/dist/main.js", mode: 420, size: 1 },
         { path: "package/package.json", mode: 420, size: 1 },
       ],
       bin: {

@@ -7,6 +7,7 @@ import {
   loadContentSource,
   type LoadedSourceMember,
 } from "@ykdz/template-generator/content-source";
+import type { ReferenceTemplateDependency } from "@ykdz/template-workspace-authoring/reference-package";
 
 const defineReferencePackageURL = import.meta
   .resolve("@ykdz/template-workspace-authoring/reference-package");
@@ -21,6 +22,8 @@ export type AuthoredContentFixtureOptions = {
   readonly featureResourcePath?: string;
   readonly featurePackageName?: string;
   readonly featureDependsOnTheme?: boolean;
+  readonly featureNativeDevDependencies?: Readonly<Record<string, string>>;
+  readonly featureTemplateDependencies?: readonly ReferenceTemplateDependency[];
   readonly includeTheme?: boolean;
   readonly includeAddon?: boolean;
 };
@@ -36,6 +39,7 @@ export type AuthoredContentFixture = {
 function packageManifest(
   packageName: string,
   dependencies: Readonly<Record<string, string>> = {},
+  devDependencies: Readonly<Record<string, string>> = {},
 ): Record<string, unknown> {
   return {
     name: packageName,
@@ -51,6 +55,7 @@ function packageManifest(
     },
     dependencies,
     devDependencies: {
+      ...devDependencies,
       "@ykdz/template-workspace-authoring": "workspace:*",
     },
   };
@@ -62,6 +67,7 @@ function referenceDefinition(options: {
   readonly defaultLeafName: string;
   readonly instance: "shared" | "independent";
   readonly resourcePath: string;
+  readonly templateDependencies?: readonly ReferenceTemplateDependency[];
 }): string {
   const resourceDirectory = path.posix.dirname(options.resourcePath);
   return [
@@ -77,7 +83,14 @@ function referenceDefinition(options: {
     '  role: "shared-library",',
     `  resources: [${JSON.stringify(resourceDirectory)}],`,
     "  template: {",
-    '    dependencies: [{ name: "@ykdz/template-workspace-authoring", purpose: "template-execution" }],',
+    `    dependencies: ${JSON.stringify(
+      options.templateDependencies ?? [
+        {
+          name: "@ykdz/template-workspace-authoring",
+          purpose: "template-execution",
+        },
+      ],
+    )},`,
     "    scripts: [],",
     "    resources: [],",
     "  },",
@@ -103,10 +116,16 @@ async function writeReferencePackage(options: {
   readonly instance: "shared" | "independent";
   readonly resourcePath: string;
   readonly dependencies?: Readonly<Record<string, string>>;
+  readonly devDependencies?: Readonly<Record<string, string>>;
+  readonly templateDependencies?: readonly ReferenceTemplateDependency[];
 }): Promise<void> {
   const packageRoot = path.join(options.authorsRoot, options.leafName);
   const packageName = options.packageName ?? `@fixture/${options.leafName}`;
-  const manifest = packageManifest(packageName, options.dependencies);
+  const manifest = packageManifest(
+    packageName,
+    options.dependencies,
+    options.devDependencies,
+  );
   await mkdir(path.join(packageRoot, "template"), { recursive: true });
   await mkdir(path.dirname(path.join(packageRoot, options.resourcePath)), {
     recursive: true,
@@ -123,6 +142,9 @@ async function writeReferencePackage(options: {
       defaultLeafName: options.defaultLeafName ?? options.alias,
       instance: options.instance,
       resourcePath: options.resourcePath,
+      ...(options.templateDependencies === undefined
+        ? {}
+        : { templateDependencies: options.templateDependencies }),
     }),
   );
   await writeFile(
@@ -227,6 +249,12 @@ export async function createAuthoredContentFixture(
       options.featureDependsOnTheme === false
         ? {}
         : { "@fixture/typescript-config": "workspace:*" },
+    ...(options.featureNativeDevDependencies === undefined
+      ? {}
+      : { devDependencies: options.featureNativeDevDependencies }),
+    ...(options.featureTemplateDependencies === undefined
+      ? {}
+      : { templateDependencies: options.featureTemplateDependencies }),
   });
   await writeReferencePackage({
     collectionRoot,

@@ -1,11 +1,13 @@
 import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "@playwright/test";
-import configuration from "@ykdz/template-workspace/assets/joint-e2e/playwright.config.ts";
+import { jointE2eWorkspaceResources } from "@ykdz/template-workspace/joint-e2e";
+
+const { default: configuration } = await import(
+  jointE2eWorkspaceResources.configuration.href
+);
 
 export default defineConfig({
   ...configuration,
-  testDir: fileURLToPath(
-    import.meta.resolve("@ykdz/template-workspace/assets/joint-e2e/test/e2e"),
-  ),
+  testDir: fileURLToPath(jointE2eWorkspaceResources.testDirectory),
 });

@@ -13,6 +13,7 @@ type CargoFile = { readonly source: string; readonly data: TomlTable };
 type RustReferenceFacts = {
   readonly cargoManifest: CargoFile;
   readonly cargoLock: CargoFile;
+  readonly toolchainConfiguration: string;
 };
 
 export const referencePackage: ReferencePackage<
@@ -26,6 +27,7 @@ export const referencePackage: ReferencePackage<
   instance: "independent",
   defaultLeafName: "app",
   role: "native-package",
+  requiresRootRustToolchain: true,
   resources: ["."],
   template: {
     dependencies: [
@@ -39,6 +41,7 @@ export const referencePackage: ReferencePackage<
     ],
     scripts: ["build:template"],
     resources: ["template", "tsconfig.template.json"],
+    executionData: ["Cargo.toml", "Cargo.lock", "template/rust-toolchain.toml"],
   },
   prepare(input) {
     const source = (file: string): CargoFile => {
@@ -48,6 +51,7 @@ export const referencePackage: ReferencePackage<
     return {
       cargoManifest: source("Cargo.toml"),
       cargoLock: source("Cargo.lock"),
+      toolchainConfiguration: input.readText("template/rust-toolchain.toml"),
     };
   },
   environmentNeeds: ({ definition }) => [
@@ -63,10 +67,6 @@ export const referencePackage: ReferencePackage<
         rust: {
           toolchain: rustChannel,
           components: ["rustfmt", "clippy"],
-          configurationSource: {
-            source: referencePackage.source("template/rust-toolchain.toml"),
-            from: ".",
-          },
         },
       },
       editorCapabilities: ["rust-tooling"],
@@ -90,6 +90,10 @@ export const referencePackage: ReferencePackage<
     const targetManifest = { ...contribution.manifest };
     delete targetManifest.files;
     const { cargoManifest, cargoLock } = preparation.ownerFacts;
+    const rustToolchain = contribution.foundation.toolchains.rust;
+    if (rustToolchain === undefined) {
+      throw new Error("Rust 参考包缺少所属工具链能力");
+    }
     const cargoPackage = cargoManifest.data.package as Record<string, unknown>;
     const nativeName = cargoPackage.name;
     const targetName = definition.name.slice(
@@ -127,6 +131,16 @@ export const referencePackage: ReferencePackage<
     return {
       ...contribution,
       manifest: targetManifest,
+      foundation: {
+        ...contribution.foundation,
+        toolchains: {
+          ...contribution.foundation.toolchains,
+          rust: {
+            ...rustToolchain,
+            configurationText: preparation.ownerFacts.toolchainConfiguration,
+          },
+        },
+      },
       operations: contribution.operations.map((operation) =>
         "to" in operation
           ? (replacements.get(operation.to) ?? operation)

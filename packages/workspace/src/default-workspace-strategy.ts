@@ -1,12 +1,10 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import { referenceDefinition as typescriptConfigurationDefinition } from "@ykdz/reference-typescript-config/template";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import {
   contentIdentityKey,
   contentIdentityLabel,
+  isContentIdentity,
 } from "@ykdz/template-core/content-identity";
 import type {
   PackageLinkIntent,
@@ -14,22 +12,22 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import {
-  createTemplateSourceHandle,
-  type RenderOperation,
-} from "@ykdz/template-core/renderer";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
   GeneratorPackageState,
   PackageCreationInput,
+  GeneratorSelectionRoot,
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import {
-  builtInEditorCustomization,
-  planBuiltInDevelopmentContainer,
+  prepareBuiltInDevelopmentContainerResources,
+  prepareBuiltInEditorCustomizationDeclarations,
+  projectBuiltInDevelopmentContainer,
+  projectBuiltInEditorCustomization,
   shellCheckDevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-environment";
 import {
@@ -58,7 +56,10 @@ import {
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
-import { projectCliPublication } from "./cli-publication-projection.ts";
+import {
+  prepareCliPublicationResources,
+  projectCliPublication,
+} from "./cli-publication-projection.ts";
 import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
@@ -75,9 +76,11 @@ import {
   WorkspacePackageAdditionFailure,
 } from "./package-addition-facts.ts";
 import {
+  prepareProjectGithubTemplates,
   projectCheckWorkflow,
   projectDependabotConfig,
   projectNextStepsDocument,
+  type PreparedProjectGithubTemplates,
 } from "./project-github.ts";
 import {
   planExplicitProjectLinks,
@@ -98,13 +101,20 @@ import {
 } from "./root-projection.ts";
 import {
   initialRustVersion,
+  prepareRustTargetAddition,
   projectRustTarget,
-  rustVersionForAddition,
 } from "./rust-target-projection.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
 import {
-  copyWorkspaceDirectory,
-  copyWorkspaceResource,
+  prepareWorkspaceProjectResources,
+  projectWorkspaceProjectResources,
+} from "./workspace-project-resources.ts";
+import {
+  copyPreparedWorkspaceResource,
+  prepareWorkspaceResources,
+  prepareWorkspaceRootTemplates,
+  type PreparedWorkspaceResources,
+  type PreparedWorkspaceRootTemplates,
 } from "./workspace-resources.ts";
 
 export type DefaultWorkspaceInput = {
@@ -115,7 +125,11 @@ export type DefaultWorkspaceInput = {
 };
 
 type DefaultReferenceContent<CreationInput extends PackageCreationInput> =
-  GeneratorContent<GenerationContext, PackageContribution, CreationInput> & {
+  GeneratorContent<
+    DefaultWorkspaceContext,
+    PackageContribution,
+    CreationInput
+  > & {
     readonly definition: ReferencePackage<CreationInput>;
   };
 
@@ -126,11 +140,6 @@ export type DefaultWorkspaceCreationInput<
   /** 现有工作区消费者应依赖本次新增的 provider。 */
   readonly linkFrom?: readonly string[];
 };
-
-export type DefaultWorkspaceConfigurationIdentity = Pick<
-  PackageDefinition,
-  "name" | "path" | "role"
->;
 
 export type DefaultWorkspaceState = {
   readonly repositoryName: string;
@@ -144,6 +153,10 @@ export type DefaultWorkspaceState = {
   };
 };
 
+type DefaultWorkspaceContext = GenerationContext & {
+  readonly existingRustDeclaration?: string;
+};
+
 export type DefaultWorkspaceOwnerFacts = {
   readonly requirements: WorkspaceProjectRequirements;
   readonly environmentNeeds: ReturnType<typeof normalizeEnvironmentNeeds>;
@@ -151,13 +164,13 @@ export type DefaultWorkspaceOwnerFacts = {
   readonly container: {
     readonly dockerfileText: string;
     readonly buildArguments: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["buildArguments"];
     readonly mounts: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["mounts"];
     readonly probes: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["probes"];
   };
   readonly dependencyMaintenance: DependencyMaintenancePolicy;
@@ -190,9 +203,73 @@ const nextSteps: readonly NextStepInstruction[] = [
   { display: "pnpm run check" },
 ];
 
-const workspaceSource = createTemplateSourceHandle(
-  fileURLToPath(new URL("../", import.meta.url)),
-);
+const defaultWorkspaceResourceOwner =
+  "默认工作区能力 @ykdz/template-workspace#./default-strategy";
+const defaultWorkspaceFiles = [
+  "assets/gitignore",
+  "assets/agent-instructions.md",
+  "scripts/check-toolchain-versions.ts",
+  "scripts/task-gates.ts",
+  "scripts/run-turbo-boundaries.ts",
+] as const;
+
+type DefaultWorkspacePreparedResources = {
+  readonly rootTemplates: PreparedWorkspaceRootTemplates;
+  readonly githubTemplates: PreparedProjectGithubTemplates;
+  readonly editorCustomizationDeclarations: ReturnType<
+    typeof prepareBuiltInEditorCustomizationDeclarations
+  >;
+  readonly developmentContainer: ReturnType<
+    typeof prepareBuiltInDevelopmentContainerResources
+  >;
+  readonly workspaceProject: PreparedWorkspaceResources;
+  readonly cliPublication: PreparedWorkspaceResources;
+  readonly workspaceFiles: PreparedWorkspaceResources;
+  readonly projectLinkManifestTruth: ReadonlyMap<
+    string,
+    Readonly<Record<string, unknown>>
+  >;
+};
+
+const preparedResourcesByContext = new WeakMap<
+  DefaultWorkspaceContext,
+  DefaultWorkspacePreparedResources
+>();
+
+function prepareDefaultWorkspaceResources(
+  context: DefaultWorkspaceContext,
+  packagePaths: readonly string[],
+): void {
+  preparedResourcesByContext.set(context, {
+    rootTemplates: prepareWorkspaceRootTemplates(),
+    githubTemplates: prepareProjectGithubTemplates(),
+    editorCustomizationDeclarations:
+      prepareBuiltInEditorCustomizationDeclarations(),
+    developmentContainer: prepareBuiltInDevelopmentContainerResources(),
+    workspaceProject: prepareWorkspaceProjectResources(),
+    cliPublication: prepareCliPublicationResources(),
+    workspaceFiles: prepareWorkspaceResources(
+      defaultWorkspaceFiles,
+      defaultWorkspaceResourceOwner,
+      defaultWorkspaceFiles,
+    ),
+    projectLinkManifestTruth: readProjectLinkManifestTruth({
+      repositoryRoot: context.targetDir,
+      packagePaths,
+    }),
+  });
+}
+
+function preparedResourcesForContext(
+  context: DefaultWorkspaceContext,
+): DefaultWorkspacePreparedResources {
+  const prepared = preparedResourcesByContext.get(context);
+  if (prepared === undefined) {
+    throw new Error("默认工作区策略缺少 initialize/prepareAddition 资源事实");
+  }
+  return prepared;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -287,47 +364,44 @@ function assertSupportedProjectRequirementKinds(
   }
 }
 
-function workspaceResource(from: string, to: string): RenderOperation {
-  return {
-    kind: "copyFile",
-    source: workspaceSource,
-    from: "assets/" + from,
+function workspaceResource(
+  resources: PreparedWorkspaceResources,
+  from: string,
+  to: string,
+): RenderOperation {
+  return copyPreparedWorkspaceResource(
+    resources,
+    `assets/${from}`,
     to,
-  };
+    defaultWorkspaceResourceOwner,
+  );
 }
 
-function workspaceFile(from: string, to: string): RenderOperation {
-  return {
-    kind: "copyFile",
-    source: workspaceSource,
+function workspaceFile(
+  resources: PreparedWorkspaceResources,
+  from: string,
+  to: string,
+): RenderOperation {
+  return copyPreparedWorkspaceResource(
+    resources,
     from,
     to,
-  };
-}
-
-function readWorkspaceJson(from: string): Record<string, unknown> {
-  return JSON.parse(
-    readFileSync(
-      fileURLToPath(new URL("../assets/" + from, import.meta.url)),
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
+    defaultWorkspaceResourceOwner,
+  );
 }
 
 function defaultContext(
   targetRoot: string,
   state: DefaultWorkspaceState,
-): GenerationContext {
-  const configuration = defaultWorkspaceConfigurationIdentity(
-    state.defaultPackageScope,
-  );
+  options: { readonly existingRustDeclaration?: string } = {},
+): DefaultWorkspaceContext {
   return {
     targetDir: path.resolve(targetRoot),
     repositoryName: state.repositoryName,
     defaultPackageScope: state.defaultPackageScope,
-    foundationPackages: {
-      typescriptConfiguration: { name: configuration.name },
-    },
+    ...(options.existingRustDeclaration === undefined
+      ? {}
+      : { existingRustDeclaration: options.existingRustDeclaration }),
     toolchain: {
       nodeLtsMajor: state.toolchain.nodeLtsMajor,
       ...(state.toolchain.nodeVersion === undefined
@@ -341,25 +415,13 @@ function defaultContext(
   };
 }
 
-/** 由实际原生配置包声明推导默认工作区的配置包身份。 */
-export function defaultWorkspaceConfigurationIdentity(
-  scope: string,
-): DefaultWorkspaceConfigurationIdentity {
-  const leafName = typescriptConfigurationDefinition.defaultLeafName;
-  return {
-    name: `@${scope}/${leafName}`,
-    path: `packages/${leafName}`,
-    role: typescriptConfigurationDefinition.role,
-  };
-}
-
 function nativeDependencyNames(
   content: DefaultReferenceContent<PackageCreationInput>,
 ): readonly string[] {
   const reference = content.definition;
-  const templateExecution = new Set(
-    reference.templateDependencies
-      .filter((dependency) => dependency.purpose === "template-execution")
+  const targetDependencies = new Set(
+    reference.dependencyUses
+      .filter((dependency) => dependency.purposes.includes("target"))
       .map((dependency) => dependency.name),
   );
   return [
@@ -375,7 +437,7 @@ function nativeDependencyNames(
         return Object.entries(dependencies)
           .filter(
             ([name, specifier]) =>
-              !templateExecution.has(name) &&
+              targetDependencies.has(name) &&
               typeof specifier === "string" &&
               (specifier.startsWith("workspace:") ||
                 specifier.startsWith("link:")),
@@ -424,6 +486,52 @@ function nativeDependencyIdentities(
     }
     return providers[0]!.identity;
   });
+}
+
+/** 从实际选择与策略依赖解释中读取配置拥有者提供的默认身份。 */
+export function selectedWorkspaceConfigurationIdentity(options: {
+  readonly selection: readonly GeneratorSelectionRoot[];
+  readonly contentByIdentity: ReadonlyMap<
+    string,
+    DefaultReferenceContent<PackageCreationInput>
+  >;
+  readonly scope: string;
+}):
+  | ReturnType<
+      DefaultReferenceContent<PackageCreationInput>["definition"]["defaultIdentity"]
+    >
+  | undefined {
+  const visited = new Set<string>();
+  const configurations = new Map<
+    string,
+    DefaultReferenceContent<PackageCreationInput>["definition"]
+  >();
+  const visit = (
+    content: DefaultReferenceContent<PackageCreationInput> | undefined,
+  ): void => {
+    if (content === undefined) return;
+    const key = contentIdentityKey(content.identity);
+    if (visited.has(key)) return;
+    visited.add(key);
+    if (content.definition.workspaceConfiguration !== undefined) {
+      configurations.set(key, content.definition);
+    }
+    for (const identity of nativeDependencyIdentities(
+      content,
+      options.contentByIdentity,
+    )) {
+      visit(options.contentByIdentity.get(contentIdentityKey(identity)));
+    }
+  };
+  for (const root of options.selection) {
+    if (isContentIdentity(root.contentIdentity)) {
+      visit(
+        options.contentByIdentity.get(contentIdentityKey(root.contentIdentity)),
+      );
+    }
+  }
+  if (configurations.size !== 1) return undefined;
+  return [...configurations.values()][0]!.defaultIdentity(options.scope);
 }
 
 function nativeBindings(
@@ -711,64 +819,6 @@ function databasePreparationScripts(
   };
 }
 
-function projectResourceOperations(options: {
-  readonly requirements: WorkspaceProjectRequirements;
-}): RenderOperation[] {
-  const operations: RenderOperation[] = [];
-  const joint = options.requirements.vueHonoJointE2e;
-  if (joint !== undefined) {
-    operations.push(
-      copyWorkspaceResource(
-        "joint-e2e/playwright.config.ts",
-        "playwright.config.ts",
-      ),
-      {
-        kind: "writeJson",
-        to: "joint-e2e.json",
-        value: {
-          apiPackageName: joint.api.name,
-          webPackageName: joint.web.name,
-        },
-      },
-      ...copyWorkspaceDirectory("joint-e2e/test", "test"),
-    );
-  }
-  if (options.requirements.deploymentCheck !== undefined) {
-    const deployment = options.requirements.deploymentCheck;
-    operations.push(
-      copyWorkspaceResource("deployment/Dockerfile", "Dockerfile"),
-      copyWorkspaceResource("deployment/.dockerignore", ".dockerignore"),
-      copyWorkspaceResource(
-        "deployment/scripts/check-standalone-deployment.ts",
-        "scripts/check-standalone-deployment.ts",
-      ),
-      copyWorkspaceResource(
-        "deployment/scripts/container-entrypoint.sh",
-        "scripts/container-entrypoint.sh",
-      ),
-      {
-        kind: "writeJson",
-        to: "deployment.json",
-        value: {
-          application: {
-            name: deployment.application.name,
-            path: deployment.application.path,
-          },
-          database: {
-            name: deployment.database.name,
-            path: deployment.database.path,
-          },
-          migrations: {
-            name: deployment.migrations.name,
-            path: deployment.migrations.path,
-          },
-        },
-      },
-    );
-  }
-  return operations;
-}
-
 function projectRootScriptInsertions(
   requirements: WorkspaceProjectRequirements,
 ): WorkspaceRootInsertion[] {
@@ -807,7 +857,7 @@ function projectRootScriptInsertions(
 }
 
 function projectOperations(options: {
-  readonly context: GenerationContext;
+  readonly context: DefaultWorkspaceContext;
   readonly state: DefaultWorkspaceState;
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
@@ -815,6 +865,7 @@ function projectOperations(options: {
   readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
   const { context } = options;
+  const prepared = preparedResourcesForContext(context);
   const projectState = projectRequirements(
     includeRequestedLinkFromIntents(
       assertDefaultProjectBlueprint(options.blueprint),
@@ -827,11 +878,7 @@ function projectOperations(options: {
   const linkPlan = planExplicitProjectLinks({
     blueprint,
     contributions: options.contributions,
-    manifestTruthByPackagePath: readProjectLinkManifestTruth({
-      repositoryRoot: context.targetDir,
-      blueprint,
-      contributions: options.contributions,
-    }),
+    manifestTruthByPackagePath: prepared.projectLinkManifestTruth,
   });
   const contributions = promoteInjectedProviderRuntimeDependencies({
     contributions: options.contributions,
@@ -840,6 +887,7 @@ function projectOperations(options: {
   const cliPublication = projectCliPublication({
     packages: options.packages,
     contributions,
+    resources: prepared.cliPublication,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -849,14 +897,17 @@ function projectOperations(options: {
   const rust = rustProjection.toolchain;
   const hasDeployment = requirements.deploymentCheck !== undefined;
   const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
-  const configuration = contributions.find(
+  const configurations = contributions.filter(
     (contribution) =>
-      contribution.definition.name ===
-      context.foundationPackages.typescriptConfiguration.name,
+      contribution.foundation.workspaceConfiguration?.kind ===
+      "typescript-workspace-configuration",
   );
-  if (configuration === undefined) {
-    throw new Error("默认策略缺少共享 TypeScript 配置内容");
+  if (configurations.length > 1) {
+    throw new Error(
+      `默认策略只能有一个共享 TypeScript 配置贡献，实际为 ${configurations.length}`,
+    );
   }
+  const configuration = configurations[0];
   const rootAutomationPaths = [
     "*.json",
     "pnpm-workspace.yaml",
@@ -876,7 +927,9 @@ function projectOperations(options: {
   ].join(" ");
   const rootManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
-    typescriptConfigurationPackageName: configuration.definition.name,
+    ...(configuration === undefined
+      ? {}
+      : { typescriptConfigurationPackageName: configuration.definition.name }),
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
@@ -947,10 +1000,11 @@ function projectOperations(options: {
       ...applicationCiDiagnosticArtifacts(requirements),
     ],
   });
-  const editor = builtInEditorCustomization(
+  const editor = projectBuiltInEditorCustomization(
     contributions.flatMap(
       (contribution) => contribution.foundation.editorCapabilities,
     ),
+    prepared.editorCustomizationDeclarations,
   );
   const deploymentEnvironmentNeeds =
     requirements.deploymentCheck?.environmentNeeds ?? [];
@@ -985,20 +1039,13 @@ function projectOperations(options: {
         contribution.foundation.developmentContainerToolLayers ?? [],
     ),
   ];
-  const container = planBuiltInDevelopmentContainer({
+  const container = projectBuiltInDevelopmentContainer({
     nodeVersion:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     layers: containerLayers,
+    resources: prepared.developmentContainer,
   });
-  const containerBase = JSON.parse(
-    readFileSync(
-      fileURLToPath(
-        import.meta
-          .resolve("@ykdz/template-environment/assets/.devcontainer/devcontainer.json"),
-      ),
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
+  const containerBase = container.configuration;
   const referenceNames = new Map(
     contributions.flatMap((contribution) =>
       contribution.referenceSource === undefined
@@ -1016,10 +1063,10 @@ function projectOperations(options: {
     packageGlobs: packages,
     dependencyCatalog,
     dependencyOverrides,
-    turboTemplate: readWorkspaceJson("turbo.json"),
+    turboTemplate: prepared.rootTemplates.turbo,
     referenceNames,
     turboBoundaryTags: boundaryTags(contributions),
-    rootTsconfigTemplate: readWorkspaceJson("tsconfig.json"),
+    rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
     rootTsconfigCompilerOptions: {
       ...cliPublication.tsconfigCompilerOptions,
       rewriteRelativeImportExtensions: false,
@@ -1031,7 +1078,7 @@ function projectOperations(options: {
       ...cliPublication.tsconfigInclude,
       ...applicationRootTsconfigIncludes(requirements),
     ],
-    tsconfigConfigTemplate: readWorkspaceJson("tsconfig.config.json"),
+    tsconfigConfigTemplate: prepared.rootTemplates.tsconfigConfig,
   });
   const editorExtensions = {
     kind: "writeJson" as const,
@@ -1106,38 +1153,52 @@ function projectOperations(options: {
   const defaultOperations: RenderOperation[] = [
     rootProjection.manifest,
     rootProjection.workspace,
-    workspaceResource("gitignore", ".gitignore"),
-    workspaceResource("agent-instructions.md", "AGENTS.md"),
+    workspaceResource(prepared.workspaceFiles, "gitignore", ".gitignore"),
+    workspaceResource(
+      prepared.workspaceFiles,
+      "agent-instructions.md",
+      "AGENTS.md",
+    ),
     rootProjection.turbo,
     workspaceFile(
+      prepared.workspaceFiles,
       "scripts/check-toolchain-versions.ts",
       "scripts/check-toolchain-versions.ts",
     ),
     projectToolchainMirrorManifest(reconciliation),
-    workspaceFile("scripts/task-gates.ts", "scripts/task-gates.ts"),
     workspaceFile(
+      prepared.workspaceFiles,
+      "scripts/task-gates.ts",
+      "scripts/task-gates.ts",
+    ),
+    workspaceFile(
+      prepared.workspaceFiles,
       "scripts/run-turbo-boundaries.ts",
       "scripts/run-turbo-boundaries.ts",
     ),
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
     ...cliPublication.operations,
-    {
-      kind: "writeText",
-      to: "oxlint.config.ts",
-      text:
-        "export { default } from " +
-        JSON.stringify(configuration.definition.name + "/oxlint") +
-        ";\n",
-    },
-    {
-      kind: "writeText",
-      to: "oxfmt.config.ts",
-      text:
-        "export { default } from " +
-        JSON.stringify(configuration.definition.name + "/oxfmt") +
-        ";\n",
-    },
+    ...(configuration === undefined
+      ? []
+      : [
+          {
+            kind: "writeText" as const,
+            to: "oxlint.config.ts",
+            text:
+              "export { default } from " +
+              JSON.stringify(configuration.definition.name + "/oxlint") +
+              ";\n",
+          },
+          {
+            kind: "writeText" as const,
+            to: "oxfmt.config.ts",
+            text:
+              "export { default } from " +
+              JSON.stringify(configuration.definition.name + "/oxfmt") +
+              ";\n",
+          },
+        ]),
     editorExtensions,
     { kind: "writeJson", to: ".vscode/settings.json", value: editor.settings },
     {
@@ -1173,25 +1234,34 @@ function projectOperations(options: {
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({
-        packagePaths,
-        ...(requirements.deploymentCheck === undefined
-          ? {}
-          : { deploymentCheck: requirements.deploymentCheck }),
-        diagnosticArtifacts: artifacts,
-      }),
+      text: projectCheckWorkflow(
+        {
+          packagePaths,
+          ...(requirements.deploymentCheck === undefined
+            ? {}
+            : { deploymentCheck: requirements.deploymentCheck }),
+          diagnosticArtifacts: artifacts,
+        },
+        prepared.githubTemplates.checkWorkflow,
+      ),
     },
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(dependencyMaintenance),
+      text: projectDependabotConfig(
+        dependencyMaintenance,
+        prepared.githubTemplates.dependabot,
+      ),
     },
     ...(options.state.todo
       ? [
           {
             kind: "writeText" as const,
             to: "TODO.md",
-            text: projectNextStepsDocument(nextSteps),
+            text: projectNextStepsDocument(
+              nextSteps,
+              prepared.githubTemplates.nextSteps,
+            ),
           },
         ]
       : []),
@@ -1244,7 +1314,10 @@ function projectOperations(options: {
     operations: [
       ...packageOperations,
       ...defaultOperations,
-      ...projectResourceOperations({ requirements }),
+      ...projectWorkspaceProjectResources({
+        requirements,
+        resources: prepared.workspaceProject,
+      }),
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
@@ -1281,7 +1354,7 @@ function projectOperations(options: {
 export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(): WorkspaceStrategy<
-  GenerationContext,
+  DefaultWorkspaceContext,
   DefaultWorkspaceInput,
   DefaultWorkspaceState,
   PackageContribution,
@@ -1316,7 +1389,9 @@ export function createDefaultWorkspaceStrategy<
           ...(rustVersion === undefined ? {} : { rustVersion }),
         },
       };
-      return { state, context: defaultContext(targetRoot, state) };
+      const context = defaultContext(targetRoot, state);
+      prepareDefaultWorkspaceResources(context, []);
+      return { state, context };
     },
     prepareAddition({
       targetRoot,
@@ -1327,19 +1402,31 @@ export function createDefaultWorkspaceStrategy<
       nodeInstances,
     }) {
       const current = readPackageAdditionVersionFacts(targetRoot);
-      const rustVersion = rustVersionForAddition({
+      const rustFacts = prepareRustTargetAddition({
         targetRoot,
         packages,
         contentIdentity: content.identity,
         contentByIdentity,
       });
-      const context = defaultContext(targetRoot, {
-        ...state,
-        toolchain: {
-          ...current.toolchain,
-          ...(rustVersion === undefined ? {} : { rustVersion }),
+      const context = defaultContext(
+        targetRoot,
+        {
+          ...state,
+          toolchain: {
+            ...current.toolchain,
+            ...(rustFacts.rustVersion === undefined
+              ? {}
+              : { rustVersion: rustFacts.rustVersion }),
+          },
         },
-      });
+        rustFacts.existingDeclaration === undefined
+          ? {}
+          : { existingRustDeclaration: rustFacts.existingDeclaration },
+      );
+      prepareDefaultWorkspaceResources(
+        context,
+        packages.map((packageRecord) => packageRecord.definition.path),
+      );
       const definitionsById = new Map<string, PackageDefinition>(
         packages.map((packageRecord) => [
           packageRecord.definition.packageDefinitionId,
@@ -1492,8 +1579,12 @@ export function createDefaultWorkspaceStrategy<
         };
         const currentManifests = readProjectLinkManifestTruth({
           repositoryRoot: targetRoot,
-          blueprint: requestedBlueprint,
-          contributions,
+          packagePaths: (requestedBlueprint.packageLinkIntents ?? []).flatMap(
+            (intent) => [
+              intent.consumerPackagePath,
+              intent.providerPackagePath,
+            ],
+          ),
         });
         const unsupported =
           !canProvideSourceConditionPackageNameImportForRole(

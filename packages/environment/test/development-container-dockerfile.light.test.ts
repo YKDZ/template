@@ -6,7 +6,11 @@ import { it } from "node:test";
 
 import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
 
-import { prepareDevelopmentContainerDockerfile } from "../src/development-container-tool-layer.ts";
+import {
+  developmentContainerDockerfileFromText,
+  planDevelopmentContainerToolLayersFromTexts,
+  prepareDevelopmentContainerToolLayerTexts,
+} from "../src/development-container-tool-layer.ts";
 
 void it("校验开发容器资源后返回普通文本操作", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "environment-dockerfile-"));
@@ -22,19 +26,28 @@ void it("校验开发容器资源后返回普通文本操作", async () => {
       "RUN corepack enable\n",
     );
     const source = createTemplateSourceHandle(sourceRoot);
-    const operation = prepareDevelopmentContainerDockerfile({
-      layers: [
-        {
-          kind: "base",
-          identity: "node-pnpm",
-          dockerfile: { source, from: "base.Dockerfile" },
-        },
-        {
-          kind: "optional",
-          identity: "tooling",
-          dockerfile: { source, from: "optional.Dockerfile" },
-        },
-      ],
+    const baseLayer = {
+      identity: "node-pnpm",
+      dockerfile: { source, from: "base.Dockerfile" },
+    };
+    const layers = [
+      {
+        identity: "tooling",
+        dockerfile: { source, from: "optional.Dockerfile" },
+      },
+    ];
+    const fragmentTexts = await prepareDevelopmentContainerToolLayerTexts({
+      baseLayer,
+      layers,
+    });
+    const plan = planDevelopmentContainerToolLayersFromTexts({
+      baseLayer,
+      layers,
+      fragmentTexts,
+    });
+    const operation = developmentContainerDockerfileFromText({
+      layers: plan.layers,
+      fragmentTexts,
     });
 
     assert.deepStrictEqual(operation, {
@@ -47,24 +60,17 @@ void it("校验开发容器资源后返回普通文本操作", async () => {
       path.join(sourceRoot, "optional.Dockerfile"),
       "COPY hidden .\n",
     );
-    assert.throws(
-      () =>
-        prepareDevelopmentContainerDockerfile({
-          layers: [
-            {
-              kind: "base",
-              identity: "node-pnpm",
-              dockerfile: { source, from: "base.Dockerfile" },
-            },
-            {
-              kind: "optional",
-              identity: "tooling",
-              dockerfile: { source, from: "optional.Dockerfile" },
-            },
-          ],
-        }),
-      /must not use Dockerfile instruction COPY/u,
-    );
+    await assert.rejects(async () => {
+      const invalidTexts = await prepareDevelopmentContainerToolLayerTexts({
+        baseLayer,
+        layers,
+      });
+      planDevelopmentContainerToolLayersFromTexts({
+        baseLayer,
+        layers,
+        fragmentTexts: invalidTexts,
+      });
+    }, /must not use Dockerfile instruction COPY/u);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
