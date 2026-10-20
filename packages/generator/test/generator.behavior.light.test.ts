@@ -357,10 +357,7 @@ void describe("生成器使用测试拥有的文档内容和策略", () => {
       firstInitialized.generationRecord,
     );
 
-    const dryRunRoot = path.join(
-      await mkdtemp(path.join(tmpdir(), "template-generator-docs-dry-run-")),
-      "project",
-    );
+    const dryRunRoot = path.join(firstRoot, "dry-run");
     const dryRunInit = await first.init({
       targetRoot: dryRunRoot,
       selection: {
