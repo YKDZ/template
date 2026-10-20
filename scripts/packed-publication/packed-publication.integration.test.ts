@@ -1007,7 +1007,12 @@ async function registerTestOwnedCollectionMember(options: {
         strategy:
           options.runtime.createDefaultWorkspaceStrategy<PackedCreationInput>(),
       }),
-    /显式内容集合缺少预设参考成员/u,
+    (error: unknown) =>
+      error instanceof Error &&
+      error.message.includes(fixturePreset.identity.namespace) &&
+      error.message.includes(fixturePreset.identity.packageName) &&
+      error.message.includes(fixturePreset.identity.exportPath) &&
+      error.message.includes("引用未装载的来源定义：内容定义未由显式集合装载"),
     "缺少声明的真实模板依赖必须明确失败",
   );
 
@@ -1569,7 +1574,9 @@ void describe("packed public CLI consumer", () => {
           ...testOwnedCollection.runtime,
           content: testOwnedCollection.runtime.content.filter(
             (member) =>
-              !("kind" in member) || member === testOwnedCollection.preset,
+              !("kind" in member) ||
+              member === testOwnedCollection.preset ||
+              member.kind === "reference",
           ) as unknown as PackedRuntime["content"],
         };
         const fixturePublicationSources =
@@ -1587,7 +1594,9 @@ void describe("packed public CLI consumer", () => {
               presetAlias: testOwnedCollection.presetAlias,
               fixturePackageName: testOwnedCollection.packageName,
               registeredPresetCount: 1,
-              registeredReferenceCount: 1,
+              fixtureReferenceCount: registeredReferenceNames.filter(
+                (name) => !defaultReferenceNames.has(name),
+              ).length,
               checkScenariosVerified:
                 fixturePublicationSources.scenariosVerified,
               sourceResourcesRead: fixturePublicationSources.resourcesRead,
@@ -1799,7 +1808,7 @@ void describe("packed public CLI consumer", () => {
           return preset;
         };
 
-        const sharedLibraryDefinition = presetWithAddedRole("shared-library");
+        const sharedLibraryDefinition = presetWithInitialRole("shared-library");
         const sharedLibraryProject = path.join(
           consumer,
           "generated",
@@ -1807,7 +1816,7 @@ void describe("packed public CLI consumer", () => {
         );
         await execa("pnpm", ["install"], { cwd: sharedLibraryProject });
 
-        const cliToolDefinition = presetWithAddedRole("cli-tool");
+        const cliToolDefinition = presetWithInitialRole("cli-tool");
         const cliToolProject = path.join(
           consumer,
           "generated",
@@ -1815,7 +1824,7 @@ void describe("packed public CLI consumer", () => {
         );
         await execa("pnpm", ["install"], { cwd: cliToolProject });
 
-        const nativePackageDefinition = presetWithAddedRole("native-package");
+        const nativePackageDefinition = presetWithInitialRole("native-package");
         const nativePackageProject = path.join(
           consumer,
           "generated",
@@ -2370,7 +2379,7 @@ void describe("packed public CLI consumer", () => {
         });
         assert.ok(
           existingPackageFailure.conflicts[0].reason.includes(
-            "Package Path services/existing already exists",
+            "新包路径已存在：services/existing",
           ),
         );
         assert.deepStrictEqual(

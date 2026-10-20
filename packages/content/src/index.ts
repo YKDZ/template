@@ -2,6 +2,7 @@ import {
   loadTemplateContent,
   type LoadedTemplateContentMember,
 } from "./collection.ts";
+import { deriveTemplateMembers as deriveContentMembers } from "./template-members.ts";
 
 /** 所有可选择内容只在这里登记一次，并从原生公开入口装载。 */
 export const templateContent = (await loadTemplateContent({
@@ -43,41 +44,9 @@ export type TemplateReferencePackage = Extract<
   { readonly kind: "reference" }
 >;
 
-/** 从唯一内容序列派生预设成员和打包所需参考包成员。 */
-export function deriveTemplateMembers<Content extends readonly unknown[]>(
-  content: Content,
-): {
-  readonly presets: readonly Extract<
-    Content[number],
-    { readonly kind: "preset" }
-  >[];
-  readonly referencePackages: readonly Extract<
-    Content[number],
-    { readonly kind: "reference" }
-  >[];
-} {
-  const presets: Extract<Content[number], { readonly kind: "preset" }>[] = [];
-  const referencePackages: Extract<
-    Content[number],
-    { readonly kind: "reference" }
-  >[] = [];
-  for (const member of content) {
-    if (typeof member !== "object" || member === null) continue;
-    if ("kind" in member && member.kind === "preset") {
-      presets.push(
-        member as Extract<Content[number], { readonly kind: "preset" }>,
-      );
-    }
-    if ("kind" in member && member.kind === "reference") {
-      referencePackages.push(
-        member as Extract<Content[number], { readonly kind: "reference" }>,
-      );
-    }
-  }
-  return { presets, referencePackages };
-}
+export { deriveTemplateMembers } from "./template-members.ts";
 
-const templateMembers = deriveTemplateMembers(templateContent);
+const templateMembers = deriveContentMembers(templateContent);
 export const templatePresets: readonly TemplatePreset[] =
   templateMembers.presets;
 export const templateReferencePackages: readonly TemplateReferencePackage[] =
