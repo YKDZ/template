@@ -13,7 +13,12 @@ import {
   assertPackageContribution,
   type PackageContribution,
 } from "@ykdz/template-workspace-authoring/package-contribution";
-import { projectCheckWorkflow } from "@ykdz/template-workspace/project-github";
+import {
+  prepareProjectGithubTemplates,
+  projectCheckWorkflow,
+} from "@ykdz/template-workspace/project-github";
+
+const checkWorkflowTemplate = prepareProjectGithubTemplates().checkWorkflow;
 
 const playwright = (path: string): CiDiagnosticArtifactDeclaration => ({
   kind: "playwright",
@@ -93,10 +98,16 @@ void describe("CI 诊断产物合同", () => {
 
   void it("工作流只投影实际包边界中的诊断所有者", () => {
     const packagePaths = ["apps/web"];
-    const workflow = projectCheckWorkflow({
-      packagePaths,
-      diagnosticArtifacts: [playwright("apps/web"), vitestBrowser("apps/web")],
-    });
+    const workflow = projectCheckWorkflow(
+      {
+        packagePaths,
+        diagnosticArtifacts: [
+          playwright("apps/web"),
+          vitestBrowser("apps/web"),
+        ],
+      },
+      checkWorkflowTemplate,
+    );
     assert.match(workflow, /PLAYWRIGHT_DIAGNOSTIC_OWNER_PATHS/u);
     assert.match(workflow, /VITEST_BROWSER_DIAGNOSTIC_OWNER_PATHS/u);
     assert.match(workflow, /apps\/web/u);
@@ -109,10 +120,13 @@ void describe("CI 诊断产物合同", () => {
     ]) {
       assert.throws(
         () =>
-          projectCheckWorkflow({
-            packagePaths: ["apps/web"],
-            diagnosticArtifacts: [declaration],
-          }),
+          projectCheckWorkflow(
+            {
+              packagePaths: ["apps/web"],
+              diagnosticArtifacts: [declaration],
+            },
+            checkWorkflowTemplate,
+          ),
         (error) =>
           error instanceof Error &&
           error.message.includes(
@@ -125,20 +139,26 @@ void describe("CI 诊断产物合同", () => {
   void it("部署工作流必须声明 Docker 环境需求", () => {
     const packagePaths = ["apps/web"];
     assert.throws(() =>
-      projectCheckWorkflow({
-        packagePaths,
-        deploymentCheck: {
-          environmentNeeds: [] as DeploymentEnvironmentNeed[],
+      projectCheckWorkflow(
+        {
+          packagePaths,
+          deploymentCheck: {
+            environmentNeeds: [] as DeploymentEnvironmentNeed[],
+          },
         },
-      }),
+        checkWorkflowTemplate,
+      ),
     );
     assert.match(
-      projectCheckWorkflow({
-        packagePaths,
-        deploymentCheck: {
-          environmentNeeds: [dockerEngineEnvironmentNeed()],
+      projectCheckWorkflow(
+        {
+          packagePaths,
+          deploymentCheck: {
+            environmentNeeds: [dockerEngineEnvironmentNeed()],
+          },
         },
-      }),
+        checkWorkflowTemplate,
+      ),
       /prepare-deployment/u,
     );
   });
@@ -150,16 +170,22 @@ void describe("CI 诊断产物合同", () => {
     };
 
     assert.throws(() =>
-      projectCheckWorkflow({
-        packagePaths: ["apps/web"],
-        diagnosticArtifacts: [declarationWithPath],
-      }),
+      projectCheckWorkflow(
+        {
+          packagePaths: ["apps/web"],
+          diagnosticArtifacts: [declarationWithPath],
+        },
+        checkWorkflowTemplate,
+      ),
     );
     assert.throws(() =>
-      projectCheckWorkflow({
-        packagePaths: ["node_modules/private"],
-        diagnosticArtifacts: [playwright("node_modules/private")],
-      }),
+      projectCheckWorkflow(
+        {
+          packagePaths: ["node_modules/private"],
+          diagnosticArtifacts: [playwright("node_modules/private")],
+        },
+        checkWorkflowTemplate,
+      ),
     );
   });
 

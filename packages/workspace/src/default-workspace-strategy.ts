@@ -1,10 +1,10 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import {
   contentIdentityKey,
   contentIdentityLabel,
+  isContentIdentity,
 } from "@ykdz/template-core/content-identity";
 import type {
   PackageLinkIntent,
@@ -12,22 +12,22 @@ import type {
   ProjectBlueprint,
 } from "@ykdz/template-core/project-blueprint";
 import type { ProjectProjectionReconciliation } from "@ykdz/template-core/project-projection";
-import {
-  createTemplateSourceHandle,
-  type RenderOperation,
-} from "@ykdz/template-core/renderer";
+import type { RenderOperation } from "@ykdz/template-core/renderer";
 import type {
   GeneratorContent,
   GeneratorPackageState,
   PackageCreationInput,
+  GeneratorSelectionRoot,
   WorkspaceProjection,
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import {
-  builtInEditorCustomization,
-  planBuiltInDevelopmentContainer,
+  prepareBuiltInDevelopmentContainerResources,
+  prepareBuiltInEditorCustomizationDeclarations,
+  projectBuiltInDevelopmentContainer,
+  projectBuiltInEditorCustomization,
   shellCheckDevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-environment";
 import {
@@ -56,7 +56,10 @@ import {
   type DatabasePreparationManifestRequirement,
   type WorkspaceProjectRequirements,
 } from "./application-requirements.ts";
-import { projectCliPublication } from "./cli-publication-projection.ts";
+import {
+  prepareCliPublicationResources,
+  projectCliPublication,
+} from "./cli-publication-projection.ts";
 import {
   assertDefaultPackageDefinition,
   assertDefaultProjectBlueprint,
@@ -73,9 +76,11 @@ import {
   WorkspacePackageAdditionFailure,
 } from "./package-addition-facts.ts";
 import {
+  prepareProjectGithubTemplates,
   projectCheckWorkflow,
   projectDependabotConfig,
   projectNextStepsDocument,
+  type PreparedProjectGithubTemplates,
 } from "./project-github.ts";
 import {
   planExplicitProjectLinks,
@@ -100,8 +105,17 @@ import {
   projectRustTarget,
 } from "./rust-target-projection.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
-import { prepareWorkspaceProjectResources } from "./workspace-project-resources.ts";
-import { readWorkspaceJson } from "./workspace-resources.ts";
+import {
+  prepareWorkspaceProjectResources,
+  projectWorkspaceProjectResources,
+} from "./workspace-project-resources.ts";
+import {
+  copyPreparedWorkspaceResource,
+  prepareWorkspaceResources,
+  prepareWorkspaceRootTemplates,
+  type PreparedWorkspaceResources,
+  type PreparedWorkspaceRootTemplates,
+} from "./workspace-resources.ts";
 
 export type DefaultWorkspaceInput = {
   readonly repositoryName?: string;
@@ -150,13 +164,13 @@ export type DefaultWorkspaceOwnerFacts = {
   readonly container: {
     readonly dockerfileText: string;
     readonly buildArguments: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["buildArguments"];
     readonly mounts: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["mounts"];
     readonly probes: ReturnType<
-      typeof planBuiltInDevelopmentContainer
+      typeof projectBuiltInDevelopmentContainer
     >["probes"];
   };
   readonly dependencyMaintenance: DependencyMaintenancePolicy;
@@ -189,9 +203,73 @@ const nextSteps: readonly NextStepInstruction[] = [
   { display: "pnpm run check" },
 ];
 
-const workspaceSource = createTemplateSourceHandle(
-  fileURLToPath(new URL("../", import.meta.url)),
-);
+const defaultWorkspaceResourceOwner =
+  "默认工作区能力 @ykdz/template-workspace#./default-strategy";
+const defaultWorkspaceFiles = [
+  "assets/gitignore",
+  "assets/agent-instructions.md",
+  "scripts/check-toolchain-versions.ts",
+  "scripts/task-gates.ts",
+  "scripts/run-turbo-boundaries.ts",
+] as const;
+
+type DefaultWorkspacePreparedResources = {
+  readonly rootTemplates: PreparedWorkspaceRootTemplates;
+  readonly githubTemplates: PreparedProjectGithubTemplates;
+  readonly editorCustomizationDeclarations: ReturnType<
+    typeof prepareBuiltInEditorCustomizationDeclarations
+  >;
+  readonly developmentContainer: ReturnType<
+    typeof prepareBuiltInDevelopmentContainerResources
+  >;
+  readonly workspaceProject: PreparedWorkspaceResources;
+  readonly cliPublication: PreparedWorkspaceResources;
+  readonly workspaceFiles: PreparedWorkspaceResources;
+  readonly projectLinkManifestTruth: ReadonlyMap<
+    string,
+    Readonly<Record<string, unknown>>
+  >;
+};
+
+const preparedResourcesByContext = new WeakMap<
+  DefaultWorkspaceContext,
+  DefaultWorkspacePreparedResources
+>();
+
+function prepareDefaultWorkspaceResources(
+  context: DefaultWorkspaceContext,
+  packagePaths: readonly string[],
+): void {
+  preparedResourcesByContext.set(context, {
+    rootTemplates: prepareWorkspaceRootTemplates(),
+    githubTemplates: prepareProjectGithubTemplates(),
+    editorCustomizationDeclarations:
+      prepareBuiltInEditorCustomizationDeclarations(),
+    developmentContainer: prepareBuiltInDevelopmentContainerResources(),
+    workspaceProject: prepareWorkspaceProjectResources(),
+    cliPublication: prepareCliPublicationResources(),
+    workspaceFiles: prepareWorkspaceResources(
+      defaultWorkspaceFiles,
+      defaultWorkspaceResourceOwner,
+      defaultWorkspaceFiles,
+    ),
+    projectLinkManifestTruth: readProjectLinkManifestTruth({
+      repositoryRoot: context.targetDir,
+      packagePaths,
+    }),
+  });
+}
+
+function preparedResourcesForContext(
+  context: DefaultWorkspaceContext,
+): DefaultWorkspacePreparedResources {
+  const prepared = preparedResourcesByContext.get(context);
+  if (prepared === undefined) {
+    throw new Error("默认工作区策略缺少 initialize/prepareAddition 资源事实");
+  }
+  return prepared;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -286,22 +364,30 @@ function assertSupportedProjectRequirementKinds(
   }
 }
 
-function workspaceResource(from: string, to: string): RenderOperation {
-  return {
-    kind: "copyFile",
-    source: workspaceSource,
-    from: "assets/" + from,
+function workspaceResource(
+  resources: PreparedWorkspaceResources,
+  from: string,
+  to: string,
+): RenderOperation {
+  return copyPreparedWorkspaceResource(
+    resources,
+    `assets/${from}`,
     to,
-  };
+    defaultWorkspaceResourceOwner,
+  );
 }
 
-function workspaceFile(from: string, to: string): RenderOperation {
-  return {
-    kind: "copyFile",
-    source: workspaceSource,
+function workspaceFile(
+  resources: PreparedWorkspaceResources,
+  from: string,
+  to: string,
+): RenderOperation {
+  return copyPreparedWorkspaceResource(
+    resources,
     from,
     to,
-  };
+    defaultWorkspaceResourceOwner,
+  );
 }
 
 function defaultContext(
@@ -400,6 +486,52 @@ function nativeDependencyIdentities(
     }
     return providers[0]!.identity;
   });
+}
+
+/** 从实际选择与策略依赖解释中读取配置拥有者提供的默认身份。 */
+export function selectedWorkspaceConfigurationIdentity(options: {
+  readonly selection: readonly GeneratorSelectionRoot[];
+  readonly contentByIdentity: ReadonlyMap<
+    string,
+    DefaultReferenceContent<PackageCreationInput>
+  >;
+  readonly scope: string;
+}):
+  | ReturnType<
+      DefaultReferenceContent<PackageCreationInput>["definition"]["defaultIdentity"]
+    >
+  | undefined {
+  const visited = new Set<string>();
+  const configurations = new Map<
+    string,
+    DefaultReferenceContent<PackageCreationInput>["definition"]
+  >();
+  const visit = (
+    content: DefaultReferenceContent<PackageCreationInput> | undefined,
+  ): void => {
+    if (content === undefined) return;
+    const key = contentIdentityKey(content.identity);
+    if (visited.has(key)) return;
+    visited.add(key);
+    if (content.definition.workspaceConfiguration !== undefined) {
+      configurations.set(key, content.definition);
+    }
+    for (const identity of nativeDependencyIdentities(
+      content,
+      options.contentByIdentity,
+    )) {
+      visit(options.contentByIdentity.get(contentIdentityKey(identity)));
+    }
+  };
+  for (const root of options.selection) {
+    if (isContentIdentity(root.contentIdentity)) {
+      visit(
+        options.contentByIdentity.get(contentIdentityKey(root.contentIdentity)),
+      );
+    }
+  }
+  if (configurations.size !== 1) return undefined;
+  return [...configurations.values()][0]!.defaultIdentity(options.scope);
 }
 
 function nativeBindings(
@@ -733,6 +865,7 @@ function projectOperations(options: {
   readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
 }): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
   const { context } = options;
+  const prepared = preparedResourcesForContext(context);
   const projectState = projectRequirements(
     includeRequestedLinkFromIntents(
       assertDefaultProjectBlueprint(options.blueprint),
@@ -745,11 +878,7 @@ function projectOperations(options: {
   const linkPlan = planExplicitProjectLinks({
     blueprint,
     contributions: options.contributions,
-    manifestTruthByPackagePath: readProjectLinkManifestTruth({
-      repositoryRoot: context.targetDir,
-      blueprint,
-      contributions: options.contributions,
-    }),
+    manifestTruthByPackagePath: prepared.projectLinkManifestTruth,
   });
   const contributions = promoteInjectedProviderRuntimeDependencies({
     contributions: options.contributions,
@@ -758,6 +887,7 @@ function projectOperations(options: {
   const cliPublication = projectCliPublication({
     packages: options.packages,
     contributions,
+    resources: prepared.cliPublication,
   });
   const rustProjection = projectRustTarget({
     context,
@@ -870,10 +1000,11 @@ function projectOperations(options: {
       ...applicationCiDiagnosticArtifacts(requirements),
     ],
   });
-  const editor = builtInEditorCustomization(
+  const editor = projectBuiltInEditorCustomization(
     contributions.flatMap(
       (contribution) => contribution.foundation.editorCapabilities,
     ),
+    prepared.editorCustomizationDeclarations,
   );
   const deploymentEnvironmentNeeds =
     requirements.deploymentCheck?.environmentNeeds ?? [];
@@ -908,10 +1039,11 @@ function projectOperations(options: {
         contribution.foundation.developmentContainerToolLayers ?? [],
     ),
   ];
-  const container = planBuiltInDevelopmentContainer({
+  const container = projectBuiltInDevelopmentContainer({
     nodeVersion:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     layers: containerLayers,
+    resources: prepared.developmentContainer,
   });
   const containerBase = container.configuration;
   const referenceNames = new Map(
@@ -931,10 +1063,10 @@ function projectOperations(options: {
     packageGlobs: packages,
     dependencyCatalog,
     dependencyOverrides,
-    turboTemplate: readWorkspaceJson("turbo.json"),
+    turboTemplate: prepared.rootTemplates.turbo,
     referenceNames,
     turboBoundaryTags: boundaryTags(contributions),
-    rootTsconfigTemplate: readWorkspaceJson("tsconfig.json"),
+    rootTsconfigTemplate: prepared.rootTemplates.tsconfig,
     rootTsconfigCompilerOptions: {
       ...cliPublication.tsconfigCompilerOptions,
       rewriteRelativeImportExtensions: false,
@@ -946,7 +1078,7 @@ function projectOperations(options: {
       ...cliPublication.tsconfigInclude,
       ...applicationRootTsconfigIncludes(requirements),
     ],
-    tsconfigConfigTemplate: readWorkspaceJson("tsconfig.config.json"),
+    tsconfigConfigTemplate: prepared.rootTemplates.tsconfigConfig,
   });
   const editorExtensions = {
     kind: "writeJson" as const,
@@ -1021,16 +1153,26 @@ function projectOperations(options: {
   const defaultOperations: RenderOperation[] = [
     rootProjection.manifest,
     rootProjection.workspace,
-    workspaceResource("gitignore", ".gitignore"),
-    workspaceResource("agent-instructions.md", "AGENTS.md"),
+    workspaceResource(prepared.workspaceFiles, "gitignore", ".gitignore"),
+    workspaceResource(
+      prepared.workspaceFiles,
+      "agent-instructions.md",
+      "AGENTS.md",
+    ),
     rootProjection.turbo,
     workspaceFile(
+      prepared.workspaceFiles,
       "scripts/check-toolchain-versions.ts",
       "scripts/check-toolchain-versions.ts",
     ),
     projectToolchainMirrorManifest(reconciliation),
-    workspaceFile("scripts/task-gates.ts", "scripts/task-gates.ts"),
     workspaceFile(
+      prepared.workspaceFiles,
+      "scripts/task-gates.ts",
+      "scripts/task-gates.ts",
+    ),
+    workspaceFile(
+      prepared.workspaceFiles,
       "scripts/run-turbo-boundaries.ts",
       "scripts/run-turbo-boundaries.ts",
     ),
@@ -1092,25 +1234,34 @@ function projectOperations(options: {
     {
       kind: "writeText",
       to: ".github/workflows/check.yml",
-      text: projectCheckWorkflow({
-        packagePaths,
-        ...(requirements.deploymentCheck === undefined
-          ? {}
-          : { deploymentCheck: requirements.deploymentCheck }),
-        diagnosticArtifacts: artifacts,
-      }),
+      text: projectCheckWorkflow(
+        {
+          packagePaths,
+          ...(requirements.deploymentCheck === undefined
+            ? {}
+            : { deploymentCheck: requirements.deploymentCheck }),
+          diagnosticArtifacts: artifacts,
+        },
+        prepared.githubTemplates.checkWorkflow,
+      ),
     },
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(dependencyMaintenance),
+      text: projectDependabotConfig(
+        dependencyMaintenance,
+        prepared.githubTemplates.dependabot,
+      ),
     },
     ...(options.state.todo
       ? [
           {
             kind: "writeText" as const,
             to: "TODO.md",
-            text: projectNextStepsDocument(nextSteps),
+            text: projectNextStepsDocument(
+              nextSteps,
+              prepared.githubTemplates.nextSteps,
+            ),
           },
         ]
       : []),
@@ -1163,7 +1314,10 @@ function projectOperations(options: {
     operations: [
       ...packageOperations,
       ...defaultOperations,
-      ...prepareWorkspaceProjectResources(requirements),
+      ...projectWorkspaceProjectResources({
+        requirements,
+        resources: prepared.workspaceProject,
+      }),
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
@@ -1235,7 +1389,9 @@ export function createDefaultWorkspaceStrategy<
           ...(rustVersion === undefined ? {} : { rustVersion }),
         },
       };
-      return { state, context: defaultContext(targetRoot, state) };
+      const context = defaultContext(targetRoot, state);
+      prepareDefaultWorkspaceResources(context, []);
+      return { state, context };
     },
     prepareAddition({
       targetRoot,
@@ -1266,6 +1422,10 @@ export function createDefaultWorkspaceStrategy<
         rustFacts.existingDeclaration === undefined
           ? {}
           : { existingRustDeclaration: rustFacts.existingDeclaration },
+      );
+      prepareDefaultWorkspaceResources(
+        context,
+        packages.map((packageRecord) => packageRecord.definition.path),
       );
       const definitionsById = new Map<string, PackageDefinition>(
         packages.map((packageRecord) => [
@@ -1419,8 +1579,12 @@ export function createDefaultWorkspaceStrategy<
         };
         const currentManifests = readProjectLinkManifestTruth({
           repositoryRoot: targetRoot,
-          blueprint: requestedBlueprint,
-          contributions,
+          packagePaths: (requestedBlueprint.packageLinkIntents ?? []).flatMap(
+            (intent) => [
+              intent.consumerPackagePath,
+              intent.providerPackagePath,
+            ],
+          ),
         });
         const unsupported =
           !canProvideSourceConditionPackageNameImportForRole(

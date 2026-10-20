@@ -4,13 +4,26 @@ import { describe, it } from "node:test";
 
 import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
 import {
-  planDevelopmentContainerToolLayers,
+  planDevelopmentContainerToolLayersFromTexts,
+  prepareDevelopmentContainerToolLayerTexts,
   type DevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-container-tool-layer";
 
 const source = createTemplateSourceHandle(
   path.resolve("test/fixtures/development-container-tool-layers"),
 );
+
+async function planDevelopmentContainerToolLayers(options: {
+  readonly baseLayer: DevelopmentContainerToolLayer;
+  readonly layers?: readonly DevelopmentContainerToolLayer[];
+}) {
+  const fragmentTexts =
+    await prepareDevelopmentContainerToolLayerTexts(options);
+  return planDevelopmentContainerToolLayersFromTexts({
+    ...options,
+    fragmentTexts,
+  });
+}
 
 function layer(
   options: Omit<DevelopmentContainerToolLayer, "dockerfile"> & {

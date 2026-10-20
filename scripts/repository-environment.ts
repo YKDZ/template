@@ -1,11 +1,14 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import { createTemplateSourceHandle } from "@ykdz/template-core/renderer";
 import type { DevelopmentContainerToolLayerProbe } from "@ykdz/template-environment/development-container-tool-layer";
 import {
-  builtInEditorCustomization,
-  planBuiltInDevelopmentContainer,
+  prepareBuiltInDevelopmentContainerResources,
+  prepareBuiltInEditorCustomizationDeclarations,
+  projectBuiltInDevelopmentContainer,
+  projectBuiltInEditorCustomization,
   rustDevelopmentContainerToolLayer,
   shellCheckDevelopmentContainerToolLayer,
 } from "@ykdz/template-environment/development-environment";
@@ -15,6 +18,23 @@ import { format } from "oxfmt";
 import formatterConfig from "../oxfmt.config.ts";
 import type { TemplateToolchainDeclarations } from "./template-toolchain-declarations.ts";
 
+function prepareRepositoryEnvironmentDockerfile(): string {
+  try {
+    return readFileSync(
+      path.join(
+        import.meta.dirname,
+        "repository-environment/repository.Dockerfile",
+      ),
+      "utf8",
+    );
+  } catch (cause) {
+    throw new Error(
+      "仓库开发环境资源 scripts/repository-environment prepare 阶段无法读取 repository.Dockerfile",
+      { cause },
+    );
+  }
+}
+
 /** 源码仓库仅声明自己的用途；通用工具与编辑器策略由所属包维护。 */
 export async function repositoryDevelopmentEnvironment(
   declarations: TemplateToolchainDeclarations,
@@ -22,48 +42,55 @@ export async function repositoryDevelopmentEnvironment(
   readonly files: Readonly<Record<string, string>>;
   readonly probes: readonly DevelopmentContainerToolLayerProbe[];
 }> {
-  const container = planBuiltInDevelopmentContainer({
-    nodeVersion: declarations.rootNodeEngine.trim(),
-    layers: [
-      browserTestDevelopmentContainerToolLayer(),
-      rustDevelopmentContainerToolLayer(
-        declarations.rustToolchainChannel.trim(),
-      ),
-      shellCheckDevelopmentContainerToolLayer(),
-      {
-        identity: "template-repository",
-        requires: ["node-pnpm"],
-        dockerfile: {
-          source: createTemplateSourceHandle(
-            path.join(import.meta.dirname, "repository-environment"),
-          ),
-          from: "repository.Dockerfile",
-        },
-        buildArguments: [
-          {
-            name: "PACKAGE_MANAGER_PIN",
-            value: declarations.packageManagerDeclaration.trim(),
-          },
-        ],
-        mounts: [
-          {
-            identity: "cargo-target",
-            type: "volume",
-            source: "${devcontainerId}-target",
-            target: "${containerWorkspaceFolder}/target",
-          },
-        ],
-        probes: [
-          { identity: "git-lfs", command: "git", args: ["lfs", "version"] },
-        ],
+  const layers = [
+    browserTestDevelopmentContainerToolLayer(),
+    rustDevelopmentContainerToolLayer(declarations.rustToolchainChannel.trim()),
+    shellCheckDevelopmentContainerToolLayer(),
+    {
+      identity: "template-repository",
+      requires: ["node-pnpm"],
+      dockerfile: {
+        source: createTemplateSourceHandle(
+          path.join(import.meta.dirname, "repository-environment"),
+        ),
+        from: "repository.Dockerfile",
       },
-    ],
+      buildArguments: [
+        {
+          name: "PACKAGE_MANAGER_PIN",
+          value: declarations.packageManagerDeclaration.trim(),
+        },
+      ],
+      mounts: [
+        {
+          identity: "cargo-target",
+          type: "volume" as const,
+          source: "${devcontainerId}-target",
+          target: "${containerWorkspaceFolder}/target",
+        },
+      ],
+      probes: [
+        { identity: "git-lfs", command: "git", args: ["lfs", "version"] },
+      ],
+    },
+  ];
+  const environmentResources = prepareBuiltInDevelopmentContainerResources();
+  const repositoryDockerfile = prepareRepositoryEnvironmentDockerfile();
+  const container = projectBuiltInDevelopmentContainer({
+    nodeVersion: declarations.rootNodeEngine.trim(),
+    layers,
+    resources: {
+      ...environmentResources,
+      dockerfileFragments: {
+        ...environmentResources.dockerfileFragments,
+        "repository.Dockerfile": repositoryDockerfile,
+      },
+    },
   });
-  const editor = builtInEditorCustomization([
-    "oxc-format-lint",
-    "vue",
-    "rust-tooling",
-  ]);
+  const editor = projectBuiltInEditorCustomization(
+    ["oxc-format-lint", "vue", "rust-tooling"],
+    prepareBuiltInEditorCustomizationDeclarations(),
+  );
   const extensions = [...editor.extensions, "fill-labs.dependi"];
   const settings = {
     ...editor.settings,

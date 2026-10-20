@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -282,43 +281,6 @@ export function validateDevelopmentContainerDockerfileFragments(options: {
   }
 }
 
-/** Reads and validates the final owned resources before returning plain text. */
-export function prepareDevelopmentContainerDockerfile(options: {
-  readonly layers: readonly PlannedDevelopmentContainerToolLayer[];
-  readonly to?: string;
-}): WriteTextOperation {
-  const [baseLayer, ...optionalLayers] = options.layers;
-  if (baseLayer?.kind !== "base") {
-    throw new Error("Development Container Dockerfile requires a base layer.");
-  }
-  if (optionalLayers.some((layer) => layer.kind !== "optional")) {
-    throw new Error(
-      "Development Container Dockerfile optional layers must follow the base layer.",
-    );
-  }
-  const fragments = options.layers.map((layer) => ({
-    identity: layer.dockerfile.from,
-    from: layer.dockerfile.from,
-    text: readFileSync(
-      resolveTemplateSource(layer.dockerfile.source, layer.dockerfile.from),
-      "utf8",
-    ),
-  }));
-  const [baseFragment, ...optionalFragments] = fragments;
-  if (baseFragment === undefined) {
-    throw new Error("Development Container Dockerfile requires a base layer.");
-  }
-  validateDevelopmentContainerDockerfileFragments({
-    baseFragment,
-    fragments: optionalFragments,
-  });
-  return {
-    kind: "writeText",
-    to: options.to ?? ".devcontainer/Dockerfile",
-    text: fragments.map(({ text }) => text.trimEnd()).join("\n\n") + "\n",
-  };
-}
-
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -593,36 +555,94 @@ function completeDevelopmentContainerToolLayerPlan(
   };
 }
 
-export function planDevelopmentContainerToolLayersSync(options: {
+/** 将所属环境准备的 Dockerfile 文本交给纯层规划。 */
+export function planDevelopmentContainerToolLayersFromTexts(options: {
   readonly baseLayer: DevelopmentContainerToolLayer;
   readonly layers?: readonly DevelopmentContainerToolLayer[] | undefined;
+  readonly fragmentTexts: Readonly<Record<string, string>>;
 }): DevelopmentContainerToolLayerPlan {
   const layers = orderLayers(options.baseLayer, options.layers ?? []);
-  return completeDevelopmentContainerToolLayerPlan(
-    layers,
-    layers.map((layer) =>
-      readFileSync(
-        resolveTemplateSource(layer.dockerfile.source, layer.dockerfile.from),
-        "utf8",
-      ),
-    ),
-  );
+  const fragmentTexts = layers.map((layer) => {
+    const text = options.fragmentTexts[layer.dockerfile.from];
+    if (text === undefined) {
+      throw new Error(
+        `Development Container Tool Layer ${layer.identity} 缺少所属准备文本 ${layer.dockerfile.from}.`,
+      );
+    }
+    return text;
+  });
+  return completeDevelopmentContainerToolLayerPlan(layers, fragmentTexts);
 }
 
-export async function planDevelopmentContainerToolLayers(options: {
+/** 只验证并组合已准备文本，不读取模板资源。 */
+export function developmentContainerDockerfileFromText(options: {
+  readonly layers: readonly PlannedDevelopmentContainerToolLayer[];
+  readonly fragmentTexts: Readonly<Record<string, string>>;
+  readonly to?: string;
+}): WriteTextOperation {
+  const [baseLayer, ...optionalLayers] = options.layers;
+  if (baseLayer?.kind !== "base") {
+    throw new Error("Development Container Dockerfile requires a base layer.");
+  }
+  if (optionalLayers.some((layer) => layer.kind !== "optional")) {
+    throw new Error(
+      "Development Container Dockerfile optional layers must follow the base layer.",
+    );
+  }
+  const fragments = options.layers.map((layer) => {
+    const text = options.fragmentTexts[layer.dockerfile.from];
+    if (text === undefined) {
+      throw new Error(
+        `Development Container Tool Layer ${layer.identity} 缺少所属准备文本 ${layer.dockerfile.from}.`,
+      );
+    }
+    return {
+      identity: layer.dockerfile.from,
+      from: layer.dockerfile.from,
+      text,
+    };
+  });
+  const [baseFragment, ...optionalFragments] = fragments;
+  if (baseFragment === undefined) {
+    throw new Error("Development Container Dockerfile requires a base layer.");
+  }
+  validateDevelopmentContainerDockerfileFragments({
+    baseFragment,
+    fragments: optionalFragments,
+  });
+  return {
+    kind: "writeText",
+    to: options.to ?? ".devcontainer/Dockerfile",
+    text: fragments.map(({ text }) => text.trimEnd()).join("\n\n") + "\n",
+  };
+}
+
+/** 所属资源 owner 在准备阶段读取所选层文本，planner 只消费该快照。 */
+export async function prepareDevelopmentContainerToolLayerTexts(options: {
   readonly baseLayer: DevelopmentContainerToolLayer;
   readonly layers?: readonly DevelopmentContainerToolLayer[] | undefined;
-}): Promise<DevelopmentContainerToolLayerPlan> {
+}): Promise<Readonly<Record<string, string>>> {
   const layers = orderLayers(options.baseLayer, options.layers ?? []);
-  return completeDevelopmentContainerToolLayerPlan(
-    layers,
-    await Promise.all(
-      layers.map((layer) =>
-        readFile(
-          resolveTemplateSource(layer.dockerfile.source, layer.dockerfile.from),
-          "utf8",
-        ),
-      ),
-    ),
+  const entries = await Promise.all(
+    layers.map(async (layer) => {
+      try {
+        return [
+          layer.dockerfile.from,
+          await readFile(
+            resolveTemplateSource(
+              layer.dockerfile.source,
+              layer.dockerfile.from,
+            ),
+            "utf8",
+          ),
+        ] as const;
+      } catch (cause) {
+        throw new Error(
+          `Development Container Tool Layer ${layer.identity} prepare 阶段无法读取 ${layer.dockerfile.from}.`,
+          { cause },
+        );
+      }
+    }),
   );
+  return Object.fromEntries(entries);
 }

@@ -1,9 +1,14 @@
 import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
-import { createContentIndex } from "@ykdz/template-core/content-identity";
+import {
+  contentIdentityKey,
+  createContentIndex,
+} from "@ykdz/template-core/content-identity";
+import type { GeneratorSelectionRoot } from "@ykdz/template-core/workspace-strategy";
 import type { PackageCreationInput } from "@ykdz/template-core/workspace-strategy";
 import { createGenerator } from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
+  selectedWorkspaceConfigurationIdentity,
   type DefaultWorkspaceCreationInput,
 } from "@ykdz/template-workspace/default-workspace-strategy";
 
@@ -12,13 +17,42 @@ export type CliPreset = Extract<
   { kind: "preset" }
 >;
 
-export const cliPresets: readonly CliPreset[] =
-  deriveTemplateMembers(templateContent).presets;
+const templateMembers = deriveTemplateMembers(templateContent);
+export const cliPresets: readonly CliPreset[] = templateMembers.presets;
 const presetIndex = createContentIndex(cliPresets);
+const referencePackages = templateMembers.referencePackages;
+const referenceIndex = createContentIndex(referencePackages);
 
 export function presetByAlias(alias: string): CliPreset | undefined {
   if (!cliPresets.some((preset) => preset.alias === alias)) return undefined;
   return presetIndex.resolve(alias, "preset");
+}
+
+/** 沿实际选中包的目标依赖图取得配置拥有者公开的默认身份。 */
+export function workspaceConfigurationIdentityForPreset(
+  preset: CliPreset,
+  scope: string,
+): ReturnType<typeof selectedWorkspaceConfigurationIdentity> {
+  const selection = Object.entries(preset.definition.nodes).map(
+    ([nodeIdentity, node]): GeneratorSelectionRoot => ({
+      nodeIdentity,
+      contentIdentity: referenceIndex.resolve(
+        { alias: node.reference.alias, namespace: preset.identity.namespace },
+        "reference",
+      ).identity,
+    }),
+  );
+  const contentByIdentity = new Map(
+    referencePackages.map((member) => [
+      contentIdentityKey(member.identity),
+      member,
+    ]),
+  );
+  return selectedWorkspaceConfigurationIdentity({
+    selection,
+    contentByIdentity,
+    scope,
+  });
 }
 
 export const cliWorkspaceStrategy =

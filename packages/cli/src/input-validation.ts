@@ -5,9 +5,12 @@ import {
   isValidDefaultPackageScope,
   validateDefaultPackagePath,
 } from "@ykdz/template-workspace/default-package-identity";
-import { defaultWorkspaceConfigurationIdentity } from "@ykdz/template-workspace/default-workspace-strategy";
 
-import { presetByAlias, type CliPreset } from "./preset-catalog.ts";
+import {
+  presetByAlias,
+  workspaceConfigurationIdentityForPreset,
+  type CliPreset,
+} from "./preset-catalog.ts";
 
 export type InitializationInputIssue = {
   readonly code:
@@ -66,12 +69,12 @@ function deduplicateIssues<T extends { readonly code: string }>(
   );
 }
 
-function validScope(value: string): boolean {
+function validScope(value: string, preset: CliPreset): boolean {
+  const configuration = workspaceConfigurationIdentityForPreset(preset, value);
   return (
     isValidDefaultPackageScope(value) &&
-    isValidDefaultNpmPackageName(
-      defaultWorkspaceConfigurationIdentity(value).name,
-    )
+    (configuration === undefined ||
+      isValidDefaultNpmPackageName(configuration.name))
   );
 }
 
@@ -122,11 +125,11 @@ export function validateInitializationInput(
   const validScopeOverride =
     normalizedScope !== undefined &&
     scopeInput === scopeInput?.trim() &&
-    validScope(normalizedScope);
+    validScope(normalizedScope, preset);
   if (normalizedScope !== undefined && !validScopeOverride) {
     issues.push({ code: "INVALID_PACKAGE_SCOPE" });
   }
-  const validRepositoryScope = validScope(repositoryName);
+  const validRepositoryScope = validScope(repositoryName, preset);
   if (normalizedScope === undefined && !validRepositoryScope) {
     issues.push({ code: "INVALID_REPOSITORY_SCOPE" });
   }
@@ -136,6 +139,10 @@ export function validateInitializationInput(
     : validRepositoryScope
       ? repositoryName
       : "repository";
+  const configurationIdentity = workspaceConfigurationIdentityForPreset(
+    preset,
+    defaultPackageScope,
+  );
   const nodeLeafNames = Object.values(definition.nodes).map(
     ({ reference }) => reference.defaultLeafName,
   );
@@ -160,11 +167,10 @@ export function validateInitializationInput(
 
   if (
     (override?.name !== undefined &&
-      defaultWorkspaceConfigurationIdentity(defaultPackageScope).name ===
+      configurationIdentity?.name ===
         `@${defaultPackageScope}/${override.name}`) ||
     (override?.path !== undefined &&
-      defaultWorkspaceConfigurationIdentity(defaultPackageScope).path ===
-        override.path)
+      configurationIdentity?.path === override.path)
   ) {
     issues.push({ code: "CONFLICTING_PACKAGE_IDENTITY" });
   }
