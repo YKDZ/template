@@ -365,9 +365,6 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:references/typescript-config
-      '@ykdz/template-builtin-presets':
-        specifier: workspace:*
-        version: link:packages/builtin-presets
       '@ykdz/template-checks':
         specifier: workspace:*
         version: link:packages/checks
@@ -674,9 +671,6 @@ importers:
       '@ykdz/reference-typescript-config':
         specifier: workspace:*
         version: link:../../references/typescript-config
-      '@ykdz/template-builtin-presets':
-        specifier: workspace:*
-        version: link:../builtin-presets
       execa:
         specifier: 'catalog:'
         version: 10.1.1
