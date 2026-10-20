@@ -182,6 +182,14 @@ function nativeBindings(
   );
 }
 
+function siblingPackagePath(defaultPath: string, leafName: string): string {
+  const parentPath = path.posix.dirname(defaultPath);
+  return path.posix.join(
+    parentPath === "." ? "packages" : parentPath,
+    leafName,
+  );
+}
+
 function maintenancePolicy(contributions: readonly PackageContribution[]) {
   const ecosystems = [
     ...new Set([
@@ -637,7 +645,7 @@ export function createDefaultWorkspaceStrategy(): WorkspaceStrategy<
           explicitPath ??
           (leafName === undefined
             ? content.defaultPath
-            : "packages/" + selectedLeaf),
+            : siblingPackagePath(content.defaultPath, selectedLeaf)),
         role: content.role,
       };
     },
