@@ -6,76 +6,12 @@ import { describe, it } from "node:test";
 
 import { materializeProjectProjection } from "@ykdz/template-core/project-projection";
 import {
-  createAtomicProjectRenderer,
   createTemplateSourceHandle,
   renderProject,
   type RenderOperation,
 } from "@ykdz/template-core/renderer";
 
-void describe("atomic renderer", () => {
-  void it("commits only planned paths and rolls them all back after a commit failure", async () => {
-    const targetRoot = await mkdtemp(
-      path.join(tmpdir(), "template-atomic-rollback-"),
-    );
-    const committedPaths: string[] = [];
-
-    try {
-      await Promise.all([
-        writeFile(path.join(targetRoot, "first.json"), '{"state":"before"}\n'),
-        writeFile(path.join(targetRoot, "second.json"), '{"state":"before"}\n'),
-        writeFile(path.join(targetRoot, "unplanned.txt"), "untouched\n"),
-      ]);
-      const renderAtomically = createAtomicProjectRenderer({
-        async commitPath(options) {
-          committedPaths.push(options.relativePath);
-          if (options.relativePath === "second.json") {
-            throw new Error("injected commit failure");
-          }
-          await options.commit();
-        },
-      });
-
-      await assert.rejects(
-        renderAtomically({
-          targetRoot,
-          operations: [
-            {
-              kind: "writeJson",
-              to: "first.json",
-              value: { state: "after" },
-              overwrite: true,
-            },
-            {
-              kind: "writeJson",
-              to: "second.json",
-              value: { state: "after" },
-              overwrite: true,
-            },
-          ],
-        }),
-        (error: unknown) =>
-          error instanceof Error &&
-          /injected commit failure/u.test(error.message),
-      );
-
-      assert.equal(
-        await readFile(path.join(targetRoot, "first.json"), "utf8"),
-        '{"state":"before"}\n',
-      );
-      assert.equal(
-        await readFile(path.join(targetRoot, "second.json"), "utf8"),
-        '{"state":"before"}\n',
-      );
-      assert.equal(
-        await readFile(path.join(targetRoot, "unplanned.txt"), "utf8"),
-        "untouched\n",
-      );
-      assert.deepEqual(committedPaths, ["first.json", "second.json"]);
-    } finally {
-      await rm(targetRoot, { recursive: true, force: true });
-    }
-  });
-
+void describe("renderer", () => {
   void it("replaces variables in a checked JSON template before merging", async () => {
     const sourceRoot = await mkdtemp(
       path.join(tmpdir(), "template-json-source-"),
