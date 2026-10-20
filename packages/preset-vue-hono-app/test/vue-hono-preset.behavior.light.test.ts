@@ -12,37 +12,72 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-vue-hono-app/template";
-import { referencePackage as api } from "@ykdz/reference-hono-api/template";
+import { preset as presetDefinition } from "@ykdz/preset-vue-hono-app/template";
+import { referencePackage as apiDefinition } from "@ykdz/reference-hono-api/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
-import { referencePackage as web } from "@ykdz/reference-vue-hono-web/template";
-import { referencePackage as vueShared } from "@ykdz/reference-vue-shared/template";
+import { referencePackage as libraryDefinition } from "@ykdz/reference-ts-lib/template";
+import { referencePackage as webDefinition } from "@ykdz/reference-vue-hono-web/template";
+import { referencePackage as vueSharedDefinition } from "@ykdz/reference-vue-shared/template";
+import {
+  createContentIndex,
+  type LoadedContentMember,
+} from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [api, web, vueShared, configuration, library, preset] as const;
-const missingResourceShared = defineReferencePackage({
-  packageName: vueShared.manifest.name,
+const loadedContent = await loadContentSource({
+  namespace: "ykdz",
   resolve: (specifier) => import.meta.resolve(specifier),
-  alias: vueShared.alias,
-  instance: vueShared.instance,
-  defaultLeafName: vueShared.defaultLeafName,
-  role: vueShared.role,
+  members: [
+    "@ykdz/reference-hono-api/template",
+    "@ykdz/reference-vue-hono-web/template",
+    "@ykdz/reference-vue-shared/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/preset-vue-hono-app/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(loadedContent);
+type PreparedReference = ReturnType<typeof defineReferencePackage>;
+function referenceMember(definition: unknown) {
+  return contentIndex.fromDefinition(
+    definition,
+    "reference",
+  ) as LoadedContentMember<PreparedReference, "reference">;
+}
+const api = referenceMember(apiDefinition);
+const web = referenceMember(webDefinition);
+const vueShared = referenceMember(vueSharedDefinition);
+const library = referenceMember(libraryDefinition);
+const configuration = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-typescript-config",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.fromDefinition(presetDefinition, "preset");
+const content = [api, web, vueShared, configuration, library, preset] as const;
+const missingResourceSharedDefinition = defineReferencePackage({
+  packageName: vueShared.definition.manifest.name,
+  resolve: vueShared.definition.resolve,
+  alias: vueShared.definition.alias,
+  instance: vueShared.definition.instance,
+  defaultLeafName: vueShared.definition.defaultLeafName,
+  role: vueShared.definition.role,
   resources: ["__missing-vue-shared-resource__.ts"],
   template: {
-    dependencies: [
-      { name: "@ykdz/template-core", purpose: "template-execution" },
-      { name: "@ykdz/template-environment", purpose: "template-execution" },
-      {
-        name: "@ykdz/template-workspace-authoring",
-        purpose: "template-execution",
-      },
-    ],
+    dependencies: vueShared.definition.templateDependencies,
     scripts: ["build:template"],
+    resources: ["template", "tsconfig.template.json"],
   },
   foundation: {
     toolchains: {},
@@ -50,6 +85,10 @@ const missingResourceShared = defineReferencePackage({
     dependencyMaintenance: { ecosystems: [], interval: "weekly" },
   },
   environmentNeeds: [],
+});
+const missingResourceShared = Object.freeze({
+  ...vueShared,
+  definition: missingResourceSharedDefinition,
 });
 
 async function snapshotTree(root: string): Promise<{
@@ -119,7 +158,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     const generated = generator();
     const result = await generated.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
 
@@ -210,7 +249,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     const beforeUnsupportedAdd = await snapshotTree(targetRoot);
     const rejectedAdd = await generated.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
     });
     assert.strictEqual(
       rejectedAdd.status,
@@ -301,7 +340,9 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     const result = await generator().init({
       targetRoot,
       selection: {
-        roots: [{ preset, creationInput: { leafName: "custom" } }],
+        roots: [
+          { preset: preset.identity, creationInput: { leafName: "custom" } },
+        ],
       },
       strategyInput,
     });
@@ -328,7 +369,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
           content: [web, vueShared, configuration, library, preset],
           strategy: createDefaultWorkspaceStrategy<TsCliCreationInput>(),
         }),
-      /缺少预设参考成员：hono-api/u,
+      /未装载的来源定义/u,
     );
     await assert.rejects(stat(targetRoot), { code: "ENOENT" });
   });
@@ -347,7 +388,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     });
     const result = await incompleteGenerator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
 
@@ -375,7 +416,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     const generated = generator();
     const initialized = await generated.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
     assert.strictEqual(
@@ -423,7 +464,7 @@ void describe("Vue-Hono 组合预设公开行为", () => {
     const generated = generator();
     const initialized = await generated.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
     assert.strictEqual(

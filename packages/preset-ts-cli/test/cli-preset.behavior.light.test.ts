@@ -13,20 +13,65 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-ts-cli/template";
-import { referencePackage as rust } from "@ykdz/reference-rust-bin/template";
+import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
 import {
-  referencePackage as cli,
-  type TsCliCreationInput,
-} from "@ykdz/reference-ts-cli/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
+  contentIdentityKey,
+  createContentIndex,
+} from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [cli, library, rust, configuration, preset];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-ts-cli/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-rust-bin/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-ts-cli/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(content);
+const cli = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-cli",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const library = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-lib",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const rust = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-rust-bin",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/preset-ts-cli",
+    exportPath: "./template",
+  },
+  "preset",
+);
 const temporaryDirectories: string[] = [];
 
 async function createTargetRoot(prefix: string): Promise<string> {
@@ -99,7 +144,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     const generated = generator();
     const initialized = await generated.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
 
@@ -146,7 +191,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
 
     const privateAdded = await generated.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: {
         leafName: "private-cli",
         packagePath: "packages/private-cli",
@@ -195,14 +240,18 @@ void describe("TypeScript CLI 公开组合预设", () => {
       ),
     ) as {
       packages: {
-        contentIdentity: string;
+        contentIdentity: typeof cli.identity;
         createdBy: string;
         creationInput?: unknown;
       }[];
     };
     assert.deepStrictEqual(
       records.packages
-        .filter((record) => record.contentIdentity === cli.identity)
+        .filter(
+          (record) =>
+            contentIdentityKey(record.contentIdentity) ===
+            contentIdentityKey(cli.identity),
+        )
         .map(({ createdBy, creationInput }) => ({ createdBy, creationInput })),
       [
         {
@@ -284,7 +333,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
 
     const linked = await generated.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { linkToNodeIdentity: "library" },
     });
     assert.strictEqual(linked.status, "success", JSON.stringify(linked));
@@ -367,7 +416,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
       selection: {
         roots: [
           {
-            preset,
+            preset: preset.identity,
             creationInput: {
               variant: "private",
               linkToNodeIdentity: "missing",
@@ -390,7 +439,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
         roots: [
           { nodeIdentity: "rust", contentIdentity: rust.identity },
           {
-            preset,
+            preset: preset.identity,
             creationInput: { variant: "private", linkToNodeIdentity: "rust" },
           },
         ],
@@ -406,7 +455,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     const generated = generator();
     const initialized = await generated.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
     assert.strictEqual(
@@ -423,7 +472,7 @@ void describe("TypeScript CLI 公开组合预设", () => {
     const before = await snapshotTree(targetRoot);
     const result = await generated.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: {
         leafName: "private-cli",
         packagePath: "packages/private-cli",

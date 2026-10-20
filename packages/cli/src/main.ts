@@ -96,7 +96,7 @@ function createCliContract(runtime: CliRuntime) {
         description: "初始化项目仓库。",
         input: initializationInputSchema(runtime.cwd),
         usageConstraints: cliPresets
-          .filter((preset) => Object.keys(preset.nodes).length !== 1)
+          .filter((preset) => Object.keys(preset.definition.nodes).length !== 1)
           .map(
             (definition) =>
               ({
@@ -105,7 +105,7 @@ function createCliContract(runtime: CliRuntime) {
                   {
                     kind: "equals",
                     field: "preset",
-                    value: definition.metadata.alias,
+                    value: definition.alias,
                   },
                 ],
                 onMatch: { forbid: ["name", "path"] },

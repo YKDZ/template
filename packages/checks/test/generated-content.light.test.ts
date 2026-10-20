@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import type {
+  TemplatePreset,
+  TemplateReferencePackage,
+} from "@ykdz/template-content";
+import { createContentIndex } from "@ykdz/template-core/content-identity";
 import { definePreset } from "@ykdz/template-core/preset-definition";
 
 import {
@@ -81,12 +86,15 @@ void describe("唯一内容集合的真实生成检查场景", () => {
       (member): member is ChecksPreset =>
         "kind" in member &&
         member.kind === "preset" &&
-        member.metadata.alias === "ts-lib",
+        member.definition.metadata.alias === "ts-lib",
     );
     assert.ok(libraryPreset);
-    const [libraryNode] = Object.values(libraryPreset.nodes);
+    const [libraryNode] = Object.values(libraryPreset.definition.nodes);
     assert.ok(libraryNode);
     const libraryReference = libraryNode.reference;
+    const libraryReferenceMember = createContentIndex(
+      sourceGeneratedScenarioRuntime.content,
+    ).fromDefinition(libraryReference, "reference");
     const nativeManifest = Object.fromEntries(
       Object.entries(libraryReference.manifest).filter(
         ([key]) => key !== "exports",
@@ -105,22 +113,54 @@ void describe("唯一内容集合的真实生成检查场景", () => {
       operations: ["add"],
       nodes: { provider: { reference: providerReference } },
     });
+    const providerReferenceMember: TemplateReferencePackage = {
+      ...libraryReferenceMember,
+      identity: {
+        namespace: "checks-fixture",
+        packageName: "@fixture/focused-provider-reference",
+        exportPath: "./template",
+      },
+      definition: providerReference,
+      source: {
+        specifier: "@fixture/focused-provider-reference/template",
+        moduleURL:
+          "file:///checks-fixture/focused-provider-reference/template.js",
+        manifestURL:
+          "file:///checks-fixture/focused-provider-reference/package.json",
+      },
+    };
+    const providerPresetMember: ChecksPreset = {
+      identity: {
+        namespace: "checks-fixture",
+        packageName: "@fixture/focused-provider",
+        exportPath: "./template",
+      },
+      kind: "preset",
+      alias: providerPreset.metadata.alias,
+      definition: providerPreset as TemplatePreset["definition"],
+      source: {
+        specifier: "@fixture/focused-provider/template",
+        moduleURL: "file:///checks-fixture/focused-provider/template.js",
+        manifestURL: "file:///checks-fixture/focused-provider/package.json",
+      },
+    };
     const content = [
       ...sourceGeneratedScenarioRuntime.content.filter(
-        (member) => member !== libraryPreset && member !== libraryReference,
+        (member) =>
+          member !== libraryPreset && member !== libraryReferenceMember,
       ),
-      providerReference,
-      providerPreset,
-    ] as unknown as GeneratedScenarioRuntime["content"];
+      providerReferenceMember,
+      providerPresetMember,
+    ];
     const runtime: GeneratedScenarioRuntime = {
       ...sourceGeneratedScenarioRuntime,
       content,
     };
     const scenario = deriveFocusedProjectLinkScenarios(runtime).find(
       (candidate) =>
-        candidate.base.metadata.alias === "ts-cli" &&
-        candidate.addition?.metadata.alias ===
-          "focused-provider-with-generated-exports",
+        candidate.base.identity.packageName === "@ykdz/preset-ts-cli" &&
+        candidate.addition?.identity.packageName ===
+          "@fixture/focused-provider",
     );
     assert.ok(scenario);
 
@@ -192,13 +232,35 @@ void describe("唯一内容集合的真实生成检查场景", () => {
       operations: ["add"],
       nodes: { provider: { reference: unsupportedReference } },
     });
+    const unsupportedReferenceMember: TemplateReferencePackage = {
+      ...providerReferenceMember,
+      definition: unsupportedReference,
+    };
+    const unsupportedPresetMember: ChecksPreset = {
+      identity: {
+        namespace: "checks-fixture",
+        packageName: "@fixture/focused-provider-without-exports",
+        exportPath: "./template",
+      },
+      kind: "preset",
+      alias: unsupportedPreset.metadata.alias,
+      definition: unsupportedPreset as TemplatePreset["definition"],
+      source: {
+        specifier: "@fixture/focused-provider-without-exports/template",
+        moduleURL:
+          "file:///checks-fixture/focused-provider-without-exports/template.js",
+        manifestURL:
+          "file:///checks-fixture/focused-provider-without-exports/package.json",
+      },
+    };
     const unsupportedContent = [
       ...sourceGeneratedScenarioRuntime.content.filter(
-        (member) => member !== libraryPreset && member !== libraryReference,
+        (member) =>
+          member !== libraryPreset && member !== libraryReferenceMember,
       ),
-      unsupportedReference,
-      unsupportedPreset,
-    ] as unknown as GeneratedScenarioRuntime["content"];
+      unsupportedReferenceMember,
+      unsupportedPresetMember,
+    ];
     const unsupportedRuntime: GeneratedScenarioRuntime = {
       ...sourceGeneratedScenarioRuntime,
       content: unsupportedContent,
@@ -207,9 +269,9 @@ void describe("唯一内容集合的真实生成检查场景", () => {
       unsupportedRuntime,
     ).find(
       (candidate) =>
-        candidate.base.metadata.alias === "ts-cli" &&
-        candidate.addition?.metadata.alias ===
-          "focused-provider-without-generated-exports",
+        candidate.base.identity.packageName === "@ykdz/preset-ts-cli" &&
+        candidate.addition?.identity.packageName ===
+          "@fixture/focused-provider-without-exports",
     );
     assert.ok(unsupportedScenario);
     const unsupportedWorkspace = await mkdtemp(

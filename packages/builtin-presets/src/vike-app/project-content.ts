@@ -1,5 +1,5 @@
 import {
-  type GeneratorContent,
+  type GeneratorContentDefinition,
   type GeneratorNodeInstances,
   type PackageCreationInput,
 } from "@ykdz/template-core/workspace-strategy";
@@ -10,7 +10,7 @@ import type { ReferencePackage } from "@ykdz/template-workspace-authoring/refere
 
 type GeneratorContributionOptions<CreationInput extends PackageCreationInput> =
   Parameters<
-    GeneratorContent<
+    GeneratorContentDefinition<
       GenerationContext,
       PackageContribution,
       CreationInput
@@ -20,7 +20,11 @@ type GeneratorContributionOptions<CreationInput extends PackageCreationInput> =
 type StrategyReferencePackage<CreationInput extends PackageCreationInput> =
   Omit<ReferencePackage, "contribute"> &
     Pick<
-      GeneratorContent<GenerationContext, PackageContribution, CreationInput>,
+      GeneratorContentDefinition<
+        GenerationContext,
+        PackageContribution,
+        CreationInput
+      >,
       "contribute"
     >;
 

@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { contentIdentityKey } from "@ykdz/template-core/content-identity";
 import { execa } from "execa";
 
 import {
@@ -514,21 +515,27 @@ export async function generatedScenariosFor(
       return deriveFocusedProjectLinkScenarios(runtime);
     case "deployment":
       return deriveInitializationScenarios(runtime).filter(
-        (scenario) => scenario.base.metadata.alias === "vike-app",
+        (scenario) =>
+          scenario.base.identity.namespace === "ykdz" &&
+          scenario.base.identity.packageName === "@ykdz/preset-vike-app",
       );
     case "capabilities":
       return [
         ...deriveInitializationScenarios(runtime).filter(
-          (scenario) => scenario.base.metadata.alias === "vue-hono-app",
+          (scenario) =>
+            scenario.base.identity.namespace === "ykdz" &&
+            scenario.base.identity.packageName === "@ykdz/preset-vue-hono-app",
         ),
         ...deriveFixtureMatrix(runtime).filter(
           ({ base, addition }) =>
-            (base.metadata.alias === "ts-lib" &&
-              ["rust-bin", "vue-app"].includes(
-                addition?.metadata.alias ?? "",
+            (base.identity.namespace === "ykdz" &&
+              base.identity.packageName === "@ykdz/preset-ts-lib" &&
+              ["@ykdz/preset-rust-bin", "@ykdz/preset-vue-app"].includes(
+                addition?.identity.packageName ?? "",
               )) ||
-            (base.metadata.alias === "vue-app" &&
-              addition?.metadata.alias === "vue-app"),
+            (base.identity.namespace === "ykdz" &&
+              base.identity.packageName === "@ykdz/preset-vue-app" &&
+              addition?.identity.packageName === "@ykdz/preset-vue-app"),
         ),
       ];
   }
@@ -539,10 +546,10 @@ function scenarioDiagnostics(scenario: GeneratedScenario) {
     id: scenario.id,
     label: scenario.label,
     presetIdentities: [
-      scenario.base.metadata.alias,
+      contentIdentityKey(scenario.base.identity),
       ...(scenario.addition === undefined
         ? []
-        : [scenario.addition.metadata.alias]),
+        : [contentIdentityKey(scenario.addition.identity)]),
     ],
   };
 }
@@ -624,7 +631,11 @@ async function runScenario(
     afterInitialization: async (initialization, projectDir) => {
       await prepareGeneratedRepositoryForContainerWrites(projectDir);
       await initializeFixtureGitRepository({ repositoryRoot: projectDir, run });
-      if (mode === "capabilities" && scenario.base.metadata.alias === "vue-app")
+      if (
+        mode === "capabilities" &&
+        scenario.base.identity.namespace === "ykdz" &&
+        scenario.base.identity.packageName === "@ykdz/preset-vue-app"
+      )
         customization = await customizeSharedVue(
           initialization,
           projectDir,
@@ -643,7 +654,8 @@ async function runScenario(
   const initialization = receipt.initialization;
   if (
     mode === "capabilities" &&
-    scenario.addition?.metadata.alias === "vue-app"
+    scenario.addition?.identity.namespace === "ykdz" &&
+    scenario.addition.identity.packageName === "@ykdz/preset-vue-app"
   )
     await verifySharedVueCombination({
       initialization,

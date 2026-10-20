@@ -40,6 +40,7 @@ export type ContentIndex<
   fromDefinition<Kind extends Member["kind"]>(
     definition: unknown,
     expectedKind: Kind,
+    options?: Readonly<{ readonly namespace?: string }>,
   ): Member & { readonly kind: Kind };
 }>;
 
@@ -170,19 +171,34 @@ export function createContentIndex<Member extends LoadedContentMember>(
   const fromDefinition = <Kind extends Member["kind"]>(
     definition: unknown,
     expectedKind: Kind,
+    options?: Readonly<{ readonly namespace?: string }>,
   ): Member & { readonly kind: Kind } => {
     if (typeof definition !== "object" || definition === null) {
       throw new Error("内容定义未由显式集合装载");
     }
-    const candidates = (definitions.get(definition) ?? []).filter(
+    const matchingKind = (definitions.get(definition) ?? []).filter(
       (member) => member.kind === expectedKind,
     );
+    const inNamespace =
+      options?.namespace === undefined
+        ? []
+        : matchingKind.filter(
+            (member) => member.identity.namespace === options.namespace,
+          );
+    const candidates = inNamespace.length > 0 ? inNamespace : matchingKind;
     if (candidates.length === 0) {
       throw new Error("内容定义未由显式集合装载");
     }
     if (candidates.length > 1) {
+      const namespaces = new Set(
+        candidates.map((member) => member.identity.namespace),
+      );
+      const cause =
+        namespaces.size > 1
+          ? "同一内容定义属于多个命名空间"
+          : "同一内容定义关联多个规范入口";
       throw new Error(
-        `同一内容定义属于多个命名空间，必须明确来源：${candidates
+        `${cause}，必须明确来源：${candidates
           .map((member) => contentIdentityLabel(member.identity))
           .join("、")}`,
       );

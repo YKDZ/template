@@ -11,10 +11,7 @@ import {
 } from "@ykdz/template-core/project-projection";
 import type { GenerationRecord } from "@ykdz/template-generator";
 import { isDefaultWorkspaceMissingLinkConflict } from "@ykdz/template-workspace/default-workspace-strategy";
-import {
-  type DefaultWorkspaceOwnerFacts,
-  type DefaultWorkspaceState,
-} from "@ykdz/template-workspace/default-workspace-strategy";
+import type { DefaultWorkspaceOwnerFacts } from "@ykdz/template-workspace/default-workspace-strategy";
 import { releaseToolchainSnapshot } from "@ykdz/template-workspace/release-toolchain-snapshot";
 
 import {
@@ -192,10 +189,10 @@ export type PackageAdditionCommandResult =
 export function listPresetCatalog(): PresetCatalogCommandResult {
   return {
     status: "success",
-    presets: cliPresets.map(({ metadata }) => ({
-      name: metadata.alias,
-      title: metadata.title,
-      description: metadata.description,
+    presets: cliPresets.map(({ definition }) => ({
+      name: definition.metadata.alias,
+      title: definition.metadata.title,
+      description: definition.metadata.description,
     })),
   };
 }
@@ -328,7 +325,7 @@ function initPackageIdentities(
 ): ResolvedInitialization["packages"] {
   const preset = presetByAlias(presetAlias);
   if (preset === undefined) throw new Error("初始化预设在结果映射时不存在");
-  return Object.keys(preset.nodes).map((nodeIdentity) => {
+  return Object.keys(preset.definition.nodes).map((nodeIdentity) => {
     const packageDefinitionId = generationRecord.nodeInstances[nodeIdentity];
     const record = generationRecord.packages.find(
       (candidate) =>
@@ -378,7 +375,7 @@ export async function runInit(
     selection: {
       roots: [
         {
-          preset,
+          preset: preset.identity,
           ...(creationInput === undefined ? {} : { creationInput }),
         },
       ],
@@ -407,7 +404,7 @@ export async function runInit(
 
   const strategyState = cliWorkspaceStrategy.parseState(
     result.generationRecord.strategyState,
-  ) as DefaultWorkspaceState;
+  );
   const ownerFacts = result.projection?.ownerFacts;
   if (ownerFacts === undefined) {
     throw new Error("默认工作区策略未返回初始化事实");
@@ -417,13 +414,13 @@ export async function runInit(
     dryRun: options.dryRun,
     targetDir: options.dir,
     resolved: {
-      preset: preset.metadata.alias,
+      preset: preset.definition.metadata.alias,
       topology:
-        Object.keys(preset.nodes).length === 1
+        Object.keys(preset.definition.nodes).length === 1
           ? "configurable-primary-package"
           : "fixed",
       packages: initPackageIdentities(
-        preset.metadata.alias,
+        preset.definition.metadata.alias,
         result.generationRecord,
       ),
       scope: strategyState.defaultPackageScope,
@@ -471,7 +468,7 @@ export async function runAddPackage(
   }
   const result = await cliGenerator.add({
     repositoryRoot: runtime.cwd,
-    preset: validation.preset,
+    preset: validation.preset.identity,
     creationInput: {
       leafName: options.name,
       ...(options.path === undefined ? {} : { packagePath: options.path }),

@@ -4,11 +4,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset as vuePreset } from "@ykdz/preset-vue-app/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { templateContent } from "@ykdz/template-content";
+import { templateContent, type TemplatePreset } from "@ykdz/template-content";
 import { createGenerator } from "@ykdz/template-generator";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+
+const vuePreset = templateContent.find(
+  (member): member is TemplatePreset =>
+    member.kind === "preset" &&
+    member.identity.packageName === "@ykdz/preset-vue-app",
+);
+assert.ok(vuePreset, "内容集合缺少 Vue 应用预设");
 
 void describe("公开内容集合中的 Vue 预设", () => {
   void it("通过公开声明初始化原生 Vue 应用及其共享依赖", async (testContext) => {
@@ -30,7 +36,7 @@ void describe("公开内容集合中的 Vue 预设", () => {
 
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: vuePreset }] },
+      selection: { roots: [{ preset: vuePreset.identity }] },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",

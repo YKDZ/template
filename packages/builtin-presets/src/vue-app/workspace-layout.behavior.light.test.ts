@@ -11,6 +11,8 @@ import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
+import { loadTestReferences } from "../../test-support/content-member.ts";
+
 const configuration = defineReferencePackage(configurationDefinition);
 
 void it("Vue 应用连续加包沿参考布局写入 apps", async () => {
@@ -20,7 +22,7 @@ void it("Vue 应用连续加包沿参考布局写入 apps", async () => {
   const targetRoot = path.join(temporaryRoot, "demo");
   try {
     const generator = createGenerator({
-      content: [vueApp, vueShared, configuration],
+      content: loadTestReferences([vueApp, vueShared, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({

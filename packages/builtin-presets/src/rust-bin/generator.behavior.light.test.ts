@@ -11,6 +11,11 @@ import { createGenerator } from "@ykdz/template-generator";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
+import {
+  loadTestReferences,
+  testContentIdentity,
+} from "../../test-support/content-member.ts";
+
 const configuration = defineReferencePackage(configurationDefinition);
 
 async function snapshotTree(root: string): Promise<string> {
@@ -47,14 +52,16 @@ void describe("显式生成器 Rust 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [rust, configuration],
+      content: loadTestReferences([rust, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
 
     const result = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "rust", contentIdentity: rust.identity }],
+        roots: [
+          { nodeIdentity: "rust", contentIdentity: testContentIdentity(rust) },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -101,13 +108,18 @@ void describe("显式生成器 Rust 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, rust, configuration],
+      content: loadTestReferences([library, rust, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        roots: [
+          {
+            nodeIdentity: "library",
+            contentIdentity: testContentIdentity(library),
+          },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -125,7 +137,7 @@ void describe("显式生成器 Rust 行为", () => {
     );
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: rust.identity,
+      contentIdentity: testContentIdentity(rust),
       creationInput: { leafName: "native", packagePath: "packages/native" },
     });
 
@@ -146,7 +158,7 @@ void describe("显式生成器 Rust 行为", () => {
 
     const addedToRustWorkspace = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: rust.identity,
+      contentIdentity: testContentIdentity(rust),
       creationInput: {
         leafName: "second-native",
         packagePath: "packages/second-native",
@@ -169,7 +181,7 @@ void describe("显式生成器 Rust 行为", () => {
     const beforeFailure = await snapshotTree(targetRoot);
     const rejected = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: rust.identity,
+      contentIdentity: testContentIdentity(rust),
       creationInput: {
         leafName: "third-native",
         packagePath: "packages/third-native",
@@ -190,13 +202,18 @@ void describe("显式生成器 Rust 行为", () => {
       "demo",
     );
     const generator = createGenerator({
-      content: [library, rust, configuration],
+      content: loadTestReferences([library, rust, configuration]),
       strategy: createDefaultWorkspaceStrategy(),
     });
     const initialized = await generator.init({
       targetRoot,
       selection: {
-        roots: [{ nodeIdentity: "library", contentIdentity: library.identity }],
+        roots: [
+          {
+            nodeIdentity: "library",
+            contentIdentity: testContentIdentity(library),
+          },
+        ],
       },
       strategyInput: { repositoryName: "demo", defaultPackageScope: "demo" },
     });
@@ -208,7 +225,7 @@ void describe("显式生成器 Rust 行为", () => {
 
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      contentIdentity: rust.identity,
+      contentIdentity: testContentIdentity(rust),
       creationInput: { leafName: "native", packagePath: "packages/native" },
     });
 

@@ -1,11 +1,11 @@
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 
 /** 从公开内容集合查找拥有指定参考包的可扩展预设。 */
 export function requireReferencePresetName(
   referencePackageName: string,
 ): string {
-  const preset = templateContent
-    .filter((content) => "kind" in content)
+  const preset = templatePresets
+    .map((member) => member.definition)
     .find(
       (candidate) =>
         candidate.operations.includes("add") &&

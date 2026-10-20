@@ -12,6 +12,10 @@ import { fileURLToPath } from "node:url";
 
 import { deriveTemplateMembers, templateContent } from "@ykdz/template-content";
 import {
+  contentIdentityKey,
+  contentIdentityLabel,
+} from "@ykdz/template-core/content-identity";
+import {
   renderProject,
   resolveTemplateSource,
 } from "@ykdz/template-core/renderer";
@@ -24,30 +28,38 @@ const { referencePackages } = deriveTemplateMembers(templateContent);
 await rm(output, { recursive: true, force: true });
 
 for (const reference of referencePackages) {
-  reference.prepare();
-  const targetRoot = path.join(output, reference.manifest.name);
-  const templateExport = reference.manifest.exports?.["./template"];
+  const definition = reference.definition;
+  const identity = contentIdentityKey(reference.identity);
+  definition.prepare();
+  const targetRoot = path.join(
+    output,
+    Buffer.from(identity).toString("base64url"),
+  );
+  const templateExport =
+    definition.manifest.exports?.[reference.identity.exportPath];
   const entry =
     typeof templateExport === "object" && templateExport !== null
       ? (templateExport as Record<string, unknown>).default
       : undefined;
   if (typeof entry !== "string" || !entry.startsWith("./"))
-    throw new Error(`参考包缺少默认生成描述入口：${reference.manifest.name}`);
+    throw new Error(
+      `参考包缺少默认生成描述入口：${contentIdentityLabel(reference.identity)}`,
+    );
 
   await renderProject({
     targetRoot,
-    operations: reference.payloadOperations(""),
+    operations: definition.payloadOperations(""),
   });
   await mkdir(targetRoot, { recursive: true });
   await cp(
-    resolveTemplateSource(reference.source("package.json"), "."),
+    resolveTemplateSource(definition.source("package.json"), "."),
     path.join(targetRoot, "package.json"),
   );
 
   // 编译产物有独立发布职责，不受源资源的 Git 忽略规则排除。
   const compiledDirectory = path.posix.dirname(entry).replace(/^\.\//u, "");
   await cp(
-    resolveTemplateSource(reference.source(compiledDirectory), "."),
+    resolveTemplateSource(definition.source(compiledDirectory), "."),
     path.join(targetRoot, compiledDirectory),
     { recursive: true },
   );
@@ -71,12 +83,18 @@ for (const file of await readdir(compiledSource, { recursive: true })) {
       const relative = path
         .relative(
           path.dirname(target),
-          path.join(output, reference.manifest.name, "template-dist/entry.js"),
+          path.join(
+            output,
+            Buffer.from(contentIdentityKey(reference.identity)).toString(
+              "base64url",
+            ),
+            "template-dist/entry.js",
+          ),
         )
         .split(path.sep)
         .join("/");
       return [
-        reference.manifest.name + "/template",
+        reference.source.specifier,
         relative.startsWith(".") ? relative : "./" + relative,
       ];
     }),

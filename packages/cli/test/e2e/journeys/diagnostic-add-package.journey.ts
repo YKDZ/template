@@ -8,7 +8,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import { templateContent } from "@ykdz/template-content";
+import { templatePresets } from "@ykdz/template-content";
 
 import type { CliJourney } from "../journey.ts";
 
@@ -63,7 +63,7 @@ function diagnosticScenario(): {
   readonly firstPackagePath: string;
   readonly secondPackagePath: string;
 } {
-  const presets = templateContent.filter((content) => "kind" in content);
+  const presets = templatePresets.map((member) => member.definition);
   const base = presets.find(
     (preset) =>
       preset.operations.includes("init") &&

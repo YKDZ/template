@@ -12,11 +12,11 @@ import { cliPresets } from "./preset-catalog.ts";
 import { standardSchema } from "./standard-schema.ts";
 
 const initializationPresetChoices = cliPresets
-  .filter((preset) => preset.operations.includes("init"))
-  .map(({ metadata }) => metadata.alias);
+  .filter((preset) => preset.definition.operations.includes("init"))
+  .map((preset) => preset.alias);
 const additionPresetChoices = cliPresets
-  .filter((preset) => preset.operations.includes("add"))
-  .map(({ metadata }) => metadata.alias);
+  .filter((preset) => preset.definition.operations.includes("add"))
+  .map((preset) => preset.alias);
 
 const initializationMessages: Record<InitializationInputIssue["code"], string> =
   {

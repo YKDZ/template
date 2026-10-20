@@ -11,15 +11,37 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { preset as vueHonoPreset } from "@ykdz/preset-vue-hono-app/template";
-import { referencePackage as rust } from "@ykdz/reference-rust-bin/template";
-import { referencePackage as tsCli } from "@ykdz/reference-ts-cli/template";
 import type { TsCliCreationInput } from "@ykdz/reference-ts-cli/template";
-import { referencePackage as tsLib } from "@ykdz/reference-ts-lib/template";
-import { referencePackage as vueApp } from "@ykdz/reference-vue-app/template";
-import { templateContent } from "@ykdz/template-content";
+import {
+  templateContent,
+  type TemplatePreset,
+  type TemplateReferencePackage,
+} from "@ykdz/template-content";
+import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
+
+function presetMember(packageName: string): TemplatePreset {
+  const member = templateContent.find(
+    (candidate): candidate is TemplatePreset =>
+      candidate.kind === "preset" &&
+      candidate.identity.packageName === packageName,
+  );
+  assert.ok(member, `内容集合缺少预设：${packageName}`);
+  return member;
+}
+
+function referenceIdentity(packageName: string): ContentIdentity {
+  const member = templateContent.find(
+    (candidate): candidate is TemplateReferencePackage =>
+      candidate.kind === "reference" &&
+      candidate.identity.packageName === packageName,
+  );
+  assert.ok(member, `内容集合缺少参考包：${packageName}`);
+  return member.identity;
+}
+
+const vueHonoPreset = presetMember("@ykdz/preset-vue-hono-app");
 
 void describe("公开内容集合中的 Vue-Hono 预设", () => {
   void it("初始化页面、API、共享依赖及联合验收配置", async (testContext) => {
@@ -38,7 +60,7 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     assert.ok(templateContent.includes(vueHonoPreset));
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset: vueHonoPreset }] },
+      selection: { roots: [{ preset: vueHonoPreset.identity }] },
       strategyInput: {
         repositoryName: "demo",
         defaultPackageScope: "demo",
@@ -95,26 +117,26 @@ void describe("公开内容集合中的 Vue-Hono 预设", () => {
     );
 
     const additions: {
-      readonly contentIdentity: string;
+      readonly contentIdentity: ContentIdentity;
       readonly creationInput: TsCliCreationInput;
     }[] = [
       {
-        contentIdentity: tsLib.identity,
+        contentIdentity: referenceIdentity("@ykdz/reference-ts-lib"),
         creationInput: {
           leafName: "extra-lib",
           packagePath: "packages/extra-lib",
         },
       },
       {
-        contentIdentity: tsCli.identity,
+        contentIdentity: referenceIdentity("@ykdz/reference-ts-cli"),
         creationInput: { leafName: "tool", packagePath: "packages/tool" },
       },
       {
-        contentIdentity: rust.identity,
+        contentIdentity: referenceIdentity("@ykdz/reference-rust-bin"),
         creationInput: { leafName: "native", packagePath: "packages/native" },
       },
       {
-        contentIdentity: vueApp.identity,
+        contentIdentity: referenceIdentity("@ykdz/reference-vue-app"),
         creationInput: { leafName: "portal", packagePath: "apps/portal" },
       },
     ];

@@ -12,16 +12,55 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 
-import { preset } from "@ykdz/preset-rust-bin/template";
-import { referencePackage as rust } from "@ykdz/reference-rust-bin/template";
-import { referencePackage as library } from "@ykdz/reference-ts-lib/template";
-import { referenceDefinition as configurationDefinition } from "@ykdz/reference-typescript-config/template";
+import {
+  contentIdentityKey,
+  createContentIndex,
+} from "@ykdz/template-core/content-identity";
 import { createGenerator } from "@ykdz/template-generator";
+import { loadContentSource } from "@ykdz/template-generator/content-source";
 import { defineReferencePackage } from "@ykdz/template-workspace-authoring/reference-package";
 import { createDefaultWorkspaceStrategy } from "@ykdz/template-workspace/default-workspace-strategy";
 
-const configuration = defineReferencePackage(configurationDefinition);
-const content = [rust, library, configuration, preset];
+const content = await loadContentSource({
+  namespace: "ykdz",
+  resolve: (specifier) => import.meta.resolve(specifier),
+  members: [
+    "@ykdz/reference-rust-bin/template",
+    "@ykdz/reference-ts-lib/template",
+    "@ykdz/reference-typescript-config/template",
+    "@ykdz/preset-rust-bin/template",
+  ],
+  prepareReferenceDefinition(definition) {
+    return defineReferencePackage(
+      definition as Parameters<typeof defineReferencePackage>[0],
+    );
+  },
+});
+const contentIndex = createContentIndex(content);
+const rust = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-rust-bin",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const library = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/reference-ts-lib",
+    exportPath: "./template",
+  },
+  "reference",
+);
+const preset = contentIndex.resolve(
+  {
+    namespace: "ykdz",
+    packageName: "@ykdz/preset-rust-bin",
+    exportPath: "./template",
+  },
+  "preset",
+);
 const temporaryDirectories: string[] = [];
 
 async function createTargetRoot(prefix: string): Promise<string> {
@@ -89,7 +128,7 @@ void describe("Rust 二进制公开组合预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
 
@@ -130,7 +169,7 @@ void describe("Rust 二进制公开组合预设", () => {
     );
     const added = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: {
         leafName: "second-native",
         packagePath: "packages/second-native",
@@ -162,10 +201,19 @@ void describe("Rust 二进制公开组合预设", () => {
         path.join(targetRoot, ".template/generation.json"),
         "utf8",
       ),
-    ) as { packages: { contentIdentity: string; createdBy: string }[] };
+    ) as {
+      packages: {
+        contentIdentity: typeof rust.identity;
+        createdBy: string;
+      }[];
+    };
     assert.deepStrictEqual(
       records.packages
-        .filter((record) => record.contentIdentity === rust.identity)
+        .filter(
+          (record) =>
+            contentIdentityKey(record.contentIdentity) ===
+            contentIdentityKey(rust.identity),
+        )
         .map((record) => record.createdBy),
       ["initialization", "addition"],
     );
@@ -200,7 +248,7 @@ void describe("Rust 二进制公开组合预设", () => {
 
     const firstRust = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: {
         leafName: "native",
         packagePath: "packages/native",
@@ -273,7 +321,7 @@ void describe("Rust 二进制公开组合预设", () => {
     });
     const result = await missingConfiguration.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
 
@@ -289,7 +337,7 @@ void describe("Rust 二进制公开组合预设", () => {
     });
     const initialized = await generator.init({
       targetRoot,
-      selection: { roots: [{ preset }] },
+      selection: { roots: [{ preset: preset.identity }] },
       strategyInput,
     });
     assert.strictEqual(
@@ -307,7 +355,7 @@ void describe("Rust 二进制公开组合预设", () => {
 
     const rejected = await generator.add({
       repositoryRoot: targetRoot,
-      preset,
+      preset: preset.identity,
       creationInput: { leafName: "conflict", packagePath: "packages/conflict" },
     });
     assert.strictEqual(rejected.status, "conflict", JSON.stringify(rejected));
