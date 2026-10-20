@@ -7,7 +7,7 @@
   "files": [
     "dist",
     "template-dist",
-    "src/cli-command-identity.ts"
+    "src/publication/cli-command-identity.ts"
   ],
   "type": "module",
   "imports": {
@@ -21,14 +21,14 @@
       "default": "./template-dist/definition.js"
     },
     "./creation-input": {
-      "source": "./template/creation-input.ts",
-      "types": "./template-dist/creation-input.d.ts",
-      "default": "./template-dist/creation-input.js"
+      "source": "./template/authoring/creation-input.ts",
+      "types": "./template-dist/authoring/creation-input.d.ts",
+      "default": "./template-dist/authoring/creation-input.js"
     },
     "./command-identity": {
-      "source": "./src/cli-command-identity.ts",
-      "types": "./dist/cli-command-identity.d.ts",
-      "default": "./dist/cli-command-identity.js"
+      "source": "./src/publication/cli-command-identity.ts",
+      "types": "./dist/publication/cli-command-identity.d.ts",
+      "default": "./dist/publication/cli-command-identity.js"
     }
   },
   "scripts": {

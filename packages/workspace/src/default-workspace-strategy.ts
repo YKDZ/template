@@ -1,8 +1,6 @@
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { referenceDefinition as typescriptConfigurationDefinition } from "@ykdz/reference-typescript-config/template";
 import type { ContentIdentity } from "@ykdz/template-core/content-identity";
 import {
   contentIdentityKey,
@@ -98,14 +96,12 @@ import {
 } from "./root-projection.ts";
 import {
   initialRustVersion,
+  prepareRustTargetAddition,
   projectRustTarget,
-  rustVersionForAddition,
 } from "./rust-target-projection.ts";
 import { vuePnpmDependencyOverrides } from "./vue-policy.ts";
-import {
-  copyWorkspaceDirectory,
-  copyWorkspaceResource,
-} from "./workspace-resources.ts";
+import { prepareWorkspaceProjectResources } from "./workspace-project-resources.ts";
+import { readWorkspaceJson } from "./workspace-resources.ts";
 
 export type DefaultWorkspaceInput = {
   readonly repositoryName?: string;
@@ -115,7 +111,11 @@ export type DefaultWorkspaceInput = {
 };
 
 type DefaultReferenceContent<CreationInput extends PackageCreationInput> =
-  GeneratorContent<GenerationContext, PackageContribution, CreationInput> & {
+  GeneratorContent<
+    DefaultWorkspaceContext,
+    PackageContribution,
+    CreationInput
+  > & {
     readonly definition: ReferencePackage<CreationInput>;
   };
 
@@ -127,11 +127,6 @@ export type DefaultWorkspaceCreationInput<
   readonly linkFrom?: readonly string[];
 };
 
-export type DefaultWorkspaceConfigurationIdentity = Pick<
-  PackageDefinition,
-  "name" | "path" | "role"
->;
-
 export type DefaultWorkspaceState = {
   readonly repositoryName: string;
   readonly defaultPackageScope: string;
@@ -142,6 +137,10 @@ export type DefaultWorkspaceState = {
     readonly packageManagerPin: string;
     readonly rustVersion?: string;
   };
+};
+
+type DefaultWorkspaceContext = GenerationContext & {
+  readonly existingRustDeclaration?: string;
 };
 
 export type DefaultWorkspaceOwnerFacts = {
@@ -305,29 +304,18 @@ function workspaceFile(from: string, to: string): RenderOperation {
   };
 }
 
-function readWorkspaceJson(from: string): Record<string, unknown> {
-  return JSON.parse(
-    readFileSync(
-      fileURLToPath(new URL("../assets/" + from, import.meta.url)),
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
-}
-
 function defaultContext(
   targetRoot: string,
   state: DefaultWorkspaceState,
-): GenerationContext {
-  const configuration = defaultWorkspaceConfigurationIdentity(
-    state.defaultPackageScope,
-  );
+  options: { readonly existingRustDeclaration?: string } = {},
+): DefaultWorkspaceContext {
   return {
     targetDir: path.resolve(targetRoot),
     repositoryName: state.repositoryName,
     defaultPackageScope: state.defaultPackageScope,
-    foundationPackages: {
-      typescriptConfiguration: { name: configuration.name },
-    },
+    ...(options.existingRustDeclaration === undefined
+      ? {}
+      : { existingRustDeclaration: options.existingRustDeclaration }),
     toolchain: {
       nodeLtsMajor: state.toolchain.nodeLtsMajor,
       ...(state.toolchain.nodeVersion === undefined
@@ -338,18 +326,6 @@ function defaultContext(
         ? {}
         : { rustVersion: state.toolchain.rustVersion }),
     },
-  };
-}
-
-/** 由实际原生配置包声明推导默认工作区的配置包身份。 */
-export function defaultWorkspaceConfigurationIdentity(
-  scope: string,
-): DefaultWorkspaceConfigurationIdentity {
-  const leafName = typescriptConfigurationDefinition.defaultLeafName;
-  return {
-    name: `@${scope}/${leafName}`,
-    path: `packages/${leafName}`,
-    role: typescriptConfigurationDefinition.role,
   };
 }
 
@@ -711,64 +687,6 @@ function databasePreparationScripts(
   };
 }
 
-function projectResourceOperations(options: {
-  readonly requirements: WorkspaceProjectRequirements;
-}): RenderOperation[] {
-  const operations: RenderOperation[] = [];
-  const joint = options.requirements.vueHonoJointE2e;
-  if (joint !== undefined) {
-    operations.push(
-      copyWorkspaceResource(
-        "joint-e2e/playwright.config.ts",
-        "playwright.config.ts",
-      ),
-      {
-        kind: "writeJson",
-        to: "joint-e2e.json",
-        value: {
-          apiPackageName: joint.api.name,
-          webPackageName: joint.web.name,
-        },
-      },
-      ...copyWorkspaceDirectory("joint-e2e/test", "test"),
-    );
-  }
-  if (options.requirements.deploymentCheck !== undefined) {
-    const deployment = options.requirements.deploymentCheck;
-    operations.push(
-      copyWorkspaceResource("deployment/Dockerfile", "Dockerfile"),
-      copyWorkspaceResource("deployment/.dockerignore", ".dockerignore"),
-      copyWorkspaceResource(
-        "deployment/scripts/check-standalone-deployment.ts",
-        "scripts/check-standalone-deployment.ts",
-      ),
-      copyWorkspaceResource(
-        "deployment/scripts/container-entrypoint.sh",
-        "scripts/container-entrypoint.sh",
-      ),
-      {
-        kind: "writeJson",
-        to: "deployment.json",
-        value: {
-          application: {
-            name: deployment.application.name,
-            path: deployment.application.path,
-          },
-          database: {
-            name: deployment.database.name,
-            path: deployment.database.path,
-          },
-          migrations: {
-            name: deployment.migrations.name,
-            path: deployment.migrations.path,
-          },
-        },
-      },
-    );
-  }
-  return operations;
-}
-
 function projectRootScriptInsertions(
   requirements: WorkspaceProjectRequirements,
 ): WorkspaceRootInsertion[] {
@@ -807,7 +725,7 @@ function projectRootScriptInsertions(
 }
 
 function projectOperations(options: {
-  readonly context: GenerationContext;
+  readonly context: DefaultWorkspaceContext;
   readonly state: DefaultWorkspaceState;
   readonly blueprint: ProjectBlueprint;
   readonly packages: readonly GeneratorPackageState[];
@@ -849,14 +767,17 @@ function projectOperations(options: {
   const rust = rustProjection.toolchain;
   const hasDeployment = requirements.deploymentCheck !== undefined;
   const hasJointE2e = requirements.vueHonoJointE2e !== undefined;
-  const configuration = contributions.find(
+  const configurations = contributions.filter(
     (contribution) =>
-      contribution.definition.name ===
-      context.foundationPackages.typescriptConfiguration.name,
+      contribution.foundation.workspaceConfiguration?.kind ===
+      "typescript-workspace-configuration",
   );
-  if (configuration === undefined) {
-    throw new Error("默认策略缺少共享 TypeScript 配置内容");
+  if (configurations.length > 1) {
+    throw new Error(
+      `默认策略只能有一个共享 TypeScript 配置贡献，实际为 ${configurations.length}`,
+    );
   }
+  const configuration = configurations[0];
   const rootAutomationPaths = [
     "*.json",
     "pnpm-workspace.yaml",
@@ -876,7 +797,9 @@ function projectOperations(options: {
   ].join(" ");
   const rootManifest = createWorkspaceRootManifest({
     name: context.repositoryName,
-    typescriptConfigurationPackageName: configuration.definition.name,
+    ...(configuration === undefined
+      ? {}
+      : { typescriptConfigurationPackageName: configuration.definition.name }),
     nodeDeclaration:
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     packageManagerPin: context.toolchain.packageManagerPin,
@@ -990,15 +913,7 @@ function projectOperations(options: {
       context.toolchain.nodeVersion ?? context.toolchain.nodeLtsMajor,
     layers: containerLayers,
   });
-  const containerBase = JSON.parse(
-    readFileSync(
-      fileURLToPath(
-        import.meta
-          .resolve("@ykdz/template-environment/assets/.devcontainer/devcontainer.json"),
-      ),
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
+  const containerBase = container.configuration;
   const referenceNames = new Map(
     contributions.flatMap((contribution) =>
       contribution.referenceSource === undefined
@@ -1122,22 +1037,26 @@ function projectOperations(options: {
     rootProjection.tsconfig,
     rootProjection.tsconfigConfig,
     ...cliPublication.operations,
-    {
-      kind: "writeText",
-      to: "oxlint.config.ts",
-      text:
-        "export { default } from " +
-        JSON.stringify(configuration.definition.name + "/oxlint") +
-        ";\n",
-    },
-    {
-      kind: "writeText",
-      to: "oxfmt.config.ts",
-      text:
-        "export { default } from " +
-        JSON.stringify(configuration.definition.name + "/oxfmt") +
-        ";\n",
-    },
+    ...(configuration === undefined
+      ? []
+      : [
+          {
+            kind: "writeText" as const,
+            to: "oxlint.config.ts",
+            text:
+              "export { default } from " +
+              JSON.stringify(configuration.definition.name + "/oxlint") +
+              ";\n",
+          },
+          {
+            kind: "writeText" as const,
+            to: "oxfmt.config.ts",
+            text:
+              "export { default } from " +
+              JSON.stringify(configuration.definition.name + "/oxfmt") +
+              ";\n",
+          },
+        ]),
     editorExtensions,
     { kind: "writeJson", to: ".vscode/settings.json", value: editor.settings },
     {
@@ -1244,7 +1163,7 @@ function projectOperations(options: {
     operations: [
       ...packageOperations,
       ...defaultOperations,
-      ...projectResourceOperations({ requirements }),
+      ...prepareWorkspaceProjectResources(requirements),
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
@@ -1281,7 +1200,7 @@ function projectOperations(options: {
 export function createDefaultWorkspaceStrategy<
   CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(): WorkspaceStrategy<
-  GenerationContext,
+  DefaultWorkspaceContext,
   DefaultWorkspaceInput,
   DefaultWorkspaceState,
   PackageContribution,
@@ -1327,19 +1246,27 @@ export function createDefaultWorkspaceStrategy<
       nodeInstances,
     }) {
       const current = readPackageAdditionVersionFacts(targetRoot);
-      const rustVersion = rustVersionForAddition({
+      const rustFacts = prepareRustTargetAddition({
         targetRoot,
         packages,
         contentIdentity: content.identity,
         contentByIdentity,
       });
-      const context = defaultContext(targetRoot, {
-        ...state,
-        toolchain: {
-          ...current.toolchain,
-          ...(rustVersion === undefined ? {} : { rustVersion }),
+      const context = defaultContext(
+        targetRoot,
+        {
+          ...state,
+          toolchain: {
+            ...current.toolchain,
+            ...(rustFacts.rustVersion === undefined
+              ? {}
+              : { rustVersion: rustFacts.rustVersion }),
+          },
         },
-      });
+        rustFacts.existingDeclaration === undefined
+          ? {}
+          : { existingRustDeclaration: rustFacts.existingDeclaration },
+      );
       const definitionsById = new Map<string, PackageDefinition>(
         packages.map((packageRecord) => [
           packageRecord.definition.packageDefinitionId,

@@ -441,9 +441,21 @@ await test("发布载荷保留生成描述读取的作者资产且继续排除�
   });
   const reference = defineReferencePackage({
     ...setup.options,
-    template: { dependencies: [], scripts: [], resources: ["template"] },
+    template: {
+      dependencies: [],
+      scripts: [],
+      resources: ["template"],
+      executionData: ["template/rust-toolchain.toml"],
+    },
   });
-  reference.prepare();
+  const preparation = reference.prepare();
+  assert.deepEqual(
+    preparation.executionData.map(({ path: resource, mode }) => ({
+      path: resource,
+      mode,
+    })),
+    [{ path: "template/rust-toolchain.toml", mode: 0o644 }],
+  );
   await renderProject({
     targetRoot: setup.target,
     operations: reference.payloadOperations("payload"),
@@ -460,4 +472,23 @@ await test("发布载荷保留生成描述读取的作者资产且继续排除�
     "src",
     "template",
   ]);
+});
+
+await test("模板执行数据必须来自所属准备资源且诊断保留owner与阶段", async (context) => {
+  const setup = await fixture(context, {
+    "src/application.txt": "应用\n",
+  });
+  const reference = defineReferencePackage({
+    ...setup.options,
+    template: {
+      dependencies: [],
+      scripts: [],
+      executionData: ["template/missing-input.ts"],
+    },
+  });
+
+  assert.throws(
+    () => reference.prepare(),
+    /参考包 @author\/application\/\.\/template prepare 阶段失败：模板执行数据未包含在参考资源范围中：template\/missing-input\.ts/u,
+  );
 });

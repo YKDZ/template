@@ -74,113 +74,126 @@ export function planBuiltInDevelopmentContainer(options: {
   readonly nodeVersion: string;
   readonly layers?: readonly DevelopmentContainerToolLayer[];
 }): DevelopmentContainerToolLayerPlan & {
+  readonly configuration: Readonly<Record<string, unknown>> & {
+    readonly features: Readonly<Record<string, Record<string, unknown>>>;
+  };
   readonly features: Readonly<Record<string, Record<string, unknown>>>;
   readonly dockerfileOperation: WriteTextOperation;
 } {
-  const plan = planDevelopmentContainerToolLayersSync({
-    baseLayer: {
-      identity: "node-pnpm",
-      dockerfile: {
-        source: environmentSources.base,
-        from: "base.Dockerfile",
+  try {
+    const plan = planDevelopmentContainerToolLayersSync({
+      baseLayer: {
+        identity: "node-pnpm",
+        dockerfile: {
+          source: environmentSources.base,
+          from: "base.Dockerfile",
+        },
+        buildArguments: [
+          {
+            name: "NODE_VERSION",
+            // 根 Node 声明原文是 M1 槽位唯一来源；major 与快照字段不得另作真源。
+            value: options.nodeVersion,
+          },
+        ],
+        probes: [
+          { identity: "procps", command: "ps", args: ["--version"] },
+          { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
+          {
+            identity: "awk",
+            command: "awk",
+            args: ["BEGIN { exit (6 * 7 != 42) }"],
+          },
+          { identity: "ripgrep", command: "rg", args: ["--version"] },
+          {
+            identity: "jq",
+            command: "jq",
+            args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
+          },
+          {
+            identity: "python3",
+            command: "python3",
+            args: [
+              "-c",
+              'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
+            ],
+          },
+          {
+            identity: "python",
+            command: "python",
+            args: [
+              "-c",
+              'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
+            ],
+          },
+          { identity: "openssh-client", command: "ssh", args: ["-V"] },
+          { identity: "unzip", command: "unzip", args: ["-v"] },
+          { identity: "file", command: "file", args: ["--version"] },
+          { identity: "iproute2", command: "ss", args: ["--version"] },
+        ],
+        mounts: [
+          {
+            identity: "pnpm-store",
+            type: "volume",
+            source: "${devcontainerId}-pnpm-store",
+            target: "/pnpm/store",
+          },
+        ],
       },
-      buildArguments: [
-        {
-          name: "NODE_VERSION",
-          // 根 Node 声明原文是 M1 槽位唯一来源；major 与快照字段不得另作真源。
-          value: options.nodeVersion,
-        },
+      layers: [
+        githubCliDevelopmentContainerToolLayer(),
+        ...(options.layers ?? []),
       ],
-      probes: [
-        { identity: "procps", command: "ps", args: ["--version"] },
-        { identity: "bubblewrap", command: "bwrap", args: ["--version"] },
-        {
-          identity: "awk",
-          command: "awk",
-          args: ["BEGIN { exit (6 * 7 != 42) }"],
-        },
-        { identity: "ripgrep", command: "rg", args: ["--version"] },
-        {
-          identity: "jq",
-          command: "jq",
-          args: ["--exit-status", "--null-input", "{ ready: true } | .ready"],
-        },
-        {
-          identity: "python3",
-          command: "python3",
-          args: [
-            "-c",
-            'import json, pathlib, sqlite3, urllib.request; assert json.loads("true") is True',
-          ],
-        },
-        {
-          identity: "python",
-          command: "python",
-          args: [
-            "-c",
-            'import os, shutil, sys; assert sys.version_info.major == 3; assert os.path.samefile(sys.executable, shutil.which("python3"))',
-          ],
-        },
-        { identity: "openssh-client", command: "ssh", args: ["-V"] },
-        { identity: "unzip", command: "unzip", args: ["-v"] },
-        { identity: "file", command: "file", args: ["--version"] },
-        { identity: "iproute2", command: "ss", args: ["--version"] },
-      ],
-      mounts: [
-        {
-          identity: "pnpm-store",
-          type: "volume",
-          source: "${devcontainerId}-pnpm-store",
-          target: "/pnpm/store",
-        },
-      ],
-    },
-    layers: [
-      githubCliDevelopmentContainerToolLayer(),
-      ...(options.layers ?? []),
-    ],
-  });
-  return {
-    ...plan,
-    features: (
-      JSON.parse(
-        readFileSync(
-          resolveTemplateSource(
-            environmentSources.base,
-            ".devcontainer/devcontainer.json",
-          ),
-          "utf8",
+    });
+    const configuration = JSON.parse(
+      readFileSync(
+        resolveTemplateSource(
+          environmentSources.devcontainer,
+          "workspace-template.json",
         ),
-      ) as { features: Record<string, Record<string, unknown>> }
-    ).features,
-    dockerfileOperation: prepareDevelopmentContainerDockerfile({
-      layers: plan.layers,
-    }),
-    probes: [
-      ...plan.probes,
-      {
-        identity: "docker-daemon",
-        command: "docker",
-        args: ["version"],
-        failureMessage:
-          "无法连接宿主 Docker；请检查宿主 daemon 是否运行，以及开发容器 Feature 的连接配置与权限。",
-      },
-      {
-        identity: "docker-buildx",
-        command: "docker",
-        args: ["buildx", "version"],
-        failureMessage:
-          "Buildx 不可用；请重建开发容器以完成官方 Feature 安装。",
-      },
-      {
-        identity: "docker-compose",
-        command: "docker",
-        args: ["compose", "version"],
-        failureMessage:
-          "Compose 不可用；请重建开发容器以完成官方 Feature 安装。",
-      },
-    ],
-  };
+        "utf8",
+      ),
+    ) as Readonly<Record<string, unknown>> & {
+      readonly features: Readonly<Record<string, Record<string, unknown>>>;
+    };
+    return {
+      ...plan,
+      configuration,
+      features: configuration.features,
+      dockerfileOperation: prepareDevelopmentContainerDockerfile({
+        layers: plan.layers,
+      }),
+      probes: [
+        ...plan.probes,
+        {
+          identity: "docker-daemon",
+          command: "docker",
+          args: ["version"],
+          failureMessage:
+            "无法连接宿主 Docker；请检查宿主 daemon 是否运行，以及开发容器 Feature 的连接配置与权限。",
+        },
+        {
+          identity: "docker-buildx",
+          command: "docker",
+          args: ["buildx", "version"],
+          failureMessage:
+            "Buildx 不可用；请重建开发容器以完成官方 Feature 安装。",
+        },
+        {
+          identity: "docker-compose",
+          command: "docker",
+          args: ["compose", "version"],
+          failureMessage:
+            "Compose 不可用；请重建开发容器以完成官方 Feature 安装。",
+        },
+      ],
+    };
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(
+      `开发容器资源 @ykdz/template-environment#./development-environment prepare 阶段失败：${detail}`,
+      { cause },
+    );
+  }
 }
 
 export function rustDevelopmentContainerToolLayer(

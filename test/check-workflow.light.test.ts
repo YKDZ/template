@@ -624,7 +624,7 @@ void describe("Fixture Verification Evidence check workflow", () => {
         name: "BuildKit",
         path: ".fixture-native-cache/buildkit",
         keyInput:
-          "hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/.devcontainer/devcontainer.json', 'packages/workspace/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts')",
+          "hashFiles('packages/environment/assets/**/*.Dockerfile', 'packages/environment/assets/devcontainer/workspace-template.json', 'packages/workspace/resources/deployment/Dockerfile', 'packages/environment/src/development-container-tool-layer.ts')",
       },
       {
         name: "pnpm downloads",

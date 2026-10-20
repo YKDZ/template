@@ -284,9 +284,9 @@ const ticket09ReceiptFilePaths = [
   "package/CHANGELOG.md",
   "package/LICENSE",
   "package/README.md",
-  "package/dist/cli-command-identity.js",
   "package/dist/cli.js",
   "package/dist/main.js",
+  "package/dist/publication/cli-command-identity.js",
   "package/package.json",
 ] as const;
 

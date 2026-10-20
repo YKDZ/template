@@ -1,7 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { referencePackage as tsCliReferencePackage } from "@ykdz/reference-ts-cli/template";
 import {
   createTemplateSourceHandle,
   type RenderOperation,
@@ -81,12 +80,14 @@ function publicationOperations(
   candidate: PublicCliCandidate | undefined,
 ): RenderOperation[] {
   if (candidate === undefined) return [];
-  const identitySource = tsCliReferencePackage.publicationIdentitySource;
-  const candidateSelectionSource = tsCliReferencePackage.source(
-    "template/creation-input.ts",
-  );
-  if (identitySource === undefined) {
-    throw new Error("公开 CLI 候选缺少原生身份资源");
+  const publication = candidate.contribution.foundation.npmPublication;
+  if (
+    publication?.commandIdentitySource === undefined ||
+    publication.creationInputSource === undefined
+  ) {
+    throw new Error(
+      `公开 CLI 候选 ${candidate.contribution.definition.name} 缺少所属发布资源事实`,
+    );
   }
   return [
     {
@@ -121,14 +122,12 @@ function publicationOperations(
     },
     {
       kind: "copyFile",
-      source: identitySource,
-      from: ".",
+      ...publication.commandIdentitySource,
       to: "scripts/npm-publication/cli-command-identity.ts",
     },
     {
       kind: "copyFile",
-      source: candidateSelectionSource,
-      from: ".",
+      ...publication.creationInputSource,
       to: "scripts/npm-publication/cli-candidate-selection.ts",
     },
     {

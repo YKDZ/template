@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { cliCommandIdentity } from "../../../src/cli-command-identity.ts";
+import { cliCommandIdentity } from "../../../src/publication/cli-command-identity.ts";
 import type { CliJourney } from "../journey.ts";
 
 const journey: CliJourney = {
