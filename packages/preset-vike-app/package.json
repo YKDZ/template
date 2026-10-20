@@ -28,7 +28,8 @@
     "@ykdz/reference-vike-migrations": "workspace:*",
     "@ykdz/reference-vike-web": "workspace:*",
     "@ykdz/template-core": "workspace:*",
-    "@ykdz/template-environment": "workspace:*"
+    "@ykdz/template-environment": "workspace:*",
+    "@ykdz/template-workspace-authoring": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -37,7 +38,6 @@
     "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-generator": "workspace:*",
     "@ykdz/template-workspace": "workspace:*",
-    "@ykdz/template-workspace-authoring": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",

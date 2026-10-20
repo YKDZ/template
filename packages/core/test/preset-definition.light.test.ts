@@ -31,6 +31,29 @@ void describe("预设声明", () => {
     assert.deepStrictEqual(preset.operations, ["init", "add"]);
   });
 
+  void it("接受所属包的根公开导出作为预设项目身份", () => {
+    const preset = definePreset({
+      metadata: {
+        alias: "application",
+        title: "应用",
+        description: "包含项目级投影的应用预设。",
+      },
+      operations: ["init"],
+      nodes: {
+        application: {
+          reference: { identity: "application", instance: "independent" },
+        },
+      },
+      owner: { packageName: "@demo/application-preset", exportPath: "." },
+      project: () => [],
+    });
+
+    assert.deepStrictEqual(preset.owner, {
+      packageName: "@demo/application-preset",
+      exportPath: ".",
+    });
+  });
+
   void it("拒绝无节点、空操作、无效节点名和重复独立参考", () => {
     const library = {
       identity: "library",
