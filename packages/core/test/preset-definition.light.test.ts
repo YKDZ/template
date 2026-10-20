@@ -9,29 +9,31 @@ import {
 void describe("预设声明", () => {
   void it("从所属包的真实公开导出推导预设身份", () => {
     assert.deepStrictEqual(
-      presetOwnerFromManifest({
-        name: "@demo/example-preset",
-        exports: {
-          "./internal": {
-            source: "./internal.ts",
-          },
-          "./template": {
-            source: "./template/definition.ts",
+      presetOwnerFromManifest(
+        {
+          name: "@demo/example-preset",
+          exports: {
+            ".": { source: "./src/preset.ts" },
+            "./template": { source: "./template/definition.ts" },
           },
         },
-      }),
+        ".",
+      ),
       {
         packageName: "@demo/example-preset",
-        exportPath: "./template",
+        exportPath: ".",
       },
     );
     assert.throws(
       () =>
-        presetOwnerFromManifest({
-          name: "@demo/hidden-preset",
-          exports: { "./template": "./template/index.js" },
-        }),
-      /未公开当前模板入口/u,
+        presetOwnerFromManifest(
+          {
+            name: "@demo/hidden-preset",
+            exports: { "./template": "./template/index.js" },
+          },
+          "./missing",
+        ),
+      /未公开所选预设入口/u,
     );
   });
 

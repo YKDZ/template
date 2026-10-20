@@ -25,6 +25,7 @@ import { templateContent } from "@ykdz/template-content";
 import { createGenerator } from "@ykdz/template-generator";
 import {
   createDefaultWorkspaceStrategy,
+  defaultWorkspaceConfigurationIdentity,
   type DefaultWorkspaceCreationInput,
 } from "@ykdz/template-workspace/default-workspace-strategy";
 
@@ -70,6 +71,14 @@ after(async () => {
 });
 
 void describe("公开模板内容集合", () => {
+  void it("从真实配置参考声明导出默认包身份供CLI校验", () => {
+    assert.deepStrictEqual(defaultWorkspaceConfigurationIdentity("demo"), {
+      name: "@demo/typescript-config",
+      path: "packages/typescript-config",
+      role: "shared-library",
+    });
+  });
+
   void it("只用集合成员完成库初始化及其公开共享依赖展开", async () => {
     const targetRoot = await createTargetRoot("template-content-ts-lib-");
     const generator = createGenerator({

@@ -1020,10 +1020,14 @@ export function createGenerator<
         reconciliation: projectPlan.reconciliation,
       });
       if (!initOptions.dryRun) {
-        await renderNewProject({
-          targetRoot: path.resolve(initOptions.targetRoot),
-          operations: [...projectPlan.operations],
-        });
+        try {
+          await renderNewProject({
+            targetRoot: path.resolve(initOptions.targetRoot),
+            operations: [...projectPlan.operations],
+          });
+        } catch (error) {
+          return fail("render", error);
+        }
       }
       return {
         status: "success",

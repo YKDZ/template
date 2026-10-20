@@ -13,7 +13,7 @@ export const preset = definePreset({
     description: "使用 Vite、Tailwind、Pinia 和测试工具的 Vue 应用工作区。",
   },
   operations: ["init", "add"],
-  owner: presetOwnerFromManifest(presetPackage),
+  owner: presetOwnerFromManifest(presetPackage, "./template"),
   nodes: {
     web: { reference: referencePackage },
   },

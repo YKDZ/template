@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { referenceDefinition as typescriptConfigurationDefinition } from "@ykdz/reference-typescript-config/template";
 import type {
   PackageLinkIntent,
   PackageDefinition,
@@ -113,6 +114,11 @@ export type DefaultWorkspaceCreationInput<
   /** 现有工作区消费者应依赖本次新增的 provider。 */
   readonly linkFrom?: readonly string[];
 };
+
+export type DefaultWorkspaceConfigurationIdentity = Pick<
+  PackageDefinition,
+  "name" | "path" | "role"
+>;
 
 export type DefaultWorkspaceState = {
   readonly repositoryName: string;
@@ -300,14 +306,15 @@ function defaultContext(
   targetRoot: string,
   state: DefaultWorkspaceState,
 ): GenerationContext {
+  const configuration = defaultWorkspaceConfigurationIdentity(
+    state.defaultPackageScope,
+  );
   return {
     targetDir: path.resolve(targetRoot),
     repositoryName: state.repositoryName,
     defaultPackageScope: state.defaultPackageScope,
     foundationPackages: {
-      typescriptConfiguration: {
-        name: "@" + state.defaultPackageScope + "/typescript-config",
-      },
+      typescriptConfiguration: { name: configuration.name },
     },
     toolchain: {
       nodeLtsMajor: state.toolchain.nodeLtsMajor,
@@ -319,6 +326,18 @@ function defaultContext(
         ? {}
         : { rustVersion: state.toolchain.rustVersion }),
     },
+  };
+}
+
+/** 由实际原生配置包声明推导默认工作区的配置包身份。 */
+export function defaultWorkspaceConfigurationIdentity(
+  scope: string,
+): DefaultWorkspaceConfigurationIdentity {
+  const leafName = typescriptConfigurationDefinition.defaultLeafName;
+  return {
+    name: `@${scope}/${leafName}`,
+    path: `packages/${leafName}`,
+    role: typescriptConfigurationDefinition.role,
   };
 }
 
@@ -1460,7 +1479,11 @@ export function createDefaultWorkspaceStrategy<
           prior?.contentIdentity === content.identity &&
           prior.definition.name === definition.name &&
           prior.definition.path === definition.path;
-        if (samePackageIdentity) {
+        if (
+          samePackageIdentity &&
+          occupiedDefinition !== undefined &&
+          prior !== undefined
+        ) {
           const existingLinks = blueprint.packageLinkIntents ?? [];
           const missingConsumer = linkFrom.find(
             (consumerPackagePath) =>
