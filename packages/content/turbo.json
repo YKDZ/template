@@ -4,10 +4,17 @@
   "tasks": {
     "build": {
       "dependsOn": [
+        "@ykdz/preset-rust-bin#build",
+        "@ykdz/preset-ts-cli#build",
         "@ykdz/preset-ts-lib#build",
+        "@ykdz/reference-rust-bin#build:template",
+        "@ykdz/reference-ts-cli#build:template",
         "@ykdz/reference-ts-lib#build:template",
         "@ykdz/reference-typescript-config#build:template",
-        "@ykdz/template-workspace-authoring#build"
+        "@ykdz/template-workspace-authoring#build",
+        "@ykdz/preset-vue-app#build",
+        "@ykdz/reference-vue-app#build:template",
+        "@ykdz/reference-vue-shared#build:template"
       ],
       "tags": ["quality:light"],
       "cache": true,

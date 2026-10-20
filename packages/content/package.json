@@ -23,9 +23,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
+    "@ykdz/preset-rust-bin": "workspace:*",
+    "@ykdz/preset-ts-cli": "workspace:*",
     "@ykdz/preset-ts-lib": "workspace:*",
+    "@ykdz/preset-vue-app": "workspace:*",
+    "@ykdz/reference-rust-bin": "workspace:*",
+    "@ykdz/reference-ts-cli": "workspace:*",
     "@ykdz/reference-ts-lib": "workspace:*",
     "@ykdz/reference-typescript-config": "workspace:*",
+    "@ykdz/reference-vue-app": "workspace:*",
+    "@ykdz/reference-vue-shared": "workspace:*",
     "@ykdz/template-workspace-authoring": "workspace:*"
   },
   "devDependencies": {
