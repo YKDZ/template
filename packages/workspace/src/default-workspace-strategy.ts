@@ -19,6 +19,7 @@ import type {
   WorkspaceStrategy,
 } from "@ykdz/template-core/workspace-strategy";
 import { composeCiDiagnosticArtifacts } from "@ykdz/template-environment/ci-diagnostic-artifact";
+import type { CiDiagnosticArtifactDeclaration } from "@ykdz/template-environment/ci-diagnostic-artifact";
 import {
   builtInEditorCustomization,
   planBuiltInDevelopmentContainer,
@@ -34,6 +35,7 @@ import type { PackageContribution } from "@ykdz/template-workspace-authoring/pac
 import type { GenerationContext } from "@ykdz/template-workspace-authoring/preset-definition";
 import type {
   DatabasePreparationRequirement,
+  DependencyMaintenancePolicy,
   DeploymentCheckRequirement,
   ProjectRequirement,
   VueHonoJointE2eRequirement,
@@ -66,6 +68,7 @@ import {
 import {
   projectCheckWorkflow,
   projectDependabotConfig,
+  projectNextStepsDocument,
 } from "./project-github.ts";
 import {
   planExplicitProjectLinks,
@@ -95,11 +98,22 @@ import {
 export type DefaultWorkspaceInput = {
   readonly repositoryName?: string;
   readonly defaultPackageScope?: string;
+  /** 是否在同次初始化投影中生成后续步骤文档；默认 SDK 保持关闭。 */
+  readonly todo?: boolean;
+};
+
+/** 默认策略拥有的有限加包输入；生成器只透传其中的创建语义。 */
+export type DefaultWorkspaceCreationInput<
+  CreationInput extends PackageCreationInput = PackageCreationInput,
+> = CreationInput & {
+  /** 现有工作区消费者应依赖本次新增的 provider。 */
+  readonly linkFrom?: readonly string[];
 };
 
 export type DefaultWorkspaceState = {
   readonly repositoryName: string;
   readonly defaultPackageScope: string;
+  readonly todo: boolean;
   readonly toolchain: {
     readonly nodeLtsMajor: string;
     readonly nodeVersion?: string;
@@ -108,16 +122,90 @@ export type DefaultWorkspaceState = {
   };
 };
 
+export type DefaultWorkspaceOwnerFacts = {
+  readonly requirements: WorkspaceProjectRequirements;
+  readonly environmentNeeds: ReturnType<typeof normalizeEnvironmentNeeds>;
+  readonly diagnosticArtifacts: readonly CiDiagnosticArtifactDeclaration[];
+  readonly container: {
+    readonly dockerfileText: string;
+    readonly buildArguments: ReturnType<
+      typeof planBuiltInDevelopmentContainer
+    >["buildArguments"];
+    readonly mounts: ReturnType<
+      typeof planBuiltInDevelopmentContainer
+    >["mounts"];
+    readonly probes: ReturnType<
+      typeof planBuiltInDevelopmentContainer
+    >["probes"];
+  };
+  readonly dependencyMaintenance: DependencyMaintenancePolicy;
+  readonly publication: {
+    readonly candidate: { readonly name: string; readonly path: string } | null;
+    readonly setup: { readonly command: string } | null;
+  };
+  readonly nextSteps: readonly NextStepInstruction[];
+};
+
+export type NextStepInstruction = { readonly display: string };
+
 /** 默认策略把单个包节点放入指定目录，并按参考包名派生其默认叶名。 */
 export type DefaultWorkspaceNodeLayout = {
   readonly packageDirectory: string;
 };
+
+const nextSteps: readonly NextStepInstruction[] = [
+  { display: "pnpm install" },
+  { display: "pnpm run fix" },
+  { display: "pnpm run check" },
+];
 
 const workspaceSource = createTemplateSourceHandle(
   fileURLToPath(new URL("../", import.meta.url)),
 );
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requestedLinkFrom(value: unknown): readonly string[] {
+  if (!isRecord(value) || value.linkFrom === undefined) return [];
+  if (
+    !Array.isArray(value.linkFrom) ||
+    !value.linkFrom.every(
+      (packagePath): packagePath is string =>
+        typeof packagePath === "string" && packagePath.length > 0,
+    )
+  ) {
+    throw new Error("默认工作区的 linkFrom 必须是非空包路径数组");
+  }
+  return [...new Set(value.linkFrom)];
+}
+
+function includeRequestedLinkFromIntents(
+  blueprint: ProjectBlueprint,
+  packages: readonly GeneratorPackageRecord[],
+): ProjectBlueprint {
+  const requested = packages.flatMap((packageRecord) =>
+    packageRecord.createdBy === "addition"
+      ? requestedLinkFrom(packageRecord.creationInput).map(
+          (consumerPackagePath) => ({
+            consumerPackagePath,
+            providerPackagePath: packageRecord.definition.path,
+          }),
+        )
+      : [],
+  );
+  if (requested.length === 0) return blueprint;
+  const identities = new Set<string>();
+  const packageLinkIntents = [
+    ...(blueprint.packageLinkIntents ?? []),
+    ...requested,
+  ].filter((intent) => {
+    const identity = `${intent.consumerPackagePath}\u0000${intent.providerPackagePath}`;
+    if (identities.has(identity)) return false;
+    identities.add(identity);
+    return true;
+  });
+  return assertDefaultProjectBlueprint({ ...blueprint, packageLinkIntents });
 }
 
 const supportedProjectRequirementKinds = new Set([
@@ -621,10 +709,13 @@ function projectOperations(options: {
   readonly packages: readonly GeneratorPackageRecord[];
   readonly contributions: readonly PackageContribution[];
   readonly presetProjectContributions: readonly (readonly ProjectRequirement[])[];
-}): WorkspaceProjection {
+}): WorkspaceProjection<DefaultWorkspaceOwnerFacts> {
   const { context } = options;
   const projectState = projectRequirements(
-    assertDefaultProjectBlueprint(options.blueprint),
+    includeRequestedLinkFromIntents(
+      assertDefaultProjectBlueprint(options.blueprint),
+      options.packages,
+    ),
     options.contributions,
     options.presetProjectContributions,
   );
@@ -850,6 +941,10 @@ function projectOperations(options: {
     check: checkEnvironmentNeeds as CheckEnvironmentNeed[],
     deployment: deploymentEnvironmentNeeds,
   });
+  const dependencyMaintenance = projectDependencyMaintenancePolicy({
+    contributions,
+    hasDeployment,
+  });
   const reconciliation: readonly ProjectProjectionReconciliation[] = [
     { path: "tsconfig.json", driver: "structured" },
     { path: "turbo.json", driver: "structured" },
@@ -985,10 +1080,17 @@ function projectOperations(options: {
     {
       kind: "writeText",
       to: ".github/dependabot.yml",
-      text: projectDependabotConfig(
-        projectDependencyMaintenancePolicy({ contributions, hasDeployment }),
-      ),
+      text: projectDependabotConfig(dependencyMaintenance),
     },
+    ...(options.state.todo
+      ? [
+          {
+            kind: "writeText" as const,
+            to: "TODO.md",
+            text: projectNextStepsDocument(nextSteps),
+          },
+        ]
+      : []),
     {
       kind: "writeJson",
       to: ".template/environment-needs.json",
@@ -1042,12 +1144,38 @@ function projectOperations(options: {
       { kind: "writeJson", to: ".template/blueprint.json", value: blueprint },
     ],
     reconciliation,
+    ownerFacts: {
+      requirements,
+      environmentNeeds,
+      diagnosticArtifacts: artifacts,
+      container: {
+        dockerfileText: container.dockerfileOperation.text,
+        buildArguments: container.buildArguments,
+        mounts: container.mounts,
+        probes: container.probes,
+      },
+      dependencyMaintenance,
+      publication: {
+        candidate:
+          cliPublication.candidate === undefined
+            ? null
+            : {
+                name: cliPublication.candidate.definition.name,
+                path: cliPublication.candidate.definition.path,
+              },
+        setup:
+          cliPublication.candidate === undefined
+            ? null
+            : { command: "./scripts/npm-publication-setup/setup.sh" },
+      },
+      nextSteps,
+    },
   };
 }
 
 /** 创建拥有 Node、pnpm、catalog、Turbo 与根任务政策的默认工作区策略。 */
 export function createDefaultWorkspaceStrategy<
-  CreationInput extends PackageCreationInput = PackageCreationInput,
+  CreationInput extends PackageCreationInput = DefaultWorkspaceCreationInput,
 >(): WorkspaceStrategy<
   GenerationContext,
   DefaultWorkspaceInput,
@@ -1056,7 +1184,8 @@ export function createDefaultWorkspaceStrategy<
   CreationInput,
   ReferencePackage,
   DefaultWorkspaceNodeLayout,
-  readonly ProjectRequirement[]
+  readonly ProjectRequirement[],
+  DefaultWorkspaceOwnerFacts
 > {
   return {
     identity: "default",
@@ -1069,6 +1198,7 @@ export function createDefaultWorkspaceStrategy<
       const state: DefaultWorkspaceState = {
         repositoryName,
         defaultPackageScope,
+        todo: input.todo ?? false,
         toolchain: {
           nodeLtsMajor: nodeVersion.slice(0, nodeVersion.indexOf(".")),
           nodeVersion,
@@ -1229,6 +1359,7 @@ export function createDefaultWorkspaceStrategy<
       if (
         typeof value.repositoryName !== "string" ||
         typeof value.defaultPackageScope !== "string" ||
+        typeof value.todo !== "boolean" ||
         typeof value.toolchain.nodeLtsMajor !== "string" ||
         typeof value.toolchain.nodeVersion !== "string" ||
         typeof value.toolchain.packageManagerPin !== "string" ||
