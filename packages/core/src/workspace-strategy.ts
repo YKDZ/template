@@ -113,6 +113,17 @@ export type WorkspaceStrategy<
     readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
     readonly nodeInstances: GeneratorNodeInstances;
   }): Context | Promise<Context>;
+  /**
+   * 上下文和当前贡献准备完成后，策略可校验仍生效的当前工作区事实。
+   * 生成器只透传内容与预设计算，不解释所属策略的校验规则。
+   */
+  validateAddition?(options: {
+    readonly targetRoot: string;
+    readonly packages: readonly GeneratorPackageRecord<CreationInput>[];
+    readonly contributions: readonly Contribution[];
+    readonly nodeInstances: GeneratorNodeInstances;
+    readonly presetProjectContributions: readonly PresetProjectContribution[];
+  }): void | Promise<void>;
   parseState(value: unknown): StrategyState;
   /** 策略把原生依赖声明映射为显式内容身份。 */
   dependencies(options: {
